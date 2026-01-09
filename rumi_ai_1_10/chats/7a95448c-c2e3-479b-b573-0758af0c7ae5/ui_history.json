@@ -1,0 +1,14 @@
+{
+  "tool_logs": [
+    {
+      "type": "tool_progress",
+      "tool": "echo",
+      "tool_name": "エコー",
+      "message": "メッセージを1回繰り返します...",
+      "timestamp": 1767471862.1912189,
+      "execution_id": "d73dde96-6851-4c88-8d7d-164e6b2be519",
+      "message_id": "a4e55378-7b00-40d0-9608-2281d213863b"
+    }
+  ],
+  "ui_state": {}
+}

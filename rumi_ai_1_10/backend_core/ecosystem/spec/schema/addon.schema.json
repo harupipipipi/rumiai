@@ -1,0 +1,202 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ecosystem.local/schema/addon.schema.json",
+  "title": "Addon Definition",
+  "description": "Addon（拡張パッチ）の定義スキーマ。既存のComponentにJSON Patchを適用して拡張する。",
+  "type": "object",
+  "required": [
+    "addon_id",
+    "version",
+    "targets"
+  ],
+  "properties": {
+    "addon_id": {
+      "type": "string",
+      "description": "Addon の識別子",
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "minLength": 1,
+      "maxLength": 64,
+      "examples": ["add_benchmark_data", "extend_connectivity"]
+    },
+    "addon_uuid": {
+      "type": "string",
+      "description": "pack_uuidとaddon_idから生成されたUUID v5（読み込み時に自動計算される場合は省略可）",
+      "format": "uuid"
+    },
+    "version": {
+      "type": "string",
+      "description": "セマンティックバージョニング",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(-[a-zA-Z0-9.]+)?(\\+[a-zA-Z0-9.]+)?$"
+    },
+    "display_name": {
+      "type": "string",
+      "description": "UI表示用の名前",
+      "maxLength": 128
+    },
+    "description": {
+      "type": "string",
+      "description": "Addonの説明",
+      "maxLength": 1024
+    },
+    "author": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string",
+          "format": "email"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        }
+      },
+      "additionalProperties": false
+    },
+    "priority": {
+      "type": "integer",
+      "description": "適用優先度（大きいほど後に適用）",
+      "minimum": 0,
+      "maximum": 1000,
+      "default": 100
+    },
+    "enabled": {
+      "type": "boolean",
+      "description": "Addonが有効かどうか",
+      "default": true
+    },
+    "targets": {
+      "type": "array",
+      "description": "パッチ適用対象のリスト",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/definitions/target"
+      }
+    },
+    "conditions": {
+      "type": "object",
+      "description": "Addonの適用条件",
+      "properties": {
+        "pack_version": {
+          "type": "string",
+          "description": "対象Packのバージョン範囲",
+          "examples": [">=1.0.0", "^2.0.0"]
+        },
+        "component_version": {
+          "type": "string",
+          "description": "対象Componentのバージョン範囲"
+        }
+      },
+      "additionalProperties": false
+    },
+    "metadata": {
+      "type": "object",
+      "description": "追加のメタデータ",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "target": {
+      "type": "object",
+      "description": "パッチ適用対象の定義",
+      "required": ["apply"],
+      "properties": {
+        "pack_identity": {
+          "type": "string",
+          "description": "対象PackのIdentity（pack_uuidの代わりに使用可）",
+          "examples": ["github:haru/default-pack"]
+        },
+        "pack_uuid": {
+          "type": "string",
+          "description": "対象PackのUUID",
+          "format": "uuid"
+        },
+        "component": {
+          "type": "object",
+          "description": "対象Componentの指定",
+          "properties": {
+            "type": {
+              "type": "string",
+              "description": "Component type",
+              "pattern": "^[a-z][a-z0-9_]*$"
+            },
+            "id": {
+              "type": "string",
+              "description": "Component ID",
+              "pattern": "^[a-z][a-z0-9_-]*$"
+            },
+            "component_uuid": {
+              "type": "string",
+              "description": "Component UUID（type+idの代わりに使用可）",
+              "format": "uuid"
+            }
+          },
+          "additionalProperties": false
+        },
+        "apply": {
+          "type": "array",
+          "description": "適用する操作のリスト",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/apply_operation"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "apply_operation": {
+      "type": "object",
+      "description": "適用する操作",
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "description": "操作の種類",
+          "enum": ["manifest_json_patch", "file_json_patch"]
+        },
+        "file": {
+          "type": "string",
+          "description": "対象ファイル（file_json_patchの場合に必須）",
+          "examples": ["ai_profile/gemini-2.5-flash.json"]
+        },
+        "patch": {
+          "type": "array",
+          "description": "RFC 6902 JSON Patch操作のリスト",
+          "items": {
+            "$ref": "#/definitions/json_patch_operation"
+          }
+        },
+        "create_if_missing": {
+          "type": "boolean",
+          "description": "ファイルが存在しない場合に作成するか（file_json_patchの場合）",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "json_patch_operation": {
+      "type": "object",
+      "description": "RFC 6902 JSON Patch操作（move/copyは禁止）",
+      "required": ["op", "path"],
+      "properties": {
+        "op": {
+          "type": "string",
+          "description": "操作タイプ",
+          "enum": ["add", "remove", "replace", "test"]
+        },
+        "path": {
+          "type": "string",
+          "description": "JSON Pointer",
+          "pattern": "^(/[^/]*)*$"
+        },
+        "value": {
+          "description": "値（add, replace, testの場合に必要）"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

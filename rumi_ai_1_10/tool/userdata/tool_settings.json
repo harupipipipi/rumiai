@@ -1,0 +1,25 @@
+{
+  "debug_tool": {
+    "verbose_mode": true,
+    "output_format": "json",
+    "include_timestamp": true
+  },
+  "test_info": {
+    "verbose_mode": true,
+    "output_format": "json",
+    "save_to_file": false,
+    "test_api_key": ""
+  },
+  "web_search": {
+    "headless": true,
+    "timeout": 10,
+    "scrape_images": true,
+    "capture_screenshots": false,
+    "max_text_length": 5000
+  },
+  "flask_test": {
+    "log_level": "DEBUG",
+    "port_check_timeout": 10,
+    "save_system_info": true
+  }
+}

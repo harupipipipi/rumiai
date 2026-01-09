@@ -1,0 +1,235 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ecosystem.local/schema/component_manifest.schema.json",
+  "title": "Component Manifest",
+  "description": "Component（機能モジュール）のマニフェスト定義。各ComponentはPack内で特定の機能を提供する。",
+  "type": "object",
+  "required": [
+    "type",
+    "id",
+    "version"
+  ],
+  "properties": {
+    "type": {
+      "type": "string",
+      "description": "Component の種類（Pack の vocabulary.types で定義されたもの）",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "examples": [
+        "chats",
+        "tool_pack",
+        "prompt_pack",
+        "supporter_pack",
+        "ai_client_provider",
+        "frontend_pack"
+      ]
+    },
+    "id": {
+      "type": "string",
+      "description": "Component の識別子（Pack内で一意）",
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "minLength": 1,
+      "maxLength": 64,
+      "examples": [
+        "chats_v1",
+        "tool_v1",
+        "gemini"
+      ]
+    },
+    "component_uuid": {
+      "type": "string",
+      "description": "pack_uuidとtype:idから生成されたUUID v5（読み込み時に自動計算される場合は省略可）",
+      "format": "uuid"
+    },
+    "version": {
+      "type": "string",
+      "description": "セマンティックバージョニング",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(-[a-zA-Z0-9.]+)?(\\+[a-zA-Z0-9.]+)?$"
+    },
+    "display_name": {
+      "type": "string",
+      "description": "UI表示用の名前",
+      "maxLength": 128
+    },
+    "description": {
+      "type": "string",
+      "description": "Componentの説明",
+      "maxLength": 1024
+    },
+    "entry": {
+      "type": "object",
+      "description": "エントリーポイント定義",
+      "properties": {
+        "backend": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "バックエンドエントリーポイント",
+          "examples": [
+            "python:module.main",
+            "python:./main.py"
+          ]
+        },
+        "frontend": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "フロントエンドエントリーポイント",
+          "examples": [
+            "js:./index.js",
+            "html:./index.html"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "connectivity": {
+      "type": "object",
+      "description": "他のComponentとの接続性定義",
+      "properties": {
+        "accepts": {
+          "type": "array",
+          "description": "受け入れ可能なComponent type",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "uniqueItems": true,
+          "default": []
+        },
+        "provides": {
+          "type": "array",
+          "description": "提供するインターフェース",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "uniqueItems": true,
+          "default": []
+        },
+        "requires": {
+          "type": "array",
+          "description": "必須の依存Component type",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "uniqueItems": true,
+          "default": []
+        }
+      },
+      "additionalProperties": false
+    },
+    "storage": {
+      "type": "object",
+      "description": "ストレージ設定",
+      "properties": {
+        "uses_mounts": {
+          "type": "array",
+          "description": "使用するマウントポイント",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_.]*$"
+          },
+          "examples": [
+            [
+              "data.chats",
+              "data.cache"
+            ]
+          ]
+        },
+        "layout": {
+          "type": "string",
+          "description": "ストレージレイアウト方式",
+          "enum": [
+            "component_defined",
+            "pack_defined",
+            "shared"
+          ],
+          "default": "component_defined"
+        }
+      },
+      "additionalProperties": false
+    },
+    "addon_policy": {
+      "type": "object",
+      "description": "Addonによる変更許可ポリシー",
+      "properties": {
+        "allowed_manifest_paths": {
+          "type": "array",
+          "description": "Addonが変更可能なマニフェストのJSON Pointerパス",
+          "items": {
+            "type": "string",
+            "pattern": "^/.*$"
+          },
+          "default": [],
+          "examples": [
+            [
+              "/connectivity/accepts",
+              "/extensions"
+            ]
+          ]
+        },
+        "editable_files": {
+          "type": "array",
+          "description": "Addonが変更可能なファイルの定義",
+          "items": {
+            "type": "object",
+            "required": [
+              "path_glob"
+            ],
+            "properties": {
+              "path_glob": {
+                "type": "string",
+                "description": "対象ファイルのglobパターン",
+                "examples": [
+                  "**/*.json",
+                  "config/*.yaml"
+                ]
+              },
+              "allowed_json_pointer_prefixes": {
+                "type": "array",
+                "description": "変更可能なJSON Pointerプレフィックス（JSONファイルの場合）",
+                "items": {
+                  "type": "string"
+                },
+                "examples": [
+                  [
+                    "/extensions",
+                    "/custom"
+                  ]
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "default": []
+        },
+        "deny_all": {
+          "type": "boolean",
+          "description": "trueの場合、すべてのAddon変更を拒否",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "extensions": {
+      "type": "object",
+      "description": "拡張データ（Addonが追加可能）",
+      "additionalProperties": true,
+      "default": {}
+    },
+    "settings_schema": {
+      "type": "object",
+      "description": "UI設定スキーマ（ユーザーが変更可能な設定の定義）",
+      "additionalProperties": true
+    },
+    "metadata": {
+      "type": "object",
+      "description": "追加のメタデータ（自由形式）",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

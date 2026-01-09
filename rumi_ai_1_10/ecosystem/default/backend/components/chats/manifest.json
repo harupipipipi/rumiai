@@ -1,0 +1,50 @@
+{
+  "type": "chats",
+  "id": "chats_v1",
+  "version": "1.0.0",
+  "display_name": "Chat Manager",
+  "description": "チャット履歴の管理、標準形式での保存、UI履歴の分離管理を提供します。",
+  "entry": {
+    "backend": "python:chat_manager",
+    "frontend": null
+  },
+  "connectivity": {
+    "accepts": [
+      "tool_pack",
+      "prompt_pack",
+      "supporter_pack",
+      "ai_client_provider"
+    ],
+    "provides": [
+      "chat_history",
+      "agent_runtime"
+    ],
+    "requires": []
+  },
+  "storage": {
+    "uses_mounts": [
+      "data.chats"
+    ],
+    "layout": "component_defined"
+  },
+  "addon_policy": {
+    "allowed_manifest_paths": [
+      "/connectivity/accepts",
+      "/extensions"
+    ],
+    "editable_files": [
+      {
+        "path_glob": "**/*.json",
+        "allowed_json_pointer_prefixes": [
+          "/extensions"
+        ]
+      }
+    ],
+    "deny_all": false
+  },
+  "extensions": {},
+  "metadata": {
+    "schema_version": "2.0",
+    "supports_branching": true
+  }
+}

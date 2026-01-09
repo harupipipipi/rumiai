@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0",
+  "messages": [
+    {
+      "id": "m1",
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "hello"
+        }
+      ]
+    },
+    {
+      "id": "m2",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "こんにちは！私の名前はルミナです。\n現在は2025年11月02日 17時44分31秒です。\n何かお手伝いできることはありますか？"
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "title": "hello",
+    "is_pinned": false,
+    "folder": null
+  },
+  "meta": {
+    "parallel_tool_calls": true,
+    "vendor_call_ids": {
+      "gemini": {},
+      "openai": {},
+      "anthropic": {}
+    }
+  }
+}

@@ -1,0 +1,1351 @@
+/* static/css/style.css */
+
+/* アニメーション */
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.animate-spin { animation: spin 1s linear infinite; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+.animate-fadeIn { animation: fadeIn 0.4s ease forwards; }
+@keyframes bob { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1.0); } }
+.animate-bob > span:nth-child(1) { animation: bob 1.4s infinite ease-in-out both -0.32s; }
+.animate-bob > span:nth-child(2) { animation: bob 1.4s infinite ease-in-out both -0.16s; }
+.animate-bob > span:nth-child(3) { animation: bob 1.4s infinite ease-in-out both; }
+
+/* モバイルでのサイドバー表示制御 */
+@media (max-width: 767px) {
+    #sidebar { position: absolute; left: -16rem; height: 100%; z-index: 40; }
+    #sidebar.open { left: 0; }
+}
+
+/* テーマアイコン表示制御 */
+.dark .sun-icon { display: none; }
+.moon-icon { display: none; }
+.dark .moon-icon { display: inline-block; }
+
+/* トグルスイッチのスタイル */
+.toggle-switch { position: relative; display: inline-block; width: 50px; height: 28px; flex-shrink: 0; }
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 34px; }
+.dark .slider { background-color: #4a5568; /* dark:bg-gray-700 */ }
+.slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+input:checked + .slider { background-color: #38a169; /* Green-600 */ }
+.dark input:checked + .slider { background-color: #48bb78; /* Green-500 */ }
+input:checked + .slider:before { transform: translateX(22px); }
+
+/* モデル/プロンプト選択メニューの表示状態 */
+#model-select-menu.visible, #prompt-select-menu.visible { opacity: 1; pointer-events: auto; transform: translateY(0); }
+
+/* アクティブなモデル/プロンプトのチェックマーク */
+.model-option.active, .prompt-option.active { color: #3b82f6; font-weight: 600; }
+.model-option.active .check-mark, .prompt-option.active .check-mark { display: inline; }
+
+/* 思考ボタンのアクティブ状態 */
+#thinking-btn.active { background-color: #3b82f6; }
+#thinking-btn.active svg { color: white; }
+.dark #thinking-btn.active { background-color: #3b82f6; }
+
+/* 入力欄の高さ自動調整 */
+textarea#chat-input { min-height: 56px; max-height: 200px; }
+
+/* 思考予算スライダーのスタイル */
+.budget-slider { -webkit-appearance: none; appearance: none; width: 100%; height: 8px; background: #e5e7eb; border-radius: 5px; outline: none; opacity: 0.7; transition: opacity .2s; }
+.dark .budget-slider { background: #4b5563; }
+.budget-slider:hover { opacity: 1; }
+.budget-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; background: #3b82f6; cursor: pointer; border-radius: 50%; border: 2px solid white; }
+.dark .budget-slider::-webkit-slider-thumb { border-color: #1f2937; }
+.budget-slider::-moz-range-thumb { width: 20px; height: 20px; background: #3b82f6; cursor: pointer; border-radius: 50%; border: 2px solid white; }
+.dark .budget-slider::-moz-range-thumb { border-color: #1f2937; }
+
+/* フォルダ & D&D & 新規ボタン */
+.folder-item[open] > summary .folder-arrow { transform: rotate(90deg); }
+.folder-chat-list { padding-left: 1.25rem; border-left: 1px solid #e5e7eb; margin-left: 0.75rem; }
+.dark .folder-chat-list { border-left-color: #4b5563; }
+
+.chat-options-btn { opacity: 0; transition: opacity 0.2s; }
+.group:hover .chat-options-btn, .chat-options-btn:focus-within, #chat-context-menu:hover + .chat-options-btn { opacity: 1; }
+
+/* ドラッグ＆ドロップのスタイル */
+.chat-history-item.dragging { opacity: 0.5; background-color: #cbd5e1; }
+.dark .chat-history-item.dragging { background-color: #4b5563; }
+
+.drop-target.drag-over {
+    background-color: rgba(59, 130, 246, 0.2);
+    border: 2px dashed #3b82f6;
+    border-radius: 0.5rem;
+}
+
+/* サイドバーのアクションボタン */
+.sidebar-action-btn {
+    width: 100%;
+    padding: 0.5rem;
+    font-size: 0.875rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    color: #4b5563;
+    border-radius: 0.5rem;
+    transition: background-color 0.2s;
+    border: 1px solid #d1d5db;
+}
+.dark .sidebar-action-btn { color: #d1d5db; border-color: #4b5563; }
+.sidebar-action-btn:hover { background-color: #e5e7eb; }
+.dark .sidebar-action-btn:hover { background-color: #374151; }
+
+/* 新規フォルダ入力フィールド */
+#new-folder-input-field {
+    width: 100%;
+    background-color: #fff;
+    border: 1px solid #3b82f6;
+    border-radius: 0.5rem;
+    padding: 0.5rem;
+    font-size: 0.875rem;
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+.dark #new-folder-input-field {
+    background-color: #1f2937;
+    border-color: #3b82f6;
+}
+
+/* Markdown表示用のスタイル */
+.ai-message-bubble { line-height: 1.7; word-wrap: break-word; }
+.ai-message-bubble > *:first-child { margin-top: 0; }
+.ai-message-bubble > *:last-child { margin-bottom: 0; }
+.ai-message-bubble h1, .ai-message-bubble h2, .ai-message-bubble h3 { margin-top: 1.25em; margin-bottom: 0.75em; font-weight: 700; line-height: 1.3; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.3em; }
+.dark .ai-message-bubble h1, .dark .ai-message-bubble h2, .dark .ai-message-bubble h3 { border-bottom-color: #4b5563; }
+.ai-message-bubble h1 { font-size: 1.5em; }
+.ai-message-bubble h2 { font-size: 1.25em; }
+.ai-message-bubble h3 { font-size: 1.1em; }
+.ai-message-bubble p { margin-bottom: 1em; }
+.ai-message-bubble ul, .ai-message-bubble ol { margin-left: 1.5rem; margin-top: 0.5em; margin-bottom: 1em; }
+.ai-message-bubble ul { list-style-type: disc; }
+.ai-message-bubble ol { list-style-type: decimal; }
+.ai-message-bubble li { margin-bottom: 0.4em; }
+.ai-message-bubble strong { font-weight: 700; }
+.ai-message-bubble pre { background-color: #111827; color: #e5e7eb; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; margin-top: 0.5em; margin-bottom: 1em; font-family: 'Courier New', Courier, monospace; }
+.dark .ai-message-bubble pre { background-color: black; }
+.ai-message-bubble code { font-family: 'Courier New', Courier, monospace; }
+.ai-message-bubble p > code, .ai-message-bubble li > code { background-color: rgba(100,100,100,0.1); padding: 0.2em 0.4em; border-radius: 4px; font-size: 0.9em; }
+
+/* ツール実行結果のスタイル */
+.tool-executions-container {
+    width: 100%;
+}
+
+.tool-log-details {
+    border: 1px solid #e5e7eb;
+    border-radius: 0.75rem;
+    overflow: hidden;
+    transition: all 0.3s ease;
+}
+.dark .tool-log-details {
+    border-color: #374151;
+}
+
+.tool-log-details[open] {
+    background-color: #f9fafb;
+}
+.dark .tool-log-details[open] {
+    background-color: rgba(17, 24, 39, 0.5);
+}
+
+.tool-log-summary {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+    list-style: none;
+    transition: background-color 0.2s;
+}
+.tool-log-summary::-webkit-details-marker {
+    display: none;
+}
+.tool-log-summary:hover {
+    background-color: #f3f4f6;
+}
+.dark .tool-log-summary:hover {
+    background-color: #1f2937;
+}
+
+.tool-log-icon {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.25rem;
+    height: 1.25rem;
+}
+
+.tool-log-name {
+    flex-grow: 1;
+    font-weight: 500;
+    color: #111827;
+    font-size: 0.875rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.dark .tool-log-name {
+    color: #f9fafb;
+}
+
+.tool-log-status {
+    flex-shrink: 0;
+    font-size: 0.75rem;
+    font-weight: 500;
+    padding: 0.25rem 0.5rem;
+    border-radius: 9999px;
+}
+.tool-log-status.running {
+    color: #1d4ed8;
+    background-color: #dbeafe;
+}
+.dark .tool-log-status.running {
+    color: #93c5fd;
+    background-color: #1e3a8a;
+}
+.tool-log-status.success {
+    color: #15803d;
+    background-color: #dcfce7;
+}
+.dark .tool-log-status.success {
+    color: #86efac;
+    background-color: #14532d;
+}
+.tool-log-status.error {
+    color: #b91c1c;
+    background-color: #fee2e2;
+}
+.dark .tool-log-status.error {
+    color: #fca5a5;
+    background-color: #7f1d1d;
+}
+
+.tool-log-content {
+    padding: 0 1rem 0.75rem 1rem;
+    border-top: 1px solid #e5e7eb;
+    margin-left: 2.75rem;
+    font-size: 0.875rem;
+    line-height: 1.6;
+    max-height: 300px;
+    overflow-y: auto;
+}
+.dark .tool-log-content {
+    border-top-color: #374151;
+}
+
+.tool-log-realtime-entry {
+    color: #4b5563;
+    font-size: 0.8rem;
+    padding: 0.1rem 0;
+    white-space: pre-wrap;
+    word-break: break-all;
+    animation: fadeIn 0.3s ease-out;
+}
+.dark .tool-log-realtime-entry {
+    color: #9ca3af;
+}
+.tool-log-realtime-entry span::before {
+    content: '→';
+    margin-right: 0.5rem;
+    color: #9ca3af;
+}
+
+.tool-log-explanation {
+    padding: 0.5rem;
+    margin-bottom: 0.5rem;
+    background-color: #eef2ff;
+    color: #4338ca;
+    border-radius: 0.5rem;
+    font-size: 0.8rem;
+}
+.dark .tool-log-explanation {
+    background-color: #312e81;
+    color: #a5b4fc;
+}
+
+.tool-log-section {
+    margin-top: 0.5rem;
+}
+.tool-log-section-title {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #6b7280;
+}
+.dark .tool-log-section-title {
+    color: #9ca3af;
+}
+.tool-log-section pre {
+    margin-top: 0.25rem;
+    padding: 0.5rem;
+    background-color: #f3f4f6;
+    border-radius: 0.375rem;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.75rem;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+.dark .tool-log-section pre {
+    background-color: #111827;
+    color: #d1d5db;
+}
+
+/* 既存のdetails/summaryスタイルを削除または上書き */
+details summary {
+    list-style: none;
+}
+details summary::-webkit-details-marker {
+    display: none;
+}
+
+/* コードブロックのコピーボタン */
+.code-block-wrapper {
+    position: relative;
+    margin: 0.5rem 0;
+}
+.code-block-wrapper .copy-code-btn {
+    background: transparent;
+    border: 1px solid #4b5563;
+    padding: 0.25rem 0.75rem;
+    border-radius: 0.25rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.code-block-wrapper .copy-code-btn:hover {
+    background: #4b5563;
+    color: white;
+}
+.code-block-wrapper .copy-code-btn.copied {
+    background: #10b981;
+    border-color: #10b981;
+    color: white;
+}
+
+/* チャットアクティブ状態 */
+.chat-active #messages-container {
+    background: transparent;
+}
+
+/* コンテキストメニュー */
+#chat-context-menu {
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+}
+
+/* スクロールバーのスタイル */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+}
+.dark ::-webkit-scrollbar-track {
+    background: #1f2937;
+}
+::-webkit-scrollbar-thumb {
+    background: #d1d5db;
+    border-radius: 4px;
+}
+.dark ::-webkit-scrollbar-thumb {
+    background: #4b5563;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #9ca3af;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+    background: #6b7280;
+}
+
+/* ファイルプレビューのアニメーション */
+#file-preview-container > div {
+    animation: fadeIn 0.3s ease-out;
+}
+
+/* モーダルオーバーレイのトランジション */
+.fixed.transition-opacity {
+    transition: opacity 0.3s ease-in-out;
+}
+
+/* メッセージコンテナのスクロール */
+#messages-container {
+    scroll-behavior: smooth;
+}
+
+/* レスポンシブ調整 */
+@media (max-width: 640px) {
+    .ai-message-bubble {
+        font-size: 0.875rem;
+    }
+    .code-block-wrapper {
+        font-size: 0.75rem;
+    }
+}
+
+/* ツールサイドバーのスタイル */
+#tools-icon-bar {
+    scrollbar-width: thin;
+    scrollbar-color: #9ca3af #f3f4f6;
+}
+
+.dark #tools-icon-bar {
+    scrollbar-color: #4b5563 #1f2937;
+}
+
+.tool-icon-button {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.5rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+    background: white;
+    border: 1px solid #e5e7eb;
+}
+
+.dark .tool-icon-button {
+    background: #374151;
+    border-color: #4b5563;
+}
+
+.tool-icon-button:hover {
+    background: #3b82f6;
+    border-color: #3b82f6;
+    transform: scale(1.1);
+}
+
+.tool-icon-button:hover svg,
+.tool-icon-button:hover span {
+    color: white !important;
+}
+
+.tool-icon-button.active {
+    background: #3b82f6;
+    border-color: #3b82f6;
+}
+
+.tool-icon-button.active svg,
+.tool-icon-button.active span {
+    color: white !important;
+}
+
+.tool-icon-button .tooltip {
+    position: absolute;
+    right: 100%;
+    top: 50%;
+    transform: translateY(-50%);
+    margin-right: 8px;
+    background: #1f2937;
+    color: white;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+}
+
+.tool-icon-button:hover .tooltip {
+    opacity: 1;
+}
+
+#tool-detail-panel {
+    transition: transform 0.3s ease;
+}
+
+#tool-detail-panel.hidden {
+    transform: translateX(100%);
+}
+
+/* メインコンテンツの調整 */
+#chat-window.tool-panel-open #messages-container,
+#chat-window.tool-panel-open header,
+#chat-window.tool-panel-open footer {
+    margin-right: 376px; /* 56px (icon bar) + 320px (detail panel) */
+}
+
+/* ツール設定フォームのスタイル */
+.tool-setting-group {
+    padding: 1rem;
+    background: #f9fafb;
+    border-radius: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.dark .tool-setting-group {
+    background: #1f2937;
+}
+
+.tool-setting-label {
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 500;
+    margin-bottom: 0.25rem;
+    color: #374151;
+}
+
+.dark .tool-setting-label {
+    color: #d1d5db;
+}
+
+.tool-setting-description {
+    font-size: 0.75rem;
+    color: #6b7280;
+    margin-bottom: 0.5rem;
+}
+
+.dark .tool-setting-description {
+    color: #9ca3af;
+}
+
+/* ツールUIサイドパネル */
+#tool-ui-side-panel {
+    box-shadow: -4px 0 6px rgba(0, 0, 0, 0.1);
+    z-index: 45; /* ツールアイコンバーより前面に */
+}
+
+#tool-ui-side-panel iframe {
+    background: white;
+}
+
+.dark #tool-ui-side-panel iframe {
+    background: #1f2937;
+}
+
+/* パネルが開いているときのメインコンテンツ調整 */
+.panel-open #messages-container,
+.panel-open header,
+.panel-open footer {
+    transition: margin-right 0.3s ease;
+}
+
+/* ツールアイコンバーとパネルの共存 */
+#tools-icon-bar {
+    z-index: 40;
+}
+
+#tool-ui-side-panel {
+    /* パネルの幅を画面の40%に */
+    width: 40%;
+    max-width: 600px;
+    min-width: 400px;
+}
+
+/* レスポンシブ対応 */
+@media (max-width: 1024px) {
+    #tool-ui-side-panel {
+        width: 50%;
+        min-width: 350px;
+    }
+}
+
+@media (max-width: 768px) {
+    #tool-ui-side-panel {
+        width: 100%;
+        max-width: none;
+    }
+    
+    .panel-open #messages-container,
+    .panel-open header,
+    .panel-open footer {
+        margin-right: 0 !important;
+        display: none; /* モバイルではメインコンテンツを隠す */
+    }
+}
+
+/* アニメーション */
+#tool-ui-side-panel {
+    transition: transform 0.3s ease-in-out;
+}
+
+#tool-ui-side-panel.translate-x-full {
+    transform: translateX(100%);
+}
+
+/* パネルヘッダーのスタイル */
+#tool-ui-side-panel .tool-name {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+#tool-ui-side-panel .tool-icon svg {
+    width: 20px;
+    height: 20px;
+}
+
+/* リトライインジケーターのアニメーション */
+@keyframes countdown-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+#retry-indicator-wrapper {
+    animation: fadeIn 0.4s ease-out;
+}
+
+#retry-circle-progress {
+    transform-origin: center;
+}
+
+#retry-progress-bar {
+    transition: width 1s linear;
+}
+
+/* エラー状態のスタイル */
+.error-shake {
+    animation: shake 0.5s;
+}
+
+@keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-5px); }
+    75% { transform: translateX(5px); }
+}
+
+/* カウントダウンテキストの点滅 */
+#retry-countdown {
+    font-weight: bold;
+    animation: countdown-pulse 1s infinite;
+}
+
+#retry-circle-text {
+    animation: countdown-pulse 1s infinite;
+}
+
+/* ボタンのホバーエフェクト */
+#retry-now-btn:hover {
+    transform: scale(1.02);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+#cancel-retry-btn:hover {
+    transform: scale(1.02);
+}
+
+/* プログレスバーのグラデーション */
+#retry-progress-bar {
+    background: linear-gradient(90deg, #D97706, #F59E0B);
+}
+
+.dark #retry-progress-bar {
+    background: linear-gradient(90deg, #B45309, #D97706);
+}
+
+/* ストリーミングメッセージのスタイル */
+.streaming-message {
+    position: relative;
+}
+
+.streaming-message::after {
+    content: '';
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    width: 8px;
+    height: 8px;
+    background: #3b82f6;
+    border-radius: 50%;
+    animation: pulse 1.5s infinite;
+}
+
+.streaming-message.streaming-complete::after {
+    display: none;
+}
+
+@keyframes pulse {
+    0% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.5;
+        transform: scale(1.2);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+/* ストリーミングコンテンツのカーソル */
+.streaming-content {
+    position: relative;
+}
+
+.streaming-content:not(.complete)::after {
+    content: '▊';
+    color: #3b82f6;
+    animation: blink 1s infinite;
+    margin-left: 2px;
+}
+
+@keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0; }
+}
+
+/* 停止ボタンのスタイル */
+.stop-button {
+    background-color: #ef4444 !important;  /* red-500 */
+}
+
+.stop-button:hover {
+    background-color: #dc2626 !important;  /* red-600 */
+}
+
+.dark .stop-button {
+    background-color: #dc2626 !important;  /* red-600 */
+}
+
+.dark .stop-button:hover {
+    background-color: #b91c1c !important;  /* red-700 */
+}
+
+/* 強制停止されたメッセージ */
+.aborted-message {
+    border: 2px solid #fbbf24;  /* yellow-400 */
+    border-style: dashed;
+}
+
+.dark .aborted-message {
+    border-color: #f59e0b;  /* yellow-500 */
+}
+
+/* 続けるボタンのスタイル */
+#continue-button-container {
+    position: relative;
+}
+
+#continue-response-btn {
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    transform: translateY(0);
+    transition: all 0.2s;
+}
+
+#continue-response-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+}
+
+/* 中断インジケーター */
+.abort-indicator {
+    padding-top: 0.5rem;
+    border-top: 1px dashed #fbbf24;
+    margin-top: 0.5rem;
+}
+
+.dark .abort-indicator {
+    border-top-color: #f59e0b;
+}
+
+/* 続行中のメッセージ結合アニメーション */
+@keyframes merge-text {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.streaming-content.continuing {
+    animation: merge-text 0.3s ease-out;
+}
+
+/* システムメッセージのスタイル */
+.system-message-abort {
+    font-size: 0.875rem;
+    opacity: 0.8;
+}
+
+/* 強制停止時のアニメーション無効化 */
+.aborted-message::after {
+    display: none !important;
+}
+
+.aborted-message .streaming-content::after {
+    display: none !important;
+}
+
+/* completeクラスでカーソル非表示 */
+.complete::after {
+    display: none !important;
+}
+
+/* 中断されたツール実行のスタイル */
+.tool-aborted {
+    opacity: 0.7;
+}
+
+.tool-aborted svg {
+    animation: none !important;
+}
+
+/* ツールUIパネルのスタイル */
+#tool-ui-right-panel {
+    box-shadow: -4px 0 6px rgba(0, 0, 0, 0.1);
+    z-index: 35; /* ツールアイコンバーより前面、モーダルより背面 */
+}
+
+#tool-ui-right-panel iframe {
+    background: white;
+    border: none;
+}
+
+.dark #tool-ui-right-panel iframe {
+    background: #1f2937;
+}
+
+/* ツール実行ログのスタイル */
+.tool-execution-log {
+    max-height: 200px;
+    overflow-y: auto;
+    font-size: 0.75rem;
+    font-family: 'Courier New', monospace;
+}
+
+.tool-execution-log-entry {
+    padding: 0.25rem 0.5rem;
+    border-left: 2px solid #3b82f6;
+    margin-bottom: 0.25rem;
+    background: rgba(59, 130, 246, 0.05);
+}
+
+.dark .tool-execution-log-entry {
+    background: rgba(59, 130, 246, 0.1);
+}
+
+/* パネル表示時のレイアウト調整 */
+.tool-panel-active #messages-container,
+.tool-panel-active header,
+.tool-panel-active footer {
+    transition: margin-right 0.3s ease;
+}
+
+/* ツールログのスタイル */
+.tool-log-entry {
+    font-family: 'Courier New', Courier, monospace;
+    line-height: 1.4;
+    padding-left: 1rem;
+    border-left: 2px solid transparent;
+    transition: all 0.2s;
+    animation: fadeIn 0.3s ease-out;
+}
+
+.tool-log-entry:hover {
+    background: rgba(59, 130, 246, 0.05);
+    border-left-color: #3b82f6;
+}
+
+.dark .tool-log-entry:hover {
+    background: rgba(59, 130, 246, 0.1);
+}
+
+/* ツール実行コンテナのアニメーション */
+.tool-execution-container {
+    animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* タイムスタンプのスタイル */
+.tool-log-entry span.text-gray-500 {
+    font-size: 0.7rem;
+    opacity: 0.7;
+    margin-right: 0.5rem;
+}
+
+/* ツール説明ボックス */
+.tool-explanation-box {
+    position: relative;
+    overflow: hidden;
+}
+
+.tool-explanation-box::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 3px;
+    height: 100%;
+    background: linear-gradient(to bottom, #3b82f6, #60a5fa);
+}
+
+/* ==================== AIモデル管理UI用のスタイル ==================== */
+
+/* モデルカード */
+.model-card {
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+.model-card:hover {
+    transform: translateY(-2px);
+}
+
+/* バッジスタイル */
+.badge {
+    display: inline-block;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    border-radius: 9999px;
+}
+
+.badge-blue {
+    background-color: #dbeafe;
+    color: #1e40af;
+}
+
+.dark .badge-blue {
+    background-color: #1e3a8a;
+    color: #93c5fd;
+}
+
+.badge-green {
+    background-color: #dcfce7;
+    color: #15803d;
+}
+
+.dark .badge-green {
+    background-color: #14532d;
+    color: #86efac;
+}
+
+.badge-purple {
+    background-color: #e9d5ff;
+    color: #7e22ce;
+}
+
+.dark .badge-purple {
+    background-color: #581c87;
+    color: #c084fc;
+}
+
+.badge-orange {
+    background-color: #fed7aa;
+    color: #c2410c;
+}
+
+.dark .badge-orange {
+    background-color: #7c2d12;
+    color: #fdba74;
+}
+
+/* テキスト切り詰め */
+.line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* フィルターパネルのアニメーション */
+#filter-panel {
+    animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* お気に入りボタンのアニメーション */
+.favorite-btn svg {
+    transition: all 0.2s ease;
+}
+
+.favorite-btn:hover svg {
+    transform: scale(1.2);
+}
+
+.favorite-btn:active svg {
+    transform: scale(0.9);
+}
+
+/* モデル選択メニューの拡張 */
+#model-select-menu {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.model-option {
+    position: relative;
+}
+
+.model-option .provider-badge {
+    font-size: 0.65rem;
+    padding: 0.125rem 0.375rem;
+    background-color: #e5e7eb;
+    color: #6b7280;
+    border-radius: 0.25rem;
+    margin-left: 0.5rem;
+}
+
+.dark .model-option .provider-badge {
+    background-color: #374151;
+    color: #9ca3af;
+}
+
+/* グリッドレスポンシブ調整 */
+@media (max-width: 768px) {
+    #favorites-grid,
+    #models-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (min-width: 769px) and (max-width: 1024px) {
+    #favorites-grid,
+    #models-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+/* モデルカードのアクティブ状態 */
+.model-card.active {
+    border-color: #3b82f6;
+    background-color: #eff6ff;
+}
+
+.dark .model-card.active {
+    background-color: rgba(59, 130, 246, 0.1);
+}
+
+/* 検索入力のスタイル */
+#model-search-input:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+/* フィルターボタンのアクティブ状態 */
+#filter-toggle-btn.active {
+    background-color: #3b82f6;
+    color: white;
+}
+
+.dark #filter-toggle-btn.active {
+    background-color: #2563eb;
+}
+
+/* モデル使用ボタン */
+.use-model-btn {
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.use-model-btn:not(:disabled):hover {
+    transform: scale(1.02);
+}
+
+.use-model-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+/* モデルカードのホバー時の影 */
+.model-card:hover {
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+}
+
+.dark .model-card:hover {
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.2);
+}
+
+/* 機能バッジのコンテナ */
+.model-card .flex.flex-wrap {
+    min-height: 28px;
+}
+
+/* セクションヘッダー */
+#favorites-section h3,
+#all-models-section h3 {
+    position: sticky;
+    top: 0;
+    background: white;
+    z-index: 10;
+    padding: 0.5rem 0;
+}
+
+.dark #favorites-section h3,
+.dark #all-models-section h3 {
+    background: #111827;
+}
+
+/* フィルターチェックボックスのスタイル */
+.model-filter {
+    width: 1rem;
+    height: 1rem;
+    border-radius: 0.25rem;
+    border: 1px solid #d1d5db;
+    cursor: pointer;
+}
+
+.dark .model-filter {
+    border-color: #4b5563;
+}
+
+.model-filter:checked {
+    background-color: #3b82f6;
+    border-color: #3b82f6;
+}
+
+/* プロバイダーフィルターのスタイル */
+#provider-filter {
+    cursor: pointer;
+}
+
+#provider-filter:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+/* 空の状態のスタイル */
+.empty-state {
+    text-align: center;
+    padding: 3rem 1rem;
+    color: #6b7280;
+}
+
+.dark .empty-state {
+    color: #9ca3af;
+}
+
+.empty-state svg {
+    margin: 0 auto 1rem;
+    opacity: 0.5;
+}
+
+/* ローディング状態 */
+.loading-spinner {
+    border: 3px solid #f3f4f6;
+    border-top: 3px solid #3b82f6;
+    border-radius: 50%;
+    width: 2rem;
+    height: 2rem;
+    animation: spin 1s linear infinite;
+}
+
+.dark .loading-spinner {
+    border-color: #374151;
+    border-top-color: #3b82f6;
+}
+
+/* モデルカード内のボタングループ */
+.model-card-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+
+/* お気に入りセクションが空の場合 */
+#favorites-grid:empty::after {
+    content: 'お気に入りのモデルがありません。⭐ボタンをクリックしてお気に入りに追加してください。';
+    display: block;
+    padding: 2rem;
+    text-align: center;
+    color: #6b7280;
+    font-size: 0.875rem;
+}
+
+.dark #favorites-grid:empty::after {
+    color: #9ca3af;
+}
+
+/* スティッキー検索バー */
+.sticky {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+/* static/css/style.css に追加 */
+
+/* ========================================
+   サポーターカード
+   ======================================== */
+.supporter-card {
+    transition: all 0.2s ease;
+    cursor: default;
+}
+
+.supporter-card:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.dark .supporter-card:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.supporter-card[data-active="true"] {
+    border-left-width: 4px;
+}
+
+/* ========================================
+   トグルスイッチ（ON/OFFスイッチ）
+   ======================================== */
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+    flex-shrink: 0;
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-switch .slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #cbd5e1;
+    transition: 0.3s;
+    border-radius: 24px;
+}
+
+.dark .toggle-switch .slider {
+    background-color: #4b5563;
+}
+
+.toggle-switch .slider:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: 0.3s;
+    border-radius: 50%;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.toggle-switch input:checked + .slider {
+    background-color: #3b82f6;
+}
+
+.toggle-switch input:checked + .slider:before {
+    transform: translateX(20px);
+}
+
+.toggle-switch input:focus + .slider {
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+}
+
+.toggle-switch input:disabled + .slider {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* ========================================
+   サポーターバッジ
+   ======================================== */
+.supporter-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.125rem 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    border-radius: 9999px;
+}
+
+/* ========================================
+   アニメーション
+   ======================================== */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.animate-fadeIn {
+    animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateX(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+.animate-slideIn {
+    animation: slideIn 0.2s ease-out;
+}
+
+/* ========================================
+   サポーター順序変更ボタン
+   ======================================== */
+.move-up-btn,
+.move-down-btn {
+    transition: background-color 0.15s ease;
+}
+
+.move-up-btn:not(:disabled):hover,
+.move-down-btn:not(:disabled):hover {
+    background-color: rgba(0, 0, 0, 0.1);
+}
+
+.dark .move-up-btn:not(:disabled):hover,
+.dark .move-down-btn:not(:disabled):hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.move-up-btn:disabled,
+.move-down-btn:disabled {
+    cursor: not-allowed;
+}
+
+/* ========================================
+   サポーター設定モーダル内のスタイル
+   ======================================== */
+#supporters-tab .supporter-card + .supporter-card {
+    margin-top: 0.75rem;
+}
+
+#supporters-list:empty::after {
+    content: "サポーターがありません";
+    display: block;
+    text-align: center;
+    padding: 2rem;
+    color: #9ca3af;
+}

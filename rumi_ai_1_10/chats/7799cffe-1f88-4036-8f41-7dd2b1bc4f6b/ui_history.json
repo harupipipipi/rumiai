@@ -1,0 +1,50 @@
+{
+  "tool_logs": [
+    {
+      "type": "tool_progress",
+      "tool": "test_info",
+      "tool_name": "情報テストツール",
+      "message": "テストツールを実行中...",
+      "timestamp": 1765452901.4561841,
+      "execution_id": "88d82981-f9c1-4502-9db7-aaf649ab07e8",
+      "message_id": "c1e5a547-5048-41ca-8ac6-521b409d79db"
+    },
+    {
+      "type": "tool_progress",
+      "tool": "test_info",
+      "tool_name": "情報テストツール",
+      "message": "受信した引数: {\"test_input\": \"aaaaaaaa\"}",
+      "timestamp": 1765452901.457071,
+      "execution_id": "88d82981-f9c1-4502-9db7-aaf649ab07e8",
+      "message_id": "ada21aac-d1f5-4e82-83db-0510768d0732"
+    },
+    {
+      "type": "tool_progress",
+      "tool": "test_info",
+      "tool_name": "情報テストツール",
+      "message": "test.pngを検索中: /Users/haru/Library/CloudStorage/GoogleDrive-harusannoakaunto@gmail.com/その他のパソコン/マイ コンピュータ/Desktop/1programming/rumi_ai/my-chat-app-11-02/tool/test/test.png",
+      "timestamp": 1765452901.457899,
+      "execution_id": "88d82981-f9c1-4502-9db7-aaf649ab07e8",
+      "message_id": "883b2610-9ec7-4852-b684-1f1e31acfa98"
+    },
+    {
+      "type": "tool_progress",
+      "tool": "test_info",
+      "tool_name": "情報テストツール",
+      "message": "テストツールの実行が完了しました",
+      "timestamp": 1765452901.4586382,
+      "execution_id": "88d82981-f9c1-4502-9db7-aaf649ab07e8",
+      "message_id": "92630253-ac86-402c-b070-fb96d83ab783"
+    },
+    {
+      "type": "tool_progress",
+      "tool": "test_info",
+      "tool_name": "情報テストツール",
+      "message": "test.pngを添付ファイルとして追加します",
+      "timestamp": 1765452901.459038,
+      "execution_id": "88d82981-f9c1-4502-9db7-aaf649ab07e8",
+      "message_id": "ae00f158-f76c-415f-a2bb-e743e1d7322b"
+    }
+  ],
+  "ui_state": {}
+}

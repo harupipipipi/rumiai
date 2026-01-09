@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flask テストツール</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gradient-to-br from-purple-50 to-indigo-100 min-h-screen flex items-center justify-center p-4">
+    <div class="max-w-md w-full">
+        <div class="bg-white rounded-xl shadow-xl p-6">
+            <div class="flex items-center justify-center mb-4">
+                <div class="text-4xl">🧪</div>
+            </div>
+            
+            <h1 class="text-2xl font-bold text-center mb-4 text-gray-800">
+                Flask テストツール
+            </h1>
+            
+            <p class="text-center text-gray-600 mb-6">
+                Flaskサーバーの起動テストを実行します
+            </p>
+            
+            <div class="space-y-4">
+                <div class="p-4 bg-purple-50 rounded-lg">
+                    <h2 class="font-semibold text-purple-900 mb-2">機能</h2>
+                    <ul class="text-sm text-purple-700 space-y-1">
+                        <li>✓ Flaskサーバーの起動テスト</li>
+                        <li>✓ ポートの利用可能性チェック</li>
+                        <li>✓ 詳細なログの記録</li>
+                        <li>✓ システム情報の収集</li>
+                    </ul>
+                </div>
+                
+                <div class="p-4 bg-blue-50 rounded-lg">
+                    <h2 class="font-semibold text-blue-900 mb-2">ログ保存先</h2>
+                    <p class="text-sm text-blue-700">
+                        チャットフォルダ/log/log.txt
+                    </p>
+                </div>
+                
+                <div class="p-4 bg-green-50 rounded-lg">
+                    <h2 class="font-semibold text-green-900 mb-2">ステータス</h2>
+                    <div class="flex items-center gap-2 text-sm text-green-700">
+                        <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                        <span>準備完了</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

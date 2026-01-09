@@ -1,0 +1,86 @@
+{
+  "basic_info": {
+    "id": "gemini-2.5-pro",
+    "name": "Google: Gemini 2.5 Pro",
+    "description": "Gemini 2.5 Pro is Google's state-of-the-art AI model designed for advanced reasoning, coding, mathematics, and scientific tasks. It employs thinking capabilities, enabling it to reason through responses with enhanced accuracy and nuanced context handling. Gemini 2.5 Pro achieves top-tier performance on multiple benchmarks, including first-place positioning on the LMArena leaderboard, reflecting superior human-preference alignment and complex problem-solving abilities.",
+    "provider": "gemini",
+    "created": 1750169544
+  },
+  "capabilities": {
+    "context_length": 1048576,
+    "max_completion_tokens": 65536,
+    "supported_parameters": [
+      "include_reasoning",
+      "max_tokens",
+      "reasoning",
+      "response_format",
+      "seed",
+      "stop",
+      "structured_outputs",
+      "temperature",
+      "tool_choice",
+      "tools",
+      "top_p"
+    ],
+    "default_parameters": {
+      "temperature": 0.7
+    }
+  },
+  "features": {
+    "supports_function_calling": true,
+    "supports_streaming": true,
+    "supports_reasoning": true,
+    "is_multimodal": true,
+    "input_modalities": [
+      "file",
+      "image",
+      "text",
+      "audio"
+    ],
+    "output_modalities": [
+      "text"
+    ],
+    "supports_system_messages": false
+  },
+  "pricing": {
+    "prompt": "0.00000125",
+    "completion": "0.00001",
+    "image": "0.00516",
+    "input_cache_read": "0.00000031",
+    "input_cache_write": "0.000001625",
+    "internal_reasoning": "0",
+    "request": "0",
+    "web_search": "0"
+  },
+  "cost_analysis": {
+    "completion_cost_per_1k": 0.01,
+    "has_free_tier": false,
+    "prompt_cost_per_1k": 0.00125,
+    "supports_caching": true,
+    "supports_image_processing": true,
+    "supports_reasoning_pricing": false,
+    "supports_web_search": true
+  },
+  "architecture": {
+    "input_modalities": [
+      "file",
+      "image",
+      "text",
+      "audio"
+    ],
+    "instruct_type": null,
+    "modality": "text+image->text",
+    "output_modalities": [
+      "text"
+    ],
+    "tokenizer": "Gemini"
+  },
+  "provider_info": {
+    "is_moderated": false,
+    "top_provider": {
+      "context_length": 1048576,
+      "is_moderated": false,
+      "max_completion_tokens": 65536
+    }
+  }
+}

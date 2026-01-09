@@ -1,0 +1,77 @@
+{
+  "tool_logs": [
+    {
+      "type": "tool_progress",
+      "tool": "echo",
+      "tool_name": "エコー",
+      "message": "メッセージを3回繰り返します...",
+      "timestamp": 1765702766.555712,
+      "execution_id": "dc12d060-0964-4dbc-bfc2-0e90decd188d",
+      "message_id": "6683f96d-bc32-4f0c-8fbe-907bab4ce76d"
+    },
+    {
+      "type": "tool_progress",
+      "tool": "echo",
+      "tool_name": "エコー",
+      "message": "メッセージを3回繰り返します...",
+      "timestamp": 1765702777.6019049,
+      "execution_id": "351071c9-b481-494d-a338-81527e92ef04",
+      "message_id": "f9a8b074-2ef7-4576-bd41-1720a662ead0"
+    },
+    {
+      "type": "tool_progress",
+      "tool": "workspace_test",
+      "tool_name": "ワークスペーステスト",
+      "message": "アクション 'test_all' を実行中...",
+      "timestamp": 1765702825.455849,
+      "execution_id": "fbf54dc8-e5d6-4f5b-af68-b206588baf84",
+      "message_id": "5338eb54-4d63-43dd-8b15-58ccfae5c2c1"
+    },
+    {
+      "type": "tool_progress",
+      "tool": "workspace_test",
+      "tool_name": "ワークスペーステスト",
+      "message": "1/4: 書き込みテスト...",
+      "timestamp": 1765702825.458119,
+      "execution_id": "fbf54dc8-e5d6-4f5b-af68-b206588baf84",
+      "message_id": "c689de62-5657-44cc-a4bb-72229ba91765"
+    },
+    {
+      "type": "tool_progress",
+      "tool": "workspace_test",
+      "tool_name": "ワークスペーステスト",
+      "message": "2/4: 読み込みテスト...",
+      "timestamp": 1765702825.459084,
+      "execution_id": "fbf54dc8-e5d6-4f5b-af68-b206588baf84",
+      "message_id": "e9298ec4-9c3b-49be-9bcf-be7b1f99ff7c"
+    },
+    {
+      "type": "tool_progress",
+      "tool": "workspace_test",
+      "tool_name": "ワークスペーステスト",
+      "message": "3/4: 存在確認テスト...",
+      "timestamp": 1765702825.459608,
+      "execution_id": "fbf54dc8-e5d6-4f5b-af68-b206588baf84",
+      "message_id": "5bae8b27-f8cb-4521-900a-415175c76d00"
+    },
+    {
+      "type": "tool_progress",
+      "tool": "workspace_test",
+      "tool_name": "ワークスペーステスト",
+      "message": "4/4: 一覧取得テスト...",
+      "timestamp": 1765702825.460149,
+      "execution_id": "fbf54dc8-e5d6-4f5b-af68-b206588baf84",
+      "message_id": "576e6dae-d6bd-44a3-bdd7-55f649dcef5c"
+    },
+    {
+      "type": "tool_progress",
+      "tool": "workspace_test",
+      "tool_name": "ワークスペーステスト",
+      "message": "ボーナス: 共有ストレージテスト...",
+      "timestamp": 1765702825.4607518,
+      "execution_id": "fbf54dc8-e5d6-4f5b-af68-b206588baf84",
+      "message_id": "f0cb1082-2302-42b1-bf4a-475d2fa05e09"
+    }
+  ],
+  "ui_state": {}
+}

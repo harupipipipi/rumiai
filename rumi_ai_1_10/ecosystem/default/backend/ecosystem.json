@@ -1,0 +1,27 @@
+{
+  "pack_id": "default",
+  "pack_identity": "github:haru/default-pack",
+  "version": "1.0.0",
+  "display_name": "Default Pack",
+  "description": "標準のエコシステムパック。チャット、ツール、プロンプト、サポーター、AIクライアントの基本機能を提供します。",
+  "author": {
+    "name": "haru"
+  },
+  "license": "MIT",
+  "vocabulary": {
+    "types": [
+      "chats",
+      "tool_pack",
+      "prompt_pack",
+      "supporter_pack",
+      "ai_client_provider",
+      "frontend_pack",
+      "ui_panel_pack",
+      "ui_button_pack"
+    ]
+  },
+  "metadata": {
+    "created_at": "2025-01-01",
+    "migration_source": "legacy"
+  }
+}

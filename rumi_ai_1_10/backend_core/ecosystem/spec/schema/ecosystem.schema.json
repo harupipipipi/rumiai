@@ -1,0 +1,130 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ecosystem.local/schema/ecosystem.schema.json",
+  "title": "Ecosystem Pack Definition",
+  "description": "Pack（エコシステムパック）の定義スキーマ。各Packは複数のComponentを含み、独立した機能セットを提供する。",
+  "type": "object",
+  "required": [
+    "pack_id",
+    "pack_identity",
+    "version",
+    "vocabulary"
+  ],
+  "properties": {
+    "pack_id": {
+      "type": "string",
+      "description": "Pack の短縮識別子（ディレクトリ名として使用）",
+      "pattern": "^[a-z][a-z0-9_-]*$",
+      "minLength": 1,
+      "maxLength": 64,
+      "examples": ["default", "pro", "enterprise"]
+    },
+    "pack_identity": {
+      "type": "string",
+      "description": "Pack のグローバル一意識別子。UUID生成の種となる。",
+      "pattern": "^[a-z]+:.+$",
+      "examples": [
+        "github:haru/default-pack",
+        "local:my-custom-pack"
+      ]
+    },
+    "version": {
+      "type": "string",
+      "description": "セマンティックバージョニング",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(-[a-zA-Z0-9.]+)?(\\+[a-zA-Z0-9.]+)?$",
+      "examples": ["1.0.0", "2.1.0-beta.1"]
+    },
+    "pack_uuid": {
+      "type": "string",
+      "description": "pack_identityから生成されたUUID v5（読み込み時に自動計算される場合は省略可）",
+      "format": "uuid"
+    },
+    "display_name": {
+      "type": "string",
+      "description": "UI表示用の名前",
+      "maxLength": 128
+    },
+    "description": {
+      "type": "string",
+      "description": "Packの説明",
+      "maxLength": 1024
+    },
+    "author": {
+      "type": "object",
+      "description": "作成者情報",
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "email": {
+          "type": "string",
+          "format": "email"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        }
+      },
+      "additionalProperties": false
+    },
+    "license": {
+      "type": "string",
+      "description": "ライセンス識別子（SPDX形式推奨）",
+      "examples": ["MIT", "Apache-2.0", "proprietary"]
+    },
+    "vocabulary": {
+      "type": "object",
+      "description": "このPackで使用可能なComponent typeの定義",
+      "required": ["types"],
+      "properties": {
+        "types": {
+          "type": "array",
+          "description": "許可されるComponent typeのリスト",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "uniqueItems": true,
+          "minItems": 1,
+          "examples": [
+            ["chats", "tool_pack", "prompt_pack", "supporter_pack", "ai_client_provider"]
+          ]
+        },
+        "custom_types": {
+          "type": "object",
+          "description": "カスタムtypeの詳細定義（将来拡張用）",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "description": {
+                "type": "string"
+              },
+              "singleton": {
+                "type": "boolean",
+                "default": false
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "dependencies": {
+      "type": "object",
+      "description": "他のPackへの依存関係",
+      "additionalProperties": {
+        "type": "string",
+        "description": "依存するPackのバージョン範囲",
+        "examples": [">=1.0.0", "^2.0.0", "1.x"]
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "description": "追加のメタデータ（自由形式）",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,9 @@
+Flask>=2.0
+google-genai
+python-dotenv
+Pillow
+requests
+werkzeug
+websocket-server
+websocket-client
+flask-sock
