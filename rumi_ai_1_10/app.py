@@ -90,7 +90,7 @@ except Exception as e:
 
 # SupporterDependencyManagerのインポートと初期化
 try:
-    from supporter.supporter_dependency_manager import SupporterDependencyManager
+    from ecosystem.default.backend.components.supporter.supporter_dependency_manager import SupporterDependencyManager
     supporter_dependency_manager = SupporterDependencyManager()
 except ImportError:
     supporter_dependency_manager = None
