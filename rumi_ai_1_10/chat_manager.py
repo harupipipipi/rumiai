@@ -876,3 +876,130 @@ class ChatManager:
                 else:
                     raise e
         return False
+    
+    # ===========================
+    # Chat Config (確定仕様)
+    # ===========================
+    
+    def load_chat_config(self, chat_id: str) -> Dict[str, Any]:
+        """
+        チャット構成を読み込む（historyとは分離：確定仕様）。
+        
+        保存先:
+          user_data/chats/<chat_id>/chat_config.json
+        
+        互換:
+          chat_config.json が無い場合は、history.json から推定して初期化する（fail-soft）。
+        """
+        chat_path = self.find_chat_path(chat_id)
+        if not chat_path:
+            # チャットディレクトリが無い場合でも、設定はデフォルトで返す
+            return self._default_chat_config()
+        
+        cfg_file = chat_path / "chat_config.json"
+        if cfg_file.exists():
+            try:
+                with open(cfg_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    return self._normalize_chat_config(data)
+            except Exception:
+                pass
+        
+        # フォールバック：historyから推定して作成（fail-soft）
+        inferred = self._default_chat_config()
+        try:
+            history = self.load_chat_history(chat_id)
+            if isinstance(history, dict):
+                # 旧互換：historyに残っている可能性があるフィールドを反映
+                if history.get("model"):
+                    inferred["model"] = history.get("model")
+                if "active_tools" in history:
+                    inferred["active_tools"] = history.get("active_tools")
+                if "active_supporters" in history:
+                    inferred["active_supporters"] = history.get("active_supporters") or []
+        except Exception:
+            pass
+        
+        # 初期化して保存（fail-soft：保存失敗でも返す）
+        try:
+            self.save_chat_config(chat_id, inferred)
+        except Exception:
+            pass
+        
+        return self._normalize_chat_config(inferred)
+    
+    def save_chat_config(self, chat_id: str, config: Dict[str, Any]) -> None:
+        """chat_config.json を保存（確定仕様）"""
+        chat_path = self.find_chat_path(chat_id)
+        if not chat_path:
+            # 新規チャットディレクトリ生成
+            chat_path = self.chats_dir / chat_id
+            chat_path.mkdir(parents=True, exist_ok=True)
+            (chat_path / "user_input").mkdir(exist_ok=True)
+        
+        cfg_file = chat_path / "chat_config.json"
+        normalized = self._normalize_chat_config(config or {})
+        with open(cfg_file, "w", encoding="utf-8") as f:
+            json.dump(normalized, f, ensure_ascii=False, indent=2)
+    
+    def update_chat_config(self, chat_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+        """chat_config.json を部分更新して保存し、更新後を返す"""
+        current = self.load_chat_config(chat_id)
+        if isinstance(updates, dict):
+            current.update(updates)
+        current = self._normalize_chat_config(current)
+        self.save_chat_config(chat_id, current)
+        return current
+    
+    def _default_chat_config(self) -> Dict[str, Any]:
+        """chat_config のデフォルト（推奨キー。必須ではない）"""
+        return {
+            # チャット既定モデル（payloadが無い場合に参照）
+            "model": None,
+            # ツール構成：None=all, []=none, ["a","b"]=allowlist
+            "active_tools": None,
+            # サポーター構成
+            "active_supporters": [],
+            # チャット既定プロンプトID
+            "prompt": "normal_prompt",
+            # 既定thinking_budget（UIの既定として使える）
+            "thinking_budget": 0,
+        }
+    
+    def _normalize_chat_config(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """型崩れを吸収して正規化（fail-soft）"""
+        base = self._default_chat_config()
+        if not isinstance(data, dict):
+            return base
+        
+        out = dict(base)
+        out.update(data)
+        
+        # active_tools: None / list を許容
+        at = out.get("active_tools", None)
+        if at is not None and not isinstance(at, list):
+            out["active_tools"] = None
+        if isinstance(out.get("active_tools"), list):
+            out["active_tools"] = [x for x in out["active_tools"] if isinstance(x, str)]
+        
+        # active_supporters: list[str]
+        sup = out.get("active_supporters", [])
+        if not isinstance(sup, list):
+            sup = []
+        out["active_supporters"] = [x for x in sup if isinstance(x, str)]
+        
+        # model/prompt: str or None
+        if out.get("model") is not None and not isinstance(out.get("model"), str):
+            out["model"] = None
+        if out.get("prompt") is not None and not isinstance(out.get("prompt"), str):
+            out["prompt"] = "normal_prompt"
+        
+        # thinking_budget: int
+        tb = out.get("thinking_budget", 0)
+        try:
+            out["thinking_budget"] = int(tb)
+        except Exception:
+            out["thinking_budget"] = 0
+        
+        return out

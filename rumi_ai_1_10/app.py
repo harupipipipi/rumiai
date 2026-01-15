@@ -17,6 +17,7 @@ import mimetypes
 import traceback
 import datetime
 import sys
+import threading
 from pathlib import Path
 from flask import Flask, render_template, request, jsonify, Response, send_from_directory, abort
 from dotenv import load_dotenv
@@ -24,6 +25,14 @@ import importlib.util
 
 load_dotenv('.env.local')
 app = Flask(__name__)
+
+# --- Kernel (Flow-driven OS) ---
+_kernel = None  # fail-soft: Kernelが初期化できなくてもアプリは起動する
+_kernel_started = False  # プロセス内ガード（WSGI/リロードでの多重実行を抑制）
+_kernel_start_error = None
+_kernel_start_lock = threading.Lock()
+_kernel_interfaces_registered = False
+_kernel_if_lock = threading.Lock()
 
 # パスを追加（tool/ と prompt/ を参照可能にする）
 _project_root = Path(__file__).parent
@@ -47,6 +56,94 @@ except Exception as e:
     print(f"エコシステム初期化エラー（従来モードで動作）: {e}")
     import traceback
     traceback.print_exc()
+
+def ensure_kernel_started():
+    """
+    Kernelを遅延起動する（fail-soft）。
+    
+    目的:
+    - WSGI/複数プロセス/リローダ環境で import 時に重いstartupが多重実行される地雷を避ける
+    - Kernelがグローバルregistry/active/mountsを確定させた後に、
+      compat の sys.path 更新（mark_ecosystem_initialized）を再度実行し、二重状態（split-brain亜種）を避ける
+    """
+    global _kernel, _kernel_started, _kernel_start_error
+    
+    if _kernel_started:
+        return
+    
+    # 運用で無効化できる（デフォルトON）
+    if os.environ.get("RUMI_KERNEL_AUTOSTART", "1").strip().lower() in ("0", "false", "no", "off"):
+        _kernel_start_error = "Kernel autostart disabled by RUMI_KERNEL_AUTOSTART"
+        _kernel_started = True
+        return
+    
+    # マルチスレッド環境での多重起動を防ぐ
+    with _kernel_start_lock:
+        if _kernel_started:
+            return
+        
+        try:
+            from core_runtime import Kernel
+            if _kernel is None:
+                _kernel = Kernel()
+            
+            _kernel.run_startup()
+            _kernel_start_error = None
+            print("[Kernel] Startup pipeline executed (lazy)")
+            
+            # 重要：Kernelがグローバル registry/active/mounts を確定（または差し替え）した後に、
+            # compat の sys.path 更新を再実行し、import可能なruntime_dir構成を最終状態に追随させる。
+            try:
+                from backend_core.ecosystem.compat import mark_ecosystem_initialized
+                mark_ecosystem_initialized()
+            except Exception as e:
+                # fail-soft：sys.path追随に失敗してもアプリは継続
+                print(f"[Kernel] compat sys.path refresh failed (fail-soft): {e}")
+        
+        except Exception as e:
+            _kernel_start_error = str(e)
+            print(f"[Kernel] Startup pipeline failed (fail-soft): {e}")
+            import traceback
+            traceback.print_exc()
+            # Kernelが失敗してもアプリは起動継続。diagnostics APIで状況を見られるよう _kernel は保持してよい。
+        finally:
+            _kernel_started = True
+
+
+def ensure_kernel_interfaces_registered():
+    """
+    参照実装（既存のMessageHandler等）を Interface Registry に登録する。
+    Kernelは贔屓しないため、登録は"あくまで参照実装"として行う。
+    """
+    global _kernel_interfaces_registered
+    if _kernel_interfaces_registered:
+        return
+    if _kernel is None:
+        return
+    # マルチスレッドでの二重登録を防ぐ
+    with _kernel_if_lock:
+        if _kernel_interfaces_registered:
+            return
+        try:
+            # 参照実装：message_handler.process_message を callable として登録
+            if message_handler is not None:
+                _kernel.interface_registry.register(
+                    "reference.message_handler",
+                    lambda chat_id, payload: message_handler.process_message(chat_id, payload),
+                    meta={"source": "app", "kind": "reference_impl"},
+                )
+                # 参照実装：ストリーミング（payload.streaming=True を強制）
+                _kernel.interface_registry.register(
+                    "reference.message_handler_stream",
+                    lambda chat_id, payload: message_handler.process_message(
+                        chat_id,
+                        {**(payload or {}), "streaming": True}
+                    ),
+                    meta={"source": "app", "kind": "reference_impl", "mode": "stream"},
+                )
+            _kernel_interfaces_registered = True
+        except Exception as e:
+            print(f"[Kernel] Failed to register reference interfaces (fail-soft): {e}")
 
 # ai_managerを先に初期化
 from ai_manager import AIClient
@@ -121,6 +218,14 @@ if ai_manager:
     )
 else:
     message_handler = None
+
+
+@app.before_request
+def _ensure_kernel_before_request():
+    # リクエストが来たプロセスで一度だけ起動する
+    ensure_kernel_started()
+    ensure_kernel_interfaces_registered()
+
 
 # --- ルート定義 ---
 @app.route('/')
@@ -336,14 +441,35 @@ def send_message_and_get_response(chat_id):
     if not message_handler:
         return jsonify({'error': 'Message handler not initialized'}), 500
     
-    payload = request.json
+    payload = request.get_json(silent=True) or {}
     user_message = payload.get('message')
     if not user_message:
         return jsonify({'error': 'Invalid request'}), 400
     
+    # 重大バグ対策:
+    # 非ストリーミングAPIでは、クライアント側のミスで streaming:true が混入しても必ず無効化する
+    if isinstance(payload, dict) and payload.get('streaming', False):
+        payload['streaming'] = False
+    
     try:
+        # Kernelが利用可能なら Flow-driven message pipeline を使う（fail-soft）
+        if _kernel is not None:
+            try:
+                result = _kernel.run_message(chat_id, payload)
+                # 非ストリーミングAPIは dict を返すことが契約。Response等ならフォールバックする。
+                if isinstance(result, dict):
+                    return jsonify(result)
+                print("[Kernel] Non-stream endpoint got non-dict result, fallback to MessageHandler")
+            except NotImplementedError:
+                pass
+            except Exception as e:
+                print(f"[Kernel] run_message failed (fail-soft), fallback to MessageHandler: {e}")
+        
         result = message_handler.process_message(chat_id, payload)
-        return jsonify(result)
+        # 念のため：参照実装が誤ってResponseを返した場合もフォールバック/エラー化
+        if isinstance(result, dict):
+            return jsonify(result)
+        return jsonify({'error': 'Non-stream endpoint returned non-JSON result'}), 500
     except Exception as e:
         import traceback
         print(f"APIリクエスト処理中にエラーが発生しました: {e}")
@@ -363,7 +489,7 @@ def send_message_and_get_response_stream(chat_id):
     if not message_handler:
         return jsonify({'error': 'Message handler not initialized'}), 500
     
-    payload = request.json
+    payload = request.get_json(silent=True) or {}
     user_message = payload.get('message')
     if not user_message:
         return jsonify({'error': 'Invalid request'}), 400
@@ -372,7 +498,21 @@ def send_message_and_get_response_stream(chat_id):
     payload['streaming'] = True
     
     try:
-        # message_handlerがResponseオブジェクトを返すように変更済み
+        # Kernelが利用可能なら Flow-driven message_stream pipeline を使う（fail-soft）
+        if _kernel is not None:
+            try:
+                result = _kernel.run_message_stream(chat_id, payload)
+                # 正常系：Flask Response（SSE）をそのまま返す
+                if isinstance(result, Response):
+                    return result
+                # 何らかのdictが返った場合はJSONで返す（fail-soft）
+                if isinstance(result, dict):
+                    return jsonify(result)
+                # 不明な型はフォールバック
+            except Exception as e:
+                print(f"[Kernel] run_message_stream failed (fail-soft), fallback to MessageHandler: {e}")
+        
+        # フォールバック：従来どおり message_handler が Response を返す
         return message_handler.process_message(chat_id, payload)
     except Exception as e:
         import traceback
@@ -1480,6 +1620,41 @@ def reload_ecosystem():
         return jsonify({'error': 'Ecosystem module not available'}), 500
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+# --- Kernel diagnostics API ---
+@app.route('/api/kernel/diagnostics', methods=['GET'])
+def get_kernel_diagnostics():
+    """
+    Kernel（Flow駆動OS）の診断情報を返す。
+    fail-soft のため、Kernelが初期化できない場合でもAPI自体は動作する。
+    """
+    # diagnostics取得前に一度だけ起動を試みる（fail-soft）
+    ensure_kernel_started()
+    ensure_kernel_interfaces_registered()
+    
+    if _kernel is None:
+        return jsonify({
+            'initialized': False,
+            'error': 'Kernel not initialized (startup failed or disabled)',
+            'diagnostics': None
+        }), 200
+    try:
+        return jsonify({
+            'initialized': True,
+            'started': _kernel_started,
+            'start_error': _kernel_start_error,
+            'diagnostics': _kernel.diagnostics.as_dict()
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'initialized': True,
+            'started': _kernel_started,
+            'start_error': _kernel_start_error,
+            'error': str(e),
+            'diagnostics': None
+        }), 200
+
 
 # アプリケーション終了時のクリーンアップ
 import atexit
