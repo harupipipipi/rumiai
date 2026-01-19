@@ -167,13 +167,14 @@ class ComponentLifecycleExecutor:
 
     def run_phase(self, phase_name: str) -> Dict[str, Any]:
         """
-        フェーズ実行(Step6: dependency/setup を実装)
+        フェーズ実行:
         - dependency: dependency_manager.py があれば実行
         - setup: setup.py があれば実行(冪等前提)
+        - runtime_boot: runtime_boot.py があれば実行
         - その他: 今はskippedとして診断に残す(後工程で実装)
         """
         phase = (phase_name or "").strip()
-        if phase not in ("dependency", "setup"):
+        if phase not in ("dependency", "setup", "runtime_boot"):
             # 後工程の器：現時点では no-op だが記録は残す
             self.diagnostics.record_step(
                 phase="startup",
@@ -189,6 +190,7 @@ class ComponentLifecycleExecutor:
             }
 
         components = self.iter_active_components(phase=phase)
+        self._ensure_components_on_syspath(components)
         self.diagnostics.record_step(
             phase="startup",
             step_id=f"component_phase.{phase}.start",
@@ -230,7 +232,12 @@ class ComponentLifecycleExecutor:
         comp_id = full_id if isinstance(full_id, str) else f"{getattr(component,'pack_id',None)}:{getattr(component,'type',None)}:{getattr(component,'id',None)}"
         runtime_dir = Path(getattr(component, "path", "."))
 
-        filename = "dependency_manager.py" if phase == "dependency" else "setup.py"
+        if phase == "dependency":
+            filename = "dependency_manager.py"
+        elif phase == "setup":
+            filename = "setup.py"
+        else:  # runtime_boot
+            filename = "runtime_boot.py"
         file_path = runtime_dir / filename
 
         if not file_path.exists():
@@ -310,6 +317,21 @@ class ComponentLifecycleExecutor:
                 error=err,
                 meta={"file": str(file_path), "reason": "phase_failed_fail_soft"},
             )
+
+    def _ensure_components_on_syspath(self, components: list) -> None:
+        """
+        アクティブコンポーネントの runtime_dir を sys.path に追加（贔屓なし・汎用）。
+        これにより component が他 component の Python package を import できる。
+        """
+        import sys
+        try:
+            for comp in components:
+                p = str(Path(getattr(comp, "path", ".")).resolve())
+                if p and p not in sys.path:
+                    sys.path.insert(0, p)
+        except Exception:
+            # fail-soft
+            return
 
     def _short_trace(self) -> str:
         """

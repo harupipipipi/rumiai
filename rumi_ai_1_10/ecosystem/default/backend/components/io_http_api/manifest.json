@@ -1,0 +1,7 @@
+{
+  "type": "io",
+  "id": "io_http_api_v1",
+  "version": "1.0.0",
+  "connectivity": { "provides": ["io.http.binders"], "requires": ["service.chats", "service.relationships"] },
+  "metadata": { "description": "HTTP API一括バインド（prompt/ai/tool無しで動作、該当APIは501）" }
+}
