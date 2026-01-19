@@ -9,7 +9,12 @@ Pack/Component/AddonのUUID v5を生成する。
 import uuid
 from typing import Union
 
-from .uuid_namespace import PACK_NAMESPACE_UUID, COMPONENT_PREFIX, ADDON_PREFIX
+# プロジェクト固有の名前空間UUID（固定値 - 変更禁止）
+PACK_NAMESPACE_UUID = uuid.UUID("a3e9f8c2-7b4d-5e1a-9c6f-2d8b4a7e3f1c")
+
+# プレフィックス
+COMPONENT_PREFIX = "component"
+ADDON_PREFIX = "addon"
 
 
 def generate_pack_uuid(pack_identity: str) -> uuid.UUID:
@@ -64,32 +69,6 @@ def generate_component_uuid(
     
     # フォーマット: "component:{type}:{id}"
     name = f"{COMPONENT_PREFIX}:{component_type}:{component_id}"
-    
-    return uuid.uuid5(pack_uuid, name)
-
-
-def generate_addon_uuid(
-    pack_uuid: Union[uuid.UUID, str],
-    addon_id: str
-) -> uuid.UUID:
-    """
-    Addon UUIDを生成
-    
-    Args:
-        pack_uuid: 親PackのUUID
-        addon_id: アドオンID
-    
-    Returns:
-        決定論的に生成されたUUID v5
-    """
-    if isinstance(pack_uuid, str):
-        pack_uuid = uuid.UUID(pack_uuid)
-    
-    if not addon_id or not isinstance(addon_id, str):
-        raise ValueError("addon_id must be a non-empty string")
-    
-    # フォーマット: "addon:{id}"
-    name = f"{ADDON_PREFIX}:{addon_id}"
     
     return uuid.uuid5(pack_uuid, name)
 

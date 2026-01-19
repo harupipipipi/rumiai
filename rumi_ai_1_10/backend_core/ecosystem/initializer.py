@@ -123,14 +123,10 @@ class EcosystemInitializer:
             mounts_data = {
                 "version": "1.0",
                 "mounts": {
-                    "data.chats": "./user_data/chats",
-                    "data.settings": "./user_data/settings",
+                    # 公式は汎用マウントのみ定義
+                    # 具体的なマウントはコンポーネントが自己登録する
+                    "data.user": "./user_data",
                     "data.cache": "./user_data/cache",
-                    "data.shared": "./user_data/shared",
-                    "data.tools.assets": "./user_data/default_tool/assets",
-                    "data.prompts.assets": "./user_data/default_prompt/assets",
-                    "data.ai_clients.assets": "./user_data/default_ai_client/assets",
-                    "data.supporters.assets": "./user_data/default_supporter/assets"
                 }
             }
             
@@ -162,11 +158,12 @@ class EcosystemInitializer:
         # active_ecosystem.jsonが存在しない場合は作成
         if not active_file.exists():
             default_data = {
-                "active_pack_identity": DEFAULT_CONFIG.active_pack_identity,
-                "overrides": dict(DEFAULT_CONFIG.overrides),
-                "disabled_components": list(DEFAULT_CONFIG.disabled_components),
-                "disabled_addons": list(DEFAULT_CONFIG.disabled_addons),
-                "metadata": dict(DEFAULT_CONFIG.metadata)
+                # 公式は内容を定義しない - 最初のPackが自己設定する
+                "active_pack_identity": None,
+                "overrides": {},
+                "disabled_components": [],
+                "disabled_addons": [],
+                "metadata": {}
             }
             
             with open(active_file, 'w', encoding='utf-8') as f:
@@ -180,65 +177,13 @@ class EcosystemInitializer:
     
     def _seed_assets(self, result: Dict[str, Any]):
         """
-        初回起動時にPackのassetsからuser_data配下にseed展開
+        アセットのseed展開（公式は実行しない）
         
-        seed元: ecosystem/<pack>/backend/assets/<type>/
-        seed先: user_data/default_<type>/assets/
-        
-        - サブディレクトリのみをコピー（ツール/プロンプト等の実体）
-        - user_data/default_*/assets/ が空の場合のみ実行
+        公式は具体的なアセット構造を知らない。
+        各コンポーネントがsetup.pyで自身のseedを行う。
         """
-        # seed設定: (assets内のサブディレクトリ名, mountキー)
-        seed_config = [
-            ('tool', 'data.tools.assets'),
-            ('prompt', 'data.prompts.assets'),
-            ('ai_client', 'data.ai_clients.assets'),
-            ('supporter', 'data.supporters.assets'),
-        ]
-        
-        # アクティブなPackのassetsディレクトリを取得
-        try:
-            from .registry import get_registry
-            registry = get_registry()
-            
-            # デフォルトPackを取得（複数Packがある場合は最初のもの）
-            if not registry.packs:
-                print("[Seed] スキップ: Packが読み込まれていません")
-                return
-            
-            # 最初のPackを使用（通常は default）
-            pack = list(registry.packs.values())[0]
-            pack_assets_dir = pack.path / "backend" / "assets"
-            
-            if not pack_assets_dir.exists():
-                print(f"[Seed] スキップ: Pack assets ディレクトリが存在しません: {pack_assets_dir}")
-                return
-            
-        except Exception as e:
-            print(f"[Seed] Pack取得エラー: {e}")
-            return
-        
-        for asset_type, mount_key in seed_config:
-            source_path = pack_assets_dir / asset_type
-            
-            if not source_path.exists():
-                print(f"[Seed] スキップ: {source_path} が存在しません")
-                continue
-            
-            try:
-                target_path = get_mount_path(mount_key, ensure_exists=True)
-            except KeyError:
-                print(f"[Seed] スキップ: マウント {mount_key} が未定義")
-                continue
-            
-            # targetが実質的に空の場合のみseed
-            if self._is_assets_empty(target_path):
-                copied_count = self._copy_plugin_dirs(source_path, target_path)
-                if copied_count > 0:
-                    result['seeded'].append(mount_key)
-                    print(f"[Seed] {source_path} → {target_path} ({copied_count}個)")
-            else:
-                print(f"[Seed] スキップ: {target_path} は既にデータがあります")
+        # 公式は何もしない - コンポーネントの責務
+        pass
     
     def _is_assets_empty(self, path: Path) -> bool:
         """
@@ -285,46 +230,13 @@ class EcosystemInitializer:
     
     def _migrate_chats(self, result: Dict[str, Any]):
         """
-        ./chats から user_data/chats へ移行
+        チャットデータの移行（公式は実行しない）
         
-        - user_data/chats が空の場合のみ実行
-        - UUIDディレクトリとrelationships.json をコピー
+        公式は「チャット」という概念を知らない。
+        chatsコンポーネントがsetup.pyで自身の移行を行う。
         """
-        legacy_chats = Path('chats')
-        
-        if not legacy_chats.exists():
-            print("[Migration] スキップ: ./chats が存在しません")
-            return
-        
-        try:
-            target_chats = get_mount_path('data.chats', ensure_exists=True)
-        except KeyError:
-            print("[Migration] スキップ: マウント data.chats が未定義")
-            return
-        
-        # target_chatsが空の場合のみ移行
-        if not self._is_chats_empty(target_chats):
-            print(f"[Migration] スキップ: {target_chats} は既にデータがあります")
-            return
-        
-        # チャットデータとrelationships.jsonをコピー
-        copied_count = 0
-        for item in legacy_chats.iterdir():
-            dst = target_chats / item.name
-            if not dst.exists():
-                try:
-                    if item.is_dir():
-                        shutil.copytree(item, dst)
-                    else:
-                        # relationships.json などのファイル
-                        shutil.copy2(item, dst)
-                    copied_count += 1
-                except Exception as e:
-                    print(f"  [Migration] コピー失敗: {item.name} - {e}")
-        
-        if copied_count > 0:
-            result['chats_migrated'] = True
-            print(f"[Migration] ./chats → {target_chats} ({copied_count}個)")
+        # 公式は何もしない - コンポーネントの責務
+        pass
     
     def _is_chats_empty(self, path: Path) -> bool:
         """

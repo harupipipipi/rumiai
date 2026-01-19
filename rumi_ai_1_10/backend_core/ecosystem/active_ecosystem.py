@@ -39,14 +39,8 @@ class ActiveEcosystemConfig:
 
 # デフォルト設定
 DEFAULT_CONFIG = ActiveEcosystemConfig(
-    active_pack_identity="github:haru/default-pack",
-    overrides={
-        "chats": "chats_v1",
-        "tool_pack": "tool_v1",
-        "prompt_pack": "prompt_v1",
-        "supporter_pack": "supporter_v1",
-        "ai_client_provider": "ai_client_v1"
-    }
+    active_pack_identity=None,  # 公式は特定のPackを指定しない
+    overrides={}                # 公式はオーバーライドを定義しない
 )
 
 
@@ -91,13 +85,13 @@ class ActiveEcosystemManager:
                 self._save_config_internal()
     
     def _create_default_config(self) -> ActiveEcosystemConfig:
-        """デフォルト設定の新しいインスタンスを作成"""
+        """デフォルト設定の新しいインスタンスを作成（公式は内容を定義しない）"""
         return ActiveEcosystemConfig(
-            active_pack_identity=DEFAULT_CONFIG.active_pack_identity,
-            overrides=dict(DEFAULT_CONFIG.overrides),
-            disabled_components=list(DEFAULT_CONFIG.disabled_components),
-            disabled_addons=list(DEFAULT_CONFIG.disabled_addons),
-            metadata=dict(DEFAULT_CONFIG.metadata)
+            active_pack_identity=None,
+            overrides={},
+            disabled_components=[],
+            disabled_addons=[],
+            metadata={}
         )
     
     def _save_config_internal(self):

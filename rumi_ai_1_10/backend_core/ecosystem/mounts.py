@@ -15,15 +15,9 @@ from typing import Dict, Optional, Any
 
 # デフォルトのマウント設定
 DEFAULT_MOUNTS = {
-    "data.chats": "./user_data/chats",
-    "data.settings": "./user_data/settings",
+    # 汎用マウントのみ（具体的な用途名を定義しない）
+    "data.user": "./user_data",
     "data.cache": "./user_data/cache",
-    "data.shared": "./user_data/shared",
-    # assets用マウント（runtime/asset分離）
-    "data.tools.assets": "./user_data/default_tool/assets",
-    "data.prompts.assets": "./user_data/default_prompt/assets",
-    "data.ai_clients.assets": "./user_data/default_ai_client/assets",
-    "data.supporters.assets": "./user_data/default_supporter/assets",
 }
 
 # グローバルインスタンス（遅延初期化）

@@ -1,27 +1,22 @@
 """
-backend_core.ecosystem package
+backend_core.ecosystem - 最小インフラ
 
-エコシステムの公開APIをまとめる __init__。
-app.py から `from backend_core.ecosystem import initialize_ecosystem` のように
-インポートできることを保証する。
+公式が提供するのは:
+- マウント管理（汎用）
+- Pack/Component読み込み（汎用）
+- UUID生成（汎用）
+- 初期化状態管理
 
-重要:
-- ここが無い（またはinitialize_ecosystem等をexportしない）と
-  app.py の初期化が失敗し、compat の sys.path 注入も走らず
-  ai_client/tool/prompt などのコンポーネントimportが壊れる。
+公式が提供しないもの:
+- 具体的なコンポーネント型
+- 具体的なサービス
+- アドオン管理（コンポーネント側の責務）
 """
-
-from .initializer import (
-    EcosystemInitializer,
-    initialize_ecosystem,
-    validate_ecosystem,
-)
 
 from .mounts import (
     MountManager,
     get_mount_manager,
     get_mount_path,
-    initialize_mounts,
     DEFAULT_MOUNTS,
 )
 
@@ -29,47 +24,51 @@ from .registry import (
     Registry,
     get_registry,
     reload_registry,
+    PackInfo,
+    ComponentInfo,
 )
 
-from .active_ecosystem import (
-    ActiveEcosystemManager,
-    get_active_ecosystem_manager,
-    get_active_pack_identity,
-    get_component_override,
+from .compat import (
+    is_ecosystem_initialized,
+    mark_ecosystem_initialized,
+    get_user_data_dir,
+    get_mount_path_safe,
+    register_mount_from_component,
+    add_to_sys_path,
 )
 
-from .addon_manager import (
-    AddonManager,
-    get_addon_manager,
-    reload_addon_manager,
+from .uuid_utils import (
+    generate_pack_uuid,
+    generate_component_uuid,
+    validate_uuid,
+    parse_uuid,
 )
 
 __all__ = [
-    # initializer
-    "EcosystemInitializer",
-    "initialize_ecosystem",
-    "validate_ecosystem",
-
     # mounts
     "MountManager",
     "get_mount_manager",
     "get_mount_path",
-    "initialize_mounts",
     "DEFAULT_MOUNTS",
-
+    
     # registry
     "Registry",
     "get_registry",
     "reload_registry",
-
-    # active ecosystem
-    "ActiveEcosystemManager",
-    "get_active_ecosystem_manager",
-    "get_active_pack_identity",
-    "get_component_override",
-
-    # addons
-    "AddonManager",
-    "get_addon_manager",
-    "reload_addon_manager",
+    "PackInfo",
+    "ComponentInfo",
+    
+    # compat
+    "is_ecosystem_initialized",
+    "mark_ecosystem_initialized",
+    "get_user_data_dir",
+    "get_mount_path_safe",
+    "register_mount_from_component",
+    "add_to_sys_path",
+    
+    # uuid
+    "generate_pack_uuid",
+    "generate_component_uuid",
+    "validate_uuid",
+    "parse_uuid",
 ]
