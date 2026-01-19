@@ -1,4 +1,4 @@
-# file_manager.py
+# file_manager.py - 自己完結版
 import os
 import json
 import base64
@@ -6,21 +6,110 @@ import tempfile
 import shutil
 from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional
-from utils import MimeTypeUtils, PathUtils
+
+
+class MimeTypeUtils:
+    """MIMEタイプ関連のユーティリティ（インライン）"""
+    
+    EXT_MAP = {
+        'text/plain': '.txt',
+        'text/html': '.html',
+        'text/csv': '.csv',
+        'image/png': '.png',
+        'image/jpeg': '.jpg',
+        'image/jpg': '.jpg',
+        'image/gif': '.gif',
+        'image/webp': '.webp',
+        'image/svg+xml': '.svg',
+        'application/pdf': '.pdf',
+        'application/json': '.json',
+        'application/xml': '.xml',
+        'application/zip': '.zip',
+        'application/x-tar': '.tar',
+        'application/gzip': '.gz',
+        'audio/mpeg': '.mp3',
+        'audio/wav': '.wav',
+        'audio/ogg': '.ogg',
+        'video/mp4': '.mp4',
+        'video/mpeg': '.mpeg',
+        'video/webm': '.webm',
+    }
+    
+    @staticmethod
+    def get_extension_from_mime(mime_type: str, file_name: Optional[str] = None) -> str:
+        """MIMEタイプから拡張子を取得"""
+        if mime_type in MimeTypeUtils.EXT_MAP:
+            return MimeTypeUtils.EXT_MAP[mime_type]
+        for key, ext in MimeTypeUtils.EXT_MAP.items():
+            if key in mime_type:
+                return ext
+        if file_name:
+            parts = file_name.rsplit('.', 1)
+            if len(parts) > 1:
+                return '.' + parts[1]
+        return '.bin'
+    
+    @staticmethod
+    def extract_mime_from_data_url(data_url: str) -> str:
+        """Data URLからMIMEタイプを抽出"""
+        if not data_url.startswith('data:'):
+            return 'application/octet-stream'
+        try:
+            header = data_url.split(',')[0]
+            if ';' in header:
+                mime_info = header.split(';')[0]
+                if ':' in mime_info:
+                    return mime_info.split(':')[1]
+        except:
+            pass
+        return 'application/octet-stream'
+
 
 class FileManager:
-    """ファイル管理関連の処理"""
+    """ファイル管理（自己完結・InterfaceRegistry経由でChatManager取得）"""
     
-    def __init__(self, chats_dir: str = None):
+    def __init__(self, chats_dir: str = None, interface_registry=None):
         """
         Args:
             chats_dir: チャットディレクトリ（setup.pyから注入される）
+            interface_registry: InterfaceRegistry（サービス取得用）
         """
         if chats_dir is None:
             chats_dir = 'user_data/chats'
-        
         self.chats_dir = Path(chats_dir)
-        self.temp_files = []  # 一時ファイルのトラッキング
+        self._ir = interface_registry
+        self.temp_files = []
+    
+    def _get_chat_manager(self):
+        """InterfaceRegistry経由でChatManagerを取得"""
+        if self._ir:
+            return self._ir.get("service.chats", strategy="last")
+        return None
+    
+    def _find_chat_path(self, chat_id: str) -> Optional[Path]:
+        """ChatManagerを使わずにチャットパスを検索"""
+        import uuid as uuid_mod
+        
+        def is_valid_uuid(s):
+            try:
+                uuid_mod.UUID(str(s))
+                return True
+            except ValueError:
+                return False
+        
+        # ルート直下を確認
+        root_path = self.chats_dir / chat_id
+        if root_path.exists() and root_path.is_dir():
+            return root_path
+        
+        # サブフォルダ内を検索
+        if self.chats_dir.exists():
+            for item in self.chats_dir.iterdir():
+                if item.is_dir() and not is_valid_uuid(item.name):
+                    sub_path = item / chat_id
+                    if sub_path.exists() and sub_path.is_dir():
+                        return sub_path
+        return None
     
     def process_uploaded_files(self, files_info: List[Dict]) -> Tuple[List[str], List[str]]:
         """
@@ -71,7 +160,7 @@ class FileManager:
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
                 temp_file.write(file_data)
                 temp_path = temp_file.name
-                
+            
             print(f"一時ファイル作成: {temp_path} ({mime_type})")
             return temp_path, temp_path
             
@@ -90,10 +179,7 @@ class FileManager:
         Returns:
             保存されたファイル情報のリスト
         """
-        from chat_manager import ChatManager
-        chat_manager = ChatManager(str(self.chats_dir))
-        
-        chat_path = chat_manager.find_chat_path(chat_id)
+        chat_path = self._find_chat_path(chat_id)
         if not chat_path:
             chat_path = self.chats_dir / chat_id
         
@@ -165,7 +251,7 @@ class FileManager:
                     os.remove(temp_path)
                     print(f"一時ファイル削除: {temp_path}")
             except OSError as e:
-                print(f"Temp file removal failed for {temp_path}: {e.strerror}")
+                print(f"Temp file removal failed for {temp_path}: {e.strerror if hasattr(e, 'strerror') else e}")
     
     def save_user_file(self, chat_id: str, file_path: str, file_info: Dict) -> str:
         """
@@ -179,10 +265,7 @@ class FileManager:
         Returns:
             保存先のパス
         """
-        from chat_manager import ChatManager
-        chat_manager = ChatManager(str(self.chats_dir))
-        
-        chat_path = chat_manager.find_chat_path(chat_id)
+        chat_path = self._find_chat_path(chat_id)
         if not chat_path:
             chat_path = self.chats_dir / chat_id
             chat_path.mkdir(parents=True, exist_ok=True)
@@ -294,10 +377,7 @@ class FileManager:
         Returns:
             Dict with 'user_files' and 'tool_files' lists
         """
-        from chat_manager import ChatManager
-        chat_manager = ChatManager(str(self.chats_dir))
-        
-        chat_path = chat_manager.find_chat_path(chat_id)
+        chat_path = self._find_chat_path(chat_id)
         if not chat_path:
             return {'user_files': [], 'tool_files': []}
         

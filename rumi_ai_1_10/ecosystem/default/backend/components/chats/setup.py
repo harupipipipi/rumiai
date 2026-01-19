@@ -54,12 +54,12 @@ def run(context: dict):
         
         if interface_registry:
             interface_registry.register(
-                "service.chat_manager",
+                "service.chats",
                 manager,
                 meta={"component": "chats:chats_v1", "version": "1.0.0"}
             )
         
-        print("[chats/setup] ChatManager registered")
+        print("[chats/setup] ChatManager registered as service.chats")
     except Exception as e:
         print(f"[chats/setup] ChatManager登録エラー: {e}")
     
@@ -72,12 +72,12 @@ def run(context: dict):
         
         if interface_registry:
             interface_registry.register(
-                "service.relationship_manager",
+                "service.relationships",
                 rel_manager,
                 meta={"component": "chats:chats_v1", "version": "1.0.0"}
             )
         
-        print("[chats/setup] RelationshipManager registered")
+        print("[chats/setup] RelationshipManager registered as service.relationships")
     except Exception as e:
         print(f"[chats/setup] RelationshipManager登録エラー: {e}")
     

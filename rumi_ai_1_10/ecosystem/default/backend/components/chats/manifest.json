@@ -5,7 +5,10 @@
   "description": "チャット履歴管理コンポーネント",
   "connectivity": {
     "accepts": [],
-    "provides": ["chat_manager", "relationship_manager"],
+    "provides": [
+      "service.chats",
+      "service.relationships"
+    ],
     "requires": []
   },
   "storage": {
@@ -14,7 +17,10 @@
     }
   },
   "addon_policy": {
-    "allowed_manifest_paths": ["/connectivity", "/storage"],
+    "allowed_manifest_paths": [
+      "/connectivity",
+      "/storage"
+    ],
     "deny_all": false
   }
 }

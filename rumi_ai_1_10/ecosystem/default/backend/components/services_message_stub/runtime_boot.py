@@ -1,10 +1,19 @@
 from __future__ import annotations
-
 from typing import Any, Dict
 import threading
-import time
+import uuid
+from datetime import datetime, timezone
 
 _ABORT = threading.Event()
+
+
+def _generate_message_id() -> str:
+    return f"msg-{uuid.uuid4().hex[:12]}"
+
+
+def _get_iso_timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+
 
 def run(context: Dict[str, Any]) -> None:
     ir = context.get("interface_registry")
@@ -16,18 +25,52 @@ def run(context: Dict[str, Any]) -> None:
 
     def _append(chat_id: str, role: str, content: str, status: str = "completed") -> None:
         cm = _chats()
-        from chat_manager import create_standard_message, add_message_to_history
-        history = cm.load_chat_history(chat_id)
-        msg = create_standard_message(
-            role=role,
-            content=content,
-            parent_id=history.get("current_node"),
-            status=status,
-        )
-        history = add_message_to_history(history, msg)
+        if cm is None:
+            return
+        try:
+            history = cm.load_chat_history(chat_id)
+        except FileNotFoundError:
+            history = {
+                "conversation_id": chat_id,
+                "title": "新しいチャット",
+                "created_at": _get_iso_timestamp(),
+                "updated_at": _get_iso_timestamp(),
+                "schema_version": "2.0",
+                "current_node": None,
+                "mapping": {},
+                "messages": [],
+                "is_pinned": False,
+                "folder": None,
+                "active_tools": None,
+                "active_supporters": []
+            }
+        
+        msg_id = _generate_message_id()
+        parent_id = history.get("current_node")
+        
+        message = {
+            "message_id": msg_id,
+            "role": role,
+            "content": content,
+            "timestamp": _get_iso_timestamp(),
+            "parent_id": parent_id,
+            "children": [],
+            "status": status
+        }
+        
+        history["messages"].append(message)
+        history["mapping"][msg_id] = {"id": msg_id, "parent": parent_id, "children": []}
+        
+        if parent_id and parent_id in history["mapping"]:
+            if msg_id not in history["mapping"][parent_id]["children"]:
+                history["mapping"][parent_id]["children"].append(msg_id)
+        
+        history["current_node"] = msg_id
+        history["updated_at"] = _get_iso_timestamp()
+        
         cm.save_chat_history(chat_id, history)
 
-    STUB = "AI subsystem is not installed yet. (prompt/ai_client/tool were removed; implement new services and rebind message.handle.)"
+    STUB = "AI subsystem is not installed. Install ai_client/prompt/tool components to enable AI responses."
 
     def message_handle(chat_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         msg = (payload or {}).get("message") or {}
@@ -39,6 +82,7 @@ def run(context: Dict[str, Any]) -> None:
 
     def message_handle_stream(chat_id: str, payload: Dict[str, Any]):
         from flask import Response
+        import time
         _ABORT.clear()
 
         msg = (payload or {}).get("message") or {}
@@ -52,10 +96,10 @@ def run(context: Dict[str, Any]) -> None:
                 if _ABORT.is_set():
                     yield '"}\n\n'
                     return
-                yield ch.replace('"', '\\"')
+                yield ch.replace('"', '\\"').replace('\n', '\\n')
                 time.sleep(0.003)
             yield '"}\n\n'
-            yield 'data: {"type":"complete","full_text":"' + STUB.replace('"', '\\"') + '"}\n\n'
+            yield 'data: {"type":"complete","full_text":"' + STUB.replace('"', '\\"').replace('\n', '\\n') + '"}\n\n'
 
         _append(chat_id, "assistant", STUB)
         return Response(gen(), mimetype="text/event-stream")
