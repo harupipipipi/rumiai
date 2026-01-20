@@ -1,7 +1,7 @@
 import os
 import threading
 import traceback
-from flask import Flask, render_template
+from flask import Flask, render_template, send_from_directory
 from dotenv import load_dotenv
 
 load_dotenv('.env.local')
@@ -83,6 +83,13 @@ class _KernelWSGIMiddleware:
 
 
 app.wsgi_app = _KernelWSGIMiddleware(app.wsgi_app)
+
+# --- Frontend static files ---
+
+@app.route('/frontend/<path:filename>')
+def frontend_static(filename):
+    """ecosystem/default/frontend/ から静的ファイルを配信"""
+    return send_from_directory('ecosystem/default/frontend', filename)
 
 # --- UI routes only (official keeps UI shell only) ---
 

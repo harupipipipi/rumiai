@@ -1,340 +1,52 @@
 <!DOCTYPE html>
 <html lang="ja">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>rumi ai</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script> tailwind.config = { darkMode: 'class' } </script>
+    <meta name="description" content="Rumi AI - AIチャットアプリケーション">
+    <meta name="theme-color" content="#1a1a2e">
+    <title>Rumi AI</title>
+    <link rel="stylesheet" href="/frontend/styles/variables.css">
+    <link rel="stylesheet" href="/frontend/styles/main.css">
+    <link rel="stylesheet" href="/frontend/styles/sidebar.css">
+    <link rel="stylesheet" href="/frontend/styles/chat.css">
+    <link rel="stylesheet" href="/frontend/styles/responsive.css">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
-<body class="font-[Inter,san-serif]">
-    <div class="flex h-screen bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
-        <!-- サイドバー -->
-        <aside id="sidebar" class="w-64 flex-shrink-0 bg-gray-50 dark:bg-black/20 flex flex-col p-2 border-r border-gray-200 dark:border-gray-800 transition-all duration-300">
-            <div class="flex flex-col flex-grow overflow-y-auto">
-                <div id="sidebar-top-actions" class="p-2 space-y-2 flex-shrink-0">
-                    <button id="new-chat-btn" class="w-full bg-gray-800 dark:bg-gray-100 hover:bg-gray-700 dark:hover:bg-gray-200 text-white dark:text-black font-semibold py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-colors">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2Z"/></svg>
-                        <span>新しいチャット</span>
-                    </button>
-                    <button id="new-folder-btn" class="sidebar-action-btn">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="w-4 h-4" viewBox="0 0 16 16"><path d="M.5 3A.5.5 0 0 1 1 2.5h2.536l.24-1.2A.5.5 0 0 1 4.276 1h7.448a.5.5 0 0 1 .499.3l.24 1.2H15a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-.64l-1.18-5.903A.5.5 0 0 0 12.205 3H3.794a.5.5 0 0 0-.491.402L2.14 8.5H1.5a.5.5 0 0 1-.5-.5v-1zM1.61 9.093a.5.5 0 0 0 .49.407h11.8a.5.5 0 0 0 .49-.407l1.01-5.046A.5.5 0 0 0 15.006 4H.994a.5.5 0 0 0-.49.546L1.61 9.093zM8 10a.5.5 0 0 1 .5.5v2h2a.5.5 0 0 1 0 1h-2v2a.5.5 0 0 1-1 0v-2h-2a.5.5 0 0 1 0-1h2v-2A.5.5 0 0 1 8 10z"/></svg>
-                        <span>新しいフォルダ</span>
-                    </button>
-                </div>
-                <div id="chat-history-list" class="flex-grow overflow-y-auto px-2 space-y-4"></div>
-            </div>
-            <div class="p-2 border-t border-gray-200 dark:border-gray-800 flex flex-col gap-2 flex-shrink-0">
-                <button id="theme-toggle-btn" title="テーマを切り替え" class="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"><span class="sun-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M8 11a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm0 1a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM8 0a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 0zm0 13a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2A.5.5 0 0 1 8 13zm8-5a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2a.5.5 0 0 1 .5.5zM3 8a.5.5 0 0 1-.5.5h-2a.5.5 0 0 1 0-1h2A.5.5 0 0 1 3 8zm10.657-5.657a.5.5 0 0 1 0 .707l-1.414 1.415a.5.5 0 1 1-.707-.708l1.414-1.414a.5.5 0 0 1 .707 0zm-9.193 9.193a.5.5 0 0 1 0 .707L3.05 13.657a.5.5 0 0 1-.707-.707l1.414-1.414a.5.5 0 0 1 .707 0zm9.193 2.121a.5.5 0 0 1-.707 0l-1.414-1.414a.5.5 0 0 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .707zM4.464 4.465a.5.5 0 0 1-.707 0L2.343 3.05a.5.5 0 1 1 .707-.707l1.414 1.414a.5.5 0 0 1 0 .707z"/></svg></span><span class="moon-icon"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M6 .278a.768.768 0 0 1 .08.858 7.208 7.208 0 0 0-.878 3.46c0 4.021 3.278 7.277 7.318 7.277.527 0 1.04-.055 1.533-.16a.787.787 0 0 1 .81.316.733.733 0 0 1-.031.893A8.349 8.349 0 0 1 8.344 16C3.734 16 0 12.286 0 7.71 0 4.266 2.114 1.312 5.124.06A.752.752 0 0 1 6 .278z"/></svg></span><span class="theme-text">ライトモード</span></button>
-                <button id="settings-btn" title="設定" class="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M9.405 1.05c-.413-1.4-2.397-1.4-2.81 0l-.1.34a1.464 1.464 0 0 1-2.105.872l-.31-.17c-1.283-.698-2.686.705-1.987 1.987l.169.311a1.464 1.464 0 0 1-.872 2.105l-.34.1c-1.4.413-1.4 2.397 0 2.81l.34.1a1.464 1.464 0 0 1 .872 2.105l-.17.31c-.698 1.283.705 2.686 1.987 1.987l.311-.169a1.464 1.464 0 0 1 2.105.872l.1.34c.413 1.4 2.397 1.4 2.81 0l.1-.34a1.464 1.464 0 0 1 2.105-.872l.31.17c1.283.698 2.686-.705 1.987-1.987l-.169-.311a1.464 1.464 0 0 1 .872-2.105l.34-.1c-1.4-.413-1.4-2.397 0-2.81l-.34-.1a1.464 1.464 0 0 1-.872-2.105l.17-.31c.698-1.283-.705-2.686-1.987-1.987l-.311.169a1.464 1.464 0 0 1-2.105-.872l-.1-.34zM8 10.93a2.929 2.929 0 1 1 0-5.86 2.929 2.929 0 0 1 0 5.858z"/></svg><span>設定</span></button>
-            </div>
-        </aside>
 
-        <!-- メインコンテンツ -->
-        <main id="chat-window" class="flex-1 flex flex-col relative">
-            <!-- 右側のツールパネル -->
-            <div id="tools-sidebar" class="fixed right-0 top-0 h-full flex z-40">
-                <!-- ツールアイコンバー -->
-                <div id="tools-icon-bar" class="w-14 bg-gray-100 dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 flex flex-col items-center py-4 gap-2 overflow-y-auto">
-                    <!-- ツールアイコンがここに動的に追加される -->
-                </div>
-                
-                <!-- ツール詳細パネル -->
-                <div id="tool-detail-panel" class="w-80 bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-gray-700 hidden shadow-xl">
-                    <div class="p-4 border-b border-gray-200 dark:border-gray-700">
-                        <div class="flex justify-between items-center">
-                            <h3 class="font-semibold text-lg">ツール詳細</h3>
-                            <button id="close-tool-detail" class="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded">
-                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                                </svg>
-                            </button>
-                        </div>
-                    </div>
-                    <div id="tool-detail-content" class="p-4 overflow-y-auto" style="max-height: calc(100vh - 80px);">
-                        <!-- ツール詳細がここに表示される -->
-                    </div>
+<body>
+    <a href="#chat-container" class="skip-link">メインコンテンツへスキップ</a>
+
+    <div id="app">
+        <header id="mobile-header" class="mobile-header">
+            <button id="menu-toggle" class="btn-icon btn-menu" aria-label="メニューを開く" aria-expanded="false"
+                aria-controls="sidebar">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="3" y1="12" x2="21" y2="12"></line>
+                    <line x1="3" y1="6" x2="21" y2="6"></line>
+                    <line x1="3" y1="18" x2="21" y2="18"></line>
+                </svg>
+            </button>
+            <h1 class="mobile-title">Rumi AI</h1>
+        </header>
+
+        <div id="sidebar-backdrop" class="sidebar-backdrop" aria-hidden="true"></div>
+
+        <aside id="sidebar" class="sidebar" role="complementary" aria-label="サイドバー"></aside>
+
+        <main id="main" class="main" role="main">
+            <div id="chat-container" class="chat-container">
+                <div id="welcome" class="welcome">
+                    <h1>Rumi AI</h1>
+                    <p>チャットを選択するか、新しいチャットを開始してください</p>
                 </div>
             </div>
-            
-            <header class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-800" style="margin-right: 56px;">
-                <button id="menu-toggle" class="md:hidden p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16"><path fill-rule="evenodd" d="M2.5 12a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5zM2.5 8a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5zm0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5z"/></svg></button>
-                <div id="chat-header-title" class="text-lg font-semibold truncate">新しいチャット</div>
-                <div id="prompt-select-container" class="relative ml-auto"></div>
-            </header>
-            <div id="messages-container" class="flex-1 flex flex-col p-6 overflow-y-auto" style="margin-right: 56px;"></div>
-            <footer class="p-4" style="margin-right: 56px;">
-                <div class="max-w-3xl mx-auto">
-                    <div id="file-preview-container" class="hidden mb-2 space-y-2"></div>
-                    <div class="relative">
-                        <div class="flex items-end gap-2">
-                            <button id="thinking-btn" class="flex-shrink-0 p-2 rounded-xl h-[56px] w-[56px] flex items-center justify-center bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors" title="思考の切り替え"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-gray-600 dark:text-gray-300"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg></button>
-                            <div class="relative">
-                                <button id="model-select-btn" class="flex-shrink-0 p-2 rounded-xl h-[56px] w-[56px] flex items-center justify-center bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors" title="モデルの選択"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-gray-600 dark:text-gray-300"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg></button>
-                                <div id="model-select-menu" class="absolute bottom-full mb-2 w-64 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 p-2 z-10 transition-all duration-300 opacity-0 pointer-events-none -translate-y-2">
-                                    <!-- お気に入りモデルがここに動的に追加される -->
-                                </div>
-                            </div>
-                            <div class="relative flex-1">
-                                <label for="file-upload" class="absolute left-3 top-1/2 -translate-y-1/2 p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 cursor-pointer text-gray-500" title="ファイルを添付">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16"><path d="M4.5 3a2.5 2.5 0 0 1 5 0v9a1.5 1.5 0 0 1-3 0V5a.5.5 0 0 1 1 0v7a.5.5 0 0 0 1 0V3a1.5 1.5 0 1 0-3 0v9a2.5 2.5 0 0 0 5 0V5a.5.5 0 0 1 1 0v7a3.5 3.5 0 1 1-7 0V3z"/></svg>
-                                </label>
-                                <input type="file" id="file-upload" class="hidden" multiple>
-                                <textarea id="chat-input" placeholder="メッセージを入力..." rows="1" class="w-full p-4 pl-12 pr-14 h-[56px] rounded-xl bg-gray-100 dark:bg-gray-700 border border-transparent focus:border-gray-300 dark:focus:border-gray-600 focus:ring-0 transition resize-none"></textarea>
-                                <button id="send-btn" disabled class="absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-lg bg-gray-800 dark:bg-gray-100 text-white dark:text-black disabled:bg-gray-300 dark:disabled:bg-gray-500 disabled:cursor-not-allowed transition-colors" title="送信">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="currentColor" viewBox="0 0 16 16"><path d="M15.854.146a.5.5 0 0 1 .11.54l-5.819 14.547a.75.75 0 0 1-1.329.124l-3.178-4.995L.643 7.184a.75.75 0 0 1 .124-1.33L15.314.037a.5.5 0 0 1 .54.11ZM6.636 10.07l2.761 4.338L14.13 2.576 6.636 10.07Zm6.787-8.201L1.591 6.602l4.339 2.76 7.494-7.493Z"/></svg>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </footer>
+            <div id="ui-history-panel" class="ui-history-panel-container"></div>
         </main>
     </div>
 
-    <!-- ツールUIパネル -->
-    <div id="tool-ui-panel" class="fixed right-0 top-0 h-full w-1/3 bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 shadow-xl z-50 hidden">
-        <div class="flex justify-between items-center p-4 border-b border-gray-200 dark:border-gray-700">
-            <span class="tool-name font-semibold"></span>
-            <button onclick="this.parentElement.parentElement.classList.add('hidden')" class="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                </svg>
-            </button>
-        </div>
-        <iframe class="w-full h-full" frameborder="0"></iframe>
-    </div>
-
-    <!-- ツールメッセージコンテナ -->
-    <div id="tool-messages" class="fixed bottom-4 left-1/2 transform -translate-x-1/2 w-96 max-h-32 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg p-3 hidden"></div>
-
-    <!-- 名前変更モーダル -->
-    <div id="rename-modal-overlay" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 opacity-0 pointer-events-none transition-opacity">
-        <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-md mx-4">
-            <h3 class="text-lg font-semibold mb-4">チャットの名前を変更</h3>
-            <input type="text" id="rename-input" placeholder="新しいチャット名" class="w-full p-2 rounded-lg bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 focus:border-gray-500 focus:ring-0">
-            <div class="flex justify-end gap-3 mt-5">
-                <button id="cancel-rename-btn" class="px-4 py-2 rounded-lg bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors">キャンセル</button>
-                <button id="save-rename-btn" class="px-4 py-2 rounded-lg bg-gray-800 dark:bg-gray-100 text-white dark:text-black hover:bg-gray-700 dark:hover:bg-gray-200 transition-colors">保存</button>
-            </div>
-        </div>
-    </div>
-    
-    <!-- フォルダ移動モーダル -->
-    <div id="move-folder-modal-overlay" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 opacity-0 pointer-events-none transition-opacity">
-        <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-md mx-4">
-            <h3 class="text-lg font-semibold mb-4">フォルダへ移動</h3>
-            <div class="space-y-4">
-                <div>
-                    <label for="move-folder-select" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">既存のフォルダを選択</label>
-                    <select id="move-folder-select" class="w-full p-2 rounded-lg bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 focus:border-gray-500 focus:ring-0"></select>
-                </div>
-                <div class="relative flex items-center">
-                    <div class="flex-grow border-t border-gray-300 dark:border-gray-600"></div>
-                    <span class="flex-shrink mx-4 text-gray-400 text-sm">または</span>
-                    <div class="flex-grow border-t border-gray-300 dark:border-gray-600"></div>
-                </div>
-                <div>
-                    <label for="new-folder-input" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">新しいフォルダを作成</label>
-                    <input type="text" id="new-folder-input" placeholder="新しいフォルダ名" class="w-full p-2 rounded-lg bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 focus:border-gray-500 focus:ring-0">
-                </div>
-            </div>
-            <div class="flex justify-end gap-3 mt-6">
-                <button id="cancel-move-folder-btn" class="px-4 py-2 rounded-lg bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors">キャンセル</button>
-                <button id="save-move-folder-btn" class="px-4 py-2 rounded-lg bg-gray-800 dark:bg-gray-100 text-white dark:text-black hover:bg-gray-700 dark:hover:bg-gray-200 transition-colors">保存</button>
-            </div>
-        </div>
-    </div>
-    
-    <!-- 削除確認モーダル -->
-    <div id="delete-confirm-modal-overlay" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 opacity-0 pointer-events-none transition-opacity">
-        <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-md mx-4">
-            <h3 class="text-lg font-semibold mb-2">チャットの削除</h3>
-            <p class="text-gray-600 dark:text-gray-300 mb-6">本当にこのチャットを削除しますか？<br>この操作は取り消せません。</p>
-            <div class="flex justify-end gap-3">
-                <button id="cancel-delete-btn" class="px-4 py-2 rounded-lg bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors">キャンセル</button>
-                <button id="confirm-delete-btn" class="px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 transition-colors">削除</button>
-            </div>
-        </div>
-    </div>
-    
-    <!-- 複数チャット移動モーダル -->
-    <div id="multi-move-modal-overlay" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 opacity-0 pointer-events-none transition-opacity">
-        <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-md mx-4">
-            <h3 class="text-lg font-semibold mb-4">複数のチャットをフォルダへ移動</h3>
-            <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                <span id="selected-count">0</span>個のチャットを移動します
-            </p>
-            <div class="space-y-4">
-                <div>
-                    <label for="multi-move-folder-select" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">移動先フォルダ</label>
-                    <select id="multi-move-folder-select" class="w-full p-2 rounded-lg bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 focus:border-gray-500 focus:ring-0"></select>
-                </div>
-                <div class="relative flex items-center">
-                    <div class="flex-grow border-t border-gray-300 dark:border-gray-600"></div>
-                    <span class="flex-shrink mx-4 text-gray-400 text-sm">または</span>
-                    <div class="flex-grow border-t border-gray-300 dark:border-gray-600"></div>
-                </div>
-                <div>
-                    <label for="multi-new-folder-input" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">新しいフォルダを作成</label>
-                    <input type="text" id="multi-new-folder-input" placeholder="新しいフォルダ名" class="w-full p-2 rounded-lg bg-gray-100 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 focus:border-gray-500 focus:ring-0">
-                </div>
-            </div>
-            <div class="flex justify-end gap-3 mt-6">
-                <button id="cancel-multi-move-btn" class="px-4 py-2 rounded-lg bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors">キャンセル</button>
-                <button id="save-multi-move-btn" class="px-4 py-2 rounded-lg bg-gray-800 dark:bg-gray-100 text-white dark:text-black hover:bg-gray-700 dark:hover:bg-gray-200 transition-colors">移動</button>
-            </div>
-        </div>
-    </div>
-    
-    <!-- 設定モーダル -->
-    <div id="settings-modal-overlay" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 opacity-0 pointer-events-none transition-opacity">
-        <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-4xl mx-4 max-h-[85vh] overflow-y-auto">
-            <div class="flex justify-between items-center mb-6">
-                <h3 class="text-lg font-semibold">設定</h3>
-                <button id="close-settings-btn" class="p-1 rounded-full text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700">×</button>
-            </div>
-            
-            <!-- タブナビゲーション -->
-            <div class="flex border-b border-gray-200 dark:border-gray-700 mb-4">
-                <button class="settings-tab px-4 py-2 font-medium text-sm border-b-2 border-blue-500 text-blue-600 dark:text-blue-400" data-tab="general">一般設定</button>
-                <button class="settings-tab px-4 py-2 font-medium text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200" data-tab="models">AIモデル</button>
-                <button class="settings-tab px-4 py-2 font-medium text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200" data-tab="tools">ツール設定</button>
-                <button class="settings-tab px-4 py-2 font-medium text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200" data-tab="supporters">サポーター</button>
-            </div>
-            
-            <!-- タブコンテンツ -->
-            <div id="settings-tabs-content">
-                <!-- 一般設定タブ -->
-                <div id="general-tab" class="settings-tab-content">
-                    <div class="space-y-6">
-                        <div>
-                            <h4 class="text-md font-semibold text-gray-800 dark:text-gray-200 mb-3">思考予算</h4>
-                            <div class="space-y-4">
-                                <div>
-                                    <div class="flex justify-between items-center mb-1">
-                                        <label for="budget-pro" class="text-sm font-medium text-gray-700 dark:text-gray-300">rumi pro</label>
-                                        <span id="budget-pro-value" class="text-sm text-gray-500 dark:text-gray-400"></span>
-                                    </div>
-                                    <input type="range" id="budget-pro" min="128" max="32768" class="budget-slider">
-                                </div>
-                                <div>
-                                    <div class="flex justify-between items-center mb-1">
-                                        <label for="budget-flash" class="text-sm font-medium text-gray-700 dark:text-gray-300">rumi flash</label>
-                                        <span id="budget-flash-value" class="text-sm text-gray-500 dark:text-gray-400"></span>
-                                    </div>
-                                    <input type="range" id="budget-flash" min="0" max="24576" class="budget-slider">
-                                </div>
-                                <div>
-                                    <div class="flex justify-between items-center mb-1">
-                                        <label for="budget-lite" class="text-sm font-medium text-gray-700 dark:text-gray-300">rumi lite</label>
-                                        <span id="budget-lite-value" class="text-sm text-gray-500 dark:text-gray-400"></span>
-                                    </div>
-                                    <input type="range" id="budget-lite" min="0" max="24576" class="budget-slider">
-                                </div>
-                            </div>
-                        </div>
-                        <div>
-                            <h4 class="text-md font-semibold text-gray-800 dark:text-gray-200 mb-3">応答設定</h4>
-                            <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-900 rounded-lg">
-                                <div>
-                                    <label for="streaming-toggle" class="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                        ストリーミング応答
-                                    </label>
-                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                        AIの応答を逐次的に表示します
-                                    </p>
-                                </div>
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="streaming-toggle" class="streaming-toggle-input">
-                                    <span class="slider"></span>
-                                </label>
-                            </div>
-                        </div>
-                        <div>
-                            <h4 class="text-md font-semibold text-gray-800 dark:text-gray-200 mb-3">開発者オプション</h4>
-                            <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-900 rounded-lg">
-                                <div>
-                                    <label for="debug-toggle" class="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                        デバッグログ
-                                    </label>
-                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                        APIリクエスト/レスポンスをdebug.txtに記録
-                                    </p>
-                                </div>
-                                <label class="toggle-switch">
-                                    <input type="checkbox" id="debug-toggle" class="debug-toggle-input">
-                                    <span class="slider"></span>
-                                </label>
-                            </div>
-                            <div id="debug-status" class="mt-2 text-xs text-gray-500 dark:text-gray-400 hidden">
-                                <span class="text-yellow-600 dark:text-yellow-400">⚠️ デバッグログが有効です</span>
-                            </div>
-                        </div>
-                        <div>
-                            <h4 class="text-md font-semibold text-gray-800 dark:text-gray-200 mb-3">ツール管理</h4>
-                            <button id="reload-tools-btn" class="w-full p-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center justify-center gap-2 transition-colors">
-                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                                </svg>
-                                <span>ツールを再読み込み</span>
-                            </button>
-                            <div id="tools-status" class="mt-2 text-sm text-gray-600 dark:text-gray-400"></div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- AIモデルタブ -->
-                <div id="models-tab" class="settings-tab-content hidden">
-                    <div class="flex items-center justify-center p-8">
-                        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                    </div>
-                </div>
-                
-                <!-- ツール設定タブ -->
-                <div id="tools-tab" class="settings-tab-content hidden">
-                    <div id="tools-settings-list" class="space-y-4">
-                        <!-- ツール設定がここに動的に追加される -->
-                    </div>
-                </div>
-                
-                <!-- サポータータブ -->
-                <div id="supporters-tab" class="settings-tab-content hidden">
-                    <div class="mb-4">
-                        <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                            サポーターはAI応答の前後に実行され、コンテキストの拡張や応答の修正を行います。
-                            ドラッグ&ドロップまたは矢印ボタンで実行順序を変更できます。
-                        </p>
-                        <div class="flex gap-2 mb-4">
-                            <button id="reload-supporters-btn" class="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg flex items-center gap-2 transition-colors">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                                </svg>
-                                <span>再読み込み</span>
-                            </button>
-                        </div>
-                    </div>
-                    <div id="supporters-list" class="space-y-3">
-                        <!-- サポーターカードがここに動的に追加される -->
-                        <div class="text-center text-gray-500 dark:text-gray-400 py-8">
-                            読み込み中...
-                        </div>
-                    </div>
-                    <div class="mt-4 flex justify-end">
-                        <button id="save-supporters-btn" class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors">
-                            サポーター設定を保存
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <script type="module" src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <script type="module" src="/frontend/app.js"></script>
 </body>
+
 </html>
