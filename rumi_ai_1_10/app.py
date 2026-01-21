@@ -1,7 +1,7 @@
 import os
 import threading
 import traceback
-from flask import Flask, send_from_directory
+from flask import Flask, Response
 from dotenv import load_dotenv
 
 load_dotenv('.env.local')
@@ -25,7 +25,7 @@ def ensure_kernel_started():
             _kernel = Kernel()
             _kernel.run_startup()
 
-            # compat 追随（fail-soft）。将来はKernel handler側へ寄せて app.py から消せる。
+            # compat 追随（fail-soft）
             try:
                 from backend_core.ecosystem.compat import mark_ecosystem_initialized
                 mark_ecosystem_initialized()
@@ -33,7 +33,6 @@ def ensure_kernel_started():
                 pass
 
         except Exception as e:
-            # fail-soft: 起動失敗でもプロセスは立てる（diagnosticsは /api/diagnostics 側で見える想定）
             print(f"[Kernel] startup failed (fail-soft): {e}")
             traceback.print_exc()
         finally:
@@ -42,12 +41,16 @@ def ensure_kernel_started():
 
 def apply_http_binders():
     """
-    ecosystem が登録する io.http.binders を適用する（idempotent前提）。
+    InterfaceRegistryから発見したHTTPバインダー/ルートを適用
     """
     if _kernel is None:
         return
+    
+    ir = _kernel.interface_registry
+    
     try:
-        binders = _kernel.interface_registry.get("io.http.binders", strategy="all") or []
+        # 1. io.http.binders: Flaskアプリにルートを追加するcallable
+        binders = ir.get("io.http.binders", strategy="all") or []
         if not isinstance(binders, list):
             binders = [binders]
         for b in binders:
@@ -56,13 +59,72 @@ def apply_http_binders():
                     b(app, _kernel, {"app": app})
                 except Exception:
                     traceback.print_exc()
+        
+        # 2. io.http.routes: ルート定義の辞書
+        routes = ir.get("io.http.routes", strategy="all") or []
+        if not isinstance(routes, list):
+            routes = [routes]
+        for route_def in routes:
+            if isinstance(route_def, dict):
+                _apply_route_definition(route_def)
+        
     except Exception:
         traceback.print_exc()
 
 
+def _apply_route_definition(route_def: dict):
+    """ルート定義を適用"""
+    rule = route_def.get("rule")
+    handler = route_def.get("handler")
+    methods = route_def.get("methods", ["GET"])
+    endpoint = route_def.get("endpoint") or f"dynamic_{abs(hash(rule or ''))}"
+    
+    if not rule or not callable(handler):
+        return
+    
+    try:
+        # 重複チェック
+        for existing_rule in app.url_map.iter_rules():
+            if existing_rule.rule == rule:
+                return  # 既に登録済み
+        
+        app.add_url_rule(rule, endpoint, handler, methods=methods)
+    except Exception:
+        traceback.print_exc()
+
+
+def _apply_fallback_index():
+    """UIが登録されていない場合のフォールバック"""
+    if _kernel is None:
+        return
+    
+    # 既に / が登録されているか確認
+    for rule in app.url_map.iter_rules():
+        if rule.rule == '/':
+            return
+    
+    # フォールバックルート
+    ir = _kernel.interface_registry
+    
+    def _no_ui_fallback():
+        registered = list((ir.list() or {}).keys())
+        return Response(
+            "Rumi AI OS\n\n"
+            "No UI component registered.\n"
+            "Install a UI pack in ecosystem/ directory.\n\n"
+            f"Registered interfaces ({len(registered)}):\n" +
+            "\n".join(f"  - {k}" for k in sorted(registered)[:20]),
+            status=503,
+            content_type="text/plain; charset=utf-8"
+        )
+    
+    app.add_url_rule('/', '_no_ui_fallback', _no_ui_fallback)
+
+
 class _KernelWSGIMiddleware:
     """
-    WSGI入口で Kernel startup + HTTP bind を実行し、初回リクエストの404を防ぐ。
+    WSGI入口で Kernel startup + HTTP bind を実行
+    公式ファイルはecosystemの中身を一切知らない
     """
     def __init__(self, wsgi_app):
         self._wsgi_app = wsgi_app
@@ -75,33 +137,13 @@ class _KernelWSGIMiddleware:
                 if not self._initialized:
                     ensure_kernel_started()
                     apply_http_binders()
+                    _apply_fallback_index()
                     self._initialized = True
 
-        # 段階的に binder が増えても良いよう、毎回軽く試す（idempotent前提）
-        apply_http_binders()
         return self._wsgi_app(environ, start_response)
 
 
 app.wsgi_app = _KernelWSGIMiddleware(app.wsgi_app)
-
-# --- Frontend static files (ecosystem) ---
-
-FRONTEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ecosystem', 'default', 'frontend')
-
-@app.route('/frontend/<path:filename>')
-def frontend_static(filename):
-    """ecosystem/default/frontend/ から静的ファイルを配信"""
-    return send_from_directory(FRONTEND_DIR, filename)
-
-# --- UI routes (SPA) ---
-
-@app.route('/')
-def home():
-    return send_from_directory(FRONTEND_DIR, 'index.html')
-
-@app.route('/chats/<chat_id>')
-def show_chat(chat_id):
-    return send_from_directory(FRONTEND_DIR, 'index.html')
 
 
 if __name__ == '__main__':

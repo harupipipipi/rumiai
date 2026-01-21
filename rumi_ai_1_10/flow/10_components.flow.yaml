@@ -1,0 +1,43 @@
+# flow/10_components.flow.yaml
+# Componentライフサイクル実行（公式・ドメイン非依存）
+
+flow_version: "2.0"
+metadata:
+  id: "components"
+  priority: 10
+  description: "全Componentのライフサイクルフェーズを実行"
+
+defaults:
+  fail_soft: true
+
+pipelines:
+  startup:
+    # Phase 1: 依存関係解決
+    - id: "components.dependency"
+      description: "dependency_manager.py を実行（環境構築）"
+      run:
+        handler: "component_phase:dependency"
+        args: {}
+      optional: true
+      on_error:
+        action: "continue"
+
+    # Phase 2: セットアップ
+    - id: "components.setup"
+      description: "setup.py を実行（InterfaceRegistry登録等）"
+      run:
+        handler: "component_phase:setup"
+        args: {}
+      optional: true
+      on_error:
+        action: "continue"
+
+    # Phase 3: ランタイム起動
+    - id: "components.runtime_boot"
+      description: "runtime_boot.py を実行（サービス起動）"
+      run:
+        handler: "component_phase:runtime_boot"
+        args: {}
+      optional: true
+      on_error:
+        action: "continue"

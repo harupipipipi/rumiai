@@ -57,18 +57,22 @@ class Kernel:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     def _init_kernel_handlers(self) -> None:
-        """Kernel内蔵 handler を登録する"""
+        """Kernel内蔵 handler（ドメイン非依存プリミティブのみ）"""
         self._kernel_handlers = {
+            # === 基盤初期化 ===
             "kernel:mounts.init": self._h_mounts_init,
             "kernel:registry.load": self._h_registry_load,
             "kernel:active_ecosystem.load": self._h_active_ecosystem_load,
-            "kernel:assets.seed": self._h_assets_seed,
             "kernel:interfaces.publish": self._h_interfaces_publish,
-            "kernel:capability_graph.build": self._h_capability_graph_build,
-            "kernel:context.assemble": self._h_context_assemble,
-            "kernel:delegate.call": self._h_delegate_call,
-            "kernel:persist": self._h_persist,
-            "kernel:output": self._h_output,
+            
+            # === 汎用プリミティブ ===
+            "kernel:ir.get": self._h_ir_get,
+            "kernel:ir.call": self._h_ir_call,
+            "kernel:ir.register": self._h_ir_register,
+            "kernel:exec_python": self._h_exec_python,
+            "kernel:ctx.set": self._h_ctx_set,
+            "kernel:ctx.get": self._h_ctx_get,
+            "kernel:ctx.copy": self._h_ctx_copy,
         }
 
     def _resolve_handler(self, handler: str) -> Optional[Callable[[Dict[str, Any], Dict[str, Any]], Any]]:
@@ -85,92 +89,104 @@ class Kernel:
         return None
 
     def load_flow(self, path: Optional[str] = None) -> Dict[str, Any]:
-        """Flow(SSOT)を読み込む - fail-soft + fallback(A) + Flow自動生成(B)"""
-        flow_path = Path(path or self.config.flow_path)
+        """
+        Flow(SSOT)を読み込む
         
-        # Flowが無い場合は生成(B)：上書きしない
-        generated = False
-        generated_from: Optional[str] = None
-        if not flow_path.exists():
+        path指定時: そのファイルのみ読み込み
+        path未指定時: flow/*.flow.yaml を全て読み込んでマージ
+        """
+        if path:
+            # 単一ファイル指定時は従来通り
+            return self._load_single_flow(Path(path))
+        
+        # flow/ ディレクトリから全て読み込み
+        flow_dir = Path("flow")
+        
+        if not flow_dir.exists():
+            # flowディレクトリが無ければfallback
+            self._flow = self._minimal_fallback_flow()
+            return self._flow
+        
+        # *.flow.yaml を優先度順に読み込み
+        yaml_files = sorted(flow_dir.glob("*.flow.yaml"))
+        
+        if not yaml_files:
+            # ファイルが無ければfallback
+            self._flow = self._minimal_fallback_flow()
+            return self._flow
+        
+        # マージ
+        merged = {
+            "flow_version": "2.0",
+            "defaults": {"fail_soft": True, "on_missing_handler": "skip"},
+            "pipelines": {"startup": [], "message": [], "message_stream": []}
+        }
+        
+        for yaml_file in yaml_files:
             try:
-                flow_path.parent.mkdir(parents=True, exist_ok=True)
-                flow_path.write_text(self._fallback_flow_a_yaml_text(), encoding="utf-8")
-                generated = True
-                generated_from = "fallback_A"
+                single = self._load_single_flow(yaml_file)
+                
+                # defaults マージ
+                if "defaults" in single:
+                    merged["defaults"].update(single["defaults"])
+                
+                # pipelines マージ（追加）
+                for pipeline_name, steps in single.get("pipelines", {}).items():
+                    if pipeline_name not in merged["pipelines"]:
+                        merged["pipelines"][pipeline_name] = []
+                    if isinstance(steps, list):
+                        merged["pipelines"][pipeline_name].extend(steps)
+                
+                self.diagnostics.record_step(
+                    phase="startup",
+                    step_id=f"flow.load.{yaml_file.name}",
+                    handler="kernel:flow.load",
+                    status="success",
+                    meta={"file": str(yaml_file)}
+                )
             except Exception as e:
-                self.diagnostics.record({
-                    "ts": self._now_ts(),
-                    "phase": "startup",
-                    "step_id": "system.flow_autogenerate",
-                    "handler": "kernel:flow.autogenerate",
-                    "status": "failed",
-                    "target": {"kind": "none", "id": None},
-                    "error": {"type": type(e).__name__, "message": str(e)},
-                    "meta": {"path": str(flow_path)},
-                })
+                self.diagnostics.record_step(
+                    phase="startup",
+                    step_id=f"flow.load.{yaml_file.name}",
+                    handler="kernel:flow.load",
+                    status="failed",
+                    error=e,
+                    meta={"file": str(yaml_file)}
+                )
         
-        # Flow読み込み(壊れてたら fallback(A))
-        try:
-            raw = flow_path.read_text(encoding="utf-8")
-            parsed, used_parser, parser_meta = self._parse_flow_text(raw)
-            
-            # 最小検証
-            pipelines = parsed.get("pipelines")
-            if not isinstance(pipelines, dict):
-                raise ValueError("Flow must contain 'pipelines' object")
-            if "startup" not in pipelines or "message" not in pipelines:
-                raise ValueError("Flow.pipelines must contain 'startup' and 'message'")
-            if not isinstance(pipelines.get("startup"), list) or not isinstance(pipelines.get("message"), list):
-                raise ValueError("Flow.pipelines.startup/message must be lists")
-            if "message_stream" in pipelines and not isinstance(pipelines.get("message_stream"), list):
-                raise ValueError("Flow.pipelines.message_stream must be a list if present")
-            
-            self._flow = parsed
-            flow_origin = "generated_fallback" if generated else "user"
-            
-            self.diagnostics.record({
-                "ts": self._now_ts(),
-                "phase": "startup",
-                "step_id": "system.flow_load",
-                "handler": "kernel:flow.load",
-                "status": "success",
-                "target": {"kind": "none", "id": None},
-                "error": None,
-                "meta": {
-                    "path": str(flow_path),
-                    "generated": generated,
-                    "generated_from": generated_from,
-                    "flow_origin": flow_origin,
-                    "used_parser": used_parser,
-                    **parser_meta,
-                },
-            })
-            
-            return parsed
-            
-        except Exception as e:
-            # 壊れたFlowは上書きしない。fail-softでfallback(A)に降りる
-            fallback = self._fallback_flow_a()
-            self._flow = fallback
-            
-            self.diagnostics.record({
-                "ts": self._now_ts(),
-                "phase": "startup",
-                "step_id": "system.flow_load",
-                "handler": "kernel:flow.load",
-                "status": "failed",
-                "target": {"kind": "none", "id": None},
-                "error": {"type": type(e).__name__, "message": str(e)},
-                "meta": {
-                    "path": str(flow_path),
-                    "fallback": "A",
-                    "generated": generated,
-                    "generated_from": generated_from,
-                    "flow_origin": "generated_fallback" if generated else "user",
-                },
-            })
-            
-            return fallback
+        self._flow = merged
+        return self._flow
+
+    def _load_single_flow(self, flow_path: Path) -> Dict[str, Any]:
+        """単一のFlowファイルを読み込む"""
+        if not flow_path.exists():
+            raise FileNotFoundError(f"Flow file not found: {flow_path}")
+        
+        raw = flow_path.read_text(encoding="utf-8")
+        parsed, used_parser, parser_meta = self._parse_flow_text(raw)
+        
+        return parsed
+
+    def _minimal_fallback_flow(self) -> Dict[str, Any]:
+        """
+        最小限のfallback flow（ドメイン知識なし）
+        
+        flow/*.flow.yaml が存在しない場合のみ使用
+        """
+        return {
+            "flow_version": "2.0",
+            "defaults": {"fail_soft": True, "on_missing_handler": "skip"},
+            "pipelines": {
+                "startup": [
+                    {"id": "fallback.mounts", "run": {"handler": "kernel:mounts.init", "args": {"mounts_file": "user_data/mounts.json"}}},
+                    {"id": "fallback.registry", "run": {"handler": "kernel:registry.load", "args": {"ecosystem_dir": "ecosystem"}}},
+                    {"id": "fallback.active", "run": {"handler": "kernel:active_ecosystem.load", "args": {"config_file": "user_data/active_ecosystem.json"}}},
+                    {"id": "fallback.setup", "run": {"handler": "component_phase:setup", "args": {}}, "optional": True},
+                ],
+                "message": [],
+                "message_stream": []
+            }
+        }
 
     def run_startup(self) -> Dict[str, Any]:
         """Startup Pipelineを実行する(Flow準拠)"""
@@ -257,10 +273,6 @@ class Kernel:
         }
         ctx["chat_id"] = chat_id
         ctx["payload"] = payload or {}
-        ctx["message_state"] = {
-            "result": None,
-            "output": None,
-        }
         
         self.diagnostics.record_step(
             phase="message",
@@ -297,12 +309,10 @@ class Kernel:
         )
         
         # 出力決定(fail-soft)
-        state = ctx.get("message_state", {}) if isinstance(ctx.get("message_state"), dict) else {}
-        out = state.get("output") or state.get("result")
-        if isinstance(out, dict):
-            return out
-        # 最低限のフォールバック
-        return {"success": False, "error": "No message output produced", "chat_id": chat_id}
+        out = ctx.get("output") or ctx.get("message_result")
+        if out is not None:
+            return out if isinstance(out, dict) else {"result": out}
+        return {"success": False, "error": "No output produced", "meta": {"chat_id": chat_id}}
 
     def run_message_stream(self, chat_id: str, payload: Dict[str, Any]) -> Any:
         """Message Stream Pipelineを実行する(Flow準拠)"""
@@ -322,7 +332,6 @@ class Kernel:
             if isinstance(stream_steps, list):
                 steps = stream_steps
             else:
-                # フォールバック：message を使う
                 steps = pipelines.get("message", []) or []
         if not isinstance(steps, list):
             steps = []
@@ -338,7 +347,6 @@ class Kernel:
         }
         ctx["chat_id"] = chat_id
         ctx["payload"] = payload2
-        ctx["message_state"] = {"result": None, "output": None}
         
         self.diagnostics.record_step(
             phase="message",
@@ -374,104 +382,9 @@ class Kernel:
             meta={"aborted": aborted, "chat_id": chat_id},
         )
         
-        state = ctx.get("message_state", {}) if isinstance(ctx.get("message_state"), dict) else {}
-        return state.get("output") or state.get("result")
+        return ctx.get("output") or ctx.get("message_result")
     
     # --- Helper methods ---
-    
-    def _fallback_flow_a(self) -> Dict[str, Any]:
-        """fallback flow (A): minimal working flow"""
-        return {
-            "flow_version": "1.0",
-            "project": {"id": "rumi_ai", "title": "Rumi AI OS (fallback)"},
-            "defaults": {
-                "fail_soft": True,
-                "on_missing_handler": "skip",
-                "diagnostics": {"enabled": True},
-                "install_journal": {
-                    "enabled": True,
-                    "dir": "user_data/settings/ecosystem/install_journal",
-                },
-            },
-            "pipelines": {
-                "startup": [
-                    {"id": "startup.mounts", "run": {"handler": "kernel:mounts.init", "args": {"mounts_file": "user_data/mounts.json"}}},
-                    {"id": "startup.registry", "run": {"handler": "kernel:registry.load", "args": {"ecosystem_dir": "ecosystem"}}},
-                    {"id": "startup.active_ecosystem", "run": {"handler": "kernel:active_ecosystem.load", "args": {"config_file": "user_data/active_ecosystem.json"}}},
-                    {"id": "startup.dependency", "run": {"handler": "component_phase:dependency", "args": {}}, "optional": True, "on_error": {"action": "continue"}},
-                    {"id": "startup.setup", "run": {"handler": "component_phase:setup", "args": {}}, "optional": True, "on_error": {"action": "continue"}},
-                    {"id": "startup.services_ready", "run": {"handler": "kernel:interfaces.publish", "args": {}}, "optional": True, "on_error": {"action": "continue"}},
-                ],
-                "message": [
-                    {"id": "message.context_assemble", "run": {"handler": "kernel:context.assemble", "args": {}}, "optional": True, "on_error": {"action": "continue"}},
-                    {"id": "message.invoke_reference", "run": {"handler": "kernel:delegate.call", "args": {"interface_key": "reference.message_handler"}}, "optional": True, "on_error": {"action": "continue"}},
-                    {"id": "message.persist", "run": {"handler": "kernel:persist", "args": {"targets": ["history", "ui_history", "chat_config"]}}, "optional": True, "on_error": {"action": "continue"}},
-                    {"id": "message.output", "run": {"handler": "kernel:output", "args": {"mode": "auto"}}, "optional": True, "on_error": {"action": "continue"}},
-                ],
-                "message_stream": [
-                    {"id": "message_stream.context_assemble", "run": {"handler": "kernel:context.assemble", "args": {}}, "optional": True, "on_error": {"action": "continue"}},
-                    {"id": "message_stream.invoke_reference", "run": {"handler": "kernel:delegate.call", "args": {"interface_key": "reference.message_handler_stream"}}, "optional": True, "on_error": {"action": "continue"}},
-                    {"id": "message_stream.persist", "run": {"handler": "kernel:persist", "args": {"targets": ["history", "ui_history", "chat_config"]}}, "optional": True, "on_error": {"action": "continue"}},
-                    {"id": "message_stream.output", "run": {"handler": "kernel:output", "args": {"mode": "auto"}}, "optional": True, "on_error": {"action": "continue"}},
-                ],
-            },
-        }
-    
-    def _fallback_flow_a_yaml_text(self) -> str:
-        """fallback flow(A)をYAMLテキストとして返す"""
-        return '''flow_version: "1.0"
-project:
-  id: "rumi_ai"
-  title: "Rumi AI OS (fallback)"
-defaults:
-  fail_soft: true
-  on_missing_handler: "skip"
-  diagnostics:
-    enabled: true
-  install_journal:
-    enabled: true
-    dir: "user_data/settings/ecosystem/install_journal"
-pipelines:
-  startup:
-    - id: "startup.mounts"
-      run:
-        handler: "kernel:mounts.init"
-        args:
-          mounts_file: "user_data/mounts.json"
-    - id: "startup.registry"
-      run:
-        handler: "kernel:registry.load"
-        args:
-          ecosystem_dir: "ecosystem"
-    - id: "startup.active_ecosystem"
-      run:
-        handler: "kernel:active_ecosystem.load"
-        args:
-          config_file: "user_data/active_ecosystem.json"
-    - id: "startup.dependency"
-      run:
-        handler: "component_phase:dependency"
-        args: {}
-      optional: true
-      on_error:
-        action: "continue"
-    - id: "startup.setup"
-      run:
-        handler: "component_phase:setup"
-        args: {}
-      optional: true
-      on_error:
-        action: "continue"
-    - id: "startup.services_ready"
-      run:
-        handler: "kernel:interfaces.publish"
-        args: {}
-      optional: true
-      on_error:
-        action: "continue"
-  message: []
-  message_stream: []
-'''
     
     def _parse_flow_text(self, raw: str) -> Tuple[Dict[str, Any], str, Dict[str, Any]]:
         """Flowテキストをdictにパースする"""
@@ -658,7 +571,9 @@ pipelines:
                 return True
             return False
     
-    # --- Built-in handlers (kernel:*) ---
+    # ========================================
+    # 基盤初期化ハンドラ
+    # ========================================
     
     def _h_mounts_init(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
         """mounts初期化"""
@@ -740,13 +655,6 @@ pipelines:
             )
             return None
     
-    def _h_assets_seed(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
-        """assets seed（簡易実装）"""
-        return {
-            "_kernel_step_status": "skipped",
-            "_kernel_step_meta": {"reason": "not_implemented_yet", "args": args},
-        }
-    
     def _h_interfaces_publish(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
         """services_ready"""
         self.interface_registry.register(
@@ -756,149 +664,341 @@ pipelines:
         )
         return {"services_ready": True}
     
-    def _h_capability_graph_build(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
-        """capability_graph（器・用途非依存）"""
-        graph = {
-            "version": "0.1",
-            "ts": self._now_ts(),
-            "nodes": [],
-            "edges": [],
-            "meta": {"note": "capability graph placeholder"},
+    # ========================================
+    # 汎用プリミティブハンドラ（ドメイン非依存）
+    # ========================================
+
+    def _h_ir_get(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """
+        InterfaceRegistryから値を取得
+        
+        args:
+            key: 取得するキー
+            strategy: "first" | "last" | "all" (default: "last")
+            store_as: 結果を格納するctxキー（オプション）
+        """
+        key = args.get("key")
+        strategy = args.get("strategy", "last")
+        store_as = args.get("store_as")
+        
+        if not key:
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {"error": "missing 'key' argument"}
+            }
+        
+        value = self.interface_registry.get(key, strategy=strategy)
+        
+        if store_as:
+            ctx[store_as] = value
+        
+        return {
+            "_kernel_step_status": "success",
+            "_kernel_step_meta": {
+                "key": key,
+                "strategy": strategy,
+                "found": value is not None
+            },
+            "value": value
         }
-        self.interface_registry.register("capability.graph", graph, meta={"source": "kernel"})
-        return {"_kernel_step_status": "success", "_kernel_step_meta": {"registered": "capability.graph"}}
-    
-    def _h_context_assemble(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
-        """context_assemble: history/ui_history/chat_config を読み、ctxに載せる"""
-        chat_id = ctx.get("chat_id")
-        if not isinstance(chat_id, str) or not chat_id:
-            return {"_kernel_step_status": "skipped", "_kernel_step_meta": {"reason": "missing_chat_id"}}
+
+    def _h_ir_call(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """
+        InterfaceRegistryから取得して呼び出す
         
-        try:
-            from chat_manager import ChatManager
-            cm = ChatManager()
-            ctx["chat_manager"] = cm
-        except Exception as e:
-            return {"_kernel_step_status": "skipped", "_kernel_step_meta": {"reason": f"chat_manager_unavailable:{type(e).__name__}:{e}"}}
+        args:
+            key: 取得するキー
+            strategy: "first" | "last" (default: "last")
+            call_args: 呼び出し時の引数（オプション）
+            store_as: 結果を格納するctxキー（オプション）
+            pass_ctx: Trueならctx全体を渡す（オプション）
+        """
+        key = args.get("key")
+        strategy = args.get("strategy", "last")
+        call_args = args.get("call_args", {})
+        store_as = args.get("store_as")
+        pass_ctx = args.get("pass_ctx", False)
         
-        cm = ctx.get("chat_manager")
-        try:
-            ctx["history"] = cm.load_chat_history(chat_id)
-        except Exception:
-            ctx["history"] = None
-        try:
-            ctx["ui_history"] = cm.load_ui_history(chat_id)
-        except Exception:
-            ctx["ui_history"] = None
-        try:
-            ctx["chat_config"] = cm.load_chat_config(chat_id)
-        except Exception:
-            ctx["chat_config"] = None
+        if not key:
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {"error": "missing 'key' argument"}
+            }
         
-        return {"_kernel_step_status": "success", "_kernel_step_meta": {"loaded": ["history", "ui_history", "chat_config"]}}
-    
-    def _h_delegate_call(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
-        """delegate.call: Interface Registry から callable を取り出して実行"""
-        key = args.get("interface_key")
-        if not isinstance(key, str) or not key:
-            return {"_kernel_step_status": "skipped", "_kernel_step_meta": {"reason": "missing_interface_key"}}
+        fn = self.interface_registry.get(key, strategy=strategy)
         
-        fn = self.interface_registry.get(key, strategy="last")
-        if fn is None or not callable(fn):
-            return {"_kernel_step_status": "skipped", "_kernel_step_meta": {"reason": "callable_not_found", "interface_key": key}}
+        if fn is None:
+            return {
+                "_kernel_step_status": "skipped",
+                "_kernel_step_meta": {"reason": "not_found", "key": key}
+            }
         
-        chat_id = ctx.get("chat_id")
-        payload = ctx.get("payload", {})
+        if not callable(fn):
+            return {
+                "_kernel_step_status": "skipped",
+                "_kernel_step_meta": {"reason": "not_callable", "key": key}
+            }
+        
+        # 変数展開
+        resolved_args = self._resolve_args(call_args, ctx)
+        
+        # 呼び出し
         try:
-            result = fn(chat_id, payload)
+            if pass_ctx:
+                result = fn(ctx)
+            elif resolved_args:
+                result = fn(**resolved_args)
+            else:
+                result = fn()
         except TypeError:
-            result = fn(ctx)
-        
-        # 結果を格納
-        if isinstance(ctx.get("message_state"), dict):
-            ctx["message_state"]["result"] = result
-            
-            # 重要：persistの競合回避
-            is_streaming = False
+            # 引数の型が合わない場合、ctx を渡してみる
             try:
-                payload_check = ctx.get("payload", {})
-                if isinstance(payload_check, dict) and bool(payload_check.get("streaming", False)):
-                    is_streaming = True
-            except Exception:
-                pass
-            
-            try:
-                from flask import Response as FlaskResponse  # type: ignore
-                if isinstance(result, FlaskResponse):
-                    is_streaming = True
-            except Exception:
-                pass
-            
-            if is_streaming:
-                ctx["message_state"]["skip_persist"] = True
+                result = fn(ctx)
+            except Exception as e:
+                return {
+                    "_kernel_step_status": "failed",
+                    "_kernel_step_meta": {"error": f"call_failed: {type(e).__name__}: {e}", "key": key}
+                }
+        except Exception as e:
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {"error": f"{type(e).__name__}: {e}", "key": key}
+            }
         
-        return {"_kernel_step_status": "success", "_kernel_step_meta": {"interface_key": key}}
-    
-    def _h_persist(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
-        """persist: history/ui_history/chat_config を保存する"""
-        cm = ctx.get("chat_manager")
-        chat_id = ctx.get("chat_id")
-        if cm is None or not isinstance(chat_id, str) or not chat_id:
-            return {"_kernel_step_status": "skipped", "_kernel_step_meta": {"reason": "missing_chat_manager_or_chat_id"}}
+        if store_as:
+            ctx[store_as] = result
         
-        # delegateがストリーミング/Responseを返した場合、persistは破壊的になり得るためスキップ
-        state = ctx.get("message_state", {})
-        if isinstance(state, dict) and state.get("skip_persist") is True:
-            return {"_kernel_step_status": "skipped", "_kernel_step_meta": {"reason": "skip_persist_for_streaming_or_response"}}
+        return {
+            "_kernel_step_status": "success",
+            "_kernel_step_meta": {"key": key, "has_result": result is not None},
+            "result": result
+        }
+
+    def _h_ir_register(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """
+        InterfaceRegistryに値を登録
         
-        targets = args.get("targets", ["history", "ui_history", "chat_config"])
-        if not isinstance(targets, list):
-            targets = ["history", "ui_history", "chat_config"]
+        args:
+            key: 登録するキー
+            value: 直接指定する値（オプション）
+            value_from_ctx: ctxから取得するキー（オプション）
+            meta: メタデータ（オプション）
+        """
+        key = args.get("key")
+        value = args.get("value")
+        value_from_ctx = args.get("value_from_ctx")
+        meta = args.get("meta", {})
         
-        # 最新を再読込して保存
-        saved = []
+        if not key:
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {"error": "missing 'key' argument"}
+            }
+        
+        # 値の決定
+        if value_from_ctx:
+            actual_value = ctx.get(value_from_ctx)
+        elif value is not None:
+            actual_value = self._resolve_value(value, ctx)
+        else:
+            actual_value = None
+        
+        self.interface_registry.register(key, actual_value, meta=meta)
+        
+        return {
+            "_kernel_step_status": "success",
+            "_kernel_step_meta": {"key": key, "has_value": actual_value is not None}
+        }
+
+    def _h_exec_python(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """
+        Pythonファイルを実行（汎用・ドメイン非依存）
+        
+        args:
+            file: 実行するファイル（相対パス可）
+            base_path: 基準パス（オプション、foreachから設定される）
+            phase: フェーズ名（オプション、ログ用）
+            inject: 追加で注入する変数（オプション）
+        """
+        file_arg = args.get("file")
+        base_path = args.get("base_path") or ctx.get("_foreach_current_path", ".")
+        phase = args.get("phase", "exec")
+        inject = args.get("inject", {})
+        
+        if not file_arg:
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {"error": "missing 'file' argument"}
+            }
+        
+        # パス解決
+        if base_path and base_path != ".":
+            full_path = Path(base_path) / file_arg
+        else:
+            full_path = Path(file_arg)
+        
+        if not full_path.exists():
+            return {
+                "_kernel_step_status": "skipped",
+                "_kernel_step_meta": {"reason": "file_not_found", "path": str(full_path)}
+            }
+        
+        # 実行コンテキスト構築
+        exec_ctx = {
+            "phase": phase,
+            "ts": self._now_ts(),
+            "paths": {
+                "file": str(full_path),
+                "dir": str(full_path.parent),
+                "component_runtime_dir": str(full_path.parent),
+            },
+            "ids": ctx.get("_foreach_ids", {}),
+            "interface_registry": self.interface_registry,
+            "event_bus": self.event_bus,
+            "diagnostics": self.diagnostics,
+            "install_journal": self.install_journal,
+        }
+        
+        # 追加注入
+        for k, v in inject.items():
+            exec_ctx[k] = self._resolve_value(v, ctx)
+        
+        # 実行
         try:
-            latest_history = cm.load_chat_history(chat_id) if "history" in targets else None
-        except Exception:
-            latest_history = None
-        try:
-            latest_ui = cm.load_ui_history(chat_id) if "ui_history" in targets else None
-        except Exception:
-            latest_ui = None
-        try:
-            latest_cfg = cm.load_chat_config(chat_id) if "chat_config" in targets else None
-        except Exception:
-            latest_cfg = None
+            self.lifecycle._exec_python_file(full_path, exec_ctx)
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_step_meta": {"file": str(full_path), "phase": phase}
+            }
+        except Exception as e:
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {
+                    "error": f"{type(e).__name__}: {e}",
+                    "file": str(full_path),
+                    "phase": phase
+                }
+            }
+
+    def _h_ctx_set(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """
+        コンテキストに値を設定
         
-        if "history" in targets and isinstance(latest_history, dict):
-            try:
-                cm.save_chat_history(chat_id, latest_history)
-                ctx["history"] = latest_history
-                saved.append("history")
-            except Exception:
-                pass
-        if "ui_history" in targets and isinstance(latest_ui, dict):
-            try:
-                cm.save_ui_history(chat_id, latest_ui)
-                ctx["ui_history"] = latest_ui
-                saved.append("ui_history")
-            except Exception:
-                pass
-        if "chat_config" in targets and isinstance(latest_cfg, dict):
-            try:
-                cm.save_chat_config(chat_id, latest_cfg)
-                ctx["chat_config"] = latest_cfg
-                saved.append("chat_config")
-            except Exception:
-                pass
+        args:
+            key: 設定するキー
+            value: 設定する値（${ctx.xxx} 形式の参照可）
+        """
+        key = args.get("key")
+        value = args.get("value")
         
-        return {"_kernel_step_status": "success", "_kernel_step_meta": {"saved": saved}}
-    
-    def _h_output(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
-        """output: message_state.result をそのまま output として確定する"""
-        state = ctx.get("message_state", {})
-        if not isinstance(state, dict):
-            return {"_kernel_step_status": "skipped", "_kernel_step_meta": {"reason": "missing_message_state"}}
-        out = state.get("result")
-        state["output"] = out
-        return {"_kernel_step_status": "success", "_kernel_step_meta": {"has_output": isinstance(out, dict)}}
+        if not key:
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {"error": "missing 'key' argument"}
+            }
+        
+        ctx[key] = self._resolve_value(value, ctx)
+        
+        return {
+            "_kernel_step_status": "success",
+            "_kernel_step_meta": {"key": key}
+        }
+
+    def _h_ctx_get(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """
+        コンテキストから値を取得
+        
+        args:
+            key: 取得するキー
+            default: デフォルト値（オプション）
+            store_as: 別のキーに格納（オプション）
+        """
+        key = args.get("key")
+        default = args.get("default")
+        store_as = args.get("store_as")
+        
+        if not key:
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {"error": "missing 'key' argument"}
+            }
+        
+        value = ctx.get(key, default)
+        
+        if store_as:
+            ctx[store_as] = value
+        
+        return {
+            "_kernel_step_status": "success",
+            "_kernel_step_meta": {"key": key, "found": key in ctx},
+            "value": value
+        }
+
+    def _h_ctx_copy(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """
+        コンテキスト内で値をコピー
+        
+        args:
+            from_key: コピー元キー
+            to_key: コピー先キー
+        """
+        from_key = args.get("from_key")
+        to_key = args.get("to_key")
+        
+        if not from_key or not to_key:
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {"error": "missing 'from_key' or 'to_key' argument"}
+            }
+        
+        ctx[to_key] = ctx.get(from_key)
+        
+        return {
+            "_kernel_step_status": "success",
+            "_kernel_step_meta": {"from_key": from_key, "to_key": to_key}
+        }
+
+    # ========================================
+    # ヘルパーメソッド
+    # ========================================
+
+    def _resolve_args(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
+        """引数内の変数参照を解決"""
+        if not isinstance(args, dict):
+            return {}
+        
+        resolved = {}
+        for k, v in args.items():
+            resolved[k] = self._resolve_value(v, ctx)
+        return resolved
+
+    def _resolve_value(self, value: Any, ctx: Dict[str, Any]) -> Any:
+        """
+        ${ctx.xxx} 形式の変数参照を解決
+        
+        サポート形式:
+            ${ctx.key}          → ctx["key"]
+            ${ctx.key.subkey}   → ctx["key"]["subkey"]（ネスト対応）
+        """
+        if not isinstance(value, str):
+            return value
+        
+        if not value.startswith("${") or not value.endswith("}"):
+            return value
+        
+        # ${ctx.xxx} の場合
+        if value.startswith("${ctx."):
+            path = value[6:-1]  # "ctx." の後から "}" の前まで
+            parts = path.split(".")
+            
+            current = ctx
+            for part in parts:
+                if isinstance(current, dict) and part in current:
+                    current = current[part]
+                else:
+                    return None  # 見つからない場合
+            return current
+        
+        # ${xxx} の場合（ctx直接参照）
+        key = value[2:-1]
+        return ctx.get(key)
