@@ -2,12 +2,12 @@
 kernel.py - Flow Runner(用途非依存カーネル)
 
 Flow駆動の用途非依存カーネル。
+公式はドメイン知識を持たない。
 """
 
 from __future__ import annotations
 
 import json
-import shutil
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -75,17 +75,39 @@ class Kernel:
             "kernel:ctx.copy": self._h_ctx_copy,
         }
 
-    def _resolve_handler(self, handler: str) -> Optional[Callable[[Dict[str, Any], Dict[str, Any]], Any]]:
-        """handler文字列を実行可能callableに解決する"""
+    def _resolve_handler(
+        self,
+        handler: str,
+        args: Dict[str, Any] = None
+    ) -> Optional[Callable[[Dict[str, Any], Dict[str, Any]], Any]]:
+        """
+        handler文字列を実行可能callableに解決する
+        
+        Args:
+            handler: ハンドラ文字列（"kernel:xxx" または "component_phase:xxx"）
+            args: Flow stepのargs（component_phaseに渡す）
+        
+        Returns:
+            callable(args, ctx) -> Any
+        """
         if not isinstance(handler, str) or not handler:
             return None
+        
         if handler.startswith("kernel:"):
             return self._kernel_handlers.get(handler)
+        
         if handler.startswith("component_phase:"):
             phase_name = handler.split(":", 1)[1].strip()
-            def _call(args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
-                return self.lifecycle.run_phase(phase_name)
+            # argsをクロージャにキャプチャ（filenameなどを渡す）
+            captured_args = dict(args or {})
+            
+            def _call(call_args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+                # call_args（実行時）とcaptured_args（定義時）をマージ
+                merged = {**captured_args, **call_args}
+                return self.lifecycle.run_phase(phase_name, **merged)
+            
             return _call
+        
         return None
 
     def load_flow(self, path: Optional[str] = None) -> Dict[str, Any]:
@@ -181,7 +203,6 @@ class Kernel:
                     {"id": "fallback.mounts", "run": {"handler": "kernel:mounts.init", "args": {"mounts_file": "user_data/mounts.json"}}},
                     {"id": "fallback.registry", "run": {"handler": "kernel:registry.load", "args": {"ecosystem_dir": "ecosystem"}}},
                     {"id": "fallback.active", "run": {"handler": "kernel:active_ecosystem.load", "args": {"config_file": "user_data/active_ecosystem.json"}}},
-                    {"id": "fallback.setup", "run": {"handler": "component_phase:setup", "args": {}}, "optional": True},
                 ],
                 "message": [],
                 "message_stream": []
@@ -498,8 +519,8 @@ class Kernel:
         step_id_str = str(step_id or "unknown.step")
         handler_str = str(handler or "unknown.handler")
         
-        # handler解決
-        fn = self._resolve_handler(handler_str)
+        # handler解決（argsも渡す）
+        fn = self._resolve_handler(handler_str, args)
         if fn is None:
             missing_policy = str(ctx.get("_flow_defaults", {}).get("on_missing_handler", "skip")).lower()
             if missing_policy == "error" and not optional:

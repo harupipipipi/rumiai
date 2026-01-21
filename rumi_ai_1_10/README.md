@@ -1,14 +1,3 @@
-```
-# Rumi AI OS
-
-**基盤のない基盤 ― AIエコシステムのためのOS**
-
-[![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://python.org)
-[![Flask](https://img.shields.io/badge/Flask-2.0+-green.svg)](https://flask.palletsprojects.com)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-
----
-
 ## 🌟 このプロジェクトについて
 
 現在のAI開発は混沌としています：
@@ -18,7 +7,7 @@
 - 昨日の常識が今日は通用しない
 - カスタマイズすると本体更新が困難に
 
-**Rumi AI OS**は、この問題に対する根本的な解決策です。
+**Rumi AI**は、この問題に対する根本的な解決策です。
 
 Minecraftのmodのように、**公式ファイルを一切編集せずに**機能を追加・変更できる。しかしMinecraftと決定的に違うのは、**改造する「本体」が存在しない**ことです。
 
@@ -29,39 +18,43 @@ Minecraftのmodのように、**公式ファイルを一切編集せずに**機�
 ### 「基盤のない基盤」とは
 
 Minecraftのmodは「Minecraft」という基盤を改造します。
-しかしRumi AI OSには、改造される「本体」がありません。
+しかしRumi AIには、改造される「本体」がありません。
 
 ```
 Minecraft の世界:
-┌─────────────────────────────────┐
-│         Minecraft本体            │  ← これを改造
-│  (ブロック、クリーパー、etc.)     │
-├─────────────────────────────────┤
-│            Mod A                 │
-│            Mod B                 │
-└─────────────────────────────────┘
+┌─────────────────────────────────────┐
+│         Minecraft本体                │  ← これを改造
+│  (ブロック、クリーパー、etc.)         │
+├─────────────────────────────────────┤
+│            Mod A                     │
+│            Mod B                     │
+└─────────────────────────────────────┘
 
-Rumi AI OS の世界:
-┌─────────────────────────────────┐
-│                                 │
-│    Component ←→ Component       │
-│        ↑           ↓            │  ← 網のように繋がる
-│    Component ←→ Component       │
-│                                 │
-├─────────────────────────────────┤
-│     Kernel (実行ルールのみ)       │  ← 「何を」ではなく「どう動くか」だけ
-└─────────────────────────────────┘
+Rumi AI の世界:
+┌─────────────────────────────────────┐
+│                                     │
+│    Component ←→ Component           │
+│        ↑           ↓                │  ← 網のように繋がる
+│    Component ←→ Component           │
+│                                     │
+├─────────────────────────────────────┤
+│     Kernel (実行ルールのみ)           │  ← 「何を」ではなく「どう動くか」だけ
+└─────────────────────────────────────┘
 ```
 
-公式が定義するのは**実行ルール**だけです：
+公式が定義するのは**実行の仕組み**だけです：
 
-- `setup.py` → 起動時に実行される
-- `dependency_manager.py` → 環境構築時に実行される
-- `runtime_boot.py` → サービス登録時に実行される
+- Flow YAML（`flow/*.flow.yaml`）に定義されたパイプラインを順次実行
+- `component_phase:{phase_name}` ハンドラで任意のPythonファイルを実行可能
+- どのフェーズを設けるか、どのファイル名にするかは**YAMLとコミュニティが決める**
+
+例えば、デフォルトのFlow定義では以下の規約を採用しています（公式の強制ではない）：
+
+- `dependency_manager.py` → 依存関係解決フェーズ
+- `setup.py` → セットアップフェーズ  
+- `runtime_boot.py` → ランタイム起動フェーズ
 
 **「チャット」「ツール」「プロンプト」「AIクライアント」「フロントエンド」― これらは全て公式の知らない概念です。**
-
-誰かがそういうComponentを作り、他のComponentがそれを見つけて繋がる。それだけです。
 
 ---
 
@@ -78,21 +71,108 @@ Rumi AI OS の世界:
 ✅ 「公式Component」という概念すら存在しない
 ```
 
-`ecosystem/default/` にあるComponentも、あなたが作るComponentも、完全に同じルールで動きます。公式が特別扱いすることはありません。
+`ecosystem/default/` にあるComponentも、あなたが作るComponentも、完全に同じルールで動きます。
 
 ---
 
-### なぜこの設計なのか
+## 🚀 クイックスタート
 
-AIの世界は変化が速すぎます。
+### 必要条件
 
-- 今日の最先端は来月の遺物
-- 特定のAPIに依存すると、そのAPI廃止で全てが壊れる
-- 「正しい設計」は1年後には「古い設計」
+- Python 3.9+
+- Git
 
-だからこそ、**公式は何も決めない**。
+### インストール
 
-コミュニティが自由に作り、自由に繋げ、自由に置き換える。公式はその「場」を提供するだけです。
+```bash
+# リポジトリをクローン
+git clone https://github.com/your-repo/rumi-ai.git
+cd rumi-ai
+
+# セットアップを実行
+# Windows:
+setup.bat
+
+# Mac/Linux:
+chmod +x setup.sh
+./setup.sh
+```
+
+セットアップウィザードが起動します：
+
+```
+╔════════════════════════════════════════════╗
+║    🌸 Rumi AI セットアップ                 ║
+╠════════════════════════════════════════════╣
+║                                            ║
+║    1. CLI モード（ターミナル操作）         ║
+║    2. Web モード（ブラウザ操作）           ║
+║    q. 終了                                 ║
+║                                            ║
+╚════════════════════════════════════════════╝
+```
+
+### アプリケーションの起動
+
+セットアップ完了後：
+
+```bash
+# セットアップツールから起動
+./setup.sh --cli run
+
+# または直接起動
+.venv/bin/python app.py      # Mac/Linux
+.venv\Scripts\python app.py  # Windows
+```
+
+ブラウザで `http://localhost:5000` を開きます。
+
+---
+
+## 🛠️ セットアップシステム
+
+Rumi AI には統合セットアップシステムが含まれています。
+
+### コマンド一覧
+
+| コマンド | 説明 |
+|---------|------|
+| `./setup.sh` | 対話モード（CLI/Web選択） |
+| `./setup.sh --cli check` | 環境チェック（Python, Git, Docker） |
+| `./setup.sh --cli init` | 初期セットアップ |
+| `./setup.sh --cli doctor` | システム診断 |
+| `./setup.sh --cli recover` | 壊れた設定を修復 |
+| `./setup.sh --cli run` | アプリケーション起動 |
+| `./setup.sh --web` | Web UI モード |
+| `./setup.sh --web --port 9000` | ポート指定 |
+
+### セットアップの流れ
+
+```
+setup.bat / setup.sh
+    │
+    ├── 1. Python チェック（なければガイドを表示）
+    ├── 2. Git チェック（なければガイドを表示）
+    ├── 3. Docker チェック（任意・警告のみ）
+    ├── 4. 仮想環境（.venv）を作成
+    ├── 5. pip アップグレード
+    ├── 6. requirements.txt インストール
+    └── 7. bootstrap.py 実行
+            │
+            ├── CLI モード → ターミナルで操作
+            └── Web モード → ブラウザで操作
+```
+
+### Default Pack のインストール
+
+初期セットアップ時に default pack のインストールを選択できます：
+
+```
+default pack をインストールしますか？ [Y/n]:
+```
+
+- **Y**: `rumi_setup/defaults/default/` を `ecosystem/default/` にコピー
+- **n**: スキップ（空のecosystemで開始）
 
 ---
 
@@ -131,7 +211,7 @@ AIの世界は変化が速すぎます。
 │                 ▼                                            │
 │  ┌─────────────────────────────────────────────────────┐   │
 │  │           Component Lifecycle Executor               │   │
-│  │    dependency → setup → runtime_boot                 │   │
+│  │    任意フェーズの汎用実行器（ファイル名はYAMLで指定）   │   │
 │  └─────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
                               │
@@ -146,12 +226,6 @@ AIの世界は変化が速すぎます。
 │                 InterfaceRegistry                            │
 │       (service.chats, io.http.binders, ui.shell, ...)       │
 └─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                      user_data/                              │
-│    chats/  │  settings/  │  mounts.json  │  cache/          │
-└─────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -161,11 +235,31 @@ AIの世界は変化が速すぎます。
 ```
 project_root/
 │
-├── app.py                              # Flaskエントリポイント
+├── setup.bat                           # Windows セットアップ
+├── setup.sh                            # Mac/Linux セットアップ
+├── bootstrap.py                        # セットアップエントリポイント
 ├── requirements.txt                    # Python依存関係
+├── app.py                              # Flaskエントリポイント
+│
+├── rumi_setup/                         # セットアップシステム
+│   ├── guide/                          # インストールガイド(HTML)
+│   │   ├── index.html
+│   │   ├── python.html
+│   │   ├── git.html
+│   │   └── docker.html
+│   ├── defaults/                       # Default Pack テンプレート
+│   │   └── default/
+│   ├── core/                           # 共通ロジック
+│   │   ├── checker.py
+│   │   ├── initializer.py
+│   │   ├── recovery.py
+│   │   ├── installer.py
+│   │   ├── runner.py
+│   │   └── state.py
+│   ├── cli/                            # CLIインターフェース
+│   └── web/                            # Webインターフェース
 │
 ├── core_runtime/                       # 用途非依存カーネル
-│   ├── __init__.py
 │   ├── kernel.py                       # Flow駆動カーネル
 │   ├── diagnostics.py                  # 診断集約
 │   ├── install_journal.py              # 生成物追跡
@@ -175,86 +269,33 @@ project_root/
 │
 ├── backend_core/                       # エコシステム基盤
 │   └── ecosystem/
-│       ├── __init__.py
 │       ├── mounts.py                   # パス抽象化
 │       ├── registry.py                 # Pack/Component読込
 │       ├── active_ecosystem.py         # アクティブPack管理
-│       ├── compat.py                   # 互換レイヤー
-│       └── spec/
-│           └── ecosystem_spec.md       # アーキテクチャ仕様
+│       └── compat.py                   # 互換レイヤー
 │
 ├── ecosystem/                          # Pack/Component群
 │   └── default/
 │       ├── backend/
-│       │   ├── ecosystem.json          # Pack定義
+│       │   ├── ecosystem.json
 │       │   └── components/
-│       │       ├── chats/              # チャット管理
-│       │       ├── io_http_api/        # HTTP APIバインダー
-│       │       ├── services/
-│       │       │   └── message_stub/   # メッセージ処理スタブ
-│       │       ├── foundation/         # 基盤ユーティリティ
-│       │       ├── settings/           # 設定管理
-│       │       └── ...
-│       │
-│       └── frontend/                   # フロントエンドUI
-│           ├── manifest.json
-│           ├── index.html              # SPAエントリ
-│           ├── app.js                  # アプリケーション
-│           ├── api.js                  # APIクライアント
-│           ├── store.js                # 状態管理
-│           ├── router.js               # ルーティング
-│           ├── utils.js                # ユーティリティ
-│           ├── components/
-│           │   ├── Sidebar.js          # サイドバー
-│           │   ├── ChatView.js         # チャット表示
-│           │   ├── ContextMenu.js      # コンテキストメニュー
-│           │   ├── Modal.js            # モーダル
-│           │   ├── SettingsModal.js    # 設定
-│           │   ├── UIHistoryPanel.js   # 実行ログ
-│           │   └── Toast.js            # 通知
-│           └── styles/
-│               ├── variables.css       # CSS変数
-│               ├── main.css            # メインスタイル
-│               ├── sidebar.css         # サイドバー
-│               ├── chat.css            # チャット
-│               └── responsive.css      # レスポンシブ
+│       └── frontend/
+│
+├── flow/                               # Flow定義
+│   ├── 00_core.flow.yaml
+│   ├── 10_components.flow.yaml
+│   ├── 20_services.flow.yaml
+│   └── 50_message.flow.yaml
 │
 ├── user_data/                          # ユーザーデータ
-│   ├── mounts.json                     # マウント設定
-│   ├── active_ecosystem.json           # アクティブPack
-│   ├── chats/                          # チャット履歴
-│   └── settings/                       # ユーザー設定
+│   ├── mounts.json
+│   ├── active_ecosystem.json
+│   ├── chats/
+│   └── settings/
 │
-└── flow/                               # Flow定義
-    └── project.flow.yaml               # パイプライン定義
+└── docs/                               # ドキュメント
+    └── setup.txt
 ```
-
----
-
-## 🚀 クイックスタート
-
-### 必要条件
-
-- Python 3.9+
-- pip
-
-### インストール
-
-```bash
-# リポジトリをクローン
-git clone https://github.com/your-repo/rumi-ai-os.git
-cd rumi-ai-os
-
-# 依存関係をインストール
-pip install -r requirements.txt
-
-# 起動
-python app.py
-```
-
-### アクセス
-
-ブラウザで `http://localhost:5000` を開きます。
 
 ---
 
@@ -279,19 +320,6 @@ python app.py
 | `POST` | `/api/message/stream` | ストリーミング送信（SSE） |
 | `POST` | `/api/stream/abort` | ストリーム中断 |
 
-### フォルダ
-
-| メソッド | エンドポイント | 説明 |
-|---------|---------------|------|
-| `POST` | `/api/folders` | フォルダ作成 |
-
-### 設定
-
-| メソッド | エンドポイント | 説明 |
-|---------|---------------|------|
-| `GET` | `/api/user/settings` | 設定取得 |
-| `POST` | `/api/user/settings` | 設定保存 |
-
 ### システム
 
 | メソッド | エンドポイント | 説明 |
@@ -301,144 +329,14 @@ python app.py
 
 ---
 
-## 🎨 フロントエンド
-
-### 機能
-
-- **チャット管理**: 作成、削除、コピー、名前変更
-- **フォルダ整理**: フォルダ作成、チャット移動、折りたたみ
-- **ピン留め**: 重要なチャットを上部に固定
-- **ストリーミング**: リアルタイム応答表示
-- **設定**: テーマ切替（ダーク/ライト）、各種設定
-- **実行ログ**: ツール実行履歴の表示
-
-### レスポンシブ対応
-
-| 画面サイズ | 動作 |
-|-----------|------|
-| デスクトップ (>1024px) | フルレイアウト |
-| タブレット (768-1024px) | 狭めのサイドバー |
-| モバイル (<768px) | オーバーレイサイドバー、ハンバーガーメニュー |
-
-### キーボードショートカット
-
-| キー | 動作 |
-|-----|------|
-| `Ctrl/Cmd + K` | 新規チャット |
-| `Ctrl/Cmd + B` | サイドバー切替（モバイル） |
-| `Escape` | モーダル/サイドバーを閉じる |
-| `Enter` | メッセージ送信 |
-| `Shift + Enter` | 改行 |
-
-### アクセシビリティ
-
-- ARIA属性対応
-- キーボードナビゲーション
-- フォーカス表示
-- スキップリンク
-- 動き軽減対応 (`prefers-reduced-motion`)
-
----
-
-## 🔧 バックエンドコンポーネント
-
-### 標準コンポーネント（default Pack）
-
-| コンポーネント | 提供サービス | 説明 |
-|--------------|-------------|------|
-| `chats` | `service.chats`, `service.relationships` | チャット履歴管理 |
-| `io_http_api` | `io.http.binders` | HTTP APIルート登録 |
-| `message_stub` | `message.handle`, `message.handle_stream` | メッセージ処理スタブ |
-| `foundation` | `foundation.safe_add_url_rule` | 基盤ユーティリティ |
-| `settings` | `service.settings_manager` | ユーザー設定管理 |
-
-### InterfaceRegistry
-
-コンポーネント間の疎結合を実現するサービスロケーター：
-
-```python
-# サービス登録
-ir.register("service.chats", ChatManager())
-
-# サービス取得
-chats = ir.get("service.chats", strategy="last")
-
-# 全て取得
-binders = ir.get("io.http.binders", strategy="all")
-```
-
----
-
-## ⚙️ 設定
-
-### user_data/mounts.json
-
-データ保存先のカスタマイズ：
-
-```json
-{
-  "version": "1.0",
-  "mounts": {
-    "data.chats": "./user_data/chats",
-    "data.settings": "./user_data/settings",
-    "data.cache": "./user_data/cache"
-  }
-}
-```
-
-### user_data/active_ecosystem.json
-
-アクティブなPackとオーバーライド：
-
-```json
-{
-  "active_pack_identity": "github:haru/default-pack",
-  "overrides": {
-    "chats": "chats_v1"
-  },
-  "disabled_components": [],
-  "disabled_addons": []
-}
-```
-
-### flow/project.flow.yaml
-
-パイプライン定義（自動生成される場合あり）：
-
-```yaml
-flow_version: "1.0"
-project:
-  id: "rumi_ai"
-  title: "Rumi AI OS"
-
-pipelines:
-  startup:
-    - id: "startup.mounts"
-      run:
-        handler: "kernel:mounts.init"
-    - id: "startup.registry"
-      run:
-        handler: "kernel:registry.load"
-    # ...
-
-  message:
-    - id: "message.handle"
-      run:
-        handler: "kernel:delegate.call"
-        args:
-          interface_key: "message.handle"
-```
-
----
-
-## 🛠️ 開発
+## 🔧 開発
 
 ### 新しいコンポーネントの作成
 
 ```
 ecosystem/my_pack/backend/components/my_component/
 ├── manifest.json
-└── setup.py
+└── setup.py          # ファイル名はFlowで定義（慣例としてsetup.py）
 ```
 
 **manifest.json**:
@@ -461,6 +359,16 @@ def run(context):
     ir.register("my.service", MyServiceImplementation())
 ```
 
+### ライフサイクルファイルの規約（デフォルトFlow準拠）
+
+| ファイル名 | フェーズ | 用途 |
+|-----------|---------|------|
+| `dependency_manager.py` | dependency | pip install等の環境構築 |
+| `setup.py` | setup | InterfaceRegistryへの登録 |
+| `runtime_boot.py` | runtime_boot | サービス起動処理 |
+
+※これらはデフォルトFlowの規約であり、カスタムFlowでは任意のファイル名・フェーズ名を使用可能
+
 ### Fail-Soft設計
 
 全ての層でエラー許容：
@@ -470,22 +378,16 @@ def run(context):
 # システムは停止せず、診断情報に記録して継続
 ```
 
-### 診断
+---
 
-`/api/diagnostics` で全ステップの実行状況を確認：
+## 📐 設計原則
 
-```json
-{
-  "records": [
-    {
-      "ts": "2024-01-01T00:00:00Z",
-      "phase": "startup",
-      "step_id": "startup.mounts",
-      "status": "success"
-    }
-  ]
-}
-```
+1. **公式ファイルの編集を必要としない** ― 全ては `ecosystem/` 内で完結
+2. **Fail-soft** ― エラーでもシステムは動き続ける
+3. **診断可能** ― 何が起きているか常に見える
+4. **贔屓なし** ― 公式Componentは存在しない
+5. **用途非依存** ― Kernelは「AI」を知らない
+6. **ハードコードしない** ― フェーズ名、ファイル名、インターフェース名は全てYAMLまたはコミュニティが定義
 
 ---
 
@@ -500,24 +402,37 @@ def run(context):
 3. **繋がりを作る** ― 他のComponentと連携
 4. **置き換える** ― 既存のComponentをより良いもので置換
 
-公式の許可は不要です。作って、公開して、使ってもらう。それだけです。
-
 ### ガイドライン
 
-- 公式ファイル（`app.py`, `core_runtime/`, `backend_core/`）の編集は最小限に
+- 公式ファイルの編集は最小限に
 - 新機能は `ecosystem/` 内にComponentとして実装
 - Fail-softを心がける（エラーでも動き続ける）
 - 診断情報を適切に出力する
 
 ---
 
-## 📐 設計原則
+## ❓ トラブルシューティング
 
-1. **公式ファイルの編集を必要としない** ― 全ては `ecosystem/` 内で完結
-2. **Fail-soft** ― エラーでもシステムは動き続ける
-3. **診断可能** ― 何が起きているか常に見える
-4. **贔屓なし** ― 公式Componentは存在しない
-5. **用途非依存** ― Kernelは「AI」を知らない
+### Python/Git が見つからない
+
+セットアップ実行時に自動的にインストールガイドが開きます。
+
+### ポートが使用中
+
+```bash
+./setup.sh --web --port 9000
+```
+
+### 仮想環境の問題
+
+```bash
+rm -rf .venv
+./setup.sh
+```
+
+### 詳細なトラブルシューティング
+
+`docs/setup.txt` を参照してください。
 
 ---
 
@@ -529,8 +444,8 @@ MIT License
 
 ## 🔗 リンク
 
+- [セットアップドキュメント](docs/setup.txt)
 - [エコシステム仕様書](backend_core/ecosystem/spec/ecosystem_spec.md)
-- [API ドキュメント](#-api-リファレンス)
 
 ---
 

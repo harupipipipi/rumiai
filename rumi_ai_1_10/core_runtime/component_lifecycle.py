@@ -1,8 +1,8 @@
 """
-component_lifecycle.py - Component Lifecycle Executor(dependency/setup/runtime/assets/addon実行器)
+component_lifecycle.py - Component Lifecycle Executor
 
-Step1では「器」だけ確定する。
-実際のecosystem連携と規約実行はStep6で実装する。
+任意のフェーズを実行する汎用ライフサイクル実行器。
+公式はフェーズ名やファイル名を固定しない（YAMLで定義）。
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import sys
 import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Any, Dict, List, Iterable, Tuple, Set
+from typing import Optional, Any, Dict, List, Set
 
 from .diagnostics import Diagnostics
 from .install_journal import InstallJournal
@@ -23,12 +23,10 @@ class ComponentLifecycleExecutor:
     """
     コンポーネントのライフサイクルを実行する。
 
-    実行フェーズ(確定仕様):
-    - dependency(dependency_manager.py があれば実行)
-    - setup(setup.py があれば実行)
-    - runtime_boot
-    - assets_load
-    - addon_apply
+    設計思想（確定仕様）:
+    - 公式はフェーズ名を固定しない（YAMLで自由に定義）
+    - 公式はファイル名を固定しない（YAMLのargs.filenameで指定、デフォルトは{phase}.py）
+    - fail-soft: 失敗したコンポーネントは無効化して続行
     """
 
     diagnostics: Diagnostics
@@ -46,7 +44,6 @@ class ComponentLifecycleExecutor:
     _disabled_components_runtime: Set[str] = field(default_factory=set)
 
     def _now_ts(self) -> str:
-        # Diagnostics側にも now はあるが、ここは独立して持つ(依存を減らす)
         from datetime import datetime, timezone
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -80,12 +77,10 @@ class ComponentLifecycleExecutor:
         - active_pack_identity の pack を優先
         - packが見つからない場合は registryの最初のpackへフォールバック
 
-        重要(今回の修正ポイント):
-        - dependency/setup は「そのコンポーネントが選抜されるかどうか」と無関係に
-          **Pack内の全コンポーネントに対して走ってよいフェーズ**。
-          したがって、dependency/setup では typeごとに1つへ絞らず、全件列挙する。
-        - runtime_boot/assets_load 等の"提供物を選ぶ"フェーズでのみ、
-          overrides を使った選抜(typeごとに1つ)を行う余地がある(将来)。
+        重要:
+        - 全フェーズで「そのコンポーネントが選抜されるかどうか」と無関係に
+          **Pack内の全コンポーネントに対して走ってよい**。
+          したがって、typeごとに1つへ絞らず、全件列挙する。
         """
         reg = self._get_registry()
         active = self._get_active()
@@ -115,8 +110,6 @@ class ComponentLifecycleExecutor:
         except Exception:
             disabled_persistent = set()
 
-        # phaseがdependency/setupなら「全件」を返す(ただしdisabledは除外)
-        # phaseがNoneまたは将来の選抜フェーズなら、ひとまず全件(将来選抜ロジックを追加可能)
         phase_name = (phase or "").strip()
 
         # 決定的順序(再現性のため)
@@ -165,44 +158,54 @@ class ComponentLifecycleExecutor:
     # Phase execution
     # ---------------------------
 
-    def run_phase(self, phase_name: str) -> Dict[str, Any]:
+    def run_phase(self, phase_name: str, **kwargs) -> Dict[str, Any]:
         """
-        フェーズ実行:
-        - dependency: dependency_manager.py があれば実行
-        - setup: setup.py があれば実行(冪等前提)
-        - runtime_boot: runtime_boot.py があれば実行
-        - その他: 今はskippedとして診断に残す(後工程で実装)
+        フェーズ実行（汎用・ドメイン非依存）
+
+        公式はフェーズ名やファイル名を固定しない。
+        - phase_name: 任意のフェーズ名（YAMLで定義）
+        - kwargs["filename"]: 実行するファイル名（省略時は {phase_name}.py）
+
+        Examples:
+            run_phase("setup")                    -> setup.py を実行
+            run_phase("setup", filename="init.py") -> init.py を実行
+            run_phase("my_custom_phase")          -> my_custom_phase.py を実行
         """
         phase = (phase_name or "").strip()
-        if phase not in ("dependency", "setup", "runtime_boot"):
-            # 後工程の器：現時点では no-op だが記録は残す
+        if not phase:
             self.diagnostics.record_step(
                 phase="startup",
-                step_id=f"component_phase.{phase}",
-                handler=f"component_phase:{phase}",
+                step_id="component_phase.unknown",
+                handler="component_phase:unknown",
                 status="skipped",
                 target={"kind": "none", "id": None},
-                meta={"reason": "not_implemented_yet"},
+                meta={"reason": "empty_phase_name"},
             )
             return {
                 "_kernel_step_status": "skipped",
-                "_kernel_step_meta": {"phase": phase, "reason": "not_implemented_yet"},
+                "_kernel_step_meta": {"reason": "empty_phase_name"},
             }
+
+        # ファイル名の決定（YAMLから指定可能、デフォルトは {phase}.py）
+        filename = kwargs.get("filename")
+        if not filename:
+            filename = f"{phase}.py"
 
         components = self.iter_active_components(phase=phase)
         self._ensure_components_on_syspath(components)
+        
         self.diagnostics.record_step(
             phase="startup",
             step_id=f"component_phase.{phase}.start",
             handler=f"component_phase:{phase}",
             status="success",
             target={"kind": "none", "id": None},
-            meta={"count": len(components)},
+            meta={"count": len(components), "filename": filename},
         )
 
         before_disabled = set(self._disabled_components_runtime)
         for comp in components:
-            self._run_phase_for_component(phase, comp)
+            self._run_phase_for_component(phase, comp, filename=filename)
         after_disabled = set(self._disabled_components_runtime)
         newly_disabled = sorted(list(after_disabled - before_disabled))
 
@@ -223,21 +226,33 @@ class ComponentLifecycleExecutor:
                 "phase": phase,
                 "count": len(components),
                 "newly_disabled": newly_disabled,
+                "filename": filename,
             },
             "_kernel_disable_targets": disable_targets,
         }
 
-    def _run_phase_for_component(self, phase: str, component: Any) -> None:
+    def _run_phase_for_component(
+        self,
+        phase: str,
+        component: Any,
+        filename: str = None
+    ) -> None:
+        """
+        単一コンポーネントに対してフェーズを実行
+
+        Args:
+            phase: フェーズ名（ログ用）
+            component: ComponentInfo
+            filename: 実行するファイル名（デフォルト: {phase}.py）
+        """
         full_id = getattr(component, "full_id", None)
         comp_id = full_id if isinstance(full_id, str) else f"{getattr(component,'pack_id',None)}:{getattr(component,'type',None)}:{getattr(component,'id',None)}"
         runtime_dir = Path(getattr(component, "path", "."))
 
-        if phase == "dependency":
-            filename = "dependency_manager.py"
-        elif phase == "setup":
-            filename = "setup.py"
-        else:  # runtime_boot
-            filename = "runtime_boot.py"
+        # ファイル名は引数から取得（公式はファイル名を固定しない）
+        if not filename:
+            filename = f"{phase}.py"
+        
         file_path = runtime_dir / filename
 
         if not file_path.exists():
@@ -323,7 +338,6 @@ class ComponentLifecycleExecutor:
         アクティブコンポーネントの runtime_dir を sys.path に追加（贔屓なし・汎用）。
         これにより component が他 component の Python package を import できる。
         """
-        import sys
         try:
             for comp in components:
                 p = str(Path(getattr(comp, "path", ".")).resolve())
@@ -346,7 +360,7 @@ class ComponentLifecycleExecutor:
 
     def _build_component_context(self, phase: str, component: Any) -> Dict[str, Any]:
         """
-        dependency_manager.py / setup.py に渡す context(多め)。
+        実行ファイルに渡す context(多め)。
         - Kernelが特定概念を贔屓しない一方で、拡張作者が高度なことをできるようにする。
         """
         reg = self._get_registry()
