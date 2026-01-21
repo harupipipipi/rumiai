@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Python インストールガイド - Rumi AI</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); min-height: 100vh; color: #e0e0e0; padding: 2rem; line-height: 1.7; }
+        .container { max-width: 800px; margin: 0 auto; }
+        a { color: #4a90d9; }
+        h1 { font-size: 2rem; color: #fff; margin-bottom: 0.5rem; }
+        .breadcrumb { margin-bottom: 2rem; }
+        .breadcrumb a { color: #888; text-decoration: none; }
+        h2 { color: #4a90d9; margin-top: 2.5rem; margin-bottom: 1rem; padding-bottom: 0.5rem; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        .os-section { background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 1.5rem; margin: 1rem 0; }
+        .os-section h3 { color: #fff; margin-bottom: 1rem; }
+        ol, ul { margin-left: 1.5rem; margin-bottom: 1rem; }
+        li { margin-bottom: 0.5rem; }
+        code { background: #2d2d44; padding: 0.2rem 0.5rem; border-radius: 4px; }
+        pre { background: #2d2d44; padding: 1rem; border-radius: 8px; overflow-x: auto; margin: 1rem 0; }
+        .warning { background: rgba(255, 180, 0, 0.1); border-left: 4px solid #ffb400; padding: 1rem; margin: 1rem 0; border-radius: 0 8px 8px 0; }
+        .success { background: rgba(100, 200, 100, 0.1); border-left: 4px solid #64c864; padding: 1rem; margin: 1rem 0; border-radius: 0 8px 8px 0; }
+        .btn { display: inline-block; background: #4a90d9; color: #fff; padding: 0.75rem 1.5rem; border-radius: 8px; text-decoration: none; margin: 0.5rem 0.5rem 0.5rem 0; }
+        .next-step { background: rgba(74, 144, 217, 0.1); border: 1px solid #4a90d9; border-radius: 12px; padding: 1.5rem; margin-top: 2rem; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="breadcrumb"><a href="index.html">← ガイド一覧に戻る</a></div>
+        <h1>🐍 Python インストールガイド</h1>
+        <p>Rumi AI には Python 3.9 以上が必要です。</p>
+        
+        <h2>Windows</h2>
+        <div class="os-section">
+            <h3>方法1: 公式インストーラー（推奨）</h3>
+            <ol>
+                <li><a href="https://www.python.org/downloads/" target="_blank">python.org/downloads</a> にアクセス</li>
+                <li>「Download Python 3.x.x」をクリック</li>
+                <li>インストーラーを実行</li>
+                <li><div class="warning"><strong>⚠️ 重要:</strong> 「Add Python to PATH」に必ずチェック</div></li>
+                <li>「Install Now」をクリック</li>
+            </ol>
+        </div>
+        
+        <h2>Mac</h2>
+        <div class="os-section">
+            <h3>Homebrew（推奨）</h3>
+            <pre>brew install python3</pre>
+        </div>
+        
+        <h2>Linux</h2>
+        <div class="os-section">
+            <h3>Ubuntu / Debian</h3>
+            <pre>sudo apt update
+sudo apt install python3 python3-pip python3-venv</pre>
+        </div>
+        
+        <h2>確認方法</h2>
+        <pre>python --version
+# または
+python3 --version</pre>
+        <div class="success"><strong>✓ 成功:</strong> Python 3.9.x 以上が表示されればOK</div>
+        
+        <div class="next-step">
+            <a href="git.html" class="btn">次へ: Git のインストール →</a>
+        </div>
+    </div>
+</body>
+</html>

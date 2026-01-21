@@ -1,9 +1,11 @@
-Flask>=2.0
-google-genai
-python-dotenv
-Pillow
-requests
-werkzeug
-websocket-server
-websocket-client
-flask-sock
+# Rumi AI OS - 公式依存関係
+# ===========================
+
+# Web Framework
+Flask>=2.0.0,<4.0.0
+
+# Environment
+python-dotenv>=1.0.0,<2.0.0
+
+# YAML Parser (Flow YAML読み込み)
+PyYAML>=6.0.0,<7.0.0

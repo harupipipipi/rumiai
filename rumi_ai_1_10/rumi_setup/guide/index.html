@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rumi AI - セットアップガイド</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #e0e0e0;
+            padding: 2rem;
+        }
+        .container { max-width: 800px; margin: 0 auto; }
+        header { text-align: center; margin-bottom: 3rem; }
+        header h1 { font-size: 2.5rem; color: #fff; margin-bottom: 0.5rem; }
+        header p { color: #888; font-size: 1.1rem; }
+        .cards { display: grid; gap: 1.5rem; }
+        .card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            padding: 2rem;
+            text-decoration: none;
+            color: inherit;
+            transition: transform 0.2s, background 0.2s;
+            position: relative;
+        }
+        .card:hover { transform: translateY(-4px); background: rgba(255, 255, 255, 0.08); }
+        .card h2 { font-size: 1.5rem; color: #fff; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.75rem; }
+        .card p { color: #888; line-height: 1.6; }
+        .card .icon { font-size: 2rem; }
+        .card.required { border-color: #4a90d9; }
+        .card.required::after { content: "必須"; background: #4a90d9; color: #fff; font-size: 0.75rem; padding: 0.25rem 0.5rem; border-radius: 4px; position: absolute; top: 1rem; right: 1rem; }
+        .card.optional::after { content: "推奨"; background: #6b7280; color: #fff; font-size: 0.75rem; padding: 0.25rem 0.5rem; border-radius: 4px; position: absolute; top: 1rem; right: 1rem; }
+        footer { text-align: center; margin-top: 3rem; color: #666; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🌸 Rumi AI</h1>
+            <p>セットアップガイド</p>
+        </header>
+        <div class="cards">
+            <a href="python.html" class="card required">
+                <h2><span class="icon">🐍</span> Python</h2>
+                <p>Rumi AI の実行に必要です。<br>Python 3.9 以上をインストールしてください。</p>
+            </a>
+            <a href="git.html" class="card required">
+                <h2><span class="icon">📦</span> Git</h2>
+                <p>Pack のインストール・更新に必要です。<br>バージョン管理システムをインストールしてください。</p>
+            </a>
+            <a href="docker.html" class="card optional">
+                <h2><span class="icon">🐳</span> Docker</h2>
+                <p>セキュリティ機能に推奨されます。<br>コンテナ環境で安全に Pack を実行できます。</p>
+            </a>
+        </div>
+        <footer>
+            <p>すべてのインストールが完了したら、setup.bat (Windows) または ./setup.sh (Mac/Linux) を実行してください。</p>
+        </footer>
+    </div>
+</body>
+</html>
