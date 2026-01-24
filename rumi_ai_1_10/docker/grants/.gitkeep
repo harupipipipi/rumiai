@@ -1,0 +1,18 @@
+# Permission Grants Directory
+#
+# このディレクトリにはコンポーネントへの許可記録が保存されます。
+# 各ファイル: {component_id}.json
+#
+# 注意: これは履歴です。矛盾が発生した場合、このファイルが修正されます。
+#
+# 例:
+# {
+#   "component_id": "default:tool:my_tool",
+#   "permissions": {
+#     "file_read": {
+#       "enabled": true,
+#       "valid": true,
+#       "directories": ["/home/user/documents"]
+#     }
+#   }
+# }

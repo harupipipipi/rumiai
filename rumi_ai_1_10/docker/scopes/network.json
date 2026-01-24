@@ -1,0 +1,29 @@
+{
+  "version": "1.0",
+  "description": "network のスコープ設定",
+  "presets": {
+    "ai_providers": {
+      "description": "AI API プロバイダー",
+      "domains": [
+        "api.openai.com",
+        "api.anthropic.com",
+        "generativelanguage.googleapis.com"
+      ]
+    },
+    "full_access": {
+      "description": "全てのネットワークアクセスを許可",
+      "domains": ["*"]
+    },
+    "no_network": {
+      "description": "ネットワークアクセスなし",
+      "domains": []
+    }
+  },
+  "default_blocked_domains": [
+    "localhost",
+    "127.0.0.1",
+    "*.local",
+    "*.internal"
+  ],
+  "default_allowed_ports": [80, 443]
+}

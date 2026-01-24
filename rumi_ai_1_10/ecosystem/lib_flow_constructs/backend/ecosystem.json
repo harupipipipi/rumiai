@@ -1,0 +1,17 @@
+{
+  "pack_id": "lib_flow_constructs",
+  "pack_version": "1.0.0",
+  "pack_type": "library",
+  "description": "Flow constructs (loop, branch, parallel, group, retry)",
+  "components": {
+    "constructs": {
+      "type": "library",
+      "id": "constructs",
+      "version": "1.0.0",
+      "connectivity": {
+        "provides": ["flow.construct.loop", "flow.construct.branch", "flow.construct.parallel", "flow.construct.group", "flow.construct.retry"],
+        "requires": []
+      }
+    }
+  }
+}

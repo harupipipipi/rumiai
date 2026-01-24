@@ -1,5 +1,4 @@
 import os
-import atexit
 import threading
 import traceback
 from flask import Flask, Response
@@ -12,6 +11,7 @@ _kernel = None
 _kernel_started = False
 _kernel_start_lock = threading.Lock()
 
+# --- Kernel bootstrap (lazy, pre-routing) ---
 
 def ensure_kernel_started():
     global _kernel, _kernel_started
@@ -25,9 +25,7 @@ def ensure_kernel_started():
             _kernel = Kernel()
             _kernel.run_startup()
 
-            # シャットダウンフック登録
-            atexit.register(lambda: _kernel.shutdown() if _kernel else None)
-
+            # compat 追随（fail-soft）
             try:
                 from backend_core.ecosystem.compat import mark_ecosystem_initialized
                 mark_ecosystem_initialized()
@@ -42,12 +40,16 @@ def ensure_kernel_started():
 
 
 def apply_http_binders():
+    """
+    InterfaceRegistryから発見したHTTPバインダー/ルートを適用
+    """
     if _kernel is None:
         return
     
     ir = _kernel.interface_registry
     
     try:
+        # 1. io.http.binders: Flaskアプリにルートを追加するcallable
         binders = ir.get("io.http.binders", strategy="all") or []
         if not isinstance(binders, list):
             binders = [binders]
@@ -55,47 +57,23 @@ def apply_http_binders():
             if callable(b):
                 try:
                     b(app, _kernel, {"app": app})
-                except Exception as e:
-                    _kernel.diagnostics.record_step(
-                        phase="http_bind",
-                        step_id=f"binder.{getattr(b, '__name__', 'unknown')}",
-                        handler="app:apply_http_binders",
-                        status="failed",
-                        error=e,
-                        meta={"binder": str(b)}
-                    )
+                except Exception:
                     traceback.print_exc()
         
+        # 2. io.http.routes: ルート定義の辞書
         routes = ir.get("io.http.routes", strategy="all") or []
         if not isinstance(routes, list):
             routes = [routes]
         for route_def in routes:
             if isinstance(route_def, dict):
-                try:
-                    _apply_route_definition(route_def)
-                except Exception as e:
-                    _kernel.diagnostics.record_step(
-                        phase="http_bind",
-                        step_id=f"route.{route_def.get('rule', 'unknown')}",
-                        handler="app:apply_http_binders",
-                        status="failed",
-                        error=e,
-                        meta={"route": route_def}
-                    )
-                    traceback.print_exc()
+                _apply_route_definition(route_def)
         
-    except Exception as e:
-        _kernel.diagnostics.record_step(
-            phase="http_bind",
-            step_id="apply_http_binders",
-            handler="app:apply_http_binders",
-            status="failed",
-            error=e
-        )
+    except Exception:
         traceback.print_exc()
 
 
 def _apply_route_definition(route_def: dict):
+    """ルート定義を適用"""
     rule = route_def.get("rule")
     handler = route_def.get("handler")
     methods = route_def.get("methods", ["GET"])
@@ -105,9 +83,10 @@ def _apply_route_definition(route_def: dict):
         return
     
     try:
+        # 重複チェック
         for existing_rule in app.url_map.iter_rules():
             if existing_rule.rule == rule:
-                return
+                return  # 既に登録済み
         
         app.add_url_rule(rule, endpoint, handler, methods=methods)
     except Exception:
@@ -115,13 +94,16 @@ def _apply_route_definition(route_def: dict):
 
 
 def _apply_fallback_index():
+    """UIが登録されていない場合のフォールバック"""
     if _kernel is None:
         return
     
+    # 既に / が登録されているか確認
     for rule in app.url_map.iter_rules():
         if rule.rule == '/':
             return
     
+    # フォールバックルート
     ir = _kernel.interface_registry
     
     def _no_ui_fallback():
@@ -140,6 +122,10 @@ def _apply_fallback_index():
 
 
 class _KernelWSGIMiddleware:
+    """
+    WSGI入口で Kernel startup + HTTP bind を実行
+    公式ファイルはecosystemの中身を一切知らない
+    """
     def __init__(self, wsgi_app):
         self._wsgi_app = wsgi_app
         self._init_lock = threading.Lock()

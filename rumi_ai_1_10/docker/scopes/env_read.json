@@ -1,0 +1,19 @@
+{
+  "version": "1.0",
+  "description": "env_read のスコープ設定",
+  "available_keys": [
+    "GEMINI_API_KEY",
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "SEARCH_API_KEY"
+  ],
+  "sensitive_keys": [
+    "SECRET_KEY",
+    "ADMIN_PASSWORD",
+    "JWT_SECRET"
+  ],
+  "key_groups": {
+    "ai_providers": ["GEMINI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"],
+    "search": ["SEARCH_API_KEY"]
+  }
+}

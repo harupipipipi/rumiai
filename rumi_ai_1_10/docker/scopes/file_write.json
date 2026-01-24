@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "description": "file_write のスコープ設定",
+  "default_directories": [],
+  "forbidden_paths": [
+    "~/.ssh",
+    "~/.gnupg",
+    "~/.bashrc",
+    "~/.zshrc",
+    "/etc",
+    "/usr",
+    "/bin"
+  ],
+  "max_file_size_mb": 100
+}
