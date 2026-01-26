@@ -37,6 +37,9 @@ class Kernel:
         self.interface_registry = interface_registry or InterfaceRegistry()
         self.event_bus = event_bus or EventBus()
         self.lifecycle = lifecycle or ComponentLifecycleExecutor(diagnostics=self.diagnostics, install_journal=self.install_journal)
+        
+        # InstallJournalにInterfaceRegistryを設定
+        self.install_journal.set_interface_registry(self.interface_registry)
         self._flow: Optional[Dict[str, Any]] = None
         self._kernel_handlers: Dict[str, Callable[[Dict[str, Any], Dict[str, Any]], Any]] = {}
         self._shutdown_handlers: List[Callable[[], None]] = []
@@ -141,7 +144,72 @@ class Kernel:
                                       status="success" if not aborted else "failed", meta={"aborted": aborted})
         return self.diagnostics.as_dict()
 
-    def run_message(self, chat_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    
+    def run_pipeline(self, pipeline_name: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        汎用パイプライン実行
+        
+        任意の名前のパイプラインを実行する。run_message()やrun_message_stream()の
+        汎用版として使用可能。
+        
+        Args:
+            pipeline_name: 実行するパイプライン名（flowのpipelines配下のキー）
+            context: 追加のコンテキスト（chat_id, payload等）
+        
+        Returns:
+            実行結果を含むコンテキスト辞書
+        """
+        flow = self._flow or self.load_flow()
+        defaults = flow.get("defaults", {}) if isinstance(flow, dict) else {}
+        fail_soft_default = bool(defaults.get("fail_soft", True))
+        pipelines = flow.get("pipelines", {})
+        steps = pipelines.get(pipeline_name, []) if isinstance(pipelines, dict) else []
+        steps = steps if isinstance(steps, list) else []
+        
+        ctx = self._build_kernel_context()
+        ctx["_flow_defaults"] = {
+            "fail_soft": fail_soft_default, 
+            "on_missing_handler": str(defaults.get("on_missing_handler", "skip")).lower()
+        }
+        if context:
+            ctx.update(context)
+        
+        self.diagnostics.record_step(
+            phase=pipeline_name, 
+            step_id=f"{pipeline_name}.pipeline.start", 
+            handler=f"kernel:{pipeline_name}.run",
+            status="success", 
+            meta={"step_count": len(steps), "pipeline": pipeline_name}
+        )
+        
+        aborted = False
+        for step in steps:
+            if aborted:
+                break
+            try:
+                aborted = self._execute_flow_step(step, phase=pipeline_name, ctx=ctx)
+            except Exception as e:
+                self.diagnostics.record_step(
+                    phase=pipeline_name, 
+                    step_id=f"{pipeline_name}.pipeline.internal_error",
+                    handler=f"kernel:{pipeline_name}.run", 
+                    status="failed", 
+                    error=e
+                )
+                if not fail_soft_default:
+                    break
+        
+        self.diagnostics.record_step(
+            phase=pipeline_name, 
+            step_id=f"{pipeline_name}.pipeline.end", 
+            handler=f"kernel:{pipeline_name}.run",
+            status="success" if not aborted else "failed", 
+            meta={"aborted": aborted, "pipeline": pipeline_name}
+        )
+        
+        return ctx
+
+def run_message(self, chat_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         flow = self._flow or self.load_flow()
         defaults = flow.get("defaults", {}) if isinstance(flow, dict) else {}
         fail_soft_default = bool(defaults.get("fail_soft", True))
@@ -459,6 +527,14 @@ class Kernel:
         except Exception:
             pass
         ctx.setdefault("_disabled_targets", {"packs": set(), "components": set()})
+        
+        # PermissionManagerを追加
+        try:
+            from .permission_manager import get_permission_manager
+            ctx["permission_manager"] = get_permission_manager()
+        except ImportError:
+            pass
+        
         return ctx
 
     def _execute_flow_step(self, step: Any, phase: str, ctx: Dict[str, Any]) -> bool:

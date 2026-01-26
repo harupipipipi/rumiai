@@ -23,12 +23,22 @@ class InstallJournal:
     def __init__(self, config: Optional[InstallJournalConfig] = None) -> None:
         self.config = config or InstallJournalConfig()
         self._last_error: Optional[str] = None
+        self._interface_registry = None
 
     def _now_ts(self) -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     def last_error(self) -> Optional[str]:
         return self._last_error
+
+    def set_interface_registry(self, ir) -> None:
+        """
+        InterfaceRegistryを設定
+        
+        system.uninstall_policy をIRから取得するために使用。
+        ecosystem側でポリシーを登録することで、許可/保護ディレクトリを制御可能。
+        """
+        self._interface_registry = ir
 
     def _journal_dir(self) -> Path:
         return Path(self.config.dir_path)
@@ -100,20 +110,66 @@ class InstallJournal:
             return result
 
     def _resolve_policy_roots(self) -> Tuple[List[Path], List[Path], Dict[str, Any]]:
-        meta: Dict[str, Any] = {"source": "fallback", "allowed_mounts": [], "protected_mounts": []}
+        """
+        アンインストールポリシーのルートディレクトリを解決
+        
+        優先順位:
+        1. InterfaceRegistryの system.uninstall_policy
+        2. MountManagerの汎用マウント（data.settings, data.cache）
+        3. フォールバック: user_data全体を保護（安全側）
+        
+        Note: 公式は具体的なマウントキー（data.chatsなど）をハードコードしない。
+              ecosystem側で system.uninstall_policy を登録することでカスタマイズ可能。
+        """
+        meta: Dict[str, Any] = {"source": "fallback", "allowed_roots": [], "protected_roots": []}
+        
+        # 1. InterfaceRegistryからポリシーを取得
+        if self._interface_registry:
+            policy = self._interface_registry.get("system.uninstall_policy")
+            if policy and isinstance(policy, dict):
+                try:
+                    allowed = [Path(p).resolve() for p in policy.get("allowed_roots", [])]
+                    protected = [Path(p).resolve() for p in policy.get("protected_roots", [])]
+                    meta["source"] = "interface_registry"
+                    meta["allowed_roots"] = [str(p) for p in allowed]
+                    meta["protected_roots"] = [str(p) for p in protected]
+                    return allowed, protected, meta
+                except Exception:
+                    pass
+        
+        # 2. MountManagerから汎用マウントを取得
         try:
             from backend_core.ecosystem.mounts import get_mount_manager
             mm = get_mount_manager()
-            allowed = [mm.get_path("data.settings", ensure_exists=False), mm.get_path("data.cache", ensure_exists=False)]
-            protected = [mm.get_path("data.chats", ensure_exists=False), mm.get_path("data.shared", ensure_exists=False)]
-            meta["source"] = "mounts"
+            allowed = []
+            protected = []
+            
+            # 汎用的なマウントキーのみ使用（ドメイン固有キーは使わない）
+            for key in ["data.settings", "data.cache"]:
+                try:
+                    allowed.append(mm.get_path(key, ensure_exists=False))
+                except (KeyError, Exception):
+                    pass
+            
+            # data.userを保護対象に
+            try:
+                protected.append(mm.get_path("data.user", ensure_exists=False))
+            except (KeyError, Exception):
+                protected.append(Path("user_data").resolve())
+            
+            if allowed or protected:
+                meta["source"] = "mounts_generic"
+                meta["allowed_roots"] = [str(p) for p in allowed]
+                meta["protected_roots"] = [str(p) for p in protected]
+                return allowed, protected, meta
         except Exception:
-            ud = Path("user_data").resolve()
-            allowed = [(ud / "settings").resolve(), (ud / "cache").resolve()]
-            protected = [(ud / "chats").resolve(), (ud / "shared").resolve()]
-        meta["allowed_roots"] = [str(p) for p in allowed]
-        meta["protected_roots"] = [str(p) for p in protected]
-        return allowed, protected, meta
+            pass
+        
+        # 3. 最終フォールバック: 全てを保護（安全側に倒す）
+        meta["source"] = "fallback_safe"
+        ud = Path("user_data").resolve()
+        meta["protected_roots"] = [str(ud)]
+        return [], [ud], meta
 
     def _collect_created_paths(self, files: List[Path], errors: List[Dict[str, Any]]) -> Set[Path]:
         out: Set[Path] = set()

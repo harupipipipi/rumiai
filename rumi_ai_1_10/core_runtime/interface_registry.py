@@ -7,7 +7,7 @@ interface_registry.py - 提供物登録箱(用途名固定しない)
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Literal, Callable, Iterable, Tuple
 from threading import RLock
 from contextlib import contextmanager
@@ -76,15 +76,51 @@ class InterfaceRegistry:
         """
         キーが存在しない場合のみ登録（アトミック操作）
         
+        Args:
+            key: 登録キー
+            value: 登録する値
+            meta: メタデータ
+            ttl: 有効期限（秒）。指定するとその時間後に期限切れとなり、
+                 次のregister_if_absentで上書き可能になる。
+        
         Returns:
-            True: 登録成功（キーが存在しなかった）
-            False: 登録失敗（キーが既に存在）
+            True: 登録成功（キーが存在しなかった、または期限切れだった）
+            False: 登録失敗（キーが既に存在し、有効）
         """
         with self._lock:
-            if key in self._store and self._store[key]:
+            existing = self._store.get(key, [])
+            
+            # 有効なエントリが存在するかチェック
+            has_valid = False
+            now = datetime.now(timezone.utc)
+            for it in existing:
+                item_meta = it.get("meta", {})
+                expires_at = item_meta.get("_expires_at")
+                if expires_at:
+                    try:
+                        exp_time = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+                        if now <= exp_time:
+                            has_valid = True
+                            break
+                    except (ValueError, TypeError):
+                        has_valid = True
+                        break
+                else:
+                    has_valid = True
+                    break
+            
+            if has_valid:
                 return False
             
+            # メタデータ準備
             meta_dict = dict(meta) if isinstance(meta, dict) else ({"_raw_meta": meta} if meta else {})
+            
+            # TTLが指定されていれば有効期限を設定
+            if ttl is not None and ttl > 0:
+                expires_at = (now + timedelta(seconds=ttl)).isoformat().replace("+00:00", "Z")
+                meta_dict["_expires_at"] = expires_at
+                meta_dict["_ttl"] = ttl
+            
             entry = {
                 "key": key,
                 "value": value,

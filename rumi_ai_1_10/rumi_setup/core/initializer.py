@@ -84,14 +84,20 @@ class Initializer:
             }
     
     def _create_user_data(self) -> list:
+        """
+        user_dataディレクトリを作成
+        
+        Note: 公式は汎用ディレクトリのみ作成。
+              chats, shared などのドメイン固有ディレクトリは
+              ecosystem側のコンポーネント(setup.py)で作成させる。
+        """
         created = []
         
+        # 公式は汎用ディレクトリのみ定義
         dirs = [
             "user_data",
-            "user_data/chats",
             "user_data/settings",
             "user_data/cache",
-            "user_data/shared",
         ]
         
         for dir_path in dirs:
@@ -113,6 +119,8 @@ class Initializer:
         mounts_data = {
             "version": "1.0",
             "mounts": {
+                # 公式は汎用マウントのみ定義
+                # 具体的なマウントはコンポーネントが自己登録する
                 "data.user": "./user_data",
                 "data.cache": "./user_data/cache",
             }

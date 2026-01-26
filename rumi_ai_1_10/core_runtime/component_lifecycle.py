@@ -215,13 +215,23 @@ class ComponentLifecycleExecutor:
         comp_id = getattr(component, "full_id", None)
         if not isinstance(comp_id, str):
             comp_id = f"{getattr(component,'pack_id',None)}:{getattr(component,'type',None)}:{getattr(component,'id',None)}"
-        return {"phase": phase, "ts": self._now_ts(),
+        
+        ctx = {"phase": phase, "ts": self._now_ts(),
                 "ids": {"component_full_id": comp_id, "component_type": getattr(component, "type", None),
                         "component_id": getattr(component, "id", None), "pack_id": getattr(component, "pack_id", None),
                         "active_pack_identity": getattr(active, "active_pack_identity", None)},
                 "paths": {"component_runtime_dir": str(Path(getattr(component, "path", ".")).resolve()), "mounts": mounts},
                 "registry": reg, "active_ecosystem": active, "diagnostics": self.diagnostics, "install_journal": self.install_journal,
                 "interface_registry": self.interface_registry, "event_bus": self.event_bus, "_source_component": comp_id}
+        
+        # PermissionManagerを追加
+        try:
+            from .permission_manager import get_permission_manager
+            ctx["permission_manager"] = get_permission_manager()
+        except ImportError:
+            pass
+        
+        return ctx
 
     def _exec_python_file(self, file_path: Path, context: Dict[str, Any]) -> None:
         module_name = f"core_runtime_dyn_{file_path.stem}_{abs(hash(str(file_path)))}"

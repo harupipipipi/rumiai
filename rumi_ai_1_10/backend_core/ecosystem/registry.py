@@ -1,4 +1,3 @@
-# backend_core/ecosystem/registry.py
 """
 Pack/Component/Addon のレジストリ
 
@@ -11,7 +10,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 
-from .uuid_utils import generate_pack_uuid, generate_component_uuid, generate_addon_uuid
+from .uuid_utils import generate_pack_uuid, generate_component_uuid
 from .json_patch import apply_patch, JsonPatchError
 from .spec.schema.validator import (
     validate_ecosystem,
@@ -31,6 +30,7 @@ class ComponentInfo:
     manifest: Dict[str, Any]
     path: Path
     pack_id: str
+    permissions_required: Dict[str, Any] = field(default_factory=dict)
     
     @property
     def full_id(self) -> str:
@@ -79,7 +79,8 @@ class Registry:
             print(f"[Registry] エコシステムディレクトリが存在しません: {self.ecosystem_dir}")
             return {}
         
-        print(f"\n=== Registry: Packの読み込みを開始 ===")
+        print(f"
+=== Registry: Packの読み込みを開始 ===")
         
         for pack_dir in self.ecosystem_dir.iterdir():
             if pack_dir.is_dir() and not pack_dir.name.startswith('.'):
@@ -200,7 +201,8 @@ class Registry:
                         uuid=component_uuid,
                         manifest=manifest,
                         path=component_dir,
-                        pack_id=pack_info.pack_id
+                        pack_id=pack_info.pack_id,
+                        permissions_required=manifest.get('permissions_required', {})
                     )
                     
                     # インデックスに追加

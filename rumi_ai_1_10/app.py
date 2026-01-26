@@ -127,9 +127,11 @@ def _apply_fallback_index():
     def _no_ui_fallback():
         registered = list((ir.list() or {}).keys())
         return Response(
-            "Rumi AI OS\n\n"
-            "No UI component registered.\n"
-            "Install a UI pack in ecosystem/ directory.\n\n"
+            "Rumi AI OS
+
+"
+            "No root route handler registered.\n"
+            "Install a pack in ecosystem/ directory that provides a root route.\n\n"
             f"Registered interfaces ({len(registered)}):\n" +
             "\n".join(f"  - {k}" for k in sorted(registered)[:20]),
             status=503,

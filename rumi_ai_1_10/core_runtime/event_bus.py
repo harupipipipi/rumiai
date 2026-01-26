@@ -6,6 +6,7 @@ event_bus.py - publish/subscribe(疎結合通信)
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from threading import RLock
@@ -38,10 +39,12 @@ class EventBus:
         with self._lock:
             handlers = list(self._subs.get(topic, []))
         
-        for _, handler in handlers:
+        for handler_id, handler in handlers:
             try:
                 handler(payload)
-            except Exception:
+            except Exception as e:
+                # エラーを可視化するが、publishは継続
+                print(f"[EventBus] Handler '{handler_id}' error on topic '{topic}': {e}", file=sys.stderr)
                 continue
 
     def unsubscribe(self, topic: str, handler_id: str) -> bool:
