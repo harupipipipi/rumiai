@@ -1,0 +1,11 @@
+# ecosystem用Flowディレクトリ
+# 
+# このディレクトリにはecosystemコンポーネントが作成・編集するFlowを配置します。
+# 
+# 例:
+# - message.flow.yaml: メッセージ処理パイプライン
+# - ai_client.flow.yaml: AI呼び出しサブFlow
+# - tool_execution.flow.yaml: ツール実行サブFlow
+#
+# Flowの作成・編集はecosystemコンポーネントのsetup.pyまたは
+# flow_hooks.pyから行います（権限が必要）。

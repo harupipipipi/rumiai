@@ -1,4 +1,883 @@
+import os
+from pathlib import Path
+
+# プロジェクトルートを設定（このスクリプトの実行場所に応じて調整）
+PROJECT_ROOT = Path(".")
+
+def write_file(path: str, content: str):
+    """ファイルを書き込む（ディレクトリがなければ作成）"""
+    full_path = PROJECT_ROOT / path
+    full_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(full_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    print(f"✓ 作成/更新: {path}")
+
+# =============================================================================
+# 1. 新規ファイル: core_runtime/function_alias.py
+# =============================================================================
+
+function_alias_py = '''"""
+function_alias.py - 関数エイリアス（同義語マッピング）システム
+
+異なる名前で同じ概念を指せるようにし、互換性を高める。
+
+設計原則:
+- 公式は具体的なエイリアスをハードコードしない
+- ecosystemが自由にエイリアスを追加可能
+- 正規名（canonical）と複数のエイリアスをマッピング
+
+Usage:
+    alias = get_function_alias_registry()
+    
+    # エイリアスを登録（ecosystem側で実行）
+    alias.register_aliases("ai", ["ai_client", "ai_provider", "llm"])
+    alias.register_aliases("tool", ["tools", "function_calling", "tooluse"])
+    
+    # 解決
+    alias.resolve("ai_provider")  # → "ai"
+    alias.resolve("unknown")       # → "unknown"（未登録はそのまま）
+    
+    # 正規名に対応する全ての名前を取得
+    alias.find_all("ai")  # → ["ai", "ai_client", "ai_provider", "llm"]
 """
+
+from __future__ import annotations
+
+import threading
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Set
+
+
+@dataclass
+class FunctionAliasRegistry:
+    """
+    関数エイリアスレジストリ
+    
+    正規名（canonical）とエイリアスのマッピングを管理する。
+    スレッドセーフ。
+    """
+    
+    # canonical -> set of aliases (canonical自身を含む)
+    _canonical_to_aliases: Dict[str, Set[str]] = field(default_factory=dict)
+    
+    # alias -> canonical
+    _alias_to_canonical: Dict[str, str] = field(default_factory=dict)
+    
+    _lock: threading.RLock = field(default_factory=threading.RLock)
+    
+    def register_aliases(self, canonical: str, aliases: List[str]) -> None:
+        """
+        正規名とエイリアスを登録
+        
+        Args:
+            canonical: 正規名（例: "ai", "tool"）
+            aliases: エイリアスのリスト（例: ["ai_client", "ai_provider"]）
+        
+        Note:
+            - canonical自身も自動的にエイリアスとして登録される
+            - 既に他のcanonicalに登録されているaliasは上書きされる
+        """
+        with self._lock:
+            # canonicalが既存のaliasとして登録されている場合、それを解除
+            if canonical in self._alias_to_canonical:
+                old_canonical = self._alias_to_canonical[canonical]
+                if old_canonical != canonical:
+                    self._canonical_to_aliases[old_canonical].discard(canonical)
+            
+            # canonical自身を含むセットを作成/更新
+            if canonical not in self._canonical_to_aliases:
+                self._canonical_to_aliases[canonical] = {canonical}
+            
+            # aliasを登録
+            for alias in aliases:
+                # 既存の登録を解除
+                if alias in self._alias_to_canonical:
+                    old_canonical = self._alias_to_canonical[alias]
+                    if old_canonical != canonical:
+                        self._canonical_to_aliases[old_canonical].discard(alias)
+                
+                self._canonical_to_aliases[canonical].add(alias)
+                self._alias_to_canonical[alias] = canonical
+            
+            # canonical自身も登録
+            self._alias_to_canonical[canonical] = canonical
+    
+    def add_alias(self, canonical: str, alias: str) -> bool:
+        """
+        単一のエイリアスを追加
+        
+        Args:
+            canonical: 正規名
+            alias: 追加するエイリアス
+        
+        Returns:
+            成功した場合True
+        """
+        with self._lock:
+            if canonical not in self._canonical_to_aliases:
+                # canonicalが未登録の場合は新規作成
+                self._canonical_to_aliases[canonical] = {canonical}
+                self._alias_to_canonical[canonical] = canonical
+            
+            # 既存の登録を解除
+            if alias in self._alias_to_canonical:
+                old_canonical = self._alias_to_canonical[alias]
+                if old_canonical != canonical:
+                    self._canonical_to_aliases[old_canonical].discard(alias)
+            
+            self._canonical_to_aliases[canonical].add(alias)
+            self._alias_to_canonical[alias] = canonical
+            return True
+    
+    def resolve(self, name: str) -> str:
+        """
+        名前を正規名に解決
+        
+        Args:
+            name: 解決する名前
+        
+        Returns:
+            正規名。未登録の場合はnameをそのまま返す。
+        """
+        with self._lock:
+            return self._alias_to_canonical.get(name, name)
+    
+    def find_all(self, canonical: str) -> List[str]:
+        """
+        正規名に対応する全ての名前（エイリアス）を取得
+        
+        Args:
+            canonical: 正規名
+        
+        Returns:
+            canonical自身を含む全てのエイリアスのリスト。
+            未登録の場合は[canonical]を返す。
+        """
+        with self._lock:
+            if canonical in self._canonical_to_aliases:
+                return sorted(list(self._canonical_to_aliases[canonical]))
+            return [canonical]
+    
+    def is_alias_of(self, name: str, canonical: str) -> bool:
+        """
+        nameがcanonicalのエイリアスかどうか判定
+        
+        Args:
+            name: 判定する名前
+            canonical: 正規名
+        
+        Returns:
+            エイリアスの場合True
+        """
+        with self._lock:
+            resolved = self._alias_to_canonical.get(name)
+            return resolved == canonical
+    
+    def get_canonical(self, name: str) -> Optional[str]:
+        """
+        名前の正規名を取得（未登録ならNone）
+        
+        Args:
+            name: 名前
+        
+        Returns:
+            正規名、または未登録ならNone
+        """
+        with self._lock:
+            return self._alias_to_canonical.get(name)
+    
+    def list_all_canonicals(self) -> List[str]:
+        """全ての正規名を取得"""
+        with self._lock:
+            return sorted(list(self._canonical_to_aliases.keys()))
+    
+    def list_all_mappings(self) -> Dict[str, List[str]]:
+        """全てのマッピングを取得"""
+        with self._lock:
+            return {
+                canonical: sorted(list(aliases))
+                for canonical, aliases in self._canonical_to_aliases.items()
+            }
+    
+    def remove_alias(self, alias: str) -> bool:
+        """
+        エイリアスを削除
+        
+        Args:
+            alias: 削除するエイリアス
+        
+        Returns:
+            削除成功した場合True
+        
+        Note:
+            正規名自身は削除できない
+        """
+        with self._lock:
+            if alias not in self._alias_to_canonical:
+                return False
+            
+            canonical = self._alias_to_canonical[alias]
+            
+            # 正規名自身は削除しない
+            if alias == canonical:
+                return False
+            
+            del self._alias_to_canonical[alias]
+            self._canonical_to_aliases[canonical].discard(alias)
+            return True
+    
+    def remove_canonical(self, canonical: str) -> bool:
+        """
+        正規名とその全てのエイリアスを削除
+        
+        Args:
+            canonical: 削除する正規名
+        
+        Returns:
+            削除成功した場合True
+        """
+        with self._lock:
+            if canonical not in self._canonical_to_aliases:
+                return False
+            
+            # 関連する全てのエイリアスを削除
+            for alias in list(self._canonical_to_aliases[canonical]):
+                if alias in self._alias_to_canonical:
+                    del self._alias_to_canonical[alias]
+            
+            del self._canonical_to_aliases[canonical]
+            return True
+    
+    def clear(self) -> None:
+        """全てのマッピングをクリア"""
+        with self._lock:
+            self._canonical_to_aliases.clear()
+            self._alias_to_canonical.clear()
+
+
+# グローバルインスタンス
+_global_function_alias_registry: Optional[FunctionAliasRegistry] = None
+_registry_lock = threading.Lock()
+
+
+def get_function_alias_registry() -> FunctionAliasRegistry:
+    """グローバルなFunctionAliasRegistryインスタンスを取得"""
+    global _global_function_alias_registry
+    if _global_function_alias_registry is None:
+        with _registry_lock:
+            if _global_function_alias_registry is None:
+                _global_function_alias_registry = FunctionAliasRegistry()
+    return _global_function_alias_registry
+
+
+def reset_function_alias_registry() -> FunctionAliasRegistry:
+    """FunctionAliasRegistryをリセット（テスト用）"""
+    global _global_function_alias_registry
+    with _registry_lock:
+        _global_function_alias_registry = FunctionAliasRegistry()
+    return _global_function_alias_registry
+'''
+
+write_file("core_runtime/function_alias.py", function_alias_py)
+
+# =============================================================================
+# 2. 新規ファイル: core_runtime/flow_composer.py
+# =============================================================================
+
+flow_composer_py = '''"""
+flow_composer.py - Flow合成・修正システム
+
+ecosystemコンポーネントがFlowを動的に修正するための基盤。
+
+設計原則:
+- 公式は修正の「仕組み」のみ提供
+- 具体的な修正ロジックはecosystem側で定義
+- 安全性を考慮（不正な修正を検出）
+
+Usage:
+    composer = get_flow_composer()
+    
+    # modifierを収集
+    modifiers = composer.collect_modifiers(interface_registry)
+    
+    # Flowに修正を適用
+    modified_flow = composer.apply_modifiers(flow_def, modifiers)
+"""
+
+from __future__ import annotations
+
+import copy
+import threading
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Dict, List, Any, Optional, Callable
+
+from .function_alias import FunctionAliasRegistry, get_function_alias_registry
+
+
+@dataclass
+class FlowModifier:
+    """Flow修正の定義"""
+    id: str
+    priority: int
+    target_flow: Optional[str]  # 対象Flow名（Noneなら全Flow）
+    requires: Dict[str, Any]    # 適用条件
+    modifications: List[Dict[str, Any]]  # 修正操作のリスト
+    source_component: Optional[str] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "priority": self.priority,
+            "target_flow": self.target_flow,
+            "requires": self.requires,
+            "modifications": self.modifications,
+            "source_component": self.source_component
+        }
+
+
+class FlowComposer:
+    """
+    Flow合成・修正システム
+    
+    ecosystemコンポーネントが登録したflow.modifierを収集し、
+    Flow定義に適用する。
+    """
+    
+    def __init__(self):
+        self._lock = threading.RLock()
+        self._applied_modifiers: List[Dict[str, Any]] = []
+        self._alias_registry: Optional[FunctionAliasRegistry] = None
+    
+    def _now_ts(self) -> str:
+        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    
+    def set_alias_registry(self, registry: FunctionAliasRegistry) -> None:
+        """エイリアスレジストリを設定"""
+        self._alias_registry = registry
+    
+    def collect_modifiers(self, interface_registry) -> List[FlowModifier]:
+        """
+        InterfaceRegistryからflow.modifierを収集
+        
+        Args:
+            interface_registry: InterfaceRegistry インスタンス
+        
+        Returns:
+            優先度順にソートされたFlowModifierのリスト
+        """
+        raw_modifiers = interface_registry.get("flow.modifier", strategy="all") or []
+        
+        modifiers = []
+        for raw in raw_modifiers:
+            if not isinstance(raw, dict):
+                continue
+            
+            try:
+                modifier = FlowModifier(
+                    id=raw.get("id", f"modifier_{len(modifiers)}"),
+                    priority=raw.get("priority", 100),
+                    target_flow=raw.get("target_flow"),
+                    requires=raw.get("requires", {}),
+                    modifications=raw.get("modifications", []),
+                    source_component=raw.get("source_component")
+                )
+                modifiers.append(modifier)
+            except Exception:
+                continue
+        
+        # 優先度でソート（小さい方が先）
+        modifiers.sort(key=lambda m: m.priority)
+        return modifiers
+    
+    def check_requirements(
+        self,
+        modifier: FlowModifier,
+        interface_registry,
+        available_capabilities: Dict[str, Any] = None
+    ) -> bool:
+        """
+        修正の適用条件をチェック
+        
+        Args:
+            modifier: チェックするmodifier
+            interface_registry: InterfaceRegistry インスタンス
+            available_capabilities: 利用可能なcapabilitiesの辞書
+        
+        Returns:
+            条件を満たす場合True
+        """
+        requires = modifier.requires
+        
+        if not requires:
+            return True
+        
+        # capabilities チェック
+        required_caps = requires.get("capabilities", [])
+        if required_caps:
+            if available_capabilities is None:
+                return False
+            for cap in required_caps:
+                if not available_capabilities.get(cap):
+                    return False
+        
+        # modifiers チェック（他のmodifierが適用済みであること）
+        required_mods = requires.get("modifiers", [])
+        if required_mods:
+            applied_ids = {m.get("id") for m in self._applied_modifiers}
+            for mod_id in required_mods:
+                if mod_id not in applied_ids:
+                    return False
+        
+        # interfaces チェック（特定のIRキーが登録されていること）
+        required_interfaces = requires.get("interfaces", [])
+        if required_interfaces:
+            for iface in required_interfaces:
+                if interface_registry.get(iface) is None:
+                    return False
+        
+        return True
+    
+    def apply_modifiers(
+        self,
+        flow_def: Dict[str, Any],
+        modifiers: List[FlowModifier],
+        interface_registry = None,
+        available_capabilities: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
+        """
+        Flow定義に修正を適用
+        
+        Args:
+            flow_def: 元のFlow定義
+            modifiers: 適用するmodifierのリスト
+            interface_registry: InterfaceRegistry インスタンス（条件チェック用）
+            available_capabilities: 利用可能なcapabilities
+        
+        Returns:
+            修正後のFlow定義（新しい辞書、元は変更しない）
+        """
+        result = copy.deepcopy(flow_def)
+        
+        with self._lock:
+            self._applied_modifiers.clear()
+            
+            for modifier in modifiers:
+                # 条件チェック
+                if interface_registry and not self.check_requirements(
+                    modifier, interface_registry, available_capabilities
+                ):
+                    continue
+                
+                # 修正を適用
+                try:
+                    result = self._apply_single_modifier(result, modifier)
+                    self._applied_modifiers.append({
+                        "id": modifier.id,
+                        "applied_at": self._now_ts(),
+                        "source_component": modifier.source_component
+                    })
+                except Exception as e:
+                    # 適用失敗は記録して継続
+                    print(f"[FlowComposer] Modifier '{modifier.id}' failed: {e}")
+                    continue
+        
+        return result
+    
+    def _apply_single_modifier(
+        self,
+        flow_def: Dict[str, Any],
+        modifier: FlowModifier
+    ) -> Dict[str, Any]:
+        """
+        単一の修正を適用
+        
+        サポートする操作:
+        - inject_before: 指定ステップの前にステップを挿入
+        - inject_after: 指定ステップの後にステップを挿入
+        - replace: 指定ステップを置換
+        - wrap_with_loop: 指定ステップ群をループで囲む
+        - remove: 指定ステップを削除
+        - set_property: ステップのプロパティを設定
+        """
+        for modification in modifier.modifications:
+            action = modification.get("action")
+            
+            if action == "inject_before":
+                flow_def = self._action_inject(
+                    flow_def, modification, "before"
+                )
+            elif action == "inject_after":
+                flow_def = self._action_inject(
+                    flow_def, modification, "after"
+                )
+            elif action == "replace":
+                flow_def = self._action_replace(flow_def, modification)
+            elif action == "wrap_with_loop":
+                flow_def = self._action_wrap_loop(flow_def, modification)
+            elif action == "remove":
+                flow_def = self._action_remove(flow_def, modification)
+            elif action == "set_property":
+                flow_def = self._action_set_property(flow_def, modification)
+            # 未知の操作は無視
+        
+        return flow_def
+    
+    def _find_step_index(
+        self,
+        steps: List[Dict[str, Any]],
+        target: Dict[str, Any]
+    ) -> int:
+        """
+        ターゲットに一致するステップのインデックスを検索
+        
+        target形式:
+        - {"id": "step_id"}: IDで検索
+        - {"function": "ai"}: 関数名（エイリアス解決あり）で検索
+        - {"handler": "ai.generate"}: ハンドラ名で検索
+        """
+        alias_registry = self._alias_registry or get_function_alias_registry()
+        
+        for i, step in enumerate(steps):
+            # ID検索
+            if "id" in target:
+                if step.get("id") == target["id"]:
+                    return i
+            
+            # 関数名検索（エイリアス解決）
+            if "function" in target:
+                target_function = target["function"]
+                target_aliases = alias_registry.find_all(target_function)
+                
+                step_handler = step.get("handler", "")
+                step_function = step_handler.split(".")[0] if step_handler else ""
+                step_type = step.get("type", "")
+                
+                # runブロック内のhandlerもチェック
+                run_block = step.get("run", {})
+                if isinstance(run_block, dict):
+                    run_handler = run_block.get("handler", "")
+                    run_function = run_handler.split(".")[0] if run_handler else ""
+                    if run_function in target_aliases:
+                        return i
+                
+                # ハンドラの先頭部分またはtypeがエイリアスに一致するか
+                if step_function in target_aliases or step_type in target_aliases:
+                    return i
+            
+            # ハンドラ名検索
+            if "handler" in target:
+                if step.get("handler") == target["handler"]:
+                    return i
+                # runブロック内もチェック
+                run_block = step.get("run", {})
+                if isinstance(run_block, dict):
+                    if run_block.get("handler") == target["handler"]:
+                        return i
+        
+        return -1
+    
+    def _action_inject(
+        self,
+        flow_def: Dict[str, Any],
+        modification: Dict[str, Any],
+        position: str  # "before" or "after"
+    ) -> Dict[str, Any]:
+        """inject_before / inject_after の実装"""
+        target_step = modification.get("target_step", {})
+        new_steps = modification.get("steps", [])
+        target_pipeline = modification.get("pipeline")
+        
+        if not new_steps:
+            return flow_def
+        
+        pipelines = flow_def.get("pipelines", {})
+        
+        for pipeline_name, steps in pipelines.items():
+            if target_pipeline and pipeline_name != target_pipeline:
+                continue
+            
+            if not isinstance(steps, list):
+                continue
+            
+            index = self._find_step_index(steps, target_step)
+            if index >= 0:
+                if position == "after":
+                    index += 1
+                
+                for j, new_step in enumerate(new_steps):
+                    steps.insert(index + j, copy.deepcopy(new_step))
+        
+        return flow_def
+    
+    def _action_replace(
+        self,
+        flow_def: Dict[str, Any],
+        modification: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """replace の実装"""
+        target_step = modification.get("target_step", {})
+        new_steps = modification.get("steps", [])
+        target_pipeline = modification.get("pipeline")
+        
+        pipelines = flow_def.get("pipelines", {})
+        
+        for pipeline_name, steps in pipelines.items():
+            if target_pipeline and pipeline_name != target_pipeline:
+                continue
+            
+            if not isinstance(steps, list):
+                continue
+            
+            index = self._find_step_index(steps, target_step)
+            if index >= 0:
+                # 元のステップを削除
+                steps.pop(index)
+                # 新しいステップを挿入
+                for j, new_step in enumerate(new_steps):
+                    steps.insert(index + j, copy.deepcopy(new_step))
+        
+        return flow_def
+    
+    def _action_wrap_loop(
+        self,
+        flow_def: Dict[str, Any],
+        modification: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """wrap_with_loop の実装"""
+        target_steps = modification.get("target_steps", [])  # ステップIDのリスト
+        loop_config = modification.get("loop_config", {})
+        target_pipeline = modification.get("pipeline")
+        
+        if not target_steps:
+            return flow_def
+        
+        pipelines = flow_def.get("pipelines", {})
+        
+        for pipeline_name, steps in pipelines.items():
+            if target_pipeline and pipeline_name != target_pipeline:
+                continue
+            
+            if not isinstance(steps, list):
+                continue
+            
+            # ターゲットステップのインデックスを収集
+            indices = []
+            for target_id in target_steps:
+                for i, step in enumerate(steps):
+                    if step.get("id") == target_id:
+                        indices.append(i)
+                        break
+            
+            if not indices:
+                continue
+            
+            # 連続する範囲を特定
+            indices.sort()
+            start_idx = indices[0]
+            end_idx = indices[-1]
+            
+            # 対象ステップを抽出
+            loop_steps = steps[start_idx:end_idx + 1]
+            
+            # loopステップを作成
+            loop_step = {
+                "type": "loop",
+                "exit_when": loop_config.get("exit_condition", "false"),
+                "max_iterations": loop_config.get("max_iterations", 10),
+                "steps": copy.deepcopy(loop_steps)
+            }
+            
+            # 元のステップを削除してloopステップを挿入
+            del steps[start_idx:end_idx + 1]
+            steps.insert(start_idx, loop_step)
+        
+        return flow_def
+    
+    def _action_remove(
+        self,
+        flow_def: Dict[str, Any],
+        modification: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """remove の実装"""
+        target_step = modification.get("target_step", {})
+        target_pipeline = modification.get("pipeline")
+        
+        pipelines = flow_def.get("pipelines", {})
+        
+        for pipeline_name, steps in pipelines.items():
+            if target_pipeline and pipeline_name != target_pipeline:
+                continue
+            
+            if not isinstance(steps, list):
+                continue
+            
+            index = self._find_step_index(steps, target_step)
+            if index >= 0:
+                steps.pop(index)
+        
+        return flow_def
+    
+    def _action_set_property(
+        self,
+        flow_def: Dict[str, Any],
+        modification: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """set_property の実装"""
+        target_step = modification.get("target_step", {})
+        properties = modification.get("properties", {})
+        target_pipeline = modification.get("pipeline")
+        
+        pipelines = flow_def.get("pipelines", {})
+        
+        for pipeline_name, steps in pipelines.items():
+            if target_pipeline and pipeline_name != target_pipeline:
+                continue
+            
+            if not isinstance(steps, list):
+                continue
+            
+            index = self._find_step_index(steps, target_step)
+            if index >= 0:
+                for key, value in properties.items():
+                    steps[index][key] = copy.deepcopy(value)
+        
+        return flow_def
+    
+    def get_applied_modifiers(self) -> List[Dict[str, Any]]:
+        """適用済みのmodifier情報を取得"""
+        with self._lock:
+            return list(self._applied_modifiers)
+    
+    def clear_applied(self) -> None:
+        """適用済み情報をクリア"""
+        with self._lock:
+            self._applied_modifiers.clear()
+
+
+# グローバルインスタンス
+_global_flow_composer: Optional[FlowComposer] = None
+_composer_lock = threading.Lock()
+
+
+def get_flow_composer() -> FlowComposer:
+    """グローバルなFlowComposerインスタンスを取得"""
+    global _global_flow_composer
+    if _global_flow_composer is None:
+        with _composer_lock:
+            if _global_flow_composer is None:
+                _global_flow_composer = FlowComposer()
+    return _global_flow_composer
+
+
+def reset_flow_composer() -> FlowComposer:
+    """FlowComposerをリセット（テスト用）"""
+    global _global_flow_composer
+    with _composer_lock:
+        _global_flow_composer = FlowComposer()
+    return _global_flow_composer
+'''
+
+write_file("core_runtime/flow_composer.py", flow_composer_py)
+
+# =============================================================================
+# 3. 新規ファイル: flow/core/00_startup.flow.yaml
+# =============================================================================
+
+startup_flow_yaml = '''# Rumi AI OS - Core Startup Flow
+# 
+# 公式Flow: Kernel初期化に必要な最小限の処理のみ定義
+# このファイルはecosystemによる編集不可
+#
+# 処理内容:
+# 1. マウントシステム初期化
+# 2. Packレジストリ読み込み
+# 3. アクティブエコシステム設定読み込み
+# 4. コンポーネントフェーズ実行（setup, runtime_boot）
+# 5. サービス公開
+
+flow_version: "2.0"
+
+defaults:
+  fail_soft: true
+  on_missing_handler: skip
+
+pipelines:
+  startup:
+    # === Phase 1: 基盤初期化 ===
+    - id: core.mounts
+      run:
+        handler: "kernel:mounts.init"
+        args:
+          mounts_file: "user_data/mounts.json"
+
+    - id: core.registry
+      run:
+        handler: "kernel:registry.load"
+        args:
+          ecosystem_dir: "ecosystem"
+
+    - id: core.active_ecosystem
+      run:
+        handler: "kernel:active_ecosystem.load"
+        args:
+          config_file: "user_data/active_ecosystem.json"
+
+    # === Phase 2: コンポーネント初期化 ===
+    - id: components.setup
+      run:
+        handler: "component_phase:setup"
+        args:
+          filename: "setup.py"
+
+    # === Phase 3: Flow合成（オプション） ===
+    # ecosystem側でflow.modifierが登録されていれば適用
+    - id: core.flow_compose
+      optional: true
+      run:
+        handler: "kernel:flow.compose"
+        args: {}
+
+    # === Phase 4: ランタイム起動 ===
+    - id: components.runtime_boot
+      run:
+        handler: "component_phase:runtime_boot"
+        args:
+          filename: "runtime_boot.py"
+
+    # === Phase 5: サービス公開 ===
+    - id: core.interfaces_publish
+      run:
+        handler: "kernel:interfaces.publish"
+        args: {}
+'''
+
+write_file("flow/core/00_startup.flow.yaml", startup_flow_yaml)
+
+# =============================================================================
+# 4. 新規ファイル: flow/ecosystem/.gitkeep
+# =============================================================================
+
+gitkeep_content = '''# ecosystem用Flowディレクトリ
+# 
+# このディレクトリにはecosystemコンポーネントが作成・編集するFlowを配置します。
+# 
+# 例:
+# - message.flow.yaml: メッセージ処理パイプライン
+# - ai_client.flow.yaml: AI呼び出しサブFlow
+# - tool_execution.flow.yaml: ツール実行サブFlow
+#
+# Flowの作成・編集はecosystemコンポーネントのsetup.pyまたは
+# flow_hooks.pyから行います（権限が必要）。
+'''
+
+write_file("flow/ecosystem/.gitkeep", gitkeep_content)
+
+# =============================================================================
+# 5. 更新: core_runtime/kernel.py (完全置き換え)
+# =============================================================================
+
+kernel_py = '''"""
 kernel.py - Flow Runner(用途非依存カーネル)
 async対応、Flow Hook、タイムアウト、循環検出対応版
 """
@@ -645,7 +1524,7 @@ class Kernel:
         if " == " in condition:
             left, right = condition.split(" == ", 1)
             left_val = self._resolve_value(left.strip(), ctx)
-            right_val = right.strip().strip('"'')
+            right_val = right.strip().strip('"\'')
             if right_val.lower() == "true":
                 return left_val == True
             if right_val.lower() == "false":
@@ -658,7 +1537,7 @@ class Kernel:
         if " != " in condition:
             left, right = condition.split(" != ", 1)
             left_val = self._resolve_value(left.strip(), ctx)
-            right_val = right.strip().strip('"'')
+            right_val = right.strip().strip('"\'')
             if right_val.lower() == "true":
                 return left_val != True
             if right_val.lower() == "false":
@@ -1089,3 +1968,74 @@ class Kernel:
                 "_kernel_step_status": "failed",
                 "_kernel_step_meta": {"error": str(e)}
             }
+'''
+
+write_file("core_runtime/kernel.py", kernel_py)
+
+# =============================================================================
+# 6. 更新: core_runtime/__init__.py (完全置き換え)
+# =============================================================================
+
+init_py = '''"""
+core_runtime package
+"""
+
+from .kernel import Kernel, KernelConfig
+from .diagnostics import Diagnostics
+from .install_journal import InstallJournal, InstallJournalConfig
+from .interface_registry import InterfaceRegistry
+from .event_bus import EventBus
+from .component_lifecycle import ComponentLifecycleExecutor
+from .permission_manager import PermissionManager, get_permission_manager
+from .function_alias import FunctionAliasRegistry, get_function_alias_registry
+from .flow_composer import FlowComposer, FlowModifier, get_flow_composer
+
+__all__ = [
+    "Kernel",
+    "KernelConfig",
+    "Diagnostics",
+    "InstallJournal",
+    "InstallJournalConfig",
+    "InterfaceRegistry",
+    "EventBus",
+    "ComponentLifecycleExecutor",
+    "PermissionManager",
+    "get_permission_manager",
+    "FunctionAliasRegistry",
+    "get_function_alias_registry",
+    "FlowComposer",
+    "FlowModifier",
+    "get_flow_composer",
+]
+'''
+
+write_file("core_runtime/__init__.py", init_py)
+
+# =============================================================================
+# 7. 古いflowファイルの移動/削除についての説明を出力
+# =============================================================================
+
+print("\n" + "="*60)
+print("実装完了")
+print("="*60)
+print("""
+作成/更新されたファイル:
+  ✓ core_runtime/function_alias.py (新規)
+  ✓ core_runtime/flow_composer.py (新規)
+  ✓ flow/core/00_startup.flow.yaml (新規)
+  ✓ flow/ecosystem/.gitkeep (新規)
+  ✓ core_runtime/kernel.py (更新)
+  ✓ core_runtime/__init__.py (更新)
+
+次のステップ:
+  1. 既存の flow/*.flow.yaml ファイルを整理してください:
+     - flow/00_core.flow.yaml → 削除（flow/core/00_startup.flow.yamlで置き換え）
+     - flow/10_components.flow.yaml → 削除または flow/core/ に移動
+     - flow/20_services.flow.yaml → 削除または flow/core/ に移動
+     - flow/50_message.flow.yaml → flow/ecosystem/ に移動
+
+  2. ecosystem側でエイリアスを登録するコンポーネントを作成:
+     例: ecosystem/default/backend/components/aliases/setup.py
+
+  3. 必要に応じてflow.modifierを登録するコンポーネントを作成
+""")

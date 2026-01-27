@@ -1,0 +1,66 @@
+# Rumi AI OS - Core Startup Flow
+# 
+# 公式Flow: Kernel初期化に必要な最小限の処理のみ定義
+# このファイルはecosystemによる編集不可
+#
+# 処理内容:
+# 1. マウントシステム初期化
+# 2. Packレジストリ読み込み
+# 3. アクティブエコシステム設定読み込み
+# 4. コンポーネントフェーズ実行（setup, runtime_boot）
+# 5. サービス公開
+
+flow_version: "2.0"
+
+defaults:
+  fail_soft: true
+  on_missing_handler: skip
+
+pipelines:
+  startup:
+    # === Phase 1: 基盤初期化 ===
+    - id: core.mounts
+      run:
+        handler: "kernel:mounts.init"
+        args:
+          mounts_file: "user_data/mounts.json"
+
+    - id: core.registry
+      run:
+        handler: "kernel:registry.load"
+        args:
+          ecosystem_dir: "ecosystem"
+
+    - id: core.active_ecosystem
+      run:
+        handler: "kernel:active_ecosystem.load"
+        args:
+          config_file: "user_data/active_ecosystem.json"
+
+    # === Phase 2: コンポーネント初期化 ===
+    - id: components.setup
+      run:
+        handler: "component_phase:setup"
+        args:
+          filename: "setup.py"
+
+    # === Phase 3: Flow合成（オプション） ===
+    # ecosystem側でflow.modifierが登録されていれば適用
+    - id: core.flow_compose
+      optional: true
+      run:
+        handler: "kernel:flow.compose"
+        args: {}
+
+    # === Phase 4: ランタイム起動 ===
+    - id: components.runtime_boot
+      run:
+        handler: "component_phase:runtime_boot"
+        args:
+          filename: "runtime_boot.py"
+
+    # === Phase 5: サービス公開 ===
+    - id: core.interfaces_publish
+      run:
+        handler: "kernel:interfaces.publish"
+        args: {}
