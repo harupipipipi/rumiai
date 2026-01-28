@@ -10,6 +10,7 @@ import json
 import asyncio
 import uuid
 import importlib.util
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from dataclasses import dataclass
@@ -70,6 +71,20 @@ class Kernel:
             "kernel:save_flow": self._h_save_flow,
             "kernel:load_flows": self._h_load_flows,
             "kernel:flow.compose": self._h_flow_compose,
+            
+            # セキュリティハンドラ（追加）
+            "kernel:security.init": self._h_security_init,
+            "kernel:docker.check": self._h_docker_check,
+            "kernel:approval.init": self._h_approval_init,
+            "kernel:approval.scan": self._h_approval_scan,
+            "kernel:container.init": self._h_container_init,
+            "kernel:privilege.init": self._h_privilege_init,
+            "kernel:api.init": self._h_api_init,
+            "kernel:container.start_approved": self._h_container_start_approved,
+            "kernel:component.discover": self._h_component_discover,
+            "kernel:component.load": self._h_component_load,
+            "kernel:emit": self._h_emit,
+            "kernel:startup.failed": self._h_startup_failed,
         }
 
     def _resolve_handler(self, handler: str, args: Dict[str, Any] = None) -> Optional[Callable[[Dict[str, Any], Dict[str, Any]], Any]]:
@@ -645,7 +660,7 @@ class Kernel:
         if " == " in condition:
             left, right = condition.split(" == ", 1)
             left_val = self._resolve_value(left.strip(), ctx)
-            right_val = right.strip().strip('"'')
+            right_val = right.strip().strip('"\'')
             if right_val.lower() == "true":
                 return left_val == True
             if right_val.lower() == "false":
@@ -658,7 +673,7 @@ class Kernel:
         if " != " in condition:
             left, right = condition.split(" != ", 1)
             left_val = self._resolve_value(left.strip(), ctx)
-            right_val = right.strip().strip('"'')
+            right_val = right.strip().strip('"\'')
             if right_val.lower() == "true":
                 return left_val != True
             if right_val.lower() == "false":
@@ -1089,3 +1104,314 @@ class Kernel:
                 "_kernel_step_status": "failed",
                 "_kernel_step_meta": {"error": str(e)}
             }
+
+    # ========================================
+    # セキュリティハンドラ
+    # ========================================
+
+    def _h_security_init(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """セキュリティ基盤初期化"""
+        try:
+            ctx["_security_initialized"] = True
+            ctx["_strict_mode"] = args.get("strict_mode", True)
+            
+            self.diagnostics.record_step(
+                phase="startup",
+                step_id="security.init",
+                handler="kernel:security.init",
+                status="success",
+                meta={"strict_mode": ctx["_strict_mode"]}
+            )
+            return {"_kernel_step_status": "success"}
+        except Exception as e:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
+
+    def _h_docker_check(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """Docker利用可能性チェック"""
+        required = args.get("required", True)
+        timeout = args.get("timeout_seconds", 10)
+        
+        try:
+            result = subprocess.run(
+                ["docker", "info"],
+                capture_output=True,
+                timeout=timeout
+            )
+            available = result.returncode == 0
+        except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+            available = False
+        
+        ctx["_docker_available"] = available
+        
+        if required and not available:
+            self.diagnostics.record_step(
+                phase="startup",
+                step_id="docker.check",
+                handler="kernel:docker.check",
+                status="failed",
+                error={"type": "DockerNotAvailable", "message": "Docker is required but not available"},
+                meta={"required": required}
+            )
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "Docker not available"}}
+        
+        self.diagnostics.record_step(
+            phase="startup",
+            step_id="docker.check",
+            handler="kernel:docker.check",
+            status="success",
+            meta={"available": available, "required": required}
+        )
+        return {"_kernel_step_status": "success", "_kernel_step_meta": {"docker_available": available}}
+
+    def _h_approval_init(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """承認マネージャ初期化"""
+        try:
+            from .approval_manager import initialize_approval_manager, get_approval_manager
+            initialize_approval_manager()
+            am = get_approval_manager()
+            ctx["approval_manager"] = am
+            
+            self.diagnostics.record_step(
+                phase="startup",
+                step_id="approval.init",
+                handler="kernel:approval.init",
+                status="success"
+            )
+            return {"_kernel_step_status": "success"}
+        except Exception as e:
+            self.diagnostics.record_step(
+                phase="startup",
+                step_id="approval.init",
+                handler="kernel:approval.init",
+                status="failed",
+                error=e
+            )
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
+
+    def _h_approval_scan(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """Pack承認状態スキャン"""
+        try:
+            from .approval_manager import get_approval_manager
+            am = get_approval_manager()
+            
+            packs = am.scan_packs()
+            check_hash = args.get("check_hash", True)
+            
+            modified = []
+            pending = []
+            approved = []
+            
+            for pack_id in packs:
+                status = am.get_status(pack_id)
+                if status:
+                    status_str = status.value if hasattr(status, 'value') else str(status)
+                    if status_str == "approved":
+                        if check_hash and not am.verify_hash(pack_id):
+                            am.mark_modified(pack_id)
+                            modified.append(pack_id)
+                        else:
+                            approved.append(pack_id)
+                    elif status_str in ("installed", "pending"):
+                        pending.append(pack_id)
+                    elif status_str == "modified":
+                        modified.append(pack_id)
+            
+            ctx["_packs_approved"] = approved
+            ctx["_packs_pending"] = pending
+            ctx["_packs_modified"] = modified
+            
+            self.diagnostics.record_step(
+                phase="startup",
+                step_id="approval.scan",
+                handler="kernel:approval.scan",
+                status="success",
+                meta={
+                    "total": len(packs),
+                    "approved": len(approved),
+                    "pending": len(pending),
+                    "modified": len(modified)
+                }
+            )
+            return {"_kernel_step_status": "success", "_kernel_step_meta": {
+                "approved": approved, "pending": pending, "modified": modified
+            }}
+        except Exception as e:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
+
+    def _h_container_init(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """コンテナオーケストレータ初期化"""
+        try:
+            from .container_orchestrator import initialize_container_orchestrator, get_container_orchestrator
+            initialize_container_orchestrator()
+            co = get_container_orchestrator()
+            ctx["container_orchestrator"] = co
+            
+            self.diagnostics.record_step(
+                phase="startup",
+                step_id="container.init",
+                handler="kernel:container.init",
+                status="success"
+            )
+            return {"_kernel_step_status": "success"}
+        except Exception as e:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
+
+    def _h_privilege_init(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """ホスト特権マネージャ初期化"""
+        try:
+            from .host_privilege_manager import initialize_host_privilege_manager, get_host_privilege_manager
+            initialize_host_privilege_manager()
+            hpm = get_host_privilege_manager()
+            ctx["host_privilege_manager"] = hpm
+            
+            self.diagnostics.record_step(
+                phase="startup",
+                step_id="privilege.init",
+                handler="kernel:privilege.init",
+                status="success"
+            )
+            return {"_kernel_step_status": "success"}
+        except Exception as e:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
+
+    def _h_api_init(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """Pack APIサーバー初期化"""
+        try:
+            from .pack_api_server import initialize_pack_api_server
+            
+            host = args.get("host", "127.0.0.1")
+            port = args.get("port", 8765)
+            
+            api_server = initialize_pack_api_server(
+                host=host,
+                port=port,
+                approval_manager=ctx.get("approval_manager"),
+                container_orchestrator=ctx.get("container_orchestrator"),
+                host_privilege_manager=ctx.get("host_privilege_manager")
+            )
+            ctx["pack_api_server"] = api_server
+            
+            self.diagnostics.record_step(
+                phase="startup",
+                step_id="api.init",
+                handler="kernel:api.init",
+                status="success",
+                meta={"host": host, "port": port}
+            )
+            return {"_kernel_step_status": "success"}
+        except Exception as e:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
+
+    def _h_container_start_approved(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """承認済みPackのコンテナを起動"""
+        approved = ctx.get("_packs_approved", [])
+        if not approved:
+            return {"_kernel_step_status": "success", "_kernel_step_meta": {"started": 0}}
+        
+        co = ctx.get("container_orchestrator")
+        if not co:
+            return {"_kernel_step_status": "skipped", "_kernel_step_meta": {"reason": "no_orchestrator"}}
+        
+        started = []
+        failed = []
+        timeout = args.get("timeout_per_pack", 30)
+        
+        for pack_id in approved:
+            try:
+                result = co.start_container(pack_id, timeout=timeout)
+                if result.success:
+                    started.append(pack_id)
+                else:
+                    failed.append({"pack_id": pack_id, "error": result.error})
+            except Exception as e:
+                failed.append({"pack_id": pack_id, "error": str(e)})
+        
+        ctx["_containers_started"] = started
+        
+        self.diagnostics.record_step(
+            phase="startup",
+            step_id="container.start_approved",
+            handler="kernel:container.start_approved",
+            status="success" if not failed else "partial",
+            meta={"started": len(started), "failed": len(failed)}
+        )
+        return {"_kernel_step_status": "success", "_kernel_step_meta": {"started": started, "failed": failed}}
+
+    def _h_component_discover(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """コンポーネント検出（承認済みのみ）"""
+        approved_only = args.get("approved_only", True)
+        approved = ctx.get("_packs_approved", [])
+        
+        try:
+            from backend_core.ecosystem.registry import get_registry
+            reg = get_registry()
+            
+            components = []
+            for comp in reg.get_all_components():
+                pack_id = getattr(comp, "pack_id", None)
+                if approved_only and pack_id not in approved:
+                    continue
+                components.append({
+                    "full_id": getattr(comp, "full_id", None),
+                    "pack_id": pack_id,
+                    "type": getattr(comp, "type", None),
+                    "id": getattr(comp, "id", None)
+                })
+            
+            ctx["_discovered_components"] = components
+            
+            self.diagnostics.record_step(
+                phase="startup",
+                step_id="component.discover",
+                handler="kernel:component.discover",
+                status="success",
+                meta={"count": len(components), "approved_only": approved_only}
+            )
+            return {"_kernel_step_status": "success", "_kernel_step_meta": {"count": len(components)}}
+        except Exception as e:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
+
+    def _h_component_load(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """コンポーネントロード（承認済みのみ）"""
+        container_execution = args.get("container_execution", True)
+        components = ctx.get("_discovered_components", [])
+        
+        if not components:
+            return {"_kernel_step_status": "success", "_kernel_step_meta": {"loaded": 0}}
+        
+        # 承認済みPackのコンポーネントのみロード
+        self.lifecycle.run_phase("setup")
+        
+        self.diagnostics.record_step(
+            phase="startup",
+            step_id="component.load",
+            handler="kernel:component.load",
+            status="success",
+            meta={"container_execution": container_execution}
+        )
+        return {"_kernel_step_status": "success"}
+
+    def _h_emit(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """イベント発行"""
+        event = args.get("event", "")
+        if event and self.event_bus:
+            self.event_bus.publish(event, {"ts": self._now_ts()})
+        return {"_kernel_step_status": "success"}
+
+    def _h_startup_failed(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """スタートアップ失敗ハンドラ"""
+        pending = ctx.get("_packs_pending", [])
+        modified = ctx.get("_packs_modified", [])
+        
+        self.diagnostics.record_step(
+            phase="startup",
+            step_id="startup.failed",
+            handler="kernel:startup.failed",
+            status="failed",
+            meta={
+                "pending_approvals": pending,
+                "modified_packs": modified,
+                "message": "Startup failed. Check pending approvals or Docker availability."
+            }
+        )
+        return {"_kernel_step_status": "success"}

@@ -1,6 +1,7 @@
 """
 component_lifecycle.py - Component Lifecycle Executor
 スレッドセーフ、使用追跡、Hot Reload対応版
+承認チェック機能付き
 """
 
 from __future__ import annotations
@@ -173,6 +174,73 @@ class ComponentLifecycleExecutor:
     def _run_phase_for_component(self, phase: str, component: Any, filename: str = None) -> None:
         full_id = getattr(component, "full_id", None)
         comp_id = full_id if isinstance(full_id, str) else f"{getattr(component,'pack_id',None)}:{getattr(component,'type',None)}:{getattr(component,'id',None)}"
+        pack_id = getattr(component, "pack_id", None)
+        
+        # ========================================
+        # 承認チェック（セキュリティゲート）
+        # ========================================
+        try:
+            from .approval_manager import get_approval_manager, PackStatus
+            am = get_approval_manager()
+            if am._initialized:  # 初期化済みの場合のみチェック
+                status = am.get_status(pack_id)
+                if status != PackStatus.APPROVED:
+                    self.diagnostics.record_step(
+                        phase=phase,
+                        step_id=f"{phase}.{comp_id}.not_approved",
+                        handler=f"component_phase:{phase}",
+                        status="skipped",
+                        target={"kind": "component", "id": comp_id},
+                        meta={
+                            "reason": "pack_not_approved",
+                            "pack_id": pack_id,
+                            "pack_status": status.value if status else "unknown"
+                        }
+                    )
+                    return  # 承認されていないPackのコードは実行しない
+                
+                # ハッシュ検証
+                if not am.verify_hash(pack_id):
+                    am.mark_modified(pack_id)
+                    self.diagnostics.record_step(
+                        phase=phase,
+                        step_id=f"{phase}.{comp_id}.hash_mismatch",
+                        handler=f"component_phase:{phase}",
+                        status="skipped",
+                        target={"kind": "component", "id": comp_id},
+                        meta={
+                            "reason": "hash_verification_failed",
+                            "pack_id": pack_id
+                        }
+                    )
+                    return  # ハッシュが一致しないPackのコードは実行しない
+        except ImportError:
+            # approval_managerが未インポートの場合は警告を記録
+            self.diagnostics.record_step(
+                phase=phase,
+                step_id=f"{phase}.{comp_id}.no_approval_check",
+                handler=f"component_phase:{phase}",
+                status="skipped",
+                target={"kind": "component", "id": comp_id},
+                meta={"reason": "approval_manager_not_available", "pack_id": pack_id}
+            )
+            return  # セキュリティシステムが利用不可の場合は実行しない
+        except Exception as e:
+            # 予期せぬエラーの場合も安全側に倒す
+            self.diagnostics.record_step(
+                phase=phase,
+                step_id=f"{phase}.{comp_id}.approval_check_error",
+                handler=f"component_phase:{phase}",
+                status="skipped",
+                target={"kind": "component", "id": comp_id},
+                error=e,
+                meta={"reason": "approval_check_failed", "pack_id": pack_id}
+            )
+            return
+        # ========================================
+        # 承認チェック終了
+        # ========================================
+        
         runtime_dir = Path(getattr(component, "path", "."))
         filename = filename or f"{phase}.py"
         file_path = runtime_dir / filename
@@ -228,6 +296,13 @@ class ComponentLifecycleExecutor:
         try:
             from .permission_manager import get_permission_manager
             ctx["permission_manager"] = get_permission_manager()
+        except ImportError:
+            pass
+        
+        # UserDataManagerを追加
+        try:
+            from .userdata_manager import get_userdata_manager
+            ctx["userdata_manager"] = get_userdata_manager()
         except ImportError:
             pass
         
