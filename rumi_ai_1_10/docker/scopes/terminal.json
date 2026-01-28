@@ -1,8 +1,0 @@
-{
-  "version": "1.0",
-  "description": "terminal のスコープ設定",
-  "default_directories": ["/sandbox"],
-  "forbidden_commands": ["rm -rf /", "rm -rf ~", "mkfs"],
-  "forbidden_patterns": ["sudo ", "su ", "chmod 777"],
-  "max_timeout_seconds": 300
-}
