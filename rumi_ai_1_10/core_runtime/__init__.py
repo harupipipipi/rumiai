@@ -11,16 +11,6 @@ from .component_lifecycle import ComponentLifecycleExecutor
 from .permission_manager import PermissionManager, get_permission_manager
 from .function_alias import FunctionAliasRegistry, get_function_alias_registry
 from .flow_composer import FlowComposer, FlowModifier, get_flow_composer
-from .userdata_manager import (
-    UserDataManager,
-    UserDataAccess,
-    UserDataConfig,
-    UserDataError,
-    UserDataPermissionError,
-    UserDataPathError,
-    get_userdata_manager,
-    reset_userdata_manager,
-)
 from .approval_manager import (
     ApprovalManager,
     PackStatus,
@@ -69,6 +59,69 @@ from .lang import (
     set_locale,
     get_locale,
 )
+from .flow_loader import (
+    FlowLoader,
+    FlowDefinition,
+    FlowStep,
+    FlowLoadResult,
+    get_flow_loader,
+    reset_flow_loader,
+    load_all_flows,
+)
+from .flow_modifier import (
+    FlowModifierDef,
+    FlowModifierLoader,
+    FlowModifierApplier,
+    ModifierRequires,
+    ModifierLoadResult,
+    ModifierApplyResult,
+    get_modifier_loader,
+    get_modifier_applier,
+    reset_modifier_loader,
+    reset_modifier_applier,
+)
+from .audit_logger import (
+    AuditLogger,
+    AuditEntry,
+    AuditCategory,
+    AuditSeverity,
+    get_audit_logger,
+    reset_audit_logger,
+)
+from .python_file_executor import (
+    PythonFileExecutor,
+    ExecutionContext,
+    ExecutionResult as PythonExecutionResult,
+    PackApprovalChecker,
+    PathValidator,
+    get_python_file_executor,
+    reset_python_file_executor,
+)
+from .network_grant_manager import (
+    NetworkGrantManager,
+    NetworkGrant,
+    NetworkCheckResult,
+    get_network_grant_manager,
+    reset_network_grant_manager,
+)
+from .egress_proxy import (
+    EgressProxyServer,
+    EgressProxyHandler,
+    ProxyRequest,
+    ProxyResponse,
+    get_egress_proxy,
+    initialize_egress_proxy,
+    shutdown_egress_proxy,
+    make_proxy_request,
+)
+from .lib_executor import (
+    LibExecutor,
+    LibExecutionRecord,
+    LibCheckResult,
+    LibExecutionResult,
+    get_lib_executor,
+    reset_lib_executor,
+)
 
 __all__ = [
     "Kernel",
@@ -86,15 +139,6 @@ __all__ = [
     "FlowComposer",
     "FlowModifier",
     "get_flow_composer",
-    # UserData
-    "UserDataManager",
-    "UserDataAccess",
-    "UserDataConfig",
-    "UserDataError",
-    "UserDataPermissionError",
-    "UserDataPathError",
-    "get_userdata_manager",
-    "reset_userdata_manager",
     # Security Components
     "ApprovalManager",
     "PackStatus",
@@ -133,4 +177,60 @@ __all__ = [
     "L",
     "set_locale",
     "get_locale",
+    # Flow Loader
+    "FlowLoader",
+    "FlowDefinition",
+    "FlowStep",
+    "FlowLoadResult",
+    "get_flow_loader",
+    "reset_flow_loader",
+    "load_all_flows",
+    # Flow Modifier
+    "FlowModifierDef",
+    "FlowModifierLoader",
+    "FlowModifierApplier",
+    "ModifierRequires",
+    "ModifierLoadResult",
+    "ModifierApplyResult",
+    "get_modifier_loader",
+    "get_modifier_applier",
+    "reset_modifier_loader",
+    "reset_modifier_applier",
+    # Audit Logger
+    "AuditLogger",
+    "AuditEntry",
+    "AuditCategory",
+    "AuditSeverity",
+    "get_audit_logger",
+    "reset_audit_logger",
+    # Python File Executor
+    "PythonFileExecutor",
+    "ExecutionContext",
+    "PythonExecutionResult",
+    "PackApprovalChecker",
+    "PathValidator",
+    "get_python_file_executor",
+    "reset_python_file_executor",
+    # Network Grant Manager
+    "NetworkGrantManager",
+    "NetworkGrant",
+    "NetworkCheckResult",
+    "get_network_grant_manager",
+    "reset_network_grant_manager",
+    # Egress Proxy
+    "EgressProxyServer",
+    "EgressProxyHandler",
+    "ProxyRequest",
+    "ProxyResponse",
+    "get_egress_proxy",
+    "initialize_egress_proxy",
+    "shutdown_egress_proxy",
+    "make_proxy_request",
+    # Lib Executor
+    "LibExecutor",
+    "LibExecutionRecord",
+    "LibCheckResult",
+    "LibExecutionResult",
+    "get_lib_executor",
+    "reset_lib_executor",
 ]

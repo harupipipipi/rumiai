@@ -1,0 +1,22 @@
+# ツール注入の例
+# ecosystem/flows/modifiers/example_tool_inject.modifier.yaml
+
+modifier_id: example_tool_inject
+target_flow_id: ai_response
+phase: prepare
+priority: 50
+action: inject_after
+target_step_id: load_context
+
+requires:
+  capabilities:
+    - tool_support
+
+step:
+  id: inject_tools
+  type: python_file_call
+  owner_pack: tool_pack
+  file: blocks/tool_selector.py
+  input:
+    context: "${ctx.context}"
+  output: selected_tools

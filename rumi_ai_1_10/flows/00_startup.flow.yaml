@@ -1,0 +1,113 @@
+# 公式起動Flow
+# flows/00_startup.flow.yaml
+
+flow_id: startup
+inputs: {}
+outputs:
+  initialized: boolean
+
+phases:
+  - init
+  - security
+  - ecosystem
+  - finalize
+
+defaults:
+  fail_soft: true
+  on_missing_step: skip
+
+steps:
+  # === init phase ===
+  - id: mounts_init
+    phase: init
+    priority: 10
+    type: handler
+    input:
+      handler: "kernel:mounts.init"
+      args:
+        mounts_file: "user_data/mounts.json"
+
+  - id: registry_load
+    phase: init
+    priority: 20
+    type: handler
+    input:
+      handler: "kernel:registry.load"
+      args:
+        ecosystem_dir: "ecosystem"
+
+  - id: active_ecosystem_load
+    phase: init
+    priority: 30
+    type: handler
+    input:
+      handler: "kernel:active_ecosystem.load"
+      args:
+        config_file: "user_data/active_ecosystem.json"
+
+  # === security phase ===
+  - id: security_init
+    phase: security
+    priority: 10
+    type: handler
+    input:
+      handler: "kernel:security.init"
+      args:
+        strict_mode: true
+
+  - id: approval_init
+    phase: security
+    priority: 20
+    type: handler
+    input:
+      handler: "kernel:approval.init"
+
+  - id: approval_scan
+    phase: security
+    priority: 30
+    type: handler
+    input:
+      handler: "kernel:approval.scan"
+      args:
+        check_hash: true
+
+  # === ecosystem phase ===
+  - id: flow_load_all
+    phase: ecosystem
+    priority: 10
+    type: handler
+    input:
+      handler: "kernel:flow.load_all"
+
+  - id: component_setup
+    phase: ecosystem
+    priority: 50
+    type: handler
+    input:
+      handler: "component_phase:setup"
+
+  - id: lib_process_all
+    phase: ecosystem
+    priority: 60
+    type: handler
+    input:
+      handler: "kernel:lib.process_all"
+      args:
+        packs_dir: "ecosystem/packs"
+
+  # === finalize phase ===
+  - id: interfaces_publish
+    phase: finalize
+    priority: 10
+    type: handler
+    input:
+      handler: "kernel:interfaces.publish"
+
+  - id: emit_ready
+    phase: finalize
+    priority: 100
+    type: handler
+    input:
+      handler: "kernel:emit"
+      args:
+        event: "system.ready"

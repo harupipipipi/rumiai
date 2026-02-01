@@ -1,0 +1,42 @@
+# python_file_call テスト用Flow
+# ecosystem/flows/hello_flow.flow.yaml
+
+flow_id: hello_flow
+inputs:
+  name: string
+outputs:
+  greeting: object
+
+phases:
+  - main
+
+defaults:
+  fail_soft: true
+  on_missing_step: skip
+
+steps:
+  - id: set_name
+    phase: main
+    priority: 10
+    type: set
+    input:
+      key: name
+      value: "${ctx.name}"
+
+  - id: call_hello
+    phase: main
+    priority: 50
+    type: python_file_call
+    owner_pack: example_pack
+    file: blocks/hello.py
+    input:
+      name: "${ctx.name}"
+    output: greeting_result
+
+  - id: set_output
+    phase: main
+    priority: 90
+    type: set
+    input:
+      key: greeting
+      value: "${ctx.greeting_result}"
