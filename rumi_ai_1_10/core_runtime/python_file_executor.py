@@ -1,0 +1,685 @@
+"""
+python_file_executor.py - python_file_call ステップ実行エンジン
+
+Flowの python_file_call ステップを実行する。
+Pack承認、Modified検出、パス制限、permissiveモード対応を含む。
+
+設計原則:
+- 承認されていないPackのコードは実行しない
+- Modifiedなpackのコードは実行しない
+- 許可されたパス以外のファイルは実行しない
+- permissiveモードでは警告付きでホスト実行を許可
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+import sys
+import threading
+import traceback
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+
+@dataclass
+class ExecutionContext:
+    """python_file_call 実行コンテキスト"""
+    flow_id: str
+    step_id: str
+    phase: str
+    ts: str
+    owner_pack: Optional[str]
+    inputs: Dict[str, Any]
+    diagnostics_callback: Optional[Callable[[Dict[str, Any]], None]] = None
+    permission_proxy: Optional[Any] = None
+
+
+@dataclass 
+class ExecutionResult:
+    """python_file_call 実行結果"""
+    success: bool
+    output: Any = None
+    error: Optional[str] = None
+    error_type: Optional[str] = None
+    execution_mode: str = "unknown"  # "container", "host_permissive", "rejected"
+    execution_time_ms: float = 0.0
+    warnings: List[str] = field(default_factory=list)
+
+
+class PackApprovalChecker:
+    """Pack承認状態チェッカー"""
+    
+    def __init__(self):
+        self._approval_manager = None
+        self._lock = threading.Lock()
+    
+    def _get_approval_manager(self):
+        """ApprovalManagerを遅延取得"""
+        if self._approval_manager is None:
+            with self._lock:
+                if self._approval_manager is None:
+                    try:
+                        from .approval_manager import get_approval_manager
+                        self._approval_manager = get_approval_manager()
+                    except ImportError:
+                        pass
+        return self._approval_manager
+    
+    def is_approved(self, pack_id: str) -> Tuple[bool, Optional[str]]:
+        """
+        Packが承認済みかチェック
+        
+        Returns:
+            (承認済みか, 拒否理由)
+        """
+        am = self._get_approval_manager()
+        if am is None:
+            # ApprovalManagerがない場合はpermissiveとして扱う
+            return True, None
+        
+        try:
+            from .approval_manager import PackStatus
+            status = am.get_status(pack_id)
+            
+            if status is None:
+                return False, f"Pack '{pack_id}' not found in approval registry"
+            
+            if status == PackStatus.APPROVED:
+                return True, None
+            elif status == PackStatus.MODIFIED:
+                return False, f"Pack '{pack_id}' has been modified since approval"
+            elif status == PackStatus.BLOCKED:
+                return False, f"Pack '{pack_id}' is blocked"
+            else:
+                return False, f"Pack '{pack_id}' is not approved (status: {status.value})"
+        except Exception as e:
+            return False, f"Approval check failed: {e}"
+    
+    def verify_hash(self, pack_id: str) -> Tuple[bool, Optional[str]]:
+        """
+        Packのハッシュを検証
+        
+        Returns:
+            (検証成功か, 失敗理由)
+        """
+        am = self._get_approval_manager()
+        if am is None:
+            return True, None
+        
+        try:
+            if am.verify_hash(pack_id):
+                return True, None
+            else:
+                return False, f"Pack '{pack_id}' hash verification failed"
+        except Exception as e:
+            return False, f"Hash verification error: {e}"
+
+
+class PathValidator:
+    """ファイルパス検証"""
+    
+    # 許可されるルートディレクトリ（相対パス）
+    ALLOWED_ROOTS = [
+        "ecosystem/packs",
+        "ecosystem/sandbox",
+    ]
+    
+    def __init__(self):
+        self._base_dir = Path.cwd()
+        self._allowed_absolute: List[Path] = []
+        self._refresh_allowed_paths()
+    
+    def _refresh_allowed_paths(self) -> None:
+        """許可パスを更新"""
+        self._allowed_absolute = []
+        for root in self.ALLOWED_ROOTS:
+            abs_path = (self._base_dir / root).resolve()
+            if abs_path.exists():
+                self._allowed_absolute.append(abs_path)
+    
+    def add_allowed_root(self, path: str) -> None:
+        """許可ルートを追加"""
+        abs_path = Path(path).resolve()
+        if abs_path not in self._allowed_absolute:
+            self._allowed_absolute.append(abs_path)
+    
+    def validate(self, file_path: str, owner_pack: Optional[str] = None) -> Tuple[bool, Optional[str], Optional[Path]]:
+        """
+        ファイルパスを検証
+        
+        Args:
+            file_path: 検証するパス
+            owner_pack: 所有Pack ID（相対パス解決に使用）
+        
+        Returns:
+            (有効か, エラー理由, 解決済み絶対パス)
+        """
+        try:
+            path = Path(file_path)
+            
+            # 絶対パスの場合
+            if path.is_absolute():
+                resolved = path.resolve()
+            else:
+                # 相対パスの場合、owner_packから解決を試みる
+                if owner_pack:
+                    pack_dir = self._base_dir / "ecosystem" / "packs" / owner_pack
+                    # backend/blocks/ を探す
+                    candidates = [
+                        pack_dir / "backend" / file_path,
+                        pack_dir / "backend" / "blocks" / file_path,
+                        pack_dir / "backend" / "components" / file_path,
+                        pack_dir / file_path,
+                    ]
+                    
+                    resolved = None
+                    for candidate in candidates:
+                        if candidate.exists():
+                            resolved = candidate.resolve()
+                            break
+                    
+                    if resolved is None:
+                        # 見つからない場合は最初の候補をデフォルトとする
+                        resolved = candidates[0].resolve()
+                else:
+                    resolved = (self._base_dir / file_path).resolve()
+            
+            # ファイル存在チェック
+            if not resolved.exists():
+                return False, f"File not found: {resolved}", None
+            
+            if not resolved.is_file():
+                return False, f"Not a file: {resolved}", None
+            
+            # 許可ルート内かチェック
+            is_allowed = False
+            for allowed_root in self._allowed_absolute:
+                try:
+                    resolved.relative_to(allowed_root)
+                    is_allowed = True
+                    break
+                except ValueError:
+                    continue
+            
+            if not is_allowed:
+                return False, f"Path outside allowed roots: {resolved}", None
+            
+            return True, None, resolved
+            
+        except Exception as e:
+            return False, f"Path validation error: {e}", None
+
+
+class PythonFileExecutor:
+    """
+    python_file_call 実行エンジン
+    
+    Packのpythonファイルを安全に実行する。
+    """
+    
+    def __init__(self):
+        self._lock = threading.RLock()
+        self._syspath_lock = threading.Lock()
+        self._approval_checker = PackApprovalChecker()
+        self._path_validator = PathValidator()
+        self._security_mode = os.environ.get("RUMI_SECURITY_MODE", "strict").lower()
+        
+        if self._security_mode not in ("strict", "permissive"):
+            self._security_mode = "strict"
+    
+    def _now_ts(self) -> str:
+        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    
+    def get_security_mode(self) -> str:
+        """現在のセキュリティモードを取得"""
+        return self._security_mode
+    
+    def execute(
+        self,
+        file_path: str,
+        owner_pack: Optional[str],
+        input_data: Any,
+        context: ExecutionContext,
+        timeout_seconds: float = 60.0
+    ) -> ExecutionResult:
+        """
+        pythonファイルを実行
+        
+        Args:
+            file_path: 実行するファイルパス
+            owner_pack: 所有Pack ID
+            input_data: 入力データ
+            context: 実行コンテキスト
+            timeout_seconds: タイムアウト秒数
+        
+        Returns:
+            ExecutionResult
+        """
+        import time
+        start_time = time.time()
+        
+        result = ExecutionResult(success=False)
+        
+        # 1. owner_pack 解決
+        resolved_pack = owner_pack or self._infer_pack_from_path(file_path)
+        
+        # 2. 承認チェック
+        if resolved_pack:
+            approved, reason = self._approval_checker.is_approved(resolved_pack)
+            if not approved:
+                result.error = reason
+                result.error_type = "approval_rejected"
+                result.execution_mode = "rejected"
+                self._record_rejection(context, result, "approval")
+                return result
+            
+            # ハッシュ検証
+            hash_ok, hash_reason = self._approval_checker.verify_hash(resolved_pack)
+            if not hash_ok:
+                result.error = hash_reason
+                result.error_type = "hash_verification_failed"
+                result.execution_mode = "rejected"
+                self._record_rejection(context, result, "hash")
+                return result
+        
+        # 3. パス検証
+        path_valid, path_error, resolved_path = self._path_validator.validate(file_path, resolved_pack)
+        if not path_valid:
+            result.error = path_error
+            result.error_type = "path_rejected"
+            result.execution_mode = "rejected"
+            self._record_rejection(context, result, "path")
+            return result
+        
+        # 4. 実行
+        try:
+            # Docker実行を試みる（将来実装）
+            docker_available = self._check_docker_available()
+            
+            if docker_available:
+                # Docker実行（Step 6で完全実装）
+                result = self._execute_in_container(
+                    resolved_path, resolved_pack, input_data, context, timeout_seconds
+                )
+            elif self._security_mode == "permissive":
+                # ホスト実行（警告付き）
+                result = self._execute_on_host(
+                    resolved_path, resolved_pack, input_data, context, timeout_seconds
+                )
+                result.warnings.append(
+                    "SECURITY WARNING: Executed on host without Docker isolation. "
+                    "Set RUMI_SECURITY_MODE=strict and ensure Docker is running for production."
+                )
+            else:
+                # strict モードでDocker無し → 拒否
+                result.error = "Docker is required but not available. Set RUMI_SECURITY_MODE=permissive for development."
+                result.error_type = "docker_required"
+                result.execution_mode = "rejected"
+                self._record_rejection(context, result, "docker_unavailable")
+                return result
+                
+        except Exception as e:
+            result.error = str(e)
+            result.error_type = type(e).__name__
+            result.execution_mode = "failed"
+        
+        result.execution_time_ms = (time.time() - start_time) * 1000
+        
+        # 監査ログに実行結果を記録
+        try:
+            from .audit_logger import get_audit_logger
+            audit = get_audit_logger()
+            audit.log_python_file_call(
+                flow_id=context.flow_id,
+                step_id=context.step_id,
+                phase=context.phase,
+                owner_pack=resolved_pack or "unknown",
+                file_path=file_path,
+                success=result.success,
+                execution_mode=result.execution_mode,
+                execution_time_ms=result.execution_time_ms,
+                error=result.error,
+                error_type=result.error_type,
+                warnings=result.warnings
+            )
+        except Exception:
+            pass  # 監査ログのエラーで処理を止めない
+        
+        return result
+    
+    def _infer_pack_from_path(self, file_path: str) -> Optional[str]:
+        """パスからPack IDを推測"""
+        try:
+            path = Path(file_path)
+            
+            # ecosystem/packs/{pack_id}/... のパターンを探す
+            parts = path.parts
+            for i, part in enumerate(parts):
+                if part == "packs" and i + 1 < len(parts):
+                    return parts[i + 1]
+            
+            return None
+        except Exception:
+            return None
+    
+    def _check_docker_available(self) -> bool:
+        """Docker利用可能性をチェック"""
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["docker", "info"],
+                capture_output=True,
+                timeout=5
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+    
+    def _execute_in_container(
+        self,
+        file_path: Path,
+        owner_pack: Optional[str],
+        input_data: Any,
+        context: ExecutionContext,
+        timeout_seconds: float
+    ) -> ExecutionResult:
+        """
+        Dockerコンテナ内で実行（スタブ - Step 6で完全実装）
+        
+        現時点ではホスト実行にフォールバック
+        """
+        # TODO: Step 6で完全実装
+        # 現時点ではpermissiveモードと同様にホスト実行
+        result = self._execute_on_host(file_path, owner_pack, input_data, context, timeout_seconds)
+        result.execution_mode = "container_stub"
+        result.warnings.append("Container execution not yet implemented, using host execution")
+        return result
+    
+    def _execute_on_host(
+        self,
+        file_path: Path,
+        owner_pack: Optional[str],
+        input_data: Any,
+        context: ExecutionContext,
+        timeout_seconds: float
+    ) -> ExecutionResult:
+        """ホスト上で実行（permissiveモード）"""
+        result = ExecutionResult(success=False, execution_mode="host_permissive")
+        
+        # 警告を出力
+        print(f"[PythonFileExecutor] SECURITY WARNING: Executing on host: {file_path}", file=sys.stderr)
+        
+        module_name = f"pfc_{owner_pack or 'unknown'}_{file_path.stem}_{abs(hash(str(file_path)))}"
+        
+        try:
+            # モジュールをロード
+            spec = importlib.util.spec_from_file_location(module_name, str(file_path))
+            
+            if spec is None or spec.loader is None:
+                result.error = f"Cannot load module from {file_path}"
+                result.error_type = "module_load_error"
+                return result
+            
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = module
+            
+            # sys.pathに追加（スレッドセーフ）
+            file_dir = str(file_path.parent)
+            path_added = False
+            
+            with self._syspath_lock:
+                if file_dir not in sys.path:
+                    sys.path.insert(0, file_dir)
+                    path_added = True
+            
+            try:
+                spec.loader.exec_module(module)
+            finally:
+                # sys.pathから削除（追加した場合のみ）
+                if path_added:
+                    with self._syspath_lock:
+                        if file_dir in sys.path:
+                            sys.path.remove(file_dir)
+            
+            # run関数を探す
+            run_fn = getattr(module, "run", None)
+            if run_fn is None:
+                result.error = f"No 'run' function found in {file_path}"
+                result.error_type = "no_run_function"
+                return result
+            
+            # コンテキスト辞書を構築
+            exec_context = {
+                "flow_id": context.flow_id,
+                "step_id": context.step_id,
+                "phase": context.phase,
+                "ts": context.ts,
+                "owner_pack": owner_pack,
+                "inputs": input_data,
+                "network_check": self._create_network_check_fn(owner_pack),
+                "http_request": self._create_proxy_request_fn(owner_pack),
+            }
+            
+            if context.permission_proxy:
+                exec_context["permission_proxy"] = context.permission_proxy
+            
+            # 実行
+            import inspect
+            sig = inspect.signature(run_fn)
+            param_count = len(sig.parameters)
+            
+            if param_count >= 2:
+                output = run_fn(input_data, exec_context)
+            elif param_count == 1:
+                output = run_fn(input_data)
+            else:
+                output = run_fn()
+            
+            # 出力をJSON互換に変換
+            result.output = self._ensure_json_compatible(output)
+            result.success = True
+            
+        except Exception as e:
+            result.error = str(e)
+            result.error_type = type(e).__name__
+            result.warnings.append(f"Traceback: {traceback.format_exc()[-2000:]}")
+        
+        finally:
+            # モジュールをクリーンアップ
+            if module_name in sys.modules:
+                del sys.modules[module_name]
+        
+        return result
+    
+    def _ensure_json_compatible(self, value: Any) -> Any:
+        """値をJSON互換に変換"""
+        if value is None:
+            return None
+        
+        if isinstance(value, (str, int, float, bool)):
+            return value
+        
+        if isinstance(value, (list, tuple)):
+            return [self._ensure_json_compatible(v) for v in value]
+        
+        if isinstance(value, dict):
+            return {str(k): self._ensure_json_compatible(v) for k, v in value.items()}
+        
+        # その他はstr化
+        try:
+            json.dumps(value)
+            return value
+        except (TypeError, ValueError):
+            return str(value)
+    
+    def _create_network_check_fn(self, owner_pack: Optional[str]) -> Callable:
+        """
+        ネットワークアクセスチェック関数を作成
+        
+        python_file_call内のコードがネットワークアクセス前に
+        呼び出すための関数を提供。
+        """
+        def check_network(domain: str, port: int) -> Dict[str, Any]:
+            """
+            ネットワークアクセスをチェック
+            
+            Args:
+                domain: アクセス先ドメイン
+                port: アクセス先ポート
+            
+            Returns:
+                {"allowed": bool, "reason": str}
+            """
+            if not owner_pack:
+                return {"allowed": False, "reason": "No owner_pack specified"}
+            
+            try:
+                from .network_grant_manager import get_network_grant_manager
+                ngm = get_network_grant_manager()
+                result = ngm.check_access(owner_pack, domain, port)
+                return {
+                    "allowed": result.allowed,
+                    "reason": result.reason
+                }
+            except Exception as e:
+                return {"allowed": False, "reason": f"Check failed: {e}"}
+        
+        return check_network
+    
+    def _create_proxy_request_fn(self, owner_pack: Optional[str]) -> Callable:
+        """
+        プロキシ経由でHTTPリクエストを送信する関数を作成
+        
+        python_file_call内のコードから外部通信を行うための関数を提供。
+        """
+        def proxy_request(
+            method: str,
+            url: str,
+            headers: Dict[str, str] = None,
+            body: str = None,
+            timeout_seconds: float = 30.0
+        ) -> Dict[str, Any]:
+            """
+            プロキシ経由でHTTPリクエストを送信
+            
+            Args:
+                method: HTTPメソッド（GET, POST, etc.）
+                url: リクエスト先URL
+                headers: HTTPヘッダー
+                body: リクエストボディ
+                timeout_seconds: タイムアウト秒数
+            
+            Returns:
+                {
+                    "success": bool,
+                    "status_code": int,
+                    "headers": dict,
+                    "body": str,
+                    "error": str or None,
+                    "allowed": bool,
+                    "rejection_reason": str or None
+                }
+            """
+            if not owner_pack:
+                return {
+                    "success": False,
+                    "error": "No owner_pack specified",
+                    "allowed": False
+                }
+            
+            try:
+                from .egress_proxy import get_egress_proxy, make_proxy_request
+                proxy = get_egress_proxy()
+                if not proxy.is_running():
+                    return {
+                        "success": False,
+                        "error": "Egress proxy is not running",
+                        "allowed": False
+                    }
+                
+                proxy_url = proxy.get_endpoint()
+                result = make_proxy_request(
+                    proxy_url=proxy_url,
+                    owner_pack=owner_pack,
+                    method=method,
+                    url=url,
+                    headers=headers,
+                    body=body,
+                    timeout_seconds=timeout_seconds
+                )
+                
+                return result.to_dict()
+            except Exception as e:
+                return {
+                    "success": False,
+                    "error": str(e),
+                    "allowed": False
+                }
+        
+        return proxy_request
+    
+    def _record_rejection(
+        self,
+        context: ExecutionContext,
+        result: ExecutionResult,
+        rejection_type: str
+    ) -> None:
+        """拒否を記録（診断と監査ログ両方）"""
+        # 診断コールバック
+        if context.diagnostics_callback:
+            context.diagnostics_callback({
+                "type": "python_file_call_rejected",
+                "rejection_type": rejection_type,
+                "flow_id": context.flow_id,
+                "step_id": context.step_id,
+                "phase": context.phase,
+                "owner_pack": context.owner_pack,
+                "error": result.error,
+                "ts": context.ts,
+            })
+        
+        # 監査ログ
+        try:
+            from .audit_logger import get_audit_logger
+            audit = get_audit_logger()
+            audit.log_security_event(
+                event_type=f"python_file_call_{rejection_type}_rejected",
+                severity="warning",
+                description=result.error or f"Rejected due to {rejection_type}",
+                pack_id=context.owner_pack,
+                details={
+                    "flow_id": context.flow_id,
+                    "step_id": context.step_id,
+                    "phase": context.phase,
+                    "rejection_type": rejection_type,
+                }
+            )
+        except Exception:
+            pass  # 監査ログのエラーで処理を止めない
+
+
+# グローバルインスタンス
+_global_executor: Optional[PythonFileExecutor] = None
+_executor_lock = threading.Lock()
+
+
+def get_python_file_executor() -> PythonFileExecutor:
+    """グローバルなPythonFileExecutorを取得"""
+    global _global_executor
+    if _global_executor is None:
+        with _executor_lock:
+            if _global_executor is None:
+                _global_executor = PythonFileExecutor()
+    return _global_executor
+
+
+def reset_python_file_executor() -> PythonFileExecutor:
+    """PythonFileExecutorをリセット（テスト用）"""
+    global _global_executor
+    with _executor_lock:
+        _global_executor = PythonFileExecutor()
+    return _global_executor
