@@ -47,6 +47,28 @@ from .pack_api_server import (
     initialize_pack_api_server,
     shutdown_pack_api_server,
 )
+from .secure_executor import (
+    SecureExecutor,
+    ExecutionResult,
+    get_secure_executor,
+    reset_secure_executor,
+)
+from .vocab_registry import (
+    VocabRegistry,
+    VocabGroup,
+    ConverterInfo,
+    get_vocab_registry,
+    reset_vocab_registry,
+    VOCAB_FILENAME,
+    CONVERTERS_DIRNAME,
+)
+from .lang import (
+    LangManager,
+    get_lang_manager,
+    L,
+    set_locale,
+    get_locale,
+)
 
 __all__ = [
     "Kernel",
@@ -92,4 +114,23 @@ __all__ = [
     "get_pack_api_server",
     "initialize_pack_api_server",
     "shutdown_pack_api_server",
+    # Secure Executor
+    "SecureExecutor",
+    "ExecutionResult",
+    "get_secure_executor",
+    "reset_secure_executor",
+    # Vocab Registry
+    "VocabRegistry",
+    "VocabGroup",
+    "ConverterInfo",
+    "get_vocab_registry",
+    "reset_vocab_registry",
+    "VOCAB_FILENAME",
+    "CONVERTERS_DIRNAME",
+    # Lang
+    "LangManager",
+    "get_lang_manager",
+    "L",
+    "set_locale",
+    "get_locale",
 ]

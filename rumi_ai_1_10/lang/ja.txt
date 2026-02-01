@@ -1,0 +1,65 @@
+# Rumi AI OS - 日本語メッセージ
+# システムメッセージのみ（ドメイン固有の用語は含まない）
+
+# アプリケーション
+app.name=Rumi AI OS
+app.version=2.0
+
+# 起動
+startup.begin=カーネルを起動しています...
+startup.success=カーネルの起動が完了しました
+startup.failed=起動に失敗しました: {error}
+startup.docker_required=Dockerが必要ですが利用できません
+startup.headless=ヘッドレスモードで実行中
+
+# シャットダウン
+shutdown.begin=シャットダウンしています...
+shutdown.complete=シャットダウンが完了しました
+
+# セキュリティ
+security.warning=セキュリティ警告
+security.permissive_mode=開発モードが有効です - 本番環境では推奨されません
+security.docker_required=Docker分離が必要です
+security.pack_not_approved=Packが承認されていません: {pack_id}
+security.hash_mismatch=ファイルハッシュの検証に失敗しました: {pack_id}
+
+# エラー
+error.not_found={name}が見つかりません
+error.file_not_found=ファイルが見つかりません: {path}
+error.permission_denied=権限がありません: {action}
+error.timeout={seconds}秒後にタイムアウトしました
+error.internal=内部エラー: {error}
+
+# Pack
+pack.loading=Packを読み込んでいます: {pack_id}
+pack.loaded=Packを読み込みました: {pack_id}
+pack.approved=Packを承認しました: {pack_id}
+pack.rejected=Packを拒否しました: {pack_id}
+pack.pending=Pack承認待ち: {pack_id}
+
+# コンポーネント
+component.loading=コンポーネントを読み込んでいます: {component_id}
+component.loaded=コンポーネントを読み込みました: {component_id}
+component.disabled=コンポーネントが無効化されました: {component_id}
+component.error=コンポーネントエラー: {component_id} - {error}
+
+# HTTPサーバー
+http.not_registered=HTTPサーバーが登録されていません
+http.install_pack=Webアクセス用にio.http.serverを提供するPackをインストールしてください
+http.starting=HTTPサーバーを起動しています...
+http.listening=HTTPサーバーが起動しました: {host}:{port}
+
+# Flow
+flow.start=Flowを開始: {flow_id}
+flow.complete=Flowが完了: {flow_id}
+flow.error=Flowエラー: {flow_id} - {error}
+flow.step_start=ステップ開始: {step_id}
+flow.step_complete=ステップ完了: {step_id}
+
+# 一般
+general.press_ctrl_c=Ctrl+Cで終了
+general.waiting=待機中...
+general.done=完了
+general.success=成功
+general.failed=失敗
+general.skipped=スキップ

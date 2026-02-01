@@ -46,7 +46,6 @@ class Kernel:
         self._shutdown_handlers: List[Callable[[], None]] = []
         self._executor: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=4)
         
-        # InstallJournalにInterfaceRegistryを設定
         self.install_journal.set_interface_registry(self.interface_registry)
         
         self._init_kernel_handlers()
@@ -71,8 +70,6 @@ class Kernel:
             "kernel:save_flow": self._h_save_flow,
             "kernel:load_flows": self._h_load_flows,
             "kernel:flow.compose": self._h_flow_compose,
-            
-            # セキュリティハンドラ（追加）
             "kernel:security.init": self._h_security_init,
             "kernel:docker.check": self._h_docker_check,
             "kernel:approval.init": self._h_approval_init,
@@ -85,6 +82,7 @@ class Kernel:
             "kernel:component.load": self._h_component_load,
             "kernel:emit": self._h_emit,
             "kernel:startup.failed": self._h_startup_failed,
+            "kernel:vocab.load": self._h_vocab_load,
         }
 
     def _resolve_handler(self, handler: str, args: Dict[str, Any] = None) -> Optional[Callable[[Dict[str, Any], Dict[str, Any]], Any]]:
@@ -101,16 +99,6 @@ class Kernel:
         return None
 
     def load_flow(self, path: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Flowを読み込む
-        
-        読み込み順序:
-        1. flow/core/*.flow.yaml (公式、必須)
-        2. flow/ecosystem/*.flow.yaml (ecosystem用、オプション)
-        3. 引数で指定されたパス（オプション）
-        
-        同名のpipelineは後勝ち（ecosystemがcoreを上書き可能）
-        """
         if path:
             return self._load_single_flow(Path(path))
         
@@ -120,7 +108,6 @@ class Kernel:
             "pipelines": {}
         }
         
-        # 1. flow/core/ から読み込み（公式）
         core_dir = Path("flow/core")
         if core_dir.exists():
             yaml_files = sorted(core_dir.glob("*.flow.yaml"))
@@ -145,7 +132,6 @@ class Kernel:
                         meta={"file": str(yaml_file), "source": "core"}
                     )
         
-        # 2. flow/ecosystem/ から読み込み（ecosystem用）
         ecosystem_dir = Path("flow/ecosystem")
         if ecosystem_dir.exists():
             yaml_files = sorted(ecosystem_dir.glob("*.flow.yaml"))
@@ -170,7 +156,6 @@ class Kernel:
                         meta={"file": str(yaml_file), "source": "ecosystem"}
                     )
         
-        # 3. 後方互換: flow/ 直下も読み込み（将来的に廃止予定）
         flow_dir = Path("flow")
         if flow_dir.exists():
             yaml_files = sorted(flow_dir.glob("*.flow.yaml"))
@@ -195,7 +180,6 @@ class Kernel:
                         meta={"file": str(yaml_file), "source": "legacy"}
                     )
         
-        # フォールバック: 何も読み込めなかった場合
         if not merged["pipelines"]:
             self._flow = self._minimal_fallback_flow()
             return self._flow
@@ -204,19 +188,11 @@ class Kernel:
         return self._flow
 
     def _merge_flow(self, base: Dict[str, Any], new: Dict[str, Any], source_file: Path = None) -> Dict[str, Any]:
-        """
-        Flow定義をマージ
-        
-        - defaultsは更新（後勝ち）
-        - pipelinesは各パイプラインのstepsを結合または上書き
-        """
         result = copy.deepcopy(base)
         
-        # defaults をマージ
         if "defaults" in new:
             result["defaults"].update(new["defaults"])
         
-        # pipelines をマージ
         for pipeline_name, steps in new.get("pipelines", {}).items():
             if not isinstance(steps, list):
                 continue
@@ -224,13 +200,11 @@ class Kernel:
             if pipeline_name not in result["pipelines"]:
                 result["pipelines"][pipeline_name] = []
             
-            # ステップを追加（同名IDは上書き）
             existing_ids = {s.get("id") for s in result["pipelines"][pipeline_name] if s.get("id")}
             
             for step in steps:
                 step_id = step.get("id")
                 if step_id and step_id in existing_ids:
-                    # 同名IDのステップを置換
                     result["pipelines"][pipeline_name] = [
                         step if s.get("id") == step_id else s
                         for s in result["pipelines"][pipeline_name]
@@ -248,11 +222,17 @@ class Kernel:
         return parsed
 
     def _minimal_fallback_flow(self) -> Dict[str, Any]:
-        return {"flow_version": "2.0", "defaults": {"fail_soft": True, "on_missing_handler": "skip"},
-                "pipelines": {"startup": [{"id": "fallback.mounts", "run": {"handler": "kernel:mounts.init", "args": {"mounts_file": "user_data/mounts.json"}}},
-                                          {"id": "fallback.registry", "run": {"handler": "kernel:registry.load", "args": {"ecosystem_dir": "ecosystem"}}},
-                                          {"id": "fallback.active", "run": {"handler": "kernel:active_ecosystem.load", "args": {"config_file": "user_data/active_ecosystem.json"}}}],
-                              "message": [], "message_stream": []}}
+        return {
+            "flow_version": "2.0",
+            "defaults": {"fail_soft": True, "on_missing_handler": "skip"},
+            "pipelines": {
+                "startup": [
+                    {"id": "fallback.mounts", "run": {"handler": "kernel:mounts.init", "args": {"mounts_file": "user_data/mounts.json"}}},
+                    {"id": "fallback.registry", "run": {"handler": "kernel:registry.load", "args": {"ecosystem_dir": "ecosystem"}}},
+                    {"id": "fallback.active", "run": {"handler": "kernel:active_ecosystem.load", "args": {"config_file": "user_data/active_ecosystem.json"}}}
+                ]
+            }
+        }
 
     def run_startup(self) -> Dict[str, Any]:
         self.load_user_flows()
@@ -283,23 +263,6 @@ class Kernel:
         return self.diagnostics.as_dict()
 
     def run_pipeline(self, pipeline_name: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
-        """
-        汎用パイプライン実行
-        
-        任意の名前のパイプラインを実行する。run_message()やrun_message_stream()の
-        汎用版として使用可能。
-        
-        Args:
-            pipeline_name: 実行するパイプライン名（flowのpipelines配下のキー）
-            context: 追加のコンテキスト（chat_id, payload等）
-        
-        Returns:
-            実行結果を含むコンテキスト辞書
-        
-        Example:
-            # "custom_process" パイプラインを実行
-            result = kernel.run_pipeline("custom_process", {"input": data})
-        """
         flow = self._flow or self.load_flow()
         defaults = flow.get("defaults", {}) if isinstance(flow, dict) else {}
         fail_soft_default = bool(defaults.get("fail_soft", True))
@@ -349,70 +312,6 @@ class Kernel:
         )
         
         return ctx
-
-    def run_message(self, chat_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        flow = self._flow or self.load_flow()
-        defaults = flow.get("defaults", {}) if isinstance(flow, dict) else {}
-        fail_soft_default = bool(defaults.get("fail_soft", True))
-        pipelines = flow.get("pipelines", {})
-        message_steps = pipelines.get("message", []) if isinstance(pipelines, dict) else []
-        message_steps = message_steps if isinstance(message_steps, list) else []
-        ctx = self._build_kernel_context()
-        ctx["_flow_defaults"] = {"fail_soft": fail_soft_default, "on_missing_handler": str(defaults.get("on_missing_handler", "skip")).lower()}
-        ctx["chat_id"] = chat_id
-        ctx["payload"] = payload or {}
-        self.diagnostics.record_step(phase="message", step_id="message.pipeline.start", handler="kernel:message.run",
-                                      status="success", meta={"step_count": len(message_steps), "chat_id": chat_id})
-        aborted = False
-        for step in message_steps:
-            if aborted:
-                break
-            try:
-                aborted = self._execute_flow_step(step, phase="message", ctx=ctx)
-            except Exception as e:
-                self.diagnostics.record_step(phase="message", step_id="message.pipeline.internal_error",
-                                              handler="kernel:message.run", status="failed", error=e)
-                if not fail_soft_default:
-                    break
-        self.diagnostics.record_step(phase="message", step_id="message.pipeline.end", handler="kernel:message.run",
-                                      status="success" if not aborted else "failed", meta={"aborted": aborted, "chat_id": chat_id})
-        out = ctx.get("output") or ctx.get("message_result")
-        return out if isinstance(out, dict) else ({"result": out} if out is not None else {"success": False, "error": "No output produced"})
-
-    def run_message_stream(self, chat_id: str, payload: Dict[str, Any]) -> Any:
-        flow = self._flow or self.load_flow()
-        defaults = flow.get("defaults", {}) if isinstance(flow, dict) else {}
-        fail_soft_default = bool(defaults.get("fail_soft", True))
-        pipelines = flow.get("pipelines", {})
-        steps = pipelines.get("message_stream") if isinstance(pipelines, dict) else None
-        steps = steps if isinstance(steps, list) else (pipelines.get("message", []) if isinstance(pipelines, dict) else [])
-        steps = steps if isinstance(steps, list) else []
-        payload2 = dict(payload or {})
-        payload2["streaming"] = True
-        ctx = self._build_kernel_context()
-        ctx["_flow_defaults"] = {"fail_soft": fail_soft_default, "on_missing_handler": str(defaults.get("on_missing_handler", "skip")).lower()}
-        ctx["chat_id"] = chat_id
-        ctx["payload"] = payload2
-        self.diagnostics.record_step(phase="message", step_id="message_stream.pipeline.start", handler="kernel:message_stream.run",
-                                      status="success", meta={"step_count": len(steps), "chat_id": chat_id})
-        aborted = False
-        for step in steps:
-            if aborted:
-                break
-            try:
-                aborted = self._execute_flow_step(step, phase="message", ctx=ctx)
-            except Exception as e:
-                self.diagnostics.record_step(phase="message", step_id="message_stream.pipeline.internal_error",
-                                              handler="kernel:message_stream.run", status="failed", error=e)
-                if not fail_soft_default:
-                    break
-        self.diagnostics.record_step(phase="message", step_id="message_stream.pipeline.end", handler="kernel:message_stream.run",
-                                      status="success" if not aborted else "failed", meta={"aborted": aborted, "chat_id": chat_id})
-        return ctx.get("output") or ctx.get("message_result")
-
-    # ========================================
-    # Flow実行（IR登録形式）
-    # ========================================
 
     async def execute_flow(self, flow_id: str, context: Optional[Dict[str, Any]] = None, timeout: Optional[float] = None) -> Dict[str, Any]:
         if timeout:
@@ -494,7 +393,6 @@ class Kernel:
                 if step_type == "handler":
                     ctx, step_result = await self._execute_handler_step_async(step, ctx)
                 elif step_type == "flow":
-                    # サブFlow呼び出し
                     ctx, step_result = await self._execute_sub_flow_step(step, ctx)
                 else:
                     construct = self.interface_registry.get(f"flow.construct.{step_type}")
@@ -544,29 +442,10 @@ class Kernel:
             raise
 
     async def _execute_sub_flow_step(self, step: Dict[str, Any], ctx: Dict[str, Any]) -> Tuple[Dict[str, Any], Any]:
-        """
-        サブFlowステップを実行
-        
-        ステップ形式:
-        - type: flow
-          flow: flow_name          # 実行するFlow名
-          args:                     # 子Flowのctxに渡す引数
-            key1: value1
-            key2: "${ctx.parent_value}"
-          output: result_key       # 結果を格納するキー（省略可）
-        
-        Args:
-            step: ステップ定義
-            ctx: 親のコンテキスト
-        
-        Returns:
-            (更新された親ctx, 子Flowの結果)
-        """
         flow_name = step.get("flow")
         if not flow_name:
             return ctx, None
         
-        # 循環検出
         call_stack = ctx.get("_flow_call_stack", [])
         if flow_name in call_stack:
             error_msg = f"Recursive flow detected: {' -> '.join(call_stack)} -> {flow_name}"
@@ -579,28 +458,22 @@ class Kernel:
             )
             return ctx, {"_error": error_msg}
         
-        # 子ctxを作成（親ctxのコピー）
         child_ctx = copy.deepcopy(ctx)
         child_ctx["_flow_call_stack"] = call_stack + [flow_name]
         child_ctx["_parent_flow_id"] = ctx.get("_flow_id")
         
-        # argsを解決して子ctxに設定
         args = step.get("args", {})
         resolved_args = self._resolve_value(args, ctx)
         if isinstance(resolved_args, dict):
             child_ctx.update(resolved_args)
         
-        # サブFlowを実行
         try:
-            # まずIRから検索
             flow_def = self.interface_registry.get(f"flow.{flow_name}", strategy="last")
             
-            # IRになければflow/ecosystem/から検索
             if flow_def is None:
                 ecosystem_flow_path = Path("flow/ecosystem") / f"{flow_name}.flow.yaml"
                 if ecosystem_flow_path.exists():
                     flow_def = self._load_single_flow(ecosystem_flow_path)
-                    # pipelinesの最初のパイプラインをstepsとして使用
                     if "pipelines" in flow_def:
                         first_pipeline = list(flow_def["pipelines"].values())[0]
                         flow_def = {"steps": first_pipeline}
@@ -615,21 +488,16 @@ class Kernel:
                 )
                 return ctx, {"_error": f"Flow '{flow_name}' not found"}
             
-            # stepsを取得
             steps = flow_def.get("steps", [])
             if not steps and "pipelines" in flow_def:
-                # pipelinesがある場合は最初のパイプラインを使用
                 first_pipeline = list(flow_def["pipelines"].values())[0]
                 steps = first_pipeline if isinstance(first_pipeline, list) else []
             
-            # 子Flowを実行
             child_ctx["_flow_id"] = flow_name
             child_ctx = await self._execute_steps_async(steps, child_ctx)
             
-            # 結果を取得
             result = child_ctx.get("output") or child_ctx.get("result") or child_ctx
             
-            # outputが指定されていれば親ctxに格納
             output_key = step.get("output")
             if output_key:
                 ctx[output_key] = result
@@ -660,7 +528,7 @@ class Kernel:
         if " == " in condition:
             left, right = condition.split(" == ", 1)
             left_val = self._resolve_value(left.strip(), ctx)
-            right_val = right.strip().strip('"\'')
+            right_val = right.strip().strip('"'')
             if right_val.lower() == "true":
                 return left_val == True
             if right_val.lower() == "false":
@@ -673,7 +541,7 @@ class Kernel:
         if " != " in condition:
             left, right = condition.split(" != ", 1)
             left_val = self._resolve_value(left.strip(), ctx)
-            right_val = right.strip().strip('"\'')
+            right_val = right.strip().strip('"'')
             if right_val.lower() == "true":
                 return left_val != True
             if right_val.lower() == "false":
@@ -784,22 +652,25 @@ class Kernel:
             pass
         ctx.setdefault("_disabled_targets", {"packs": set(), "components": set()})
         
-        # PermissionManagerを追加
         try:
             from .permission_manager import get_permission_manager
             ctx["permission_manager"] = get_permission_manager()
         except ImportError:
             pass
         
-        # FunctionAliasRegistryを追加
         try:
             ctx["function_alias_registry"] = get_function_alias_registry()
         except Exception:
             pass
         
-        # FlowComposerを追加
         try:
             ctx["flow_composer"] = get_flow_composer()
+        except Exception:
+            pass
+        
+        try:
+            from .vocab_registry import get_vocab_registry
+            ctx["vocab_registry"] = get_vocab_registry()
         except Exception:
             pass
         
@@ -876,7 +747,6 @@ class Kernel:
     def _resolve_args(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
         return {k: self._resolve_value(v, ctx) for k, v in args.items()} if isinstance(args, dict) else {}
 
-    # ハンドラ実装
     def _h_mounts_init(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
         mounts_file = str(args.get("mounts_file", "user_data/mounts.json"))
         try:
@@ -1035,17 +905,11 @@ class Kernel:
         return {"loaded": self.load_user_flows(args.get("path", "user_data/flows"))}
 
     def _h_flow_compose(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
-        """
-        Flow合成を実行
-        
-        IRに登録されたflow.modifierを収集し、現在のFlow定義に適用する。
-        """
         try:
             composer = get_flow_composer()
             alias_registry = get_function_alias_registry()
             composer.set_alias_registry(alias_registry)
             
-            # modifierを収集
             modifiers = composer.collect_modifiers(self.interface_registry)
             
             if not modifiers:
@@ -1054,14 +918,12 @@ class Kernel:
                     "_kernel_step_meta": {"reason": "no_modifiers"}
                 }
             
-            # capabilitiesを収集
             capabilities = {}
             all_caps = self.interface_registry.get("component.capabilities", strategy="all") or []
             for cap_dict in all_caps:
                 if isinstance(cap_dict, dict):
                     capabilities.update(cap_dict)
             
-            # 修正を適用
             if self._flow:
                 self._flow = composer.apply_modifiers(
                     self._flow,
@@ -1105,12 +967,7 @@ class Kernel:
                 "_kernel_step_meta": {"error": str(e)}
             }
 
-    # ========================================
-    # セキュリティハンドラ
-    # ========================================
-
     def _h_security_init(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
-        """セキュリティ基盤初期化"""
         try:
             ctx["_security_initialized"] = True
             ctx["_strict_mode"] = args.get("strict_mode", True)
@@ -1127,7 +984,6 @@ class Kernel:
             return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
 
     def _h_docker_check(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
-        """Docker利用可能性チェック"""
         required = args.get("required", True)
         timeout = args.get("timeout_seconds", 10)
         
@@ -1164,7 +1020,6 @@ class Kernel:
         return {"_kernel_step_status": "success", "_kernel_step_meta": {"docker_available": available}}
 
     def _h_approval_init(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
-        """承認マネージャ初期化"""
         try:
             from .approval_manager import initialize_approval_manager, get_approval_manager
             initialize_approval_manager()
@@ -1189,7 +1044,6 @@ class Kernel:
             return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
 
     def _h_approval_scan(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
-        """Pack承認状態スキャン"""
         try:
             from .approval_manager import get_approval_manager
             am = get_approval_manager()
@@ -1239,7 +1093,6 @@ class Kernel:
             return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
 
     def _h_container_init(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
-        """コンテナオーケストレータ初期化"""
         try:
             from .container_orchestrator import initialize_container_orchestrator, get_container_orchestrator
             initialize_container_orchestrator()
@@ -1257,7 +1110,6 @@ class Kernel:
             return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
 
     def _h_privilege_init(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
-        """ホスト特権マネージャ初期化"""
         try:
             from .host_privilege_manager import initialize_host_privilege_manager, get_host_privilege_manager
             initialize_host_privilege_manager()
@@ -1275,7 +1127,6 @@ class Kernel:
             return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
 
     def _h_api_init(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
-        """Pack APIサーバー初期化"""
         try:
             from .pack_api_server import initialize_pack_api_server
             
@@ -1303,7 +1154,6 @@ class Kernel:
             return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
 
     def _h_container_start_approved(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
-        """承認済みPackのコンテナを起動"""
         approved = ctx.get("_packs_approved", [])
         if not approved:
             return {"_kernel_step_status": "success", "_kernel_step_meta": {"started": 0}}
@@ -1338,7 +1188,6 @@ class Kernel:
         return {"_kernel_step_status": "success", "_kernel_step_meta": {"started": started, "failed": failed}}
 
     def _h_component_discover(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
-        """コンポーネント検出（承認済みのみ）"""
         approved_only = args.get("approved_only", True)
         approved = ctx.get("_packs_approved", [])
         
@@ -1372,14 +1221,12 @@ class Kernel:
             return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
 
     def _h_component_load(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
-        """コンポーネントロード（承認済みのみ）"""
         container_execution = args.get("container_execution", True)
         components = ctx.get("_discovered_components", [])
         
         if not components:
             return {"_kernel_step_status": "success", "_kernel_step_meta": {"loaded": 0}}
         
-        # 承認済みPackのコンポーネントのみロード
         self.lifecycle.run_phase("setup")
         
         self.diagnostics.record_step(
@@ -1392,14 +1239,12 @@ class Kernel:
         return {"_kernel_step_status": "success"}
 
     def _h_emit(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
-        """イベント発行"""
         event = args.get("event", "")
         if event and self.event_bus:
             self.event_bus.publish(event, {"ts": self._now_ts()})
         return {"_kernel_step_status": "success"}
 
     def _h_startup_failed(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
-        """スタートアップ失敗ハンドラ"""
         pending = ctx.get("_packs_pending", [])
         modified = ctx.get("_packs_modified", [])
         
@@ -1415,3 +1260,20 @@ class Kernel:
             }
         )
         return {"_kernel_step_status": "success"}
+
+    def _h_vocab_load(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        try:
+            from .vocab_registry import get_vocab_registry
+            vr = get_vocab_registry()
+            
+            file_path = args.get("file")
+            pack_id = args.get("pack_id")
+            
+            if file_path:
+                from pathlib import Path
+                count = vr.load_vocab_file(Path(file_path), pack_id)
+                return {"_kernel_step_status": "success", "_kernel_step_meta": {"groups_loaded": count}}
+            
+            return {"_kernel_step_status": "skipped", "_kernel_step_meta": {"reason": "no_file"}}
+        except Exception as e:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}

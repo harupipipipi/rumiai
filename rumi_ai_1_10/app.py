@@ -1,166 +1,91 @@
-import os
-import atexit
-import threading
-import traceback
-from flask import Flask, Response
-from dotenv import load_dotenv
+#!/usr/bin/env python3
+"""
+Rumi AI OS - エントリポイント
 
-load_dotenv('.env.local')
-app = Flask(__name__)
+Kernelを起動し、Packが提供するサービス（HTTPサーバー等）を開始する。
+Flask/dotenv等の特定フレームワークには依存しない。
+
+HTTPサーバーが必要な場合:
+  Packが io.http.server をInterfaceRegistryに登録する。
+"""
+
+import sys
+import atexit
+import argparse
+import traceback
 
 _kernel = None
-_kernel_started = False
-_kernel_start_lock = threading.Lock()
 
 
-def ensure_kernel_started():
-    global _kernel, _kernel_started
-    if _kernel_started:
-        return
-    with _kernel_start_lock:
-        if _kernel_started:
-            return
+def main():
+    global _kernel
+    
+    parser = argparse.ArgumentParser(description="Rumi AI OS")
+    parser.add_argument("--headless", action="store_true", help="Run without HTTP server")
+    parser.add_argument("--permissive", action="store_true", help="Run in permissive security mode (development only)")
+    args = parser.parse_args()
+    
+    # セキュリティモード設定
+    if args.permissive:
+        import os
+        os.environ["RUMI_SECURITY_MODE"] = "permissive"
+    
+    try:
+        from core_runtime import Kernel
+        from core_runtime.lang import L, load_system_lang
+        
+        # Langシステム初期化
+        load_system_lang()
+        
+        _kernel = Kernel()
+        
+        print(f"[Rumi] {L('startup.starting')}")
+        _kernel.run_startup()
+        
+        atexit.register(lambda: _kernel.shutdown() if _kernel else None)
+        
         try:
-            from core_runtime import Kernel
-            _kernel = Kernel()
-            _kernel.run_startup()
-
-            # シャットダウンフック登録
-            atexit.register(lambda: _kernel.shutdown() if _kernel else None)
-
-            try:
-                from backend_core.ecosystem.compat import mark_ecosystem_initialized
-                mark_ecosystem_initialized()
-            except Exception:
-                pass
-
-        except Exception as e:
-            print(f"[Kernel] startup failed (fail-soft): {e}")
-            traceback.print_exc()
-        finally:
-            _kernel_started = True
-
-
-def apply_http_binders():
-    if _kernel is None:
-        return
-    
-    ir = _kernel.interface_registry
-    
-    try:
-        binders = ir.get("io.http.binders", strategy="all") or []
-        if not isinstance(binders, list):
-            binders = [binders]
-        for b in binders:
-            if callable(b):
-                try:
-                    b(app, _kernel, {"app": app})
-                except Exception as e:
-                    _kernel.diagnostics.record_step(
-                        phase="http_bind",
-                        step_id=f"binder.{getattr(b, '__name__', 'unknown')}",
-                        handler="app:apply_http_binders",
-                        status="failed",
-                        error=e,
-                        meta={"binder": str(b)}
-                    )
-                    traceback.print_exc()
+            from backend_core.ecosystem.compat import mark_ecosystem_initialized
+            mark_ecosystem_initialized()
+        except Exception:
+            pass
         
-        routes = ir.get("io.http.routes", strategy="all") or []
-        if not isinstance(routes, list):
-            routes = [routes]
-        for route_def in routes:
-            if isinstance(route_def, dict):
-                try:
-                    _apply_route_definition(route_def)
-                except Exception as e:
-                    _kernel.diagnostics.record_step(
-                        phase="http_bind",
-                        step_id=f"route.{route_def.get('rule', 'unknown')}",
-                        handler="app:apply_http_binders",
-                        status="failed",
-                        error=e,
-                        meta={"route": route_def}
-                    )
-                    traceback.print_exc()
+        print(f"[Rumi] {L('startup.success')}")
         
-    except Exception as e:
-        _kernel.diagnostics.record_step(
-            phase="http_bind",
-            step_id="apply_http_binders",
-            handler="app:apply_http_binders",
-            status="failed",
-            error=e
-        )
-        traceback.print_exc()
-
-
-def _apply_route_definition(route_def: dict):
-    rule = route_def.get("rule")
-    handler = route_def.get("handler")
-    methods = route_def.get("methods", ["GET"])
-    endpoint = route_def.get("endpoint") or f"dynamic_{abs(hash(rule or ''))}"
-    
-    if not rule or not callable(handler):
-        return
-    
-    try:
-        for existing_rule in app.url_map.iter_rules():
-            if existing_rule.rule == rule:
-                return
-        
-        app.add_url_rule(rule, endpoint, handler, methods=methods)
-    except Exception:
-        traceback.print_exc()
-
-
-def _apply_fallback_index():
-    if _kernel is None:
-        return
-    
-    for rule in app.url_map.iter_rules():
-        if rule.rule == '/':
+        if args.headless:
+            print(f"[Rumi] {L('startup.headless')}")
             return
-    
-    ir = _kernel.interface_registry
-    
-    def _no_ui_fallback():
-        registered = list((ir.list() or {}).keys())
-        return Response(
-            "Rumi AI OS
-
-"
-            "No root route handler registered.\n"
-            "Install a pack in ecosystem/ directory that provides a root route.\n\n"
-            f"Registered interfaces ({len(registered)}):\n" +
-            "\n".join(f"  - {k}" for k in sorted(registered)[:20]),
-            status=503,
-            content_type="text/plain; charset=utf-8"
-        )
-    
-    app.add_url_rule('/', '_no_ui_fallback', _no_ui_fallback)
-
-
-class _KernelWSGIMiddleware:
-    def __init__(self, wsgi_app):
-        self._wsgi_app = wsgi_app
-        self._init_lock = threading.Lock()
-        self._initialized = False
-
-    def __call__(self, environ, start_response):
-        if not self._initialized:
-            with self._init_lock:
-                if not self._initialized:
-                    ensure_kernel_started()
-                    apply_http_binders()
-                    _apply_fallback_index()
-                    self._initialized = True
-
-        return self._wsgi_app(environ, start_response)
+        
+        # HTTPサーバーがPackから提供されている場合は起動
+        http_server = _kernel.interface_registry.get("io.http.server")
+        if http_server and callable(http_server):
+            print(f"[Rumi] {L('startup.http_starting')}")
+            http_server(_kernel)
+        else:
+            print(f"[Rumi] {L('startup.no_http')}")
+            print(f"[Rumi] {L('startup.install_http_pack')}")
+            print(f"[Rumi] {L('startup.press_ctrl_c')}")
+            _wait_for_signal()
+        
+    except KeyboardInterrupt:
+        print(f"\n[Rumi] {L('shutdown.starting')}")
+    except Exception as e:
+        print(f"[Rumi] {L('startup.failed')}: {e}")
+        traceback.print_exc()
+        sys.exit(1)
 
 
-app.wsgi_app = _KernelWSGIMiddleware(app.wsgi_app)
+def _wait_for_signal():
+    """シグナル待機（プラットフォーム対応）"""
+    try:
+        import signal
+        signal.pause()
+    except AttributeError:
+        # Windows
+        import time
+        while True:
+            time.sleep(1)
 
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    main()

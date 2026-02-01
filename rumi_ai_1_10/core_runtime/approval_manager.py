@@ -3,12 +3,6 @@ approval_manager.py - Pack承認管理
 
 Packのインストール、承認、ハッシュ検証を管理する。
 承認されていないPackのコードは実行されない。
-
-セキュリティ保証:
-- 承認前はメタデータ読み込みのみ（コード実行なし）
-- 全ファイルのSHA-256ハッシュを記録
-- ハッシュ不一致で自動無効化
-- HMAC署名でgrants.json改ざん検出
 """
 
 from __future__ import annotations
@@ -17,6 +11,7 @@ import hashlib
 import hmac
 import json
 import os
+import sys
 import threading
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
@@ -70,15 +65,7 @@ class ApprovalResult:
 
 
 class ApprovalManager:
-    """
-    Pack承認管理クラス
-    
-    責務:
-    - Packの検出とメタデータ読み込み
-    - 承認状態の管理
-    - ファイルハッシュの計算と検証
-    - grants.jsonの読み書き（HMAC署名付き）
-    """
+    """Pack承認管理クラス"""
     
     def __init__(
         self,
@@ -98,18 +85,46 @@ class ApprovalManager:
     
     def _generate_or_load_key(self) -> str:
         """シークレットキーを生成または読み込み"""
+        env_key = os.environ.get("RUMI_HMAC_SECRET")
+        if env_key and len(env_key) >= 32:
+            return env_key
+        
+        try:
+            import keyring
+            stored_key = keyring.get_password("rumi_ai_os", "hmac_secret")
+            if stored_key:
+                return stored_key
+            
+            new_key = hashlib.sha256(os.urandom(32)).hexdigest()
+            keyring.set_password("rumi_ai_os", "hmac_secret", new_key)
+            return new_key
+        except ImportError:
+            pass
+        except Exception:
+            pass
+        
         key_file = self.grants_dir / ".secret_key"
         self.grants_dir.mkdir(parents=True, exist_ok=True)
         
         if key_file.exists():
+            try:
+                import stat
+                mode = key_file.stat().st_mode
+                if mode & (stat.S_IRWXG | stat.S_IRWXO):
+                    print(f"[SECURITY WARNING] {key_file} has insecure permissions!", file=sys.stderr)
+            except Exception:
+                pass
+            
             return key_file.read_text(encoding="utf-8").strip()
         
         key = hashlib.sha256(os.urandom(32)).hexdigest()
         key_file.write_text(key, encoding="utf-8")
+        
         try:
             os.chmod(key_file, 0o600)
         except (OSError, AttributeError):
             pass
+        
         return key
     
     def initialize(self) -> None:
@@ -178,8 +193,20 @@ class ApprovalManager:
             if not pack_dir.is_dir() or pack_dir.name.startswith("."):
                 continue
             
-            ecosystem_json = pack_dir / "backend" / "ecosystem.json"
-            if ecosystem_json.exists():
+            ecosystem_json = None
+            for subdir in pack_dir.iterdir():
+                if subdir.is_dir() and not subdir.name.startswith("."):
+                    candidate = subdir / "ecosystem.json"
+                    if candidate.exists():
+                        ecosystem_json = candidate
+                        break
+            
+            if ecosystem_json is None:
+                direct = pack_dir / "ecosystem.json"
+                if direct.exists():
+                    ecosystem_json = direct
+            
+            if ecosystem_json and ecosystem_json.exists():
                 pack_id = pack_dir.name
                 packs.append(pack_id)
                 

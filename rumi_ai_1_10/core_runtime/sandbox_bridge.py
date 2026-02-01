@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -26,16 +27,6 @@ class SandboxConfig:
 class SandboxBridge:
     """
     Ecosystem と Docker コンテナの仲介役
-    
-    役割:
-    - handlers/ を自動発見・登録
-    - 許可(grants)チェック
-    - スコープチェック
-    - コンテナへの転送
-    
-    やらないこと:
-    - 権限名のハードコード
-    - 具体的な処理の実装（handlers が担当）
     """
     
     def __init__(self, config: Optional[SandboxConfig] = None):
@@ -70,7 +61,6 @@ class SandboxBridge:
             
             self._grants_dir.mkdir(parents=True, exist_ok=True)
             
-            # handlers 読み込み
             handlers_dir = self._docker_dir / "handlers"
             if handlers_dir.exists():
                 for py_file in handlers_dir.glob("*.py"):
@@ -86,7 +76,6 @@ class SandboxBridge:
                     except Exception as e:
                         result["errors"].append(f"Handler load error ({py_file.name}): {e}")
             
-            # scopes 読み込み
             scopes_dir = self._docker_dir / "scopes"
             if scopes_dir.exists():
                 for json_file in scopes_dir.glob("*.json"):
@@ -97,7 +86,6 @@ class SandboxBridge:
                     except Exception as e:
                         result["errors"].append(f"Scope load error ({json_file.name}): {e}")
             
-            # grants 読み込み
             if self._grants_dir.exists():
                 for json_file in self._grants_dir.glob("*.json"):
                     if json_file.name.startswith("."):
@@ -110,12 +98,10 @@ class SandboxBridge:
                     except Exception as e:
                         result["errors"].append(f"Grant load error ({json_file.name}): {e}")
             
-            # grants の整合性チェック
             if self.config.auto_reconcile:
                 reconciled = self._reconcile_grants()
                 result["grants_reconciled"] = reconciled
             
-            # コンテナマネージャー初期化
             try:
                 from .sandbox_container import get_container_manager
                 self._container_manager = get_container_manager()
@@ -155,7 +141,8 @@ class SandboxBridge:
             modified = False
             permissions = grant_data.get("permissions", {})
             
-            for perm_name, perm_config in list(permissions.items()):
+            for perm_name,
+ perm_config in list(permissions.items()):
                 if perm_name not in self._handlers:
                     perm_config["valid"] = False
                     perm_config["invalid_reason"] = "handler_not_found"
@@ -218,14 +205,12 @@ class SandboxBridge:
         if not grant.get("enabled", False):
             return {"success": False, "error": f"Permission disabled: {permission}"}
         
-        # スコープチェック
         meta = self._handler_meta.get(permission, {})
         if meta.get("requires_scope", False):
             scope_check = self._check_scope(permission, grant, args)
             if not scope_check["allowed"]:
                 return {"success": False, "error": scope_check["reason"]}
         
-        # コンテキスト構築
         context = {
             "component_id": component_id,
             "permission": permission,
@@ -245,11 +230,20 @@ class SandboxBridge:
         if "allowed_ports" in grant:
             context["allowed_ports"] = grant["allowed_ports"]
         
-        # コンテナ内で実行
         if pack_id and self._container_manager:
             return self._execute_in_container(pack_id, permission, context, args)
         
-        # フォールバック: 直接実行
+        security_mode = os.environ.get("RUMI_SECURITY_MODE", "strict").lower()
+        
+        if security_mode != "permissive":
+            return {
+                "success": False, 
+                "error": "Docker is required for handler execution. Set RUMI_SECURITY_MODE=permissive for development."
+            }
+        
+        print(f"[SECURITY WARNING] Executing handler '{permission}' on host without isolation!", file=sys.stderr)
+        print(f"[SECURITY WARNING] This is only acceptable for development.", file=sys.stderr)
+        
         try:
             handler = self._handlers[permission]
             result = handler.execute(context, args)
@@ -445,7 +439,6 @@ class SandboxBridge:
             return False
 
 
-# グローバルインスタンス
 _global_sandbox: Optional[SandboxBridge] = None
 
 

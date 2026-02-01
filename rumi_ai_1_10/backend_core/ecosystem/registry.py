@@ -46,6 +46,7 @@ class PackInfo:
     uuid: str
     ecosystem: Dict[str, Any]
     path: Path
+    subdir: Path = None  # ecosystem.jsonが見つかったサブディレクトリ
     components: Dict[str, ComponentInfo] = field(default_factory=dict)
     addons: List[Dict[str, Any]] = field(default_factory=list)
 
@@ -57,7 +58,7 @@ class Registry:
     Pack/Component/Addonの読み込み、解決、管理を行う。
     """
     
-    def __init__(self, ecosystem_dir: str = "ecosystem"):
+    def __init__(self, ecosystem_dir: str = "ecosystem/packs"):
         """
         Args:
             ecosystem_dir: エコシステムディレクトリのパス
@@ -79,8 +80,7 @@ class Registry:
             print(f"[Registry] エコシステムディレクトリが存在しません: {self.ecosystem_dir}")
             return {}
         
-        print(f"
-=== Registry: Packの読み込みを開始 ===")
+        print(f"\n=== Registry: Packの読み込みを開始 ===")
         
         for pack_dir in self.ecosystem_dir.iterdir():
             if pack_dir.is_dir() and not pack_dir.name.startswith('.'):
@@ -106,9 +106,51 @@ class Registry:
         print(f"=== 読み込み完了: {len(self.packs)}個のPack ===\n")
         return self.packs
     
+    def _find_ecosystem_json(self, pack_dir: Path) -> Tuple[Optional[Path], Optional[Path]]:
+        """
+        ecosystem.jsonを探す
+        
+        探索順序:
+        1. pack_dir/[任意サブディレクトリ]/ecosystem.json
+        2. pack_dir/ecosystem.json（直下、フォールバック）
+        
+        Args:
+            pack_dir: Packのルートディレクトリ
+        
+        Returns:
+            (ecosystem.jsonのパス, サブディレクトリのパス) または (None, None)
+        """
+        # 1. サブディレクトリ内を探索
+        for subdir in sorted(pack_dir.iterdir()):
+            if not subdir.is_dir() or subdir.name.startswith('.'):
+                continue
+            
+            # __pycache__ などを除外
+            if subdir.name in ('__pycache__', 'node_modules', '.git', '.venv'):
+                continue
+            
+            candidate = subdir / "ecosystem.json"
+            if candidate.exists():
+                return candidate, subdir
+        
+        # 2. フォールバック: pack_dir直下
+        direct_file = pack_dir / "ecosystem.json"
+        if direct_file.exists():
+            return direct_file, pack_dir
+        
+        return None, None
+    
     def _load_pack(self, pack_dir: Path) -> Optional[PackInfo]:
         """
         単一のPackを読み込む
+        
+        Pack構造:
+            pack_dir/[subdir]/ecosystem.json
+            pack_dir/[subdir]/components/
+            pack_dir/[subdir]/addons/
+        
+        [subdir] は任意の名前（backend, frontend, ui, src, lib など）。
+        ecosystem.jsonを含む最初のサブディレクトリを使用する。
         
         Args:
             pack_dir: Packディレクトリのパス
@@ -117,10 +159,10 @@ class Registry:
             PackInfo または None
         """
         # ecosystem.jsonを探す
-        ecosystem_file = pack_dir / "backend" / "ecosystem.json"
+        ecosystem_file, pack_subdir = self._find_ecosystem_json(pack_dir)
         
-        if not ecosystem_file.exists():
-            print(f"    ecosystem.jsonが見つかりません: {ecosystem_file}")
+        if ecosystem_file is None:
+            print(f"    ecosystem.jsonが見つかりません: {pack_dir}")
             return None
         
         # ecosystem.jsonを読み込み
@@ -144,16 +186,17 @@ class Registry:
             version=ecosystem_data['version'],
             uuid=pack_uuid,
             ecosystem=ecosystem_data,
-            path=pack_dir
+            path=pack_dir,
+            subdir=pack_subdir
         )
         
         # Componentを読み込む
-        components_dir = pack_dir / "backend" / "components"
+        components_dir = pack_subdir / "components"
         if components_dir.exists():
             self._load_components(pack_info, components_dir)
         
         # Addonを読み込む
-        addons_dir = pack_dir / "backend" / "addons"
+        addons_dir = pack_subdir / "addons"
         if addons_dir.exists():
             self._load_addons(pack_info, addons_dir)
         

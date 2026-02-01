@@ -1,7 +1,7 @@
 """
 component_lifecycle.py - Component Lifecycle Executor
 スレッドセーフ、使用追跡、Hot Reload対応版
-承認チェック機能付き
+承認チェック機能付き、セキュアエグゼキューター統合
 """
 
 from __future__ import annotations
@@ -176,13 +176,10 @@ class ComponentLifecycleExecutor:
         comp_id = full_id if isinstance(full_id, str) else f"{getattr(component,'pack_id',None)}:{getattr(component,'type',None)}:{getattr(component,'id',None)}"
         pack_id = getattr(component, "pack_id", None)
         
-        # ========================================
-        # 承認チェック（セキュリティゲート）
-        # ========================================
         try:
             from .approval_manager import get_approval_manager, PackStatus
             am = get_approval_manager()
-            if am._initialized:  # 初期化済みの場合のみチェック
+            if am._initialized:
                 status = am.get_status(pack_id)
                 if status != PackStatus.APPROVED:
                     self.diagnostics.record_step(
@@ -197,9 +194,8 @@ class ComponentLifecycleExecutor:
                             "pack_status": status.value if status else "unknown"
                         }
                     )
-                    return  # 承認されていないPackのコードは実行しない
+                    return
                 
-                # ハッシュ検証
                 if not am.verify_hash(pack_id):
                     am.mark_modified(pack_id)
                     self.diagnostics.record_step(
@@ -213,9 +209,8 @@ class ComponentLifecycleExecutor:
                             "pack_id": pack_id
                         }
                     )
-                    return  # ハッシュが一致しないPackのコードは実行しない
+                    return
         except ImportError:
-            # approval_managerが未インポートの場合は警告を記録
             self.diagnostics.record_step(
                 phase=phase,
                 step_id=f"{phase}.{comp_id}.no_approval_check",
@@ -224,9 +219,8 @@ class ComponentLifecycleExecutor:
                 target={"kind": "component", "id": comp_id},
                 meta={"reason": "approval_manager_not_available", "pack_id": pack_id}
             )
-            return  # セキュリティシステムが利用不可の場合は実行しない
+            return
         except Exception as e:
-            # 予期せぬエラーの場合も安全側に倒す
             self.diagnostics.record_step(
                 phase=phase,
                 step_id=f"{phase}.{comp_id}.approval_check_error",
@@ -237,9 +231,33 @@ class ComponentLifecycleExecutor:
                 meta={"reason": "approval_check_failed", "pack_id": pack_id}
             )
             return
-        # ========================================
-        # 承認チェック終了
-        # ========================================
+        
+        if phase == "setup":
+            try:
+                from .vocab_registry import get_vocab_registry, VOCAB_FILENAME, CONVERTERS_DIRNAME
+                vr = get_vocab_registry()
+                
+                comp_path = Path(getattr(component, "path", "."))
+                pack_subdir = comp_path.parent
+                
+                vocab_result = vr.load_pack_vocab(pack_subdir, pack_id)
+                
+                if vocab_result["groups"] > 0 or vocab_result["converters"] > 0:
+                    self.diagnostics.record_step(
+                        phase=phase,
+                        step_id=f"{phase}.{comp_id}.vocab_loaded",
+                        handler=f"component_phase:{phase}",
+                        status="success",
+                        meta=vocab_result
+                    )
+            except Exception as e:
+                self.diagnostics.record_step(
+                    phase=phase,
+                    step_id=f"{phase}.{comp_id}.vocab_warning",
+                    handler=f"component_phase:{phase}",
+                    status="success",
+                    meta={"warning": f"vocab load failed: {e}"}
+                )
         
         runtime_dir = Path(getattr(component, "path", "."))
         filename = filename or f"{phase}.py"
@@ -252,9 +270,34 @@ class ComponentLifecycleExecutor:
         try:
             self.diagnostics.record_step(phase="startup", step_id=f"{phase}.{comp_id}.start", handler=f"component_phase:{phase}",
                                           status="success", target={"kind": "component", "id": comp_id}, meta={"file": str(file_path)})
-            self._exec_python_file(file_path, ctx)
+            
+            from .secure_executor import get_secure_executor
+            executor = get_secure_executor()
+            
+            exec_result = executor.execute_component_phase(
+                pack_id=pack_id,
+                component_id=comp_id,
+                phase=phase,
+                file_path=file_path,
+                context=ctx,
+                component_dir=Path(getattr(component, "path", file_path.parent))
+            )
+            
+            if not exec_result.success:
+                raise RuntimeError(exec_result.error or "Secure execution failed")
+            
+            if exec_result.warnings:
+                self.diagnostics.record_step(
+                    phase="startup",
+                    step_id=f"{phase}.{comp_id}.security_warning",
+                    handler=f"component_phase:{phase}",
+                    status="success",
+                    meta={"execution_mode": exec_result.execution_mode, "warnings": exec_result.warnings}
+                )
+            
             self.install_journal.append({"ts": self._now_ts(), "event": f"{phase}_run", "scope": "component", "ref": comp_id,
-                                          "result": "success", "paths": {"created": [], "modified": []}, "meta": {"file": str(file_path)}})
+                                          "result": "success", "paths": {"created": [], "modified": []}, 
+                                          "meta": {"file": str(file_path), "execution_mode": exec_result.execution_mode}})
             self.diagnostics.record_step(phase="startup", step_id=f"{phase}.{comp_id}.done", handler=f"component_phase:{phase}",
                                           status="success", target={"kind": "component", "id": comp_id}, meta={"file": str(file_path)})
         except Exception as e:
@@ -292,14 +335,12 @@ class ComponentLifecycleExecutor:
                 "registry": reg, "active_ecosystem": active, "diagnostics": self.diagnostics, "install_journal": self.install_journal,
                 "interface_registry": self.interface_registry, "event_bus": self.event_bus, "_source_component": comp_id}
         
-        # PermissionManagerを追加
         try:
             from .permission_manager import get_permission_manager
             ctx["permission_manager"] = get_permission_manager()
         except ImportError:
             pass
         
-        # UserDataManagerを追加
         try:
             from .userdata_manager import get_userdata_manager
             ctx["userdata_manager"] = get_userdata_manager()

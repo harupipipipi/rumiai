@@ -1,0 +1,248 @@
+# Rumi AI OS 実装計画書
+
+---
+
+## 1. IR プレフィックス取得機能
+
+### 背景・理由
+
+現状のIRは `ir.get("key")` で1つの値を取得するか、`ir.list(prefix="...")` でキー一覧を取得するだけ。「あるプレフィックスに属する値を全部取得」ができない。
+
+これにより、Pack同士がお互いを知らずに連携することが困難。例えばWebUI Packが「全てのCSS注入を適用したい」と思っても、どのキーで登録されているか知らないと取得できない。
+
+### 実装完了時の理想
+
+```python
+# テーマPack A
+ir.register("ui.inject.css.theme_a", "body { background: red; }")
+
+# テーマPack B
+ir.register("ui.inject.css.theme_b", "body { font-size: 16px; }")
+
+# WebUI Pack（お互いを知らない）
+all_css = ir.get_all(prefix="ui.inject.css")
+# → ["body { background: red; }", "body { font-size: 16px; }"]
+```
+
+Chrome拡張のように、注入する側とされる側がお互いを知らなくても連携できる。
+
+### ユーザープロンプト
+
+> だから今辞書的なのを作ってるんじゃないの？tool=tools
+>
+> IRキーとは
+>
+> なるほど。それも実装案に入れる。
+
+---
+
+## 2. Flow 入力/出力スキーマ + フェーズ順序
+
+### 背景・理由
+
+現状のFlowは「ステップを順番に実行する」だけ。入力として何を受け付けるか、出力として何を返すかの定義がない。また、Pack同士が「自分はどの順番で実行されるべきか」を知らない。
+
+tool Packは「ai_clientの前に実行されたい」、新技術Packは「toolの前に実行されたい」と思っても、お互いを知らないと順序を決められない。
+
+### 実装完了時の理想
+
+```yaml
+flow: ai_response
+inputs:
+  model_id: string
+  user_input: string
+  history: array
+outputs:
+  response: string
+
+phases:
+  - pre_process
+  - capability_check
+  - enhancement
+  - execution
+  - post_process
+
+steps:
+  - phase: enhancement
+    handler: tool.inject
+  - phase: execution
+    handler: ai.generate
+```
+
+```yaml
+# 新技術Pack（toolを知らない）
+flow.modifier:
+  phase: capability_check  # enhancementより前に自動配置
+  handler: new_tech.check
+```
+
+Pack同士が知らなくても、フェーズに属するだけで正しい順序になる。vocab_registryと連携して、tool形式で来たらtooluse形式に自動変換してai_clientへ渡す。
+
+### ユーザープロンプト
+
+> あとflowって今どんな感じ？自分の理想としては共有スクラッチ関数って感じで、ai_responseというflowを作ったら、入力として何を受け付けるか（model_id,user_input,など）でそこでどのような順番でpythonファイルを実行するか書く感じ。例だとmodel_id+user_input+historyをai_clientに送り、返答をそのflowへinputしてきたものへreturnするって感じ。もっと長くてもいいtoolを呼び出して使用可能なtoolを読み込む、model_profileを呼び出してモデル情報を確認してtool使用可能か確認など。(辞書にあればtool=tools=function calling)もしfuncitoncallingの形できたら、functioncalling_to_tooluseに渡して返還されたものをai_clientに渡すって感じ。これできてる？packがtoolだったらtoolを取得してモデルに渡すってのをflowの中に上書きするしって感じ。あと想像できてない部分が、順番ai_clientはtoolを知らないしtoolはもっと新しい技術のものを知らないため、どこに配置したらいいかわからない。自分より優勢されるべきファイルがあるかもしれないが比べられないなど。
+
+---
+
+## 3. ライブラリ（lib/）機能
+
+### 背景・理由
+
+現状は全てが「実行されるもの」として扱われる。共有コード、辞書、Flowテンプレートを提供したいだけなのに、Packとして承認が必要になる。
+
+例えばDocker操作のユーティリティ関数、よく使うvocab.txtの標準辞書、基本的なFlowテンプレートなど、「参照されるだけ」のものを提供する仕組みがない。
+
+### 実装完了時の理想
+
+```
+ecosystem/packs/utils_pack/
+└── backend/
+    ├── ecosystem.json
+    ├── components/           # 実行されるもの
+    └── lib/                  # 参照されるもの
+        ├── docker_utils.py
+        ├── standard_vocab.txt
+        └── flow_templates/
+            └── basic_ai.flow.yaml
+```
+
+```python
+# 他のPackから参照
+ir.register("flow.my_ai", {
+    "extends": "lib.utils_pack.flow_templates.basic_ai",
+    "steps": [...]  # 追加や上書き
+})
+```
+
+公式は「lib/ディレクトリの規約」と「extends機能」だけ提供。中身は全部ecosystem。
+
+### ユーザープロンプト
+
+> まあそれも実装することリストだね。あとライブラリ的なのを用意したい。例えばdockerのハンドラだったり、辞書だったり、flowのテンプレ的なのだったり。今ってどんな感じ？ライブラリも別に公式ファイルじゃなくてecosystemのもの。
+
+---
+
+## 4. UI注入システム（フロントエンド疎結合）
+
+### 背景・理由
+
+WebUI PackとテーマPackがお互いを知らずに連携できない。Chrome拡張のように「後から注入する」仕組みがない。
+
+現状だとWebUI Packが「背景を変えたい人がいるかもしれない」と想定してAPIを用意するか、テーマPackがWebUIのDOM構造を知っている必要がある。
+
+### 実装完了時の理想
+
+```python
+# テーマPack（WebUIを知らない）
+ir.register("ui.inject.css.mytheme", """
+body { background: url('/sunset.jpg') !important; }
+""")
+
+ir.register("ui.inject.js.mytheme", """
+console.log('Theme loaded');
+""")
+```
+
+```javascript
+// WebUI Pack（どんなテーマがあるか知らない）
+const allCss = await fetch('/api/ir?prefix=ui.inject.css');
+const allJs = await fetch('/api/ir?prefix=ui.inject.js');
+// 全部適用
+```
+
+お互いを知らなくても、命名規則に従うだけで連携できる。
+
+### ユーザープロンプト
+
+> 一度ecosystem開発者側として考えて欲しいのだけど、例えばフロントエンドのwebuiを作ったとして、背景を変えるpackを作れる？ecosystemのpackは色々あり、webuiも色々ある中、全てに対応した背景を変えるpackって作れる？また無理ならどうすればいいかな？どちら友が相手のことを知らずにできるようにしたい。
+>
+> なんか上手くできない？例えばchromeの拡張機能って片方だけじゃん？dark modeとかの拡張機能はサイト側は特に知らないわけだし。ただこれをフロントエンドとバックエンドでやりたい。拡張機能のアイデアはいいけど仕組みをそのまま使うのは違う
+
+---
+
+## 5. Langシステム（多言語対応）
+
+### 背景・理由
+
+ユーザー向けメッセージがコード内にハードコードされている。言語切り替えができない。
+
+### 実装完了時の理想
+
+```
+lang/
+├── en.txt
+└── ja.txt
+```
+
+```
+# lang/ja.txt
+startup.success=カーネルの起動が完了しました
+error.not_found={name}が見つかりません
+```
+
+```python
+from core_runtime.lang import L
+print(L("startup.success"))  # → "カーネルの起動が完了しました"
+print(L("error.not_found", name="config.json"))  # → "config.jsonが見つかりません"
+```
+
+### ユーザープロンプト
+
+> 細かいところで修正するべき点の案を上げてください。例えば、フロントエンド、バックエンドともにユーザーの画面に表示されるところは、langフォルダを作り、そこに変数=の形でおくように。例えばyou=あなた。みたいな感じです。ユーザーはuser_dataに自分の言語を登録して的な。これは公式ファイルに実装させたい。
+
+---
+
+## 6. ログシステム
+
+### 背景・理由
+
+print文が散在、構造化されていない。デバッグや運用が困難。
+
+### 実装完了時の理想
+
+```python
+from core_runtime.logger import get_logger
+logger = get_logger("my_pack")
+logger.info("Started", {"component": "auth"})
+```
+
+出力先、フォーマット、レベルをIRで設定可能。
+
+### ユーザープロンプト
+
+> （前回の改善提案に含まれる）
+
+---
+
+## 7. 設定管理
+
+### 背景・理由
+
+ハードコードされた値が散在（ポート、タイムアウト、制限値など）。
+
+### 実装完了時の理想
+
+```python
+from core_runtime.config import get_config
+port = get_config("server.port", default=5000)
+```
+
+優先順位: 環境変数 > user_data/config.json > デフォルト
+
+### ユーザープロンプト
+
+> （前回の改善提案に含まれる）
+
+---
+
+## 実装優先順位
+
+| 順位 | 項目 | 理由 |
+|------|------|------|
+| 1 | IR プレフィックス取得 | 他の全ての疎結合の基盤 |
+| 2 | Flow スキーマ + フェーズ | Pack連携の根幹 |
+| 3 | UI注入システム | 1に依存、フロントエンド疎結合 |
+| 4 | ライブラリ機能 | コード共有の基盤 |
+| 5 | Langシステム | ユーザー体験 |
+| 6 | ログシステム | 運用・デバッグ |
+| 7 | 設定管理 | 保守性 |

@@ -6,8 +6,10 @@ Pack承認、コンテナ操作、特権操作のHTTP APIを提供。
 
 from __future__ import annotations
 
+import hmac
 import json
 import logging
+import secrets
 import threading
 from dataclasses import dataclass, asdict
 from typing import Any, Optional
@@ -46,9 +48,15 @@ class PackAPIHandler(BaseHTTPRequestHandler):
     
     def _check_auth(self) -> bool:
         auth_header = self.headers.get('Authorization', '')
+        
         if not self.internal_token:
-            return True
-        return auth_header == f"Bearer {self.internal_token}"
+            logger.error("API token not configured - rejecting request")
+            return False
+        
+        if not auth_header:
+            return False
+        
+        return hmac.compare_digest(auth_header, f"Bearer {self.internal_token}")
     
     def _parse_body(self) -> dict:
         content_length = int(self.headers.get('Content-Length', 0))
@@ -333,13 +341,19 @@ class PackAPIServer:
         approval_manager = None,
         container_orchestrator = None,
         host_privilege_manager = None,
-        internal_token: str = ""
+        internal_token: str = None
     ):
         self.host = host
         self.port = port
         self.approval_manager = approval_manager
         self.container_orchestrator = container_orchestrator
         self.host_privilege_manager = host_privilege_manager
+        
+        if internal_token is None:
+            internal_token = secrets.token_urlsafe(32)
+            logger.warning(f"Generated API token: {internal_token}")
+            logger.warning("Set this token in client requests: Authorization: Bearer <token>")
+        
         self.internal_token = internal_token
         self.server: Optional[HTTPServer] = None
         self.thread: Optional[threading.Thread] = None
@@ -381,7 +395,7 @@ def initialize_pack_api_server(
     approval_manager = None,
     container_orchestrator = None,
     host_privilege_manager = None,
-    internal_token: str = ""
+    internal_token: str = None
 ) -> PackAPIServer:
     global _api_server
     

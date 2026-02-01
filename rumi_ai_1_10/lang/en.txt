@@ -1,0 +1,65 @@
+# Rumi AI OS - English Messages
+# System messages only (no domain-specific terms like "chat", "message", "AI")
+
+# Application
+app.name=Rumi AI OS
+app.version=2.0
+
+# Startup
+startup.begin=Starting Kernel...
+startup.success=Kernel started successfully
+startup.failed=Startup failed: {error}
+startup.docker_required=Docker is required but not available
+startup.headless=Running in headless mode
+
+# Shutdown
+shutdown.begin=Shutting down...
+shutdown.complete=Shutdown complete
+
+# Security
+security.warning=SECURITY WARNING
+security.permissive_mode=Permissive mode enabled - not recommended for production
+security.docker_required=Docker isolation required
+security.pack_not_approved=Pack not approved: {pack_id}
+security.hash_mismatch=File hash verification failed for pack: {pack_id}
+
+# Errors
+error.not_found={name} not found
+error.file_not_found=File not found: {path}
+error.permission_denied=Permission denied: {action}
+error.timeout=Operation timed out after {seconds}s
+error.internal=Internal error: {error}
+
+# Pack
+pack.loading=Loading pack: {pack_id}
+pack.loaded=Pack loaded: {pack_id}
+pack.approved=Pack approved: {pack_id}
+pack.rejected=Pack rejected: {pack_id}
+pack.pending=Pack pending approval: {pack_id}
+
+# Component
+component.loading=Loading component: {component_id}
+component.loaded=Component loaded: {component_id}
+component.disabled=Component disabled: {component_id}
+component.error=Component error: {component_id} - {error}
+
+# HTTP Server
+http.not_registered=No HTTP server registered
+http.install_pack=Install a Pack that provides io.http.server for web access
+http.starting=HTTP server starting...
+http.listening=HTTP server listening on {host}:{port}
+
+# Flow
+flow.start=Starting flow: {flow_id}
+flow.complete=Flow completed: {flow_id}
+flow.error=Flow error: {flow_id} - {error}
+flow.step_start=Step started: {step_id}
+flow.step_complete=Step completed: {step_id}
+
+# General
+general.press_ctrl_c=Press Ctrl+C to exit
+general.waiting=Waiting...
+general.done=Done
+general.success=Success
+general.failed=Failed
+general.skipped=Skipped

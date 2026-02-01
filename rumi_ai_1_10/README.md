@@ -1,4 +1,3 @@
-```markdown
 # Rumi AI OS
 
 **「基盤のない基盤」** - 改造される「本体」が存在しないモジュラーAIフレームワーク
@@ -47,7 +46,7 @@ Rumi AI の世界:
 
 ### USB モデル
 
-各 Pack は互いの存在を知りません。`InterfaceRegistry` という共通バスを通じて疎結合に通信します。
+各 Pack は互いの存在を知りません。疎結合の接続点として InterfaceRegistry 等の共通機構を持ちつつ、実際の結線・拡張は Flow（YAML）で記述します。
 
 ---
 
@@ -57,7 +56,7 @@ Rumi AI の世界:
 2. **診断可能** - 何が起きているか常に見える
 3. **セキュリティ** - 承認されていない Pack のコードは実行されない
 4. **拡張性** - 誰でも Pack を作成して機能を追加できる
-5. **ハードコードしない** - フェーズ名、ファイル名、インターフェース名は全て YAML または Pack が定義
+5. **ハードコードしない** - ドメイン概念（チャット/ツール等）を公式に持ち込まない。結線は Flow（YAML）で定義し、具体処理は Pack が提供する
 
 ---
 
@@ -83,7 +82,7 @@ Rumi AI の世界:
 ```
 project_root/
 │
-├── app.py                      # Flask エントリポイント
+├── app.py                      # OS エントリポイント（特定フレームワーク非依存）
 ├── bootstrap.py                # セットアップエントリポイント
 ├── requirements.txt            # Python 依存関係
 ├── setup.bat                   # Windows セットアップ
@@ -93,7 +92,7 @@ project_root/
 ├── core_runtime/               # カーネル（実行エンジン）
 ├── backend_core/               # エコシステム基盤
 ├── docker/                     # Docker 設定（公式）
-├── flow/                       # Flow 定義（公式）
+├── flows/                      # Flow 定義（公式）
 ├── ecosystem/                  # Pack 格納・統合領域
 ├── user_data/                  # ユーザーデータ
 ├── rumi_setup/                 # セットアップシステム
@@ -177,26 +176,24 @@ docker/
 
 ---
 
-### `flow/` - Flow 定義（公式）
+### `flows/` - Flow 定義（公式）
 
 **役割**: 起動シーケンスとパイプラインの定義。
 
 ```
-flow/
-├── core/                       # 公式 Flow（編集不可）
-│   └── 00_startup.flow.yaml    # セキュリティ対応起動フロー
-└── ecosystem/                  # Pack が追加する Flow
-    └── .gitkeep
+flows/
+└── 00_startup.flow.yaml        # 起動フロー（公式）
 ```
 
-**`00_startup.flow.yaml` の内容**:
+**`00_startup.flow.yaml` の内容（例）**:
 1. セキュリティ基盤初期化
 2. Docker 利用可能性チェック
 3. 承認マネージャ初期化
 4. Pack 承認状態スキャン
 5. コンテナオーケストレータ初期化
 6. 承認済み Pack のコンテナ起動
-7. コンポーネント検出・ロード
+7. Ecosystem Flow の読み込み（`ecosystem/flows/*.flow.yaml`）
+8. （必要なら）初期フェーズ実行／サービス起動
 
 ---
 
@@ -214,8 +211,8 @@ ecosystem/
 │           ├── components/     # コンポーネント
 │           └── handlers/       # カスタム handler
 │
-├── flows/                      # 統合 Flow（自動生成）
-│   └── {name}.{pack_id}.yaml
+├── flows/                      # Ecosystem Flow（手動/Pack側が提供）
+│   └── {flow_id}.flow.yaml
 │
 └── docker/                     # 統合 Docker 設定（自動生成）
     └── {pack_id}/
@@ -245,7 +242,7 @@ user_data/
 ├── permissions/                # 承認状態
 │   ├── {pack_id}.grants.json   # Pack 別承認情報
 │   └── .secret_key             # HMAC 署名キー
-├── flows/                      # ユーザー定義 Flow
+├── flows/                      # （予約）※公式FlowやEcosystem Flowはここに置かない方針
 ├── settings/                   # 設定
 ├── shared/                     # 共有データ
 └── cache/                      # キャッシュ
@@ -435,16 +432,17 @@ curl -X POST http://localhost:8765/api/packs/{pack_id}/approve
 
 ## Pack 開発
 
-### 最小構成
+### 最小構成（例）
 
 ```
 ecosystem/packs/my_pack/
 └── backend/
     ├── ecosystem.json
-    └── components/
-        └── hello/
-            ├── manifest.json
-            └── setup.py
+    └── blocks/
+        └── hello_world.py
+
+ecosystem/flows/
+└── hello.flow.yaml
 ```
 
 ### ecosystem.json
@@ -458,32 +456,9 @@ ecosystem/packs/my_pack/
 }
 ```
 
-### manifest.json
+**ブロック（例: hello_world.py）**は `python_file_call` から呼ばれ、入力を受け取り出力を返します。
 
-```json
-{
-  "type": "service",
-  "id": "hello",
-  "version": "1.0.0",
-  "connectivity": {
-    "provides": ["service.hello"],
-    "requires": []
-  }
-}
-```
-
-### setup.py
-
-```python
-def run(context):
-    ir = context["interface_registry"]
-    
-    def hello_handler(args, ctx):
-        name = args.get("name", "World")
-        return {"message": f"Hello, {name}!"}
-    
-    ir.register("service.hello", hello_handler)
-```
+**Flow（例: hello.flow.yaml）**がそのブロックを実行する順序や前後処理を定義します。
 
 ### 権限要求（permissions.json）
 
@@ -554,4 +529,3 @@ MIT License
 ---
 
 *「基盤がないからこそ、何でも作れる」*
-```
