@@ -1,0 +1,5133 @@
+---
+
+## Step 1: Flow ローダー
+
+### 1.1 新規ファイル: `core_runtime/flow_loader.py`
+
+```python
+"""
+flow_loader.py - Flow定義ファイルのローダー
+
+flows/（公式）と ecosystem/flows/（エコシステム）からYAMLファイルを読み込み、
+InterfaceRegistryに登録する。
+
+設計原則:
+- Flowはファイルからロードされる（setup.py登録に依存しない）
+- 公式は具体的なドメイン概念を持たない
+- phases/priority/idによる決定的な実行順序
+"""
+
+from __future__ import annotations
+
+import threading
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+try:
+    import yaml
+    HAS_YAML = True
+except ImportError:
+    HAS_YAML = False
+
+
+@dataclass
+class FlowStep:
+    """Flowステップの正規化表現"""
+    id: str
+    phase: str
+    priority: int
+    type: str
+    when: Optional[str]
+    input: Any
+    output: Optional[str]
+    raw: Dict[str, Any]
+    
+    # python_file_call用
+    owner_pack: Optional[str] = None
+    file: Optional[str] = None
+    timeout_seconds: float = 60.0
+
+
+@dataclass
+class FlowDefinition:
+    """Flow定義の正規化表現"""
+    flow_id: str
+    inputs: Dict[str, str]
+    outputs: Dict[str, str]
+    phases: List[str]
+    defaults: Dict[str, Any]
+    steps: List[FlowStep]
+    source_file: Optional[Path] = None
+    source_type: str = "unknown"  # "official" or "ecosystem"
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """既存Kernelが処理できる形式に変換"""
+        return {
+            "flow_id": self.flow_id,
+            "inputs": self.inputs,
+            "outputs": self.outputs,
+            "phases": self.phases,
+            "defaults": self.defaults,
+            "steps": [self._step_to_dict(s) for s in self.steps],
+            "_source_file": str(self.source_file) if self.source_file else None,
+            "_source_type": self.source_type,
+        }
+    
+    def _step_to_dict(self, step: FlowStep) -> Dict[str, Any]:
+        """ステップを辞書形式に変換"""
+        d = {
+            "id": step.id,
+            "phase": step.phase,
+            "priority": step.priority,
+            "type": step.type,
+        }
+        if step.when:
+            d["when"] = step.when
+        if step.input is not None:
+            d["input"] = step.input
+        if step.output:
+            d["output"] = step.output
+        if step.owner_pack:
+            d["owner_pack"] = step.owner_pack
+        if step.file:
+            d["file"] = step.file
+        if step.timeout_seconds != 60.0:
+            d["timeout_seconds"] = step.timeout_seconds
+        return d
+
+
+@dataclass
+class FlowLoadResult:
+    """Flowロード結果"""
+    success: bool
+    flow_id: Optional[str] = None
+    flow_def: Optional[FlowDefinition] = None
+    errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+
+
+class FlowLoader:
+    """
+    Flowファイルローダー
+    
+    flows/（公式）と ecosystem/flows/（エコシステム）から
+    YAMLファイルを読み込み、正規化する。
+    """
+    
+    OFFICIAL_FLOWS_DIR = "flows"
+    ECOSYSTEM_FLOWS_DIR = "ecosystem/flows"
+    
+    def __init__(self):
+        self._lock = threading.RLock()
+        self._loaded_flows: Dict[str, FlowDefinition] = {}
+        self._load_errors: List[Dict[str, Any]] = []
+    
+    def _now_ts(self) -> str:
+        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    
+    def load_all_flows(self) -> Dict[str, FlowDefinition]:
+        """
+        全Flowファイルをロード
+        
+        Returns:
+            flow_id -> FlowDefinition のマップ
+        """
+        with self._lock:
+            self._loaded_flows.clear()
+            self._load_errors.clear()
+            
+            # 1. 公式Flowをロード
+            official_dir = Path(self.OFFICIAL_FLOWS_DIR)
+            if official_dir.exists():
+                self._load_directory(official_dir, "official")
+            
+            # 2. エコシステムFlowをロード
+            ecosystem_dir = Path(self.ECOSYSTEM_FLOWS_DIR)
+            if ecosystem_dir.exists():
+                self._load_directory(ecosystem_dir, "ecosystem")
+            
+            return dict(self._loaded_flows)
+    
+    def _load_directory(self, directory: Path, source_type: str) -> None:
+        """ディレクトリ内のFlowファイルをロード"""
+        for yaml_file in sorted(directory.glob("*.flow.yaml")):
+            result = self.load_flow_file(yaml_file, source_type)
+            
+            if result.success and result.flow_def:
+                # 重複チェック
+                if result.flow_id in self._loaded_flows:
+                    existing = self._loaded_flows[result.flow_id]
+                    # エコシステムが公式を上書きするのは許可しない
+                    if existing.source_type == "official" and source_type == "ecosystem":
+                        self._load_errors.append({
+                            "file": str(yaml_file),
+                            "error": f"Cannot override official flow '{result.flow_id}' from ecosystem",
+                            "ts": self._now_ts()
+                        })
+                        continue
+                
+                self._loaded_flows[result.flow_id] = result.flow_def
+            else:
+                self._load_errors.append({
+                    "file": str(yaml_file),
+                    "errors": result.errors,
+                    "ts": self._now_ts()
+                })
+    
+    def load_flow_file(self, file_path: Path, source_type: str = "unknown") -> FlowLoadResult:
+        """
+        単一のFlowファイルをロード
+        
+        Args:
+            file_path: YAMLファイルのパス
+            source_type: "official" or "ecosystem"
+        
+        Returns:
+            FlowLoadResult
+        """
+        result = FlowLoadResult(success=False)
+        
+        if not file_path.exists():
+            result.errors.append(f"File not found: {file_path}")
+            return result
+        
+        if not HAS_YAML:
+            result.errors.append("PyYAML is not installed")
+            return result
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                raw_data = yaml.safe_load(f)
+        except yaml.YAMLError as e:
+            result.errors.append(f"YAML parse error: {e}")
+            return result
+        except Exception as e:
+            result.errors.append(f"File read error: {e}")
+            return result
+        
+        if not isinstance(raw_data, dict):
+            result.errors.append("Flow file must be a YAML object")
+            return result
+        
+        # 必須フィールドチェック
+        flow_id = raw_data.get("flow_id")
+        if not flow_id or not isinstance(flow_id, str):
+            result.errors.append("Missing or invalid 'flow_id'")
+            return result
+        
+        result.flow_id = flow_id
+        
+        # inputs/outputs（任意だがあれば型チェック）
+        inputs = raw_data.get("inputs", {})
+        if not isinstance(inputs, dict):
+            result.errors.append("'inputs' must be an object")
+            return result
+        
+        outputs = raw_data.get("outputs", {})
+        if not isinstance(outputs, dict):
+            result.errors.append("'outputs' must be an object")
+            return result
+        
+        # phases（必須）
+        phases = raw_data.get("phases", [])
+        if not isinstance(phases, list) or not phases:
+            result.errors.append("'phases' must be a non-empty array")
+            return result
+        
+        for i, phase in enumerate(phases):
+            if not isinstance(phase, str):
+                result.errors.append(f"phases[{i}] must be a string")
+                return result
+        
+        # defaults（任意）
+        defaults = raw_data.get("defaults", {})
+        if not isinstance(defaults, dict):
+            defaults = {}
+        
+        defaults.setdefault("fail_soft", True)
+        defaults.setdefault("on_missing_step", "skip")
+        
+        # steps（必須）
+        raw_steps = raw_data.get("steps", [])
+        if not isinstance(raw_steps, list):
+            result.errors.append("'steps' must be an array")
+            return result
+        
+        # ステップをパース
+        steps, step_errors, step_warnings = self._parse_steps(raw_steps, phases, file_path)
+        result.errors.extend(step_errors)
+        result.warnings.extend(step_warnings)
+        
+        if result.errors:
+            return result
+        
+        # ステップをソート（phase順 → priority順 → id順）
+        sorted_steps = self._sort_steps(steps, phases)
+        
+        # FlowDefinitionを作成
+        flow_def = FlowDefinition(
+            flow_id=flow_id,
+            inputs=inputs,
+            outputs=outputs,
+            phases=phases,
+            defaults=defaults,
+            steps=sorted_steps,
+            source_file=file_path,
+            source_type=source_type
+        )
+        
+        result.success = True
+        result.flow_def = flow_def
+        return result
+    
+    def _parse_steps(
+        self,
+        raw_steps: List[Any],
+        phases: List[str],
+        file_path: Path
+    ) -> Tuple[List[FlowStep], List[str], List[str]]:
+        """ステップをパースして正規化"""
+        steps = []
+        errors = []
+        warnings = []
+        seen_ids = set()
+        
+        for i, raw_step in enumerate(raw_steps):
+            if not isinstance(raw_step, dict):
+                errors.append(f"steps[{i}] must be an object")
+                continue
+            
+            # id（必須）
+            step_id = raw_step.get("id")
+            if not step_id or not isinstance(step_id, str):
+                errors.append(f"steps[{i}]: missing or invalid 'id'")
+                continue
+            
+            if step_id in seen_ids:
+                errors.append(f"steps[{i}]: duplicate id '{step_id}'")
+                continue
+            seen_ids.add(step_id)
+            
+            # phase（必須）
+            phase = raw_step.get("phase")
+            if not phase or not isinstance(phase, str):
+                errors.append(f"steps[{i}] ({step_id}): missing or invalid 'phase'")
+                continue
+            
+            if phase not in phases:
+                errors.append(f"steps[{i}] ({step_id}): phase '{phase}' not in phases list")
+                continue
+            
+            # type（必須）
+            step_type = raw_step.get("type")
+            if not step_type or not isinstance(step_type, str):
+                errors.append(f"steps[{i}] ({step_id}): missing or invalid 'type'")
+                continue
+            
+            # priority（任意、デフォルト100）
+            priority = raw_step.get("priority", 100)
+            if not isinstance(priority, (int, float)):
+                warnings.append(f"steps[{i}] ({step_id}): invalid priority, using 100")
+                priority = 100
+            priority = int(priority)
+            
+            # when（任意）
+            when = raw_step.get("when")
+            if when is not None and not isinstance(when, str):
+                warnings.append(f"steps[{i}] ({step_id}): 'when' must be a string")
+                when = None
+            
+            # input（任意）
+            step_input = raw_step.get("input")
+            
+            # output（任意）
+            output = raw_step.get("output")
+            if output is not None and not isinstance(output, str):
+                warnings.append(f"steps[{i}] ({step_id}): 'output' must be a string")
+                output = None
+            
+            # FlowStepを作成
+            step = FlowStep(
+                id=step_id,
+                phase=phase,
+                priority=priority,
+                type=step_type,
+                when=when,
+                input=step_input,
+                output=output,
+                raw=raw_step
+            )
+            
+            # python_file_call固有のフィールド
+            if step_type == "python_file_call":
+                step.owner_pack = raw_step.get("owner_pack")
+                step.file = raw_step.get("file")
+                step.timeout_seconds = raw_step.get("timeout_seconds", 60.0)
+                
+                if not step.file:
+                    errors.append(f"steps[{i}] ({step_id}): python_file_call requires 'file'")
+                    continue
+            
+            steps.append(step)
+        
+        return steps, errors, warnings
+    
+    def _sort_steps(self, steps: List[FlowStep], phases: List[str]) -> List[FlowStep]:
+        """
+        ステップを決定的にソート
+        
+        ソート順:
+        1. phase（phasesリストでの順序）
+        2. priority（昇順、小さいほど先）
+        3. id（アルファベット順、タイブレーク）
+        """
+        phase_order = {phase: i for i, phase in enumerate(phases)}
+        
+        return sorted(
+            steps,
+            key=lambda s: (phase_order.get(s.phase, 999), s.priority, s.id)
+        )
+    
+    def get_loaded_flows(self) -> Dict[str, FlowDefinition]:
+        """ロード済みFlowを取得"""
+        with self._lock:
+            return dict(self._loaded_flows)
+    
+    def get_load_errors(self) -> List[Dict[str, Any]]:
+        """ロードエラーを取得"""
+        with self._lock:
+            return list(self._load_errors)
+    
+    def get_flow(self, flow_id: str) -> Optional[FlowDefinition]:
+        """特定のFlowを取得"""
+        with self._lock:
+            return self._loaded_flows.get(flow_id)
+
+
+# グローバルインスタンス
+_global_flow_loader: Optional[FlowLoader] = None
+_loader_lock = threading.Lock()
+
+
+def get_flow_loader() -> FlowLoader:
+    """グローバルなFlowLoaderを取得"""
+    global _global_flow_loader
+    if _global_flow_loader is None:
+        with _loader_lock:
+            if _global_flow_loader is None:
+                _global_flow_loader = FlowLoader()
+    return _global_flow_loader
+
+
+def reset_flow_loader() -> FlowLoader:
+    """FlowLoaderをリセット（テスト用）"""
+    global _global_flow_loader
+    with _loader_lock:
+        _global_flow_loader = FlowLoader()
+    return _global_flow_loader
+
+
+def load_all_flows() -> Dict[str, FlowDefinition]:
+    """全Flowをロード（ショートカット）"""
+    return get_flow_loader().load_all_flows()
+```
+
+---
+
+### 1.2 `core_runtime/__init__.py` への追加
+
+```python
+# 既存のimportの後に追加
+from .flow_loader import (
+    FlowLoader,
+    FlowDefinition,
+    FlowStep,
+    FlowLoadResult,
+    get_flow_loader,
+    reset_flow_loader,
+    load_all_flows,
+)
+
+# __all__ リストに追加
+__all__ = [
+    # ... 既存のエントリ ...
+    
+    # Flow Loader
+    "FlowLoader",
+    "FlowDefinition",
+    "FlowStep",
+    "FlowLoadResult",
+    "get_flow_loader",
+    "reset_flow_loader",
+    "load_all_flows",
+]
+```
+
+---
+
+### 1.3 `core_runtime/kernel.py` への修正
+
+#### 1.3.1 import追加（ファイル先頭付近）
+
+```python
+from .flow_loader import get_flow_loader, FlowDefinition, FlowStep
+from .flow_modifier import get_modifier_loader, get_modifier_applier
+```
+
+#### 1.3.2 `_init_kernel_handlers` メソッドに追加
+
+```python
+        "kernel:flow.load_all": self._h_flow_load_all,
+        "kernel:flow.execute_by_id": self._h_flow_execute_by_id,
+        "kernel:noop": self._h_noop,
+        "kernel:python_file_call": self._h_python_file_call,
+```
+
+#### 1.3.3 新規ハンドラメソッド `_h_flow_load_all`（完全版）
+
+```python
+    def _h_flow_load_all(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """
+        全Flowファイルをロードし、modifierを適用し、InterfaceRegistryに登録
+        
+        flows/（公式）と ecosystem/flows/（エコシステム）から読み込む
+        """
+        try:
+            # 1. Flowをロード
+            loader = get_flow_loader()
+            flows = loader.load_all_flows()
+            
+            # Flowロードエラーを記録
+            flow_errors = loader.get_load_errors()
+            for err in flow_errors:
+                self.diagnostics.record_step(
+                    phase="startup",
+                    step_id="flow.load.error",
+                    handler="kernel:flow.load_all",
+                    status="failed",
+                    error={"errors": err.get("errors", [])},
+                    meta={"file": err.get("file")}
+                )
+            
+            # 2. modifierをロード
+            modifier_loader = get_modifier_loader()
+            all_modifiers = modifier_loader.load_all_modifiers()
+            
+            # modifierロードエラーを記録
+            modifier_errors = modifier_loader.get_load_errors()
+            for err in modifier_errors:
+                self.diagnostics.record_step(
+                    phase="startup",
+                    step_id="modifier.load.error",
+                    handler="kernel:flow.load_all",
+                    status="failed",
+                    error={"errors": err.get("errors", [])},
+                    meta={"file": err.get("file")}
+                )
+            
+            # 3. 各Flowにmodifierを適用してIRに登録
+            registered = []
+            modifier_results_all = []
+            
+            applier = get_modifier_applier()
+            applier.set_interface_registry(self.interface_registry)
+            
+            for flow_id, flow_def in flows.items():
+                # このFlowに対するmodifierを取得
+                modifiers_for_flow = modifier_loader.get_modifiers_for_flow(flow_id)
+                
+                # modifier適用
+                if modifiers_for_flow:
+                    modified_flow, results = applier.apply_modifiers(flow_def, modifiers_for_flow)
+                    modifier_results_all.extend(results)
+                    
+                    # 適用結果をログ
+                    for result in results:
+                        if result.success:
+                            self.diagnostics.record_step(
+                                phase="startup",
+                                step_id=f"modifier.apply.{result.modifier_id}",
+                                handler="kernel:flow.load_all",
+                                status="success",
+                                meta={
+                                    "action": result.action,
+                                    "target_flow": flow_id,
+                                    "target_step_id": result.target_step_id
+                                }
+                            )
+                        elif result.skipped_reason:
+                            self.diagnostics.record_step(
+                                phase="startup",
+                                step_id=f"modifier.apply.{result.modifier_id}",
+                                handler="kernel:flow.load_all",
+                                status="skipped",
+                                meta={
+                                    "reason": result.skipped_reason,
+                                    "target_flow": flow_id
+                                }
+                            )
+                        else:
+                            self.diagnostics.record_step(
+                                phase="startup",
+                                step_id=f"modifier.apply.{result.modifier_id}",
+                                handler="kernel:flow.load_all",
+                                status="failed",
+                                error={"errors": result.errors},
+                                meta={"target_flow": flow_id}
+                            )
+                    
+                    final_flow = modified_flow
+                    applied_modifiers = [r.modifier_id for r in results if r.success]
+                else:
+                    final_flow = flow_def
+                    applied_modifiers = []
+                
+                # 4. IRに登録（1回のみ）
+                converted = self._convert_new_flow_to_legacy(final_flow)
+                ir_key = f"flow.{flow_id}"
+                self.interface_registry.register(ir_key, converted, meta={
+                    "_source_file": str(final_flow.source_file) if final_flow.source_file else None,
+                    "_source_type": final_flow.source_type,
+                    "_flow_loader": True,
+                    "_modifiers_applied": applied_modifiers,
+                })
+                registered.append(flow_id)
+            
+            # 5. 完了ログ
+            modifier_success = sum(1 for r in modifier_results_all if r.success)
+            modifier_skipped = sum(1 for r in modifier_results_all if r.skipped_reason)
+            modifier_failed = sum(1 for r in modifier_results_all if not r.success and not r.skipped_reason)
+            
+            self.diagnostics.record_step(
+                phase="startup",
+                step_id="flow.load_all.complete",
+                handler="kernel:flow.load_all",
+                status="success",
+                meta={
+                    "flows_registered": len(registered),
+                    "flow_ids": registered,
+                    "flow_errors": len(flow_errors),
+                    "modifiers_loaded": len(all_modifiers),
+                    "modifiers_applied": modifier_success,
+                    "modifiers_skipped": modifier_skipped,
+                    "modifiers_failed": modifier_failed,
+                }
+            )
+            
+            # 監査ログに記録
+            audit = get_audit_logger()
+            audit.log_system_event(
+                event_type="flow_load_all",
+                success=True,
+                details={
+                    "flows_registered": len(registered),
+                    "flow_ids": registered,
+                    "modifiers_loaded": len(all_modifiers),
+                    "modifiers_applied": modifier_success,
+                }
+            )
+            
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_step_meta": {
+                    "flows_registered": registered,
+                    "flow_error_count": len(flow_errors),
+                    "modifiers_loaded": len(all_modifiers),
+                    "modifiers_applied": modifier_success,
+                    "modifiers_skipped": modifier_skipped,
+                }
+            }
+            
+        except Exception as e:
+            self.diagnostics.record_step(
+                phase="startup",
+                step_id="flow.load_all.failed",
+                handler="kernel:flow.load_all",
+                status="failed",
+                error=e
+            )
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {"error": str(e)}
+            }
+```
+
+#### 1.3.4 `_h_flow_execute_by_id` メソッド
+
+```python
+    def _h_flow_execute_by_id(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """
+        flow_idを指定してFlowを実行
+        """
+        flow_id = args.get("flow_id")
+        if not flow_id:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "missing flow_id"}}
+        
+        inputs = args.get("inputs", {})
+        timeout = args.get("timeout")
+        
+        exec_ctx = dict(ctx)
+        exec_ctx.update(inputs)
+        
+        result = self.execute_flow_sync(flow_id, exec_ctx, timeout)
+        
+        return {
+            "_kernel_step_status": "success" if "_error" not in result else "failed",
+            "_kernel_step_meta": {"flow_id": flow_id},
+            "result": result
+        }
+```
+
+#### 1.3.5 `_h_noop` メソッド
+
+```python
+    def _h_noop(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """何もしないハンドラ（プレースホルダー）"""
+        return {"_kernel_step_status": "success", "_kernel_step_meta": {"handler": "noop"}}
+```
+
+#### 1.3.6 `_convert_new_flow_to_legacy` メソッド（問題1修正済み）
+
+```python
+    def _convert_new_flow_to_legacy(self, flow_def: FlowDefinition) -> Dict[str, Any]:
+        """
+        新形式FlowDefinitionを既存Kernelが処理できる形式に変換
+        
+        新形式: phases, inputs, outputs, steps（type: python_file_call等）
+        既存形式: steps（handler, args, when, output）
+        """
+        legacy_steps = []
+        
+        for step in flow_def.steps:
+            legacy_step = {
+                "id": step.id,
+                "phase": step.phase,
+                "priority": step.priority,
+            }
+            
+            # whenの変換
+            if step.when:
+                legacy_step["when"] = step.when
+            
+            # outputの変換
+            if step.output:
+                legacy_step["output"] = step.output
+            
+            # typeごとの変換
+            if step.type == "python_file_call":
+                legacy_step["handler"] = "kernel:python_file_call"
+                legacy_step["args"] = {
+                    "file": step.file,
+                    "owner_pack": step.owner_pack,
+                    "input": step.input,
+                    "timeout_seconds": step.timeout_seconds,
+                    "_step_id": step.id,
+                    "_phase": step.phase,
+                }
+                if step.output:
+                    legacy_step["output"] = step.output
+            elif step.type == "set":
+                # set: コンテキストに値を設定
+                legacy_step["handler"] = "kernel:ctx.set"
+                if isinstance(step.input, dict):
+                    legacy_step["args"] = {
+                        "key": step.input.get("key", step.output or ""),
+                        "value": step.input.get("value"),
+                    }
+                else:
+                    legacy_step["args"] = {"key": step.output or "", "value": step.input}
+            elif step.type == "if":
+                # if: 条件分岐（簡易版）
+                legacy_step["handler"] = "kernel:noop"
+                if isinstance(step.input, dict):
+                    legacy_step["when"] = step.input.get("condition", "false")
+            elif step.type == "handler":
+                # handler: 既存のIRハンドラを呼び出し
+                if isinstance(step.input, dict):
+                    legacy_step["handler"] = step.input.get("handler", "kernel:noop")
+                    legacy_step["args"] = step.input.get("args", {})
+                else:
+                    legacy_step["handler"] = str(step.input) if step.input else "kernel:noop"
+                    legacy_step["args"] = {}
+            else:
+                # 未知のtype: noopとして扱い、警告を記録
+                legacy_step["handler"] = "kernel:noop"
+                legacy_step["args"] = {"_unknown_type": step.type, "_raw": step.raw}
+            
+            legacy_steps.append(legacy_step)
+        
+        return {
+            "flow_id": flow_def.flow_id,
+            "inputs": flow_def.inputs,
+            "outputs": flow_def.outputs,
+            "phases": flow_def.phases,
+            "defaults": flow_def.defaults,
+            "steps": legacy_steps,
+            "_source_file": str(flow_def.source_file) if flow_def.source_file else None,
+            "_source_type": flow_def.source_type,
+        }
+```
+
+#### 1.3.7 `load_flow` メソッドへの挿入（`self._flow = merged` の直前）
+
+```python
+        # === 新形式Flowローダー統合（modifier適用込み） ===
+        try:
+            from .flow_loader import get_flow_loader
+            from .flow_modifier import get_modifier_loader, get_modifier_applier
+            
+            loader = get_flow_loader()
+            new_flows = loader.load_all_flows()
+            
+            # modifierをロード
+            modifier_loader = get_modifier_loader()
+            modifier_loader.load_all_modifiers()
+            
+            # applierを準備
+            applier = get_modifier_applier()
+            applier.set_interface_registry(self.interface_registry)
+            
+            for flow_id, flow_def in new_flows.items():
+                # modifier適用
+                modifiers_for_flow = modifier_loader.get_modifiers_for_flow(flow_id)
+                if modifiers_for_flow:
+                    modified_flow, _ = applier.apply_modifiers(flow_def, modifiers_for_flow)
+                    final_flow = modified_flow
+                else:
+                    final_flow = flow_def
+                
+                # IRに登録
+                converted = self._convert_new_flow_to_legacy(final_flow)
+                self.interface_registry.register(f"flow.{flow_id}", converted, meta={
+                    "_source_file": str(final_flow.source_file) if final_flow.source_file else None,
+                    "_source_type": final_flow.source_type,
+                    "_flow_loader": True,
+                })
+                
+                self.diagnostics.record_step(
+                    phase="startup",
+                    step_id=f"flow.load.new.{flow_id}",
+                    handler="kernel:flow.load",
+                    status="success",
+                    meta={"flow_id": flow_id, "source_type": final_flow.source_type}
+                )
+        except Exception as e:
+            self.diagnostics.record_step(
+                phase="startup",
+                step_id="flow.load.new_loader.error",
+                handler="kernel:flow.load",
+                status="failed",
+                error=e
+            )
+        # === 新形式Flowローダー統合ここまで ===
+```
+
+---
+
+### 1.4 サンプルFlowファイル: `flows/00_startup.flow.yaml`
+
+```yaml
+# 公式起動Flow
+# flows/00_startup.flow.yaml
+
+flow_id: startup
+inputs: {}
+outputs:
+  initialized: boolean
+
+phases:
+  - init
+  - security
+  - ecosystem
+  - finalize
+
+defaults:
+  fail_soft: true
+  on_missing_step: skip
+
+steps:
+  # === init phase ===
+  - id: mounts_init
+    phase: init
+    priority: 10
+    type: handler
+    input:
+      handler: "kernel:mounts.init"
+      args:
+        mounts_file: "user_data/mounts.json"
+
+  - id: registry_load
+    phase: init
+    priority: 20
+    type: handler
+    input:
+      handler: "kernel:registry.load"
+      args:
+        ecosystem_dir: "ecosystem"
+
+  - id: active_ecosystem_load
+    phase: init
+    priority: 30
+    type: handler
+    input:
+      handler: "kernel:active_ecosystem.load"
+      args:
+        config_file: "user_data/active_ecosystem.json"
+
+  # === security phase ===
+  - id: security_init
+    phase: security
+    priority: 10
+    type: handler
+    input:
+      handler: "kernel:security.init"
+      args:
+        strict_mode: true
+
+  - id: approval_init
+    phase: security
+    priority: 20
+    type: handler
+    input:
+      handler: "kernel:approval.init"
+
+  - id: approval_scan
+    phase: security
+    priority: 30
+    type: handler
+    input:
+      handler: "kernel:approval.scan"
+      args:
+        check_hash: true
+
+  # === ecosystem phase ===
+  - id: flow_load_all
+    phase: ecosystem
+    priority: 10
+    type: handler
+    input:
+      handler: "kernel:flow.load_all"
+
+  - id: component_setup
+    phase: ecosystem
+    priority: 50
+    type: handler
+    input:
+      handler: "component_phase:setup"
+
+  # === finalize phase ===
+  - id: interfaces_publish
+    phase: finalize
+    priority: 10
+    type: handler
+    input:
+      handler: "kernel:interfaces.publish"
+
+  - id: emit_ready
+    phase: finalize
+    priority: 100
+    type: handler
+    input:
+      handler: "kernel:emit"
+      args:
+        event: "system.ready"
+```
+
+---
+
+## Step 2: Flow modifier 適用ロジック
+
+### 2.1 新規ファイル: `core_runtime/flow_modifier.py`（問題2修正済み）
+
+```python
+"""
+flow_modifier.py - Flow modifier（差し込み）システム
+
+ecosystem/flows/modifiers/*.modifier.yaml を読み込み、
+対象Flowに対してステップの注入・置換・削除を行う。
+
+設計原則:
+- Flowはファイルからロードされる（setup.py登録に依存しない）
+- modifier適用順序は決定的（phase → priority → modifier_id）
+- requires（interfaces/capabilities）で適用条件を制御
+"""
+
+from __future__ import annotations
+
+import copy
+import threading
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Set
+
+try:
+    import yaml
+    HAS_YAML = True
+except ImportError:
+    HAS_YAML = False
+
+from .flow_loader import FlowDefinition, FlowStep, FlowLoadResult
+
+
+@dataclass
+class ModifierRequires:
+    """modifier適用条件"""
+    interfaces: List[str] = field(default_factory=list)
+    capabilities: List[str] = field(default_factory=list)
+
+
+@dataclass
+class FlowModifierDef:
+    """Flow modifier定義"""
+    modifier_id: str
+    target_flow_id: str
+    phase: str
+    priority: int
+    action: str  # inject_before, inject_after, append, replace, remove
+    target_step_id: Optional[str]
+    step: Optional[Dict[str, Any]]  # 注入/置換するステップ定義
+    requires: ModifierRequires
+    source_file: Optional[Path] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "modifier_id": self.modifier_id,
+            "target_flow_id": self.target_flow_id,
+            "phase": self.phase,
+            "priority": self.priority,
+            "action": self.action,
+            "target_step_id": self.target_step_id,
+            "step": self.step,
+            "requires": {
+                "interfaces": self.requires.interfaces,
+                "capabilities": self.requires.capabilities,
+            },
+            "_source_file": str(self.source_file) if self.source_file else None,
+        }
+
+
+@dataclass
+class ModifierLoadResult:
+    """modifierロード結果"""
+    success: bool
+    modifier_id: Optional[str] = None
+    modifier_def: Optional[FlowModifierDef] = None
+    errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+
+
+@dataclass
+class ModifierApplyResult:
+    """modifier適用結果"""
+    success: bool
+    modifier_id: str
+    action: str
+    target_flow_id: str
+    target_step_id: Optional[str] = None
+    skipped_reason: Optional[str] = None
+    errors: List[str] = field(default_factory=list)
+
+
+class FlowModifierLoader:
+    """
+    Flow modifierローダー
+    
+    ecosystem/flows/modifiers/*.modifier.yaml を読み込む。
+    """
+    
+    MODIFIERS_DIR = "ecosystem/flows/modifiers"
+    
+    def __init__(self):
+        self._lock = threading.RLock()
+        self._loaded_modifiers: Dict[str, FlowModifierDef] = {}
+        self._load_errors: List[Dict[str, Any]] = []
+    
+    def _now_ts(self) -> str:
+        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    
+    def load_all_modifiers(self) -> Dict[str, FlowModifierDef]:
+        """
+        全modifierファイルをロード
+        
+        Returns:
+            modifier_id -> FlowModifierDef のマップ
+        """
+        with self._lock:
+            self._loaded_modifiers.clear()
+            self._load_errors.clear()
+            
+            modifiers_dir = Path(self.MODIFIERS_DIR)
+            if not modifiers_dir.exists():
+                return {}
+            
+            for yaml_file in sorted(modifiers_dir.glob("*.modifier.yaml")):
+                result = self.load_modifier_file(yaml_file)
+                
+                if result.success and result.modifier_def:
+                    if result.modifier_id in self._loaded_modifiers:
+                        self._load_errors.append({
+                            "file": str(yaml_file),
+                            "error": f"Duplicate modifier_id: {result.modifier_id}",
+                            "ts": self._now_ts()
+                        })
+                        continue
+                    
+                    self._loaded_modifiers[result.modifier_id] = result.modifier_def
+                else:
+                    self._load_errors.append({
+                        "file": str(yaml_file),
+                        "errors": result.errors,
+                        "ts": self._now_ts()
+                    })
+            
+            return dict(self._loaded_modifiers)
+    
+    def load_modifier_file(self, file_path: Path) -> ModifierLoadResult:
+        """
+        単一のmodifierファイルをロード
+        """
+        result = ModifierLoadResult(success=False)
+        
+        if not file_path.exists():
+            result.errors.append(f"File not found: {file_path}")
+            return result
+        
+        if not HAS_YAML:
+            result.errors.append("PyYAML is not installed")
+            return result
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                raw_data = yaml.safe_load(f)
+        except yaml.YAMLError as e:
+            result.errors.append(f"YAML parse error: {e}")
+            return result
+        except Exception as e:
+            result.errors.append(f"File read error: {e}")
+            return result
+        
+        if not isinstance(raw_data, dict):
+            result.errors.append("Modifier file must be a YAML object")
+            return result
+        
+        # 必須フィールドチェック
+        modifier_id = raw_data.get("modifier_id")
+        if not modifier_id or not isinstance(modifier_id, str):
+            result.errors.append("Missing or invalid 'modifier_id'")
+            return result
+        
+        result.modifier_id = modifier_id
+        
+        target_flow_id = raw_data.get("target_flow_id")
+        if not target_flow_id or not isinstance(target_flow_id, str):
+            result.errors.append("Missing or invalid 'target_flow_id'")
+            return result
+        
+        phase = raw_data.get("phase")
+        if not phase or not isinstance(phase, str):
+            result.errors.append("Missing or invalid 'phase'")
+            return result
+        
+        action = raw_data.get("action")
+        valid_actions = {"inject_before", "inject_after", "append", "replace", "remove"}
+        if not action or action not in valid_actions:
+            result.errors.append(f"Invalid 'action': must be one of {valid_actions}")
+            return result
+        
+        # target_step_id（actionによって必須）
+        target_step_id = raw_data.get("target_step_id")
+        if action in {"inject_before", "inject_after", "replace", "remove"}:
+            if not target_step_id or not isinstance(target_step_id, str):
+                result.errors.append(f"'target_step_id' is required for action '{action}'")
+                return result
+        
+        # step（inject/append/replaceでは必須）
+        step = raw_data.get("step")
+        if action in {"inject_before", "inject_after", "append", "replace"}:
+            if not step or not isinstance(step, dict):
+                result.errors.append(f"'step' is required for action '{action}'")
+                return result
+            
+            # stepの最低限の検証
+            if "id" not in step:
+                result.errors.append("'step.id' is required")
+                return result
+            if "type" not in step:
+                result.errors.append("'step.type' is required")
+                return result
+        
+        # priority（任意、デフォルト100）
+        priority = raw_data.get("priority", 100)
+        if not isinstance(priority, (int, float)):
+            result.warnings.append("Invalid priority, using 100")
+            priority = 100
+        priority = int(priority)
+        
+        # requires（任意）
+        requires_raw = raw_data.get("requires", {})
+        requires = ModifierRequires(
+            interfaces=requires_raw.get("interfaces", []) if isinstance(requires_raw, dict) else [],
+            capabilities=requires_raw.get("capabilities", []) if isinstance(requires_raw, dict) else []
+        )
+        
+        modifier_def = FlowModifierDef(
+            modifier_id=modifier_id,
+            target_flow_id=target_flow_id,
+            phase=phase,
+            priority=priority,
+            action=action,
+            target_step_id=target_step_id,
+            step=step,
+            requires=requires,
+            source_file=file_path
+        )
+        
+        result.success = True
+        result.modifier_def = modifier_def
+        return result
+    
+    def get_loaded_modifiers(self) -> Dict[str, FlowModifierDef]:
+        """ロード済みmodifierを取得"""
+        with self._lock:
+            return dict(self._loaded_modifiers)
+    
+    def get_load_errors(self) -> List[Dict[str, Any]]:
+        """ロードエラーを取得"""
+        with self._lock:
+            return list(self._load_errors)
+    
+    def get_modifiers_for_flow(self, flow_id: str) -> List[FlowModifierDef]:
+        """特定Flowに対するmodifierを取得（ソート済み）"""
+        with self._lock:
+            modifiers = [
+                m for m in self._loaded_modifiers.values()
+                if m.target_flow_id == flow_id
+            ]
+            # phase → priority → modifier_id でソート
+            return sorted(modifiers, key=lambda m: (m.phase, m.priority, m.modifier_id))
+
+
+class FlowModifierApplier:
+    """
+    Flow modifier適用エンジン
+    
+    modifierをFlowDefinitionに適用する。
+    """
+    
+    def __init__(self, interface_registry=None):
+        self._interface_registry = interface_registry
+        self._available_interfaces: Set[str] = set()
+        self._available_capabilities: Set[str] = set()
+    
+    def set_interface_registry(self, ir) -> None:
+        """InterfaceRegistryを設定"""
+        self._interface_registry = ir
+        self._refresh_available()
+    
+    def _refresh_available(self) -> None:
+        """利用可能なinterfaces/capabilitiesを更新"""
+        if not self._interface_registry:
+            return
+        
+        # interfacesはIRに登録されているキー
+        ir_list = self._interface_registry.list() or {}
+        self._available_interfaces = set(ir_list.keys())
+        
+        # capabilitiesはcomponent.capabilitiesから収集
+        all_caps = self._interface_registry.get("component.capabilities", strategy="all") or []
+        self._available_capabilities = set()
+        for cap_dict in all_caps:
+            if isinstance(cap_dict, dict):
+                for k, v in cap_dict.items():
+                    if v:
+                        self._available_capabilities.add(k)
+    
+    def check_requires(self, requires: ModifierRequires) -> Tuple[bool, Optional[str]]:
+        """
+        requires条件をチェック
+        
+        Returns:
+            (満たされているか, 満たされていない理由)
+        """
+        # interfaces チェック
+        for iface in requires.interfaces:
+            if iface not in self._available_interfaces:
+                return False, f"interface '{iface}' not available"
+        
+        # capabilities チェック
+        for cap in requires.capabilities:
+            if cap not in self._available_capabilities:
+                return False, f"capability '{cap}' not available"
+        
+        return True, None
+    
+    def apply_modifiers(
+        self,
+        flow_def: FlowDefinition,
+        modifiers: List[FlowModifierDef]
+    ) -> Tuple[FlowDefinition, List[ModifierApplyResult]]:
+        """
+        modifierをFlowに適用
+        
+        Args:
+            flow_def: 元のFlowDefinition
+            modifiers: 適用するmodifierリスト（ソート済み）
+        
+        Returns:
+            (変更後のFlowDefinition, 適用結果リスト)
+        """
+        # FlowDefinitionをディープコピー（元を変更しない）
+        new_steps = copy.deepcopy(flow_def.steps)
+        results = []
+        
+        for modifier in modifiers:
+            result = self._apply_single_modifier(new_steps, modifier, flow_def.phases)
+            results.append(result)
+        
+        # 新しいFlowDefinitionを作成
+        new_flow_def = FlowDefinition(
+            flow_id=flow_def.flow_id,
+            inputs=copy.deepcopy(flow_def.inputs),
+            outputs=copy.deepcopy(flow_def.outputs),
+            phases=list(flow_def.phases),
+            defaults=copy.deepcopy(flow_def.defaults),
+            steps=new_steps,
+            source_file=flow_def.source_file,
+            source_type=flow_def.source_type
+        )
+        
+        return new_flow_def, results
+    
+    def _apply_single_modifier(
+        self,
+        steps: List[FlowStep],
+        modifier: FlowModifierDef,
+        phases: List[str]
+    ) -> ModifierApplyResult:
+        """単一のmodifierを適用"""
+        result = ModifierApplyResult(
+            success=False,
+            modifier_id=modifier.modifier_id,
+            action=modifier.action,
+            target_flow_id=modifier.target_flow_id,
+            target_step_id=modifier.target_step_id
+        )
+        
+        # requires チェック
+        satisfied, reason = self.check_requires(modifier.requires)
+        if not satisfied:
+            result.skipped_reason = reason
+            return result
+        
+        # phaseがFlowに存在するかチェック
+        if modifier.phase not in phases:
+            result.skipped_reason = f"phase '{modifier.phase}' not in flow phases"
+            return result
+        
+        try:
+            if modifier.action == "append":
+                self._action_append(steps, modifier, phases)
+            elif modifier.action == "inject_before":
+                self._action_inject_before(steps, modifier, phases)
+            elif modifier.action == "inject_after":
+                self._action_inject_after(steps, modifier, phases)
+            elif modifier.action == "replace":
+                self._action_replace(steps, modifier, phases)
+            elif modifier.action == "remove":
+                self._action_remove(steps, modifier)
+            else:
+                result.errors.append(f"Unknown action: {modifier.action}")
+                return result
+            
+            result.success = True
+        except Exception as e:
+            result.errors.append(str(e))
+        
+        # 監査ログに記録
+        try:
+            from .audit_logger import get_audit_logger
+            audit = get_audit_logger()
+            audit.log_modifier_application(
+                modifier_id=modifier.modifier_id,
+                target_flow_id=modifier.target_flow_id,
+                action=modifier.action,
+                success=result.success,
+                target_step_id=modifier.target_step_id,
+                skipped_reason=result.skipped_reason,
+                error=result.errors[0] if result.errors else None
+            )
+        except Exception:
+            pass  # 監査ログのエラーで処理を止めない
+        
+        return result
+    
+    def _step_from_dict(self, step_dict: Dict[str, Any], phase: str, modifier_id: str) -> FlowStep:
+        """辞書からFlowStepを作成"""
+        return FlowStep(
+            id=step_dict.get("id", f"modifier_{modifier_id}"),
+            phase=step_dict.get("phase", phase),
+            priority=step_dict.get("priority", 100),
+            type=step_dict.get("type", "handler"),
+            when=step_dict.get("when"),
+            input=step_dict.get("input"),
+            output=step_dict.get("output"),
+            raw=step_dict,
+            owner_pack=step_dict.get("owner_pack"),
+            file=step_dict.get("file"),
+            timeout_seconds=step_dict.get("timeout_seconds", 60.0)
+        )
+    
+    def _find_step_index(self, steps: List[FlowStep], step_id: str) -> int:
+        """step_idでステップのインデックスを検索"""
+        for i, step in enumerate(steps):
+            if step.id == step_id:
+                return i
+        return -1
+    
+    def _action_append(
+        self,
+        steps: List[FlowStep],
+        modifier: FlowModifierDef,
+        phases: List[str]
+    ) -> None:
+        """append: 指定phaseの最後（次のphaseの直前）にステップを追加"""
+        new_step = self._step_from_dict(modifier.step, modifier.phase, modifier.modifier_id)
+        
+        # 次のphaseの直前（＝このphaseの末尾）を探す
+        insert_index = len(steps)
+        phase_order = {p: i for i, p in enumerate(phases)}
+        target_phase_order = phase_order.get(modifier.phase, 999)
+        
+        for i, step in enumerate(steps):
+            step_phase_order = phase_order.get(step.phase, 999)
+            if step_phase_order > target_phase_order:
+                insert_index = i
+                break
+        
+        steps.insert(insert_index, new_step)
+    
+    def _action_inject_before(
+        self,
+        steps: List[FlowStep],
+        modifier: FlowModifierDef,
+        phases: List[str]
+    ) -> None:
+        """inject_before: target_step_idの前にステップを挿入"""
+        target_index = self._find_step_index(steps, modifier.target_step_id)
+        if target_index < 0:
+            raise ValueError(f"Target step '{modifier.target_step_id}' not found")
+        
+        new_step = self._step_from_dict(modifier.step, modifier.phase, modifier.modifier_id)
+        steps.insert(target_index, new_step)
+    
+    def _action_inject_after(
+        self,
+        steps: List[FlowStep],
+        modifier: FlowModifierDef,
+        phases: List[str]
+    ) -> None:
+        """inject_after: target_step_idの後にステップを挿入"""
+        target_index = self._find_step_index(steps, modifier.target_step_id)
+        if target_index < 0:
+            raise ValueError(f"Target step '{modifier.target_step_id}' not found")
+        
+        new_step = self._step_from_dict(modifier.step, modifier.phase, modifier.modifier_id)
+        steps.insert(target_index + 1, new_step)
+    
+    def _action_replace(
+        self,
+        steps: List[FlowStep],
+        modifier: FlowModifierDef,
+        phases: List[str]
+    ) -> None:
+        """replace: target_step_idのステップを置換"""
+        target_index = self._find_step_index(steps, modifier.target_step_id)
+        if target_index < 0:
+            raise ValueError(f"Target step '{modifier.target_step_id}' not found")
+        
+        new_step = self._step_from_dict(modifier.step, modifier.phase, modifier.modifier_id)
+        steps[target_index] = new_step
+    
+    def _action_remove(
+        self,
+        steps: List[FlowStep],
+        modifier: FlowModifierDef
+    ) -> None:
+        """remove: target_step_idのステップを削除"""
+        target_index = self._find_step_index(steps, modifier.target_step_id)
+        if target_index < 0:
+            raise ValueError(f"Target step '{modifier.target_step_id}' not found")
+        
+        steps.pop(target_index)
+
+
+# グローバルインスタンス
+_global_modifier_loader: Optional[FlowModifierLoader] = None
+_global_modifier_applier: Optional[FlowModifierApplier] = None
+_modifier_lock = threading.Lock()
+
+
+def get_modifier_loader() -> FlowModifierLoader:
+    """グローバルなFlowModifierLoaderを取得"""
+    global _global_modifier_loader
+    if _global_modifier_loader is None:
+        with _modifier_lock:
+            if _global_modifier_loader is None:
+                _global_modifier_loader = FlowModifierLoader()
+    return _global_modifier_loader
+
+
+def get_modifier_applier() -> FlowModifierApplier:
+    """グローバルなFlowModifierApplierを取得"""
+    global _global_modifier_applier
+    if _global_modifier_applier is None:
+        with _modifier_lock:
+            if _global_modifier_applier is None:
+                _global_modifier_applier = FlowModifierApplier()
+    return _global_modifier_applier
+
+
+def reset_modifier_loader() -> FlowModifierLoader:
+    """FlowModifierLoaderをリセット（テスト用）"""
+    global _global_modifier_loader
+    with _modifier_lock:
+        _global_modifier_loader = FlowModifierLoader()
+    return _global_modifier_loader
+
+
+def reset_modifier_applier() -> FlowModifierApplier:
+    """FlowModifierApplierをリセット（テスト用）"""
+    global _global_modifier_applier
+    with _modifier_lock:
+        _global_modifier_applier = FlowModifierApplier()
+    return _global_modifier_applier
+```
+
+---
+
+### 2.2 `core_runtime/__init__.py` への追加
+
+```python
+from .flow_modifier import (
+    FlowModifierDef,
+    FlowModifierLoader,
+    FlowModifierApplier,
+    ModifierRequires,
+    ModifierLoadResult,
+    ModifierApplyResult,
+    get_modifier_loader,
+    get_modifier_applier,
+    reset_modifier_loader,
+    reset_modifier_applier,
+)
+```
+
+`__all__` リストに追加:
+
+```python
+    # Flow Modifier
+    "FlowModifierDef",
+    "FlowModifierLoader",
+    "FlowModifierApplier",
+    "ModifierRequires",
+    "ModifierLoadResult",
+    "ModifierApplyResult",
+    "get_modifier_loader",
+    "get_modifier_applier",
+    "reset_modifier_loader",
+    "reset_modifier_applier",
+```
+
+---
+
+### 2.3 `core_runtime/kernel.py` への追加ハンドラ
+
+#### `_h_modifier_load_all`
+
+```python
+    def _h_modifier_load_all(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """
+        全modifierファイルをロード（単独実行用）
+        
+        通常は _h_flow_load_all 内で自動的にロードされる。
+        このハンドラは診断やデバッグ目的で単独呼び出し可能。
+        """
+        try:
+            loader = get_modifier_loader()
+            modifiers = loader.load_all_modifiers()
+            
+            errors = loader.get_load_errors()
+            for err in errors:
+                self.diagnostics.record_step(
+                    phase="startup",
+                    step_id="modifier.load.error",
+                    handler="kernel:modifier.load_all",
+                    status="failed",
+                    error={"errors": err.get("errors", [])},
+                    meta={"file": err.get("file")}
+                )
+            
+            self.diagnostics.record_step(
+                phase="startup",
+                step_id="modifier.load_all.complete",
+                handler="kernel:modifier.load_all",
+                status="success",
+                meta={
+                    "loaded_count": len(modifiers),
+                    "modifier_ids": list(modifiers.keys()),
+                    "error_count": len(errors)
+                }
+            )
+            
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_step_meta": {
+                    "loaded": list(modifiers.keys()),
+                    "error_count": len(errors)
+                }
+            }
+        except Exception as e:
+            self.diagnostics.record_step(
+                phase="startup",
+                step_id="modifier.load_all.failed",
+                handler="kernel:modifier.load_all",
+                status="failed",
+                error=e
+            )
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {"error": str(e)}
+            }
+```
+
+#### `_h_modifier_apply`
+
+```python
+    def _h_modifier_apply(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """
+        指定Flowにmodifierを再適用（単独実行用）
+        
+        Args:
+            args.flow_id: 対象Flow ID（省略時は全Flow）
+        """
+        try:
+            target_flow_id = args.get("flow_id")
+            
+            flow_loader = get_flow_loader()
+            modifier_loader = get_modifier_loader()
+            applier = get_modifier_applier()
+            applier.set_interface_registry(self.interface_registry)
+            
+            flows = flow_loader.get_loaded_flows()
+            all_results = []
+            
+            for flow_id, flow_def in flows.items():
+                if target_flow_id and flow_id != target_flow_id:
+                    continue
+                
+                modifiers = modifier_loader.get_modifiers_for_flow(flow_id)
+                if not modifiers:
+                    continue
+                
+                modified_flow, results = applier.apply_modifiers(flow_def, modifiers)
+                all_results.extend(results)
+                
+                # IRを更新
+                converted = self._convert_new_flow_to_legacy(modified_flow)
+                self.interface_registry.register(f"flow.{flow_id}", converted, meta={
+                    "_source_file": str(modified_flow.source_file) if modified_flow.source_file else None,
+                    "_source_type": modified_flow.source_type,
+                    "_flow_loader": True,
+                    "_modifiers_applied": [r.modifier_id for r in results if r.success],
+                })
+            
+            success_count = sum(1 for r in all_results if r.success)
+            skip_count = sum(1 for r in all_results if r.skipped_reason)
+            fail_count = sum(1 for r in all_results if not r.success and not r.skipped_reason)
+            
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_step_meta": {
+                    "success_count": success_count,
+                    "skip_count": skip_count,
+                    "fail_count": fail_count
+                }
+            }
+        except Exception as e:
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {"error": str(e)}
+            }
+```
+
+---
+
+### 2.4 サンプルmodifierファイル: `ecosystem/flows/modifiers/example_tool_inject.modifier.yaml`
+
+```yaml
+# ツール注入の例
+# ecosystem/flows/modifiers/example_tool_inject.modifier.yaml
+
+modifier_id: example_tool_inject
+target_flow_id: ai_response
+phase: prepare
+priority: 50
+action: inject_after
+target_step_id: load_context
+
+requires:
+  capabilities:
+    - tool_support
+
+step:
+  id: inject_tools
+  type: python_file_call
+  owner_pack: tool_pack
+  file: blocks/tool_selector.py
+  input:
+    context: "${ctx.context}"
+  output: selected_tools
+```
+
+---
+
+### 2.5 サンプルエコシステムFlow: `ecosystem/flows/ai_response.flow.yaml`
+
+```yaml
+# AIレスポンス生成Flow（サンプル）
+# ecosystem/flows/ai_response.flow.yaml
+
+flow_id: ai_response
+inputs:
+  user_input: string
+  context: object
+outputs:
+  response: string
+
+phases:
+  - prepare
+  - generate
+  - postprocess
+
+defaults:
+  fail_soft: true
+  on_missing_step: skip
+
+steps:
+  - id: load_context
+    phase: prepare
+    priority: 10
+    type: handler
+    input:
+      handler: "kernel:ctx.get"
+      args:
+        key: "context"
+        default: {}
+    output: context
+
+  - id: generate_response
+    phase: generate
+    priority: 50
+    type: python_file_call
+    owner_pack: ai_client
+    file: blocks/generate.py
+    input:
+      user_input: "${ctx.user_input}"
+      context: "${ctx.context}"
+    output: ai_output
+
+  - id: format_output
+    phase: postprocess
+    priority: 10
+    type: set
+    input:
+      key: response
+      value: "${ctx.ai_output.text}"
+```
+
+---
+
+## Step 3: python_file_call 実装
+
+### 3.1 新規ファイル: `core_runtime/python_file_executor.py`（問題3修正済み）
+
+```python
+"""
+python_file_executor.py - python_file_call ステップ実行エンジン
+
+Flowの python_file_call ステップを実行する。
+Pack承認、Modified検出、パス制限、permissiveモード対応を含む。
+
+設計原則:
+- 承認されていないPackのコードは実行しない
+- Modifiedなpackのコードは実行しない
+- 許可されたパス以外のファイルは実行しない
+- permissiveモードでは警告付きでホスト実行を許可
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+import sys
+import threading
+import traceback
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+
+@dataclass
+class ExecutionContext:
+    """python_file_call 実行コンテキスト"""
+    flow_id: str
+    step_id: str
+    phase: str
+    ts: str
+    owner_pack: Optional[str]
+    inputs: Dict[str, Any]
+    diagnostics_callback: Optional[Callable[[Dict[str, Any]], None]] = None
+    permission_proxy: Optional[Any] = None
+
+
+@dataclass 
+class ExecutionResult:
+    """python_file_call 実行結果"""
+    success: bool
+    output: Any = None
+    error: Optional[str] = None
+    error_type: Optional[str] = None
+    execution_mode: str = "unknown"  # "container", "host_permissive", "rejected"
+    execution_time_ms: float = 0.0
+    warnings: List[str] = field(default_factory=list)
+
+
+class PackApprovalChecker:
+    """Pack承認状態チェッカー"""
+    
+    def __init__(self):
+        self._approval_manager = None
+        self._lock = threading.Lock()
+    
+    def _get_approval_manager(self):
+        """ApprovalManagerを遅延取得"""
+        if self._approval_manager is None:
+            with self._lock:
+                if self._approval_manager is None:
+                    try:
+                        from .approval_manager import get_approval_manager
+                        self._approval_manager = get_approval_manager()
+                    except ImportError:
+                        pass
+        return self._approval_manager
+    
+    def is_approved(self, pack_id: str) -> Tuple[bool, Optional[str]]:
+        """
+        Packが承認済みかチェック
+        
+        Returns:
+            (承認済みか, 拒否理由)
+        """
+        am = self._get_approval_manager()
+        if am is None:
+            # ApprovalManagerがない場合はpermissiveとして扱う
+            return True, None
+        
+        try:
+            from .approval_manager import PackStatus
+            status = am.get_status(pack_id)
+            
+            if status is None:
+                return False, f"Pack '{pack_id}' not found in approval registry"
+            
+            if status == PackStatus.APPROVED:
+                return True, None
+            elif status == PackStatus.MODIFIED:
+                return False, f"Pack '{pack_id}' has been modified since approval"
+            elif status == PackStatus.BLOCKED:
+                return False, f"Pack '{pack_id}' is blocked"
+            else:
+                return False, f"Pack '{pack_id}' is not approved (status: {status.value})"
+        except Exception as e:
+            return False, f"Approval check failed: {e}"
+    
+    def verify_hash(self, pack_id: str) -> Tuple[bool, Optional[str]]:
+        """
+        Packのハッシュを検証
+        
+        Returns:
+            (検証成功か, 失敗理由)
+        """
+        am = self._get_approval_manager()
+        if am is None:
+            return True, None
+        
+        try:
+            if am.verify_hash(pack_id):
+                return True, None
+            else:
+                return False, f"Pack '{pack_id}' hash verification failed"
+        except Exception as e:
+            return False, f"Hash verification error: {e}"
+
+
+class PathValidator:
+    """ファイルパス検証"""
+    
+    # 許可されるルートディレクトリ（相対パス）
+    ALLOWED_ROOTS = [
+        "ecosystem/packs",
+        "ecosystem/sandbox",
+    ]
+    
+    def __init__(self):
+        self._base_dir = Path.cwd()
+        self._allowed_absolute: List[Path] = []
+        self._refresh_allowed_paths()
+    
+    def _refresh_allowed_paths(self) -> None:
+        """許可パスを更新"""
+        self._allowed_absolute = []
+        for root in self.ALLOWED_ROOTS:
+            abs_path = (self._base_dir / root).resolve()
+            if abs_path.exists():
+                self._allowed_absolute.append(abs_path)
+    
+    def add_allowed_root(self, path: str) -> None:
+        """許可ルートを追加"""
+        abs_path = Path(path).resolve()
+        if abs_path not in self._allowed_absolute:
+            self._allowed_absolute.append(abs_path)
+    
+    def validate(self, file_path: str, owner_pack: Optional[str] = None) -> Tuple[bool, Optional[str], Optional[Path]]:
+        """
+        ファイルパスを検証
+        
+        Args:
+            file_path: 検証するパス
+            owner_pack: 所有Pack ID（相対パス解決に使用）
+        
+        Returns:
+            (有効か, エラー理由, 解決済み絶対パス)
+        """
+        try:
+            path = Path(file_path)
+            
+            # 絶対パスの場合
+            if path.is_absolute():
+                resolved = path.resolve()
+            else:
+                # 相対パスの場合、owner_packから解決を試みる
+                if owner_pack:
+                    pack_dir = self._base_dir / "ecosystem" / "packs" / owner_pack
+                    # backend/blocks/ を探す
+                    candidates = [
+                        pack_dir / "backend" / file_path,
+                        pack_dir / "backend" / "blocks" / file_path,
+                        pack_dir / "backend" / "components" / file_path,
+                        pack_dir / file_path,
+                    ]
+                    
+                    resolved = None
+                    for candidate in candidates:
+                        if candidate.exists():
+                            resolved = candidate.resolve()
+                            break
+                    
+                    if resolved is None:
+                        # 見つからない場合は最初の候補をデフォルトとする
+                        resolved = candidates[0].resolve()
+                else:
+                    resolved = (self._base_dir / file_path).resolve()
+            
+            # ファイル存在チェック
+            if not resolved.exists():
+                return False, f"File not found: {resolved}", None
+            
+            if not resolved.is_file():
+                return False, f"Not a file: {resolved}", None
+            
+            # 許可ルート内かチェック
+            is_allowed = False
+            for allowed_root in self._allowed_absolute:
+                try:
+                    resolved.relative_to(allowed_root)
+                    is_allowed = True
+                    break
+                except ValueError:
+                    continue
+            
+            if not is_allowed:
+                return False, f"Path outside allowed roots: {resolved}", None
+            
+            return True, None, resolved
+            
+        except Exception as e:
+            return False, f"Path validation error: {e}", None
+
+
+class PythonFileExecutor:
+    """
+    python_file_call 実行エンジン
+    
+    Packのpythonファイルを安全に実行する。
+    """
+    
+    def __init__(self):
+        self._lock = threading.RLock()
+        self._syspath_lock = threading.Lock()
+        self._approval_checker = PackApprovalChecker()
+        self._path_validator = PathValidator()
+        self._security_mode = os.environ.get("RUMI_SECURITY_MODE", "strict").lower()
+        
+        if self._security_mode not in ("strict", "permissive"):
+            self._security_mode = "strict"
+    
+    def _now_ts(self) -> str:
+        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    
+    def get_security_mode(self) -> str:
+        """現在のセキュリティモードを取得"""
+        return self._security_mode
+    
+    def execute(
+        self,
+        file_path: str,
+        owner_pack: Optional[str],
+        input_data: Any,
+        context: ExecutionContext,
+        timeout_seconds: float = 60.0
+    ) -> ExecutionResult:
+        """
+        pythonファイルを実行
+        
+        Args:
+            file_path: 実行するファイルパス
+            owner_pack: 所有Pack ID
+            input_data: 入力データ
+            context: 実行コンテキスト
+            timeout_seconds: タイムアウト秒数
+        
+        Returns:
+            ExecutionResult
+        """
+        import time
+        start_time = time.time()
+        
+        result = ExecutionResult(success=False)
+        
+        # 1. owner_pack 解決
+        resolved_pack = owner_pack or self._infer_pack_from_path(file_path)
+        
+        # 2. 承認チェック
+        if resolved_pack:
+            approved, reason = self._approval_checker.is_approved(resolved_pack)
+            if not approved:
+                result.error = reason
+                result.error_type = "approval_rejected"
+                result.execution_mode = "rejected"
+                self._record_rejection(context, result, "approval")
+                return result
+            
+            # ハッシュ検証
+            hash_ok, hash_reason = self._approval_checker.verify_hash(resolved_pack)
+            if not hash_ok:
+                result.error = hash_reason
+                result.error_type = "hash_verification_failed"
+                result.execution_mode = "rejected"
+                self._record_rejection(context, result, "hash")
+                return result
+        
+        # 3. パス検証
+        path_valid, path_error, resolved_path = self._path_validator.validate(file_path, resolved_pack)
+        if not path_valid:
+            result.error = path_error
+            result.error_type = "path_rejected"
+            result.execution_mode = "rejected"
+            self._record_rejection(context, result, "path")
+            return result
+        
+        # 4. 実行
+        try:
+            # Docker実行を試みる（将来実装）
+            docker_available = self._check_docker_available()
+            
+            if docker_available:
+                # Docker実行（Step 6で完全実装）
+                result = self._execute_in_container(
+                    resolved_path, resolved_pack, input_data, context, timeout_seconds
+                )
+            elif self._security_mode == "permissive":
+                # ホスト実行（警告付き）
+                result = self._execute_on_host(
+                    resolved_path, resolved_pack, input_data, context, timeout_seconds
+                )
+                result.warnings.append(
+                    "SECURITY WARNING: Executed on host without Docker isolation. "
+                    "Set RUMI_SECURITY_MODE=strict and ensure Docker is running for production."
+                )
+            else:
+                # strict モードでDocker無し → 拒否
+                result.error = "Docker is required but not available. Set RUMI_SECURITY_MODE=permissive for development."
+                result.error_type = "docker_required"
+                result.execution_mode = "rejected"
+                self._record_rejection(context, result, "docker_unavailable")
+                return result
+                
+        except Exception as e:
+            result.error = str(e)
+            result.error_type = type(e).__name__
+            result.execution_mode = "failed"
+        
+        result.execution_time_ms = (time.time() - start_time) * 1000
+        
+        # 監査ログに実行結果を記録
+        try:
+            from .audit_logger import get_audit_logger
+            audit = get_audit_logger()
+            audit.log_python_file_call(
+                flow_id=context.flow_id,
+                step_id=context.step_id,
+                phase=context.phase,
+                owner_pack=resolved_pack or "unknown",
+                file_path=file_path,
+                success=result.success,
+                execution_mode=result.execution_mode,
+                execution_time_ms=result.execution_time_ms,
+                error=result.error,
+                error_type=result.error_type,
+                warnings=result.warnings
+            )
+        except Exception:
+            pass  # 監査ログのエラーで処理を止めない
+        
+        return result
+    
+    def _infer_pack_from_path(self, file_path: str) -> Optional[str]:
+        """パスからPack IDを推測"""
+        try:
+            path = Path(file_path)
+            
+            # ecosystem/packs/{pack_id}/... のパターンを探す
+            parts = path.parts
+            for i, part in enumerate(parts):
+                if part == "packs" and i + 1 < len(parts):
+                    return parts[i + 1]
+            
+            return None
+        except Exception:
+            return None
+    
+    def _check_docker_available(self) -> bool:
+        """Docker利用可能性をチェック"""
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["docker", "info"],
+                capture_output=True,
+                timeout=5
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+    
+    def _execute_in_container(
+        self,
+        file_path: Path,
+        owner_pack: Optional[str],
+        input_data: Any,
+        context: ExecutionContext,
+        timeout_seconds: float
+    ) -> ExecutionResult:
+        """
+        Dockerコンテナ内で実行（スタブ - Step 6で完全実装）
+        
+        現時点ではホスト実行にフォールバック
+        """
+        # TODO: Step 6で完全実装
+        # 現時点ではpermissiveモードと同様にホスト実行
+        result = self._execute_on_host(file_path, owner_pack, input_data, context, timeout_seconds)
+        result.execution_mode = "container_stub"
+        result.warnings.append("Container execution not yet implemented, using host execution")
+        return result
+    
+    def _execute_on_host(
+        self,
+        file_path: Path,
+        owner_pack: Optional[str],
+        input_data: Any,
+        context: ExecutionContext,
+        timeout_seconds: float
+    ) -> ExecutionResult:
+        """ホスト上で実行（permissiveモード）"""
+        result = ExecutionResult(success=False, execution_mode="host_permissive")
+        
+        # 警告を出力
+        print(f"[PythonFileExecutor] SECURITY WARNING: Executing on host: {file_path}", file=sys.stderr)
+        
+        module_name = f"pfc_{owner_pack or 'unknown'}_{file_path.stem}_{abs(hash(str(file_path)))}"
+        
+        try:
+            # モジュールをロード
+            spec = importlib.util.spec_from_file_location(module_name, str(file_path))
+            
+            if spec is None or spec.loader is None:
+                result.error = f"Cannot load module from {file_path}"
+                result.error_type = "module_load_error"
+                return result
+            
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = module
+            
+            # sys.pathに追加（スレッドセーフ）
+            file_dir = str(file_path.parent)
+            path_added = False
+            
+            with self._syspath_lock:
+                if file_dir not in sys.path:
+                    sys.path.insert(0, file_dir)
+                    path_added = True
+            
+            try:
+                spec.loader.exec_module(module)
+            finally:
+                # sys.pathから削除（追加した場合のみ）
+                if path_added:
+                    with self._syspath_lock:
+                        if file_dir in sys.path:
+                            sys.path.remove(file_dir)
+            
+            # run関数を探す
+            run_fn = getattr(module, "run", None)
+            if run_fn is None:
+                result.error = f"No 'run' function found in {file_path}"
+                result.error_type = "no_run_function"
+                return result
+            
+            # コンテキスト辞書を構築
+            exec_context = {
+                "flow_id": context.flow_id,
+                "step_id": context.step_id,
+                "phase": context.phase,
+                "ts": context.ts,
+                "owner_pack": owner_pack,
+                "inputs": input_data,
+                "network_check": self._create_network_check_fn(owner_pack),
+                "http_request": self._create_proxy_request_fn(owner_pack),
+            }
+            
+            if context.permission_proxy:
+                exec_context["permission_proxy"] = context.permission_proxy
+            
+            # 実行
+            import inspect
+            sig = inspect.signature(run_fn)
+            param_count = len(sig.parameters)
+            
+            if param_count >= 2:
+                output = run_fn(input_data, exec_context)
+            elif param_count == 1:
+                output = run_fn(input_data)
+            else:
+                output = run_fn()
+            
+            # 出力をJSON互換に変換
+            result.output = self._ensure_json_compatible(output)
+            result.success = True
+            
+        except Exception as e:
+            result.error = str(e)
+            result.error_type = type(e).__name__
+            result.warnings.append(f"Traceback: {traceback.format_exc()[-2000:]}")
+        
+        finally:
+            # モジュールをクリーンアップ
+            if module_name in sys.modules:
+                del sys.modules[module_name]
+        
+        return result
+    
+    def _ensure_json_compatible(self, value: Any) -> Any:
+        """値をJSON互換に変換"""
+        if value is None:
+            return None
+        
+        if isinstance(value, (str, int, float, bool)):
+            return value
+        
+        if isinstance(value, (list, tuple)):
+            return [self._ensure_json_compatible(v) for v in value]
+        
+        if isinstance(value, dict):
+            return {str(k): self._ensure_json_compatible(v) for k, v in value.items()}
+        
+        # その他はstr化
+        try:
+            json.dumps(value)
+            return value
+        except (TypeError, ValueError):
+            return str(value)
+    
+    def _create_network_check_fn(self, owner_pack: Optional[str]) -> Callable:
+        """
+        ネットワークアクセスチェック関数を作成
+        
+        python_file_call内のコードがネットワークアクセス前に
+        呼び出すための関数を提供。
+        """
+        def check_network(domain: str, port: int) -> Dict[str, Any]:
+            """
+            ネットワークアクセスをチェック
+            
+            Args:
+                domain: アクセス先ドメイン
+                port: アクセス先ポート
+            
+            Returns:
+                {"allowed": bool, "reason": str}
+            """
+            if not owner_pack:
+                return {"allowed": False, "reason": "No owner_pack specified"}
+            
+            try:
+                from .network_grant_manager import get_network_grant_manager
+                ngm = get_network_grant_manager()
+                result = ngm.check_access(owner_pack, domain, port)
+                return {
+                    "allowed": result.allowed,
+                    "reason": result.reason
+                }
+            except Exception as e:
+                return {"allowed": False, "reason": f"Check failed: {e}"}
+        
+        return check_network
+    
+    def _create_proxy_request_fn(self, owner_pack: Optional[str]) -> Callable:
+        """
+        プロキシ経由でHTTPリクエストを送信する関数を作成
+        
+        python_file_call内のコードから外部通信を行うための関数を提供。
+        """
+        def proxy_request(
+            method: str,
+            url: str,
+            headers: Dict[str, str] = None,
+            body: str = None,
+            timeout_seconds: float = 30.0
+        ) -> Dict[str, Any]:
+            """
+            プロキシ経由でHTTPリクエストを送信
+            
+            Args:
+                method: HTTPメソッド（GET, POST, etc.）
+                url: リクエスト先URL
+                headers: HTTPヘッダー
+                body: リクエストボディ
+                timeout_seconds: タイムアウト秒数
+            
+            Returns:
+                {
+                    "success": bool,
+                    "status_code": int,
+                    "headers": dict,
+                    "body": str,
+                    "error": str or None,
+                    "allowed": bool,
+                    "rejection_reason": str or None
+                }
+            """
+            if not owner_pack:
+                return {
+                    "success": False,
+                    "error": "No owner_pack specified",
+                    "allowed": False
+                }
+            
+            try:
+                from .egress_proxy import get_egress_proxy, make_proxy_request
+                proxy = get_egress_proxy()
+                if not proxy.is_running():
+                    return {
+                        "success": False,
+                        "error": "Egress proxy is not running",
+                        "allowed": False
+                    }
+                
+                proxy_url = proxy.get_endpoint()
+                result = make_proxy_request(
+                    proxy_url=proxy_url,
+                    owner_pack=owner_pack,
+                    method=method,
+                    url=url,
+                    headers=headers,
+                    body=body,
+                    timeout_seconds=timeout_seconds
+                )
+                
+                return result.to_dict()
+            except Exception as e:
+                return {
+                    "success": False,
+                    "error": str(e),
+                    "allowed": False
+                }
+        
+        return proxy_request
+    
+    def _record_rejection(
+        self,
+        context: ExecutionContext,
+        result: ExecutionResult,
+        rejection_type: str
+    ) -> None:
+        """拒否を記録（診断と監査ログ両方）"""
+        # 診断コールバック
+        if context.diagnostics_callback:
+            context.diagnostics_callback({
+                "type": "python_file_call_rejected",
+                "rejection_type": rejection_type,
+                "flow_id": context.flow_id,
+                "step_id": context.step_id,
+                "phase": context.phase,
+                "owner_pack": context.owner_pack,
+                "error": result.error,
+                "ts": context.ts,
+            })
+        
+        # 監査ログ
+        try:
+            from .audit_logger import get_audit_logger
+            audit = get_audit_logger()
+            audit.log_security_event(
+                event_type=f"python_file_call_{rejection_type}_rejected",
+                severity="warning",
+                description=result.error or f"Rejected due to {rejection_type}",
+                pack_id=context.owner_pack,
+                details={
+                    "flow_id": context.flow_id,
+                    "step_id": context.step_id,
+                    "phase": context.phase,
+                    "rejection_type": rejection_type,
+                }
+            )
+        except Exception:
+            pass  # 監査ログのエラーで処理を止めない
+
+
+# グローバルインスタンス
+_global_executor: Optional[PythonFileExecutor] = None
+_executor_lock = threading.Lock()
+
+
+def get_python_file_executor() -> PythonFileExecutor:
+    """グローバルなPythonFileExecutorを取得"""
+    global _global_executor
+    if _global_executor is None:
+        with _executor_lock:
+            if _global_executor is None:
+                _global_executor = PythonFileExecutor()
+    return _global_executor
+
+
+def reset_python_file_executor() -> PythonFileExecutor:
+    """PythonFileExecutorをリセット（テスト用）"""
+    global _global_executor
+    with _executor_lock:
+        _global_executor = PythonFileExecutor()
+    return _global_executor
+```
+
+---
+
+### 3.2 `core_runtime/__init__.py` への追加
+
+```python
+from .python_file_executor import (
+    PythonFileExecutor,
+    ExecutionContext,
+    ExecutionResult,
+    PackApprovalChecker,
+    PathValidator,
+    get_python_file_executor,
+    reset_python_file_executor,
+)
+```
+
+`__all__` リストに追加:
+
+```python
+    # Python File Executor
+    "PythonFileExecutor",
+    "ExecutionContext",
+    "ExecutionResult",
+    "PackApprovalChecker",
+    "PathValidator",
+    "get_python_file_executor",
+    "reset_python_file_executor",
+```
+
+---
+
+### 3.3 `core_runtime/kernel.py` への `_h_python_file_call` メソッド
+
+```python
+    def _h_python_file_call(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """
+        python_file_call ステップを実行
+        
+        Args (from args):
+            file: 実行するファイルパス（必須）
+            owner_pack: 所有Pack ID（任意、パスから推測可能）
+            input: 入力データ（任意）
+            timeout_seconds: タイムアウト秒数（任意、デフォルト60）
+            _step_id: ステップID（内部用）
+            _phase: フェーズ名（内部用）
+        """
+        file_path = args.get("file")
+        if not file_path:
+            self.diagnostics.record_step(
+                phase=args.get("_phase", "flow"),
+                step_id=args.get("_step_id", "unknown"),
+                handler="kernel:python_file_call",
+                status="failed",
+                error={"type": "missing_file", "message": "No 'file' specified"}
+            )
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {"error": "No 'file' specified"}
+            }
+        
+        owner_pack = args.get("owner_pack")
+        input_data = args.get("input", {})
+        timeout_seconds = args.get("timeout_seconds", 60.0)
+        step_id = args.get("_step_id", "unknown")
+        phase = args.get("_phase", "flow")
+        
+        # 入力データの変数解決
+        resolved_input = self._resolve_value(input_data, ctx)
+        
+        # 実行コンテキストを構築
+        exec_context = ExecutionContext(
+            flow_id=ctx.get("_flow_id", "unknown"),
+            step_id=step_id,
+            phase=phase,
+            ts=self._now_ts(),
+            owner_pack=owner_pack,
+            inputs=resolved_input,
+            diagnostics_callback=lambda data: self.diagnostics.record_step(
+                phase=data.get("phase", phase),
+                step_id=f"{step_id}.{data.get('type', 'event')}",
+                handler="kernel:python_file_call",
+                status="failed" if "error" in data else "success",
+                error=data.get("error"),
+                meta=data
+            )
+        )
+        
+        # 実行
+        executor = get_python_file_executor()
+        result = executor.execute(
+            file_path=file_path,
+            owner_pack=owner_pack,
+            input_data=resolved_input,
+            context=exec_context,
+            timeout_seconds=timeout_seconds
+        )
+        
+        # 結果を記録
+        status = "success" if result.success else "failed"
+        self.diagnostics.record_step(
+            phase=phase,
+            step_id=step_id,
+            handler="kernel:python_file_call",
+            status=status,
+            error={"type": result.error_type, "message": result.error} if result.error else None,
+            meta={
+                "file": file_path,
+                "owner_pack": owner_pack,
+                "execution_mode": result.execution_mode,
+                "execution_time_ms": result.execution_time_ms,
+                "warnings": result.warnings if result.warnings else None,
+            }
+        )
+        
+        # 警告をログ出力
+        for warning in result.warnings:
+            print(f"[python_file_call] WARNING: {warning}", file=sys.stderr)
+        
+        if result.success:
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_step_meta": {
+                    "execution_mode": result.execution_mode,
+                    "execution_time_ms": result.execution_time_ms,
+                },
+                "output": result.output
+            }
+        else:
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {
+                    "error": result.error,
+                    "error_type": result.error_type,
+                    "execution_mode": result.execution_mode,
+                }
+            }
+```
+
+---
+
+### 3.4 サンプルブロック: `ecosystem/packs/example_pack/backend/blocks/hello.py`
+
+```python
+"""
+サンプル python_file_call ブロック
+
+このファイルは python_file_call から呼び出される。
+"""
+
+
+def run(input_data, context=None):
+    """
+    メイン実行関数
+    
+    Args:
+        input_data: Flowから渡される入力データ
+        context: 実行コンテキスト（省略可能）
+            - flow_id: Flow ID
+            - step_id: ステップID
+            - phase: フェーズ名
+            - ts: タイムスタンプ
+            - owner_pack: 所有Pack ID
+            - inputs: 入力データ（input_dataと同じ）
+    
+    Returns:
+        JSON互換の出力データ
+    """
+    name = "World"
+    
+    if isinstance(input_data, dict):
+        name = input_data.get("name", name)
+    elif isinstance(input_data, str):
+        name = input_data
+    
+    result = {
+        "message": f"Hello, {name}!",
+        "received_input": input_data,
+    }
+    
+    if context:
+        result["context_info"] = {
+            "flow_id": context.get("flow_id"),
+            "step_id": context.get("step_id"),
+            "phase": context.get("phase"),
+        }
+    
+    return result
+```
+
+---
+
+### 3.5 サンプルFlow: `ecosystem/flows/hello_flow.flow.yaml`
+
+```yaml
+# python_file_call テスト用Flow
+# ecosystem/flows/hello_flow.flow.yaml
+
+flow_id: hello_flow
+inputs:
+  name: string
+outputs:
+  greeting: object
+
+phases:
+  - main
+
+defaults:
+  fail_soft: true
+  on_missing_step: skip
+
+steps:
+  - id: set_name
+    phase: main
+    priority: 10
+    type: set
+    input:
+      key: name
+      value: "${ctx.name}"
+
+  - id: call_hello
+    phase: main
+    priority: 50
+    type: python_file_call
+    owner_pack: example_pack
+    file: blocks/hello.py
+    input:
+      name: "${ctx.name}"
+    output: greeting_result
+
+  - id: set_output
+    phase: main
+    priority: 90
+    type: set
+    input:
+      key: greeting
+      value: "${ctx.greeting_result}"
+```
+
+---
+
+### 3.6 `ecosystem/packs/example_pack/backend/ecosystem.json`
+
+```json
+{
+  "pack_id": "example_pack",
+  "pack_identity": "local:example_pack",
+  "version": "1.0.0",
+  "description": "Example pack for testing python_file_call"
+}
+```
+
+---
+
+## Step 4: 監査ログ・診断の統合
+
+### 4.1 新規ファイル: `core_runtime/audit_logger.py`（問題7修正済み）
+
+```python
+"""
+audit_logger.py - 監査ログシステム
+
+Flow実行、modifier適用、python_file_call、権限操作などの
+監査ログを永続化する。
+
+設計原則:
+- 全ての重要な操作を記録
+- 拒否理由を明確に記録
+- JSON Lines形式で永続化
+- ローテーション対応
+"""
+
+from __future__ import annotations
+
+import atexit
+import json
+import os
+import threading
+from dataclasses import dataclass, field, asdict
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Literal
+
+
+AuditCategory = Literal[
+    "flow_execution",
+    "modifier_application", 
+    "python_file_call",
+    "approval",
+    "permission",
+    "network",
+    "security",
+    "system"
+]
+
+AuditSeverity = Literal["info", "warning", "error", "critical"]
+
+
+@dataclass
+class AuditEntry:
+    """監査ログエントリ"""
+    ts: str
+    category: AuditCategory
+    severity: AuditSeverity
+    action: str
+    success: bool
+    
+    # コンテキスト情報
+    flow_id: Optional[str] = None
+    step_id: Optional[str] = None
+    phase: Optional[str] = None
+    owner_pack: Optional[str] = None
+    modifier_id: Optional[str] = None
+    
+    # 詳細情報
+    details: Dict[str, Any] = field(default_factory=dict)
+    error: Optional[str] = None
+    error_type: Optional[str] = None
+    
+    # セキュリティ関連
+    rejection_reason: Optional[str] = None
+    execution_mode: Optional[str] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """辞書に変換（None値は除外）"""
+        d = asdict(self)
+        return {k: v for k, v in d.items() if v is not None}
+    
+    def to_json(self) -> str:
+        """JSON文字列に変換"""
+        return json.dumps(self.to_dict(), ensure_ascii=False)
+
+
+class AuditLogger:
+    """
+    監査ログ管理クラス
+    
+    監査ログをファイルに永続化し、検索・取得機能を提供する。
+    """
+    
+    DEFAULT_AUDIT_DIR = "user_data/audit"
+    
+    def __init__(self, audit_dir: str = None):
+        self._audit_dir = Path(audit_dir) if audit_dir else Path(self.DEFAULT_AUDIT_DIR)
+        self._lock = threading.RLock()
+        self._buffer: List[AuditEntry] = []
+        self._buffer_size = 100
+        self._ensure_dir()
+        
+        # 終了時にフラッシュ
+        atexit.register(self._atexit_flush)
+    
+    def _now_ts(self) -> str:
+        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    
+    def _today_str(self) -> str:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    
+    def _ensure_dir(self) -> None:
+        """監査ログディレクトリを作成"""
+        self._audit_dir.mkdir(parents=True, exist_ok=True)
+    
+    def _get_log_file(self, category: str) -> Path:
+        """カテゴリ別のログファイルパスを取得"""
+        return self._audit_dir / f"{category}_{self._today_str()}.jsonl"
+    
+    def log(self, entry: AuditEntry) -> None:
+        """監査ログを記録"""
+        with self._lock:
+            self._buffer.append(entry)
+            
+            if len(self._buffer) >= self._buffer_size:
+                self._flush_buffer()
+    
+    def _flush_buffer(self) -> None:
+        """バッファをファイルに書き出し"""
+        if not self._buffer:
+            return
+        
+        # カテゴリ別にグループ化
+        by_category: Dict[str, List[AuditEntry]] = {}
+        for entry in self._buffer:
+            cat = entry.category
+            if cat not in by_category:
+                by_category[cat] = []
+            by_category[cat].append(entry)
+        
+        # 各カテゴリのファイルに書き出し
+        for category, entries in by_category.items():
+            log_file = self._get_log_file(category)
+            try:
+                with open(log_file, "a", encoding="utf-8") as f:
+                    for entry in entries:
+                        f.write(entry.to_json() + "\n")
+            except Exception as e:
+                print(f"[AuditLogger] Failed to write to {log_file}: {e}")
+        
+        self._buffer.clear()
+    
+    def flush(self) -> None:
+        """バッファを強制フラッシュ"""
+        with self._lock:
+            self._flush_buffer()
+    
+    def _atexit_flush(self) -> None:
+        """終了時のフラッシュ（例外を握りつぶす）"""
+        try:
+            self.flush()
+        except Exception:
+            pass
+    
+    def log_flow_execution(
+        self,
+        flow_id: str,
+        success: bool,
+        step_count: int = 0,
+        execution_time_ms: float = 0,
+        error: str = None,
+        details: Dict[str, Any] = None
+    ) -> None:
+        """Flow実行ログを記録"""
+        entry = AuditEntry(
+            ts=self._now_ts(),
+            category="flow_execution",
+            severity="info" if success else "error",
+            action="execute_flow",
+            success=success,
+            flow_id=flow_id,
+            error=error,
+            details={
+                "step_count": step_count,
+                "execution_time_ms": execution_time_ms,
+                **(details or {})
+            }
+        )
+        self.log(entry)
+    
+    def log_modifier_application(
+        self,
+        modifier_id: str,
+        target_flow_id: str,
+        action: str,
+        success: bool,
+        target_step_id: str = None,
+        skipped_reason: str = None,
+        error: str = None
+    ) -> None:
+        """modifier適用ログを記録"""
+        entry = AuditEntry(
+            ts=self._now_ts(),
+            category="modifier_application",
+            severity="info" if success else ("warning" if skipped_reason else "error"),
+            action=f"modifier_{action}",
+            success=success,
+            flow_id=target_flow_id,
+            step_id=target_step_id,
+            modifier_id=modifier_id,
+            rejection_reason=skipped_reason,
+            error=error
+        )
+        self.log(entry)
+    
+    def log_python_file_call(
+        self,
+        flow_id: str,
+        step_id: str,
+        phase: str,
+        owner_pack: str,
+        file_path: str,
+        success: bool,
+        execution_mode: str,
+        execution_time_ms: float = 0,
+        error: str = None,
+        error_type: str = None,
+        rejection_reason: str = None,
+        warnings: List[str] = None
+    ) -> None:
+        """python_file_call実行ログを記録"""
+        severity: AuditSeverity = "info"
+        if not success:
+            if rejection_reason:
+                severity = "warning"
+            else:
+                severity = "error"
+        
+        entry = AuditEntry(
+            ts=self._now_ts(),
+            category="python_file_call",
+            severity=severity,
+            action="execute_python_file",
+            success=success,
+            flow_id=flow_id,
+            step_id=step_id,
+            phase=phase,
+            owner_pack=owner_pack,
+            execution_mode=execution_mode,
+            error=error,
+            error_type=error_type,
+            rejection_reason=rejection_reason,
+            details={
+                "file": file_path,
+                "execution_time_ms": execution_time_ms,
+                "warnings": warnings or []
+            }
+        )
+        self.log(entry)
+    
+    def log_approval_event(
+        self,
+        pack_id: str,
+        action: str,
+        success: bool,
+        previous_status: str = None,
+        new_status: str = None,
+        reason: str = None,
+        error: str = None
+    ) -> None:
+        """承認イベントログを記録"""
+        entry = AuditEntry(
+            ts=self._now_ts(),
+            category="approval",
+            severity="info" if success else "error",
+            action=f"approval_{action}",
+            success=success,
+            owner_pack=pack_id,
+            error=error,
+            details={
+                "previous_status": previous_status,
+                "new_status": new_status,
+                "reason": reason
+            }
+        )
+        self.log(entry)
+    
+    def log_permission_event(
+        self,
+        pack_id: str,
+        permission_type: str,
+        action: str,
+        success: bool,
+        details: Dict[str, Any] = None,
+        rejection_reason: str = None
+    ) -> None:
+        """権限イベントログを記録"""
+        entry = AuditEntry(
+            ts=self._now_ts(),
+            category="permission",
+            severity="info" if success else "warning",
+            action=f"permission_{action}",
+            success=success,
+            owner_pack=pack_id,
+            rejection_reason=rejection_reason,
+            details={
+                "permission_type": permission_type,
+                **(details or {})
+            }
+        )
+        self.log(entry)
+    
+    def log_network_event(
+        self,
+        pack_id: str,
+        domain: str,
+        port: int,
+        allowed: bool,
+        reason: str = None,
+        request_details: Dict[str, Any] = None
+    ) -> None:
+        """ネットワークイベントログを記録"""
+        entry = AuditEntry(
+            ts=self._now_ts(),
+            category="network",
+            severity="info" if allowed else "warning",
+            action="network_request",
+            success=allowed,
+            owner_pack=pack_id,
+            rejection_reason=reason if not allowed else None,
+            details={
+                "domain": domain,
+                "port": port,
+                **(request_details or {})
+            }
+        )
+        self.log(entry)
+    
+    def log_security_event(
+        self,
+        event_type: str,
+        severity: AuditSeverity,
+        description: str,
+        pack_id: str = None,
+        details: Dict[str, Any] = None
+    ) -> None:
+        """セキュリティイベントログを記録"""
+        entry = AuditEntry(
+            ts=self._now_ts(),
+            category="security",
+            severity=severity,
+            action=event_type,
+            success=severity in ("info", "warning"),
+            owner_pack=pack_id,
+            details={
+                "description": description,
+                **(details or {})
+            }
+        )
+        self.log(entry)
+    
+    def log_system_event(
+        self,
+        event_type: str,
+        success: bool,
+        details: Dict[str, Any] = None,
+        error: str = None
+    ) -> None:
+        """システムイベントログを記録"""
+        entry = AuditEntry(
+            ts=self._now_ts(),
+            category="system",
+            severity="info" if success else "error",
+            action=event_type,
+            success=success,
+            error=error,
+            details=details or {}
+        )
+        self.log(entry)
+    
+    def query_logs(
+        self,
+        category: AuditCategory = None,
+        start_date: str = None,
+        end_date: str = None,
+        pack_id: str = None,
+        flow_id: str = None,
+        success_only: bool = None,
+        limit: int = 1000
+    ) -> List[Dict[str, Any]]:
+        """
+        監査ログを検索
+        
+        Args:
+            category: カテゴリでフィルタ
+            start_date: 開始日（YYYY-MM-DD）
+            end_date: 終了日（YYYY-MM-DD）
+            pack_id: Pack IDでフィルタ
+            flow_id: Flow IDでフィルタ
+            success_only: 成功のみ（True）、失敗のみ（False）、全て（None）
+            limit: 最大取得件数
+        
+        Returns:
+            ログエントリのリスト
+        """
+        self.flush()
+        
+        results = []
+        
+        # 対象ファイルを特定
+        if category:
+            pattern = f"{category}_*.jsonl"
+        else:
+            pattern = "*.jsonl"
+        
+        log_files = sorted(self._audit_dir.glob(pattern), reverse=True)
+        
+        for log_file in log_files:
+            # 日付フィルタ
+            file_date = self._extract_date_from_filename(log_file.name)
+            if file_date:
+                if start_date and file_date < start_date:
+                    continue
+                if end_date and file_date > end_date:
+                    continue
+            
+            try:
+                with open(log_file, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if len(results) >= limit:
+                            break
+                        
+                        try:
+                            entry = json.loads(line.strip())
+                        except json.JSONDecodeError:
+                            continue
+                        
+                        # フィルタ適用
+                        if pack_id and entry.get("owner_pack") != pack_id:
+                            continue
+                        if flow_id and entry.get("flow_id") != flow_id:
+                            continue
+                        if success_only is not None and entry.get("success") != success_only:
+                            continue
+                        
+                        results.append(entry)
+                
+                if len(results) >= limit:
+                    break
+                    
+            except Exception as e:
+                print(f"[AuditLogger] Failed to read {log_file}: {e}")
+        
+        return results
+    
+    def _extract_date_from_filename(self, filename: str) -> Optional[str]:
+        """ファイル名から日付を抽出"""
+        # category_YYYY-MM-DD.jsonl のパターン
+        parts = filename.replace(".jsonl", "").split("_")
+        if len(parts) >= 2:
+            date_part = parts[-1]
+            if len(date_part) == 10 and date_part[4] == "-" and date_part[7] == "-":
+                return date_part
+        return None
+    
+    def get_summary(
+        self,
+        category: AuditCategory = None,
+        date: str = None
+    ) -> Dict[str, Any]:
+        """
+        監査ログのサマリーを取得
+        
+        Returns:
+            カテゴリ別・成功/失敗別の集計
+        """
+        date = date or self._today_str()
+        
+        summary = {
+            "date": date,
+            "categories": {},
+            "total_entries": 0,
+            "total_success": 0,
+            "total_failure": 0,
+        }
+        
+        if category:
+            categories = [category]
+        else:
+            categories = ["flow_execution", "modifier_application", "python_file_call", 
+                         "approval", "permission", "network", "security", "system"]
+        
+        for cat in categories:
+            log_file = self._audit_dir / f"{cat}_{date}.jsonl"
+            cat_summary = {"success": 0, "failure": 0, "total": 0}
+            
+            if log_file.exists():
+                try:
+                    with open(log_file, "r", encoding="utf-8") as f:
+                        for line in f:
+                            try:
+                                entry = json.loads(line.strip())
+                                cat_summary["total"] += 1
+                                if entry.get("success"):
+                                    cat_summary["success"] += 1
+                                else:
+                                    cat_summary["failure"] += 1
+                            except json.JSONDecodeError:
+                                continue
+                except Exception:
+                    pass
+            
+            summary["categories"][cat] = cat_summary
+            summary["total_entries"] += cat_summary["total"]
+            summary["total_success"] += cat_summary["success"]
+            summary["total_failure"] += cat_summary["failure"]
+        
+        return summary
+    
+    def cleanup_old_logs(self, days_to_keep: int = 30) -> int:
+        """
+        古いログファイルを削除
+        
+        Args:
+            days_to_keep: 保持する日数
+        
+        Returns:
+            削除したファイル数
+        """
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days_to_keep)).strftime("%Y-%m-%d")
+        deleted = 0
+        
+        for log_file in self._audit_dir.glob("*.jsonl"):
+            file_date = self._extract_date_from_filename(log_file.name)
+            if file_date and file_date < cutoff:
+                try:
+                    log_file.unlink()
+                    deleted += 1
+                except Exception as e:
+                    print(f"[AuditLogger] Failed to delete {log_file}: {e}")
+        
+        return deleted
+
+
+# グローバルインスタンス
+_global_audit_logger: Optional[AuditLogger] = None
+_audit_lock = threading.Lock()
+
+
+def get_audit_logger() -> AuditLogger:
+    """グローバルなAuditLoggerを取得"""
+    global _global_audit_logger
+    if _global_audit_logger is None:
+        with _audit_lock:
+            if _global_audit_logger is None:
+                _global_audit_logger = AuditLogger()
+    return _global_audit_logger
+
+
+def reset_audit_logger(audit_dir: str = None) -> AuditLogger:
+    """AuditLoggerをリセット（テスト用）"""
+    global _global_audit_logger
+    with _audit_lock:
+        if _global_audit_logger:
+            _global_audit_logger.flush()
+        _global_audit_logger = AuditLogger(audit_dir)
+    return _global_audit_logger
+```
+
+---
+
+### 4.2 `core_runtime/__init__.py` への追加
+
+```python
+from .audit_logger import (
+    AuditLogger,
+    AuditEntry,
+    AuditCategory,
+    AuditSeverity,
+    get_audit_logger,
+    reset_audit_logger,
+)
+```
+
+`__all__` リストに追加:
+
+```python
+    # Audit Logger
+    "AuditLogger",
+    "AuditEntry",
+    "AuditCategory",
+    "AuditSeverity",
+    "get_audit_logger",
+    "reset_audit_logger",
+```
+
+---
+
+### 4.3 `core_runtime/kernel.py` への追加
+
+#### import追加
+
+```python
+from .audit_logger import get_audit_logger
+```
+
+#### `_init_kernel_handlers` に追加
+
+```python
+        "kernel:audit.query": self._h_audit_query,
+        "kernel:audit.summary": self._h_audit_summary,
+        "kernel:audit.flush": self._h_audit_flush,
+```
+
+#### ハンドラメソッド
+
+```python
+    def _h_audit_query(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """
+        監査ログを検索
+        
+        Args:
+            args.category: カテゴリ（任意）
+            args.start_date: 開始日（任意）
+            args.end_date: 終了日（任意）
+            args.pack_id: Pack ID（任意）
+            args.flow_id: Flow ID（任意）
+            args.success_only: 成功のみ/失敗のみ（任意）
+            args.limit: 最大件数（任意、デフォルト100）
+        """
+        try:
+            audit = get_audit_logger()
+            results = audit.query_logs(
+                category=args.get("category"),
+                start_date=args.get("start_date"),
+                end_date=args.get("end_date"),
+                pack_id=args.get("pack_id"),
+                flow_id=args.get("flow_id"),
+                success_only=args.get("success_only"),
+                limit=args.get("limit", 100)
+            )
+            
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_step_meta": {"count": len(results)},
+                "results": results
+            }
+        except Exception as e:
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {"error": str(e)}
+            }
+
+    def _h_audit_summary(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """
+        監査ログのサマリーを取得
+        
+        Args:
+            args.category: カテゴリ（任意）
+            args.date: 日付（任意、デフォルト今日）
+        """
+        try:
+            audit = get_audit_logger()
+            summary = audit.get_summary(
+                category=args.get("category"),
+                date=args.get("date")
+            )
+            
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_step_meta": summary,
+                "summary": summary
+            }
+        except Exception as e:
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {"error": str(e)}
+            }
+
+    def _h_audit_flush(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """監査ログバッファをフラッシュ"""
+        try:
+            audit = get_audit_logger()
+            audit.flush()
+            
+            return {"_kernel_step_status": "success"}
+        except Exception as e:
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {"error": str(e)}
+            }
+```
+
+---
+
+## Step 5: 権限モデル統合
+
+### 5.1 新規ファイル: `core_runtime/network_grant_manager.py`（問題8修正済み）
+
+```python
+"""
+network_grant_manager.py - ネットワーク権限管理
+
+Pack単位でのネットワークアクセス許可を管理する。
+allowed_domains / allowed_ports による制御と、
+Modified検出時の自動無効化を実装。
+
+設計原則:
+- Pack単位でのGrant（運用を簡単に）
+- ModifiedなPackは自動的にネットワーク権限を失う
+- HMAC署名で改ざん検知
+- 監査ログに全ての判定を記録
+"""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+import os
+import threading
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+
+@dataclass
+class NetworkGrant:
+    """ネットワーク権限Grant"""
+    pack_id: str
+    enabled: bool
+    allowed_domains: List[str]
+    allowed_ports: List[int]
+    granted_at: str
+    updated_at: str
+    granted_by: str = "system"
+    notes: str = ""
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "pack_id": self.pack_id,
+            "enabled": self.enabled,
+            "allowed_domains": self.allowed_domains,
+            "allowed_ports": self.allowed_ports,
+            "granted_at": self.granted_at,
+            "updated_at": self.updated_at,
+            "granted_by": self.granted_by,
+            "notes": self.notes,
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'NetworkGrant':
+        return cls(
+            pack_id=data.get("pack_id", ""),
+            enabled=data.get("enabled", False),
+            allowed_domains=data.get("allowed_domains", []),
+            allowed_ports=data.get("allowed_ports", []),
+            granted_at=data.get("granted_at", ""),
+            updated_at=data.get("updated_at", ""),
+            granted_by=data.get("granted_by", "system"),
+            notes=data.get("notes", ""),
+        )
+
+
+@dataclass
+class NetworkCheckResult:
+    """ネットワークアクセスチェック結果"""
+    allowed: bool
+    reason: str
+    pack_id: str
+    domain: Optional[str] = None
+    port: Optional[int] = None
+    grant: Optional[NetworkGrant] = None
+
+
+class NetworkGrantManager:
+    """
+    ネットワーク権限Grant管理
+    
+    user_data/permissions/network/{pack_id}.json でGrant情報を永続化。
+    """
+    
+    GRANTS_DIR = "user_data/permissions/network"
+    SECRET_KEY_FILE = "user_data/permissions/.secret_key"
+    
+    def __init__(self, grants_dir: str = None, secret_key: str = None):
+        self._grants_dir = Path(grants_dir) if grants_dir else Path(self.GRANTS_DIR)
+        self._secret_key = secret_key or self._load_or_create_
+
+---
+
+## Step 5: 権限モデル統合（続き）
+
+### 5.1 `core_runtime/network_grant_manager.py`（続き）
+
+```python
+secret_key()
+        self._grants: Dict[str, NetworkGrant] = {}
+        self._disabled_packs: Set[str] = set()  # ModifiedでDisabledになったPack
+        self._lock = threading.RLock()
+        
+        self._ensure_dir()
+        self._load_all_grants()
+    
+    def _now_ts(self) -> str:
+        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    
+    def _ensure_dir(self) -> None:
+        """ディレクトリを作成"""
+        self._grants_dir.mkdir(parents=True, exist_ok=True)
+    
+    def _load_or_create_secret_key(self) -> str:
+        """シークレットキーをロードまたは作成"""
+        key_file = Path(self.SECRET_KEY_FILE)
+        
+        if key_file.exists():
+            try:
+                return key_file.read_text(encoding="utf-8").strip()
+            except Exception:
+                pass
+        
+        # 新規作成
+        key = hashlib.sha256(os.urandom(32)).hexdigest()
+        key_file.parent.mkdir(parents=True, exist_ok=True)
+        key_file.write_text(key, encoding="utf-8")
+        
+        try:
+            os.chmod(key_file, 0o600)
+        except (OSError, AttributeError):
+            pass
+        
+        return key
+    
+    def _compute_hmac(self, data: Dict[str, Any]) -> str:
+        """HMAC署名を計算"""
+        data_copy = {k: v for k, v in data.items() if not k.startswith("_hmac")}
+        payload = json.dumps(data_copy, sort_keys=True, ensure_ascii=False)
+        return hmac.new(
+            self._secret_key.encode("utf-8"),
+            payload.encode("utf-8"),
+            hashlib.sha256
+        ).hexdigest()
+    
+    def _get_grant_file(self, pack_id: str) -> Path:
+        """Pack IDからGrantファイルパスを取得"""
+        safe_id = pack_id.replace("/", "_").replace(":", "_")
+        return self._grants_dir / f"{safe_id}.json"
+    
+    def _load_all_grants(self) -> None:
+        """全Grantをロード"""
+        with self._lock:
+            self._grants.clear()
+            
+            if not self._grants_dir.exists():
+                return
+            
+            for grant_file in self._grants_dir.glob("*.json"):
+                try:
+                    self._load_grant_file(grant_file)
+                except Exception as e:
+                    print(f"[NetworkGrantManager] Failed to load {grant_file}: {e}")
+    
+    def _load_grant_file(self, file_path: Path) -> Optional[NetworkGrant]:
+        """単一のGrantファイルをロード"""
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        # HMAC検証
+        stored_sig = data.pop("_hmac_signature", None)
+        if stored_sig:
+            computed_sig = self._compute_hmac(data)
+            if not hmac.compare_digest(stored_sig, computed_sig):
+                print(f"[NetworkGrantManager] HMAC verification failed for {file_path}")
+                # 改ざん検出 → 無効化
+                pack_id = data.get("pack_id", file_path.stem)
+                self._disabled_packs.add(pack_id)
+                return None
+        
+        grant = NetworkGrant.from_dict(data)
+        self._grants[grant.pack_id] = grant
+        return grant
+    
+    def _save_grant(self, grant: NetworkGrant) -> bool:
+        """Grantを保存"""
+        try:
+            data = grant.to_dict()
+            data["_hmac_signature"] = self._compute_hmac(data)
+            
+            file_path = self._get_grant_file(grant.pack_id)
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            
+            return True
+        except Exception as e:
+            print(f"[NetworkGrantManager] Failed to save grant for {grant.pack_id}: {e}")
+            return False
+    
+    def grant_network_access(
+        self,
+        pack_id: str,
+        allowed_domains: List[str],
+        allowed_ports: List[int],
+        granted_by: str = "user",
+        notes: str = ""
+    ) -> NetworkGrant:
+        """ネットワークアクセスを許可"""
+        with self._lock:
+            now = self._now_ts()
+            
+            existing = self._grants.get(pack_id)
+            if existing:
+                grant = NetworkGrant(
+                    pack_id=pack_id,
+                    enabled=True,
+                    allowed_domains=allowed_domains,
+                    allowed_ports=allowed_ports,
+                    granted_at=existing.granted_at,
+                    updated_at=now,
+                    granted_by=granted_by,
+                    notes=notes,
+                )
+            else:
+                grant = NetworkGrant(
+                    pack_id=pack_id,
+                    enabled=True,
+                    allowed_domains=allowed_domains,
+                    allowed_ports=allowed_ports,
+                    granted_at=now,
+                    updated_at=now,
+                    granted_by=granted_by,
+                    notes=notes,
+                )
+            
+            self._grants[pack_id] = grant
+            self._disabled_packs.discard(pack_id)
+            self._save_grant(grant)
+            
+            self._log_grant_event(pack_id, "grant", True, {
+                "allowed_domains": allowed_domains,
+                "allowed_ports": allowed_ports,
+                "granted_by": granted_by,
+            })
+            
+            return grant
+    
+    def revoke_network_access(self, pack_id: str, reason: str = "") -> bool:
+        """ネットワークアクセスを取り消し"""
+        with self._lock:
+            grant = self._grants.get(pack_id)
+            if not grant:
+                return False
+            
+            grant.enabled = False
+            grant.updated_at = self._now_ts()
+            grant.notes = reason or grant.notes
+            
+            self._save_grant(grant)
+            self._log_grant_event(pack_id, "revoke", True, {"reason": reason})
+            
+            return True
+    
+    def disable_for_modified(self, pack_id: str) -> None:
+        """ModifiedなPackのネットワークアクセスを無効化"""
+        with self._lock:
+            self._disabled_packs.add(pack_id)
+            self._log_grant_event(pack_id, "disable_modified", True, {
+                "reason": "Pack has been modified since approval"
+            })
+    
+    def enable_after_reapproval(self, pack_id: str) -> None:
+        """再承認後にネットワークアクセスを再有効化"""
+        with self._lock:
+            self._disabled_packs.discard(pack_id)
+            self._log_grant_event(pack_id, "enable_reapproval", True, {
+                "reason": "Pack re-approved"
+            })
+    
+    def check_access(
+        self,
+        pack_id: str,
+        domain: str,
+        port: int
+    ) -> NetworkCheckResult:
+        """ネットワークアクセスをチェック"""
+        with self._lock:
+            if pack_id in self._disabled_packs:
+                result = NetworkCheckResult(
+                    allowed=False,
+                    reason="Pack is disabled due to modification",
+                    pack_id=pack_id,
+                    domain=domain,
+                    port=port,
+                )
+                self._log_access_check(result)
+                return result
+            
+            grant = self._grants.get(pack_id)
+            if not grant:
+                result = NetworkCheckResult(
+                    allowed=False,
+                    reason="No network grant for this pack",
+                    pack_id=pack_id,
+                    domain=domain,
+                    port=port,
+                )
+                self._log_access_check(result)
+                return result
+            
+            if not grant.enabled:
+                result = NetworkCheckResult(
+                    allowed=False,
+                    reason="Network grant is disabled",
+                    pack_id=pack_id,
+                    domain=domain,
+                    port=port,
+                    grant=grant,
+                )
+                self._log_access_check(result)
+                return result
+            
+            domain_allowed = self._check_domain(domain, grant.allowed_domains)
+            if not domain_allowed:
+                result = NetworkCheckResult(
+                    allowed=False,
+                    reason=f"Domain '{domain}' not in allowed list",
+                    pack_id=pack_id,
+                    domain=domain,
+                    port=port,
+                    grant=grant,
+                )
+                self._log_access_check(result)
+                return result
+            
+            port_allowed = self._check_port(port, grant.allowed_ports)
+            if not port_allowed:
+                result = NetworkCheckResult(
+                    allowed=False,
+                    reason=f"Port {port} not in allowed list",
+                    pack_id=pack_id,
+                    domain=domain,
+                    port=port,
+                    grant=grant,
+                )
+                self._log_access_check(result)
+                return result
+            
+            result = NetworkCheckResult(
+                allowed=True,
+                reason="Access granted",
+                pack_id=pack_id,
+                domain=domain,
+                port=port,
+                grant=grant,
+            )
+            self._log_access_check(result)
+            return result
+    
+    def _check_domain(self, domain: str, allowed: List[str]) -> bool:
+        """ドメインが許可リストに含まれるかチェック"""
+        if not allowed:
+            return False
+        
+        domain_lower = domain.lower()
+        
+        for pattern in allowed:
+            pattern_lower = pattern.lower()
+            
+            # 完全一致
+            if domain_lower == pattern_lower:
+                return True
+            
+            # ワイルドカード（*.example.com）
+            if pattern_lower.startswith("*."):
+                base_domain = pattern_lower[2:]  # example.com
+                # *.example.com は example.com 自体も許可
+                if domain_lower == base_domain:
+                    return True
+                # サブドメインも許可
+                if domain_lower.endswith("." + base_domain):
+                    return True
+            
+            # サブドメイン許可（example.com は sub.example.com も許可）
+            if domain_lower.endswith("." + pattern_lower):
+                return True
+        
+        return False
+    
+    def _check_port(self, port: int, allowed: List[int]) -> bool:
+        """ポートが許可リストに含まれるかチェック"""
+        if not allowed:
+            return False
+        if 0 in allowed:
+            return True
+        return port in allowed
+    
+    def _log_grant_event(self, pack_id: str, action: str, success: bool, details: Dict[str, Any]) -> None:
+        """Grant操作を監査ログに記録"""
+        try:
+            from .audit_logger import get_audit_logger
+            audit = get_audit_logger()
+            audit.log_permission_event(
+                pack_id=pack_id,
+                permission_type="network",
+                action=action,
+                success=success,
+                details=details
+            )
+        except Exception:
+            pass
+    
+    def _log_access_check(self, result: NetworkCheckResult) -> None:
+        """アクセスチェックを監査ログに記録"""
+        try:
+            from .audit_logger import get_audit_logger
+            audit = get_audit_logger()
+            audit.log_network_event(
+                pack_id=result.pack_id,
+                domain=result.domain or "",
+                port=result.port or 0,
+                allowed=result.allowed,
+                reason=result.reason if not result.allowed else None,
+            )
+        except Exception:
+            pass
+    
+    def get_grant(self, pack_id: str) -> Optional[NetworkGrant]:
+        """Grantを取得"""
+        with self._lock:
+            return self._grants.get(pack_id)
+    
+    def get_all_grants(self) -> Dict[str, NetworkGrant]:
+        """全Grantを取得"""
+        with self._lock:
+            return dict(self._grants)
+    
+    def get_disabled_packs(self) -> Set[str]:
+        """無効化されたPackを取得"""
+        with self._lock:
+            return set(self._disabled_packs)
+    
+    def is_pack_network_enabled(self, pack_id: str) -> bool:
+        """Packのネットワークが有効かチェック"""
+        with self._lock:
+            if pack_id in self._disabled_packs:
+                return False
+            grant = self._grants.get(pack_id)
+            return grant is not None and grant.enabled
+    
+    def delete_grant(self, pack_id: str) -> bool:
+        """Grantを削除"""
+        with self._lock:
+            if pack_id not in self._grants:
+                return False
+            
+            del self._grants[pack_id]
+            
+            file_path = self._get_grant_file(pack_id)
+            if file_path.exists():
+                file_path.unlink()
+            
+            self._log_grant_event(pack_id, "delete", True, {})
+            return True
+
+
+# グローバルインスタンス
+_global_network_grant_manager: Optional[NetworkGrantManager] = None
+_network_lock = threading.Lock()
+
+
+def get_network_grant_manager() -> NetworkGrantManager:
+    """グローバルなNetworkGrantManagerを取得"""
+    global _global_network_grant_manager
+    if _global_network_grant_manager is None:
+        with _network_lock:
+            if _global_network_grant_manager is None:
+                _global_network_grant_manager = NetworkGrantManager()
+    return _global_network_grant_manager
+
+
+def reset_network_grant_manager(grants_dir: str = None) -> NetworkGrantManager:
+    """NetworkGrantManagerをリセット（テスト用）"""
+    global _global_network_grant_manager
+    with _network_lock:
+        _global_network_grant_manager = NetworkGrantManager(grants_dir)
+    return _global_network_grant_manager
+```
+
+---
+
+### 5.2 `core_runtime/__init__.py` への追加
+
+```python
+from .network_grant_manager import (
+    NetworkGrantManager,
+    NetworkGrant,
+    NetworkCheckResult,
+    get_network_grant_manager,
+    reset_network_grant_manager,
+)
+```
+
+`__all__` リストに追加:
+
+```python
+    # Network Grant Manager
+    "NetworkGrantManager",
+    "NetworkGrant",
+    "NetworkCheckResult",
+    "get_network_grant_manager",
+    "reset_network_grant_manager",
+```
+
+---
+
+### 5.3 `core_runtime/approval_manager.py` への修正
+
+#### `approve` メソッド（完全置換）
+
+```python
+    def approve(self, pack_id: str) -> ApprovalResult:
+        """Packを承認"""
+        with self._lock:
+            if pack_id not in self._approvals:
+                return ApprovalResult(success=False, pack_id=pack_id, error="Pack not found")
+            
+            approval = self._approvals[pack_id]
+            previous_status = approval.status
+            
+            pack_dir = self.packs_dir / pack_id
+            if not pack_dir.exists():
+                return ApprovalResult(success=False, pack_id=pack_id, error="Pack directory not found")
+            
+            file_hashes = self._compute_pack_hashes(pack_dir)
+            
+            approval.status = PackStatus.APPROVED
+            approval.approved_at = self._now_ts()
+            approval.file_hashes = file_hashes
+            approval.rejection_reason = None
+            
+            self._save_grant(approval)
+            
+            # 監査ログ
+            try:
+                from .audit_logger import get_audit_logger
+                audit = get_audit_logger()
+                audit.log_approval_event(
+                    pack_id=pack_id,
+                    action="approve",
+                    success=True,
+                    previous_status=previous_status.value if previous_status else None,
+                    new_status=PackStatus.APPROVED.value,
+                )
+            except Exception:
+                pass
+            
+            # ネットワーク権限の再有効化
+            try:
+                from .network_grant_manager import get_network_grant_manager
+                ngm = get_network_grant_manager()
+                ngm.enable_after_reapproval(pack_id)
+            except Exception:
+                pass
+            
+            return ApprovalResult(success=True, pack_id=pack_id, status=PackStatus.APPROVED)
+```
+
+#### `reject` メソッド（完全置換）
+
+```python
+    def reject(self, pack_id: str, reason: str = "") -> ApprovalResult:
+        """Packを拒否"""
+        with self._lock:
+            if pack_id not in self._approvals:
+                return ApprovalResult(success=False, pack_id=pack_id, error="Pack not found")
+            
+            approval = self._approvals[pack_id]
+            previous_status = approval.status
+            
+            approval.status = PackStatus.BLOCKED
+            approval.rejection_reason = reason
+            
+            self._save_grant(approval)
+            
+            # 監査ログ
+            try:
+                from .audit_logger import get_audit_logger
+                audit = get_audit_logger()
+                audit.log_approval_event(
+                    pack_id=pack_id,
+                    action="reject",
+                    success=True,
+                    previous_status=previous_status.value if previous_status else None,
+                    new_status=PackStatus.BLOCKED.value,
+                    reason=reason,
+                )
+            except Exception:
+                pass
+            
+            return ApprovalResult(success=True, pack_id=pack_id, status=PackStatus.BLOCKED)
+```
+
+#### `mark_modified` メソッド（完全置換）
+
+```python
+    def mark_modified(self, pack_id: str) -> None:
+        """Packを変更済みとしてマーク（再承認必要）"""
+        with self._lock:
+            if pack_id in self._approvals:
+                previous_status = self._approvals[pack_id].status
+                self._approvals[pack_id].status = PackStatus.MODIFIED
+                self._save_grant(self._approvals[pack_id])
+                
+                # 監査ログ
+                try:
+                    from .audit_logger import get_audit_logger
+                    audit = get_audit_logger()
+                    audit.log_approval_event(
+                        pack_id=pack_id,
+                        action="mark_modified",
+                        success=True,
+                        previous_status=previous_status.value if previous_status else None,
+                        new_status=PackStatus.MODIFIED.value,
+                    )
+                except Exception:
+                    pass
+                
+                # ネットワーク権限を無効化
+                try:
+                    from .network_grant_manager import get_network_grant_manager
+                    ngm = get_network_grant_manager()
+                    ngm.disable_for_modified(pack_id)
+                except Exception:
+                    pass
+```
+
+---
+
+### 5.4 `core_runtime/kernel.py` への追加
+
+#### import追加
+
+```python
+from .network_grant_manager import get_network_grant_manager
+```
+
+#### `_init_kernel_handlers` に追加
+
+```python
+        "kernel:network.grant": self._h_network_grant,
+        "kernel:network.revoke": self._h_network_revoke,
+        "kernel:network.check": self._h_network_check,
+        "kernel:network.list": self._h_network_list,
+```
+
+#### ハンドラメソッド
+
+```python
+    def _h_network_grant(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """ネットワークアクセスを許可"""
+        pack_id = args.get("pack_id")
+        if not pack_id:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "Missing pack_id"}}
+        
+        allowed_domains = args.get("allowed_domains", [])
+        allowed_ports = args.get("allowed_ports", [])
+        
+        if not allowed_domains and not allowed_ports:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "Must specify allowed_domains or allowed_ports"}}
+        
+        try:
+            ngm = get_network_grant_manager()
+            grant = ngm.grant_network_access(
+                pack_id=pack_id,
+                allowed_domains=allowed_domains,
+                allowed_ports=allowed_ports,
+                granted_by=args.get("granted_by", "kernel"),
+                notes=args.get("notes", "")
+            )
+            
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_step_meta": {"pack_id": pack_id},
+                "grant": grant.to_dict()
+            }
+        except Exception as e:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
+
+    def _h_network_revoke(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """ネットワークアクセスを取り消し"""
+        pack_id = args.get("pack_id")
+        if not pack_id:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "Missing pack_id"}}
+        
+        try:
+            ngm = get_network_grant_manager()
+            success = ngm.revoke_network_access(pack_id=pack_id, reason=args.get("reason", ""))
+            return {
+                "_kernel_step_status": "success" if success else "failed",
+                "_kernel_step_meta": {"pack_id": pack_id, "revoked": success}
+            }
+        except Exception as e:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
+
+    def _h_network_check(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """ネットワークアクセスをチェック"""
+        pack_id = args.get("pack_id")
+        domain = args.get("domain")
+        port = args.get("port")
+        
+        if not pack_id or not domain or port is None:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "Missing pack_id, domain, or port"}}
+        
+        try:
+            ngm = get_network_grant_manager()
+            result = ngm.check_access(pack_id, domain, int(port))
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_step_meta": {"allowed": result.allowed, "reason": result.reason},
+                "result": {"allowed": result.allowed, "reason": result.reason, "pack_id": result.pack_id, "domain": result.domain, "port": result.port}
+            }
+        except Exception as e:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
+
+    def _h_network_list(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """全ネットワークGrantを一覧"""
+        try:
+            ngm = get_network_grant_manager()
+            grants = ngm.get_all_grants()
+            disabled = ngm.get_disabled_packs()
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_step_meta": {"grant_count": len(grants), "disabled_count": len(disabled)},
+                "grants": {k: v.to_dict() for k, v in grants.items()},
+                "disabled_packs": list(disabled)
+            }
+        except Exception as e:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
+```
+
+---
+
+## Step 6: Egress Proxy 実装
+
+### 6.1 新規ファイル: `core_runtime/egress_proxy.py`（問題4修正済み）
+
+```python
+"""
+egress_proxy.py - Egress Proxy サーバー
+
+Packからの外部ネットワーク通信を仲介するプロキシサーバー。
+network grant に基づいて allow/deny を判定し、監査ログに記録する。
+"""
+
+from __future__ import annotations
+
+import json
+import socket
+import ssl
+import threading
+import traceback
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
+
+
+@dataclass
+class ProxyRequest:
+    """プロキシリクエスト"""
+    owner_pack: str
+    method: str
+    url: str
+    headers: Dict[str, str]
+    body: Optional[bytes]
+    timeout_seconds: float = 30.0
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'ProxyRequest':
+        return cls(
+            owner_pack=data.get("owner_pack", ""),
+            method=data.get("method", "GET").upper(),
+            url=data.get("url", ""),
+            headers=data.get("headers", {}),
+            body=data.get("body", "").encode("utf-8") if data.get("body") else None,
+            timeout_seconds=data.get("timeout_seconds", 30.0),
+        )
+
+
+@dataclass
+class ProxyResponse:
+    """プロキシレスポンス"""
+    success: bool
+    status_code: int = 0
+    headers: Dict[str, str] = field(default_factory=dict)
+    body: str = ""
+    error: Optional[str] = None
+    error_type: Optional[str] = None
+    allowed: bool = True
+    rejection_reason: Optional[str] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        d = {
+            "success": self.success,
+            "status_code": self.status_code,
+            "headers": self.headers,
+            "body": self.body,
+            "allowed": self.allowed,
+        }
+        if self.error:
+            d["error"] = self.error
+            d["error_type"] = self.error_type
+        if self.rejection_reason:
+            d["rejection_reason"] = self.rejection_reason
+        return d
+
+
+class EgressHTTPServer(HTTPServer):
+    """カスタムHTTPServer（インスタンス変数でマネージャを保持）"""
+    
+    def __init__(self, server_address, RequestHandlerClass, network_grant_manager=None, audit_logger=None):
+        super().__init__(server_address, RequestHandlerClass)
+        self.network_grant_manager = network_grant_manager
+        self.audit_logger = audit_logger
+        self.allowed_internal_ips = ["127.0.0.1", "::1", "localhost"]
+
+
+class EgressProxyHandler(BaseHTTPRequestHandler):
+    """HTTPリクエストハンドラ"""
+    
+    def log_message(self, format: str, *args) -> None:
+        pass
+    
+    @property
+    def network_grant_manager(self):
+        return self.server.network_grant_manager
+    
+    @property
+    def audit_logger(self):
+        return self.server.audit_logger
+    
+    @property
+    def allowed_internal_ips(self):
+        return self.server.allowed_internal_ips
+    
+    def _send_json_response(self, status_code: int, data: Dict[str, Any]) -> None:
+        body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        self.send_response(status_code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
+    
+    def _check_client_allowed(self) -> bool:
+        client_ip = self.client_address[0]
+        return client_ip in self.allowed_internal_ips
+    
+    def do_OPTIONS(self) -> None:
+        self.send_response(200)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Owner-Pack")
+        self.end_headers()
+    
+    def do_POST(self) -> None:
+        if not self._check_client_allowed():
+            self._send_json_response(403, {"success": False, "error": "Forbidden: Only local connections allowed", "error_type": "forbidden_client"})
+            return
+        
+        if self.path != "/proxy/request":
+            self._send_json_response(404, {"success": False, "error": f"Not found: {self.path}", "error_type": "not_found"})
+            return
+        
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_length) if content_length > 0 else b""
+            request_data = json.loads(body.decode("utf-8")) if body else {}
+        except json.JSONDecodeError as e:
+            self._send_json_response(400, {"success": False, "error": f"Invalid JSON: {e}", "error_type": "invalid_json"})
+            return
+        except Exception as e:
+            self._send_json_response(400, {"success": False, "error": f"Request error: {e}", "error_type": "request_error"})
+            return
+        
+        owner_pack = self.headers.get("X-Owner-Pack") or request_data.get("owner_pack")
+        if not owner_pack:
+            self._send_json_response(400, {"success": False, "error": "Missing owner_pack", "error_type": "missing_owner_pack"})
+            return
+        
+        request_data["owner_pack"] = owner_pack
+        
+        try:
+            proxy_request = ProxyRequest.from_dict(request_data)
+            response = self._process_request(proxy_request)
+            status = 200 if response.success else (403 if not response.allowed else 502)
+            self._send_json_response(status, response.to_dict())
+        except Exception as e:
+            self._send_json_response(500, {"success": False, "error": str(e), "error_type": type(e).__name__})
+    
+    def _process_request(self, request: ProxyRequest) -> ProxyResponse:
+        try:
+            parsed = urlparse(request.url)
+            domain = parsed.hostname or ""
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        except Exception as e:
+            return ProxyResponse(success=False, error=f"Invalid URL: {e}", error_type="invalid_url")
+        
+        if self.network_grant_manager:
+            check_result = self.network_grant_manager.check_access(request.owner_pack, domain, port)
+            if not check_result.allowed:
+                return ProxyResponse(success=False, allowed=False, rejection_reason=check_result.reason, error=f"Network access denied: {check_result.reason}", error_type="network_denied")
+        
+        try:
+            response = self._execute_http_request(request, domain, port)
+            self._log_request(request, domain, port, True, response.status_code)
+            return response
+        except Exception as e:
+            self._log_request(request, domain, port, False, 0, str(e))
+            return ProxyResponse(success=False, error=str(e), error_type=type(e).__name__)
+    
+    def _execute_http_request(self, request: ProxyRequest, domain: str, port: int) -> ProxyResponse:
+        try:
+            import http.client
+            parsed = urlparse(request.url)
+            
+            if parsed.scheme == "https":
+                context = ssl.create_default_context()
+                conn = http.client.HTTPSConnection(domain, port, timeout=request.timeout_seconds, context=context)
+            else:
+                conn = http.client.HTTPConnection(domain, port, timeout=request.timeout_seconds)
+            
+            try:
+                path = parsed.path or "/"
+                if parsed.query:
+                    path = f"{path}?{parsed.query}"
+                
+                headers = dict(request.headers)
+                if "Host" not in headers:
+                    headers["Host"] = domain
+                
+                conn.request(request.method, path, body=request.body, headers=headers)
+                resp = conn.getresponse()
+                
+                resp_headers = {}
+                for key, value in resp.getheaders():
+                    resp_headers[key] = value
+                
+                resp_body = resp.read()
+                
+                try:
+                    body_str = resp_body.decode("utf-8")
+                except UnicodeDecodeError:
+                    import base64
+                    body_str = base64.b64encode(resp_body).decode("ascii")
+                    resp_headers["X-Proxy-Body-Encoding"] = "base64"
+                
+                return ProxyResponse(success=True, status_code=resp.status, headers=resp_headers, body=body_str, allowed=True)
+            finally:
+                conn.close()
+        except socket.timeout:
+            return ProxyResponse(success=False, error="Request timed out", error_type="timeout")
+        except Exception as e:
+            return ProxyResponse(success=False, error=str(e), error_type=type(e).__name__)
+    
+    def _log_request(self, request: ProxyRequest, domain: str, port: int, success: bool, status_code: int, error: str = None) -> None:
+        if self.audit_logger:
+            try:
+                self.audit_logger.log_network_event(
+                    pack_id=request.owner_pack,
+                    domain=domain,
+                    port=port,
+                    allowed=True,
+                    request_details={"method": request.method, "url": request.url, "success": success, "status_code": status_code, "error": error}
+                )
+            except Exception:
+                pass
+
+
+class EgressProxyServer:
+    """Egress Proxy サーバー"""
+    
+    DEFAULT_HOST = "127.0.0.1"
+    DEFAULT_PORT = 8766
+    
+    def __init__(self, host: str = None, port: int = None, network_grant_manager=None, audit_logger=None):
+        self.host = host or self.DEFAULT_HOST
+        self.port = port or self.DEFAULT_PORT
+        self._network_grant_manager = network_grant_manager
+        self._audit_logger = audit_logger
+        self._server: Optional[EgressHTTPServer] = None
+        self._thread: Optional[threading.Thread] = None
+        self._lock = threading.Lock()
+    
+    def start(self) -> bool:
+        with self._lock:
+            if self._server is not None:
+                return False
+            try:
+                self._server = EgressHTTPServer(
+                    (self.host, self.port),
+                    EgressProxyHandler,
+                    network_grant_manager=self._network_grant_manager,
+                    audit_logger=self._audit_logger
+                )
+                self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+                self._thread.start()
+                print(f"[EgressProxy] Started on http://{self.host}:{self.port}")
+                if self._audit_logger:
+                    self._audit_logger.log_system_event(event_type="egress_proxy_start", success=True, details={"host": self.host, "port": self.port})
+                return True
+            except Exception as e:
+                print(f"[EgressProxy] Failed to start: {e}")
+                self._server = None
+                self._thread = None
+                return False
+    
+    def stop(self) -> bool:
+        with self._lock:
+            if self._server is None:
+                return False
+            try:
+                self._server.shutdown()
+                self._server = None
+                if self._thread:
+                    self._thread.join(timeout=5)
+                    self._thread = None
+                print("[EgressProxy] Stopped")
+                if self._audit_logger:
+                    self._audit_logger.log_system_event(event_type="egress_proxy_stop", success=True)
+                return True
+            except Exception as e:
+                print(f"[EgressProxy] Error stopping: {e}")
+                return False
+    
+    def is_running(self) -> bool:
+        with self._lock:
+            return self._server is not None and self._thread is not None and self._thread.is_alive()
+    
+    def get_endpoint(self) -> str:
+        return f"http://{self.host}:{self.port}/proxy/request"
+    
+    def set_network_grant_manager(self, manager) -> None:
+        self._network_grant_manager = manager
+        if self._server:
+            self._server.network_grant_manager = manager
+    
+    def set_audit_logger(self, logger) -> None:
+        self._audit_logger = logger
+        if self._server:
+            self._server.audit_logger = logger
+
+
+def make_proxy_request(proxy_url: str, owner_pack: str, method: str, url: str, headers: Dict[str, str] = None, body: str = None, timeout_seconds: float = 30.0) -> ProxyResponse:
+    """プロキシ経由でHTTPリクエストを送信"""
+    import http.client
+    try:
+        parsed = urlparse(proxy_url)
+        conn = http.client.HTTPConnection(parsed.hostname, parsed.port or 80, timeout=timeout_seconds + 5)
+        try:
+            request_body = json.dumps({
+                "owner_pack": owner_pack, "method": method, "url": url,
+                "headers": headers or {}, "body": body or "", "timeout_seconds": timeout_seconds,
+            }).encode("utf-8")
+            conn.request("POST", parsed.path or "/proxy/request", body=request_body, headers={"Content-Type": "application/json", "X-Owner-Pack": owner_pack})
+            resp = conn.getresponse()
+            resp_body = resp.read().decode("utf-8")
+            resp_data = json.loads(resp_body)
+            return ProxyResponse(
+                success=resp_data.get("success", False), status_code=resp_data.get("status_code", 0),
+                headers=resp_data.get("headers", {}), body=resp_data.get("body", ""),
+                error=resp_data.get("error"), error_type=resp_data.get("error_type"),
+                allowed=resp_data.get("allowed", True), rejection_reason=resp_data.get("rejection_reason"),
+            )
+        finally:
+            conn.close()
+    except Exception as e:
+        return ProxyResponse(success=False, error=str(e), error_type=type(e).__name__)
+
+
+_global_egress_proxy: Optional[EgressProxyServer] = None
+_proxy_lock = threading.Lock()
+
+
+def get_egress_proxy() -> EgressProxyServer:
+    global _global_egress_proxy
+    if _global_egress_proxy is None:
+        with _proxy_lock:
+            if _global_egress_proxy is None:
+                _global_egress_proxy = EgressProxyServer()
+    return _global_egress_proxy
+
+
+def initialize_egress_proxy(host: str = None, port: int = None, network_grant_manager=None, audit_logger=None, auto_start: bool = True) -> EgressProxyServer:
+    global _global_egress_proxy
+    with _proxy_lock:
+        if _global_egress_proxy and _global_egress_proxy.is_running():
+            _global_egress_proxy.stop()
+        _global_egress_proxy = EgressProxyServer(host=host, port=port, network_grant_manager=network_grant_manager, audit_logger=audit_logger)
+        if auto_start:
+            _global_egress_proxy.start()
+    return _global_egress_proxy
+
+
+def shutdown_egress_proxy() -> None:
+    global _global_egress_proxy
+    with _proxy_lock:
+        if _global_egress_proxy:
+            _global_egress_proxy.stop()
+            _global_egress_proxy = None
+```
+
+---
+
+### 6.2 `core_runtime/__init__.py` への追加
+
+```python
+from .egress_proxy import (
+    EgressProxyServer,
+    EgressProxyHandler,
+    ProxyRequest,
+    ProxyResponse,
+    get_egress_proxy,
+    initialize_egress_proxy,
+    shutdown_egress_proxy,
+    make_proxy_request,
+)
+```
+
+`__all__` リストに追加:
+
+```python
+    # Egress Proxy
+    "EgressProxyServer",
+    "EgressProxyHandler",
+    "ProxyRequest",
+    "ProxyResponse",
+    "get_egress_proxy",
+    "initialize_egress_proxy",
+    "shutdown_egress_proxy",
+    "make_proxy_request",
+```
+
+---
+
+### 6.3 `core_runtime/kernel.py` への追加
+
+#### import追加
+
+```python
+from .egress_proxy import get_egress_proxy, initialize_egress_proxy, shutdown_egress_proxy
+```
+
+#### `_init_kernel_handlers` に追加
+
+```python
+        "kernel:egress_proxy.start": self._h_egress_proxy_start,
+        "kernel:egress_proxy.stop": self._h_egress_proxy_stop,
+        "kernel:egress_proxy.status": self._h_egress_proxy_status,
+```
+
+#### ハンドラメソッド
+
+```python
+    def _h_egress_proxy_start(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """Egress Proxyを起動"""
+        try:
+            ngm = get_network_grant_manager()
+            audit = get_audit_logger()
+            proxy = initialize_egress_proxy(
+                host=args.get("host"), port=args.get("port"),
+                network_grant_manager=ngm, audit_logger=audit, auto_start=True
+            )
+            if proxy.is_running():
+                return {"_kernel_step_status": "success", "_kernel_step_meta": {"endpoint": proxy.get_endpoint(), "running": True}}
+            else:
+                return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "Failed to start proxy"}}
+        except Exception as e:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
+
+    def _h_egress_proxy_stop(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """Egress Proxyを停止"""
+        try:
+            shutdown_egress_proxy()
+            return {"_kernel_step_status": "success"}
+        except Exception as e:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
+
+    def _h_egress_proxy_status(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """Egress Proxyの状態を取得"""
+        try:
+            proxy = get_egress_proxy()
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_step_meta": {"running": proxy.is_running(), "endpoint": proxy.get_endpoint() if proxy.is_running() else None}
+            }
+        except Exception as e:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
+```
+
+#### `shutdown` メソッドへの追加（`try: self.event_bus.clear()` の前に）
+
+```python
+        # Egress Proxyを停止
+        try:
+            shutdown_egress_proxy()
+        except Exception:
+            pass
+```
+
+---
+
+### 6.4 サンプルブロック: `ecosystem/packs/example_pack/backend/blocks/fetch_example.py`
+
+```python
+"""
+サンプル: Egress Proxy経由でHTTPリクエストを送信
+"""
+
+
+def run(input_data, context=None):
+    if not context:
+        return {"error": "No context provided"}
+    
+    http_request = context.get("http_request")
+    if not http_request:
+        return {"error": "http_request function not available"}
+    
+    url = input_data.get("url") if isinstance(input_data, dict) else None
+    if not url:
+        return {"error": "No URL provided"}
+    
+    result = http_request(method="GET", url=url, headers={"Accept": "application/json"}, timeout_seconds=10.0)
+    
+    if not result.get("success"):
+        return {"error": result.get("error"), "allowed": result.get("allowed", False), "rejection_reason": result.get("rejection_reason")}
+    
+    return {"status_code": result.get("status_code"), "body": result.get("body"), "headers": result.get("headers")}
+```
+
+---
+
+## Step 7: lib install/update ロジック
+
+### 7.1 新規ファイル: `core_runtime/lib_executor.py`（問題5修正済み）
+
+```python
+"""
+lib_executor.py - lib install/update 実行システム
+
+Packの lib/install.py と lib/update.py を管理する。
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import threading
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+
+@dataclass
+class LibExecutionRecord:
+    """lib実行記録"""
+    pack_id: str
+    lib_type: str
+    executed_at: str
+    file_hash: str
+    success: bool
+    error: Optional[str] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {"pack_id": self.pack_id, "lib_type": self.lib_type, "executed_at": self.executed_at, "file_hash": self.file_hash, "success": self.success, "error": self.error}
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'LibExecutionRecord':
+        return cls(pack_id=data.get("pack_id", ""), lib_type=data.get("lib_type", ""), executed_at=data.get("executed_at", ""), file_hash=data.get("file_hash", ""), success=data.get("success", False), error=data.get("error"))
+
+
+@dataclass
+class LibCheckResult:
+    """lib実行チェック結果"""
+    pack_id: str
+    needs_install: bool
+    needs_update: bool
+    install_file: Optional[Path] = None
+    update_file: Optional[Path] = None
+    reason: str = ""
+
+
+@dataclass
+class LibExecutionResult:
+    """lib実行結果"""
+    pack_id: str
+    lib_type: str
+    success: bool
+    output: Any = None
+    error: Optional[str] = None
+    error_type: Optional[str] = None
+    execution_time_ms: float = 0.0
+
+
+class LibExecutor:
+    """lib実行管理クラス"""
+    
+    RECORDS_FILE = "user_data/settings/lib_execution_records.json"
+    LIB_DIR_NAME = "lib"
+    INSTALL_FILE = "install.py"
+    UPDATE_FILE = "update.py"
+    
+    def __init__(self, records_file: str = None):
+        self._records_file = Path(records_file) if records_file else Path(self.RECORDS_FILE)
+        self._records: Dict[str, LibExecutionRecord] = {}
+        self._lock = threading.RLock()
+        self._load_records()
+    
+    def _now_ts(self) -> str:
+        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    
+    def _load_records(self) -> None:
+        if not self._records_file.exists():
+            return
+        try:
+            with open(self._records_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            for pack_id, record_data in data.get("records", {}).items():
+                self._records[pack_id] = LibExecutionRecord.from_dict(record_data)
+        except Exception as e:
+            print(f"[LibExecutor] Failed to load records: {e}")
+    
+    def _save_records(self) -> None:
+        try:
+            self._records_file.parent.mkdir(parents=True, exist_ok=True)
+            data = {"version": "1.0", "updated_at": self._now_ts(), "records": {pack_id: record.to_dict() for pack_id, record in self._records.items()}}
+            with open(self._records_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[LibExecutor] Failed to save records: {e}")
+    
+    def _compute_file_hash(self, file_path: Path) -> str:
+        if not file_path.exists():
+            return ""
+        sha256 = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                sha256.update(chunk)
+        return sha256.hexdigest()
+    
+    def _find_lib_dir(self, pack_dir: Path) -> Optional[Path]:
+        backend_lib = pack_dir / "backend" / self.LIB_DIR_NAME
+        if backend_lib.exists() and backend_lib.is_dir():
+            return backend_lib
+        direct_lib = pack_dir / self.LIB_DIR_NAME
+        if direct_lib.exists() and direct_lib.is_dir():
+            return direct_lib
+        return None
+    
+    def check_pack(self, pack_id: str, pack_dir: Path) -> LibCheckResult:
+        result = LibCheckResult(pack_id=pack_id, needs_install=False, needs_update=False)
+        lib_dir = self._find_lib_dir(pack_dir)
+        if not lib_dir:
+            result.reason = "No lib directory found"
+            return result
+        
+        install_file = lib_dir / self.INSTALL_FILE
+        update_file = lib_dir / self.UPDATE_FILE
+        if install_file.exists():
+            result.install_file = install_file
+        if update_file.exists():
+            result.update_file = update_file
+        if not result.install_file and not result.update_file:
+            result.reason = "No install.py or update.py found"
+            return result
+        
+        with self._lock:
+            existing_record = self._records.get(pack_id)
+        
+        if existing_record is None:
+            if result.install_file:
+                result.needs_install = True
+                result.reason = "First time installation"
+            return result
+        
+        if result.install_file:
+            current_hash = self._compute_file_hash(result.install_file)
+            if current_hash != existing_record.file_hash:
+                if result.update_file:
+                    result.needs_update = True
+                    result.reason = "File hash changed, update needed"
+                else:
+                    result.needs_install = True
+                    result.reason = "File hash changed, re-install needed"
+        
+        if not result.needs_install and not result.needs_update:
+            result.reason = "No changes detected"
+        return result
+    
+    def execute_lib(self, pack_id: str, lib_file: Path, lib_type: str, context: Dict[str, Any] = None) -> LibExecutionResult:
+        import time
+        import importlib.util
+        import sys
+        
+        start_time = time.time()
+        result = LibExecutionResult(pack_id=pack_id, lib_type=lib_type, success=False)
+        
+        if not lib_file.exists():
+            result.error = f"File not found: {lib_file}"
+            result.error_type = "file_not_found"
+            return result
+        
+        # 承認チェック
+        try:
+            from .approval_manager import get_approval_manager, PackStatus
+            am = get_approval_manager()
+            status = am.get_status(pack_id)
+            
+            if status is None:
+                result.error = f"Pack '{pack_id}' not found in approval registry"
+                result.error_type = "not_found"
+                self._log_execution(pack_id, lib_type, False, result.error)
+                return result
+            
+            if status != PackStatus.APPROVED:
+                result.error = f"Pack not approved: {status.value}"
+                result.error_type = "not_approved"
+                self._log_execution(pack_id, lib_type, False, result.error)
+                return result
+        except Exception as e:
+            result.error = f"Approval check failed: {e}"
+            result.error_type = "approval_check_error"
+            return result
+        
+        module_name = f"lib_{pack_id}_{lib_type}_{abs(hash(str(lib_file)))}"
+        
+        try:
+            spec = importlib.util.spec_from_file_location(module_name, str(lib_file))
+            if spec is None or spec.loader is None:
+                result.error = f"Cannot load module from {lib_file}"
+                result.error_type = "module_load_error"
+                return result
+            
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = module
+            
+            lib_dir = str(lib_file.parent)
+            if lib_dir not in sys.path:
+                sys.path.insert(0, lib_dir)
+            
+            try:
+                spec.loader.exec_module(module)
+            finally:
+                if lib_dir in sys.path:
+                    sys.path.remove(lib_dir)
+            
+            run_fn = getattr(module, "run", None)
+            if run_fn is None:
+                result.error = f"No 'run' function found in {lib_file}"
+                result.error_type = "no_run_function"
+                return result
+            
+            exec_context = {"pack_id": pack_id, "lib_type": lib_type, "ts": self._now_ts(), "lib_dir": str(lib_file.parent), **(context or {})}
+            
+            import inspect
+            sig = inspect.signature(run_fn)
+            param_count = len(sig.parameters)
+            
+            if param_count >= 1:
+                output = run_fn(exec_context)
+            else:
+                output = run_fn()
+            
+            result.success = True
+            result.output = output
+        except Exception as e:
+            result.error = str(e)
+            result.error_type = type(e).__name__
+        finally:
+            if module_name in sys.modules:
+                del sys.modules[module_name]
+        
+        result.execution_time_ms = (time.time() - start_time) * 1000
+        file_hash = self._compute_file_hash(lib_file)
+        self._save_execution_record(pack_id, lib_type, file_hash, result.success, result.error)
+        self._log_execution(pack_id, lib_type, result.success, result.error)
+        return result
+    
+    def _save_execution_record(self, pack_id: str, lib_type: str, file_hash: str, success: bool, error: Optional[str]) -> None:
+        with self._lock:
+            self._records[pack_id] = LibExecutionRecord(pack_id=pack_id, lib_type=lib_type, executed_at=self._now_ts(), file_hash=file_hash, success=success, error=error)
+            self._save_records()
+    
+    def _log_execution(self, pack_id: str, lib_type: str, success: bool, error: Optional[str]) -> None:
+        try:
+            from .audit_logger import get_audit_logger
+            audit = get_audit_logger()
+            audit.log_system_event(event_type=f"lib_{lib_type}", success=success, details={"pack_id": pack_id, "lib_type": lib_type}, error=error)
+        except Exception:
+            pass
+    
+    def process_all_packs(self, packs_dir: Path, context: Dict[str, Any] = None) -> Dict[str, Any]:
+        results = {"processed": 0, "installed": [], "updated": [], "skipped": [], "failed": [], "errors": []}
+        if not packs_dir.exists():
+            return results
+        
+        for pack_dir in packs_dir.iterdir():
+            if not pack_dir.is_dir() or pack_dir.name.startswith("."):
+                continue
+            pack_id = pack_dir.name
+            results["processed"] += 1
+            
+            try:
+                check_result = self.check_pack(pack_id, pack_dir)
+                if check_result.needs_install and check_result.install_file:
+                    exec_result = self.execute_lib(pack_id, check_result.install_file, "install", context)
+                    if exec_result.success:
+                        results["installed"].append(pack_id)
+                    else:
+                        results["failed"].append({"pack_id": pack_id, "lib_type": "install", "error": exec_result.error})
+                elif check_result.needs_update and check_result.update_file:
+                    exec_result = self.execute_lib(pack_id, check_result.update_file, "update", context)
+                    if exec_result.success:
+                        results["updated"].append(pack_id)
+                    else:
+                        results["failed"].append({"pack_id": pack_id, "lib_type": "update", "error": exec_result.error})
+                else:
+                    results["skipped"].append({"pack_id": pack_id, "reason": check_result.reason})
+            except Exception as e:
+                results["errors"].append({"pack_id": pack_id, "error": str(e)})
+        return results
+    
+    def get_record(self, pack_id: str) -> Optional[LibExecutionRecord]:
+        with self._lock:
+            return self._records.get(pack_id)
+    
+    def get_all_records(self) -> Dict[str, LibExecutionRecord]:
+        with self._lock:
+            return dict(self._records)
+    
+    def clear_record(self, pack_id: str) -> bool:
+        with self._lock:
+            if pack_id in self._records:
+                del self._records[pack_id]
+                self._save_records()
+                return True
+            return False
+    
+    def clear_all_records(self) -> int:
+        with self._lock:
+            count = len(self._records)
+            self._records.clear()
+            self._save_records()
+            return count
+
+
+_global_lib_executor: Optional[LibExecutor] = None
+_lib_lock = threading.Lock()
+
+
+def get_lib_executor() -> LibExecutor:
+    global _global_lib_executor
+    if _global_lib_executor is None:
+        with _lib_lock:
+            if _global_lib_executor is None:
+                _global_lib_executor = LibExecutor()
+    return _global_lib_executor
+
+
+def reset_lib_executor(records_file: str = None) -> LibExecutor:
+    global _global_lib_executor
+    with _lib_lock:
+        _global_lib_executor = LibExecutor(records_file)
+    return _global_lib_executor
+```
+
+---
+
+### 7.2 `core_runtime/__init__.py` への追加
+
+```python
+from .lib_executor import (
+    LibExecutor,
+    LibExecutionRecord,
+    LibCheckResult,
+    LibExecutionResult,
+    get_lib_executor,
+    reset_lib_executor,
+)
+```
+
+`__all__` リストに追加:
+
+```python
+    # Lib Executor
+    "LibExecutor",
+    "LibExecutionRecord",
+    "LibCheckResult",
+    "LibExecutionResult",
+    "get_lib_executor",
+    "reset_lib_executor",
+```
+
+---
+
+### 7.3 `core_runtime/kernel.py` への追加
+
+#### import追加
+
+```python
+from .lib_executor import get_lib_executor
+```
+
+#### `_init_kernel_handlers` に追加
+
+```python
+        "kernel:lib.process_all": self._h_lib_process_all,
+        "kernel:lib.check": self._h_lib_check,
+        "kernel:lib.execute": self._h_lib_execute,
+        "kernel:lib.clear_record": self._h_lib_clear_record,
+        "kernel:lib.list_records": self._h_lib_list_records,
+```
+
+#### ハンドラメソッド
+
+```python
+    def _h_lib_process_all(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """全Packのlibを処理"""
+        try:
+            packs_dir = Path(args.get("packs_dir", "ecosystem/packs"))
+            executor = get_lib_executor()
+            results = executor.process_all_packs(packs_dir, ctx)
+            return {"_kernel_step_status": "success", "_kernel_step_meta": {"installed": results["installed"], "updated": results["updated"], "failed_count": len(results["failed"])}, "results": results}
+        except Exception as e:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
+
+    def _h_lib_check(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """Packのlib実行が必要かチェック"""
+        pack_id = args.get("pack_id")
+        if not pack_id:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "Missing pack_id"}}
+        pack_dir = Path(args.get("pack_dir", f"ecosystem/packs/{pack_id}"))
+        try:
+            executor = get_lib_executor()
+            result = executor.check_pack(pack_id, pack_dir)
+            return {"_kernel_step_status": "success", "_kernel_step_meta": {"needs_install": result.needs_install, "needs_update": result.needs_update, "reason": result.reason}}
+        except Exception as e:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
+
+    def _h_lib_execute(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """Packのlibを手動実行"""
+        pack_id = args.get("pack_id")
+        lib_type = args.get("lib_type")
+        if not pack_id or not lib_type:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "Missing pack_id or lib_type"}}
+        if lib_type not in ("install", "update"):
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "lib_type must be 'install' or 'update'"}}
+        pack_dir = Path(args.get("pack_dir", f"ecosystem/packs/{pack_id}"))
+        try:
+            executor = get_lib_executor()
+            lib_dir = pack_dir / "backend" / "lib"
+            if not lib_dir.exists():
+                lib_dir = pack_dir / "lib"
+            lib_file = lib_dir / f"{lib_type}.py"
+            if not lib_file.exists():
+                return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": f"File not found: {lib_file}"}}
+            result = executor.execute_lib(pack_id, lib_file, lib_type, ctx)
+            return {"_kernel_step_status": "success" if result.success else "failed", "_kernel_step_meta": {"pack_id": pack_id, "lib_type": lib_type, "success": result.success, "error": result.error}, "output": result.output}
+        except Exception as e:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
+
+    def _h_lib_clear_record(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """lib実行記録をクリア"""
+        try:
+            executor = get_lib_executor()
+            pack_id = args.get("pack_id")
+            if pack_id:
+                success = executor.clear_record(pack_id)
+                return {"_kernel_step_status": "success" if success else "failed", "_kernel_step_meta": {"pack_id": pack_id, "cleared": success}}
+            else:
+                count = executor.clear_all_records()
+                return {"_kernel_step_status": "success", "_kernel_step_meta": {"cleared_count": count}}
+        except Exception as e:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
+
+    def _h_lib_list_records(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """lib実行記録を一覧"""
+        try:
+            executor = get_lib_executor()
+            records = executor.get_all_records()
+            return {"_kernel_step_status": "success", "_kernel_step_meta": {"count": len(records)}, "records": {pack_id: record.to_dict() for pack_id, record in records.items()}}
+        except Exception as e:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
+```
+
+---
+
+### 7.4 サンプル: `ecosystem/packs/example_pack/backend/lib/install.py`
+
+```python
+"""サンプル lib/install.py"""
+
+
+def run(context=None):
+    pack_id = context.get("pack_id", "unknown") if context else "unknown"
+    print(f"[lib/install.py] Installing {pack_id}...")
+    return {"status": "installed", "pack_id": pack_id, "message": "Installation completed successfully"}
+```
+
+---
+
+### 7.5 サンプル: `ecosystem/packs/example_pack/backend/lib/update.py`
+
+```python
+"""サンプル lib/update.py"""
+
+
+def run(context=None):
+    pack_id = context.get("pack_id", "unknown") if context else "unknown"
+    print(f"[lib/update.py] Updating {pack_id}...")
+    return {"status": "updated", "pack_id": pack_id, "message": "Update completed successfully"}
+```
+
+---
+
+### 7.6 起動Flowへのlib処理追加: `flows/00_startup.flow.yaml` の steps に追加
+
+```yaml
+  # === lib processing ===
+  - id: lib_process_all
+    phase: ecosystem
+    priority: 60
+    type: handler
+    input:
+      handler: "kernel:lib.process_all"
+      args:
+        packs_dir: "ecosystem/packs"
+```
+
+---
+
