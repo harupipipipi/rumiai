@@ -153,27 +153,71 @@ class EgressProxyHandler(BaseHTTPRequestHandler):
             self._send_json_response(500, {"success": False, "error": str(e), "error_type": type(e).__name__})
     
     def _process_request(self, request: ProxyRequest) -> ProxyResponse:
+        """リクエストを処理"""
         try:
             parsed = urlparse(request.url)
             domain = parsed.hostname or ""
             port = parsed.port or (443 if parsed.scheme == "https" else 80)
         except Exception as e:
-            return ProxyResponse(success=False, error=f"Invalid URL: {e}", error_type="invalid_url")
+            response = ProxyResponse(
+                success=False,
+                error=f"Invalid URL: {e}",
+                error_type="invalid_url",
+                allowed=False
+            )
+            self._log_request(
+                request, "", 0, False, 0,
+                error=str(e), allowed=False, rejection_reason="invalid_url"
+            )
+            return response
         
+        # ネットワーク権限チェック
         if self.network_grant_manager:
             check_result = self.network_grant_manager.check_access(request.owner_pack, domain, port)
             if not check_result.allowed:
-                return ProxyResponse(success=False, allowed=False, rejection_reason=check_result.reason, error=f"Network access denied: {check_result.reason}", error_type="network_denied")
+                response = ProxyResponse(
+                    success=False,
+                    allowed=False,
+                    rejection_reason=check_result.reason,
+                    error=f"Network access denied: {check_result.reason}",
+                    error_type="network_denied"
+                )
+                # 拒否を監査ログに記録
+                self._log_request(
+                    request, domain, port, False, 0,
+                    error=response.error, allowed=False, rejection_reason=check_result.reason
+                )
+                return response
         
+        # HTTPリクエストを実行
         try:
             response = self._execute_http_request(request, domain, port)
-            self._log_request(request, domain, port, True, response.status_code)
+            # 成功/失敗を監査ログに記録
+            self._log_request(
+                request, domain, port,
+                success=response.success,
+                status_code=response.status_code,
+                error=response.error if not response.success else None,
+                allowed=True
+            )
             return response
         except Exception as e:
-            self._log_request(request, domain, port, False, 0, str(e))
-            return ProxyResponse(success=False, error=str(e), error_type=type(e).__name__)
+            error_msg = str(e)
+            response = ProxyResponse(
+                success=False,
+                error=error_msg,
+                error_type=type(e).__name__,
+                allowed=True  # 許可はされたが実行失敗
+            )
+            # 実行失敗を監査ログに記録
+            self._log_request(
+                request, domain, port, False, 0,
+                error=error_msg, allowed=True
+            )
+            return response
     
     def _execute_http_request(self, request: ProxyRequest, domain: str, port: int) -> ProxyResponse:
+        """HTTPリクエストを実行"""
         try:
             import http.client
             parsed = urlparse(request.url)
@@ -209,23 +253,57 @@ class EgressProxyHandler(BaseHTTPRequestHandler):
                     body_str = base64.b64encode(resp_body).decode("ascii")
                     resp_headers["X-Proxy-Body-Encoding"] = "base64"
                 
-                return ProxyResponse(success=True, status_code=resp.status, headers=resp_headers, body=body_str, allowed=True)
+                return ProxyResponse(
+                    success=True,
+                    status_code=resp.status,
+                    headers=resp_headers,
+                    body=body_str,
+                    allowed=True
+                )
             finally:
                 conn.close()
         except socket.timeout:
-            return ProxyResponse(success=False, error="Request timed out", error_type="timeout")
+            return ProxyResponse(
+                success=False,
+                error="Request timed out",
+                error_type="timeout",
+                allowed=True  # 許可はされたがタイムアウト
+            )
         except Exception as e:
-            return ProxyResponse(success=False, error=str(e), error_type=type(e).__name__)
+            return ProxyResponse(
+                success=False,
+                error=str(e),
+                error_type=type(e).__name__,
+                allowed=True  # 許可はされたが実行失敗
+            )
     
-    def _log_request(self, request: ProxyRequest, domain: str, port: int, success: bool, status_code: int, error: str = None) -> None:
+    def _log_request(
+        self,
+        request: ProxyRequest,
+        domain: str,
+        port: int,
+        success: bool,
+        status_code: int,
+        error: str = None,
+        allowed: bool = True,
+        rejection_reason: str = None
+    ) -> None:
+        """リクエストを監査ログに記録"""
         if self.audit_logger:
             try:
                 self.audit_logger.log_network_event(
                     pack_id=request.owner_pack,
                     domain=domain,
                     port=port,
-                    allowed=True,
-                    request_details={"method": request.method, "url": request.url, "success": success, "status_code": status_code, "error": error}
+                    allowed=allowed,
+                    reason=rejection_reason if not allowed else None,
+                    request_details={
+                        "method": request.method,
+                        "url": request.url,
+                        "success": success,
+                        "status_code": status_code,
+                        "error": error,
+                    }
                 )
             except Exception:
                 pass

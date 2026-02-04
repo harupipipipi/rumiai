@@ -255,9 +255,22 @@ class VocabRegistry:
         from_term: str,
         to_term: str,
         data: Any,
-        context: Dict[str, Any] = None
+        context: Dict[str, Any] = None,
+        log_success: bool = False
     ) -> Tuple[Any, bool]:
-        """データを変換"""
+        """
+        データを変換
+        
+        Args:
+            from_term: 変換元の語
+            to_term: 変換先の語
+            data: 変換するデータ
+            context: 変換コンテキスト
+            log_success: 成功時も監査ログに記録するか（デフォルトはFalse、ログ過多防止）
+        
+        Returns:
+            (変換後のデータ, 成功したか)
+        """
         from_lower = from_term.strip().lower()
         to_lower = to_term.strip().lower()
         
@@ -270,6 +283,14 @@ class VocabRegistry:
         
         convert_fn = self._get_converter_function(converter_info)
         if convert_fn is None:
+            # 変換関数のロード失敗を監査ログに記録
+            self._log_conversion(
+                from_term=from_term,
+                to_term=to_term,
+                success=False,
+                error="Failed to load converter function",
+                converter_info=converter_info
+            )
             return data, False
         
         try:
@@ -277,10 +298,65 @@ class VocabRegistry:
                 result = convert_fn(data, context)
             else:
                 result = convert_fn(data)
+            
+            # 成功時のログ（オプション）
+            if log_success:
+                self._log_conversion(
+                    from_term=from_term,
+                    to_term=to_term,
+                    success=True,
+                    converter_info=converter_info
+                )
+            
             return result, True
         except Exception as e:
+            # 失敗時は必ず監査ログに記録
+            self._log_conversion(
+                from_term=from_term,
+                to_term=to_term,
+                success=False,
+                error=str(e),
+                error_type=type(e).__name__,
+                converter_info=converter_info
+            )
             print(f"[VocabRegistry] Converter error ({from_term} -> {to_term}): {e}")
             return data, False
+    
+    def _log_conversion(
+        self,
+        from_term: str,
+        to_term: str,
+        success: bool,
+        error: str = None,
+        error_type: str = None,
+        converter_info: ConverterInfo = None
+    ) -> None:
+        """変換の監査ログを記録"""
+        try:
+            from .audit_logger import get_audit_logger
+            audit = get_audit_logger()
+            
+            details = {
+                "from_term": from_term,
+                "to_term": to_term,
+            }
+            
+            if converter_info:
+                details["converter_file"] = str(converter_info.file_path)
+                details["source_pack"] = converter_info.source_pack
+            
+            if error:
+                details["error"] = error
+            if error_type:
+                details["error_type"] = error_type
+            
+            audit.log_system_event(
+                event_type="vocab_conversion",
+                success=success,
+                details=details
+            )
+        except Exception:
+            pass  # 監査ログのエラーで処理を止めない
     
     def _get_converter_function(self, info: ConverterInfo) -> Optional[Callable]:
         """変換関数を取得"""
@@ -417,6 +493,54 @@ class VocabRegistry:
                 }
                 for c in self._converters.values()
             ]
+    
+    def get_registration_summary(self) -> Dict[str, Any]:
+        """
+        登録状況のサマリーを取得（どのpackがどの語彙を登録したか）
+        
+        Returns:
+            {
+                "groups": {pack_id: [groups...]},
+                "converters": {pack_id: [converters...]},
+                "loaded_packs": [pack_ids...],
+                "totals": {"groups": n, "converters": m}
+            }
+        """
+        with self._lock:
+            # Pack別にグループを集計
+            groups_by_pack: Dict[str, List[Dict[str, Any]]] = {}
+            for gid, group in self._groups.items():
+                pack_id = group.source_pack or "_unknown"
+                if pack_id not in groups_by_pack:
+                    groups_by_pack[pack_id] = []
+                groups_by_pack[pack_id].append({
+                    "id": gid,
+                    "preferred": group.preferred,
+                    "members": sorted(group.members),
+                })
+            
+            # Pack別にconverterを集計
+            converters_by_pack: Dict[str, List[Dict[str, Any]]] = {}
+            for converter in self._converters.values():
+                pack_id = converter.source_pack or "_unknown"
+                if pack_id not in converters_by_pack:
+                    converters_by_pack[pack_id] = []
+                converters_by_pack[pack_id].append({
+                    "from": converter.from_term,
+                    "to": converter.to_term,
+                    "file": str(converter.file_path),
+                })
+            
+            return {
+                "groups_by_pack": groups_by_pack,
+                "converters_by_pack": converters_by_pack,
+                "loaded_packs": sorted(self._loaded_packs),
+                "totals": {
+                    "groups": len(self._groups),
+                    "converters": len(self._converters),
+                    "packs": len(self._loaded_packs),
+                }
+            }
     
     def clear(self) -> None:
         """全データをクリア"""

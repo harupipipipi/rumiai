@@ -1,66 +1,132 @@
-# Rumi AI OS - Core Startup Flow
-# 
-# 公式Flow: Kernel初期化に必要な最小限の処理のみ定義
-# このファイルはecosystemによる編集不可
+# flows/00_startup.flow.yaml
+# Rumi OS起動Flow（正規）
 #
-# 処理内容:
-# 1. マウントシステム初期化
-# 2. Packレジストリ読み込み
-# 3. アクティブエコシステム設定読み込み
-# 4. コンポーネントフェーズ実行（setup, runtime_boot）
-# 5. サービス公開
+# このファイルがOSブートの正式な定義です。
+# 旧 flow/ ディレクトリは deprecated であり、fallback としてのみ使用されます。
 
 flow_version: "2.0"
+flow_id: "00_startup"
+description: "Rumi OS startup flow - official boot sequence"
 
 defaults:
   fail_soft: true
   on_missing_handler: skip
 
-pipelines:
-  startup:
-    # === Phase 1: 基盤初期化 ===
-    - id: core.mounts
-      run:
-        handler: "kernel:mounts.init"
-        args:
-          mounts_file: "user_data/mounts.json"
+phases:
+  - security
+  - core
+  - ecosystem
+  - ready
 
-    - id: core.registry
-      run:
-        handler: "kernel:registry.load"
-        args:
-          ecosystem_dir: "ecosystem"
+steps:
+  # === Security Phase ===
+  - id: secret_key_load
+    phase: security
+    priority: 10
+    type: handler
+    input:
+      handler: "kernel:secret_key.load"
+      args:
+        auto_generate: true
 
-    - id: core.active_ecosystem
-      run:
-        handler: "kernel:active_ecosystem.load"
-        args:
-          config_file: "user_data/active_ecosystem.json"
+  - id: approval_scan
+    phase: security
+    priority: 20
+    type: handler
+    input:
+      handler: "kernel:approval.scan"
+      args:
+        directories:
+          - "ecosystem/packs"
 
-    # === Phase 2: コンポーネント初期化 ===
-    - id: components.setup
-      run:
-        handler: "component_phase:setup"
-        args:
-          filename: "setup.py"
+  - id: egress_proxy_start
+    phase: security
+    priority: 40
+    type: handler
+    input:
+      handler: "kernel:egress_proxy.start"
+      args:
+        auto_start: true
 
-    # === Phase 3: Flow合成（オプション） ===
-    # ecosystem側でflow.modifierが登録されていれば適用
-    - id: core.flow_compose
-      optional: true
-      run:
-        handler: "kernel:flow.compose"
-        args: {}
+  # === Core Phase ===
+  - id: vocab_load
+    phase: core
+    priority: 10
+    type: handler
+    input:
+      handler: "kernel:vocab.load"
+      args:
+        sources:
+          - "ecosystem/packs"
 
-    # === Phase 4: ランタイム起動 ===
-    - id: components.runtime_boot
-      run:
-        handler: "component_phase:runtime_boot"
-        args:
-          filename: "runtime_boot.py"
+  - id: flow_loader_init
+    phase: core
+    priority: 20
+    type: handler
+    input:
+      handler: "kernel:flow_loader.init"
+      args:
+        directories:
+          - "flows"
+          - "ecosystem/flows"
 
-    # === Phase 5: サービス公開 ===
-    - id: core.interfaces_publish
-      run:
-        handler: "kernel:interfaces.publish"
-        args: {}
+  - id: modifier_load
+    phase: core
+    priority: 30
+    type: handler
+    input:
+      handler: "kernel:modifier.load"
+      args:
+        directories:
+          - "ecosystem/flows/modifiers"
+
+  # === Ecosystem Phase ===
+  - id: pack_discovery
+    phase: ecosystem
+    priority: 10
+    type: handler
+    input:
+      handler: "kernel:pack.discover"
+      args:
+        directories:
+          - "ecosystem/packs"
+
+  - id: pack_load
+    phase: ecosystem
+    priority: 20
+    type: handler
+    input:
+      handler: "kernel:pack.load"
+      args:
+        filter:
+          approved_only: true
+
+  - id: interface_register
+    phase: ecosystem
+    priority: 30
+    type: handler
+    input:
+      handler: "kernel:interface.register"
+      args: {}
+
+  # === Ready Phase ===
+  - id: health_check
+    phase: ready
+    priority: 10
+    type: handler
+    input:
+      handler: "kernel:health.check"
+      args:
+        components:
+          - vocab
+          - flow_loader
+          - pack_manager
+
+  - id: startup_complete
+    phase: ready
+    priority: 99
+    type: handler
+    input:
+      handler: "kernel:startup.complete"
+      args:
+        emit_event: true

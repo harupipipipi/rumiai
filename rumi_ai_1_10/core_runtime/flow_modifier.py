@@ -47,6 +47,8 @@ class FlowModifierDef:
     step: Optional[Dict[str, Any]]  # 注入/置換するステップ定義
     requires: ModifierRequires
     source_file: Optional[Path] = None
+    resolve_target: bool = False  # target_flow_idを共有辞書で解決するか
+    resolve_namespace: str = "flow_id"  # 解決に使用するnamespace
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -62,6 +64,8 @@ class FlowModifierDef:
                 "capabilities": self.requires.capabilities,
             },
             "_source_file": str(self.source_file) if self.source_file else None,
+            "resolve_target": self.resolve_target,
+            "resolve_namespace": self.resolve_namespace,
         }
 
 
@@ -229,6 +233,10 @@ class FlowModifierLoader:
             capabilities=requires_raw.get("capabilities", []) if isinstance(requires_raw, dict) else []
         )
         
+        # resolve_target（任意）
+        resolve_target = raw_data.get("resolve_target", False)
+        resolve_namespace = raw_data.get("resolve_namespace", "flow_id")
+        
         modifier_def = FlowModifierDef(
             modifier_id=modifier_id,
             target_flow_id=target_flow_id,
@@ -238,7 +246,9 @@ class FlowModifierLoader:
             target_step_id=target_step_id,
             step=step,
             requires=requires,
-            source_file=file_path
+            source_file=file_path,
+            resolve_target=resolve_target,
+            resolve_namespace=resolve_namespace,
         )
         
         result.success = True
@@ -255,13 +265,35 @@ class FlowModifierLoader:
         with self._lock:
             return list(self._load_errors)
     
-    def get_modifiers_for_flow(self, flow_id: str) -> List[FlowModifierDef]:
-        """特定Flowに対するmodifierを取得(ソート済み)"""
+    def get_modifiers_for_flow(self, flow_id: str, resolve: bool = False) -> List[FlowModifierDef]:
+        """
+        特定Flowに対するmodifierを取得(ソート済み)
+        
+        Args:
+            flow_id: Flow ID
+            resolve: 共有辞書で target_flow_id を解決するか
+        
+        Returns:
+            マッチするmodifierのリスト
+        """
         with self._lock:
-            modifiers = [
-                m for m in self._loaded_modifiers.values()
-                if m.target_flow_id == flow_id
-            ]
+            modifiers = []
+            
+            for m in self._loaded_modifiers.values():
+                target = m.target_flow_id
+                
+                # resolve_target が True の場合、共有辞書で解決
+                if m.resolve_target or resolve:
+                    try:
+                        from .shared_dict import get_shared_dict_resolver
+                        resolver = get_shared_dict_resolver()
+                        target = resolver.resolve(m.resolve_namespace, target)
+                    except Exception:
+                        pass  # 解決失敗時は元の値を使用
+                
+                if target == flow_id:
+                    modifiers.append(m)
+            
             # phase → priority → modifier_id でソート
             return sorted(modifiers, key=lambda m: (m.phase, m.priority, m.modifier_id))
 
@@ -371,6 +403,32 @@ class FlowModifierApplier:
             target_flow_id=modifier.target_flow_id,
             target_step_id=modifier.target_step_id
         )
+        
+        # resolve_target が True の場合のログ
+        if modifier.resolve_target:
+            try:
+                from .shared_dict import get_shared_dict_resolver
+                resolver = get_shared_dict_resolver()
+                resolved = resolver.resolve(modifier.resolve_namespace, modifier.target_flow_id)
+                if resolved != modifier.target_flow_id:
+                    # 解決された場合は監査ログに記録
+                    try:
+                        from .audit_logger import get_audit_logger
+                        audit = get_audit_logger()
+                        audit.log_system_event(
+                            event_type="modifier_target_resolved",
+                            success=True,
+                            details={
+                                "modifier_id": modifier.modifier_id,
+                                "original_target": modifier.target_flow_id,
+                                "resolved_target": resolved,
+                                "namespace": modifier.resolve_namespace,
+                            }
+                        )
+                    except Exception:
+                        pass
+            except Exception:
+                pass
         
         # requires チェック
         satisfied, reason = self.check_requires(modifier.requires)

@@ -1,5 +1,5 @@
 ================================================================================
-Rumi AI - Docker Security System ドキュメント
+Rumi AI - Docker Security System ドキュメント（完全版）
 ================================================================================
 
 目次
@@ -10,56 +10,73 @@ Rumi AI - Docker Security System ドキュメント
 4. ディレクトリ構造
 5. 使用方法
 6. 権限システム
-7. ハンドラ
-8. トラブルシューティング
+7. Flow中心アーキテクチャ
+8. python_file_call
+9. Egress Proxy
+10. lib システム
+11. 監査ログ
+12. トラブルシューティング
 
 ================================================================================
 1. 概要
 ================================================================================
 
 Rumi AI Docker Security Systemは、Ecosystem内の各Packを完全に隔離された
-Dockerコンテナで実行するセキュリティシステムです。
+環境で実行するセキュリティシステムです。
 
 【設計原則】
-- 全てのPackは信頼度ゼロとして扱う
-- 各Packは独立したコンテナで実行（共有なし）
+- 全てのPackは信頼度ゼロとして扱う（悪意ある作者を想定）
+- 承認されていないPackのコードは一切実行されない
 - ファイル/ネットワークアクセスは明示的な許可が必要
 - 監査ログで全ての操作を記録
+- Flow中心：結線・順序・後付け注入をFlowで行い、Pack改造なしに拡張
+
+【セキュリティモード】
+- strict（デフォルト、本番推奨）: Docker必須、なければ実行拒否
+- permissive（開発用）: Docker不要、警告付きでホスト実行を許可
+
+環境変数で設定:
+  RUMI_SECURITY_MODE=strict   # 本番環境
+  RUMI_SECURITY_MODE=permissive  # 開発環境
 
 ================================================================================
 2. アーキテクチャ
 ================================================================================
 
 ┌─────────────────────────────────────────────────────────────────┐
-│                     Docker Host                                  │
+│                         Rumi AI OS                              │
 │                                                                  │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │  Base Image (rumi-base:latest)                          │   │
-│  │  - Python 3.11 Alpine                                    │   │
-│  │  - 基本ツール (git, curl)                               │   │
-│  │  - 信頼できる公式イメージ                               │   │
-│  │  - 全コンテナで共有（読み取り専用レイヤー）             │   │
-│  └─────────────────────────────────────────────────────────┘   │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │                      Kernel                               │  │
+│  │  - Flow実行エンジン                                       │  │
+│  │  - python_file_call ハンドラ                             │  │
+│  │  - 承認/権限チェック統合                                  │  │
+│  └──────────────────────────────────────────────────────────┘  │
 │                              │                                   │
 │         ┌────────────────────┼────────────────────┐             │
 │         ▼                    ▼                    ▼             │
 │  ┌─────────────┐      ┌─────────────┐      ┌─────────────┐     │
 │  │ Pack A      │      │ Pack B      │      │ Pack C      │     │
-│  │ Container   │      │ Container   │      │ Container   │     │
 │  │             │      │             │      │             │     │
-│  │ - 独自venv  │      │ - 独自venv  │      │ - 独自venv  │     │
-│  │ - 独自依存  │      │ - 独自依存  │      │ - 独自依存  │     │
-│  │ - 独自code  │      │ - 独自code  │      │ - 独自code  │     │
+│  │ blocks/     │      │ blocks/     │      │ blocks/     │     │
+│  │ lib/        │      │ lib/        │      │ lib/        │     │
 │  │             │      │             │      │             │     │
-│  │ 完全隔離    │      │ 完全隔離    │      │ 完全隔離    │     │
+│  │ 承認必須    │      │ 承認必須    │      │ 承認必須    │     │
+│  │ 隔離実行    │      │ 隔離実行    │      │ 隔離実行    │     │
 │  └─────────────┘      └─────────────┘      └─────────────┘     │
-│                                                                  │
+│         │                    │                    │             │
+│         └────────────────────┼────────────────────┘             │
+│                              ▼                                   │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │                   Egress Proxy                            │  │
+│  │  - 全外部通信を仲介                                       │  │
+│  │  - Pack単位のallowlist制御                               │  │
+│  │  - 監査ログ記録                                           │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                              │                                   │
+│                              ▼                                   │
+│                        外部ネットワーク                          │
 └─────────────────────────────────────────────────────────────────┘
-
-【メモリ使用量】
-- Base Image: ~60MB（全コンテナ共有）
-- コンテナあたり: ~20-30MB（Pack固有レイヤー）
-- 20 Pack の場合: 60MB + 20×25MB = ~560MB
 
 ================================================================================
 3. セキュリティモデル
@@ -68,60 +85,114 @@ Dockerコンテナで実行するセキュリティシステムです。
 【信頼の境界】
 
   公式が提供（信頼できる）:
-  ├── Docker Engine
-  ├── Linux Kernel
-  ├── Base Image (python:3.11-alpine)
-  └── 基本ツール
+  ├── Kernel（Flow実行エンジン）
+  ├── 承認マネージャ（ApprovalManager）
+  ├── ネットワーク権限マネージャ（NetworkGrantManager）
+  ├── Egress Proxy
+  ├── 監査ログシステム（AuditLogger）
+  └── lib実行システム（LibExecutor）
 
   Packが提供（信頼度ゼロ）:
-  ├── Pack のコード
-  ├── Pack の requirements.txt
-  └── Pack の依存ライブラリ
+  ├── Pack のコード（blocks/*.py）
+  ├── Pack の lib/（install.py, update.py）
+  ├── Pack の Flow定義
+  └── Pack の modifier定義
 
-【隔離の保証】
+【承認フロー】
 
-  ✗ Pack A が Pack B のコードを読む    → 不可能（別コンテナ）
-  ✗ Pack A が Pack B のメモリにアクセス → 不可能（別プロセス空間）
-  ✗ Pack A が共有ライブラリを汚染     → 不可能（読取専用レイヤー）
-  ✗ Pack A が Pack B のファイルを操作  → 不可能（別ボリューム）
-  ✗ Pack A が Pack B のネットワークに介入 → 不可能（別ネットワーク）
+  Pack配置 (ecosystem/packs/)
+      ↓
+  メタデータのみ読み込み（コード実行なし）
+      ↓
+  ユーザー承認（手動）
+      ↓
+  全ファイルの SHA-256 ハッシュを記録
+      ↓
+  初めてコード実行可能に
+      ↓
+  ファイル変更検出 → 自動的にModified状態 → 再承認必要
+
+【保護機構】
+
+| 機構              | 説明                                         |
+|-------------------|----------------------------------------------|
+| 承認ゲート        | 未承認 Pack のコードは一切実行されない       |
+| ハッシュ検証      | 承認後にファイルが変更されると自動無効化     |
+| HMAC 署名         | grants.json の改ざんを検出                   |
+| パス制限          | 許可ルート外のファイルアクセスを拒否         |
+| ネットワーク制御  | Egress Proxy経由のみ、allowlist制御          |
+| 監査ログ          | 全操作を記録、改ざん検知可能                 |
+
+【Pack状態遷移】
+
+  INSTALLED → (ユーザー承認) → APPROVED → (ファイル変更) → MODIFIED
+      ↓                            ↓                           ↓
+  (ユーザー拒否)              実行可能                    実行不可
+      ↓                                                   ネットワーク不可
+  BLOCKED                                                     ↓
+                                                    (再承認) → APPROVED
 
 ================================================================================
 4. ディレクトリ構造
 ================================================================================
 
-docker/
-├── base/
-│   └── Dockerfile              # 共有ベースイメージ
+project_root/
+├── flows/                          # 公式Flow（起動・基盤）
+│   └── 00_startup.flow.yaml
 │
-├── packs/
-│   ├── default/
-│   │   └── Dockerfile          # Pack専用イメージ
-│   └── {pack_id}/
-│       └── Dockerfile
+├── ecosystem/
+│   ├── flows/                      # Ecosystem Flow（共有の結線）
+│   │   ├── ai_response.flow.yaml
+│   │   └── ...
+│   │
+│   ├── flows/modifiers/            # Flow modifier（差し込み定義）
+│   │   ├── tool_inject.modifier.yaml
+│   │   └── ...
+│   │
+│   └── packs/                      # Pack格納
+│       └── {pack_id}/
+│           └── backend/
+│               ├── ecosystem.json
+│               ├── permissions.json
+│               ├── components/
+│               │   └── {component_id}/
+│               │       ├── manifest.json
+│               │       └── blocks/         # python_file_callで呼ばれるブロック
+│               │           ├── generate.py
+│               │           └── ...
+│               └── lib/                    # install/update スクリプト
+│                   ├── install.py
+│                   └── update.py
 │
-├── handlers/                   # 権限ハンドラ
-│   ├── file_read.py
-│   ├── file_write.py
-│   ├── env_read.py
-│   ├── terminal.py
-│   └── network.py
+├── user_data/
+│   ├── permissions/
+│   │   ├── approvals/              # Pack承認状態（未使用、将来用）
+│   │   ├── network/                # Pack単位ネットワーク権限
+│   │   │   └── {pack_id}.json
+│   │   └── .secret_key             # HMAC署名キー
+│   │
+│   ├── audit/                      # 監査ログ
+│   │   ├── flow_execution_YYYY-MM-DD.jsonl
+│   │   ├── python_file_call_YYYY-MM-DD.jsonl
+│   │   ├── network_YYYY-MM-DD.jsonl
+│   │   └── ...
+│   │
+│   ├── settings/
+│   │   └── lib_execution_records.json  # lib実行記録
+│   │
+│   └── ...
 │
-├── scopes/                     # スコープ定義
-│   ├── file_read.json
-│   ├── file_write.json
-│   ├── env_read.json
-│   ├── terminal.json
-│   └── network.json
-│
-├── grants/                     # 許可記録
-│   └── {component_id}.json
-│
-├── sandbox/                    # 作業領域
-│   └── {pack_id}/
-│
-├── docker-compose.yml
-└── config.json
+└── core_runtime/
+    ├── kernel.py                   # Flow実行エンジン
+    ├── flow_loader.py              # Flowファイルローダー
+    ├── flow_modifier.py            # Flow modifier適用
+    ├── python_file_executor.py     # python_file_call実行
+    ├── approval_manager.py         # Pack承認管理
+    ├── network_grant_manager.py    # ネットワーク権限管理
+    ├── egress_proxy.py             # Egress Proxyサーバー
+    ├── lib_executor.py             # lib実行管理
+    ├── audit_logger.py             # 監査ログ
+    └── ...
 
 ================================================================================
 5. 使用方法
@@ -129,120 +200,510 @@ docker/
 
 【初期セットアップ】
 
-1. create_dockerfile.py を実行:
-   python create_dockerfile.py
+1. 依存関係をインストール:
+   pip install -r requirements.txt
 
-2. ベースイメージをビルド:
-   docker build -t rumi-base:latest docker/base/
+2. アプリケーションを起動:
+   python app.py
 
-3. 全Packイメージをビルド:
-   docker-compose -f docker/docker-compose.yml build
+   開発モード（Docker不要）:
+   RUMI_SECURITY_MODE=permissive python app.py
 
-4. コンテナを起動:
-   docker-compose -f docker/docker-compose.yml up -d
+【Pack管理】
 
-【コンテナ管理】
+# 承認待ちPackを確認
+curl http://localhost:8765/api/packs/pending
 
-# 特定のPackを起動
-docker-compose -f docker/docker-compose.yml up -d pack-default
+# Packを承認
+curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
+  -H "Authorization: Bearer {token}"
 
-# コンテナの状態確認
-docker-compose -f docker/docker-compose.yml ps
+# Packを拒否
+curl -X POST http://localhost:8765/api/packs/{pack_id}/reject \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "セキュリティ上の懸念"}'
 
-# ログ確認
-docker-compose -f docker/docker-compose.yml logs pack-default
+【ネットワーク権限管理】
 
-# 停止
-docker-compose -f docker/docker-compose.yml down
+# ネットワークアクセスを許可
+curl -X POST http://localhost:8765/api/network/grant \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pack_id": "my_pack",
+    "allowed_domains": ["api.openai.com", "*.anthropic.com"],
+    "allowed_ports": [443]
+  }'
+
+# ネットワークアクセスを取り消し
+curl -X POST http://localhost:8765/api/network/revoke \
+  -H "Authorization: Bearer {token}" \
+  -H "Content-Type: application/json" \
+  -d '{"pack_id": "my_pack", "reason": "不要になった"}'
 
 ================================================================================
 6. 権限システム
 ================================================================================
 
-【権限の種類】
+【Pack単位Grant】
 
-- file_read:  ファイル読み取り（許可ディレクトリのみ）
-- file_write: ファイル書き込み（許可ディレクトリのみ）
-- env_read:   環境変数読み取り（許可キーのみ）
-- terminal:   ターミナル実行（許可ディレクトリ内のみ）
-- network:    ネットワーク通信（許可ドメイン/ポートのみ）
+各Packに対して、以下の権限を個別に付与:
 
-【許可の付与】
+1. 実行権限（承認）
+   - ApprovalManagerで管理
+   - 承認されていないPackのコードは実行不可
+   - ファイル変更でModified状態 → 再承認必要
 
-docker/grants/{component_id}.json:
+2. ネットワーク権限
+   - NetworkGrantManagerで管理
+   - allowed_domains: 許可するドメインリスト
+   - allowed_ports: 許可するポートリスト
+   - Modified状態で自動無効化
+
+【Grant ファイル形式】
+
+user_data/permissions/network/{pack_id}.json:
+
 {
-  "component_id": "default:tool:my_tool",
-  "permissions": {
-    "file_read": {
-      "enabled": true,
-      "directories": ["/home/user/documents"]
-    },
-    "env_read": {
-      "enabled": true,
-      "allowed_keys": ["OPENAI_API_KEY"]
-    },
-    "network": {
-      "enabled": true,
-      "allowed_domains": ["api.openai.com"],
-      "allowed_ports": [443]
+  "pack_id": "my_pack",
+  "enabled": true,
+  "allowed_domains": ["api.openai.com", "*.anthropic.com"],
+  "allowed_ports": [443, 80],
+  "granted_at": "2024-01-01T00:00:00Z",
+  "updated_at": "2024-01-01T00:00:00Z",
+  "granted_by": "user",
+  "notes": "OpenAI/Anthropic APIアクセス用",
+  "_hmac_signature": "..."
+}
+
+【HMAC署名】
+
+- 全てのgrantファイルはHMAC-SHA256で署名
+- 署名キーは user_data/permissions/.secret_key に保存
+- 改ざん検出時は該当Packを自動無効化
+
+================================================================================
+7. Flow中心アーキテクチャ
+================================================================================
+
+【設計思想】
+
+- Flowが中心: Pack間の結線・順序・後付け注入をFlowで行う
+- 贔屓なし: 公式は「AI」「tool」「prompt」などのドメイン概念を固定しない
+- 既存Pack改造なし: modifierで後から機能を注入
+
+【Flowファイル形式】
+
+flows/*.flow.yaml または ecosystem/flows/*.flow.yaml:
+
+flow_id: ai_response
+inputs:
+  user_input: string
+outputs:
+  response: string
+
+phases:
+  - prepare
+  - generate
+  - postprocess
+
+defaults:
+  fail_soft: true
+  on_missing_step: skip
+
+steps:
+  - id: load_context
+    phase: prepare
+    priority: 10
+    type: handler
+    input:
+      handler: "kernel:ctx.get"
+      args:
+        key: "context"
+
+  - id: generate_response
+    phase: generate
+    priority: 50
+    type: python_file_call
+    owner_pack: ai_client
+    file: blocks/generate.py
+    input:
+      user_input: "${ctx.user_input}"
+    output: ai_output
+
+【ステップタイプ】
+
+| タイプ           | 説明                                    |
+|------------------|-----------------------------------------|
+| handler          | 既存のKernelハンドラを呼び出し          |
+| python_file_call | Pythonファイルを実行                    |
+| set              | コンテキストに値を設定                  |
+| if               | 条件分岐（簡易版）                      |
+
+【実行順序（決定的）】
+
+1. phases の並び順でソート
+2. 同じphase内は priority 昇順
+3. priorityが同値の場合は id 昇順
+
+================================================================================
+8. python_file_call
+================================================================================
+
+【概要】
+
+Flowのステップとして任意のPythonファイルを実行する。
+入力→出力で次のステップに繋ぐ「Scratchブロック」のような仕組み。
+
+【ステップ定義】
+
+- id: generate_response
+  phase: generate
+  priority: 50
+  type: python_file_call
+  owner_pack: ai_client          # 所有Pack（権限判定に使用）
+  file: blocks/generate.py       # 実行ファイル（相対パス推奨）
+  input:                         # 入力データ（変数展開可能）
+    user_input: "${ctx.user_input}"
+  output: ai_output              # 出力先コンテキストキー
+  timeout_seconds: 60            # タイムアウト（デフォルト60秒）
+
+【Python側の実行契約】
+
+対象ファイルは以下のいずれかの関数を持つこと:
+
+def run(input_data, context):
+    """
+    Args:
+        input_data: Flowから渡される入力データ
+        context: 実行コンテキスト
+            - flow_id: Flow ID
+            - step_id: ステップID
+            - phase: フェーズ名
+            - ts: タイムスタンプ
+            - owner_pack: 所有Pack ID
+            - inputs: 入力データ
+            - network_check: ネットワークチェック関数
+            - http_request: Egress Proxy経由HTTPリクエスト関数
+    
+    Returns:
+        JSON互換の出力データ
+    """
+    # 処理
+    return {"result": "..."}
+
+# または引数1つ版
+def run(input_data):
+    return {"result": "..."}
+
+【セキュリティチェック】
+
+実行前に以下をチェック:
+
+1. owner_pack の承認状態（APPROVED以外は拒否）
+2. owner_pack のハッシュ検証（Modified検出で拒否）
+3. ファイルパスの検証（許可ルート外は拒否）
+
+許可ルート:
+- ecosystem/packs/（承認済みPackディレクトリ）
+- ecosystem/sandbox/（サンドボックス領域）
+
+【ネットワークアクセス】
+
+python_file_call内から外部通信を行う場合:
+
+def run(input_data, context):
+    # 1. アクセス可否をチェック（任意）
+    check = context["network_check"]("api.openai.com", 443)
+    if not check["allowed"]:
+        return {"error": check["reason"]}
+    
+    # 2. Egress Proxy経由でリクエスト
+    result = context["http_request"](
+        method="POST",
+        url="https://api.openai.com/v1/chat/completions",
+        headers={"Authorization": "Bearer ..."},
+        body='{"model": "gpt-4", ...}',
+        timeout_seconds=30.0
+    )
+    
+    if not result["success"]:
+        return {"error": result["error"]}
+    
+    return {"response": result["body"]}
+
+================================================================================
+9. Egress Proxy
+================================================================================
+
+【概要】
+
+全ての外部ネットワーク通信を仲介するプロキシサーバー。
+Pack単位のallowlistに基づいてallow/denyを判定し、監査ログに記録。
+
+【エンドポイント】
+
+POST http://127.0.0.1:8766/proxy/request
+
+リクエストボディ:
+{
+  "owner_pack": "my_pack",
+  "method": "GET",
+  "url": "https://api.example.com/data",
+  "headers": {"Accept": "application/json"},
+  "body": "",
+  "timeout_seconds": 30
+}
+
+レスポンス:
+{
+  "success": true,
+  "status_code": 200,
+  "headers": {"Content-Type": "application/json"},
+  "body": "{...}",
+  "allowed": true
+}
+
+拒否時のレスポンス:
+{
+  "success": false,
+  "allowed": false,
+  "rejection_reason": "Domain 'evil.com' not in allowed list",
+  "error": "Network access denied: ..."
+}
+
+【セキュリティ】
+
+- ローカル接続のみ許可（127.0.0.1, ::1, localhost）
+- owner_pack 必須（ヘッダーまたはボディで指定）
+- NetworkGrantManagerでallow/deny判定
+- 全リクエストを監査ログに記録
+
+【Kernel ハンドラ】
+
+| ハンドラ                    | 説明                     |
+|-----------------------------|--------------------------|
+| kernel:egress_proxy.start   | プロキシを起動           |
+| kernel:egress_proxy.stop    | プロキシを停止           |
+| kernel:egress_proxy.status  | プロキシの状態を取得     |
+
+================================================================================
+10. lib システム
+================================================================================
+
+【概要】
+
+Packの lib/install.py と lib/update.py を管理。
+「整理」目的であり、常駐しない。必要時のみ実行。
+
+【実行タイミング】
+
+| 状況                     | 実行されるファイル |
+|--------------------------|-------------------|
+| 初回導入時               | install.py        |
+| ハッシュ変更時           | update.py         |
+| それ以外                 | 実行しない        |
+
+【ファイル形式】
+
+lib/install.py:
+def run(context):
+    """
+    Args:
+        context:
+            - pack_id: Pack ID
+            - lib_type: "install"
+            - ts: タイムスタンプ
+            - lib_dir: libディレクトリパス
+    """
+    # 初期化処理
+    return {"status": "installed"}
+
+lib/update.py:
+def run(context):
+    """
+    Args:
+        context:
+            - pack_id: Pack ID
+            - lib_type: "update"
+            - ts: タイムスタンプ
+            - lib_dir: libディレクトリパス
+    """
+    # アップデート処理
+    return {"status": "updated"}
+
+【実行記録】
+
+user_data/settings/lib_execution_records.json:
+{
+  "version": "1.0",
+  "updated_at": "2024-01-01T00:00:00Z",
+  "records": {
+    "my_pack": {
+      "pack_id": "my_pack",
+      "lib_type": "install",
+      "executed_at": "2024-01-01T00:00:00Z",
+      "file_hash": "abc123...",
+      "success": true,
+      "error": null
     }
   }
 }
 
+【Kernel ハンドラ】
+
+| ハンドラ                  | 説明                           |
+|---------------------------|--------------------------------|
+| kernel:lib.process_all    | 全Packのlibを処理              |
+| kernel:lib.check          | 実行が必要かチェック           |
+| kernel:lib.execute        | 手動実行                       |
+| kernel:lib.clear_record   | 実行記録をクリア（再実行強制） |
+| kernel:lib.list_records   | 実行記録を一覧                 |
+
 ================================================================================
-7. ハンドラ
+11. 監査ログ
 ================================================================================
 
-【ハンドラの追加】
+【概要】
 
-docker/handlers/ に Python ファイルを追加:
+全ての重要な操作を監査ログに記録。
+JSON Lines形式で永続化、カテゴリ別にファイル分割。
 
-```python
-# my_handler.py
+【カテゴリ】
 
-META = {
-    "requires_scope": True,
-    "supports_modes": ["sandbox"],
-    "description": "説明"
-}
+| カテゴリ              | 説明                           |
+|-----------------------|--------------------------------|
+| flow_execution        | Flow実行                       |
+| modifier_application  | modifier適用                   |
+| python_file_call      | python_file_call実行           |
+| approval              | Pack承認操作                   |
+| permission            | 権限操作                       |
+| network               | ネットワークアクセス           |
+| security              | セキュリティイベント           |
+| system                | システムイベント               |
 
-def execute(context: dict, args: dict) -> dict:
-    # 処理
-    return {"success": True, "data": ...}
-```
+【ファイル形式】
 
-【スコープの追加】
+user_data/audit/{category}_{date}.jsonl:
 
-docker/scopes/ に JSON ファイルを追加:
+{"ts":"2024-01-01T00:00:00Z","category":"python_file_call","severity":"info","action":"execute_python_file","success":true,"flow_id":"ai_response","step_id":"generate","phase":"generate","owner_pack":"ai_client","execution_mode":"host_permissive","details":{"file":"blocks/generate.py","execution_time_ms":123.45}}
 
-```json
+【エントリ構造】
+
 {
-  "version": "1.0",
-  "description": "スコープの説明",
-  "default_config": {}
+  "ts": "ISO8601タイムスタンプ",
+  "category": "カテゴリ",
+  "severity": "info|warning|error|critical",
+  "action": "アクション名",
+  "success": true/false,
+  "flow_id": "Flow ID（該当する場合）",
+  "step_id": "ステップID（該当する場合）",
+  "phase": "フェーズ名（該当する場合）",
+  "owner_pack": "Pack ID（該当する場合）",
+  "execution_mode": "実行モード（該当する場合）",
+  "error": "エラーメッセージ（失敗時）",
+  "error_type": "エラータイプ（失敗時）",
+  "rejection_reason": "拒否理由（拒否時）",
+  "details": { ... }
 }
-```
+
+【Kernel ハンドラ】
+
+| ハンドラ               | 説明                 |
+|------------------------|----------------------|
+| kernel:audit.query     | ログを検索           |
+| kernel:audit.summary   | サマリーを取得       |
+| kernel:audit.flush     | バッファをフラッシュ |
+
+【クエリ例】
+
+# 特定Packの失敗ログを検索
+result = kernel.execute_flow_sync("_internal", {
+    "handler": "kernel:audit.query",
+    "args": {
+        "category": "python_file_call",
+        "pack_id": "my_pack",
+        "success_only": False,
+        "limit": 100
+    }
+})
 
 ================================================================================
-8. トラブルシューティング
+12. トラブルシューティング
 ================================================================================
 
-【Dockerが起動しない】
-- Docker Desktop が起動しているか確認
-- `docker info` でDockerの状態を確認
+【python_file_call が実行されない】
 
-【コンテナが起動しない】
-- `docker-compose logs {service}` でログを確認
-- Dockerfile の構文エラーを確認
+1. Pack が承認されているか確認:
+   curl http://localhost:8765/api/packs/{pack_id}/status
 
-【権限エラー】
-- docker/grants/ に適切な許可ファイルがあるか確認
-- 許可されたディレクトリ/キーが正しいか確認
+2. ファイルが存在するか確認:
+   ls ecosystem/packs/{pack_id}/backend/blocks/
 
-【メモリ不足】
-- `docker stats` でメモリ使用量を確認
-- config.json の memory_limit を調整
-- 不要なコンテナを停止
+3. 監査ログで拒否理由を確認:
+   cat user_data/audit/python_file_call_$(date +%Y-%m-%d).jsonl | grep "rejection"
+
+【ネットワークアクセスが拒否される】
+
+1. ネットワーク権限を確認:
+   curl http://localhost:8765/api/network/list
+
+2. 許可するドメイン/ポートを追加:
+   curl -X POST http://localhost:8765/api/network/grant \
+     -H "Authorization: Bearer {token}" \
+     -d '{"pack_id": "...", "allowed_domains": ["..."], "allowed_ports": [443]}'
+
+3. PackがModified状態でないか確認:
+   curl http://localhost:8765/api/packs/{pack_id}/status
+
+【Pack が Modified になった】
+
+ファイルが変更されるとModified状態になり、実行・ネットワークが無効化されます。
+
+再承認する:
+   curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
+     -H "Authorization: Bearer {token}"
+
+【lib が実行されない】
+
+1. 実行記録を確認:
+   cat user_data/settings/lib_execution_records.json
+
+2. 記録をクリアして再実行を強制:
+   # kernel:lib.clear_record を呼び出し
+
+3. 手動実行:
+   # kernel:lib.execute を呼び出し
+
+【Egress Proxy が起動しない】
+
+1. ポート競合を確認:
+   lsof -i :8766
+
+2. 別ポートで起動:
+   # kernel:egress_proxy.start に port 引数を指定
+
+【監査ログの確認方法】
+
+# 今日のログを確認
+ls -la user_data/audit/
+
+# 特定カテゴリのログを確認
+cat user_data/audit/network_$(date +%Y-%m-%d).jsonl | jq .
+
+# 失敗のみ抽出
+cat user_data/audit/python_file_call_$(date +%Y-%m-%d).jsonl | \
+  jq 'select(.success == false)'
+
+【開発モードでの注意】
+
+RUMI_SECURITY_MODE=permissive で実行すると:
+- Docker なしでもコード実行可能
+- 警告が毎回表示される
+- 監査ログに "host_permissive" と記録される
+
+本番環境では必ず strict モードを使用してください。
 
 ================================================================================
                               ドキュメント終わり

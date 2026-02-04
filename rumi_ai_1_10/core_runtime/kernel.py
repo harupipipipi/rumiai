@@ -111,6 +111,17 @@ class Kernel:
             "kernel:audit.query": self._h_audit_query,
             "kernel:audit.summary": self._h_audit_summary,
             "kernel:audit.flush": self._h_audit_flush,
+            # vocab ハンドラ
+            "kernel:vocab.list_groups": self._h_vocab_list_groups,
+            "kernel:vocab.list_converters": self._h_vocab_list_converters,
+            "kernel:vocab.summary": self._h_vocab_summary,
+            "kernel:vocab.convert": self._h_vocab_convert,
+            # shared_dict ハンドラ
+            "kernel:shared_dict.resolve": self._h_shared_dict_resolve,
+            "kernel:shared_dict.propose": self._h_shared_dict_propose,
+            "kernel:shared_dict.explain": self._h_shared_dict_explain,
+            "kernel:shared_dict.list": self._h_shared_dict_list,
+            "kernel:shared_dict.remove": self._h_shared_dict_remove,
         }
 
     def _resolve_handler(self, handler: str, args: Dict[str, Any] = None) -> Optional[Callable[[Dict[str, Any], Dict[str, Any]], Any]]:
@@ -127,86 +138,111 @@ class Kernel:
         return None
 
     def load_flow(self, path: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Flowを読み込む
+        
+        優先順位:
+        1. flows/00_startup.flow.yaml (new flow - 正)
+        2. 旧 flow/ ディレクトリ (fallback only - deprecated)
+        """
+        # 明示的なパス指定がある場合はそれを使用
         if path:
             return self._load_single_flow(Path(path))
         
+        # 1. New flow (正): flows/00_startup.flow.yaml を試行
+        new_flow_path = Path("flows/00_startup.flow.yaml")
+        if new_flow_path.exists():
+            try:
+                flow_def = self._load_single_flow(new_flow_path)
+                
+                # new flow形式をpipelines形式に変換
+                if "steps" in flow_def and "pipelines" not in flow_def:
+                    flow_def = self._convert_new_flow_to_pipelines(flow_def)
+                
+                self._flow = flow_def
+                self.diagnostics.record_step(
+                    phase="startup",
+                    step_id="flow.load.new_flow",
+                    handler="kernel:flow.load",
+                    status="success",
+                    meta={"file": str(new_flow_path), "mode": "new_flow"}
+                )
+                return self._flow
+            except Exception as e:
+                self.diagnostics.record_step(
+                    phase="startup",
+                    step_id="flow.load.new_flow.failed",
+                    handler="kernel:flow.load",
+                    status="failed",
+                    error=e,
+                    meta={"file": str(new_flow_path)}
+                )
+                # new flow の読み込みに失敗した場合、fallback へ
+        
+        # 2. Fallback (deprecated): 旧 flow/ ディレクトリ
+        self._log_fallback_warning()
+        return self._load_legacy_flow()
+
+    def _log_fallback_warning(self) -> None:
+        """旧flow使用時の警告をログに記録"""
+        warning_msg = (
+            "Using legacy flow path (flow/). This is DEPRECATED and will be removed. "
+            "Please migrate to flows/00_startup.flow.yaml"
+        )
+        print(f"[Rumi] WARNING: {warning_msg}")
+        
+        self.diagnostics.record_step(
+            phase="startup",
+            step_id="flow.load.fallback_warning",
+            handler="kernel:flow.load",
+            status="success",
+            meta={"warning": warning_msg, "mode": "legacy_fallback"}
+        )
+        
+        # 監査ログにも記録
+        try:
+            audit = get_audit_logger()
+            audit.log_system_event(
+                event_type="legacy_flow_fallback",
+                success=True,
+                details={"warning": warning_msg, "deprecated": True}
+            )
+        except Exception:
+            pass
+
+    def _load_legacy_flow(self) -> Dict[str, Any]:
+        """旧形式のflowを読み込む（fallback用）"""
         merged = {
             "flow_version": "2.0",
             "defaults": {"fail_soft": True, "on_missing_handler": "skip"},
             "pipelines": {}
         }
         
-        core_dir = Path("flow/core")
-        if core_dir.exists():
-            yaml_files = sorted(core_dir.glob("*.flow.yaml"))
-            for yaml_file in yaml_files:
-                try:
-                    single = self._load_single_flow(yaml_file)
-                    merged = self._merge_flow(merged, single, yaml_file)
-                    self.diagnostics.record_step(
-                        phase="startup",
-                        step_id=f"flow.load.core.{yaml_file.name}",
-                        handler="kernel:flow.load",
-                        status="success",
-                        meta={"file": str(yaml_file), "source": "core"}
-                    )
-                except Exception as e:
-                    self.diagnostics.record_step(
-                        phase="startup",
-                        step_id=f"flow.load.core.{yaml_file.name}",
-                        handler="kernel:flow.load",
-                        status="failed",
-                        error=e,
-                        meta={"file": str(yaml_file), "source": "core"}
-                    )
-        
-        ecosystem_dir = Path("flow/ecosystem")
-        if ecosystem_dir.exists():
-            yaml_files = sorted(ecosystem_dir.glob("*.flow.yaml"))
-            for yaml_file in yaml_files:
-                try:
-                    single = self._load_single_flow(yaml_file)
-                    merged = self._merge_flow(merged, single, yaml_file)
-                    self.diagnostics.record_step(
-                        phase="startup",
-                        step_id=f"flow.load.ecosystem.{yaml_file.name}",
-                        handler="kernel:flow.load",
-                        status="success",
-                        meta={"file": str(yaml_file), "source": "ecosystem"}
-                    )
-                except Exception as e:
-                    self.diagnostics.record_step(
-                        phase="startup",
-                        step_id=f"flow.load.ecosystem.{yaml_file.name}",
-                        handler="kernel:flow.load",
-                        status="failed",
-                        error=e,
-                        meta={"file": str(yaml_file), "source": "ecosystem"}
-                    )
-        
-        flow_dir = Path("flow")
-        if flow_dir.exists():
-            yaml_files = sorted(flow_dir.glob("*.flow.yaml"))
-            for yaml_file in yaml_files:
-                try:
-                    single = self._load_single_flow(yaml_file)
-                    merged = self._merge_flow(merged, single, yaml_file)
-                    self.diagnostics.record_step(
-                        phase="startup",
-                        step_id=f"flow.load.legacy.{yaml_file.name}",
-                        handler="kernel:flow.load",
-                        status="success",
-                        meta={"file": str(yaml_file), "source": "legacy"}
-                    )
-                except Exception as e:
-                    self.diagnostics.record_step(
-                        phase="startup",
-                        step_id=f"flow.load.legacy.{yaml_file.name}",
-                        handler="kernel:flow.load",
-                        status="failed",
-                        error=e,
-                        meta={"file": str(yaml_file), "source": "legacy"}
-                    )
+        # 旧ディレクトリを読み込み（互換性のため）
+        for legacy_dir in ["flow/core", "flow/ecosystem", "flow"]:
+            legacy_path = Path(legacy_dir)
+            if legacy_path.exists():
+                yaml_files = sorted(legacy_path.glob("*.flow.yaml"))
+                for yaml_file in yaml_files:
+                    try:
+                        single = self._load_single_flow(yaml_file)
+                        merged = self._merge_flow(merged, single, yaml_file)
+                        self.diagnostics.record_step(
+                            phase="startup",
+                            step_id=f"flow.load.legacy.{yaml_file.name}",
+                            handler="kernel:flow.load",
+                            status="success",
+                            meta={"file": str(yaml_file), "source": "legacy", "deprecated": True}
+                        )
+                    except Exception as e:
+                        self.diagnostics.record_step(
+                            phase="startup",
+                            step_id=f"flow.load.legacy.{yaml_file.name}",
+                            handler="kernel:flow.load",
+                            status="failed",
+                            error=e,
+                            meta={"file": str(yaml_file), "source": "legacy"}
+                        )
         
         if not merged["pipelines"]:
             self._flow = self._minimal_fallback_flow()
@@ -214,6 +250,72 @@ class Kernel:
         
         self._flow = merged
         return self._flow
+
+    def _convert_new_flow_to_pipelines(self, flow_def: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        New flow形式（phases/steps）をpipelines形式に変換
+        
+        Kernel.run_startup() が pipelines 形式を期待しているため
+        """
+        result = {
+            "flow_version": "2.0",
+            "defaults": flow_def.get("defaults", {"fail_soft": True, "on_missing_handler": "skip"}),
+            "pipelines": {"startup": []}
+        }
+        
+        steps = flow_def.get("steps", [])
+        phases = flow_def.get("phases", [])
+        
+        # phase順 → priority順 → id順 でソート
+        phase_order = {p: i for i, p in enumerate(phases)}
+        sorted_steps = sorted(
+            steps,
+            key=lambda s: (phase_order.get(s.get("phase", ""), 999), s.get("priority", 100), s.get("id", ""))
+        )
+        
+        # pipelines形式に変換
+        for step in sorted_steps:
+            pipeline_step = {
+                "id": step.get("id"),
+                "run": {}
+            }
+            
+            # type による変換
+            step_type = step.get("type", "handler")
+            step_input = step.get("input", {})
+            
+            if step_type == "handler":
+                if isinstance(step_input, dict):
+                    pipeline_step["run"]["handler"] = step_input.get("handler", "kernel:noop")
+                    pipeline_step["run"]["args"] = step_input.get("args", {})
+                else:
+                    pipeline_step["run"]["handler"] = "kernel:noop"
+                    pipeline_step["run"]["args"] = {}
+            elif step_type == "python_file_call":
+                pipeline_step["run"]["handler"] = "kernel:python_file_call"
+                pipeline_step["run"]["args"] = {
+                    "file": step.get("file"),
+                    "owner_pack": step.get("owner_pack"),
+                    "input": step_input,
+                    "timeout_seconds": step.get("timeout_seconds", 60.0),
+                    "_step_id": step.get("id"),
+                    "_phase": step.get("phase"),
+                }
+            else:
+                pipeline_step["run"]["handler"] = "kernel:noop"
+                pipeline_step["run"]["args"] = {}
+            
+            # when条件があれば追加
+            if step.get("when"):
+                pipeline_step["when"] = step["when"]
+            
+            # output があれば追加
+            if step.get("output"):
+                pipeline_step["output"] = step["output"]
+            
+            result["pipelines"]["startup"].append(pipeline_step)
+        
+        return result
 
     def _merge_flow(self, base: Dict[str, Any], new: Dict[str, Any], source_file: Path = None) -> Dict[str, Any]:
         result = copy.deepcopy(base)
@@ -556,7 +658,7 @@ class Kernel:
         if " == " in condition:
             left, right = condition.split(" == ", 1)
             left_val = self._resolve_value(left.strip(), ctx)
-            right_val = right.strip().strip('"'')
+            right_val = right.strip().strip('"\'')
             if right_val.lower() == "true":
                 return left_val == True
             if right_val.lower() == "false":
@@ -569,7 +671,7 @@ class Kernel:
         if " != " in condition:
             left, right = condition.split(" != ", 1)
             left_val = self._resolve_value(left.strip(), ctx)
-            right_val = right.strip().strip('"'')
+            right_val = right.strip().strip('"\'')
             if right_val.lower() == "true":
                 return left_val != True
             if right_val.lower() == "false":
@@ -774,6 +876,8 @@ class Kernel:
 
     def _resolve_args(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
         return {k: self._resolve_value(v, ctx) for k, v in args.items()} if isinstance(args, dict) else {}
+
+    # ========== Kernel Handlers ==========
 
     def _h_mounts_init(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
         mounts_file = str(args.get("mounts_file", "user_data/mounts.json"))
@@ -1472,22 +1576,100 @@ class Kernel:
             }
 
     def _h_flow_execute_by_id(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
-        """flow_idを指定してFlowを実行"""
+        """
+        flow_idを指定してFlowを実行
+        
+        Args:
+            flow_id: 実行するFlow ID（必須）
+            inputs: Flow入力（任意）
+            timeout: タイムアウト秒数（任意）
+            resolve: 共有辞書で解決するか（任意、デフォルトFalse）
+            resolve_namespace: 解決に使用するnamespace（任意、デフォルト"flow_id"）
+        """
         flow_id = args.get("flow_id")
         if not flow_id:
             return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "missing flow_id"}}
         
         inputs = args.get("inputs", {})
         timeout = args.get("timeout")
+        resolve = args.get("resolve", False)
+        resolve_namespace = args.get("resolve_namespace", "flow_id")
         
+        # 共有辞書での解決（オプトイン）
+        original_flow_id = flow_id
+        resolved_flow_id = flow_id
+        resolution_info = None
+        
+        if resolve:
+            try:
+                from .shared_dict import get_shared_dict_resolver
+                resolver = get_shared_dict_resolver()
+                result = resolver.resolve_chain(resolve_namespace, flow_id, ctx)
+                resolved_flow_id = result.resolved
+                
+                resolution_info = {
+                    "original": original_flow_id,
+                    "resolved": resolved_flow_id,
+                    "hops": result.hops,
+                    "cycle_detected": result.cycle_detected,
+                    "max_hops_reached": result.max_hops_reached,
+                }
+                
+                # 解決された場合は監査ログに記録
+                if resolved_flow_id != original_flow_id:
+                    try:
+                        audit = get_audit_logger()
+                        audit.log_system_event(
+                            event_type="flow_id_resolved",
+                            success=True,
+                            details={
+                                "namespace": resolve_namespace,
+                                "original": original_flow_id,
+                                "resolved": resolved_flow_id,
+                                "hops": result.hops,
+                            }
+                        )
+                    except Exception:
+                        pass
+                    
+                    self.diagnostics.record_step(
+                        phase="flow",
+                        step_id=f"flow.{original_flow_id}.resolved",
+                        handler="kernel:flow.execute_by_id",
+                        status="success",
+                        meta={
+                            "original_flow_id": original_flow_id,
+                            "resolved_flow_id": resolved_flow_id,
+                            "namespace": resolve_namespace,
+                        }
+                    )
+            except Exception as e:
+                # 解決失敗時は元のflow_idを使用
+                self.diagnostics.record_step(
+                    phase="flow",
+                    step_id=f"flow.{original_flow_id}.resolve_failed",
+                    handler="kernel:flow.execute_by_id",
+                    status="failed",
+                    error=e,
+                    meta={"namespace": resolve_namespace}
+                )
+        
+        # Flow実行
         exec_ctx = dict(ctx)
         exec_ctx.update(inputs)
         
-        result = self.execute_flow_sync(flow_id, exec_ctx, timeout)
+        if resolution_info:
+            exec_ctx["_flow_resolution"] = resolution_info
+        
+        result = self.execute_flow_sync(resolved_flow_id, exec_ctx, timeout)
         
         return {
             "_kernel_step_status": "success" if "_error" not in result else "failed",
-            "_kernel_step_meta": {"flow_id": flow_id},
+            "_kernel_step_meta": {
+                "flow_id": resolved_flow_id,
+                "original_flow_id": original_flow_id if resolve else None,
+                "resolved": resolve and (resolved_flow_id != original_flow_id),
+            },
             "result": result
         }
 
@@ -2019,3 +2201,209 @@ class Kernel:
                 "_kernel_step_status": "failed",
                 "_kernel_step_meta": {"error": str(e)}
             }
+
+    # ========== vocab ハンドラ ==========
+
+    def _h_vocab_list_groups(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """登録された同義語グループを一覧"""
+        try:
+            from .vocab_registry import get_vocab_registry
+            vr = get_vocab_registry()
+            groups = vr.list_groups()
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_step_meta": {"count": len(groups)},
+                "groups": groups
+            }
+        except Exception as e:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
+
+    def _h_vocab_list_converters(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """登録されたconverterを一覧"""
+        try:
+            from .vocab_registry import get_vocab_registry
+            vr = get_vocab_registry()
+            converters = vr.list_converters()
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_step_meta": {"count": len(converters)},
+                "converters": converters
+            }
+        except Exception as e:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
+
+    def _h_vocab_summary(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """vocab/converterの登録状況サマリーを取得"""
+        try:
+            from .vocab_registry import get_vocab_registry
+            vr = get_vocab_registry()
+            summary = vr.get_registration_summary()
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_step_meta": summary.get("totals", {}),
+                "summary": summary
+            }
+        except Exception as e:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
+
+    def _h_vocab_convert(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """データを変換"""
+        from_term = args.get("from_term")
+        to_term = args.get("to_term")
+        data = args.get("data")
+        log_success = args.get("log_success", False)
+        
+        if not from_term or not to_term:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "Missing from_term or to_term"}}
+        
+        try:
+            from .vocab_registry import get_vocab_registry
+            vr = get_vocab_registry()
+            result, success = vr.convert(from_term, to_term, data, log_success=log_success)
+            return {
+                "_kernel_step_status": "success" if success else "failed",
+                "_kernel_step_meta": {"converted": success, "from": from_term, "to": to_term},
+                "result": result
+            }
+        except Exception as e:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
+
+    # ========== shared_dict ハンドラ ==========
+
+    def _h_shared_dict_resolve(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """共有辞書でtokenを解決"""
+        namespace = args.get("namespace")
+        token = args.get("token")
+        
+        if not namespace or not token:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "Missing namespace or token"}}
+        
+        try:
+            from .shared_dict import get_shared_dict_resolver
+            resolver = get_shared_dict_resolver()
+            result = resolver.resolve_chain(namespace, token, ctx)
+            
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_step_meta": {
+                    "original": result.original,
+                    "resolved": result.resolved,
+                    "hop_count": len(result.hops),
+                    "cycle_detected": result.cycle_detected,
+                    "max_hops_reached": result.max_hops_reached,
+                },
+                "resolved": result.resolved,
+                "hops": result.hops,
+            }
+        except Exception as e:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
+
+    def _h_shared_dict_propose(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """共有辞書にルールを提案"""
+        namespace = args.get("namespace")
+        token = args.get("token")
+        value = args.get("value")
+        provenance = args.get("provenance", {})
+        
+        if not namespace or not token or value is None:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "Missing namespace, token, or value"}}
+        
+        try:
+            from .shared_dict import get_shared_dict_journal
+            journal = get_shared_dict_journal()
+            result = journal.propose(namespace, token, value, provenance)
+            
+            return {
+                "_kernel_step_status": "success" if result.accepted else "failed",
+                "_kernel_step_meta": {
+                    "status": result.status.value,
+                    "accepted": result.accepted,
+                    "reason": result.reason,
+                },
+                "result": {
+                    "status": result.status.value,
+                    "namespace": result.namespace,
+                    "token": result.token,
+                    "value": result.value,
+                    "reason": result.reason,
+                }
+            }
+        except Exception as e:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
+
+    def _h_shared_dict_explain(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """共有辞書の解決を説明"""
+        namespace = args.get("namespace")
+        token = args.get("token")
+        
+        if not namespace or not token:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "Missing namespace or token"}}
+        
+        try:
+            from .shared_dict import get_shared_dict_resolver
+            resolver = get_shared_dict_resolver()
+            result = resolver.explain(namespace, token, ctx)
+            
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_step_meta": {
+                    "original": result.original,
+                    "resolved": result.resolved,
+                    "hop_count": len(result.hops),
+                },
+                "explanation": {
+                    "original": result.original,
+                    "resolved": result.resolved,
+                    "hops": result.hops,
+                    "cycle_detected": result.cycle_detected,
+                    "max_hops_reached": result.max_hops_reached,
+                }
+            }
+        except Exception as e:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
+
+    def _h_shared_dict_list(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """共有辞書のnamespace/ルールを一覧"""
+        namespace = args.get("namespace")
+        
+        try:
+            from .shared_dict import get_shared_dict_resolver
+            resolver = get_shared_dict_resolver()
+            
+            if namespace:
+                rules = resolver.list_rules(namespace)
+                return {
+                    "_kernel_step_status": "success",
+                    "_kernel_step_meta": {"namespace": namespace, "rule_count": len(rules)},
+                    "rules": rules,
+                }
+            else:
+                namespaces = resolver.list_namespaces()
+                return {
+                    "_kernel_step_status": "success",
+                    "_kernel_step_meta": {"namespace_count": len(namespaces)},
+                    "namespaces": namespaces,
+                }
+        except Exception as e:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
+
+    def _h_shared_dict_remove(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """共有辞書からルールを削除"""
+        namespace = args.get("namespace")
+        token = args.get("token")
+        provenance = args.get("provenance", {})
+        
+        if not namespace or not token:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "Missing namespace or token"}}
+        
+        try:
+            from .shared_dict import get_shared_dict_journal
+            journal = get_shared_dict_journal()
+            success = journal.remove(namespace, token, provenance)
+            
+            return {
+                "_kernel_step_status": "success" if success else "failed",
+                "_kernel_step_meta": {"removed": success, "namespace": namespace, "token": token},
+            }
+        except Exception as e:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}

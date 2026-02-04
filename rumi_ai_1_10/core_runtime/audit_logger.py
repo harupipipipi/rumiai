@@ -308,17 +308,24 @@ class AuditLogger:
         request_details: Dict[str, Any] = None
     ) -> None:
         """ネットワークイベントログを記録"""
+        # severity を allowed に基づいて設定
+        if allowed:
+            severity: AuditSeverity = "info"
+        else:
+            severity: AuditSeverity = "warning"
+        
         entry = AuditEntry(
             ts=self._now_ts(),
             category="network",
-            severity="info" if allowed else "warning",
+            severity=severity,
             action="network_request",
-            success=allowed,
+            success=allowed,  # allowed を success として記録
             owner_pack=pack_id,
             rejection_reason=reason if not allowed else None,
             details={
                 "domain": domain,
                 "port": port,
+                "allowed": allowed,  # 明示的に allowed を記録
                 **(request_details or {})
             }
         )

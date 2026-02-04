@@ -405,12 +405,20 @@ class NetworkGrantManager:
         try:
             from .audit_logger import get_audit_logger
             audit = get_audit_logger()
+            
+            # 許可/拒否を明確に記録
             audit.log_network_event(
                 pack_id=result.pack_id,
                 domain=result.domain or "",
                 port=result.port or 0,
                 allowed=result.allowed,
                 reason=result.reason if not result.allowed else None,
+                request_details={
+                    "check_type": "access_check",
+                    "grant_enabled": result.grant.enabled if result.grant else None,
+                    "grant_domains": result.grant.allowed_domains if result.grant else None,
+                    "grant_ports": result.grant.allowed_ports if result.grant else None,
+                }
             )
         except Exception:
             pass

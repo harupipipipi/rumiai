@@ -19,6 +19,7 @@ import os
 import sys
 import threading
 import traceback
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -297,29 +298,33 @@ class PythonFileExecutor:
         
         # 4. 実行
         try:
-            # Docker実行を試みる（将来実装）
             docker_available = self._check_docker_available()
             
             if docker_available:
-                # Docker実行（Step 6で完全実装）
+                # Docker隔離実行
                 result = self._execute_in_container(
                     resolved_path, resolved_pack, input_data, context, timeout_seconds
                 )
+                result.execution_mode = "container"
             elif self._security_mode == "permissive":
-                # ホスト実行（警告付き）
+                # permissive モードではホスト実行（警告付き）
                 result = self._execute_on_host(
                     resolved_path, resolved_pack, input_data, context, timeout_seconds
                 )
+                result.execution_mode = "host_permissive"
                 result.warnings.append(
                     "SECURITY WARNING: Executed on host without Docker isolation. "
                     "Set RUMI_SECURITY_MODE=strict and ensure Docker is running for production."
                 )
             else:
-                # strict モードでDocker無し → 拒否
-                result.error = "Docker is required but not available. Set RUMI_SECURITY_MODE=permissive for development."
-                result.error_type = "docker_required"
-                result.execution_mode = "rejected"
-                self._record_rejection(context, result, "docker_unavailable")
+                # strict モードで Docker 不可 → 拒否
+                result = ExecutionResult(
+                    success=False,
+                    error="Docker is required but not available. Cannot execute in strict mode.",
+                    error_type="docker_required",
+                    execution_mode="rejected"
+                )
+                self._record_rejection(context, result, "docker_unavailable_strict")
                 return result
                 
         except Exception as e:
@@ -388,16 +393,167 @@ class PythonFileExecutor:
         timeout_seconds: float
     ) -> ExecutionResult:
         """
-        Dockerコンテナ内で実行（スタブ - Step 6で完全実装）
+        Dockerコンテナ内でPythonファイルを実行
         
-        現時点ではホスト実行にフォールバック
+        docker run --rm で1回実行する方式（シンプル・安全）
         """
-        # TODO: Step 6で完全実装
-        # 現時点ではpermissiveモードと同様にホスト実行
-        result = self._execute_on_host(file_path, owner_pack, input_data, context, timeout_seconds)
-        result.execution_mode = "container_stub"
-        result.warnings.append("Container execution not yet implemented, using host execution")
+        import subprocess
+        import tempfile
+        
+        result = ExecutionResult(success=False, execution_mode="container")
+        
+        # 一意なコンテナ名を生成（UUID使用で衝突回避）
+        unique_id = uuid.uuid4().hex[:12]
+        container_name = f"rumi-pfc-{owner_pack or 'unknown'}-{unique_id}"
+        
+        # 入力データとコンテキストをJSON化
+        exec_context = {
+            "flow_id": context.flow_id,
+            "step_id": context.step_id,
+            "phase": context.phase,
+            "ts": context.ts,
+            "owner_pack": owner_pack,
+            "inputs": input_data,
+        }
+        
+        # 一時ファイルのパスを事前に初期化
+        input_file = None
+        script_file = None
+        
+        try:
+            # 一時ファイルに入力データを書き込み
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                json.dump({"input_data": input_data, "context": exec_context}, f, ensure_ascii=False, default=str)
+                input_file = f.name
+            
+            # 実行スクリプトを生成
+            executor_script = self._generate_executor_script(file_path.name)
+            
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+                f.write(executor_script)
+                script_file = f.name
+            
+            # Docker実行コマンドを構築
+            docker_cmd = [
+                "docker", "run",
+                "--rm",
+                "--name", container_name,
+                "--network=none",  # ネットワーク隔離
+                "--cap-drop=ALL",  # 全権限を削除
+                "--security-opt=no-new-privileges:true",
+                "--read-only",  # 読み取り専用ファイルシステム
+                "--tmpfs=/tmp:size=64m,noexec,nosuid",  # 一時領域
+                "--memory=256m",
+                "--memory-swap=256m",
+                "--cpus=0.5",
+                "--pids-limit=100",
+                "--user=65534:65534",  # nobody ユーザー
+                "-v", f"{file_path.parent.resolve()}:/workspace:ro",  # ソースディレクトリ（読み取り専用）
+                "-v", f"{input_file}:/input.json:ro",  # 入力ファイル
+                "-v", f"{script_file}:/executor.py:ro",  # 実行スクリプト
+                "-w", "/workspace",
+                "--label", "rumi.managed=true",
+                "--label", f"rumi.pack_id={owner_pack or 'unknown'}",
+                "--label", "rumi.type=python_file_call",
+                "python:3.11-slim",
+                "python", "/executor.py", file_path.name
+            ]
+            
+            # Docker実行
+            try:
+                proc_result = subprocess.run(
+                    docker_cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout_seconds
+                )
+                
+                if proc_result.returncode == 0:
+                    # 出力をパース
+                    output_text = proc_result.stdout.strip()
+                    if output_text:
+                        try:
+                            result.output = json.loads(output_text)
+                        except json.JSONDecodeError:
+                            result.output = output_text
+                    else:
+                        result.output = None
+                    
+                    result.success = True
+                else:
+                    result.error = proc_result.stderr or f"Container exited with code {proc_result.returncode}"
+                    result.error_type = "container_execution_error"
+            
+            except subprocess.TimeoutExpired:
+                # タイムアウト時はコンテナを強制停止
+                subprocess.run(["docker", "kill", container_name], capture_output=True)
+                result.error = f"Execution timed out after {timeout_seconds}s"
+                result.error_type = "timeout"
+            
+        except Exception as e:
+            result.error = str(e)
+            result.error_type = type(e).__name__
+        
+        finally:
+            # 一時ファイルを削除（存在する場合のみ）
+            if input_file is not None:
+                try:
+                    os.unlink(input_file)
+                except Exception:
+                    pass
+            if script_file is not None:
+                try:
+                    os.unlink(script_file)
+                except Exception:
+                    pass
+        
         return result
+    
+    def _generate_executor_script(self, target_filename: str) -> str:
+        """コンテナ内で実行するPythonスクリプトを生成"""
+        return f'''
+import sys
+import json
+import importlib.util
+
+# 入力を読み込み
+with open("/input.json", "r") as f:
+    data = json.load(f)
+
+input_data = data.get("input_data", {{}})
+context = data.get("context", {{}})
+
+# ターゲットモジュールをロード
+target_file = "/workspace/{target_filename}"
+spec = importlib.util.spec_from_file_location("target_module", target_file)
+
+if spec and spec.loader:
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["target_module"] = module
+    spec.loader.exec_module(module)
+    
+    # run関数を探す
+    run_fn = getattr(module, "run", None)
+    if run_fn:
+        import inspect
+        sig = inspect.signature(run_fn)
+        param_count = len(sig.parameters)
+        
+        if param_count >= 2:
+            result = run_fn(input_data, context)
+        elif param_count == 1:
+            result = run_fn(input_data)
+        else:
+            result = run_fn()
+        
+        # 結果を出力
+        if result is not None:
+            print(json.dumps(result, default=str))
+    else:
+        print(json.dumps({{"error": "No run function found"}}))
+else:
+    print(json.dumps({{"error": "Cannot load module"}}))
+'''
     
     def _execute_on_host(
         self,
