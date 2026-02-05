@@ -1,3 +1,4 @@
+
 """
 flow_loader.py - Flow定義ファイルのローダー
 
@@ -14,6 +15,9 @@ Phase2追加:
 - pack配下探索 (ecosystem/packs/{pack_id}/backend/flows/)
 - 承認ゲート (ApprovalManager連携)
 - local_pack互換 (ecosystem/flows/ を仮想packとして扱う)
+
+PR-B追加:
+- hash_mismatch検知時にMODIFIED昇格 + network権限無効化（B3）
 """
 
 from __future__ import annotations
@@ -171,6 +175,8 @@ class FlowLoader:
         """
         packの承認状態をチェック
         
+        PR-B追加: hash_mismatch検知時にMODIFIED昇格 + network権限無効化
+        
         Returns:
             (is_approved: bool, skip_reason: Optional[str])
         """
@@ -181,9 +187,54 @@ class FlowLoader:
         
         try:
             is_valid, reason = am.is_pack_approved_and_verified(pack_id)
+            
+            # B3: hash_mismatch検知時の処理
+            if not is_valid and reason == "hash_mismatch":
+                self._handle_hash_mismatch(pack_id, am)
+            
             return is_valid, reason
         except Exception as e:
             return False, f"approval_check_error: {e}"
+    
+    def _handle_hash_mismatch(self, pack_id: str, am) -> None:
+        """
+        hash_mismatch検知時の処理（B3）
+        
+        - ApprovalManager.mark_modified() を呼ぶ（必須）
+        - NetworkGrantManager.disable_for_modified() も呼ぶ（best-effort）
+        """
+        # 1. MODIFIEDへ昇格（必須）
+        try:
+            am.mark_modified(pack_id)
+        except Exception as e:
+            # 失敗してもログに記録して継続
+            self._log_hash_mismatch_error(pack_id, "mark_modified", e)
+        
+        # 2. ネットワーク権限無効化（best-effort）
+        try:
+            from .network_grant_manager import get_network_grant_manager
+            ngm = get_network_grant_manager()
+            ngm.disable_for_modified(pack_id)
+        except Exception as e:
+            # 失敗してもログに記録して継続（best-effort）
+            self._log_hash_mismatch_error(pack_id, "disable_network", e)
+    
+    def _log_hash_mismatch_error(self, pack_id: str, operation: str, error: Exception) -> None:
+        """hash_mismatch処理のエラーをログに記録"""
+        try:
+            from .audit_logger import get_audit_logger
+            audit = get_audit_logger()
+            audit.log_system_event(
+                event_type="hash_mismatch_handling_error",
+                success=False,
+                details={
+                    "pack_id": pack_id,
+                    "operation": operation,
+                    "error": str(error),
+                }
+            )
+        except Exception:
+            pass  # 監査ログのエラーで処理を止めない
     
     def _record_skip(self, file_path: Path, pack_id: Optional[str], reason: str) -> None:
         """スキップを記録"""

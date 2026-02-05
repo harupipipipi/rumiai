@@ -13,6 +13,11 @@ network grant に基づいて allow/deny を判定し、監査ログに記録す
 - タイムアウト制限
 - ヘッダー数/サイズ制限
 - メソッド制限
+
+PR-B変更:
+- 内部宛て禁止をgrant判定より前に（B1）
+- 巨大レスポンスは必ず失敗化（B2）
+- Packへの返却は汎用理由、auditに詳細
 """
 
 from __future__ import annotations
@@ -43,6 +48,7 @@ from urllib.parse import urlparse, urljoin
 # サイズ制限
 MAX_REQUEST_SIZE = 1 * 1024 * 1024   # 1MB
 MAX_RESPONSE_SIZE = 4 * 1024 * 1024  # 4MB
+MAX_RESPONSE_READ_CHUNK = 65536      # 64KB per chunk
 
 # タイムアウト
 DEFAULT_TIMEOUT = 30.0
@@ -58,6 +64,10 @@ ALLOWED_METHODS = {"GET", "HEAD", "POST", "PUT", "DELETE", "PATCH"}
 MAX_HEADER_COUNT = 100
 MAX_HEADER_NAME_LENGTH = 256
 MAX_HEADER_VALUE_LENGTH = 8192
+
+# セキュリティブロック用の汎用エラーメッセージ（Pack向け）
+GENERIC_SECURITY_BLOCK_MESSAGE = "Request blocked by security policy"
+GENERIC_SECURITY_BLOCK_TYPE = "blocked"
 
 # 禁止IPレンジ（IPv4）
 BLOCKED_IPV4_NETWORKS = [
@@ -278,7 +288,9 @@ def _log_network_event(
     error_type: str = None,
     redirect_hops: int = 0,
     bytes_read: int = 0,
-    blocked_reason: str = None
+    blocked_reason: str = None,
+    max_response_bytes: int = None,
+    check_type: str = None
 ) -> None:
     """監査ログにネットワークイベントを記録"""
     if audit_logger is None:
@@ -300,6 +312,10 @@ def _log_network_event(
             request_details["error_type"] = error_type
         if blocked_reason is not None:
             request_details["blocked_reason"] = blocked_reason
+        if max_response_bytes is not None:
+            request_details["max_response_bytes"] = max_response_bytes
+        if check_type is not None:
+            request_details["check_type"] = check_type
         
         audit_logger.log_network_event(
             pack_id=pack_id,
@@ -311,6 +327,61 @@ def _log_network_event(
         )
     except Exception as e:
         print(f"[EgressProxy] Failed to log network event: {e}")
+
+
+# ============================================================
+# レスポンス読み取りヘルパー（B2対応）
+# ============================================================
+
+def read_response_with_limit(resp, max_size: int) -> Tuple[bytes, bool, int]:
+    """
+    レスポンスボディを上限付きで読み取る
+    
+    Returns:
+        (data, exceeded, bytes_read)
+        - data: 読み取ったデータ（超過時は途中まで）
+        - exceeded: 上限を超過したか
+        - bytes_read: 実際に読み取ったバイト数
+    """
+    # Content-Lengthがあれば事前チェック
+    content_length = resp.getheader("Content-Length")
+    if content_length:
+        try:
+            cl = int(content_length)
+            if cl > max_size:
+                # Content-Length超過：読み取らずに即失敗
+                return b"", True, 0
+        except (ValueError, TypeError):
+            pass
+    
+    # チャンク読み取りで上限監視
+    data = b""
+    bytes_read = 0
+    exceeded = False
+    
+    while True:
+        remaining = max_size - bytes_read + 1  # +1で超過検知
+        chunk_size = min(MAX_RESPONSE_READ_CHUNK, remaining)
+        
+        try:
+            chunk = resp.read(chunk_size)
+        except Exception:
+            break
+        
+        if not chunk:
+            break
+        
+        bytes_read += len(chunk)
+        
+        if bytes_read > max_size:
+            # 超過検知
+            exceeded = True
+            data += chunk[:max_size - (bytes_read - len(chunk))]  # 上限までのデータ
+            break
+        
+        data += chunk
+    
+    return data, exceeded, bytes_read
 
 
 # ============================================================
@@ -327,6 +398,11 @@ def execute_http_request(
     HTTPリクエストを実行（リダイレクト、セキュリティチェック込み）
     
     pack_id はUDSソケットから確定済み（payloadのowner_packは無視）
+    
+    PR-B変更:
+    - B1: 内部宛て禁止をgrant判定より前に
+    - B2: 巨大レスポンスは必ず失敗化
+    - Packへの返却は汎用理由、auditに詳細
     """
     start_time = time.time()
     
@@ -364,7 +440,63 @@ def execute_http_request(
             last_domain = domain
             last_port = port
             
-            # 1. Grant チェック
+            # ============================================================
+            # B1: 内部宛て禁止を最優先判定（grantより前）
+            # ============================================================
+            
+            # 1. IPリテラルチェック（内部IP禁止）
+            if _is_ip_literal(domain):
+                is_blocked, reason = is_internal_ip(domain)
+                if is_blocked:
+                    # Pack向けは汎用メッセージ
+                    result["error"] = GENERIC_SECURITY_BLOCK_MESSAGE
+                    result["error_type"] = GENERIC_SECURITY_BLOCK_TYPE
+                    result["latency_ms"] = (time.time() - start_time) * 1000
+                    result["redirect_hops"] = redirect_hops
+                    result["final_url"] = current_url
+                    
+                    # auditには詳細を記録
+                    _log_network_event(
+                        audit_logger, pack_id, domain, port, False,
+                        reason=reason,
+                        method=method, url=original_url, final_url=current_url,
+                        latency_ms=result["latency_ms"],
+                        redirect_hops=redirect_hops,
+                        blocked_reason="internal_ip_blocked",
+                        check_type="proxy_request"
+                    )
+                    return result
+            
+            # 2. DNS解決 & 内部IP検証（DNS rebinding対策）
+            is_blocked, dns_reason, resolved_ips = resolve_and_check_ip(domain)
+            if is_blocked:
+                # Pack向けは汎用メッセージ
+                result["error"] = GENERIC_SECURITY_BLOCK_MESSAGE
+                result["error_type"] = GENERIC_SECURITY_BLOCK_TYPE
+                result["latency_ms"] = (time.time() - start_time) * 1000
+                result["redirect_hops"] = redirect_hops
+                result["final_url"] = current_url
+                
+                # blocked_reasonを判定（dns_rebindingかdns_blockedか）
+                blocked_reason = "dns_blocked"
+                if "rebinding" in dns_reason.lower():
+                    blocked_reason = "dns_rebinding_blocked"
+                
+                # auditには詳細を記録
+                _log_network_event(
+                    audit_logger, pack_id, domain, port, False,
+                    reason=dns_reason,
+                    method=method, url=original_url, final_url=current_url,
+                    latency_ms=result["latency_ms"],
+                    redirect_hops=redirect_hops,
+                    blocked_reason=blocked_reason,
+                    check_type="proxy_request"
+                )
+                return result
+            
+            # ============================================================
+            # 3. Grant チェック（内部宛て判定の後）
+            # ============================================================
             if network_grant_manager:
                 grant_result = network_grant_manager.check_access(pack_id, domain, port)
                 if not grant_result.allowed:
@@ -380,50 +512,14 @@ def execute_http_request(
                         method=method, url=original_url, final_url=current_url,
                         latency_ms=result["latency_ms"],
                         redirect_hops=redirect_hops,
-                        blocked_reason="grant_denied"
+                        blocked_reason="grant_denied",
+                        check_type="proxy_request"
                     )
                     return result
             
-            # 2. IPリテラルチェック
-            if _is_ip_literal(domain):
-                is_blocked, reason = is_internal_ip(domain)
-                if is_blocked:
-                    result["error"] = f"Internal IP blocked: {reason}"
-                    result["error_type"] = "internal_ip_blocked"
-                    result["latency_ms"] = (time.time() - start_time) * 1000
-                    result["redirect_hops"] = redirect_hops
-                    result["final_url"] = current_url
-                    
-                    _log_network_event(
-                        audit_logger, pack_id, domain, port, False,
-                        reason=reason,
-                        method=method, url=original_url, final_url=current_url,
-                        latency_ms=result["latency_ms"],
-                        redirect_hops=redirect_hops,
-                        blocked_reason="internal_ip"
-                    )
-                    return result
-            
-            # 3. DNS解決 & 内部IP検証
-            is_blocked, dns_reason, resolved_ips = resolve_and_check_ip(domain)
-            if is_blocked:
-                result["error"] = dns_reason
-                result["error_type"] = "dns_blocked"
-                result["latency_ms"] = (time.time() - start_time) * 1000
-                result["redirect_hops"] = redirect_hops
-                result["final_url"] = current_url
-                
-                _log_network_event(
-                    audit_logger, pack_id, domain, port, False,
-                    reason=dns_reason,
-                    method=method, url=original_url, final_url=current_url,
-                    latency_ms=result["latency_ms"],
-                    redirect_hops=redirect_hops,
-                    blocked_reason="dns_rebinding"
-                )
-                return result
-            
+            # ============================================================
             # 4. HTTP接続 & リクエスト実行
+            # ============================================================
             conn = None
             try:
                 if parsed.scheme == "https":
@@ -448,8 +544,34 @@ def execute_http_request(
                 resp = conn.getresponse()
                 
                 resp_headers = {k: v for k, v in resp.getheaders()}
-                resp_body = resp.read(MAX_RESPONSE_SIZE)
-                bytes_read += len(resp_body)
+                
+                # ============================================================
+                # B2: 巨大レスポンスは必ず失敗化
+                # ============================================================
+                resp_body, size_exceeded, read_bytes = read_response_with_limit(resp, MAX_RESPONSE_SIZE)
+                bytes_read += read_bytes
+                
+                if size_exceeded:
+                    result["error"] = f"Response too large (max: {MAX_RESPONSE_SIZE} bytes)"
+                    result["error_type"] = "response_too_large"
+                    result["latency_ms"] = (time.time() - start_time) * 1000
+                    result["redirect_hops"] = redirect_hops
+                    result["bytes_read"] = bytes_read
+                    result["final_url"] = current_url
+                    
+                    _log_network_event(
+                        audit_logger, pack_id, domain, port, False,
+                        reason=f"Response exceeded size limit: {read_bytes} bytes read, max {MAX_RESPONSE_SIZE}",
+                        method=method, url=original_url, final_url=current_url,
+                        latency_ms=result["latency_ms"],
+                        status_code=resp.status,
+                        redirect_hops=redirect_hops,
+                        bytes_read=bytes_read,
+                        error_type="response_too_large",
+                        max_response_bytes=MAX_RESPONSE_SIZE,
+                        check_type="proxy_request"
+                    )
+                    return result
                 
                 # 5. リダイレクト判定（GET/HEADのみfollow）
                 if resp.status in (301, 302, 303, 307, 308) and method in ("GET", "HEAD"):
@@ -469,9 +591,10 @@ def execute_http_request(
                                 reason=result["error"],
                                 method=method, url=original_url, final_url=current_url,
                                 latency_ms=result["latency_ms"],
+                                error_type="too_many_redirects",
                                 redirect_hops=redirect_hops,
                                 bytes_read=bytes_read,
-                                error_type="too_many_redirects"
+                                check_type="proxy_request"
                             )
                             return result
                         
@@ -501,7 +624,8 @@ def execute_http_request(
                     latency_ms=result["latency_ms"],
                     status_code=resp.status,
                     redirect_hops=redirect_hops,
-                    bytes_read=bytes_read
+                    bytes_read=bytes_read,
+                    check_type="proxy_request"
                 )
                 
                 return result
@@ -546,7 +670,8 @@ def execute_http_request(
         latency_ms=result["latency_ms"],
         error_type=result.get("error_type"),
         redirect_hops=redirect_hops,
-        bytes_read=bytes_read
+        bytes_read=bytes_read,
+        check_type="proxy_request"
     )
     
     return result

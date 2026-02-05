@@ -21,6 +21,9 @@ Usage:
     
     print(L("startup.success"))  # → "カーネルの起動が完了しました"
     print(L("error.not_found", name="config.json"))  # → "config.jsonが見つかりません"
+
+PR-B追加:
+- LangManager / get_lang_manager の互換alias（B6）
 """
 
 from __future__ import annotations
@@ -205,6 +208,14 @@ class LangRegistry:
             self._load_locale(DEFAULT_LOCALE)
 
 
+# ============================================================
+# B6: 互換alias（破壊的変更禁止）
+# ============================================================
+
+# LangManager は LangRegistry の別名
+LangManager = LangRegistry
+
+
 _global_lang_registry: Optional[LangRegistry] = None
 _lang_lock = threading.Lock()
 
@@ -217,6 +228,23 @@ def _get_registry() -> LangRegistry:
             if _global_lang_registry is None:
                 _global_lang_registry = LangRegistry()
     return _global_lang_registry
+
+
+def get_lang_registry() -> LangRegistry:
+    """LangRegistryインスタンスを取得"""
+    return _get_registry()
+
+
+# B6: 互換alias - get_lang_manager は get_lang_registry の別名
+def get_lang_manager() -> LangRegistry:
+    """
+    LangManager（LangRegistry）インスタンスを取得
+    
+    B6: 後方互換のためのalias
+    __init__.py が get_lang_manager をexportしているため、
+    この関数が存在しないと ImportError になる。
+    """
+    return _get_registry()
 
 
 def L(key: str, **kwargs) -> str:
@@ -242,8 +270,3 @@ def get_locale() -> str:
 def reload_lang() -> None:
     """言語ファイルを再読み込み"""
     _get_registry().reload()
-
-
-def get_lang_registry() -> LangRegistry:
-    """LangRegistryインスタンスを取得"""
-    return _get_registry()

@@ -1,6 +1,9 @@
 """
 kernel.py - Flow Runner(用途非依存カーネル)
 async対応、Flow Hook、タイムアウト、循環検出対応版
+
+PR-B追加:
+- 未承認/スキップ理由をdiagnosticsに記録（B4）
 """
 
 from __future__ import annotations
@@ -37,6 +40,12 @@ from .lib_executor import get_lib_executor
 @dataclass
 class KernelConfig:
     flow_path: str = "flow/project.flow.yaml"
+
+
+# B4: 環境変数でverboseモード判定
+def _is_diagnostics_verbose() -> bool:
+    """RUMI_DIAGNOSTICS_VERBOSE=1 かどうか"""
+    return os.environ.get("RUMI_DIAGNOSTICS_VERBOSE", "0") == "1"
 
 
 class Kernel:
@@ -1457,6 +1466,8 @@ class Kernel:
         全Flowファイルをロードし、modifierを適用し、InterfaceRegistryに登録
         
         flows/(公式)と ecosystem/flows/(エコシステム)から読み込む
+        
+        PR-B追加: 未承認/スキップ理由をdiagnosticsに記録（B4）
         """
         try:
             # 1. Flowをロード
@@ -1475,6 +1486,9 @@ class Kernel:
                     meta={"file": err.get("file")}
                 )
             
+            # B4: スキップされたFlowをdiagnosticsに記録
+            self._record_skipped_flows_to_diagnostics(loader)
+            
             # 2. modifierをロード
             modifier_loader = get_modifier_loader()
             all_modifiers = modifier_loader.load_all_modifiers()
@@ -1490,6 +1504,9 @@ class Kernel:
                     error={"errors": err.get("errors", [])},
                     meta={"file": err.get("file")}
                 )
+            
+            # B4: スキップされたmodifierをdiagnosticsに記録
+            self._record_skipped_modifiers_to_diagnostics(modifier_loader)
             
             # 3. 各Flowにmodifierを適用してIRに登録
             registered = []
@@ -1564,6 +1581,10 @@ class Kernel:
             modifier_skipped = sum(1 for r in modifier_results_all if r.skipped_reason)
             modifier_failed = sum(1 for r in modifier_results_all if not r.success and not r.skipped_reason)
             
+            # スキップ数を取得
+            skipped_flows = loader.get_skipped_flows()
+            skipped_modifiers = modifier_loader.get_skipped_modifiers()
+            
             self.diagnostics.record_step(
                 phase="startup",
                 step_id="flow.load_all.complete",
@@ -1577,6 +1598,8 @@ class Kernel:
                     "modifiers_applied": modifier_success,
                     "modifiers_skipped": modifier_skipped,
                     "modifiers_failed": modifier_failed,
+                    "flows_skipped_count": len(skipped_flows),
+                    "modifiers_skipped_count": len(skipped_modifiers),
                 }
             )
             
@@ -1590,6 +1613,8 @@ class Kernel:
                     "flow_ids": registered,
                     "modifiers_loaded": len(all_modifiers),
                     "modifiers_applied": modifier_success,
+                    "flows_skipped": len(skipped_flows),
+                    "modifiers_skipped": len(skipped_modifiers),
                 }
             )
             
@@ -1601,6 +1626,8 @@ class Kernel:
                     "modifiers_loaded": len(all_modifiers),
                     "modifiers_applied": modifier_success,
                     "modifiers_skipped": modifier_skipped,
+                    "flows_skipped_count": len(skipped_flows),
+                    "modifiers_skipped_by_approval": len(skipped_modifiers),
                 }
             }
             
@@ -1616,6 +1643,112 @@ class Kernel:
                 "_kernel_step_status": "failed",
                 "_kernel_step_meta": {"error": str(e)}
             }
+
+    def _record_skipped_flows_to_diagnostics(self, loader) -> None:
+        """
+        スキップされたFlowをdiagnosticsに記録（B4）
+        
+        - pack単位でグループ化して記録（必須）
+        - RUMI_DIAGNOSTICS_VERBOSE=1 の場合はファイル単位も記録
+        """
+        skipped_flows = loader.get_skipped_flows()
+        if not skipped_flows:
+            return
+        
+        verbose = _is_diagnostics_verbose()
+        
+        # pack_id + reason でグループ化
+        by_pack_reason: Dict[Tuple[str, str], List] = {}
+        for record in skipped_flows:
+            pack_id = record.pack_id or "unknown"
+            reason = record.reason or "unknown"
+            key = (pack_id, reason)
+            if key not in by_pack_reason:
+                by_pack_reason[key] = []
+            by_pack_reason[key].append(record)
+        
+        # pack単位で記録（必須）
+        for (pack_id, reason), records in by_pack_reason.items():
+            self.diagnostics.record_step(
+                phase="startup",
+                step_id=f"flow.skipped.{pack_id}",
+                handler="kernel:flow.load_all",
+                status="skipped",
+                meta={
+                    "pack_id": pack_id,
+                    "reason": reason,
+                    "skipped_files_count": len(records),
+                }
+            )
+        
+        # verbose時はファイル単位も記録
+        if verbose:
+            for record in skipped_flows:
+                self.diagnostics.record_step(
+                    phase="startup",
+                    step_id=f"flow.skipped.file.{Path(record.file_path).stem}",
+                    handler="kernel:flow.load_all",
+                    status="skipped",
+                    meta={
+                        "file": record.file_path,
+                        "pack_id": record.pack_id,
+                        "reason": record.reason,
+                        "ts": record.ts,
+                    }
+                )
+
+    def _record_skipped_modifiers_to_diagnostics(self, modifier_loader) -> None:
+        """
+        スキップされたmodifierをdiagnosticsに記録（B4）
+        
+        - pack単位でグループ化して記録（必須）
+        - RUMI_DIAGNOSTICS_VERBOSE=1 の場合はファイル単位も記録
+        """
+        skipped_modifiers = modifier_loader.get_skipped_modifiers()
+        if not skipped_modifiers:
+            return
+        
+        verbose = _is_diagnostics_verbose()
+        
+        # pack_id + reason でグループ化
+        by_pack_reason: Dict[Tuple[str, str], List] = {}
+        for record in skipped_modifiers:
+            pack_id = record.pack_id or "unknown"
+            reason = record.reason or "unknown"
+            key = (pack_id, reason)
+            if key not in by_pack_reason:
+                by_pack_reason[key] = []
+            by_pack_reason[key].append(record)
+        
+        # pack単位で記録（必須）
+        for (pack_id, reason), records in by_pack_reason.items():
+            self.diagnostics.record_step(
+                phase="startup",
+                step_id=f"modifier.skipped.{pack_id}",
+                handler="kernel:flow.load_all",
+                status="skipped",
+                meta={
+                    "pack_id": pack_id,
+                    "reason": reason,
+                    "skipped_files_count": len(records),
+                }
+            )
+        
+        # verbose時はファイル単位も記録
+        if verbose:
+            for record in skipped_modifiers:
+                self.diagnostics.record_step(
+                    phase="startup",
+                    step_id=f"modifier.skipped.file.{Path(record.file_path).stem}",
+                    handler="kernel:flow.load_all",
+                    status="skipped",
+                    meta={
+                        "file": record.file_path,
+                        "pack_id": record.pack_id,
+                        "reason": record.reason,
+                        "ts": record.ts,
+                    }
+                )
 
     def _h_flow_execute_by_id(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
         """
@@ -2638,4 +2771,9 @@ class Kernel:
             active_packs = uds_manager.list_active_packs()
             return {
                 "_kernel_step_status": "success",
-                "_kernel_
+                "_kernel_step_meta": {
+                    "initialized": True,
+                    "active_packs": active_packs,
+                    "base_dir": str(uds_manager.get_base_dir())
+                }
+            }

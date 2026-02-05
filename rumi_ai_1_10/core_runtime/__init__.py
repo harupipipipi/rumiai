@@ -1,5 +1,9 @@
 """
 core_runtime package
+
+PR-B追加:
+- lang export不整合の修正（B6）
+- rumi_syscall のexport追加（B5）
 """
 
 from .kernel import Kernel, KernelConfig
@@ -53,11 +57,15 @@ from .vocab_registry import (
     CONVERTERS_DIRNAME,
 )
 from .lang import (
-    LangManager,
-    get_lang_manager,
+    LangRegistry,
+    LangManager,  # B6: 互換alias (= LangRegistry)
+    get_lang_registry,
+    get_lang_manager,  # B6: 互換alias (= get_lang_registry)
     L,
+    Lp,
     set_locale,
     get_locale,
+    reload_lang,
 )
 from .flow_loader import (
     FlowLoader,
@@ -122,6 +130,9 @@ from .lib_executor import (
     get_lib_executor,
     reset_lib_executor,
 )
+# B5: rumi_syscall（単一ソース）
+from . import rumi_syscall
+from . import syscall  # 互換ラッパー
 
 __all__ = [
     "Kernel",
@@ -172,11 +183,15 @@ __all__ = [
     "VOCAB_FILENAME",
     "CONVERTERS_DIRNAME",
     # Lang
-    "LangManager",
-    "get_lang_manager",
+    "LangRegistry",
+    "LangManager",  # B6: 互換alias
+    "get_lang_registry",
+    "get_lang_manager",  # B6: 互換alias
     "L",
+    "Lp",
     "set_locale",
     "get_locale",
+    "reload_lang",
     # Flow Loader
     "FlowLoader",
     "FlowDefinition",
@@ -233,4 +248,7 @@ __all__ = [
     "LibExecutionResult",
     "get_lib_executor",
     "reset_lib_executor",
+    # B5: Syscall modules
+    "rumi_syscall",
+    "syscall",
 ]

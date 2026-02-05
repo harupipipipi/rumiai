@@ -1,4 +1,3 @@
-# backend_core/ecosystem/mounts.py
 """
 マウント管理システム
 
@@ -17,6 +16,7 @@ from typing import Dict, Optional, Any
 DEFAULT_MOUNTS = {
     # 汎用マウントのみ（具体的な用途名を定義しない）
     "data.user": "./user_data",
+    "data.settings": "./user_data/settings",
     "data.cache": "./user_data/cache",
 }
 

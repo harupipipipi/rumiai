@@ -1,4 +1,3 @@
-# backend_core/ecosystem/initializer.py
 """
 エコシステム初期化
 
@@ -13,6 +12,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 from .mounts import MountManager, get_mount_manager, get_mount_path, DEFAULT_MOUNTS
+from . import registry as registry_module
 from .registry import Registry, get_registry, reload_registry
 from .active_ecosystem import (
     ActiveEcosystemManager,
@@ -99,7 +99,6 @@ class EcosystemInitializer:
         """必要なディレクトリを作成"""
         directories = [
             self.user_data_dir,
-            self.user_data_dir / "chats",
             self.user_data_dir / "settings",
             self.user_data_dir / "cache",
             self.user_data_dir / "shared",
@@ -126,6 +125,7 @@ class EcosystemInitializer:
                     # 公式は汎用マウントのみ定義
                     # 具体的なマウントはコンポーネントが自己登録する
                     "data.user": "./user_data",
+                    "data.settings": "./user_data/settings",
                     "data.cache": "./user_data/cache",
                 }
             }
@@ -139,12 +139,23 @@ class EcosystemInitializer:
     
     def _initialize_registry(self, result: Dict[str, Any]):
         """レジストリを初期化"""
-        if not self.ecosystem_dir.exists():
-            result["errors"].append(f"エコシステムディレクトリが存在しません: {self.ecosystem_dir}")
+        # ecosystem_dir/packs が存在するならそちらを優先、なければそのまま使用
+        packs_dir = self.ecosystem_dir / "packs"
+        if packs_dir.exists() and packs_dir.is_dir():
+            actual_ecosystem_dir = packs_dir
+        else:
+            actual_ecosystem_dir = self.ecosystem_dir
+        
+        if not actual_ecosystem_dir.exists():
+            result["errors"].append(f"エコシステムディレクトリが存在しません: {actual_ecosystem_dir}")
             return
         
-        # レジストリを取得（グローバルインスタンスを使用）
-        self.registry = get_registry()
+        # initializer指定のパスでRegistryを生成
+        self.registry = Registry(ecosystem_dir=str(actual_ecosystem_dir))
+        self.registry.load_all_packs()
+        
+        # グローバル変数に代入して既存コードとの互換性を維持
+        registry_module._global_registry = self.registry
         
         # 統計情報を収集
         result["registry_loaded"] = True

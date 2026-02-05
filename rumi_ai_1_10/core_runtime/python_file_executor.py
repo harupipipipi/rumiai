@@ -14,6 +14,9 @@ UDS Egress Proxy連携:
 - strict モードではコンテナは --network=none で実行
 - 外部通信は UDS ソケット経由でのみ可能
 - rumi_syscall モジュールをコンテナに注入
+
+PR-B追加:
+- syscall注入の単一ソース化（rumi_syscall固定）（B5）
 """
 
 from __future__ import annotations
@@ -235,6 +238,7 @@ class PythonFileExecutor:
         self._path_validator = PathValidator()
         self._security_mode = os.environ.get("RUMI_SECURITY_MODE", "strict").lower()
         self._uds_proxy_manager = None
+        self._syscall_content_cache: Optional[str] = None
         
         if self._security_mode not in ("strict", "permissive"):
             self._security_mode = "strict"
@@ -435,24 +439,40 @@ class PythonFileExecutor:
             return False
     
     def _get_syscall_module_content(self) -> str:
-        """rumi_syscall モジュールの内容を取得"""
-        # syscall.py のパスを探す
+        """
+        rumi_syscall モジュールの内容を取得（B5: 単一ソース化）
+        
+        優先順位:
+        1. core_runtime/rumi_syscall.py（単一ソース - 推奨）
+        2. フォールバック: インラインで最小限のsyscallを生成
+        """
+        # キャッシュがあれば使用
+        if self._syscall_content_cache is not None:
+            return self._syscall_content_cache
+        
+        # 1. 単一ソース: core_runtime/rumi_syscall.py
         try:
-            from . import syscall
-            syscall_path = Path(syscall.__file__)
+            from . import rumi_syscall
+            syscall_path = Path(rumi_syscall.__file__)
             if syscall_path.exists():
-                return syscall_path.read_text(encoding="utf-8")
-        except Exception:
+                content = syscall_path.read_text(encoding="utf-8")
+                self._syscall_content_cache = content
+                return content
+        except (ImportError, AttributeError, OSError):
             pass
         
-        # フォールバック: インラインで最小限のsyscallを生成
-        return '''
-"""rumi_syscall - Rumi AI OS System Call API (minimal)"""
+        # 2. フォールバック: インラインで最小限のsyscallを生成
+        fallback_content = '''
+"""rumi_syscall - Rumi AI OS System Call API (minimal fallback)"""
 import json, os, socket, struct
 from typing import Any, Dict, Optional
 
 SOCKET_PATH = os.environ.get("RUMI_EGRESS_SOCKET", "/run/rumi/egress.sock")
 MAX_RESPONSE_SIZE = 4 * 1024 * 1024
+
+class SyscallError(Exception):
+    """システムコールエラー"""
+    pass
 
 def http_request(method: str, url: str, headers: Optional[Dict[str, str]] = None,
                  body: Optional[str] = None, timeout_seconds: float = 30.0,
@@ -471,16 +491,18 @@ def http_request(method: str, url: str, headers: Optional[Dict[str, str]] = None
         length_data = b""
         while len(length_data) < 4:
             chunk = sock.recv(4 - len(length_data))
-            if not chunk: raise Exception("Connection closed")
+            if not chunk: raise SyscallError("Connection closed")
             length_data += chunk
         length = struct.unpack(">I", length_data)[0]
-        if length > MAX_RESPONSE_SIZE: raise Exception(f"Response too large: {length}")
+        if length > MAX_RESPONSE_SIZE: raise SyscallError(f"Response too large: {length}")
         data = b""
         while len(data) < length:
             chunk = sock.recv(min(length - len(data), 65536))
-            if not chunk: raise Exception("Connection closed")
+            if not chunk: raise SyscallError("Connection closed")
             data += chunk
         return json.loads(data.decode("utf-8"))
+    except SyscallError:
+        raise
     except Exception as e:
         return {"success": False, "error": str(e), "error_type": type(e).__name__}
     finally:
@@ -498,8 +520,22 @@ def post_json(url: str, data: Any, headers=None, timeout_seconds=30.0):
     h = dict(headers or {}); h["Content-Type"] = "application/json"
     return http_request("POST", url, headers=h, body=json.dumps(data, ensure_ascii=False), timeout_seconds=timeout_seconds)
 
+def put(url: str, body=None, headers=None, timeout_seconds=30.0):
+    return http_request("PUT", url, headers=headers, body=body, timeout_seconds=timeout_seconds)
+
+def delete(url: str, headers=None, timeout_seconds=30.0):
+    return http_request("DELETE", url, headers=headers, timeout_seconds=timeout_seconds)
+
+def patch(url: str, body=None, headers=None, timeout_seconds=30.0):
+    return http_request("PATCH", url, headers=headers, body=body, timeout_seconds=timeout_seconds)
+
+def head(url: str, headers=None, timeout_seconds=30.0):
+    return http_request("HEAD", url, headers=headers, timeout_seconds=timeout_seconds)
+
 request = http_request
 '''
+        self._syscall_content_cache = fallback_content
+        return fallback_content
     
     def _execute_in_container(
         self,

@@ -1,4 +1,3 @@
-# backend_core/ecosystem/active_ecosystem.py
 """
 アクティブエコシステム管理
 
@@ -29,7 +28,7 @@ class ActiveEcosystemConfig:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'ActiveEcosystemConfig':
         return cls(
-            active_pack_identity=data.get('active_pack_identity', 'github:haru/default-pack'),
+            active_pack_identity=data.get('active_pack_identity'),
             overrides=data.get('overrides', {}),
             disabled_components=data.get('disabled_components', []),
             disabled_addons=data.get('disabled_addons', []),
