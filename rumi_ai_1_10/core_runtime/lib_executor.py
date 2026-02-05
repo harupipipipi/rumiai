@@ -2,6 +2,7 @@
 lib_executor.py - lib install/update 実行システム
 
 Packの lib/install.py と lib/update.py を管理する。
+全ての実行は SecureExecutor 経由で Docker 隔離される（strictモード）。
 """
 
 from __future__ import annotations
@@ -9,10 +10,14 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+
+# local_pack 定数
+LOCAL_PACK_ID = "local_pack"
 
 
 @dataclass
@@ -26,11 +31,25 @@ class LibExecutionRecord:
     error: Optional[str] = None
     
     def to_dict(self) -> Dict[str, Any]:
-        return {"pack_id": self.pack_id, "lib_type": self.lib_type, "executed_at": self.executed_at, "file_hash": self.file_hash, "success": self.success, "error": self.error}
+        return {
+            "pack_id": self.pack_id,
+            "lib_type": self.lib_type,
+            "executed_at": self.executed_at,
+            "file_hash": self.file_hash,
+            "success": self.success,
+            "error": self.error
+        }
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'LibExecutionRecord':
-        return cls(pack_id=data.get("pack_id", ""), lib_type=data.get("lib_type", ""), executed_at=data.get("executed_at", ""), file_hash=data.get("file_hash", ""), success=data.get("success", False), error=data.get("error"))
+        return cls(
+            pack_id=data.get("pack_id", ""),
+            lib_type=data.get("lib_type", ""),
+            executed_at=data.get("executed_at", ""),
+            file_hash=data.get("file_hash", ""),
+            success=data.get("success", False),
+            error=data.get("error")
+        )
 
 
 @dataclass
@@ -73,6 +92,11 @@ class LibExecutor:
     def _now_ts(self) -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     
+    def _get_secure_executor(self):
+        """SecureExecutor を取得（遅延インポート）"""
+        from .secure_executor import get_secure_executor
+        return get_secure_executor()
+    
     def _load_records(self) -> None:
         if not self._records_file.exists():
             return
@@ -87,7 +111,11 @@ class LibExecutor:
     def _save_records(self) -> None:
         try:
             self._records_file.parent.mkdir(parents=True, exist_ok=True)
-            data = {"version": "1.0", "updated_at": self._now_ts(), "records": {pack_id: record.to_dict() for pack_id, record in self._records.items()}}
+            data = {
+                "version": "1.0",
+                "updated_at": self._now_ts(),
+                "records": {pack_id: record.to_dict() for pack_id, record in self._records.items()}
+            }
             with open(self._records_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
@@ -112,7 +140,18 @@ class LibExecutor:
         return None
     
     def check_pack(self, pack_id: str, pack_dir: Path) -> LibCheckResult:
+        """
+        Pack の lib 実行要否をチェック
+        
+        local_pack は常にスキップ。
+        """
         result = LibCheckResult(pack_id=pack_id, needs_install=False, needs_update=False)
+        
+        # local_pack は lib をサポートしない
+        if pack_id == LOCAL_PACK_ID:
+            result.reason = "local_pack does not support lib execution"
+            return result
+        
         lib_dir = self._find_lib_dir(pack_dir)
         if not lib_dir:
             result.reason = "No lib directory found"
@@ -152,109 +191,130 @@ class LibExecutor:
         return result
     
     def execute_lib(self, pack_id: str, lib_file: Path, lib_type: str, context: Dict[str, Any] = None) -> LibExecutionResult:
-        import time
-        import importlib.util
-        import sys
+        """
+        lib を SecureExecutor 経由で実行
         
-        start_time = time.time()
-        result = LibExecutionResult(pack_id=pack_id, lib_type=lib_type, success=False)
+        全ての実行は Docker 隔離される（strictモード）。
+        permissive モードでは警告付きでホスト実行。
+        """
+        # local_pack チェック
+        if pack_id == LOCAL_PACK_ID:
+            result = LibExecutionResult(
+                pack_id=pack_id,
+                lib_type=lib_type,
+                success=False,
+                error="local_pack does not support lib execution",
+                error_type="local_pack_skip"
+            )
+            self._log_execution(pack_id, lib_type, False, result.error, "skipped")
+            return result
         
         if not lib_file.exists():
-            result.error = f"File not found: {lib_file}"
-            result.error_type = "file_not_found"
+            result = LibExecutionResult(
+                pack_id=pack_id,
+                lib_type=lib_type,
+                success=False,
+                error=f"File not found: {lib_file}",
+                error_type="file_not_found"
+            )
+            self._log_execution(pack_id, lib_type, False, result.error, "rejected")
             return result
         
         # 承認チェック
         try:
-            from .approval_manager import get_approval_manager, PackStatus
+            from .approval_manager import get_approval_manager
             am = get_approval_manager()
-            status = am.get_status(pack_id)
             
-            if status is None:
-                result.error = f"Pack '{pack_id}' not found in approval registry"
-                result.error_type = "not_found"
-                self._log_execution(pack_id, lib_type, False, result.error)
+            # 承認 + ハッシュ検証
+            is_valid, reason = am.is_pack_approved_and_verified(pack_id)
+            if not is_valid:
+                result = LibExecutionResult(
+                    pack_id=pack_id,
+                    lib_type=lib_type,
+                    success=False,
+                    error=f"Pack not approved or modified: {reason}",
+                    error_type=reason
+                )
+                self._log_execution(pack_id, lib_type, False, result.error, "rejected")
                 return result
-            
-            if status != PackStatus.APPROVED:
-                result.error = f"Pack not approved: {status.value}"
-                result.error_type = "not_approved"
-                self._log_execution(pack_id, lib_type, False, result.error)
-                return result
+                
         except Exception as e:
-            result.error = f"Approval check failed: {e}"
-            result.error_type = "approval_check_error"
+            result = LibExecutionResult(
+                pack_id=pack_id,
+                lib_type=lib_type,
+                success=False,
+                error=f"Approval check failed: {e}",
+                error_type="approval_check_error"
+            )
+            self._log_execution(pack_id, lib_type, False, result.error, "rejected")
             return result
         
-        module_name = f"lib_{pack_id}_{lib_type}_{abs(hash(str(lib_file)))}"
+        # SecureExecutor 経由で実行
+        secure_executor = self._get_secure_executor()
+        exec_result = secure_executor.execute_lib(
+            pack_id=pack_id,
+            lib_type=lib_type,
+            lib_file=lib_file,
+            context=context
+        )
         
-        try:
-            spec = importlib.util.spec_from_file_location(module_name, str(lib_file))
-            if spec is None or spec.loader is None:
-                result.error = f"Cannot load module from {lib_file}"
-                result.error_type = "module_load_error"
-                return result
-            
-            module = importlib.util.module_from_spec(spec)
-            sys.modules[module_name] = module
-            
-            lib_dir = str(lib_file.parent)
-            if lib_dir not in sys.path:
-                sys.path.insert(0, lib_dir)
-            
-            try:
-                spec.loader.exec_module(module)
-            finally:
-                if lib_dir in sys.path:
-                    sys.path.remove(lib_dir)
-            
-            run_fn = getattr(module, "run", None)
-            if run_fn is None:
-                result.error = f"No 'run' function found in {lib_file}"
-                result.error_type = "no_run_function"
-                return result
-            
-            exec_context = {"pack_id": pack_id, "lib_type": lib_type, "ts": self._now_ts(), "lib_dir": str(lib_file.parent), **(context or {})}
-            
-            import inspect
-            sig = inspect.signature(run_fn)
-            param_count = len(sig.parameters)
-            
-            if param_count >= 1:
-                output = run_fn(exec_context)
-            else:
-                output = run_fn()
-            
-            result.success = True
-            result.output = output
-        except Exception as e:
-            result.error = str(e)
-            result.error_type = type(e).__name__
-        finally:
-            if module_name in sys.modules:
-                del sys.modules[module_name]
+        # ExecutionResult を LibExecutionResult に変換
+        result = LibExecutionResult(
+            pack_id=pack_id,
+            lib_type=lib_type,
+            success=exec_result.success,
+            output=exec_result.output,
+            error=exec_result.error,
+            error_type=exec_result.error_type,
+            execution_time_ms=exec_result.execution_time_ms
+        )
         
-        result.execution_time_ms = (time.time() - start_time) * 1000
+        # 実行記録を保存
         file_hash = self._compute_file_hash(lib_file)
         self._save_execution_record(pack_id, lib_type, file_hash, result.success, result.error)
-        self._log_execution(pack_id, lib_type, result.success, result.error)
+        self._log_execution(pack_id, lib_type, result.success, result.error, exec_result.execution_mode)
+        
         return result
     
     def _save_execution_record(self, pack_id: str, lib_type: str, file_hash: str, success: bool, error: Optional[str]) -> None:
         with self._lock:
-            self._records[pack_id] = LibExecutionRecord(pack_id=pack_id, lib_type=lib_type, executed_at=self._now_ts(), file_hash=file_hash, success=success, error=error)
+            self._records[pack_id] = LibExecutionRecord(
+                pack_id=pack_id,
+                lib_type=lib_type,
+                executed_at=self._now_ts(),
+                file_hash=file_hash,
+                success=success,
+                error=error
+            )
             self._save_records()
     
-    def _log_execution(self, pack_id: str, lib_type: str, success: bool, error: Optional[str]) -> None:
+    def _log_execution(self, pack_id: str, lib_type: str, success: bool, error: Optional[str], execution_mode: str = "unknown") -> None:
+        """監査ログに lib 実行を記録"""
         try:
             from .audit_logger import get_audit_logger
             audit = get_audit_logger()
-            audit.log_system_event(event_type=f"lib_{lib_type}", success=success, details={"pack_id": pack_id, "lib_type": lib_type}, error=error)
+            audit.log_system_event(
+                event_type=f"lib_{lib_type}",
+                success=success,
+                details={
+                    "pack_id": pack_id,
+                    "lib_type": lib_type,
+                    "execution_mode": execution_mode
+                },
+                error=error
+            )
         except Exception:
             pass
     
     def process_all_packs(self, packs_dir: Path, context: Dict[str, Any] = None) -> Dict[str, Any]:
-        results = {"processed": 0, "installed": [], "updated": [], "skipped": [], "failed": [], "errors": []}
+        results = {
+            "processed": 0,
+            "installed": [],
+            "updated": [],
+            "skipped": [],
+            "failed": [],
+            "errors": []
+        }
         if not packs_dir.exists():
             return results
         
@@ -262,6 +322,12 @@ class LibExecutor:
             if not pack_dir.is_dir() or pack_dir.name.startswith("."):
                 continue
             pack_id = pack_dir.name
+            
+            # local_pack はスキップ（明示的に）
+            if pack_id == LOCAL_PACK_ID:
+                results["skipped"].append({"pack_id": pack_id, "reason": "local_pack does not support lib"})
+                continue
+            
             results["processed"] += 1
             
             try:

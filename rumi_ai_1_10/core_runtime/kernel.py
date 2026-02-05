@@ -8,6 +8,7 @@ from __future__ import annotations
 import copy
 import json
 import asyncio
+import os
 import uuid
 import importlib.util
 import subprocess
@@ -52,6 +53,7 @@ class Kernel:
         self._kernel_handlers: Dict[str, Callable[[Dict[str, Any], Dict[str, Any]], Any]] = {}
         self._shutdown_handlers: List[Callable[[], None]] = []
         self._executor: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=4)
+        self._uds_proxy_manager = None  # UDS Egress Proxy Manager
         
         self.install_journal.set_interface_registry(self.interface_registry)
         
@@ -122,7 +124,38 @@ class Kernel:
             "kernel:shared_dict.explain": self._h_shared_dict_explain,
             "kernel:shared_dict.list": self._h_shared_dict_list,
             "kernel:shared_dict.remove": self._h_shared_dict_remove,
+            # UDS Egress Proxy ハンドラ
+            "kernel:uds_proxy.init": self._h_uds_proxy_init,
+            "kernel:uds_proxy.ensure_socket": self._h_uds_proxy_ensure_socket,
+            "kernel:uds_proxy.stop": self._h_uds_proxy_stop,
+            "kernel:uds_proxy.stop_all": self._h_uds_proxy_stop_all,
+            "kernel:uds_proxy.status": self._h_uds_proxy_status,
         }
+
+    def _get_uds_proxy_manager(self):
+        """UDSEgressProxyManagerを取得（遅延初期化）"""
+        if self._uds_proxy_manager is None:
+            try:
+                from .egress_proxy import initialize_uds_egress_proxy
+                from .network_grant_manager import get_network_grant_manager
+                from .audit_logger import get_audit_logger
+                
+                ngm = get_network_grant_manager()
+                audit = get_audit_logger()
+                
+                self._uds_proxy_manager = initialize_uds_egress_proxy(
+                    network_grant_manager=ngm,
+                    audit_logger=audit
+                )
+            except Exception as e:
+                self.diagnostics.record_step(
+                    phase="startup",
+                    step_id="uds_proxy.init.auto",
+                    handler="kernel:uds_proxy.init",
+                    status="failed",
+                    error=e
+                )
+        return self._uds_proxy_manager
 
     def _resolve_handler(self, handler: str, args: Dict[str, Any] = None) -> Optional[Callable[[Dict[str, Any], Dict[str, Any]], Any]]:
         if not isinstance(handler, str) or not handler:
@@ -716,6 +749,15 @@ class Kernel:
 
     def shutdown(self) -> Dict[str, Any]:
         results: List[Dict[str, Any]] = []
+        
+        # UDSプロキシを停止
+        if self._uds_proxy_manager:
+            try:
+                self._uds_proxy_manager.stop_all()
+                results.append({"handler": "uds_proxy_manager", "status": "success"})
+            except Exception as e:
+                results.append({"handler": "uds_proxy_manager", "status": "failed", "error": str(e)})
+        
         for fn in reversed(self._shutdown_handlers):
             try:
                 fn()
@@ -1759,6 +1801,11 @@ class Kernel:
         """
         python_file_call ステップを実行
         
+        UDS Egress Proxy連携:
+        - strict モードでは実行前にUDSソケットを確保
+        - コンテナは --network=none で実行
+        - 外部通信は UDS 経由でのみ可能
+        
         Args (from args):
             file: 実行するファイルパス(必須)
             owner_pack: 所有Pack ID(任意、パスから推測可能)
@@ -1792,6 +1839,36 @@ class Kernel:
         # 入力データの変数解決
         resolved_input = self._resolve_value(input_data, ctx)
         
+        # UDSプロキシマネージャを取得（strictモードでは必須）
+        security_mode = os.environ.get("RUMI_SECURITY_MODE", "strict").lower()
+        uds_manager = self._get_uds_proxy_manager()
+        
+        if owner_pack and uds_manager:
+            # UDSソケットを確保（Docker実行前に必須）
+            success, error, sock_path = uds_manager.ensure_pack_socket(owner_pack)
+            if not success:
+                if security_mode == "strict":
+                    self.diagnostics.record_step(
+                        phase=phase,
+                        step_id=f"{step_id}.socket_ensure_failed",
+                        handler="kernel:python_file_call",
+                        status="failed",
+                        error={"type": "socket_ensure_failed", "message": error}
+                    )
+                    return {
+                        "_kernel_step_status": "failed",
+                        "_kernel_step_meta": {"error": f"Failed to ensure UDS socket: {error}"}
+                    }
+                else:
+                    # permissive モードでは警告のみ
+                    self.diagnostics.record_step(
+                        phase=phase,
+                        step_id=f"{step_id}.socket_ensure_warning",
+                        handler="kernel:python_file_call",
+                        status="success",
+                        meta={"warning": f"Failed to ensure UDS socket: {error}"}
+                    )
+        
         # 実行コンテキストを構築
         exec_context = ExecutionContext(
             flow_id=ctx.get("_flow_id", "unknown"),
@@ -1812,6 +1889,11 @@ class Kernel:
         
         # 実行
         executor = get_python_file_executor()
+        
+        # UDSプロキシマネージャを設定
+        if uds_manager:
+            executor.set_uds_proxy_manager(uds_manager)
+        
         result = executor.execute(
             file_path=file_path,
             owner_pack=owner_pack,
@@ -2407,3 +2489,153 @@ class Kernel:
             }
         except Exception as e:
             return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
+
+    # ========== UDS Egress Proxy ハンドラ ==========
+
+    def _h_uds_proxy_init(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """UDS Egress Proxyを初期化"""
+        try:
+            from .egress_proxy import initialize_uds_egress_proxy
+            from .network_grant_manager import get_network_grant_manager
+            from .audit_logger import get_audit_logger
+            
+            ngm = get_network_grant_manager()
+            audit = get_audit_logger()
+            
+            self._uds_proxy_manager = initialize_uds_egress_proxy(
+                network_grant_manager=ngm,
+                audit_logger=audit
+            )
+            
+            self.diagnostics.record_step(
+                phase="startup",
+                step_id="uds_proxy.init",
+                handler="kernel:uds_proxy.init",
+                status="success",
+                meta={"base_dir": str(self._uds_proxy_manager.get_base_dir())}
+            )
+            
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_step_meta": {
+                    "base_dir": str(self._uds_proxy_manager.get_base_dir())
+                }
+            }
+        except Exception as e:
+            self.diagnostics.record_step(
+                phase="startup",
+                step_id="uds_proxy.init",
+                handler="kernel:uds_proxy.init",
+                status="failed",
+                error=e
+            )
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {"error": str(e)}
+            }
+
+    def _h_uds_proxy_ensure_socket(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """Pack用UDSソケットを確保"""
+        pack_id = args.get("pack_id")
+        if not pack_id:
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {"error": "Missing pack_id"}
+            }
+        
+        uds_manager = self._get_uds_proxy_manager()
+        if not uds_manager:
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {"error": "UDS proxy manager not available"}
+            }
+        
+        success, error, sock_path = uds_manager.ensure_pack_socket(pack_id)
+        
+        if success:
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_step_meta": {
+                    "pack_id": pack_id,
+                    "socket_path": str(sock_path)
+                }
+            }
+        else:
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {
+                    "pack_id": pack_id,
+                    "error": error
+                }
+            }
+
+    def _h_uds_proxy_stop(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """Pack用UDSサーバーを停止"""
+        pack_id = args.get("pack_id")
+        if not pack_id:
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {"error": "Missing pack_id"}
+            }
+        
+        uds_manager = self._get_uds_proxy_manager()
+        if not uds_manager:
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {"error": "UDS proxy manager not available"}
+            }
+        
+        uds_manager.stop_pack_server(pack_id)
+        
+        return {
+            "_kernel_step_status": "success",
+            "_kernel_step_meta": {"pack_id": pack_id, "stopped": True}
+        }
+
+    def _h_uds_proxy_stop_all(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """全UDSサーバーを停止"""
+        uds_manager = self._get_uds_proxy_manager()
+        if not uds_manager:
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_step_meta": {"stopped": 0}
+            }
+        
+        active_packs = uds_manager.list_active_packs()
+        uds_manager.stop_all()
+        
+        return {
+            "_kernel_step_status": "success",
+            "_kernel_step_meta": {"stopped": len(active_packs), "packs": active_packs}
+        }
+
+    def _h_uds_proxy_status(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """UDSプロキシの状態を取得"""
+        uds_manager = self._get_uds_proxy_manager()
+        if not uds_manager:
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_step_meta": {
+                    "initialized": False,
+                    "active_packs": []
+                }
+            }
+        
+        pack_id = args.get("pack_id")
+        
+        if pack_id:
+            is_running = uds_manager.is_running(pack_id)
+            sock_path = uds_manager.get_socket_path(pack_id)
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_step_meta": {
+                    "pack_id": pack_id,
+                    "is_running": is_running,
+                    "socket_path": str(sock_path) if sock_path else None
+                }
+            }
+        else:
+            active_packs = uds_manager.list_active_packs()
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_

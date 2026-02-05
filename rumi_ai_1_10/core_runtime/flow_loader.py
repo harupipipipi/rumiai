@@ -1,28 +1,40 @@
 """
 flow_loader.py - Flow定義ファイルのローダー
 
-flows/(公式)と ecosystem/flows/(エコシステム)からYAMLファイルを読み込み、
+flows/(公式)と ecosystem/packs/{pack_id}/backend/flows/(pack提供)からYAMLファイルを読み込み、
 InterfaceRegistryに登録する。
 
 設計原則:
-- Flowはファイルからロードされる(setup.py登録に依存しない)
-- 公式は具体的なドメイン概念を持たない
+- 公式Flow (flows/) は承認不要で常にロード
+- pack提供Flow は承認+ハッシュ一致のpackのみロード
+- local_pack互換: RUMI_LOCAL_PACK_MODE=require_approval の場合のみ
 - phases/priority/idによる決定的な実行順序
+
+Phase2追加:
+- pack配下探索 (ecosystem/packs/{pack_id}/backend/flows/)
+- 承認ゲート (ApprovalManager連携)
+- local_pack互換 (ecosystem/flows/ を仮想packとして扱う)
 """
 
 from __future__ import annotations
 
+import os
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Set
 
 try:
     import yaml
     HAS_YAML = True
 except ImportError:
     HAS_YAML = False
+
+
+# local_pack定数（approval_managerと共有）
+LOCAL_PACK_ID = "local_pack"
+LOCAL_PACK_DIR = "ecosystem/flows"
 
 
 @dataclass
@@ -53,7 +65,8 @@ class FlowDefinition:
     defaults: Dict[str, Any]
     steps: List[FlowStep]
     source_file: Optional[Path] = None
-    source_type: str = "unknown"  # "official" or "ecosystem"
+    source_type: str = "unknown"  # "official", "pack", "local_pack"
+    source_pack_id: Optional[str] = None  # pack提供の場合のpack_id
     
     def to_dict(self) -> Dict[str, Any]:
         """既存Kernelが処理できる形式に変換"""
@@ -66,6 +79,7 @@ class FlowDefinition:
             "steps": [self._step_to_dict(s) for s in self.steps],
             "_source_file": str(self.source_file) if self.source_file else None,
             "_source_type": self.source_type,
+            "_source_pack_id": self.source_pack_id,
         }
     
     def _step_to_dict(self, step: FlowStep) -> Dict[str, Any]:
@@ -99,26 +113,103 @@ class FlowLoadResult:
     flow_def: Optional[FlowDefinition] = None
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
+    skipped_reason: Optional[str] = None
+
+
+@dataclass
+class FlowSkipRecord:
+    """スキップされたFlowの記録"""
+    file_path: str
+    pack_id: Optional[str]
+    reason: str
+    ts: str
 
 
 class FlowLoader:
     """
     Flowファイルローダー
     
-    flows/(公式)と ecosystem/flows/(エコシステム)から
+    flows/(公式)と ecosystem/packs/{pack_id}/backend/flows/(pack提供)から
     YAMLファイルを読み込み、正規化する。
+    
+    承認ゲート:
+    - 公式Flow (flows/) は承認不要
+    - pack提供Flow は承認+ハッシュ一致が必要
+    - local_pack (ecosystem/flows/) は環境変数で制御
     """
     
     OFFICIAL_FLOWS_DIR = "flows"
-    ECOSYSTEM_FLOWS_DIR = "ecosystem/flows"
+    PACKS_DIR = "ecosystem/packs"
+    PACK_FLOWS_SUBDIR = "backend/flows"
     
-    def __init__(self):
+    def __init__(self, approval_manager=None):
         self._lock = threading.RLock()
         self._loaded_flows: Dict[str, FlowDefinition] = {}
         self._load_errors: List[Dict[str, Any]] = []
+        self._skipped_flows: List[FlowSkipRecord] = []
+        self._approval_manager = approval_manager
     
     def _now_ts(self) -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    
+    def _get_approval_manager(self):
+        """ApprovalManagerを取得（遅延初期化）"""
+        if self._approval_manager is None:
+            try:
+                from .approval_manager import get_approval_manager
+                self._approval_manager = get_approval_manager()
+            except Exception:
+                pass
+        return self._approval_manager
+    
+    def _is_local_pack_mode_enabled(self) -> bool:
+        """local_packモードが有効かチェック"""
+        mode = os.environ.get("RUMI_LOCAL_PACK_MODE", "off").lower()
+        return mode == "require_approval"
+    
+    def _check_pack_approval(self, pack_id: str) -> Tuple[bool, Optional[str]]:
+        """
+        packの承認状態をチェック
+        
+        Returns:
+            (is_approved: bool, skip_reason: Optional[str])
+        """
+        am = self._get_approval_manager()
+        if am is None:
+            # ApprovalManagerがない場合は承認済みとみなす（後方互換）
+            return True, None
+        
+        try:
+            is_valid, reason = am.is_pack_approved_and_verified(pack_id)
+            return is_valid, reason
+        except Exception as e:
+            return False, f"approval_check_error: {e}"
+    
+    def _record_skip(self, file_path: Path, pack_id: Optional[str], reason: str) -> None:
+        """スキップを記録"""
+        record = FlowSkipRecord(
+            file_path=str(file_path),
+            pack_id=pack_id,
+            reason=reason,
+            ts=self._now_ts()
+        )
+        self._skipped_flows.append(record)
+        
+        # 監査ログにも記録
+        try:
+            from .audit_logger import get_audit_logger
+            audit = get_audit_logger()
+            audit.log_system_event(
+                event_type="flow_load_skipped",
+                success=False,
+                details={
+                    "file": str(file_path),
+                    "pack_id": pack_id,
+                    "reason": reason,
+                }
+            )
+        except Exception:
+            pass
     
     def load_all_flows(self) -> Dict[str, FlowDefinition]:
         """
@@ -130,33 +221,132 @@ class FlowLoader:
         with self._lock:
             self._loaded_flows.clear()
             self._load_errors.clear()
+            self._skipped_flows.clear()
             
-            # 1. 公式Flowをロード
+            # 1. 公式Flowをロード（承認不要）
             official_dir = Path(self.OFFICIAL_FLOWS_DIR)
             if official_dir.exists():
-                self._load_directory(official_dir, "official")
+                self._load_official_flows(official_dir)
             
-            # 2. エコシステムFlowをロード
-            ecosystem_dir = Path(self.ECOSYSTEM_FLOWS_DIR)
-            if ecosystem_dir.exists():
-                self._load_directory(ecosystem_dir, "ecosystem")
+            # 2. pack提供Flowをロード（承認必須）
+            packs_dir = Path(self.PACKS_DIR)
+            if packs_dir.exists():
+                self._load_pack_flows(packs_dir)
+            
+            # 3. local_pack互換（環境変数で制御）
+            if self._is_local_pack_mode_enabled():
+                self._load_local_pack_flows()
             
             return dict(self._loaded_flows)
     
-    def _load_directory(self, directory: Path, source_type: str) -> None:
-        """ディレクトリ内のFlowファイルをロード"""
+    def _load_official_flows(self, directory: Path) -> None:
+        """公式Flowをロード（承認不要）"""
         for yaml_file in sorted(directory.glob("*.flow.yaml")):
-            result = self.load_flow_file(yaml_file, source_type)
+            result = self.load_flow_file(yaml_file, "official", None)
+            
+            if result.success and result.flow_def:
+                # 重複チェック
+                if result.flow_id in self._loaded_flows:
+                    self._load_errors.append({
+                        "file": str(yaml_file),
+                        "error": f"Duplicate flow_id: {result.flow_id}",
+                        "ts": self._now_ts()
+                    })
+                    continue
+                
+                self._loaded_flows[result.flow_id] = result.flow_def
+            else:
+                self._load_errors.append({
+                    "file": str(yaml_file),
+                    "errors": result.errors,
+                    "ts": self._now_ts()
+                })
+    
+    def _load_pack_flows(self, packs_dir: Path) -> None:
+        """pack提供Flowをロード（承認必須）"""
+        for pack_dir in sorted(packs_dir.iterdir()):
+            if not pack_dir.is_dir() or pack_dir.name.startswith("."):
+                continue
+            
+            pack_id = pack_dir.name
+            
+            # 承認チェック
+            is_approved, reason = self._check_pack_approval(pack_id)
+            if not is_approved:
+                # このpackのflows配下をスキップ
+                flows_dir = pack_dir / self.PACK_FLOWS_SUBDIR
+                if flows_dir.exists():
+                    for yaml_file in flows_dir.glob("**/*.flow.yaml"):
+                        if "modifiers" not in str(yaml_file):
+                            self._record_skip(yaml_file, pack_id, reason or "not_approved")
+                continue
+            
+            # pack提供Flowをロード
+            flows_dir = pack_dir / self.PACK_FLOWS_SUBDIR
+            if flows_dir.exists():
+                self._load_directory_flows(flows_dir, "pack", pack_id)
+    
+    def _load_local_pack_flows(self) -> None:
+        """local_pack互換: ecosystem/flows/ をロード"""
+        # 承認チェック
+        is_approved, reason = self._check_pack_approval(LOCAL_PACK_ID)
+        if not is_approved:
+            local_dir = Path(LOCAL_PACK_DIR)
+            if local_dir.exists():
+                for yaml_file in local_dir.glob("**/*.flow.yaml"):
+                    # modifiers配下はFlowではないのでスキップ
+                    if "modifiers" not in str(yaml_file):
+                        self._record_skip(yaml_file, LOCAL_PACK_ID, reason or "not_approved")
+            return
+        
+        # ロード
+        local_dir = Path(LOCAL_PACK_DIR)
+        if local_dir.exists():
+            for yaml_file in sorted(local_dir.glob("**/*.flow.yaml")):
+                # modifiers配下はFlowではないのでスキップ
+                if "modifiers" in str(yaml_file):
+                    continue
+                
+                result = self.load_flow_file(yaml_file, "local_pack", LOCAL_PACK_ID)
+                
+                if result.success and result.flow_def:
+                    if result.flow_id in self._loaded_flows:
+                        existing = self._loaded_flows[result.flow_id]
+                        # 公式やpack提供を上書きしない
+                        if existing.source_type in ("official", "pack"):
+                            self._load_errors.append({
+                                "file": str(yaml_file),
+                                "error": f"Cannot override {existing.source_type} flow '{result.flow_id}' from local_pack",
+                                "ts": self._now_ts()
+                            })
+                            continue
+                    
+                    self._loaded_flows[result.flow_id] = result.flow_def
+                else:
+                    self._load_errors.append({
+                        "file": str(yaml_file),
+                        "errors": result.errors,
+                        "ts": self._now_ts()
+                    })
+    
+    def _load_directory_flows(self, directory: Path, source_type: str, pack_id: Optional[str]) -> None:
+        """ディレクトリ内のFlowファイルをロード"""
+        for yaml_file in sorted(directory.glob("**/*.flow.yaml")):
+            # modifiers配下はFlowではないのでスキップ
+            if "modifiers" in str(yaml_file):
+                continue
+            
+            result = self.load_flow_file(yaml_file, source_type, pack_id)
             
             if result.success and result.flow_def:
                 # 重複チェック
                 if result.flow_id in self._loaded_flows:
                     existing = self._loaded_flows[result.flow_id]
-                    # エコシステムが公式を上書きするのは許可しない
-                    if existing.source_type == "official" and source_type == "ecosystem":
+                    # 公式を上書きしない
+                    if existing.source_type == "official" and source_type != "official":
                         self._load_errors.append({
                             "file": str(yaml_file),
-                            "error": f"Cannot override official flow '{result.flow_id}' from ecosystem",
+                            "error": f"Cannot override official flow '{result.flow_id}' from {source_type}",
                             "ts": self._now_ts()
                         })
                         continue
@@ -169,13 +359,14 @@ class FlowLoader:
                     "ts": self._now_ts()
                 })
     
-    def load_flow_file(self, file_path: Path, source_type: str = "unknown") -> FlowLoadResult:
+    def load_flow_file(self, file_path: Path, source_type: str = "unknown", pack_id: Optional[str] = None) -> FlowLoadResult:
         """
         単一のFlowファイルをロード
         
         Args:
             file_path: YAMLファイルのパス
-            source_type: "official" or "ecosystem"
+            source_type: "official", "pack", "local_pack"
+            pack_id: pack提供の場合のpack_id
         
         Returns:
             FlowLoadResult
@@ -268,7 +459,8 @@ class FlowLoader:
             defaults=defaults,
             steps=sorted_steps,
             source_file=file_path,
-            source_type=source_type
+            source_type=source_type,
+            source_pack_id=pack_id
         )
         
         result.success = True
@@ -392,6 +584,11 @@ class FlowLoader:
         """ロードエラーを取得"""
         with self._lock:
             return list(self._load_errors)
+    
+    def get_skipped_flows(self) -> List[FlowSkipRecord]:
+        """スキップされたFlowを取得"""
+        with self._lock:
+            return list(self._skipped_flows)
     
     def get_flow(self, flow_id: str) -> Optional[FlowDefinition]:
         """特定のFlowを取得"""

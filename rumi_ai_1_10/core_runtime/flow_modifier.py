@@ -1,18 +1,30 @@
 """
 flow_modifier.py - Flow modifier(差し込み)システム
 
-ecosystem/flows/modifiers/*.modifier.yaml を読み込み、
+ecosystem/packs/{pack_id}/backend/flows/modifiers/*.modifier.yaml を読み込み、
 対象Flowに対してステップの注入・置換・削除を行う。
 
 設計原則:
-- Flowはファイルからロードされる(setup.py登録に依存しない)
-- modifier適用順序は決定的(phase → priority → modifier_id)
-- requires(interfaces/capabilities)で適用条件を制御
+- 承認済み+ハッシュ一致のpackのみロード
+- modifier適用順序は決定的
+- 同一注入点: priority → step.id → modifier_id
+- inject相対位置を保持（再ソート禁止）
+
+Phase2追加:
+- pack配下探索 (ecosystem/packs/{pack_id}/backend/flows/modifiers/)
+- 承認ゲート (ApprovalManager連携)
+- local_pack互換
+
+Phase3追加:
+- modifier適用の決定性強化
+- 同一注入点での順序: priority → step.id → modifier_id
+- inject相対位置を保持（再ソート禁止）
 """
 
 from __future__ import annotations
 
 import copy
+import os
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -26,6 +38,12 @@ except ImportError:
     HAS_YAML = False
 
 from .flow_loader import FlowDefinition, FlowStep, FlowLoadResult
+
+
+# local_pack定数
+LOCAL_PACK_ID = "local_pack"
+LOCAL_PACK_DIR = "ecosystem/flows"
+LOCAL_PACK_MODIFIERS_DIR = "ecosystem/flows/modifiers"
 
 
 @dataclass
@@ -47,6 +65,7 @@ class FlowModifierDef:
     step: Optional[Dict[str, Any]]  # 注入/置換するステップ定義
     requires: ModifierRequires
     source_file: Optional[Path] = None
+    source_pack_id: Optional[str] = None  # 提供元pack_id
     resolve_target: bool = False  # target_flow_idを共有辞書で解決するか
     resolve_namespace: str = "flow_id"  # 解決に使用するnamespace
     
@@ -64,6 +83,7 @@ class FlowModifierDef:
                 "capabilities": self.requires.capabilities,
             },
             "_source_file": str(self.source_file) if self.source_file else None,
+            "_source_pack_id": self.source_pack_id,
             "resolve_target": self.resolve_target,
             "resolve_namespace": self.resolve_namespace,
         }
@@ -77,6 +97,7 @@ class ModifierLoadResult:
     modifier_def: Optional[FlowModifierDef] = None
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
+    skipped_reason: Optional[str] = None
 
 
 @dataclass
@@ -91,22 +112,94 @@ class ModifierApplyResult:
     errors: List[str] = field(default_factory=list)
 
 
+@dataclass
+class ModifierSkipRecord:
+    """スキップされたmodifierの記録"""
+    file_path: str
+    pack_id: Optional[str]
+    reason: str
+    ts: str
+
+
 class FlowModifierLoader:
     """
     Flow modifierローダー
     
-    ecosystem/flows/modifiers/*.modifier.yaml を読み込む。
+    ecosystem/packs/{pack_id}/backend/flows/modifiers/*.modifier.yaml を読み込む。
+    承認済み+ハッシュ一致のpackのみ対象。
     """
     
-    MODIFIERS_DIR = "ecosystem/flows/modifiers"
+    PACKS_DIR = "ecosystem/packs"
+    PACK_MODIFIERS_SUBDIR = "backend/flows/modifiers"
     
-    def __init__(self):
+    def __init__(self, approval_manager=None):
         self._lock = threading.RLock()
         self._loaded_modifiers: Dict[str, FlowModifierDef] = {}
         self._load_errors: List[Dict[str, Any]] = []
+        self._skipped_modifiers: List[ModifierSkipRecord] = []
+        self._approval_manager = approval_manager
     
     def _now_ts(self) -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    
+    def _get_approval_manager(self):
+        """ApprovalManagerを取得（遅延初期化）"""
+        if self._approval_manager is None:
+            try:
+                from .approval_manager import get_approval_manager
+                self._approval_manager = get_approval_manager()
+            except Exception:
+                pass
+        return self._approval_manager
+    
+    def _is_local_pack_mode_enabled(self) -> bool:
+        """local_packモードが有効かチェック"""
+        mode = os.environ.get("RUMI_LOCAL_PACK_MODE", "off").lower()
+        return mode == "require_approval"
+    
+    def _check_pack_approval(self, pack_id: str) -> Tuple[bool, Optional[str]]:
+        """
+        packの承認状態をチェック
+        
+        Returns:
+            (is_approved: bool, skip_reason: Optional[str])
+        """
+        am = self._get_approval_manager()
+        if am is None:
+            # ApprovalManagerがない場合は承認済みとみなす（後方互換）
+            return True, None
+        
+        try:
+            is_valid, reason = am.is_pack_approved_and_verified(pack_id)
+            return is_valid, reason
+        except Exception as e:
+            return False, f"approval_check_error: {e}"
+    
+    def _record_skip(self, file_path: Path, pack_id: Optional[str], reason: str) -> None:
+        """スキップを記録"""
+        record = ModifierSkipRecord(
+            file_path=str(file_path),
+            pack_id=pack_id,
+            reason=reason,
+            ts=self._now_ts()
+        )
+        self._skipped_modifiers.append(record)
+        
+        # 監査ログにも記録
+        try:
+            from .audit_logger import get_audit_logger
+            audit = get_audit_logger()
+            audit.log_system_event(
+                event_type="modifier_load_skipped",
+                success=False,
+                details={
+                    "file": str(file_path),
+                    "pack_id": pack_id,
+                    "reason": reason,
+                }
+            )
+        except Exception:
+            pass
     
     def load_all_modifiers(self) -> Dict[str, FlowModifierDef]:
         """
@@ -118,34 +211,78 @@ class FlowModifierLoader:
         with self._lock:
             self._loaded_modifiers.clear()
             self._load_errors.clear()
+            self._skipped_modifiers.clear()
             
-            modifiers_dir = Path(self.MODIFIERS_DIR)
-            if not modifiers_dir.exists():
-                return {}
+            # 1. pack提供modifierをロード（承認必須）
+            packs_dir = Path(self.PACKS_DIR)
+            if packs_dir.exists():
+                self._load_pack_modifiers(packs_dir)
             
-            for yaml_file in sorted(modifiers_dir.glob("*.modifier.yaml")):
-                result = self.load_modifier_file(yaml_file)
-                
-                if result.success and result.modifier_def:
-                    if result.modifier_id in self._loaded_modifiers:
-                        self._load_errors.append({
-                            "file": str(yaml_file),
-                            "error": f"Duplicate modifier_id: {result.modifier_id}",
-                            "ts": self._now_ts()
-                        })
-                        continue
-                    
-                    self._loaded_modifiers[result.modifier_id] = result.modifier_def
-                else:
-                    self._load_errors.append({
-                        "file": str(yaml_file),
-                        "errors": result.errors,
-                        "ts": self._now_ts()
-                    })
+            # 2. local_pack互換（環境変数で制御）
+            if self._is_local_pack_mode_enabled():
+                self._load_local_pack_modifiers()
             
             return dict(self._loaded_modifiers)
     
-    def load_modifier_file(self, file_path: Path) -> ModifierLoadResult:
+    def _load_pack_modifiers(self, packs_dir: Path) -> None:
+        """pack提供modifierをロード（承認必須）"""
+        for pack_dir in sorted(packs_dir.iterdir()):
+            if not pack_dir.is_dir() or pack_dir.name.startswith("."):
+                continue
+            
+            pack_id = pack_dir.name
+            
+            # 承認チェック
+            is_approved, reason = self._check_pack_approval(pack_id)
+            if not is_approved:
+                modifiers_dir = pack_dir / self.PACK_MODIFIERS_SUBDIR
+                if modifiers_dir.exists():
+                    for yaml_file in modifiers_dir.glob("**/*.modifier.yaml"):
+                        self._record_skip(yaml_file, pack_id, reason or "not_approved")
+                continue
+            
+            # modifierをロード
+            modifiers_dir = pack_dir / self.PACK_MODIFIERS_SUBDIR
+            if modifiers_dir.exists():
+                self._load_directory_modifiers(modifiers_dir, pack_id)
+    
+    def _load_local_pack_modifiers(self) -> None:
+        """local_pack互換: ecosystem/flows/modifiers/ をロード"""
+        is_approved, reason = self._check_pack_approval(LOCAL_PACK_ID)
+        if not is_approved:
+            local_modifiers_dir = Path(LOCAL_PACK_MODIFIERS_DIR)
+            if local_modifiers_dir.exists():
+                for yaml_file in local_modifiers_dir.glob("**/*.modifier.yaml"):
+                    self._record_skip(yaml_file, LOCAL_PACK_ID, reason or "not_approved")
+            return
+        
+        local_modifiers_dir = Path(LOCAL_PACK_MODIFIERS_DIR)
+        if local_modifiers_dir.exists():
+            self._load_directory_modifiers(local_modifiers_dir, LOCAL_PACK_ID)
+    
+    def _load_directory_modifiers(self, directory: Path, pack_id: str) -> None:
+        """ディレクトリ内のmodifierファイルをロード"""
+        for yaml_file in sorted(directory.glob("**/*.modifier.yaml")):
+            result = self.load_modifier_file(yaml_file, pack_id)
+            
+            if result.success and result.modifier_def:
+                if result.modifier_id in self._loaded_modifiers:
+                    self._load_errors.append({
+                        "file": str(yaml_file),
+                        "error": f"Duplicate modifier_id: {result.modifier_id}",
+                        "ts": self._now_ts()
+                    })
+                    continue
+                
+                self._loaded_modifiers[result.modifier_id] = result.modifier_def
+            else:
+                self._load_errors.append({
+                    "file": str(yaml_file),
+                    "errors": result.errors,
+                    "ts": self._now_ts()
+                })
+    
+    def load_modifier_file(self, file_path: Path, pack_id: Optional[str] = None) -> ModifierLoadResult:
         """
         単一のmodifierファイルをロード
         """
@@ -247,6 +384,7 @@ class FlowModifierLoader:
             step=step,
             requires=requires,
             source_file=file_path,
+            source_pack_id=pack_id,
             resolve_target=resolve_target,
             resolve_namespace=resolve_namespace,
         )
@@ -264,6 +402,11 @@ class FlowModifierLoader:
         """ロードエラーを取得"""
         with self._lock:
             return list(self._load_errors)
+    
+    def get_skipped_modifiers(self) -> List[ModifierSkipRecord]:
+        """スキップされたmodifierを取得"""
+        with self._lock:
+            return list(self._skipped_modifiers)
     
     def get_modifiers_for_flow(self, flow_id: str, resolve: bool = False) -> List[FlowModifierDef]:
         """
@@ -303,6 +446,10 @@ class FlowModifierApplier:
     Flow modifier適用エンジン
     
     modifierをFlowDefinitionに適用する。
+    
+    Phase3: 適用決定性の強化
+    - 同一注入点での順序: priority → step.id → modifier_id
+    - inject相対位置を保持（再ソートしない）
     """
     
     def __init__(self, interface_registry=None):
@@ -360,6 +507,11 @@ class FlowModifierApplier:
         """
         modifierをFlowに適用
         
+        Phase3: 決定的な適用順序
+        - 同一注入点(target_step_id + action)でバッファリング
+        - バッファ内を priority → step.id → modifier_id でソート
+        - 同一注入点のステップは一括挿入してインデックスずれを防ぐ
+        
         Args:
             flow_def: 元のFlowDefinition
             modifiers: 適用するmodifierリスト(ソート済み)
@@ -371,11 +523,162 @@ class FlowModifierApplier:
         new_steps = copy.deepcopy(flow_def.steps)
         results = []
         
+        # Phase3: 注入点ごとにmodifierをグループ化
+        inject_before_groups: Dict[str, List[FlowModifierDef]] = {}
+        inject_after_groups: Dict[str, List[FlowModifierDef]] = {}
+        append_groups: Dict[str, List[FlowModifierDef]] = {}
+        other_modifiers: List[FlowModifierDef] = []
+        
         for modifier in modifiers:
+            # requires チェックを先に行う
+            satisfied, reason = self.check_requires(modifier.requires)
+            if not satisfied:
+                result = ModifierApplyResult(
+                    success=False,
+                    modifier_id=modifier.modifier_id,
+                    action=modifier.action,
+                    target_flow_id=modifier.target_flow_id,
+                    target_step_id=modifier.target_step_id,
+                    skipped_reason=f"requires_not_satisfied: {reason}"
+                )
+                self._log_modifier_skip(modifier, result.skipped_reason)
+                results.append(result)
+                continue
+            
+            # phaseチェック
+            if modifier.phase not in flow_def.phases:
+                result = ModifierApplyResult(
+                    success=False,
+                    modifier_id=modifier.modifier_id,
+                    action=modifier.action,
+                    target_flow_id=modifier.target_flow_id,
+                    target_step_id=modifier.target_step_id,
+                    skipped_reason=f"phase_not_found: {modifier.phase}"
+                )
+                self._log_modifier_skip(modifier, result.skipped_reason)
+                results.append(result)
+                continue
+            
+            if modifier.action == "inject_before":
+                target = modifier.target_step_id or ""
+                if target not in inject_before_groups:
+                    inject_before_groups[target] = []
+                inject_before_groups[target].append(modifier)
+            elif modifier.action == "inject_after":
+                target = modifier.target_step_id or ""
+                if target not in inject_after_groups:
+                    inject_after_groups[target] = []
+                inject_after_groups[target].append(modifier)
+            elif modifier.action == "append":
+                phase = modifier.phase
+                if phase not in append_groups:
+                    append_groups[phase] = []
+                append_groups[phase].append(modifier)
+            else:
+                # replace, remove は個別処理
+                other_modifiers.append(modifier)
+        
+        # 各グループ内でソート: priority → step.id → modifier_id
+        for key in inject_before_groups:
+            inject_before_groups[key] = sorted(
+                inject_before_groups[key],
+                key=lambda m: (m.priority, m.step.get("id", "") if m.step else "", m.modifier_id)
+            )
+        for key in inject_after_groups:
+            inject_after_groups[key] = sorted(
+                inject_after_groups[key],
+                key=lambda m: (m.priority, m.step.get("id", "") if m.step else "", m.modifier_id)
+            )
+        for key in append_groups:
+            append_groups[key] = sorted(
+                append_groups[key],
+                key=lambda m: (m.priority, m.step.get("id", "") if m.step else "", m.modifier_id)
+            )
+        
+        # 1. replace, removeを先に適用
+        for modifier in other_modifiers:
             result = self._apply_single_modifier(new_steps, modifier, flow_def.phases)
             results.append(result)
         
-        # 新しいFlowDefinitionを作成
+        # 2. inject_before を一括適用（同一注入点ごと）
+        for target_step_id, group in inject_before_groups.items():
+            target_index = self._find_step_index(new_steps, target_step_id)
+            if target_index < 0:
+                # target不在：全てスキップ
+                for modifier in group:
+                    result = ModifierApplyResult(
+                        success=False,
+                        modifier_id=modifier.modifier_id,
+                        action=modifier.action,
+                        target_flow_id=modifier.target_flow_id,
+                        target_step_id=modifier.target_step_id,
+                        skipped_reason=f"target_step_not_found: {target_step_id}"
+                    )
+                    self._log_modifier_skip(modifier, result.skipped_reason)
+                    results.append(result)
+                continue
+            
+            # 同一注入点のステップを順番に作成し、一括挿入
+            for i, modifier in enumerate(group):
+                new_step = self._step_from_dict(modifier.step, modifier.phase, modifier.modifier_id)
+                new_steps.insert(target_index + i, new_step)
+                result = ModifierApplyResult(
+                    success=True,
+                    modifier_id=modifier.modifier_id,
+                    action=modifier.action,
+                    target_flow_id=modifier.target_flow_id,
+                    target_step_id=modifier.target_step_id
+                )
+                results.append(result)
+                self._log_modifier_success(modifier)
+        
+        # 3. inject_after を一括適用（同一注入点ごと）
+        for target_step_id, group in inject_after_groups.items():
+            target_index = self._find_step_index(new_steps, target_step_id)
+            if target_index < 0:
+                for modifier in group:
+                    result = ModifierApplyResult(
+                        success=False,
+                        modifier_id=modifier.modifier_id,
+                        action=modifier.action,
+                        target_flow_id=modifier.target_flow_id,
+                        target_step_id=modifier.target_step_id,
+                        skipped_reason=f"target_step_not_found: {target_step_id}"
+                    )
+                    self._log_modifier_skip(modifier, result.skipped_reason)
+                    results.append(result)
+                continue
+            
+            # target_index + 1 の位置から一括挿入
+            insert_pos = target_index + 1
+            for i, modifier in enumerate(group):
+                new_step = self._step_from_dict(modifier.step, modifier.phase, modifier.modifier_id)
+                new_steps.insert(insert_pos + i, new_step)
+                result = ModifierApplyResult(
+                    success=True,
+                    modifier_id=modifier.modifier_id,
+                    action=modifier.action,
+                    target_flow_id=modifier.target_flow_id,
+                    target_step_id=modifier.target_step_id
+                )
+                results.append(result)
+                self._log_modifier_success(modifier)
+        
+        # 4. append を適用
+        for phase, group in append_groups.items():
+            for modifier in group:
+                self._action_append(new_steps, modifier, flow_def.phases)
+                result = ModifierApplyResult(
+                    success=True,
+                    modifier_id=modifier.modifier_id,
+                    action=modifier.action,
+                    target_flow_id=modifier.target_flow_id,
+                    target_step_id=modifier.target_step_id
+                )
+                results.append(result)
+                self._log_modifier_success(modifier)
+        
+        # 新しいFlowDefinitionを作成（再ソートしない）
         new_flow_def = FlowDefinition(
             flow_id=flow_def.flow_id,
             inputs=copy.deepcopy(flow_def.inputs),
@@ -384,7 +687,8 @@ class FlowModifierApplier:
             defaults=copy.deepcopy(flow_def.defaults),
             steps=new_steps,
             source_file=flow_def.source_file,
-            source_type=flow_def.source_type
+            source_type=flow_def.source_type,
+            source_pack_id=flow_def.source_pack_id
         )
         
         return new_flow_def, results
@@ -395,7 +699,7 @@ class FlowModifierApplier:
         modifier: FlowModifierDef,
         phases: List[str]
     ) -> ModifierApplyResult:
-        """単一のmodifierを適用"""
+        """単一のmodifierを適用（replace, remove用）"""
         result = ModifierApplyResult(
             success=False,
             modifier_id=modifier.modifier_id,
@@ -404,63 +708,32 @@ class FlowModifierApplier:
             target_step_id=modifier.target_step_id
         )
         
-        # resolve_target が True の場合のログ
-        if modifier.resolve_target:
-            try:
-                from .shared_dict import get_shared_dict_resolver
-                resolver = get_shared_dict_resolver()
-                resolved = resolver.resolve(modifier.resolve_namespace, modifier.target_flow_id)
-                if resolved != modifier.target_flow_id:
-                    # 解決された場合は監査ログに記録
-                    try:
-                        from .audit_logger import get_audit_logger
-                        audit = get_audit_logger()
-                        audit.log_system_event(
-                            event_type="modifier_target_resolved",
-                            success=True,
-                            details={
-                                "modifier_id": modifier.modifier_id,
-                                "original_target": modifier.target_flow_id,
-                                "resolved_target": resolved,
-                                "namespace": modifier.resolve_namespace,
-                            }
-                        )
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-        
-        # requires チェック
-        satisfied, reason = self.check_requires(modifier.requires)
-        if not satisfied:
-            result.skipped_reason = reason
-            return result
-        
-        # phaseがFlowに存在するかチェック
-        if modifier.phase not in phases:
-            result.skipped_reason = f"phase '{modifier.phase}' not in flow phases"
-            return result
-        
         try:
-            if modifier.action == "append":
-                self._action_append(steps, modifier, phases)
-            elif modifier.action == "inject_before":
-                self._action_inject_before(steps, modifier, phases)
-            elif modifier.action == "inject_after":
-                self._action_inject_after(steps, modifier, phases)
-            elif modifier.action == "replace":
-                self._action_replace(steps, modifier, phases)
+            if modifier.action == "replace":
+                success = self._action_replace(steps, modifier, phases)
+                if not success:
+                    result.skipped_reason = f"target_step_not_found: {modifier.target_step_id}"
+                    self._log_modifier_skip(modifier, result.skipped_reason)
+                    return result
             elif modifier.action == "remove":
-                self._action_remove(steps, modifier)
+                success = self._action_remove(steps, modifier)
+                if not success:
+                    result.skipped_reason = f"target_step_not_found: {modifier.target_step_id}"
+                    self._log_modifier_skip(modifier, result.skipped_reason)
+                    return result
             else:
                 result.errors.append(f"Unknown action: {modifier.action}")
                 return result
             
             result.success = True
+            self._log_modifier_success(modifier)
         except Exception as e:
             result.errors.append(str(e))
         
-        # 監査ログに記録
+        return result
+    
+    def _log_modifier_skip(self, modifier: FlowModifierDef, reason: str) -> None:
+        """modifierスキップをログに記録"""
         try:
             from .audit_logger import get_audit_logger
             audit = get_audit_logger()
@@ -468,15 +741,30 @@ class FlowModifierApplier:
                 modifier_id=modifier.modifier_id,
                 target_flow_id=modifier.target_flow_id,
                 action=modifier.action,
-                success=result.success,
+                success=False,
                 target_step_id=modifier.target_step_id,
-                skipped_reason=result.skipped_reason,
-                error=result.errors[0] if result.errors else None
+                skipped_reason=reason,
+                error=None
             )
         except Exception:
-            pass  # 監査ログのエラーで処理を止めない
-        
-        return result
+            pass
+    
+    def _log_modifier_success(self, modifier: FlowModifierDef) -> None:
+        """modifier成功をログに記録"""
+        try:
+            from .audit_logger import get_audit_logger
+            audit = get_audit_logger()
+            audit.log_modifier_application(
+                modifier_id=modifier.modifier_id,
+                target_flow_id=modifier.target_flow_id,
+                action=modifier.action,
+                success=True,
+                target_step_id=modifier.target_step_id,
+                skipped_reason=None,
+                error=None
+            )
+        except Exception:
+            pass
     
     def _step_from_dict(self, step_dict: Dict[str, Any], phase: str, modifier_id: str) -> FlowStep:
         """辞書からFlowStepを作成"""
@@ -523,59 +811,33 @@ class FlowModifierApplier:
         
         steps.insert(insert_index, new_step)
     
-    def _action_inject_before(
-        self,
-        steps: List[FlowStep],
-        modifier: FlowModifierDef,
-        phases: List[str]
-    ) -> None:
-        """inject_before: target_step_idの前にステップを挿入"""
-        target_index = self._find_step_index(steps, modifier.target_step_id)
-        if target_index < 0:
-            raise ValueError(f"Target step '{modifier.target_step_id}' not found")
-        
-        new_step = self._step_from_dict(modifier.step, modifier.phase, modifier.modifier_id)
-        steps.insert(target_index, new_step)
-    
-    def _action_inject_after(
-        self,
-        steps: List[FlowStep],
-        modifier: FlowModifierDef,
-        phases: List[str]
-    ) -> None:
-        """inject_after: target_step_idの後にステップを挿入"""
-        target_index = self._find_step_index(steps, modifier.target_step_id)
-        if target_index < 0:
-            raise ValueError(f"Target step '{modifier.target_step_id}' not found")
-        
-        new_step = self._step_from_dict(modifier.step, modifier.phase, modifier.modifier_id)
-        steps.insert(target_index + 1, new_step)
-    
     def _action_replace(
         self,
         steps: List[FlowStep],
         modifier: FlowModifierDef,
         phases: List[str]
-    ) -> None:
+    ) -> bool:
         """replace: target_step_idのステップを置換"""
         target_index = self._find_step_index(steps, modifier.target_step_id)
         if target_index < 0:
-            raise ValueError(f"Target step '{modifier.target_step_id}' not found")
+            return False
         
         new_step = self._step_from_dict(modifier.step, modifier.phase, modifier.modifier_id)
         steps[target_index] = new_step
+        return True
     
     def _action_remove(
         self,
         steps: List[FlowStep],
         modifier: FlowModifierDef
-    ) -> None:
+    ) -> bool:
         """remove: target_step_idのステップを削除"""
         target_index = self._find_step_index(steps, modifier.target_step_id)
         if target_index < 0:
-            raise ValueError(f"Target step '{modifier.target_step_id}' not found")
+            return False
         
         steps.pop(target_index)
+        return True
 
 
 # グローバルインスタンス

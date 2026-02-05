@@ -1,4 +1,3 @@
-
 ```markdown
 # Rumi AI OS
 
@@ -56,7 +55,7 @@ Minecraft の mod は「Minecraft」という基盤を改造します。しか�
 ecosystemは第三者が作成でき、悪意ある作者も存在しうるという前提で設計されています：
 
 - **承認必須**: 未承認Packのコードは一切実行されない
-- **ハッシュ検証**: 承認後にファイルが変更されると自動無効化
+- **ハッシュ検証**: 承認後にファイルが変更されると自動無効化（再承認必要）
 - **Docker隔離**: 承認済みPackはコンテナ内で実行
 - **Egress Proxy**: 外部通信はプロキシ経由のみ許可
 
@@ -81,8 +80,7 @@ project_root/
 │   ├── egress_proxy.py         # 外部通信プロキシ
 │   ├── lib_executor.py         # lib install/update実行
 │   ├── audit_logger.py         # 監査ログ
-│   ├── interface_registry.py   # サービス登録箱
-│   ├── vocab_registry.py       # 同義語/変換器レジストリ
+│   ├── interface_registry.py   # 内部サービス登録（Pack非公開）
 │   ├── event_bus.py            # イベント通信
 │   ├── diagnostics.py          # 診断情報
 │   ├── shared_dict/            # 共有辞書システム
@@ -98,7 +96,7 @@ project_root/
 │       ├── mounts.py           # パス抽象化
 │       └── ...
 │
-├── flows/                      # 公式Flow（起動・基盤）- 正
+├── flows/                      # 公式Flow（起動・基盤）
 │   └── 00_startup.flow.yaml
 │
 ├── ecosystem/
@@ -133,6 +131,7 @@ project_root/
 │   └── ecosystem/              # → ecosystem/flows/ へ移行してください
 │
 └── docs/
+    └── internal_kernel_handlers.md  # 内部ハンドラ一覧
 ```
 
 **注意**: `flow/` ディレクトリは非推奨です。新規Flowは `flows/` または `ecosystem/flows/` に配置してください。
@@ -392,41 +391,6 @@ export RUMI_SECURITY_MODE=permissive
     args:
       namespace: "flow_id"
       token: "old_flow_name"
-
-# 説明を取得
-- type: handler
-  input:
-    handler: "kernel:shared_dict.explain"
-    args:
-      namespace: "flow_id"
-      token: "old_flow_name"
-
-# 一覧
-- type: handler
-  input:
-    handler: "kernel:shared_dict.list"
-    args:
-      namespace: "flow_id"  # 省略すると全namespace一覧
-
-# 削除
-- type: handler
-  input:
-    handler: "kernel:shared_dict.remove"
-    args:
-      namespace: "flow_id"
-      token: "old_flow_name"
-```
-
-### Flow実行での解決
-
-```yaml
-- type: handler
-  input:
-    handler: "kernel:flow.execute_by_id"
-    args:
-      flow_id: "old_flow_name"
-      resolve: true                    # オプトイン
-      resolve_namespace: "flow_id"     # デフォルト
 ```
 
 ### 安全機能
@@ -435,71 +399,6 @@ export RUMI_SECURITY_MODE=permissive
 - **衝突検出**: 同じ token に異なる value を登録しようとすると拒否
 - **ホップ上限**: デフォルト10ホップで解決を打ち切り
 - **監査ログ**: 全ての操作を記録
-
-### データ保存場所
-
-```
-user_data/settings/shared_dict/
-├── snapshot.json    # 現在のルール状態
-└── journal.jsonl    # 全操作の追記ログ
-```
-
----
-
-## vocab/converter
-
-Pack追加だけで互換性を増やせる仕組みです。
-
-### vocab.txt（同義語グループ）
-
-```
-# ecosystem/packs/my_pack/backend/vocab.txt
-tool, function_calling, tools, tooluse
-thinking_budget, reasoning_effort
-```
-
-同じ行に書かれた語は同義として扱われます。
-
-### converters（変換器）
-
-```python
-# ecosystem/packs/my_pack/backend/converters/tool_to_function_calling.py
-def convert(data, context=None):
-    """
-    tool形式 → function_calling形式に変換
-    """
-    # 変換ロジック
-    return transformed_data
-```
-
-### Kernelハンドラ
-
-```yaml
-# グループ一覧
-- type: handler
-  input:
-    handler: "kernel:vocab.list_groups"
-
-# converter一覧
-- type: handler
-  input:
-    handler: "kernel:vocab.list_converters"
-
-# 登録状況サマリー
-- type: handler
-  input:
-    handler: "kernel:vocab.summary"
-
-# 変換実行
-- type: handler
-  input:
-    handler: "kernel:vocab.convert"
-    args:
-      from_term: "tool"
-      to_term: "function_calling"
-      data: ${ctx.tool_data}
-      log_success: false  # 成功時も監査ログに記録するか
-```
 
 ---
 
@@ -515,6 +414,9 @@ ecosystem/packs/my_pack/backend/lib/
 └── update.py     # ハッシュ変更時に実行
 ```
 
+**セキュリティ**: lib は Docker コンテナ内で隔離実行されます（strictモード）。
+RW マウントは `user_data/packs/{pack_id}/` のみに限定されます。
+
 ### 実行タイミング
 
 - **install.py**: Pack初回導入時に一度だけ
@@ -525,15 +427,47 @@ ecosystem/packs/my_pack/backend/lib/
 
 ```python
 def run(context=None):
-    pack_id = context.get("pack_id")
+    pack_id = context.get("pack_id") if context else "unknown"
+    data_dir = context.get("data_dir") if context else None  # RW 書き込み先
     
     # 初期化処理
-    # - 設定ファイル作成
-    # - データベース初期化
-    # - 必要なディレクトリ作成
+    # - data_dir 内に設定ファイル作成
+    # - data_dir 内にデータベース初期化
     
     return {"status": "installed"}
 ```
+
+---
+
+## local_pack（非推奨）
+
+`ecosystem/flows/**` に直接配置された Flow/Modifier を仮想 Pack として扱う互換モードです。
+
+### 現在の状態
+
+- **デフォルト**: 無効（`RUMI_LOCAL_PACK_MODE=off`）
+- **互換モード**: `RUMI_LOCAL_PACK_MODE=require_approval` で有効化
+- **lib 非対応**: local_pack は lib（install/update）をサポートしません
+
+### 廃止計画
+
+local_pack は以下の理由で非推奨です：
+
+1. **セキュリティ**: 承認境界が曖昧になる
+2. **一貫性**: 通常の Pack と異なるライフサイクル
+3. **保守性**: 特殊ケースによるコード複雑化
+
+**移行手順**:
+
+1. `ecosystem/flows/` 内の Flow/Modifier を Pack 化
+2. `ecosystem/packs/{pack_id}/backend/` に配置
+3. `ecosystem.json` を作成
+4. 承認フローを経て有効化
+
+**廃止スケジュール**:
+
+- v2.0: 警告付きで互換モード維持
+- v3.0: 互換モード削除予定
 
 ---
 
@@ -565,18 +499,6 @@ def run(context=None):
 | `details.domain` | 対象ドメイン |
 | `details.port` | 対象ポート |
 | `rejection_reason` | 拒否理由（拒否時のみ） |
-
-### クエリ
-
-```python
-# Kernelハンドラ経由
-result = kernel.execute("kernel:audit.query", {
-    "category": "network",
-    "pack_id": "my_pack",
-    "start_date": "2024-01-01",
-    "limit": 100
-})
-```
 
 ---
 
@@ -621,79 +543,6 @@ python app.py --headless
 curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
   -H "Authorization: Bearer {token}"
 ```
-
----
-
-## Kernel ハンドラ一覧
-
-### Flow関連
-
-| ハンドラ | 説明 |
-|----------|------|
-| `kernel:flow.load_all` | 全Flowをロード |
-| `kernel:flow.execute_by_id` | Flow IDで実行（resolve オプション対応） |
-| `kernel:modifier.load_all` | 全modifierをロード |
-| `kernel:modifier.apply` | modifierを適用 |
-
-### python_file_call
-
-| ハンドラ | 説明 |
-|----------|------|
-| `kernel:python_file_call` | Pythonファイルを実行 |
-
-### 権限関連
-
-| ハンドラ | 説明 |
-|----------|------|
-| `kernel:network.grant` | ネットワーク権限を付与 |
-| `kernel:network.revoke` | ネットワーク権限を取り消し |
-| `kernel:network.check` | アクセス可否をチェック |
-| `kernel:network.list` | 全Grant一覧 |
-
-### Egress Proxy
-
-| ハンドラ | 説明 |
-|----------|------|
-| `kernel:egress_proxy.start` | プロキシ起動 |
-| `kernel:egress_proxy.stop` | プロキシ停止 |
-| `kernel:egress_proxy.status` | 状態取得 |
-
-### lib関連
-
-| ハンドラ | 説明 |
-|----------|------|
-| `kernel:lib.process_all` | 全Packのlibを処理 |
-| `kernel:lib.check` | 実行要否をチェック |
-| `kernel:lib.execute` | 手動実行 |
-| `kernel:lib.clear_record` | 記録クリア |
-| `kernel:lib.list_records` | 記録一覧 |
-
-### 共有辞書
-
-| ハンドラ | 説明 |
-|----------|------|
-| `kernel:shared_dict.resolve` | tokenを解決 |
-| `kernel:shared_dict.propose` | ルールを提案 |
-| `kernel:shared_dict.explain` | 解決を説明 |
-| `kernel:shared_dict.list` | namespace/ルール一覧 |
-| `kernel:shared_dict.remove` | ルールを削除 |
-
-### vocab/converter
-
-| ハンドラ | 説明 |
-|----------|------|
-| `kernel:vocab.list_groups` | 同義語グループ一覧 |
-| `kernel:vocab.list_converters` | converter一覧 |
-| `kernel:vocab.summary` | 登録状況サマリー |
-| `kernel:vocab.convert` | データ変換 |
-
-### 監査ログ
-
-| ハンドラ | 説明 |
-|----------|------|
-| `kernel:audit.query` | ログ検索 |
-| `kernel:audit.summary` | サマリー取得 |
-| `kernel:audit.flush` | バッファフラッシュ |
 
 ---
 
@@ -754,21 +603,58 @@ steps:
     output: greeting
 ```
 
-### vocab.txt（オプション）
+### 開発の流れ
+
+1. **Pack を作る**: `ecosystem/packs/{pack_id}/backend/` に配置
+2. **ecosystem.json を書く**: Pack のメタデータ
+3. **blocks/ を書く**: `python_file_call` で呼ばれるコード
+4. **Flow を書く**: `ecosystem/flows/` に配置し、blocks を結線
+5. **承認を得る**: ユーザーが Pack を承認
+6. **実行**: 承認後、Flow 実行時に blocks が呼ばれる
+
+### 注意事項
+
+- **InterfaceRegistry は内部 API**: Pack から直接 IR を操作しないでください
+- **外部通信は Egress Proxy 経由**: `context["http_request"]` を使用
+- **lib は Docker 隔離**: `user_data/packs/{pack_id}/` のみ書き込み可能
+
+### 内部ハンドラ一覧
+
+内部実装の参考として、Kernel ハンドラ一覧は [docs/internal_kernel_handlers.md](docs/internal_kernel_handlers.md) を参照してください。
+Pack 開発では直接使用せず、Flow/Modifier/Blocks を通じて機能を利用してください。
+
+---
+
+## Advanced: vocab/converter
+
+> **注意**: この機能は互換性吸収のための高度な機能です。
+> 通常の Pack 開発では使用する必要はありません。
+
+Pack追加だけで互換性を増やせる仕組みです。Flow 内で converter を呼び出すことで、異なるフォーマット間の変換を行えます。
+
+### vocab.txt（同義語グループ）
 
 ```
 # ecosystem/packs/my_pack/backend/vocab.txt
-greeting, hello, hi, salutation
+tool, function_calling, tools, tooluse
+thinking_budget, reasoning_effort
 ```
 
-### converters（オプション）
+同じ行に書かれた語は同義として扱われます。
+
+### converters（変換器）
 
 ```python
-# ecosystem/packs/my_pack/backend/converters/greeting_to_hello.py
+# ecosystem/packs/my_pack/backend/converters/tool_to_function_calling.py
 def convert(data, context=None):
-    # greeting形式 → hello形式に変換
-    return data
+    """
+    tool形式 → function_calling形式に変換
+    """
+    # 変換ロジック
+    return transformed_data
 ```
+
+詳細は `docs/advanced_vocab.md`（準備中）を参照してください。
 
 ---
 
@@ -858,23 +744,4 @@ WARNING: Using legacy flow path (flow/). This is DEPRECATED and will be removed.
 ## ライセンス
 
 MIT License
-
----
-
-## コントリビューション
-
-### ガイドライン
-
-1. **Pack を作る** - 好きな機能を実装
-2. **Flow で繋ぐ** - modifier で既存Flowを拡張
-3. **公式ファイルは編集しない** - 全ては ecosystem 内で完結
-
-### セキュリティ報告
-
-セキュリティ上の問題を発見した場合は、Issue ではなく直接連絡してください。
-
----
-
-*「基盤がないからこそ、何でも作れる」*
-*「Flowが中心、Packは自由」*
 ```

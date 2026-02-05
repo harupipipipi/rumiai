@@ -1,5 +1,5 @@
 """
-python_file_executor.py - python_file_call ステップ実行エンジン
+python_file_executor.py - python_file_call ステップ実行エンジン (UDS Egress Proxy対応)
 
 Flowの python_file_call ステップを実行する。
 Pack承認、Modified検出、パス制限、permissiveモード対応を含む。
@@ -9,6 +9,11 @@ Pack承認、Modified検出、パス制限、permissiveモード対応を含む�
 - Modifiedなpackのコードは実行しない
 - 許可されたパス以外のファイルは実行しない
 - permissiveモードでは警告付きでホスト実行を許可
+
+UDS Egress Proxy連携:
+- strict モードではコンテナは --network=none で実行
+- 外部通信は UDS ソケット経由でのみ可能
+- rumi_syscall モジュールをコンテナに注入
 """
 
 from __future__ import annotations
@@ -16,6 +21,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import tempfile
 import sys
 import threading
 import traceback
@@ -228,6 +234,7 @@ class PythonFileExecutor:
         self._approval_checker = PackApprovalChecker()
         self._path_validator = PathValidator()
         self._security_mode = os.environ.get("RUMI_SECURITY_MODE", "strict").lower()
+        self._uds_proxy_manager = None
         
         if self._security_mode not in ("strict", "permissive"):
             self._security_mode = "strict"
@@ -238,6 +245,20 @@ class PythonFileExecutor:
     def get_security_mode(self) -> str:
         """現在のセキュリティモードを取得"""
         return self._security_mode
+    
+    def set_uds_proxy_manager(self, manager) -> None:
+        """UDSEgressProxyManagerを設定"""
+        self._uds_proxy_manager = manager
+    
+    def _get_uds_proxy_manager(self):
+        """UDSEgressProxyManagerを取得"""
+        if self._uds_proxy_manager is None:
+            try:
+                from .egress_proxy import get_uds_egress_proxy_manager
+                self._uds_proxy_manager = get_uds_egress_proxy_manager()
+            except ImportError:
+                pass
+        return self._uds_proxy_manager
     
     def execute(
         self,
@@ -301,9 +322,38 @@ class PythonFileExecutor:
             docker_available = self._check_docker_available()
             
             if docker_available:
+                # strict モード: UDSソケット確保が必須
+                uds_manager = self._get_uds_proxy_manager()
+                if uds_manager is None and self._security_mode == "strict":
+                    result = ExecutionResult(
+                        success=False,
+                        error="UDS Egress Proxy manager not available in strict mode",
+                        error_type="uds_proxy_unavailable",
+                        execution_mode="rejected"
+                    )
+                    self._record_rejection(context, result, "uds_proxy_unavailable")
+                    return result
+                
+                # UDSソケット確保
+                sock_path = None
+                if uds_manager and resolved_pack:
+                    success, error, sock_path = uds_manager.ensure_pack_socket(resolved_pack)
+                    if not success:
+                        if self._security_mode == "strict":
+                            result = ExecutionResult(
+                                success=False,
+                                error=f"Failed to ensure UDS socket: {error}",
+                                error_type="socket_ensure_failed",
+                                execution_mode="rejected"
+                            )
+                            self._record_rejection(context, result, "socket_ensure_failed")
+                            return result
+                        else:
+                            result.warnings.append(f"Failed to ensure UDS socket: {error}")
+                
                 # Docker隔離実行
                 result = self._execute_in_container(
-                    resolved_path, resolved_pack, input_data, context, timeout_seconds
+                    resolved_path, resolved_pack, input_data, context, timeout_seconds, sock_path
                 )
                 result.execution_mode = "container"
             elif self._security_mode == "permissive":
@@ -384,21 +434,89 @@ class PythonFileExecutor:
         except Exception:
             return False
     
+    def _get_syscall_module_content(self) -> str:
+        """rumi_syscall モジュールの内容を取得"""
+        # syscall.py のパスを探す
+        try:
+            from . import syscall
+            syscall_path = Path(syscall.__file__)
+            if syscall_path.exists():
+                return syscall_path.read_text(encoding="utf-8")
+        except Exception:
+            pass
+        
+        # フォールバック: インラインで最小限のsyscallを生成
+        return '''
+"""rumi_syscall - Rumi AI OS System Call API (minimal)"""
+import json, os, socket, struct
+from typing import Any, Dict, Optional
+
+SOCKET_PATH = os.environ.get("RUMI_EGRESS_SOCKET", "/run/rumi/egress.sock")
+MAX_RESPONSE_SIZE = 4 * 1024 * 1024
+
+def http_request(method: str, url: str, headers: Optional[Dict[str, str]] = None,
+                 body: Optional[str] = None, timeout_seconds: float = 30.0,
+                 socket_path: Optional[str] = None) -> Dict[str, Any]:
+    sock_path = socket_path or SOCKET_PATH
+    timeout = min(float(timeout_seconds), 120.0)
+    request = {"method": method.upper(), "url": url, "headers": headers or {},
+               "body": body, "timeout_seconds": timeout}
+    sock = None
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(timeout + 5)
+        sock.connect(sock_path)
+        payload = json.dumps(request, ensure_ascii=False).encode("utf-8")
+        sock.sendall(struct.pack(">I", len(payload)) + payload)
+        length_data = b""
+        while len(length_data) < 4:
+            chunk = sock.recv(4 - len(length_data))
+            if not chunk: raise Exception("Connection closed")
+            length_data += chunk
+        length = struct.unpack(">I", length_data)[0]
+        if length > MAX_RESPONSE_SIZE: raise Exception(f"Response too large: {length}")
+        data = b""
+        while len(data) < length:
+            chunk = sock.recv(min(length - len(data), 65536))
+            if not chunk: raise Exception("Connection closed")
+            data += chunk
+        return json.loads(data.decode("utf-8"))
+    except Exception as e:
+        return {"success": False, "error": str(e), "error_type": type(e).__name__}
+    finally:
+        if sock:
+            try: sock.close()
+            except: pass
+
+def get(url: str, headers=None, timeout_seconds=30.0):
+    return http_request("GET", url, headers=headers, timeout_seconds=timeout_seconds)
+
+def post(url: str, body=None, headers=None, timeout_seconds=30.0):
+    return http_request("POST", url, headers=headers, body=body, timeout_seconds=timeout_seconds)
+
+def post_json(url: str, data: Any, headers=None, timeout_seconds=30.0):
+    h = dict(headers or {}); h["Content-Type"] = "application/json"
+    return http_request("POST", url, headers=h, body=json.dumps(data, ensure_ascii=False), timeout_seconds=timeout_seconds)
+
+request = http_request
+'''
+    
     def _execute_in_container(
         self,
         file_path: Path,
         owner_pack: Optional[str],
         input_data: Any,
         context: ExecutionContext,
-        timeout_seconds: float
+        timeout_seconds: float,
+        sock_path: Optional[Path] = None
     ) -> ExecutionResult:
         """
         Dockerコンテナ内でPythonファイルを実行
         
-        docker run --rm で1回実行する方式（シンプル・安全）
+        docker run --rm --network=none で実行
+        外部通信はUDSソケット経由でのみ可能
         """
         import subprocess
-        import tempfile
         
         result = ExecutionResult(success=False, execution_mode="container")
         
@@ -419,12 +537,18 @@ class PythonFileExecutor:
         # 一時ファイルのパスを事前に初期化
         input_file = None
         script_file = None
+        syscall_file = None
         
         try:
             # 一時ファイルに入力データを書き込み
             with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
                 json.dump({"input_data": input_data, "context": exec_context}, f, ensure_ascii=False, default=str)
                 input_file = f.name
+            
+            # rumi_syscall モジュールを一時ファイルに書き込み
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+                f.write(self._get_syscall_module_content())
+                syscall_file = f.name
             
             # 実行スクリプトを生成
             executor_script = self._generate_executor_script(file_path.name)
@@ -438,7 +562,7 @@ class PythonFileExecutor:
                 "docker", "run",
                 "--rm",
                 "--name", container_name,
-                "--network=none",  # ネットワーク隔離
+                "--network=none",  # ネットワーク隔離（重要！）
                 "--cap-drop=ALL",  # 全権限を削除
                 "--security-opt=no-new-privileges:true",
                 "--read-only",  # 読み取り専用ファイルシステム
@@ -451,13 +575,24 @@ class PythonFileExecutor:
                 "-v", f"{file_path.parent.resolve()}:/workspace:ro",  # ソースディレクトリ（読み取り専用）
                 "-v", f"{input_file}:/input.json:ro",  # 入力ファイル
                 "-v", f"{script_file}:/executor.py:ro",  # 実行スクリプト
+                "-v", f"{syscall_file}:/rumi_syscall.py:ro",  # syscallモジュール
+                "-e", "PYTHONPATH=/",  # rumi_syscall をimport可能に
+            ]
+            
+            # UDSソケットマウント（存在する場合）
+            if sock_path and sock_path.exists():
+                docker_cmd.extend([
+                    "-v", f"{sock_path}:/run/rumi/egress.sock:rw",  # UDSソケット（単体マウント）
+                ])
+            
+            docker_cmd.extend([
                 "-w", "/workspace",
                 "--label", "rumi.managed=true",
                 "--label", f"rumi.pack_id={owner_pack or 'unknown'}",
                 "--label", "rumi.type=python_file_call",
                 "python:3.11-slim",
                 "python", "/executor.py", file_path.name
-            ]
+            ])
             
             # Docker実行
             try:
@@ -489,23 +624,19 @@ class PythonFileExecutor:
                 subprocess.run(["docker", "kill", container_name], capture_output=True)
                 result.error = f"Execution timed out after {timeout_seconds}s"
                 result.error_type = "timeout"
-            
+        
         except Exception as e:
             result.error = str(e)
             result.error_type = type(e).__name__
         
         finally:
-            # 一時ファイルを削除（存在する場合のみ）
-            if input_file is not None:
-                try:
-                    os.unlink(input_file)
-                except Exception:
-                    pass
-            if script_file is not None:
-                try:
-                    os.unlink(script_file)
-                except Exception:
-                    pass
+            # 一時ファイルを削除
+            for tmp_file in [input_file, script_file, syscall_file]:
+                if tmp_file is not None:
+                    try:
+                        os.unlink(tmp_file)
+                    except Exception:
+                        pass
         
         return result
     
@@ -515,6 +646,9 @@ class PythonFileExecutor:
 import sys
 import json
 import importlib.util
+
+# rumi_syscall を先にimport可能にする
+sys.path.insert(0, "/")
 
 # 入力を読み込み
 with open("/input.json", "r") as f:

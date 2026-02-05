@@ -14,6 +14,7 @@ Rumi AI - Docker Security System ドキュメント（完全版）
 8. python_file_call
 9. Egress Proxy
 10. lib システム
+10.5 lib 隔離実行
 11. 監査ログ
 12. トラブルシューティング
 
@@ -171,6 +172,9 @@ project_root/
 │   │   │   └── {pack_id}.json
 │   │   └── .secret_key             # HMAC署名キー
 │   │
+│   ├── packs/                      # Pack別データディレクトリ（lib RW用）
+│   │   └── {pack_id}/              # 各Packの書き込み可能領域
+│   │
 │   ├── audit/                      # 監査ログ
 │   │   ├── flow_execution_YYYY-MM-DD.jsonl
 │   │   ├── python_file_call_YYYY-MM-DD.jsonl
@@ -191,6 +195,7 @@ project_root/
     ├── network_grant_manager.py    # ネットワーク権限管理
     ├── egress_proxy.py             # Egress Proxyサーバー
     ├── lib_executor.py             # lib実行管理
+    ├── secure_executor.py          # セキュア実行層（Docker隔離）
     ├── audit_logger.py             # 監査ログ
     └── ...
 
@@ -516,6 +521,7 @@ def run(context):
             - lib_type: "install"
             - ts: タイムスタンプ
             - lib_dir: libディレクトリパス
+            - data_dir: 書き込み可能ディレクトリ（コンテナ内: /data）
     """
     # 初期化処理
     return {"status": "installed"}
@@ -529,6 +535,7 @@ def run(context):
             - lib_type: "update"
             - ts: タイムスタンプ
             - lib_dir: libディレクトリパス
+            - data_dir: 書き込み可能ディレクトリ（コンテナ内: /data）
     """
     # アップデート処理
     return {"status": "updated"}
@@ -560,6 +567,117 @@ user_data/settings/lib_execution_records.json:
 | kernel:lib.execute        | 手動実行                       |
 | kernel:lib.clear_record   | 実行記録をクリア（再実行強制） |
 | kernel:lib.list_records   | 実行記録を一覧                 |
+
+================================================================================
+10.5 lib 隔離実行
+================================================================================
+
+【概要】
+
+Pack の lib/install.py と lib/update.py は Docker コンテナ内で隔離実行されます。
+strictモードでは Docker 必須、permissiveモードでは警告付きでホスト実行を許可。
+
+【コンテナ設定】
+
+lib 実行時の Docker コンテナ設定:
+
+  docker run --rm \
+    --name rumi-lib-{pack_id}-{lib_type}-{hash} \
+    --network=none \
+    --cap-drop=ALL \
+    --security-opt=no-new-privileges:true \
+    --read-only \
+    --tmpfs=/tmp:size=64m,noexec,nosuid \
+    --memory=256m \
+    --memory-swap=256m \
+    --cpus=0.5 \
+    --pids-limit=50 \
+    --user=65534:65534 \
+    --ulimit=nproc=50:50 \
+    --ulimit=nofile=100:100 \
+    -v {lib_dir}:/lib:ro \
+    -v {pack_data_dir}:/data:rw \
+    -v {context_file}:/context.json:ro \
+    -e RUMI_PACK_ID={pack_id} \
+    -e RUMI_LIB_TYPE={lib_type} \
+    python:3.11-slim \
+    python -c "..."
+
+【マウントポイント】
+
+| パス           | モード | 説明                                    |
+|----------------|--------|----------------------------------------|
+| /lib           | RO     | lib ディレクトリ（install.py, update.py）|
+| /data          | RW     | Pack データディレクトリ（書き込み可能）  |
+| /context.json  | RO     | 実行コンテキスト                        |
+
+【RW マウントの制限】
+
+RW マウントは user_data/packs/{pack_id}/ のみに限定されます:
+
+- ホスト側: user_data/packs/{pack_id}/
+- コンテナ内: /data
+
+これにより、lib が書き込める範囲を最小限に制限します。
+
+【セキュリティ保証】
+
+| 項目           | 保証                                              |
+|----------------|---------------------------------------------------|
+| ネットワーク   | --network=none で無効                             |
+| ファイルシステム| --read-only でルートFS読み取り専用               |
+| 書き込み範囲   | /data（= user_data/packs/{pack_id}/）のみ        |
+| 権限昇格       | --cap-drop=ALL, --security-opt=no-new-privileges |
+| リソース       | メモリ256MB、CPU 0.5コア、プロセス50個制限       |
+
+【local_pack の扱い】
+
+local_pack（ecosystem/flows/** の仮想Pack）は lib をサポートしません。
+lib 実行要求は常にスキップされます。
+
+【context で提供される情報】
+
+lib の run() 関数には以下の context が渡されます:
+
+{
+  "pack_id": "my_pack",
+  "lib_type": "install",  // または "update"
+  "ts": "2024-01-01T00:00:00Z",
+  "lib_dir": "/lib",      // コンテナ内のlibディレクトリ
+  "data_dir": "/data"     // コンテナ内の書き込み可能ディレクトリ
+}
+
+【permissive モードでのホスト実行】
+
+Docker が利用できない場合、permissive モードでは警告付きでホスト実行されます:
+
+- 警告が stderr に出力される
+- 監査ログに execution_mode="host_permissive" が記録される
+- data_dir にはホスト側の実パス（user_data/packs/{pack_id}/）が渡される
+
+本番環境では必ず strict モードを使用してください。
+
+【監査ログ】
+
+lib 実行は監査ログに記録されます:
+
+{
+  "ts": "2024-01-01T00:00:00Z",
+  "category": "system",
+  "action": "lib_install",
+  "success": true,
+  "details": {
+    "pack_id": "my_pack",
+    "lib_type": "install",
+    "execution_mode": "container"
+  }
+}
+
+execution_mode の値:
+- "container": Docker コンテナ内で実行
+- "host_permissive": permissive モードでホスト実行
+- "skipped": local_pack などでスキップ
+- "rejected": 承認エラーなどで拒否
 
 ================================================================================
 11. 監査ログ
@@ -676,6 +794,25 @@ result = kernel.execute_flow_sync("_internal", {
 3. 手動実行:
    # kernel:lib.execute を呼び出し
 
+4. Docker が利用可能か確認（strictモード）:
+   docker info
+
+5. 監査ログを確認:
+   cat user_data/audit/system_$(date +%Y-%m-%d).jsonl | jq 'select(.action | contains("lib"))'
+
+【lib の書き込みが失敗する】
+
+lib は /data（= user_data/packs/{pack_id}/）にのみ書き込み可能です。
+それ以外のパスへの書き込みは --read-only により失敗します。
+
+context["data_dir"] を使用して書き込み先を指定してください:
+
+def run(context):
+    data_dir = context.get("data_dir", "/data")
+    # data_dir 内に書き込む
+    with open(f"{data_dir}/config.json", "w") as f:
+        f.write("{}")
+
 【Egress Proxy が起動しない】
 
 1. ポート競合を確認:
@@ -695,6 +832,10 @@ cat user_data/audit/network_$(date +%Y-%m-%d).jsonl | jq .
 # 失敗のみ抽出
 cat user_data/audit/python_file_call_$(date +%Y-%m-%d).jsonl | \
   jq 'select(.success == false)'
+
+# lib 実行ログを確認
+cat user_data/audit/system_$(date +%Y-%m-%d).jsonl | \
+  jq 'select(.action | contains("lib"))'
 
 【開発モードでの注意】
 

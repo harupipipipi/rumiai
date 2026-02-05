@@ -3,6 +3,8 @@ approval_manager.py - Pack承認管理
 
 Packのインストール、承認、ハッシュ検証を管理する。
 承認されていないPackのコードは実行されない。
+
+Phase2追加: local_pack対応（ecosystem/flows/**の仮想pack）
 """
 
 from __future__ import annotations
@@ -17,7 +19,12 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
+
+
+# local_pack定数
+LOCAL_PACK_ID = "local_pack"
+LOCAL_PACK_DIR = "ecosystem/flows"
 
 
 class PackStatus(Enum):
@@ -77,7 +84,7 @@ class ApprovalManager:
         self.grants_dir = Path(grants_dir)
         self._secret_key = secret_key or self._generate_or_load_key()
         self._approvals: Dict[str, PackApproval] = {}
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()  # RLockで再入可能
         self._initialized = False
     
     def _now_ts(self) -> str:
@@ -182,6 +189,43 @@ class ApprovalManager:
             hashlib.sha256
         ).hexdigest()
     
+    def _is_local_pack_mode_enabled(self) -> bool:
+        """local_packモードが有効かチェック"""
+        mode = os.environ.get("RUMI_LOCAL_PACK_MODE", "off").lower()
+        return mode == "require_approval"
+    
+    def _get_local_pack_dir(self) -> Path:
+        """local_pack用のディレクトリを取得"""
+        return Path(LOCAL_PACK_DIR)
+    
+    def _compute_local_pack_hashes(self) -> Dict[str, str]:
+        """
+        local_pack用のハッシュを計算
+        
+        対象: ecosystem/flows/**/*.flow.yaml, ecosystem/flows/**/*.modifier.yaml
+        """
+        hashes = {}
+        local_dir = self._get_local_pack_dir()
+        
+        if not local_dir.exists():
+            return hashes
+        
+        # .flow.yaml と .modifier.yaml を対象
+        patterns = ["**/*.flow.yaml", "**/*.modifier.yaml"]
+        
+        for pattern in patterns:
+            for file_path in local_dir.glob(pattern):
+                if file_path.is_file():
+                    # __pycache__ 等を除外
+                    if any(p in str(file_path) for p in ["__pycache__", ".pyc", ".git"]):
+                        continue
+                    
+                    relative_path = str(file_path.relative_to(local_dir))
+                    hash_value = self._compute_file_hash(file_path)
+                    hashes[relative_path] = hash_value
+        
+        return hashes
+    
     def scan_packs(self) -> List[str]:
         """インストール済みPackをスキャン"""
         packs = []
@@ -206,6 +250,12 @@ class ApprovalManager:
                 if direct.exists():
                     ecosystem_json = direct
             
+            # backend/ecosystem.json もチェック
+            if ecosystem_json is None:
+                backend_ecosystem = pack_dir / "backend" / "ecosystem.json"
+                if backend_ecosystem.exists():
+                    ecosystem_json = backend_ecosystem
+            
             if ecosystem_json and ecosystem_json.exists():
                 pack_id = pack_dir.name
                 packs.append(pack_id)
@@ -218,6 +268,22 @@ class ApprovalManager:
                             created_at=self._now_ts()
                         )
                         self._save_grant(self._approvals[pack_id])
+        
+        # local_pack対応: RUMI_LOCAL_PACK_MODE=require_approval の場合のみ
+        if self._is_local_pack_mode_enabled():
+            local_dir = self._get_local_pack_dir()
+            if local_dir.exists():
+                # local_packをスキャン対象に追加
+                packs.append(LOCAL_PACK_ID)
+                
+                with self._lock:
+                    if LOCAL_PACK_ID not in self._approvals:
+                        self._approvals[LOCAL_PACK_ID] = PackApproval(
+                            pack_id=LOCAL_PACK_ID,
+                            status=PackStatus.INSTALLED,
+                            created_at=self._now_ts()
+                        )
+                        self._save_grant(self._approvals[LOCAL_PACK_ID])
         
         return packs
     
@@ -240,6 +306,36 @@ class ApprovalManager:
                 if approval.status in (PackStatus.INSTALLED, PackStatus.PENDING, PackStatus.MODIFIED)
             ]
     
+    def is_pack_approved_and_verified(self, pack_id: str) -> tuple:
+        """
+        Packが承認済み+ハッシュ一致かチェック
+        
+        Returns:
+            (is_valid: bool, reason: Optional[str])
+            - is_valid: True = 承認済み+ハッシュ一致
+            - reason: 不合格の場合の理由
+        """
+        with self._lock:
+            approval = self._approvals.get(pack_id)
+            
+            if approval is None:
+                return False, "not_found"
+            
+            if approval.status == PackStatus.BLOCKED:
+                return False, "blocked"
+            
+            if approval.status == PackStatus.MODIFIED:
+                return False, "modified"
+            
+            if approval.status != PackStatus.APPROVED:
+                return False, "not_approved"
+        
+        # ハッシュ検証（ロック外でファイルI/O）
+        if not self.verify_hash(pack_id):
+            return False, "hash_mismatch"
+        
+        return True, None
+    
     def approve(self, pack_id: str) -> ApprovalResult:
         """Packを承認"""
         with self._lock:
@@ -248,11 +344,15 @@ class ApprovalManager:
             
             approval = self._approvals[pack_id]
             
-            pack_dir = self.packs_dir / pack_id
-            if not pack_dir.exists():
-                return ApprovalResult(success=False, pack_id=pack_id, error="Pack directory not found")
-            
-            file_hashes = self._compute_pack_hashes(pack_dir)
+            # local_pack特殊処理
+            if pack_id == LOCAL_PACK_ID:
+                file_hashes = self._compute_local_pack_hashes()
+            else:
+                pack_dir = self.packs_dir / pack_id
+                if not pack_dir.exists():
+                    return ApprovalResult(success=False, pack_id=pack_id, error="Pack directory not found")
+                
+                file_hashes = self._compute_pack_hashes(pack_dir)
             
             approval.status = PackStatus.APPROVED
             approval.approved_at = self._now_ts()
@@ -286,25 +386,31 @@ class ApprovalManager:
     
     def verify_hash(self, pack_id: str) -> bool:
         """Packのファイルハッシュを検証"""
+        # ロック内でapprovalを取得
         with self._lock:
             approval = self._approvals.get(pack_id)
             if not approval or not approval.file_hashes:
                 return False
-            
+            stored_hashes = dict(approval.file_hashes)  # コピー
+        
+        # ロック外でファイルI/O
+        if pack_id == LOCAL_PACK_ID:
+            current_hashes = self._compute_local_pack_hashes()
+        else:
             pack_dir = self.packs_dir / pack_id
             if not pack_dir.exists():
                 return False
-            
             current_hashes = self._compute_pack_hashes(pack_dir)
-            
-            if set(current_hashes.keys()) != set(approval.file_hashes.keys()):
+        
+        # 比較
+        if set(current_hashes.keys()) != set(stored_hashes.keys()):
+            return False
+        
+        for path, hash_value in stored_hashes.items():
+            if current_hashes.get(path) != hash_value:
                 return False
-            
-            for path, hash_value in approval.file_hashes.items():
-                if current_hashes.get(path) != hash_value:
-                    return False
-            
-            return True
+        
+        return True
     
     def _compute_pack_hashes(self, pack_dir: Path) -> Dict[str, str]:
         """Packの全ファイルのハッシュを計算"""
@@ -341,6 +447,22 @@ class ApprovalManager:
                 
                 return True
             return False
+    
+    def get_approved_pack_ids(self) -> Set[str]:
+        """承認済み+ハッシュ一致のpack_idセットを取得"""
+        approved_packs = set()
+        with self._lock:
+            for pack_id, approval in self._approvals.items():
+                if approval.status == PackStatus.APPROVED:
+                    approved_packs.add(pack_id)
+        
+        # ハッシュ検証（ロック外）
+        verified_packs = set()
+        for pack_id in approved_packs:
+            if self.verify_hash(pack_id):
+                verified_packs.add(pack_id)
+        
+        return verified_packs
 
 
 _global_approval_manager: Optional[ApprovalManager] = None

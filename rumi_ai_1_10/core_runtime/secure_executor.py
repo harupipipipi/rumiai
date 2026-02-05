@@ -1,3 +1,5 @@
+# core_runtime/secure_executor.py
+
 """
 secure_executor.py - セキュアなコード実行層
 
@@ -14,28 +16,40 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, List
 
 
+# lib 実行用定数
+LIB_INSTALL = "install"
+LIB_UPDATE = "update"
+PACK_DATA_BASE_DIR = "user_data/packs"
+LOCAL_PACK_ID = "local_pack"
+# pack_id に許可する文字（英数字、ハイフン、アンダースコアのみ）
+PACK_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]+$')
+
+
 @dataclass
 class ExecutionResult:
-    """実行結果"""
+    """実行結果（汎用）"""
     success: bool
     output: Any = None
     error: Optional[str] = None
+    error_type: Optional[str] = None
     execution_mode: str = "unknown"
-    warnings: List[str] = None
+    execution_time_ms: float = 0.0
+    warnings: List[str] = field(default_factory=list)
     
-    def __post_init__(self):
-        if self.warnings is None:
-            self.warnings = []
+    # lib 実行用の追加フィールド（オプション）
+    pack_id: Optional[str] = None
+    lib_type: Optional[str] = None
 
 
 class SecureExecutor:
@@ -64,6 +78,59 @@ class SecureExecutor:
             print("This is ONLY acceptable for development.", file=sys.stderr)
             print("Set RUMI_SECURITY_MODE=strict for production.", file=sys.stderr)
             print("=" * 60, file=sys.stderr)
+    
+    def _sanitize_pack_id(self, pack_id: str) -> tuple:
+        """
+        pack_id をサニタイズし、安全性を検証
+        
+        Returns:
+            (is_valid: bool, sanitized_or_error: str)
+        """
+        if not pack_id:
+            return False, "pack_id is empty"
+        
+        # 長さ制限
+        if len(pack_id) > 64:
+            return False, "pack_id too long (max 64 chars)"
+        
+        # 許可パターンチェック
+        if not PACK_ID_PATTERN.match(pack_id):
+            return False, f"pack_id contains invalid characters: {pack_id}"
+        
+        # 危険なパターン
+        if pack_id in ('.', '..') or pack_id.startswith('.'):
+            return False, f"pack_id cannot start with dot: {pack_id}"
+        
+        return True, pack_id
+    
+    def _ensure_pack_data_dir(self, pack_id: str) -> tuple:
+        """
+        user_data/packs/{pack_id}/ ディレクトリを作成
+        
+        Returns:
+            (success: bool, path_or_error: Path|str)
+        """
+        # サニタイズ
+        is_valid, result = self._sanitize_pack_id(pack_id)
+        if not is_valid:
+            return False, result
+        
+        base_dir = Path(PACK_DATA_BASE_DIR).resolve()
+        pack_data_dir = base_dir / pack_id
+        
+        # パストラバーサル防止
+        try:
+            pack_data_dir = pack_data_dir.resolve()
+            pack_data_dir.relative_to(base_dir)
+        except ValueError:
+            return False, f"Path traversal detected: {pack_id}"
+        
+        # ディレクトリ作成
+        try:
+            pack_data_dir.mkdir(parents=True, exist_ok=True)
+            return True, pack_data_dir
+        except OSError as e:
+            return False, f"Failed to create directory: {e}"
     
     def _now_ts(self) -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -110,6 +177,7 @@ class SecureExecutor:
             return ExecutionResult(
                 success=False,
                 error=f"File not found: {file_path}",
+                error_type="file_not_found",
                 execution_mode="rejected"
             )
         
@@ -131,6 +199,7 @@ class SecureExecutor:
             return ExecutionResult(
                 success=False,
                 error="Docker is required but not available. Set RUMI_SECURITY_MODE=permissive for development.",
+                error_type="docker_required",
                 execution_mode="rejected"
             )
         
@@ -153,6 +222,9 @@ class SecureExecutor:
         timeout: int
     ) -> ExecutionResult:
         """Dockerコンテナ内で実行"""
+        import time
+        start_time = time.time()
+        
         container_name = f"rumi-exec-{pack_id}-{phase}-{abs(hash(component_id)) % 10000}"
         
         safe_context = self._sanitize_context(context)
@@ -197,6 +269,8 @@ class SecureExecutor:
                 timeout=timeout
             )
             
+            execution_time_ms = (time.time() - start_time) * 1000
+            
             if result.returncode == 0:
                 output = None
                 if result.stdout.strip():
@@ -208,13 +282,16 @@ class SecureExecutor:
                 return ExecutionResult(
                     success=True,
                     output=output,
-                    execution_mode="container"
+                    execution_mode="container",
+                    execution_time_ms=execution_time_ms
                 )
             else:
                 return ExecutionResult(
                     success=False,
                     error=result.stderr or f"Exit code: {result.returncode}",
-                    execution_mode="container"
+                    error_type="container_execution_error",
+                    execution_mode="container",
+                    execution_time_ms=execution_time_ms
                 )
         
         except subprocess.TimeoutExpired:
@@ -222,14 +299,18 @@ class SecureExecutor:
             return ExecutionResult(
                 success=False,
                 error=f"Execution timed out after {timeout}s",
-                execution_mode="container"
+                error_type="timeout",
+                execution_mode="container",
+                execution_time_ms=(time.time() - start_time) * 1000
             )
         
         except Exception as e:
             return ExecutionResult(
                 success=False,
                 error=f"Container execution failed: {e}",
-                execution_mode="container"
+                error_type=type(e).__name__,
+                execution_mode="container",
+                execution_time_ms=(time.time() - start_time) * 1000
             )
         
         finally:
@@ -268,6 +349,402 @@ else:
     print(json.dumps({{"error": "Cannot load module"}}))
 '''
     
+    def _get_lib_executor_script(self, filename: str) -> str:
+        """lib実行用のPythonスクリプト"""
+        return f'''
+import sys
+import json
+
+sys.path.insert(0, "/lib")
+
+with open("/context.json", "r") as f:
+    context = json.load(f)
+
+target_file = "/lib/{filename}"
+
+import importlib.util
+spec = importlib.util.spec_from_file_location("lib_module", target_file)
+
+if spec and spec.loader:
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["lib_module"] = module
+    spec.loader.exec_module(module)
+    
+    fn = getattr(module, "run", None)
+    if fn:
+        import inspect
+        sig = inspect.signature(fn)
+        if len(sig.parameters) >= 1:
+            result = fn(context)
+        else:
+            result = fn()
+        if result:
+            print(json.dumps(result, default=str))
+        else:
+            print(json.dumps({{"status": "completed"}}))
+    else:
+        print(json.dumps({{"error": "No run function found"}}))
+else:
+    print(json.dumps({{"error": "Cannot load module"}}))
+'''
+    
+    def execute_lib(
+        self,
+        pack_id: str,
+        lib_type: str,
+        lib_file: Path,
+        context: Dict[str, Any] = None,
+        timeout: int = 120
+    ) -> ExecutionResult:
+        """
+        lib（install/update）をセキュアに実行
+        
+        Args:
+            pack_id: Pack ID
+            lib_type: "install" または "update"
+            lib_file: lib ファイルのパス
+            context: 実行コンテキスト
+            timeout: タイムアウト秒数
+        
+        Returns:
+            ExecutionResult（pack_id, lib_type フィールド付き）
+        """
+        import time
+        start_time = time.time()
+        
+        # local_pack はスキップ
+        if pack_id == LOCAL_PACK_ID:
+            return ExecutionResult(
+                success=False,
+                error="local_pack does not support lib execution",
+                error_type="local_pack_skip",
+                execution_mode="skipped",
+                pack_id=pack_id,
+                lib_type=lib_type
+            )
+        
+        # pack_id サニタイズ
+        is_valid, sanitize_result = self._sanitize_pack_id(pack_id)
+        if not is_valid:
+            return ExecutionResult(
+                success=False,
+                error=sanitize_result,
+                error_type="invalid_pack_id",
+                execution_mode="rejected",
+                pack_id=pack_id,
+                lib_type=lib_type
+            )
+        
+        # ファイル存在確認
+        if not lib_file.exists():
+            return ExecutionResult(
+                success=False,
+                error=f"File not found: {lib_file}",
+                error_type="file_not_found",
+                execution_mode="rejected",
+                pack_id=pack_id,
+                lib_type=lib_type
+            )
+        
+        # lib_type 検証
+        if lib_type not in (LIB_INSTALL, LIB_UPDATE):
+            return ExecutionResult(
+                success=False,
+                error=f"Invalid lib_type: {lib_type}",
+                error_type="invalid_lib_type",
+                execution_mode="rejected",
+                pack_id=pack_id,
+                lib_type=lib_type
+            )
+        
+        # Pack データディレクトリ作成
+        dir_ok, dir_result = self._ensure_pack_data_dir(pack_id)
+        if not dir_ok:
+            return ExecutionResult(
+                success=False,
+                error=dir_result,
+                error_type="directory_error",
+                execution_mode="rejected",
+                pack_id=pack_id,
+                lib_type=lib_type
+            )
+        pack_data_dir = dir_result
+        
+        if self.is_docker_available():
+            return self._execute_lib_in_container(
+                pack_id=pack_id,
+                lib_type=lib_type,
+                lib_file=lib_file,
+                pack_data_dir=pack_data_dir,
+                context=context,
+                timeout=timeout,
+                start_time=start_time
+            )
+        
+        # Docker 不可
+        if self._security_mode == self.MODE_STRICT:
+            return ExecutionResult(
+                success=False,
+                error="Docker is required for lib execution in strict mode",
+                error_type="docker_required",
+                execution_mode="rejected",
+                execution_time_ms=(time.time() - start_time) * 1000,
+                pack_id=pack_id,
+                lib_type=lib_type
+            )
+        
+        # permissive: 警告付きホスト実行
+        return self._execute_lib_on_host_with_warning(
+            pack_id=pack_id,
+            lib_type=lib_type,
+            lib_file=lib_file,
+            pack_data_dir=pack_data_dir,
+            context=context,
+            start_time=start_time
+        )
+    
+    def _execute_lib_in_container(
+        self,
+        pack_id: str,
+        lib_type: str,
+        lib_file: Path,
+        pack_data_dir: Path,
+        context: Dict[str, Any],
+        timeout: int,
+        start_time: float
+    ) -> ExecutionResult:
+        """Dockerコンテナ内でlib実行"""
+        import time
+        
+        container_name = f"rumi-lib-{pack_id}-{lib_type}-{abs(hash(str(lib_file))) % 10000}"
+        lib_dir = lib_file.parent
+        
+        # コンテキスト準備
+        exec_context = {
+            "pack_id": pack_id,
+            "lib_type": lib_type,
+            "ts": self._now_ts(),
+            "lib_dir": str(lib_dir),
+            "data_dir": "/data",  # コンテナ内パス
+            **(context or {})
+        }
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(exec_context, f, ensure_ascii=False, default=str)
+            context_file = f.name
+        
+        try:
+            docker_cmd = [
+                "docker", "run",
+                "--rm",
+                "--name", container_name,
+                "--network=none",
+                "--cap-drop=ALL",
+                "--security-opt=no-new-privileges:true",
+                "--read-only",
+                "--tmpfs=/tmp:size=64m,noexec,nosuid",
+                "--memory=256m",
+                "--memory-swap=256m",
+                "--cpus=0.5",
+                "--pids-limit=50",
+                "--user=65534:65534",
+                "--ulimit=nproc=50:50",
+                "--ulimit=nofile=100:100",
+                # lib ディレクトリ（読み取り専用）
+                "-v", f"{lib_dir.resolve()}:/lib:ro",
+                # Pack データディレクトリ（読み書き可能）
+                "-v", f"{pack_data_dir.resolve()}:/data:rw",
+                # コンテキストファイル
+                "-v", f"{context_file}:/context.json:ro",
+                # 環境変数
+                "-e", f"RUMI_PACK_ID={pack_id}",
+                "-e", f"RUMI_LIB_TYPE={lib_type}",
+                # ラベル
+                "--label", "rumi.managed=true",
+                "--label", f"rumi.pack_id={pack_id}",
+                "--label", "rumi.type=lib_executor",
+                "python:3.11-slim",
+                "python", "-c", self._get_lib_executor_script(lib_file.name)
+            ]
+            
+            proc_result = subprocess.run(
+                docker_cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
+            
+            execution_time_ms = (time.time() - start_time) * 1000
+            
+            if proc_result.returncode == 0:
+                output = None
+                if proc_result.stdout.strip():
+                    try:
+                        output = json.loads(proc_result.stdout.strip())
+                    except json.JSONDecodeError:
+                        output = proc_result.stdout.strip()
+                
+                return ExecutionResult(
+                    success=True,
+                    output=output,
+                    execution_mode="container",
+                    execution_time_ms=execution_time_ms,
+                    pack_id=pack_id,
+                    lib_type=lib_type
+                )
+            else:
+                return ExecutionResult(
+                    success=False,
+                    error=proc_result.stderr or f"Exit code: {proc_result.returncode}",
+                    error_type="container_execution_error",
+                    execution_mode="container",
+                    execution_time_ms=execution_time_ms,
+                    pack_id=pack_id,
+                    lib_type=lib_type
+                )
+        
+        except subprocess.TimeoutExpired:
+            subprocess.run(["docker", "kill", container_name], capture_output=True)
+            return ExecutionResult(
+                success=False,
+                error=f"Lib execution timed out after {timeout}s",
+                error_type="timeout",
+                execution_mode="container",
+                execution_time_ms=(time.time() - start_time) * 1000,
+                pack_id=pack_id,
+                lib_type=lib_type
+            )
+        
+        except Exception as e:
+            return ExecutionResult(
+                success=False,
+                error=f"Container execution failed: {e}",
+                error_type=type(e).__name__,
+                execution_mode="container",
+                execution_time_ms=(time.time() - start_time) * 1000,
+                pack_id=pack_id,
+                lib_type=lib_type
+            )
+        
+        finally:
+            try:
+                os.unlink(context_file)
+            except Exception:
+                pass
+    
+    def _execute_lib_on_host_with_warning(
+        self,
+        pack_id: str,
+        lib_type: str,
+        lib_file: Path,
+        pack_data_dir: Path,
+        context: Dict[str, Any],
+        start_time: float
+    ) -> ExecutionResult:
+        """ホスト上でlib実行（permissiveモード、警告付き）"""
+        import time
+        
+        warnings = [
+            "!!! SECURITY WARNING !!!",
+            "Executing lib code on host without Docker isolation.",
+            "This is only acceptable for development.",
+            "Set RUMI_SECURITY_MODE=strict and ensure Docker is running for production.",
+            f"Pack: {pack_id}, LibType: {lib_type}",
+            f"Data directory: {pack_data_dir}"
+        ]
+        
+        for w in warnings:
+            print(f"[SecureExecutor] {w}", file=sys.stderr)
+        
+        module_name = f"rumi_lib_{pack_id}_{lib_type}_{abs(hash(str(lib_file)))}"
+        
+        try:
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(module_name, str(lib_file))
+            
+            if spec is None or spec.loader is None:
+                return ExecutionResult(
+                    success=False,
+                    error=f"Cannot load module: {lib_file}",
+                    error_type="module_load_error",
+                    execution_mode="host_permissive",
+                    execution_time_ms=(time.time() - start_time) * 1000,
+                    warnings=warnings,
+                    pack_id=pack_id,
+                    lib_type=lib_type
+                )
+            
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = module
+            
+            # lib ディレクトリを一時的にパスに追加
+            lib_dir = str(lib_file.parent)
+            if lib_dir not in sys.path:
+                sys.path.insert(0, lib_dir)
+            
+            try:
+                spec.loader.exec_module(module)
+            finally:
+                if lib_dir in sys.path:
+                    sys.path.remove(lib_dir)
+            
+            fn = getattr(module, "run", None)
+            if fn is None:
+                return ExecutionResult(
+                    success=False,
+                    error=f"No 'run' function found in {lib_file}",
+                    error_type="no_run_function",
+                    execution_mode="host_permissive",
+                    execution_time_ms=(time.time() - start_time) * 1000,
+                    warnings=warnings,
+                    pack_id=pack_id,
+                    lib_type=lib_type
+                )
+            
+            # コンテキスト準備
+            exec_context = {
+                "pack_id": pack_id,
+                "lib_type": lib_type,
+                "ts": self._now_ts(),
+                "lib_dir": str(lib_file.parent),
+                "data_dir": str(pack_data_dir),
+                **(context or {})
+            }
+            
+            import inspect
+            sig = inspect.signature(fn)
+            
+            if len(sig.parameters) >= 1:
+                output = fn(exec_context)
+            else:
+                output = fn()
+            
+            return ExecutionResult(
+                success=True,
+                output=output,
+                execution_mode="host_permissive",
+                execution_time_ms=(time.time() - start_time) * 1000,
+                warnings=warnings,
+                pack_id=pack_id,
+                lib_type=lib_type
+            )
+            
+        except Exception as e:
+            return ExecutionResult(
+                success=False,
+                error=str(e),
+                error_type=type(e).__name__,
+                execution_mode="host_permissive",
+                execution_time_ms=(time.time() - start_time) * 1000,
+                warnings=warnings,
+                pack_id=pack_id,
+                lib_type=lib_type
+            )
+        
+        finally:
+            if module_name in sys.modules:
+                del sys.modules[module_name]
+    
     def _execute_on_host_with_warning(
         self,
         pack_id: str,
@@ -277,6 +754,9 @@ else:
         context: Dict[str, Any]
     ) -> ExecutionResult:
         """ホスト上で実行（開発用、警告付き）"""
+        import time
+        start_time = time.time()
+        
         warnings = [
             "!!! SECURITY WARNING !!!",
             "Executing Pack code on host without Docker isolation.",
@@ -288,16 +768,19 @@ else:
         for w in warnings:
             print(f"[SecureExecutor] {w}", file=sys.stderr)
         
+        module_name = f"rumi_exec_{pack_id}_{phase}_{abs(hash(str(file_path)))}"
+        
         try:
             import importlib.util
-            module_name = f"rumi_exec_{pack_id}_{phase}_{abs(hash(str(file_path)))}"
             spec = importlib.util.spec_from_file_location(module_name, str(file_path))
             
             if spec is None or spec.loader is None:
                 return ExecutionResult(
                     success=False,
                     error=f"Cannot load module: {file_path}",
+                    error_type="module_load_error",
                     execution_mode="host_permissive",
+                    execution_time_ms=(time.time() - start_time) * 1000,
                     warnings=warnings
                 )
             
@@ -311,6 +794,7 @@ else:
                     success=True,
                     output=None,
                     execution_mode="host_permissive",
+                    execution_time_ms=(time.time() - start_time) * 1000,
                     warnings=warnings
                 )
             
@@ -320,6 +804,7 @@ else:
                 success=True,
                 output=result,
                 execution_mode="host_permissive",
+                execution_time_ms=(time.time() - start_time) * 1000,
                 warnings=warnings
             )
         
@@ -327,9 +812,15 @@ else:
             return ExecutionResult(
                 success=False,
                 error=str(e),
+                error_type=type(e).__name__,
                 execution_mode="host_permissive",
+                execution_time_ms=(time.time() - start_time) * 1000,
                 warnings=warnings
             )
+        
+        finally:
+            if module_name in sys.modules:
+                del sys.modules[module_name]
     
     def _sanitize_context(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """コンテキストから安全なフィールドのみ抽出"""
