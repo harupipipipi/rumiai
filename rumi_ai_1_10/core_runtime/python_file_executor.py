@@ -15,6 +15,11 @@ UDS Egress Proxy連携:
 - 外部通信は UDS ソケット経由でのみ可能
 - rumi_syscall モジュールをコンテナに注入
 
+Host Capability Proxy連携:
+- principal_id 単位の capability ソケットをコンテナにマウント
+- rumi_capability モジュールをコンテナに注入
+- permissive モードでも UDS 経由で capability を呼び出し可能
+
 PR-B追加:
 - syscall注入の単一ソース化（rumi_syscall固定）（B5）
 """
@@ -48,7 +53,7 @@ class ExecutionContext:
     permission_proxy: Optional[Any] = None
 
 
-@dataclass 
+@dataclass
 class ExecutionResult:
     """python_file_call 実行結果"""
     success: bool
@@ -62,11 +67,11 @@ class ExecutionResult:
 
 class PackApprovalChecker:
     """Pack承認状態チェッカー"""
-    
+
     def __init__(self):
         self._approval_manager = None
         self._lock = threading.Lock()
-    
+
     def _get_approval_manager(self):
         """ApprovalManagerを遅延取得"""
         if self._approval_manager is None:
@@ -78,11 +83,11 @@ class PackApprovalChecker:
                     except ImportError:
                         pass
         return self._approval_manager
-    
+
     def is_approved(self, pack_id: str) -> Tuple[bool, Optional[str]]:
         """
         Packが承認済みかチェック
-        
+
         Returns:
             (承認済みか, 拒否理由)
         """
@@ -90,14 +95,14 @@ class PackApprovalChecker:
         if am is None:
             # ApprovalManagerがない場合はpermissiveとして扱う
             return True, None
-        
+
         try:
             from .approval_manager import PackStatus
             status = am.get_status(pack_id)
-            
+
             if status is None:
                 return False, f"Pack '{pack_id}' not found in approval registry"
-            
+
             if status == PackStatus.APPROVED:
                 return True, None
             elif status == PackStatus.MODIFIED:
@@ -108,18 +113,18 @@ class PackApprovalChecker:
                 return False, f"Pack '{pack_id}' is not approved (status: {status.value})"
         except Exception as e:
             return False, f"Approval check failed: {e}"
-    
+
     def verify_hash(self, pack_id: str) -> Tuple[bool, Optional[str]]:
         """
         Packのハッシュを検証
-        
+
         Returns:
             (検証成功か, 失敗理由)
         """
         am = self._get_approval_manager()
         if am is None:
             return True, None
-        
+
         try:
             if am.verify_hash(pack_id):
                 return True, None
@@ -131,18 +136,18 @@ class PackApprovalChecker:
 
 class PathValidator:
     """ファイルパス検証"""
-    
+
     # 許可されるルートディレクトリ（相対パス）
     ALLOWED_ROOTS = [
         "ecosystem/packs",
         "ecosystem/sandbox",
     ]
-    
+
     def __init__(self):
         self._base_dir = Path.cwd()
         self._allowed_absolute: List[Path] = []
         self._refresh_allowed_paths()
-    
+
     def _refresh_allowed_paths(self) -> None:
         """許可パスを更新"""
         self._allowed_absolute = []
@@ -150,27 +155,27 @@ class PathValidator:
             abs_path = (self._base_dir / root).resolve()
             if abs_path.exists():
                 self._allowed_absolute.append(abs_path)
-    
+
     def add_allowed_root(self, path: str) -> None:
         """許可ルートを追加"""
         abs_path = Path(path).resolve()
         if abs_path not in self._allowed_absolute:
             self._allowed_absolute.append(abs_path)
-    
+
     def validate(self, file_path: str, owner_pack: Optional[str] = None) -> Tuple[bool, Optional[str], Optional[Path]]:
         """
         ファイルパスを検証
-        
+
         Args:
             file_path: 検証するパス
             owner_pack: 所有Pack ID（相対パス解決に使用）
-        
+
         Returns:
             (有効か, エラー理由, 解決済み絶対パス)
         """
         try:
             path = Path(file_path)
-            
+
             # 絶対パスの場合
             if path.is_absolute():
                 resolved = path.resolve()
@@ -185,26 +190,26 @@ class PathValidator:
                         pack_dir / "backend" / "components" / file_path,
                         pack_dir / file_path,
                     ]
-                    
+
                     resolved = None
                     for candidate in candidates:
                         if candidate.exists():
                             resolved = candidate.resolve()
                             break
-                    
+
                     if resolved is None:
                         # 見つからない場合は最初の候補をデフォルトとする
                         resolved = candidates[0].resolve()
                 else:
                     resolved = (self._base_dir / file_path).resolve()
-            
+
             # ファイル存在チェック
             if not resolved.exists():
                 return False, f"File not found: {resolved}", None
-            
+
             if not resolved.is_file():
                 return False, f"Not a file: {resolved}", None
-            
+
             # 許可ルート内かチェック
             is_allowed = False
             for allowed_root in self._allowed_absolute:
@@ -214,12 +219,12 @@ class PathValidator:
                     break
                 except ValueError:
                     continue
-            
+
             if not is_allowed:
                 return False, f"Path outside allowed roots: {resolved}", None
-            
+
             return True, None, resolved
-            
+
         except Exception as e:
             return False, f"Path validation error: {e}", None
 
@@ -227,10 +232,10 @@ class PathValidator:
 class PythonFileExecutor:
     """
     python_file_call 実行エンジン
-    
+
     Packのpythonファイルを安全に実行する。
     """
-    
+
     def __init__(self):
         self._lock = threading.RLock()
         self._syspath_lock = threading.Lock()
@@ -239,21 +244,22 @@ class PythonFileExecutor:
         self._security_mode = os.environ.get("RUMI_SECURITY_MODE", "strict").lower()
         self._uds_proxy_manager = None
         self._syscall_content_cache: Optional[str] = None
-        
+        self._capability_content_cache: Optional[str] = None
+
         if self._security_mode not in ("strict", "permissive"):
             self._security_mode = "strict"
-    
+
     def _now_ts(self) -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    
+
     def get_security_mode(self) -> str:
         """現在のセキュリティモードを取得"""
         return self._security_mode
-    
+
     def set_uds_proxy_manager(self, manager) -> None:
         """UDSEgressProxyManagerを設定"""
         self._uds_proxy_manager = manager
-    
+
     def _get_uds_proxy_manager(self):
         """UDSEgressProxyManagerを取得"""
         if self._uds_proxy_manager is None:
@@ -263,36 +269,40 @@ class PythonFileExecutor:
             except ImportError:
                 pass
         return self._uds_proxy_manager
-    
+
     def execute(
         self,
         file_path: str,
         owner_pack: Optional[str],
         input_data: Any,
         context: ExecutionContext,
+        principal_id: Optional[str] = None,
+        capability_sock_path: Optional[Path] = None,
         timeout_seconds: float = 60.0
     ) -> ExecutionResult:
         """
         pythonファイルを実行
-        
+
         Args:
             file_path: 実行するファイルパス
             owner_pack: 所有Pack ID
             input_data: 入力データ
             context: 実行コンテキスト
+            principal_id: 主体ID（capability用、未指定ならowner_pack）
+            capability_sock_path: capability UDSソケットパス
             timeout_seconds: タイムアウト秒数
-        
+
         Returns:
             ExecutionResult
         """
         import time
         start_time = time.time()
-        
+
         result = ExecutionResult(success=False)
-        
+
         # 1. owner_pack 解決
         resolved_pack = owner_pack or self._infer_pack_from_path(file_path)
-        
+
         # 2. 承認チェック
         if resolved_pack:
             approved, reason = self._approval_checker.is_approved(resolved_pack)
@@ -302,7 +312,7 @@ class PythonFileExecutor:
                 result.execution_mode = "rejected"
                 self._record_rejection(context, result, "approval")
                 return result
-            
+
             # ハッシュ検証
             hash_ok, hash_reason = self._approval_checker.verify_hash(resolved_pack)
             if not hash_ok:
@@ -311,7 +321,7 @@ class PythonFileExecutor:
                 result.execution_mode = "rejected"
                 self._record_rejection(context, result, "hash")
                 return result
-        
+
         # 3. パス検証
         path_valid, path_error, resolved_path = self._path_validator.validate(file_path, resolved_pack)
         if not path_valid:
@@ -320,11 +330,11 @@ class PythonFileExecutor:
             result.execution_mode = "rejected"
             self._record_rejection(context, result, "path")
             return result
-        
+
         # 4. 実行
         try:
             docker_available = self._check_docker_available()
-            
+
             if docker_available:
                 # strict モード: UDSソケット確保が必須
                 uds_manager = self._get_uds_proxy_manager()
@@ -337,7 +347,7 @@ class PythonFileExecutor:
                     )
                     self._record_rejection(context, result, "uds_proxy_unavailable")
                     return result
-                
+
                 # UDSソケット確保
                 sock_path = None
                 if uds_manager and resolved_pack:
@@ -354,16 +364,16 @@ class PythonFileExecutor:
                             return result
                         else:
                             result.warnings.append(f"Failed to ensure UDS socket: {error}")
-                
+
                 # Docker隔離実行
                 result = self._execute_in_container(
-                    resolved_path, resolved_pack, input_data, context, timeout_seconds, sock_path
+                    resolved_path, resolved_pack, input_data, context, timeout_seconds, sock_path, capability_sock_path
                 )
                 result.execution_mode = "container"
             elif self._security_mode == "permissive":
                 # permissive モードではホスト実行（警告付き）
                 result = self._execute_on_host(
-                    resolved_path, resolved_pack, input_data, context, timeout_seconds
+                    resolved_path, resolved_pack, input_data, context, timeout_seconds, capability_sock_path
                 )
                 result.execution_mode = "host_permissive"
                 result.warnings.append(
@@ -380,14 +390,14 @@ class PythonFileExecutor:
                 )
                 self._record_rejection(context, result, "docker_unavailable_strict")
                 return result
-                
+
         except Exception as e:
             result.error = str(e)
             result.error_type = type(e).__name__
             result.execution_mode = "failed"
-        
+
         result.execution_time_ms = (time.time() - start_time) * 1000
-        
+
         # 監査ログに実行結果を記録
         try:
             from .audit_logger import get_audit_logger
@@ -407,24 +417,24 @@ class PythonFileExecutor:
             )
         except Exception:
             pass  # 監査ログのエラーで処理を止めない
-        
+
         return result
-    
+
     def _infer_pack_from_path(self, file_path: str) -> Optional[str]:
         """パスからPack IDを推測"""
         try:
             path = Path(file_path)
-            
+
             # ecosystem/packs/{pack_id}/... のパターンを探す
             parts = path.parts
             for i, part in enumerate(parts):
                 if part == "packs" and i + 1 < len(parts):
                     return parts[i + 1]
-            
+
             return None
         except Exception:
             return None
-    
+
     def _check_docker_available(self) -> bool:
         """Docker利用可能性をチェック"""
         try:
@@ -437,11 +447,11 @@ class PythonFileExecutor:
             return result.returncode == 0
         except Exception:
             return False
-    
+
     def _get_syscall_module_content(self) -> str:
         """
         rumi_syscall モジュールの内容を取得（B5: 単一ソース化）
-        
+
         優先順位:
         1. core_runtime/rumi_syscall.py（単一ソース - 推奨）
         2. フォールバック: インラインで最小限のsyscallを生成
@@ -449,7 +459,7 @@ class PythonFileExecutor:
         # キャッシュがあれば使用
         if self._syscall_content_cache is not None:
             return self._syscall_content_cache
-        
+
         # 1. 単一ソース: core_runtime/rumi_syscall.py
         try:
             from . import rumi_syscall
@@ -460,7 +470,7 @@ class PythonFileExecutor:
                 return content
         except (ImportError, AttributeError, OSError):
             pass
-        
+
         # 2. フォールバック: インラインで最小限のsyscallを生成
         fallback_content = '''
 """rumi_syscall - Rumi AI OS System Call API (minimal fallback)"""
@@ -536,7 +546,31 @@ request = http_request
 '''
         self._syscall_content_cache = fallback_content
         return fallback_content
-    
+
+    def _get_capability_module_content(self) -> str:
+        """
+        rumi_capability モジュールの内容を取得（単一ソース）
+
+        優先順位:
+        1. core_runtime/rumi_capability.py（単一ソース）
+        2. フォールバック: 空文字列（注入しない）
+        """
+        if self._capability_content_cache is not None:
+            return self._capability_content_cache
+
+        try:
+            from . import rumi_capability
+            cap_path = Path(rumi_capability.__file__)
+            if cap_path.exists():
+                content = cap_path.read_text(encoding="utf-8")
+                self._capability_content_cache = content
+                return content
+        except (ImportError, AttributeError, OSError):
+            pass
+
+        self._capability_content_cache = ""
+        return ""
+
     def _execute_in_container(
         self,
         file_path: Path,
@@ -544,22 +578,24 @@ request = http_request
         input_data: Any,
         context: ExecutionContext,
         timeout_seconds: float,
-        sock_path: Optional[Path] = None
+        sock_path: Optional[Path] = None,
+        capability_sock_path: Optional[Path] = None,
     ) -> ExecutionResult:
         """
         Dockerコンテナ内でPythonファイルを実行
-        
+
         docker run --rm --network=none で実行
         外部通信はUDSソケット経由でのみ可能
+        capability呼び出しはcapabilityソケット経由でのみ可能
         """
         import subprocess
-        
+
         result = ExecutionResult(success=False, execution_mode="container")
-        
+
         # 一意なコンテナ名を生成（UUID使用で衝突回避）
         unique_id = uuid.uuid4().hex[:12]
         container_name = f"rumi-pfc-{owner_pack or 'unknown'}-{unique_id}"
-        
+
         # 入力データとコンテキストをJSON化
         exec_context = {
             "flow_id": context.flow_id,
@@ -569,30 +605,38 @@ request = http_request
             "owner_pack": owner_pack,
             "inputs": input_data,
         }
-        
+
         # 一時ファイルのパスを事前に初期化
         input_file = None
         script_file = None
         syscall_file = None
-        
+        capability_file = None
+
         try:
             # 一時ファイルに入力データを書き込み
             with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
                 json.dump({"input_data": input_data, "context": exec_context}, f, ensure_ascii=False, default=str)
                 input_file = f.name
-            
+
             # rumi_syscall モジュールを一時ファイルに書き込み
             with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
                 f.write(self._get_syscall_module_content())
                 syscall_file = f.name
-            
+
+            # rumi_capability モジュールを一時ファイルに書き込み
+            cap_content = self._get_capability_module_content()
+            if cap_content:
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+                    f.write(cap_content)
+                    capability_file = f.name
+
             # 実行スクリプトを生成
             executor_script = self._generate_executor_script(file_path.name)
-            
+
             with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
                 f.write(executor_script)
                 script_file = f.name
-            
+
             # Docker実行コマンドを構築
             docker_cmd = [
                 "docker", "run",
@@ -614,13 +658,25 @@ request = http_request
                 "-v", f"{syscall_file}:/rumi_syscall.py:ro",  # syscallモジュール
                 "-e", "PYTHONPATH=/",  # rumi_syscall をimport可能に
             ]
-            
+
             # UDSソケットマウント（存在する場合）
             if sock_path and sock_path.exists():
                 docker_cmd.extend([
                     "-v", f"{sock_path}:/run/rumi/egress.sock:rw",  # UDSソケット（単体マウント）
                 ])
-            
+
+            # Capability ソケットマウント（存在する場合）
+            if capability_sock_path and capability_sock_path.exists():
+                docker_cmd.extend([
+                    "-v", f"{capability_sock_path}:/run/rumi/capability.sock:rw",
+                ])
+
+            # rumi_capability.py マウント（存在する場合）
+            if capability_file:
+                docker_cmd.extend([
+                    "-v", f"{capability_file}:/rumi_capability.py:ro",
+                ])
+
             docker_cmd.extend([
                 "-w", "/workspace",
                 "--label", "rumi.managed=true",
@@ -629,7 +685,7 @@ request = http_request
                 "python:3.11-slim",
                 "python", "/executor.py", file_path.name
             ])
-            
+
             # Docker実行
             try:
                 proc_result = subprocess.run(
@@ -638,7 +694,7 @@ request = http_request
                     text=True,
                     timeout=timeout_seconds
                 )
-                
+
                 if proc_result.returncode == 0:
                     # 出力をパース
                     output_text = proc_result.stdout.strip()
@@ -649,33 +705,33 @@ request = http_request
                             result.output = output_text
                     else:
                         result.output = None
-                    
+
                     result.success = True
                 else:
                     result.error = proc_result.stderr or f"Container exited with code {proc_result.returncode}"
                     result.error_type = "container_execution_error"
-            
+
             except subprocess.TimeoutExpired:
                 # タイムアウト時はコンテナを強制停止
                 subprocess.run(["docker", "kill", container_name], capture_output=True)
                 result.error = f"Execution timed out after {timeout_seconds}s"
                 result.error_type = "timeout"
-        
+
         except Exception as e:
             result.error = str(e)
             result.error_type = type(e).__name__
-        
+
         finally:
             # 一時ファイルを削除
-            for tmp_file in [input_file, script_file, syscall_file]:
+            for tmp_file in [input_file, script_file, syscall_file, capability_file]:
                 if tmp_file is not None:
                     try:
                         os.unlink(tmp_file)
                     except Exception:
                         pass
-        
+
         return result
-    
+
     def _generate_executor_script(self, target_filename: str) -> str:
         """コンテナ内で実行するPythonスクリプトを生成"""
         return f'''
@@ -701,21 +757,21 @@ if spec and spec.loader:
     module = importlib.util.module_from_spec(spec)
     sys.modules["target_module"] = module
     spec.loader.exec_module(module)
-    
+
     # run関数を探す
     run_fn = getattr(module, "run", None)
     if run_fn:
         import inspect
         sig = inspect.signature(run_fn)
         param_count = len(sig.parameters)
-        
+
         if param_count >= 2:
             result = run_fn(input_data, context)
         elif param_count == 1:
             result = run_fn(input_data)
         else:
             result = run_fn()
-        
+
         # 結果を出力
         if result is not None:
             print(json.dumps(result, default=str))
@@ -724,44 +780,45 @@ if spec and spec.loader:
 else:
     print(json.dumps({{"error": "Cannot load module"}}))
 '''
-    
+
     def _execute_on_host(
         self,
         file_path: Path,
         owner_pack: Optional[str],
         input_data: Any,
         context: ExecutionContext,
-        timeout_seconds: float
+        timeout_seconds: float,
+        capability_sock_path: Optional[Path] = None,
     ) -> ExecutionResult:
         """ホスト上で実行（permissiveモード）"""
         result = ExecutionResult(success=False, execution_mode="host_permissive")
-        
+
         # 警告を出力
         print(f"[PythonFileExecutor] SECURITY WARNING: Executing on host: {file_path}", file=sys.stderr)
-        
+
         module_name = f"pfc_{owner_pack or 'unknown'}_{file_path.stem}_{abs(hash(str(file_path)))}"
-        
+
         try:
             # モジュールをロード
             spec = importlib.util.spec_from_file_location(module_name, str(file_path))
-            
+
             if spec is None or spec.loader is None:
                 result.error = f"Cannot load module from {file_path}"
                 result.error_type = "module_load_error"
                 return result
-            
+
             module = importlib.util.module_from_spec(spec)
             sys.modules[module_name] = module
-            
+
             # sys.pathに追加（スレッドセーフ）
             file_dir = str(file_path.parent)
             path_added = False
-            
+
             with self._syspath_lock:
                 if file_dir not in sys.path:
                     sys.path.insert(0, file_dir)
                     path_added = True
-            
+
             try:
                 spec.loader.exec_module(module)
             finally:
@@ -770,14 +827,14 @@ else:
                     with self._syspath_lock:
                         if file_dir in sys.path:
                             sys.path.remove(file_dir)
-            
+
             # run関数を探す
             run_fn = getattr(module, "run", None)
             if run_fn is None:
                 result.error = f"No 'run' function found in {file_path}"
                 result.error_type = "no_run_function"
                 return result
-            
+
             # コンテキスト辞書を構築
             exec_context = {
                 "flow_id": context.flow_id,
@@ -789,80 +846,83 @@ else:
                 "network_check": self._create_network_check_fn(owner_pack),
                 "http_request": self._create_proxy_request_fn(owner_pack),
             }
-            
+
+            if capability_sock_path:
+                exec_context["capability_socket"] = str(capability_sock_path)
+
             if context.permission_proxy:
                 exec_context["permission_proxy"] = context.permission_proxy
-            
+
             # 実行
             import inspect
             sig = inspect.signature(run_fn)
             param_count = len(sig.parameters)
-            
+
             if param_count >= 2:
                 output = run_fn(input_data, exec_context)
             elif param_count == 1:
                 output = run_fn(input_data)
             else:
                 output = run_fn()
-            
+
             # 出力をJSON互換に変換
             result.output = self._ensure_json_compatible(output)
             result.success = True
-            
+
         except Exception as e:
             result.error = str(e)
             result.error_type = type(e).__name__
             result.warnings.append(f"Traceback: {traceback.format_exc()[-2000:]}")
-        
+
         finally:
             # モジュールをクリーンアップ
             if module_name in sys.modules:
                 del sys.modules[module_name]
-        
+
         return result
-    
+
     def _ensure_json_compatible(self, value: Any) -> Any:
         """値をJSON互換に変換"""
         if value is None:
             return None
-        
+
         if isinstance(value, (str, int, float, bool)):
             return value
-        
+
         if isinstance(value, (list, tuple)):
             return [self._ensure_json_compatible(v) for v in value]
-        
+
         if isinstance(value, dict):
             return {str(k): self._ensure_json_compatible(v) for k, v in value.items()}
-        
+
         # その他はstr化
         try:
             json.dumps(value)
             return value
         except (TypeError, ValueError):
             return str(value)
-    
+
     def _create_network_check_fn(self, owner_pack: Optional[str]) -> Callable:
         """
         ネットワークアクセスチェック関数を作成
-        
+
         python_file_call内のコードがネットワークアクセス前に
         呼び出すための関数を提供。
         """
         def check_network(domain: str, port: int) -> Dict[str, Any]:
             """
             ネットワークアクセスをチェック
-            
+
             Args:
                 domain: アクセス先ドメイン
                 port: アクセス先ポート
-            
+
             Returns:
                 {"allowed": bool, "reason": str}
             """
             if not owner_pack:
                 return {"allowed": False, "reason": "No owner_pack specified"}
-            
+
             try:
                 from .network_grant_manager import get_network_grant_manager
                 ngm = get_network_grant_manager()
@@ -873,13 +933,13 @@ else:
                 }
             except Exception as e:
                 return {"allowed": False, "reason": f"Check failed: {e}"}
-        
+
         return check_network
-    
+
     def _create_proxy_request_fn(self, owner_pack: Optional[str]) -> Callable:
         """
         プロキシ経由でHTTPリクエストを送信する関数を作成
-        
+
         python_file_call内のコードから外部通信を行うための関数を提供。
         """
         def proxy_request(
@@ -891,14 +951,14 @@ else:
         ) -> Dict[str, Any]:
             """
             プロキシ経由でHTTPリクエストを送信
-            
+
             Args:
                 method: HTTPメソッド（GET, POST, etc.）
                 url: リクエスト先URL
                 headers: HTTPヘッダー
                 body: リクエストボディ
                 timeout_seconds: タイムアウト秒数
-            
+
             Returns:
                 {
                     "success": bool,
@@ -916,7 +976,7 @@ else:
                     "error": "No owner_pack specified",
                     "allowed": False
                 }
-            
+
             try:
                 from .egress_proxy import get_egress_proxy, make_proxy_request
                 proxy = get_egress_proxy()
@@ -926,7 +986,7 @@ else:
                         "error": "Egress proxy is not running",
                         "allowed": False
                     }
-                
+
                 proxy_url = proxy.get_endpoint()
                 result = make_proxy_request(
                     proxy_url=proxy_url,
@@ -937,7 +997,7 @@ else:
                     body=body,
                     timeout_seconds=timeout_seconds
                 )
-                
+
                 return result.to_dict()
             except Exception as e:
                 return {
@@ -945,9 +1005,9 @@ else:
                     "error": str(e),
                     "allowed": False
                 }
-        
+
         return proxy_request
-    
+
     def _record_rejection(
         self,
         context: ExecutionContext,
@@ -967,7 +1027,7 @@ else:
                 "error": result.error,
                 "ts": context.ts,
             })
-        
+
         # 監査ログ
         try:
             from .audit_logger import get_audit_logger

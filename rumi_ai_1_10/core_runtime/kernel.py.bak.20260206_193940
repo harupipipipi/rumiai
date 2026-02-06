@@ -36,8 +36,6 @@ from .network_grant_manager import get_network_grant_manager
 from .egress_proxy import get_egress_proxy, initialize_egress_proxy, shutdown_egress_proxy
 from .lib_executor import get_lib_executor
 
-from .capability_proxy import get_capability_proxy
-
 
 @dataclass
 class KernelConfig:
@@ -63,7 +61,6 @@ class Kernel:
         self._flow: Optional[Dict[str, Any]] = None
         self._kernel_handlers: Dict[str, Callable[[Dict[str, Any], Dict[str, Any]], Any]] = {}
         self._shutdown_handlers: List[Callable[[], None]] = []
-        self._capability_proxy = None
         self._executor: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=4)
         self._uds_proxy_manager = None  # UDS Egress Proxy Manager
         
@@ -142,9 +139,6 @@ class Kernel:
             "kernel:uds_proxy.stop": self._h_uds_proxy_stop,
             "kernel:uds_proxy.stop_all": self._h_uds_proxy_stop_all,
             "kernel:uds_proxy.status": self._h_uds_proxy_status,
-            "kernel:capability_proxy.init": self._h_capability_proxy_init,
-            "kernel:capability_proxy.status": self._h_capability_proxy_status,
-            "kernel:capability_proxy.stop_all": self._h_capability_proxy_stop_all,
         }
 
     def _get_uds_proxy_manager(self):
@@ -171,19 +165,6 @@ class Kernel:
                     error=e
                 )
         return self._uds_proxy_manager
-
-    def _get_capability_proxy(self):
-        """HostCapabilityProxyServerを取得（遅延初期化）"""
-        if self._capability_proxy is None:
-            try:
-                self._capability_proxy = get_capability_proxy()
-                self._capability_proxy.initialize()
-            except Exception as e:
-                self.diagnostics.record_step(
-                    phase="startup", step_id="capability_proxy.init.auto",
-                    handler="kernel:capability_proxy.init", status="failed", error=e,
-                )
-        return self._capability_proxy
 
     def _resolve_handler(self, handler: str, args: Dict[str, Any] = None) -> Optional[Callable[[Dict[str, Any], Dict[str, Any]], Any]]:
         if not isinstance(handler, str) or not handler:
@@ -357,7 +338,6 @@ class Kernel:
                 pipeline_step["run"]["args"] = {
                     "file": step.get("file"),
                     "owner_pack": step.get("owner_pack"),
-                    "principal_id": step.get("principal_id"),
                     "input": step_input,
                     "timeout_seconds": step.get("timeout_seconds", 60.0),
                     "_step_id": step.get("id"),
@@ -779,14 +759,6 @@ class Kernel:
     def shutdown(self) -> Dict[str, Any]:
         results: List[Dict[str, Any]] = []
         
-        # Capability proxy を停止
-        if self._capability_proxy:
-            try:
-                self._capability_proxy.stop_all()
-                results.append({"handler": "capability_proxy", "status": "success"})
-            except Exception as e:
-                results.append({"handler": "capability_proxy", "status": "failed", "error": str(e)})
-
         # UDSプロキシを停止
         if self._uds_proxy_manager:
             try:
@@ -1910,7 +1882,6 @@ class Kernel:
                 legacy_step["args"] = {
                     "file": step.file,
                     "owner_pack": step.owner_pack,
-                    "principal_id": step.principal_id,
                     "input": step.input,
                     "timeout_seconds": step.timeout_seconds,
                     "_step_id": step.id,
@@ -1993,7 +1964,6 @@ class Kernel:
             }
         
         owner_pack = args.get("owner_pack")
-        principal_id = args.get("principal_id")
         input_data = args.get("input", {})
         timeout_seconds = args.get("timeout_seconds", 60.0)
         step_id = args.get("_step_id", "unknown")
@@ -2005,23 +1975,6 @@ class Kernel:
         # UDSプロキシマネージャを取得（strictモードでは必須）
         security_mode = os.environ.get("RUMI_SECURITY_MODE", "strict").lower()
         uds_manager = self._get_uds_proxy_manager()
-        
-        # Capability Proxy: principal_id 用のソケットを確保
-        effective_principal = principal_id or owner_pack
-        capability_sock_path = None
-        if effective_principal:
-            cap_proxy = self._get_capability_proxy()
-            if cap_proxy:
-                cap_ok, cap_err, cap_sock = cap_proxy.ensure_principal_socket(effective_principal)
-                if cap_ok:
-                    capability_sock_path = cap_sock
-                else:
-                    self.diagnostics.record_step(
-                        phase=phase, step_id=f"{step_id}.capability_socket_warning",
-                        handler="kernel:python_file_call", status="success",
-                        meta={"warning": f"Failed to ensure capability socket: {cap_err}"}
-                    )
-
         
         if owner_pack and uds_manager:
             # UDSソケットを確保（Docker実行前に必須）
@@ -2056,8 +2009,6 @@ class Kernel:
             phase=phase,
             ts=self._now_ts(),
             owner_pack=owner_pack,
-            principal_id=principal_id,
-            capability_sock_path=capability_sock_path,
             inputs=resolved_input,
             diagnostics_callback=lambda data: self.diagnostics.record_step(
                 phase=data.get("phase", phase),
@@ -2826,35 +2777,3 @@ class Kernel:
                     "base_dir": str(uds_manager.get_base_dir())
                 }
             }
-
-    def _h_capability_proxy_init(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
-        """Capability Proxy を初期化"""
-        try:
-            proxy = self._get_capability_proxy()
-            if proxy and proxy._initialized:
-                self.diagnostics.record_step(
-                    phase="startup", step_id="capability_proxy.init",
-                    handler="kernel:capability_proxy.init", status="success",
-                    meta={"base_dir": str(proxy.get_base_dir())}
-                )
-                return {"_kernel_step_status": "success", "_kernel_step_meta": {"base_dir": str(proxy.get_base_dir())}}
-            else:
-                return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "Capability proxy initialization failed"}}
-        except Exception as e:
-            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
-
-    def _h_capability_proxy_status(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
-        """Capability Proxy のステータスを取得"""
-        proxy = self._capability_proxy
-        if proxy is None:
-            return {"_kernel_step_status": "success", "_kernel_step_meta": {"initialized": False}}
-        return {"_kernel_step_status": "success", "_kernel_step_meta": proxy.status()}
-
-    def _h_capability_proxy_stop_all(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
-        """全 Capability サーバーを停止"""
-        proxy = self._capability_proxy
-        if proxy:
-            active = proxy.list_active_principals()
-            proxy.stop_all()
-            return {"_kernel_step_status": "success", "_kernel_step_meta": {"stopped": len(active), "principals": active}}
-        return {"_kernel_step_status": "success", "_kernel_step_meta": {"stopped": 0}}

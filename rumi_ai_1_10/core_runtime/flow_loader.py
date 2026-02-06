@@ -1,4 +1,3 @@
-
 """
 flow_loader.py - Flow定義ファイルのローダー
 
@@ -18,6 +17,9 @@ Phase2追加:
 
 PR-B追加:
 - hash_mismatch検知時にMODIFIED昇格 + network権限無効化（B3）
+
+PR-C追加:
+- FlowStep に principal_id を追加（Capability Proxy連携）
 """
 
 from __future__ import annotations
@@ -57,6 +59,7 @@ class FlowStep:
     owner_pack: Optional[str] = None
     file: Optional[str] = None
     timeout_seconds: float = 60.0
+    principal_id: Optional[str] = None
 
 
 @dataclass
@@ -106,6 +109,8 @@ class FlowDefinition:
             d["file"] = step.file
         if step.timeout_seconds != 60.0:
             d["timeout_seconds"] = step.timeout_seconds
+        if step.principal_id:
+            d["principal_id"] = step.principal_id
         return d
 
 
@@ -600,6 +605,7 @@ class FlowLoader:
             if step_type == "python_file_call":
                 step.owner_pack = raw_step.get("owner_pack")
                 step.file = raw_step.get("file")
+                step.principal_id = raw_step.get("principal_id")
                 step.timeout_seconds = raw_step.get("timeout_seconds", 60.0)
                 
                 if not step.file:
