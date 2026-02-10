@@ -24,6 +24,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from .hierarchical_grant import get_principal_chain, intersect_configs
+
 _UNSAFE_CHARS = re.compile(r'[/\\:*?"<>|.\x00-\x1f]')
 
 
@@ -233,60 +235,62 @@ class CapabilityGrantManager:
             GrantCheckResult
         """
         with self._lock:
-            # 改ざん検出済みの principal は拒否（raw と sanitize 両方で判定）
-            if (principal_id in self._tampered_principals
-                    or sanitize_principal_id(principal_id) in self._tampered_principals):
-                return GrantCheckResult(
-                    allowed=False,
-                    reason=f"Grant file for '{principal_id}' has been tampered with",
-                    principal_id=principal_id,
-                    permission_id=permission_id,
-                )
-            
-            # Grant が存在するか
-            grant = self._grants.get(principal_id)
-            if grant is None:
-                return GrantCheckResult(
-                    allowed=False,
-                    reason=f"No capability grant for principal '{principal_id}'",
-                    principal_id=principal_id,
-                    permission_id=permission_id,
-                )
-            
-            # principal 全体が有効か
-            if not grant.enabled:
-                return GrantCheckResult(
-                    allowed=False,
-                    reason=f"Capability grant for '{principal_id}' is disabled",
-                    principal_id=principal_id,
-                    permission_id=permission_id,
-                )
-            
-            # 該当 permission が存在するか
-            perm = grant.permissions.get(permission_id)
-            if perm is None:
-                return GrantCheckResult(
-                    allowed=False,
-                    reason=f"Permission '{permission_id}' not granted to '{principal_id}'",
-                    principal_id=principal_id,
-                    permission_id=permission_id,
-                )
-            
-            # 該当 permission が有効か
-            if not perm.enabled:
-                return GrantCheckResult(
-                    allowed=False,
-                    reason=f"Permission '{permission_id}' is disabled for '{principal_id}'",
-                    principal_id=principal_id,
-                    permission_id=permission_id,
-                )
-            
+            chain = get_principal_chain(principal_id)
+            merged_config: Dict[str, Any] = {}
+
+            for chain_principal in chain:
+                # 改ざん検出済みの principal は拒否（raw と sanitize 両方で判定）
+                if (chain_principal in self._tampered_principals
+                        or sanitize_principal_id(chain_principal) in self._tampered_principals):
+                    return GrantCheckResult(
+                        allowed=False,
+                        reason=f"Grant file for '{chain_principal}' has been tampered with",
+                        principal_id=principal_id,
+                        permission_id=permission_id,
+                    )
+
+                grant = self._grants.get(chain_principal)
+                if grant is None:
+                    return GrantCheckResult(
+                        allowed=False,
+                        reason=f"No capability grant for principal '{chain_principal}'",
+                        principal_id=principal_id,
+                        permission_id=permission_id,
+                    )
+
+                if not grant.enabled:
+                    return GrantCheckResult(
+                        allowed=False,
+                        reason=f"Capability grant for '{chain_principal}' is disabled",
+                        principal_id=principal_id,
+                        permission_id=permission_id,
+                    )
+
+                perm = grant.permissions.get(permission_id)
+                if perm is None:
+                    return GrantCheckResult(
+                        allowed=False,
+                        reason=f"Permission '{permission_id}' not granted to '{chain_principal}'",
+                        principal_id=principal_id,
+                        permission_id=permission_id,
+                    )
+
+                if not perm.enabled:
+                    return GrantCheckResult(
+                        allowed=False,
+                        reason=f"Permission '{permission_id}' is disabled for '{chain_principal}'",
+                        principal_id=principal_id,
+                        permission_id=permission_id,
+                    )
+
+                merged_config = intersect_configs(merged_config, perm.config)
+
             return GrantCheckResult(
                 allowed=True,
                 reason="Granted",
                 principal_id=principal_id,
                 permission_id=permission_id,
-                config=dict(perm.config),
+                config=merged_config,
             )
     
     def grant_permission(
