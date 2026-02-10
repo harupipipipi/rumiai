@@ -15,6 +15,12 @@ UDS Egress Proxy連携:
 - 外部通信は UDS ソケット経由でのみ可能
 - rumi_syscall モジュールをコンテナに注入
 
+パス刷新:
+- owner_pack → pack_subdir 基準で実行ファイルを解決
+- resolved_path が pack_subdir 配下でない場合は拒否（boundary強制）
+- owner_pack 未指定は原則拒否（ecosystem/sandbox のみ許可）
+- ALLOWED_ROOTS を ecosystem/ 基準に更新
+
 Host Capability Proxy連携:
 - principal_id 単位の capability ソケットをコンテナにマウント
 - rumi_capability モジュールをコンテナに注入
@@ -22,6 +28,14 @@ Host Capability Proxy連携:
 
 PR-B追加:
 - syscall注入の単一ソース化（rumi_syscall固定）（B5）
+
+PR-C追加:
+- ExecutionContext に principal_id / capability_sock_path を追加（修正1）
+- executor.execute() に principal_id / capability_sock_path 引数を伝播（修正2受け側）
+- permissive ホスト実行時に rumi_capability を sys.modules に注入（推奨修正）
+
+pip依存追加:
+- docker run に site-packages の RO マウントを追加し、PYTHONPATH に追加
 """
 
 from __future__ import annotations
@@ -40,6 +54,17 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 
+from .paths import (
+    ECOSYSTEM_DIR,
+    PACK_DATA_BASE_DIR,
+    discover_pack_locations,
+    find_ecosystem_json,
+    get_pack_block_dirs,
+    is_path_within,
+    PackLocation,
+)
+
+
 @dataclass
 class ExecutionContext:
     """python_file_call 実行コンテキスト"""
@@ -51,6 +76,8 @@ class ExecutionContext:
     inputs: Dict[str, Any]
     diagnostics_callback: Optional[Callable[[Dict[str, Any]], None]] = None
     permission_proxy: Optional[Any] = None
+    principal_id: Optional[str] = None
+    capability_sock_path: Optional[Path] = None
 
 
 @dataclass
@@ -135,17 +162,18 @@ class PackApprovalChecker:
 
 
 class PathValidator:
-    """ファイルパス検証"""
+    """ファイルパス検証（pack_subdir boundary 強制）"""
 
-    # 許可されるルートディレクトリ（相対パス）
+    # 許可されるルートディレクトリ
     ALLOWED_ROOTS = [
-        "ecosystem/packs",
+        "ecosystem",
         "ecosystem/sandbox",
     ]
 
-    def __init__(self):
+    def __init__(self, pack_locations: Optional[Dict[str, PackLocation]] = None):
         self._base_dir = Path.cwd()
         self._allowed_absolute: List[Path] = []
+        self._pack_locations: Dict[str, PackLocation] = pack_locations or {}
         self._refresh_allowed_paths()
 
     def _refresh_allowed_paths(self) -> None:
@@ -162,9 +190,25 @@ class PathValidator:
         if abs_path not in self._allowed_absolute:
             self._allowed_absolute.append(abs_path)
 
+    def _get_pack_location(self, owner_pack: str) -> Optional[PackLocation]:
+        """owner_pack に対応する PackLocation を取得（キャッシュ or 再探索）"""
+        if owner_pack in self._pack_locations:
+            return self._pack_locations[owner_pack]
+
+        # キャッシュにない場合は discover で再探索
+        locations = discover_pack_locations()
+        for loc in locations:
+            self._pack_locations[loc.pack_id] = loc
+
+        return self._pack_locations.get(owner_pack)
+
     def validate(self, file_path: str, owner_pack: Optional[str] = None) -> Tuple[bool, Optional[str], Optional[Path]]:
         """
-        ファイルパスを検証
+        ファイルパスを検証（pack_subdir boundary 強制）
+
+        owner_pack が指定されている場合は pack_subdir 基準で解決し、
+        resolved_path が pack_subdir 配下であることを強制する。
+        owner_pack 未指定は ecosystem/sandbox のみ許可。
 
         Args:
             file_path: 検証するパス
@@ -176,41 +220,62 @@ class PathValidator:
         try:
             path = Path(file_path)
 
-            # 絶対パスの場合
+            # owner_pack 未指定の場合は原則拒否（sandbox のみ許可）
+            if not owner_pack:
+                if path.is_absolute():
+                    resolved = path.resolve()
+                else:
+                    resolved = (self._base_dir / file_path).resolve()
+
+                # sandbox 内であれば許可
+                sandbox_dir = (self._base_dir / "ecosystem" / "sandbox").resolve()
+                if resolved.exists() and resolved.is_file():
+                    try:
+                        resolved.relative_to(sandbox_dir)
+                        return True, None, resolved
+                    except ValueError:
+                        pass
+
+                return False, "owner_pack is required for python_file_call", None
+
+            # owner_pack から PackLocation を取得
+            pack_loc = self._get_pack_location(owner_pack)
+
+            if pack_loc is None:
+                return False, f"Pack '{owner_pack}' not found in ecosystem", None
+
+            pack_subdir = pack_loc.pack_subdir
+
+            # パスの解決
             if path.is_absolute():
                 resolved = path.resolve()
             else:
-                # 相対パスの場合、owner_packから解決を試みる
-                if owner_pack:
-                    pack_dir = self._base_dir / "ecosystem" / "packs" / owner_pack
-                    # backend/blocks/ を探す
-                    candidates = [
-                        pack_dir / "backend" / file_path,
-                        pack_dir / "backend" / "blocks" / file_path,
-                        pack_dir / "backend" / "components" / file_path,
-                        pack_dir / file_path,
-                    ]
+                # pack_subdir 基準の候補で解決
+                block_dirs = get_pack_block_dirs(pack_subdir)
 
-                    resolved = None
-                    for candidate in candidates:
-                        if candidate.exists():
-                            resolved = candidate.resolve()
-                            break
+                candidates = []
+                for block_dir in block_dirs:
+                    candidates.append(block_dir / file_path)
+                # pack_subdir 直下も候補に（ファイルが直接置かれるケース）
+                candidates.append(pack_subdir / file_path)
 
-                    if resolved is None:
-                        # 見つからない場合は最初の候補をデフォルトとする
-                        resolved = candidates[0].resolve()
-                else:
-                    resolved = (self._base_dir / file_path).resolve()
+                resolved = None
+                for candidate in candidates:
+                    if candidate.exists() and candidate.is_file():
+                        resolved = candidate.resolve()
+                        break
+
+                if resolved is None:
+                    first_candidate = candidates[0] if candidates else (pack_subdir / file_path)
+                    return False, f"File not found: {first_candidate} (searched {len(candidates)} candidates)", None
 
             # ファイル存在チェック
             if not resolved.exists():
                 return False, f"File not found: {resolved}", None
-
             if not resolved.is_file():
                 return False, f"Not a file: {resolved}", None
 
-            # 許可ルート内かチェック
+            # ALLOWED_ROOTS 内かチェック
             is_allowed = False
             for allowed_root in self._allowed_absolute:
                 try:
@@ -222,6 +287,15 @@ class PathValidator:
 
             if not is_allowed:
                 return False, f"Path outside allowed roots: {resolved}", None
+
+            # pack_subdir boundary 強制
+            if not is_path_within(resolved, pack_subdir):
+                return (
+                    False,
+                    f"Path outside pack boundary: {resolved} "
+                    f"(pack_subdir: {pack_subdir.resolve()})",
+                    None,
+                )
 
             return True, None, resolved
 
@@ -302,6 +376,8 @@ class PythonFileExecutor:
 
         # 1. owner_pack 解決
         resolved_pack = owner_pack or self._infer_pack_from_path(file_path)
+        if not resolved_pack and not file_path.startswith("ecosystem/sandbox"):
+            resolved_pack = owner_pack  # None — PathValidator が拒否
 
         # 2. 承認チェック
         if resolved_pack:
@@ -421,15 +497,28 @@ class PythonFileExecutor:
         return result
 
     def _infer_pack_from_path(self, file_path: str) -> Optional[str]:
-        """パスからPack IDを推測"""
+        """
+        パスからPack IDを推測
+
+        パターン:
+          - ecosystem/<pack_id>/...
+          - ecosystem/packs/<pack_id>/...  (互換)
+        """
         try:
             path = Path(file_path)
-
-            # ecosystem/packs/{pack_id}/... のパターンを探す
             parts = path.parts
+
+            # ecosystem/packs/<pack_id>/... (互換)
             for i, part in enumerate(parts):
                 if part == "packs" and i + 1 < len(parts):
                     return parts[i + 1]
+
+            # ecosystem/<pack_id>/... (新構造)
+            for i, part in enumerate(parts):
+                if part == "ecosystem" and i + 1 < len(parts):
+                    next_part = parts[i + 1]
+                    if next_part not in ("packs", "sandbox", "flows"):
+                        return next_part
 
             return None
         except Exception:
@@ -587,6 +676,7 @@ request = http_request
         docker run --rm --network=none で実行
         外部通信はUDSソケット経由でのみ可能
         capability呼び出しはcapabilityソケット経由でのみ可能
+        pip依存はsite-packagesをROマウントしPYTHONPATHに追加
         """
         import subprocess
 
@@ -595,6 +685,18 @@ request = http_request
         # 一意なコンテナ名を生成（UUID使用で衝突回避）
         unique_id = uuid.uuid4().hex[:12]
         container_name = f"rumi-pfc-{owner_pack or 'unknown'}-{unique_id}"
+
+        # site-packages パスを確認 (pip 依存)
+        pip_site_packages = None
+        if owner_pack:
+            _sp = Path(PACK_DATA_BASE_DIR) / owner_pack / "python" / "site-packages"
+            if _sp.is_dir():
+                pip_site_packages = _sp
+
+        # PYTHONPATH 構築
+        pythonpath_parts = ["/"]
+        if pip_site_packages:
+            pythonpath_parts.append("/pip-packages")
 
         # 入力データとコンテキストをJSON化
         exec_context = {
@@ -656,8 +758,14 @@ request = http_request
                 "-v", f"{input_file}:/input.json:ro",  # 入力ファイル
                 "-v", f"{script_file}:/executor.py:ro",  # 実行スクリプト
                 "-v", f"{syscall_file}:/rumi_syscall.py:ro",  # syscallモジュール
-                "-e", "PYTHONPATH=/",  # rumi_syscall をimport可能に
+                "-e", f"PYTHONPATH={':'.join(pythonpath_parts)}",
             ]
+
+            # pip site-packages マウント（存在する場合）
+            if pip_site_packages:
+                docker_cmd.extend([
+                    "-v", f"{pip_site_packages.resolve()}:/pip-packages:ro",
+                ])
 
             # UDSソケットマウント（存在する場合）
             if sock_path and sock_path.exists():
@@ -796,6 +904,25 @@ else:
         # 警告を出力
         print(f"[PythonFileExecutor] SECURITY WARNING: Executing on host: {file_path}", file=sys.stderr)
 
+        # rumi_capability をPackコードからimport可能にする（best-effort）
+        _capability_injected = False
+        _prev_env_cap_sock = os.environ.get("RUMI_CAPABILITY_SOCKET")
+        try:
+            if capability_sock_path and capability_sock_path.exists():
+                os.environ["RUMI_CAPABILITY_SOCKET"] = str(capability_sock_path)
+            try:
+                from . import rumi_capability as _rc_module
+                sys.modules["rumi_capability"] = _rc_module
+                _capability_injected = True
+            except ImportError:
+                result.warnings.append(
+                    "rumi_capability module not available for host injection"
+                )
+        except Exception as e:
+            result.warnings.append(
+                f"Failed to inject rumi_capability for host execution: {e}"
+            )
+
         module_name = f"pfc_{owner_pack or 'unknown'}_{file_path.stem}_{abs(hash(str(file_path)))}"
 
         try:
@@ -878,6 +1005,13 @@ else:
             # モジュールをクリーンアップ
             if module_name in sys.modules:
                 del sys.modules[module_name]
+            # rumi_capability 注入のクリーンアップ
+            if _capability_injected:
+                sys.modules.pop("rumi_capability", None)
+            if _prev_env_cap_sock is not None:
+                os.environ["RUMI_CAPABILITY_SOCKET"] = _prev_env_cap_sock
+            elif "RUMI_CAPABILITY_SOCKET" in os.environ and capability_sock_path:
+                os.environ.pop("RUMI_CAPABILITY_SOCKET", None)
 
         return result
 

@@ -270,3 +270,14 @@ def get_locale() -> str:
 def reload_lang() -> None:
     """言語ファイルを再読み込み"""
     _get_registry().reload()
+
+
+def load_system_lang() -> None:
+    """
+    システム言語ファイルを読み込む（互換関数）
+
+    app.py が from core_runtime.lang import load_system_lang として
+    呼び出すため、ImportError を防ぐ互換関数。
+    内部で reload_lang() を呼ぶ。
+    """
+    reload_lang()

@@ -1,4 +1,5 @@
 
+
 ```markdown
 # Rumi AI Ecosystem 開発ガイド
 
@@ -17,12 +18,13 @@ Pack/Component開発者向けの包括的なドキュメントです。
 7. [権限モデル](#権限モデル)
 8. [ネットワークアクセス](#ネットワークアクセス)
 9. [lib（install/update）](#libinstallupdate)
-10. [Pack開発ガイド](#pack開発ガイド)
-11. [InterfaceRegistry API](#interfaceregistry-api)
-12. [EventBus API](#eventbus-api)
-13. [監査ログ](#監査ログ)
-14. [セキュリティ](#セキュリティ)
-15. [トラブルシューティング](#トラブルシューティング)
+10. [Dependency Installation (pip)](#dependency-installation-pip)
+11. [Pack開発ガイド](#pack開発ガイド)
+12. [InterfaceRegistry API](#interfaceregistry-api)
+13. [EventBus API](#eventbus-api)
+14. [監査ログ](#監査ログ)
+15. [セキュリティ](#セキュリティ)
+16. [トラブルシューティング](#トラブルシューティング)
 
 ---
 
@@ -596,6 +598,50 @@ def run(context=None):
 
 ---
 
+## Dependency Installation (pip)
+
+### 概要
+
+Pack が PyPI パッケージに依存する場合、`requirements.lock` を同梱し、API で承認するとビルダー用 Docker コンテナで安全にインストールされます。ホスト Python 環境は汚れません。
+
+### requirements.lock の置き場所
+
+pack_subdir 基準で探索されます:
+
+1. `<pack_subdir>/requirements.lock`
+2. `<pack_subdir>/backend/requirements.lock`（互換）
+
+### 承認フロー
+
+```
+scan → pending → approve → installed
+                → reject  → rejected (cooldown 1h)
+                            → 3回 reject → blocked
+                                            → unblock → pending
+```
+
+### 生成物
+
+```
+user_data/packs/<pack_id>/python/
+├── wheelhouse/         # ダウンロードしたファイル
+├── site-packages/      # インストール展開先
+└── state.json          # メタデータ
+```
+
+### 実行時の import
+
+site-packages が存在する場合、実行コンテナに `/pip-packages:ro` としてマウントされ、`PYTHONPATH` に追加されます。Pack コードからは通常通り `import` するだけです。
+
+### 詳細ドキュメント
+
+- [Pip Dependency Installation 完成像](pip_dependency_installation.md)
+- [requirements.lock 規約](spec/requirements_lock.md)
+- [運用手順](runbook/dependency_workflow.md)
+- [PYTHONPATH と site-packages 仕様](architecture/pythonpath_and_sitepackages.md)
+
+---
+
 ## Pack開発ガイド
 
 ### 最小構成
@@ -1134,5 +1180,3 @@ step:
 
 *「Flowが中心、贔屓なし、悪意Pack前提」— これがRumi AI Ecosystemの設計原則です。*
 ```
-
----

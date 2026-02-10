@@ -3,6 +3,8 @@ Pack/Component/Addon のレジストリ
 
 エコシステム内のすべてのPack、Component、Addonを
 読み込み、解決、管理する中央レジストリ。
+
+パス刷新: ecosystem/ 直下を走査（ecosystem/packs/ 互換あり）、ecosystem.json 直下優先
 """
 
 import json
@@ -18,6 +20,14 @@ from .spec.schema.validator import (
     validate_addon,
     SchemaValidationError
 )
+
+
+# paths.py を参照（core_runtime パッケージとして import できない場合のフォールバック付き）
+try:
+    from core_runtime.paths import ECOSYSTEM_DIR as _ECOSYSTEM_DIR, find_ecosystem_json as _find_ecosystem_json_paths
+except ImportError:
+    _ECOSYSTEM_DIR = "ecosystem"
+    _find_ecosystem_json_paths = None
 
 
 @dataclass
@@ -58,7 +68,7 @@ class Registry:
     Pack/Component/Addonの読み込み、解決、管理を行う。
     """
     
-    def __init__(self, ecosystem_dir: str = "ecosystem/packs"):
+    def __init__(self, ecosystem_dir: str = _ECOSYSTEM_DIR):
         """
         Args:
             ecosystem_dir: エコシステムディレクトリのパス
@@ -82,8 +92,26 @@ class Registry:
         
         print(f"\n=== Registry: Packの読み込みを開始 ===")
         
-        for pack_dir in self.ecosystem_dir.iterdir():
-            if pack_dir.is_dir() and not pack_dir.name.startswith('.'):
+        # ecosystem/* を走査（特殊ディレクトリは除外）
+        _excluded = {".git", "__pycache__", "node_modules", ".venv", "packs", "flows"}
+        
+        candidates = []
+        if self.ecosystem_dir.exists():
+            candidates.extend(
+                d for d in sorted(self.ecosystem_dir.iterdir())
+                if d.is_dir() and d.name not in _excluded and not d.name.startswith(".")
+            )
+        
+        # ecosystem/packs/* 互換ルートも走査
+        legacy_root = self.ecosystem_dir / "packs"
+        if legacy_root.is_dir():
+            for d in sorted(legacy_root.iterdir()):
+                if d.is_dir() and d.name not in _excluded and not d.name.startswith("."):
+                    if d.name not in {c.name for c in candidates}:
+                        candidates.append(d)
+        
+        for pack_dir in candidates:
+            if pack_dir.is_dir():
                 try:
                     pack_info = self._load_pack(pack_dir)
                     if pack_info:
@@ -108,35 +136,30 @@ class Registry:
     
     def _find_ecosystem_json(self, pack_dir: Path) -> Tuple[Optional[Path], Optional[Path]]:
         """
-        ecosystem.jsonを探す
+        ecosystem.jsonを探す（直下優先）
         
         探索順序:
-        1. pack_dir/[任意サブディレクトリ]/ecosystem.json
-        2. pack_dir/ecosystem.json（直下、フォールバック）
-        
-        Args:
-            pack_dir: Packのルートディレクトリ
-        
-        Returns:
-            (ecosystem.jsonのパス, サブディレクトリのパス) または (None, None)
+        1. pack_dir/ecosystem.json（直下優先）
+        2. pack_dir/[任意サブディレクトリ]/ecosystem.json
         """
-        # 1. サブディレクトリ内を探索
-        for subdir in sorted(pack_dir.iterdir()):
-            if not subdir.is_dir() or subdir.name.startswith('.'):
-                continue
-            
-            # __pycache__ などを除外
-            if subdir.name in ('__pycache__', 'node_modules', '.git', '.venv'):
-                continue
-            
-            candidate = subdir / "ecosystem.json"
-            if candidate.exists():
-                return candidate, subdir
+        # paths.py の共有実装を使う（利用可能な場合）
+        if _find_ecosystem_json_paths is not None:
+            return _find_ecosystem_json_paths(pack_dir)
         
-        # 2. フォールバック: pack_dir直下
+        # フォールバック: 直下優先
         direct_file = pack_dir / "ecosystem.json"
         if direct_file.exists():
             return direct_file, pack_dir
+        
+        _excluded_sub = {"__pycache__", "node_modules", ".git", ".venv", "packs", "flows"}
+        for subdir in sorted(pack_dir.iterdir()):
+            if not subdir.is_dir() or subdir.name.startswith("."):
+                continue
+            if subdir.name in _excluded_sub:
+                continue
+            candidate = subdir / "ecosystem.json"
+            if candidate.exists():
+                return candidate, subdir
         
         return None, None
     
@@ -151,6 +174,7 @@ class Registry:
         
         [subdir] は任意の名前（backend, frontend, ui, src, lib など）。
         ecosystem.jsonを含む最初のサブディレクトリを使用する。
+        直下に ecosystem.json がある場合はそれを優先する。
         
         Args:
             pack_dir: Packディレクトリのパス

@@ -15,6 +15,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
+from .paths import ECOSYSTEM_DIR
+
+
 @dataclass
 class ContainerResult:
     """コンテナ操作結果"""
@@ -28,7 +31,7 @@ class ContainerOrchestrator:
     
     def __init__(
         self,
-        packs_dir: str = "ecosystem/packs",
+        packs_dir: str = ECOSYSTEM_DIR,
         docker_dir: str = "docker/core"
     ):
         self.packs_dir = Path(packs_dir)

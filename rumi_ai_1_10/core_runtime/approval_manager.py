@@ -5,6 +5,7 @@ Packのインストール、承認、ハッシュ検証を管理する。
 承認されていないPackのコードは実行されない。
 
 Phase2追加: local_pack対応（ecosystem/flows/**の仮想pack）
+パス刷新: pack供給元を ecosystem/ 直下に変更（ecosystem/packs/ 互換あり）
 """
 
 from __future__ import annotations
@@ -22,9 +23,15 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 
-# local_pack定数
-LOCAL_PACK_ID = "local_pack"
-LOCAL_PACK_DIR = "ecosystem/flows"
+from .paths import (
+    LOCAL_PACK_ID,
+    LOCAL_PACK_DIR,
+    ECOSYSTEM_DIR,
+    GRANTS_DIR,
+    discover_pack_locations,
+    check_pack_id_mismatch,
+    PackLocation,
+)
 
 
 class PackStatus(Enum):
@@ -76,14 +83,15 @@ class ApprovalManager:
     
     def __init__(
         self,
-        packs_dir: str = "ecosystem/packs",
-        grants_dir: str = "user_data/permissions",
+        packs_dir: str = ECOSYSTEM_DIR,
+        grants_dir: str = GRANTS_DIR,
         secret_key: Optional[str] = None
     ):
         self.packs_dir = Path(packs_dir)
         self.grants_dir = Path(grants_dir)
         self._secret_key = secret_key or self._generate_or_load_key()
         self._approvals: Dict[str, PackApproval] = {}
+        self._pack_locations: Dict[str, PackLocation] = {}
         self._lock = threading.RLock()  # RLockで再入可能
         self._initialized = False
     
@@ -227,55 +235,41 @@ class ApprovalManager:
         return hashes
     
     def scan_packs(self) -> List[str]:
-        """インストール済みPackをスキャン"""
+        """
+        インストール済みPackをスキャン
+        
+        discover_pack_locations() を使って ecosystem/* と ecosystem/packs/* を走査。
+        canonical pack_id はディレクトリ名。
+        ecosystem.json の pack_id が異なる場合は警告を記録。
+        """
         packs = []
         
-        if not self.packs_dir.exists():
-            return packs
+        locations = discover_pack_locations(str(self.packs_dir))
         
-        for pack_dir in self.packs_dir.iterdir():
-            if not pack_dir.is_dir() or pack_dir.name.startswith("."):
-                continue
+        for loc in locations:
+            pack_id = loc.pack_id
+            self._pack_locations[pack_id] = loc
+            packs.append(pack_id)
             
-            ecosystem_json = None
-            for subdir in pack_dir.iterdir():
-                if subdir.is_dir() and not subdir.name.startswith("."):
-                    candidate = subdir / "ecosystem.json"
-                    if candidate.exists():
-                        ecosystem_json = candidate
-                        break
+            # ecosystem.json の pack_id とディレクトリ名の不一致を検出・記録
+            mismatch_warning = check_pack_id_mismatch(loc)
+            if mismatch_warning:
+                self._record_pack_id_mismatch(pack_id, mismatch_warning)
             
-            if ecosystem_json is None:
-                direct = pack_dir / "ecosystem.json"
-                if direct.exists():
-                    ecosystem_json = direct
-            
-            # backend/ecosystem.json もチェック
-            if ecosystem_json is None:
-                backend_ecosystem = pack_dir / "backend" / "ecosystem.json"
-                if backend_ecosystem.exists():
-                    ecosystem_json = backend_ecosystem
-            
-            if ecosystem_json and ecosystem_json.exists():
-                pack_id = pack_dir.name
-                packs.append(pack_id)
-                
-                with self._lock:
-                    if pack_id not in self._approvals:
-                        self._approvals[pack_id] = PackApproval(
-                            pack_id=pack_id,
-                            status=PackStatus.INSTALLED,
-                            created_at=self._now_ts()
-                        )
-                        self._save_grant(self._approvals[pack_id])
+            with self._lock:
+                if pack_id not in self._approvals:
+                    self._approvals[pack_id] = PackApproval(
+                        pack_id=pack_id,
+                        status=PackStatus.INSTALLED,
+                        created_at=self._now_ts()
+                    )
+                    self._save_grant(self._approvals[pack_id])
         
         # local_pack対応: RUMI_LOCAL_PACK_MODE=require_approval の場合のみ
         if self._is_local_pack_mode_enabled():
             local_dir = self._get_local_pack_dir()
             if local_dir.exists():
-                # local_packをスキャン対象に追加
                 packs.append(LOCAL_PACK_ID)
-                
                 with self._lock:
                     if LOCAL_PACK_ID not in self._approvals:
                         self._approvals[LOCAL_PACK_ID] = PackApproval(
@@ -286,6 +280,48 @@ class ApprovalManager:
                         self._save_grant(self._approvals[LOCAL_PACK_ID])
         
         return packs
+    
+    def _resolve_pack_dir(self, pack_id: str) -> Optional[Path]:
+        """
+        pack_id から pack_dir を解決する。
+        キャッシュ → discover の順で探索。
+        """
+        if pack_id in self._pack_locations:
+            return self._pack_locations[pack_id].pack_dir
+        
+        # キャッシュにない場合は再探索
+        locations = discover_pack_locations(str(self.packs_dir))
+        for loc in locations:
+            self._pack_locations[loc.pack_id] = loc
+        
+        if pack_id in self._pack_locations:
+            return self._pack_locations[pack_id].pack_dir
+        
+        # フォールバック: 旧構造
+        legacy = self.packs_dir / pack_id
+        if legacy.is_dir():
+            return legacy
+        return None
+    
+    def _record_pack_id_mismatch(self, pack_id: str, warning: str) -> None:
+        """pack_id 不一致の警告を diagnostics/audit に記録"""
+        print(
+            f"[ApprovalManager] WARNING: {warning}",
+            file=sys.stderr,
+        )
+        try:
+            from .audit_logger import get_audit_logger
+            audit = get_audit_logger()
+            audit.log_system_event(
+                event_type="pack_id_mismatch",
+                success=True,
+                details={
+                    "pack_id": pack_id,
+                    "warning": warning,
+                }
+            )
+        except Exception:
+            pass
     
     def get_status(self, pack_id: str) -> Optional[PackStatus]:
         """Pack状態を取得"""
@@ -348,8 +384,8 @@ class ApprovalManager:
             if pack_id == LOCAL_PACK_ID:
                 file_hashes = self._compute_local_pack_hashes()
             else:
-                pack_dir = self.packs_dir / pack_id
-                if not pack_dir.exists():
+                pack_dir = self._resolve_pack_dir(pack_id)
+                if pack_dir is None or not pack_dir.exists():
                     return ApprovalResult(success=False, pack_id=pack_id, error="Pack directory not found")
                 
                 file_hashes = self._compute_pack_hashes(pack_dir)
@@ -397,8 +433,8 @@ class ApprovalManager:
         if pack_id == LOCAL_PACK_ID:
             current_hashes = self._compute_local_pack_hashes()
         else:
-            pack_dir = self.packs_dir / pack_id
-            if not pack_dir.exists():
+            pack_dir = self._resolve_pack_dir(pack_id)
+            if pack_dir is None or not pack_dir.exists():
                 return False
             current_hashes = self._compute_pack_hashes(pack_dir)
         
@@ -480,8 +516,8 @@ def get_approval_manager() -> ApprovalManager:
 
 
 def initialize_approval_manager(
-    packs_dir: str = "ecosystem/packs",
-    grants_dir: str = "user_data/permissions"
+    packs_dir: str = ECOSYSTEM_DIR,
+    grants_dir: str = GRANTS_DIR,
 ) -> ApprovalManager:
     """ApprovalManagerを初期化"""
     global _global_approval_manager

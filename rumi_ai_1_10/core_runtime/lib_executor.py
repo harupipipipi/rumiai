@@ -3,6 +3,10 @@ lib_executor.py - lib install/update 実行システム
 
 Packの lib/install.py と lib/update.py を管理する。
 全ての実行は SecureExecutor 経由で Docker 隔離される（strictモード）。
+
+パス刷新:
+- pack_subdir 基準で lib/ と backend/lib/ の両方を探索
+- discover_pack_locations() ベースで全pack走査
 """
 
 from __future__ import annotations
@@ -16,8 +20,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
-# local_pack 定数
-LOCAL_PACK_ID = "local_pack"
+from .paths import (
+    LOCAL_PACK_ID,
+    ECOSYSTEM_DIR,
+    discover_pack_locations,
+    get_pack_lib_dirs,
+    find_ecosystem_json,
+)
 
 
 @dataclass
@@ -83,10 +92,11 @@ class LibExecutor:
     INSTALL_FILE = "install.py"
     UPDATE_FILE = "update.py"
     
-    def __init__(self, records_file: str = None):
+    def __init__(self, records_file: str = None, packs_dir: str = ECOSYSTEM_DIR):
         self._records_file = Path(records_file) if records_file else Path(self.RECORDS_FILE)
         self._records: Dict[str, LibExecutionRecord] = {}
         self._lock = threading.RLock()
+        self._packs_dir = packs_dir
         self._load_records()
     
     def _now_ts(self) -> str:
@@ -131,12 +141,17 @@ class LibExecutor:
         return sha256.hexdigest()
     
     def _find_lib_dir(self, pack_dir: Path) -> Optional[Path]:
-        backend_lib = pack_dir / "backend" / self.LIB_DIR_NAME
-        if backend_lib.exists() and backend_lib.is_dir():
-            return backend_lib
-        direct_lib = pack_dir / self.LIB_DIR_NAME
-        if direct_lib.exists() and direct_lib.is_dir():
-            return direct_lib
+        """
+        pack_subdir 基準で lib ディレクトリを探索。
+        paths.get_pack_lib_dirs() を使い候補順に返す。
+        """
+        _, pack_subdir = find_ecosystem_json(pack_dir)
+        if pack_subdir is None:
+            pack_subdir = pack_dir  # フォールバック
+        
+        lib_dirs = get_pack_lib_dirs(pack_subdir)
+        if lib_dirs:
+            return lib_dirs[0]  # 最初に見つかった候補
         return None
     
     def check_pack(self, pack_id: str, pack_dir: Path) -> LibCheckResult:
@@ -315,13 +330,12 @@ class LibExecutor:
             "failed": [],
             "errors": []
         }
-        if not packs_dir.exists():
-            return results
         
-        for pack_dir in packs_dir.iterdir():
-            if not pack_dir.is_dir() or pack_dir.name.startswith("."):
-                continue
-            pack_id = pack_dir.name
+        locations = discover_pack_locations(str(packs_dir))
+        
+        for loc in locations:
+            pack_id = loc.pack_id
+            pack_dir = loc.pack_dir
             
             # local_pack はスキップ（明示的に）
             if pack_id == LOCAL_PACK_ID:

@@ -5,7 +5,10 @@ ecosystem/packs/{pack_id}/backend/flows/modifiers/*.modifier.yaml を読み込�
 対象Flowに対してステップの注入・置換・削除を行う。
 
 設計原則:
-- 承認済み+ハッシュ一致のpackのみロード
+- shared modifiers (user_data/shared/flows/modifiers/) は承認不要でロード
+- pack提供 modifiers は承認済み+ハッシュ一致のpackのみロード
+- local_pack互換 は deprecated（優先順位最低）
+- pack_subdir 基準で flows/modifiers/ と backend/flows/modifiers/ の両方を探索
 - modifier適用順序は決定的
 - 同一注入点: priority → step.id → modifier_id
 - inject相対位置を保持（再ソート禁止）
@@ -22,6 +25,13 @@ Phase3追加:
 
 PR-B追加:
 - hash_mismatch検知時にMODIFIED昇格 + network権限無効化（B3）
+
+パス刷新:
+- pack_subdir 基準で modifiers 探索候補を複数化
+- user_data/shared/flows/modifiers/ を shared source として追加
+
+PR-C追加:
+- _step_from_dict で principal_id を FlowStep に引き継ぎ（Capability Proxy連携）
 """
 
 from __future__ import annotations
@@ -43,10 +53,15 @@ except ImportError:
 from .flow_loader import FlowDefinition, FlowStep, FlowLoadResult
 
 
-# local_pack定数
-LOCAL_PACK_ID = "local_pack"
-LOCAL_PACK_DIR = "ecosystem/flows"
-LOCAL_PACK_MODIFIERS_DIR = "ecosystem/flows/modifiers"
+from .paths import (
+    LOCAL_PACK_ID,
+    LOCAL_PACK_DIR,
+    LOCAL_PACK_MODIFIERS_DIR,
+    ECOSYSTEM_DIR,
+    discover_pack_locations,
+    get_pack_modifier_dirs,
+    get_shared_modifier_dir,
+)
 
 
 @dataclass
@@ -128,12 +143,13 @@ class FlowModifierLoader:
     """
     Flow modifierローダー
     
-    ecosystem/packs/{pack_id}/backend/flows/modifiers/*.modifier.yaml を読み込む。
+    探索優先順:
+      1. user_data/shared/flows/modifiers/ — 承認不要
+      2. pack提供 modifiers — 承認+ハッシュ一致のpackのみ
+      3. local_pack互換 ecosystem/flows/modifiers/ — deprecated
+    
     承認済み+ハッシュ一致のpackのみ対象。
     """
-    
-    PACKS_DIR = "ecosystem/packs"
-    PACK_MODIFIERS_SUBDIR = "backend/flows/modifiers"
     
     def __init__(self, approval_manager=None):
         self._lock = threading.RLock()
@@ -255,6 +271,11 @@ class FlowModifierLoader:
         """
         全modifierファイルをロード
         
+        探索優先順:
+          1. shared modifiers (user_data/shared/flows/modifiers/) — 承認不要
+          2. pack提供 modifiers — 承認必須
+          3. local_pack互換 — deprecated
+        
         Returns:
             modifier_id -> FlowModifierDef のマップ
         """
@@ -263,41 +284,54 @@ class FlowModifierLoader:
             self._load_errors.clear()
             self._skipped_modifiers.clear()
             
-            # 1. pack提供modifierをロード（承認必須）
-            packs_dir = Path(self.PACKS_DIR)
-            if packs_dir.exists():
-                self._load_pack_modifiers(packs_dir)
+            # 1. shared modifierをロード（承認不要）
+            self._load_shared_modifiers()
             
-            # 2. local_pack互換（環境変数で制御）
+            # 2. pack提供modifierをロード（承認必須）
+            self._load_pack_modifiers_via_discovery()
+            
+            # 3. local_pack互換（環境変数で制御、deprecated）
             if self._is_local_pack_mode_enabled():
                 self._load_local_pack_modifiers()
             
             return dict(self._loaded_modifiers)
     
-    def _load_pack_modifiers(self, packs_dir: Path) -> None:
-        """pack提供modifierをロード（承認必須）"""
-        for pack_dir in sorted(packs_dir.iterdir()):
-            if not pack_dir.is_dir() or pack_dir.name.startswith("."):
-                continue
-            
-            pack_id = pack_dir.name
+    def _load_shared_modifiers(self) -> None:
+        """
+        shared modifierをロード（承認不要）
+        user_data/shared/flows/modifiers/**/*.modifier.yaml を読み込む。
+        """
+        shared_dir = get_shared_modifier_dir()
+        if not shared_dir.exists():
+            return
+        self._load_directory_modifiers(shared_dir, None)
+    
+    def _load_pack_modifiers_via_discovery(self) -> None:
+        """
+        pack提供modifierをロード（承認必須）
+        
+        discover_pack_locations() で検出された全packについて、
+        pack_subdir 基準で modifiers ディレクトリを探索する。
+        """
+        locations = discover_pack_locations(str(ECOSYSTEM_DIR))
+        
+        for loc in locations:
+            pack_id = loc.pack_id
             
             # 承認チェック
             is_approved, reason = self._check_pack_approval(pack_id)
             if not is_approved:
-                modifiers_dir = pack_dir / self.PACK_MODIFIERS_SUBDIR
-                if modifiers_dir.exists():
-                    for yaml_file in modifiers_dir.glob("**/*.modifier.yaml"):
+                for mod_dir in get_pack_modifier_dirs(loc.pack_subdir):
+                    for yaml_file in sorted(mod_dir.glob("**/*.modifier.yaml")):
                         self._record_skip(yaml_file, pack_id, reason or "not_approved")
                 continue
             
-            # modifierをロード
-            modifiers_dir = pack_dir / self.PACK_MODIFIERS_SUBDIR
-            if modifiers_dir.exists():
-                self._load_directory_modifiers(modifiers_dir, pack_id)
+            # pack_subdir 基準で候補ディレクトリを探索
+            for mod_dir in get_pack_modifier_dirs(loc.pack_subdir):
+                self._load_directory_modifiers(mod_dir, pack_id)
     
     def _load_local_pack_modifiers(self) -> None:
-        """local_pack互換: ecosystem/flows/modifiers/ をロード"""
+        """local_pack互換: ecosystem/flows/modifiers/ をロード（deprecated）"""
         is_approved, reason = self._check_pack_approval(LOCAL_PACK_ID)
         if not is_approved:
             local_modifiers_dir = Path(LOCAL_PACK_MODIFIERS_DIR)
@@ -305,6 +339,15 @@ class FlowModifierLoader:
                 for yaml_file in local_modifiers_dir.glob("**/*.modifier.yaml"):
                     self._record_skip(yaml_file, LOCAL_PACK_ID, reason or "not_approved")
             return
+        
+        # deprecated 警告
+        import sys
+        print(
+            "[FlowModifierLoader] WARNING: local_pack modifiers "
+            "(ecosystem/flows/modifiers/) is deprecated. "
+            "Use user_data/shared/flows/modifiers/ instead.",
+            file=sys.stderr,
+        )
         
         local_modifiers_dir = Path(LOCAL_PACK_MODIFIERS_DIR)
         if local_modifiers_dir.exists():
@@ -829,7 +872,8 @@ class FlowModifierApplier:
             raw=step_dict,
             owner_pack=step_dict.get("owner_pack"),
             file=step_dict.get("file"),
-            timeout_seconds=step_dict.get("timeout_seconds", 60.0)
+            timeout_seconds=step_dict.get("timeout_seconds", 60.0),
+            principal_id=step_dict.get("principal_id"),
         )
     
     def _find_step_index(self, steps: List[FlowStep], step_id: str) -> int:

@@ -1,7 +1,8 @@
 """
 pack_api_server.py - Pack管理HTTP APIサーバー
 
-Pack承認、コンテナ操作、特権操作のHTTP APIを提供。
+Pack承認、コンテナ操作、特権操作、Capability Handler候補管理、
+pip依存ライブラリ管理のHTTP APIを提供。
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ import threading
 from dataclasses import dataclass, asdict
 from typing import Any, Optional
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, unquote
 
 
 logger = logging.getLogger(__name__)
@@ -108,6 +109,28 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             elif path == "/api/docker/status":
                 result = self._get_docker_status()
                 self._send_response(APIResponse(True, result))
+
+            elif path == "/api/capability/blocked":
+                result = self._capability_list_blocked()
+                self._send_response(APIResponse(True, result))
+
+            elif path == "/api/capability/requests":
+                # GET /api/capability/requests?status=pending
+                query = parse_qs(urlparse(self.path).query)
+                status_filter = query.get("status", ["all"])[0]
+                result = self._capability_list_requests(status_filter)
+                self._send_response(APIResponse(True, result))
+
+            elif path == "/api/pip/blocked":
+                result = self._pip_list_blocked()
+                self._send_response(APIResponse(True, result))
+
+            elif path == "/api/pip/requests":
+                # GET /api/pip/requests?status=pending
+                query = parse_qs(urlparse(self.path).query)
+                status_filter = query.get("status", ["all"])[0]
+                result = self._pip_list_requests(status_filter)
+                self._send_response(APIResponse(True, result))
             
             else:
                 self._send_response(APIResponse(False, error="Not found"), 404)
@@ -129,6 +152,89 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             if path == "/api/packs/scan":
                 result = self._scan_packs()
                 self._send_response(APIResponse(True, result))
+
+            elif path == "/api/pip/candidates/scan":
+                ecosystem_dir = body.get("ecosystem_dir", None)
+                result = self._pip_scan(ecosystem_dir)
+                self._send_response(APIResponse(True, result))
+
+            elif path.startswith("/api/pip/requests/") and path.endswith("/approve"):
+                candidate_key = self._extract_capability_key(path, "/api/pip/requests/", "/approve")
+                if candidate_key is None:
+                    self._send_response(APIResponse(False, error="Invalid candidate_key"), 400)
+                else:
+                    allow_sdist = body.get("allow_sdist", False)
+                    index_url = body.get("index_url", "https://pypi.org/simple")
+                    result = self._pip_approve(candidate_key, allow_sdist, index_url)
+                    if result.get("success"):
+                        self._send_response(APIResponse(True, result))
+                    else:
+                        self._send_response(APIResponse(False, error=result.get("error", "Approve failed")), 400)
+
+            elif path.startswith("/api/pip/requests/") and path.endswith("/reject"):
+                candidate_key = self._extract_capability_key(path, "/api/pip/requests/", "/reject")
+                if candidate_key is None:
+                    self._send_response(APIResponse(False, error="Invalid candidate_key"), 400)
+                else:
+                    reason = body.get("reason", "")
+                    result = self._pip_reject(candidate_key, reason)
+                    if result.get("success"):
+                        self._send_response(APIResponse(True, result))
+                    else:
+                        self._send_response(APIResponse(False, error=result.get("error", "Reject failed")), 400)
+
+            elif path.startswith("/api/pip/blocked/") and path.endswith("/unblock"):
+                candidate_key = self._extract_capability_key(path, "/api/pip/blocked/", "/unblock")
+                if candidate_key is None:
+                    self._send_response(APIResponse(False, error="Invalid candidate_key"), 400)
+                else:
+                    reason = body.get("reason", "")
+                    result = self._pip_unblock(candidate_key, reason)
+                    if result.get("success"):
+                        self._send_response(APIResponse(True, result))
+                    else:
+                        self._send_response(APIResponse(False, error=result.get("error", "Unblock failed")), 400)
+
+            elif path == "/api/capability/candidates/scan":
+                ecosystem_dir = body.get("ecosystem_dir", None)
+                result = self._capability_scan(ecosystem_dir)
+                self._send_response(APIResponse(True, result))
+
+            elif path.startswith("/api/capability/requests/") and path.endswith("/approve"):
+                candidate_key = self._extract_capability_key(path, "/api/capability/requests/", "/approve")
+                if candidate_key is None:
+                    self._send_response(APIResponse(False, error="Invalid candidate_key"), 400)
+                else:
+                    notes = body.get("notes", "")
+                    result = self._capability_approve(candidate_key, notes)
+                    if result.get("success"):
+                        self._send_response(APIResponse(True, result))
+                    else:
+                        self._send_response(APIResponse(False, error=result.get("error", "Approve failed")), 400)
+
+            elif path.startswith("/api/capability/requests/") and path.endswith("/reject"):
+                candidate_key = self._extract_capability_key(path, "/api/capability/requests/", "/reject")
+                if candidate_key is None:
+                    self._send_response(APIResponse(False, error="Invalid candidate_key"), 400)
+                else:
+                    reason = body.get("reason", "")
+                    result = self._capability_reject(candidate_key, reason)
+                    if result.get("success"):
+                        self._send_response(APIResponse(True, result))
+                    else:
+                        self._send_response(APIResponse(False, error=result.get("error", "Reject failed")), 400)
+
+            elif path.startswith("/api/capability/blocked/") and path.endswith("/unblock"):
+                candidate_key = self._extract_capability_key(path, "/api/capability/blocked/", "/unblock")
+                if candidate_key is None:
+                    self._send_response(APIResponse(False, error="Invalid candidate_key"), 400)
+                else:
+                    reason = body.get("reason", "")
+                    result = self._capability_unblock(candidate_key, reason)
+                    if result.get("success"):
+                        self._send_response(APIResponse(True, result))
+                    else:
+                        self._send_response(APIResponse(False, error=result.get("error", "Unblock failed")), 400)
             
             elif path.startswith("/api/packs/") and path.endswith("/approve"):
                 pack_id = path.split("/")[3]
@@ -210,6 +316,10 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             logger.exception(f"API error: {e}")
             self._send_response(APIResponse(False, error=str(e)), 500)
     
+    # ------------------------------------------------------------------
+    # Pack endpoints
+    # ------------------------------------------------------------------
+
     def _get_all_packs(self) -> list:
         if not self.approval_manager:
             return []
@@ -258,6 +368,10 @@ class PackAPIHandler(BaseHTTPRequestHandler):
         self.approval_manager.reject(pack_id, reason)
         return {"success": True, "pack_id": pack_id, "reason": reason}
     
+    # ------------------------------------------------------------------
+    # Container endpoints
+    # ------------------------------------------------------------------
+
     def _get_containers(self) -> list:
         if not self.container_orchestrator:
             return []
@@ -289,6 +403,10 @@ class PackAPIHandler(BaseHTTPRequestHandler):
         self.container_orchestrator.remove_container(pack_id)
         return {"success": True, "pack_id": pack_id}
     
+    # ------------------------------------------------------------------
+    # Privilege endpoints
+    # ------------------------------------------------------------------
+
     def _get_privileges(self) -> list:
         if not self.host_privilege_manager:
             return []
@@ -306,6 +424,10 @@ class PackAPIHandler(BaseHTTPRequestHandler):
         result = self.host_privilege_manager.execute(pack_id, privilege_id, params)
         return {"success": result.success, "result": result.data, "error": result.error}
     
+    # ------------------------------------------------------------------
+    # Docker status
+    # ------------------------------------------------------------------
+
     def _get_docker_status(self) -> dict:
         if self.container_orchestrator:
             available = self.container_orchestrator.is_docker_available()
@@ -319,6 +441,144 @@ class PackAPIHandler(BaseHTTPRequestHandler):
         
         return {"available": available, "required": True}
     
+    # ------------------------------------------------------------------
+    # Capability Handler candidate endpoints
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _extract_capability_key(path: str, prefix: str, suffix: str) -> Optional[str]:
+        """
+        URL パスから candidate_key を抽出し、URL デコードする。
+
+        例: /api/capability/requests/my_pack%3Aslug%3Aid%3Asha/approve
+        → "my_pack:slug:id:sha"
+        """
+        if not path.startswith(prefix) or not path.endswith(suffix):
+            return None
+        encoded_key = path[len(prefix):-len(suffix)]
+        if not encoded_key:
+            return None
+        return unquote(encoded_key)
+
+    def _capability_scan(self, ecosystem_dir: Optional[str] = None) -> dict:
+        try:
+            from .capability_installer import get_capability_installer
+            installer = get_capability_installer()
+            result = installer.scan_candidates(ecosystem_dir)
+            return result.to_dict()
+        except Exception as e:
+            return {"error": str(e), "scanned_count": 0, "pending_created": 0}
+
+    def _capability_list_requests(self, status_filter: str = "all") -> dict:
+        try:
+            from .capability_installer import get_capability_installer
+            installer = get_capability_installer()
+            items = installer.list_items(status_filter)
+            return {"items": items, "count": len(items), "status_filter": status_filter}
+        except Exception as e:
+            return {"items": [], "error": str(e)}
+
+    def _capability_approve(self, candidate_key: str, notes: str = "") -> dict:
+        try:
+            from .capability_installer import get_capability_installer
+            installer = get_capability_installer()
+            result = installer.approve_and_install(candidate_key, actor="api_user", notes=notes)
+            return result.to_dict()
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _capability_reject(self, candidate_key: str, reason: str = "") -> dict:
+        try:
+            from .capability_installer import get_capability_installer
+            installer = get_capability_installer()
+            result = installer.reject(candidate_key, actor="api_user", reason=reason)
+            return result.to_dict()
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _capability_list_blocked(self) -> dict:
+        try:
+            from .capability_installer import get_capability_installer
+            installer = get_capability_installer()
+            blocked = installer.list_blocked()
+            return {"blocked": blocked, "count": len(blocked)}
+        except Exception as e:
+            return {"blocked": {}, "error": str(e)}
+
+    def _capability_unblock(self, candidate_key: str, reason: str = "") -> dict:
+        try:
+            from .capability_installer import get_capability_installer
+            installer = get_capability_installer()
+            result = installer.unblock(candidate_key, actor="api_user", reason=reason)
+            return result.to_dict()
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    # ------------------------------------------------------------------
+    # Pip dependency endpoints
+    # ------------------------------------------------------------------
+
+    def _pip_scan(self, ecosystem_dir: Optional[str] = None) -> dict:
+        try:
+            from .pip_installer import get_pip_installer
+            installer = get_pip_installer()
+            result = installer.scan_candidates(ecosystem_dir)
+            return result.to_dict()
+        except Exception as e:
+            return {"error": str(e), "scanned_count": 0, "pending_created": 0}
+
+    def _pip_list_requests(self, status_filter: str = "all") -> dict:
+        try:
+            from .pip_installer import get_pip_installer
+            installer = get_pip_installer()
+            items = installer.list_items(status_filter)
+            return {"items": items, "count": len(items), "status_filter": status_filter}
+        except Exception as e:
+            return {"items": [], "error": str(e)}
+
+    def _pip_approve(self, candidate_key: str, allow_sdist: bool = False, index_url: str = "https://pypi.org/simple") -> dict:
+        try:
+            from .pip_installer import get_pip_installer
+            installer = get_pip_installer()
+            result = installer.approve_and_install(
+                candidate_key, actor="api_user",
+                allow_sdist=allow_sdist, index_url=index_url,
+            )
+            return result.to_dict()
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _pip_reject(self, candidate_key: str, reason: str = "") -> dict:
+        try:
+            from .pip_installer import get_pip_installer
+            installer = get_pip_installer()
+            result = installer.reject(candidate_key, actor="api_user", reason=reason)
+            return result.to_dict()
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _pip_list_blocked(self) -> dict:
+        try:
+            from .pip_installer import get_pip_installer
+            installer = get_pip_installer()
+            blocked = installer.list_blocked()
+            return {"blocked": blocked, "count": len(blocked)}
+        except Exception as e:
+            return {"blocked": {}, "error": str(e)}
+
+    def _pip_unblock(self, candidate_key: str, reason: str = "") -> dict:
+        try:
+            from .pip_installer import get_pip_installer
+            installer = get_pip_installer()
+            result = installer.unblock(candidate_key, actor="api_user", reason=reason)
+            return result.to_dict()
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    # ------------------------------------------------------------------
+    # Uninstall
+    # ------------------------------------------------------------------
+
     def _uninstall_pack(self, pack_id: str) -> dict:
         if self.container_orchestrator:
             self.container_orchestrator.stop_container(pack_id)

@@ -1,5 +1,3 @@
-# core_runtime/secure_executor.py
-
 """
 secure_executor.py - セキュアなコード実行層
 
@@ -27,11 +25,12 @@ from pathlib import Path
 from typing import Any, Dict, Optional, List
 
 
+from .paths import LOCAL_PACK_ID, PACK_DATA_BASE_DIR as _PACK_DATA_BASE_DIR
+
 # lib 実行用定数
 LIB_INSTALL = "install"
 LIB_UPDATE = "update"
-PACK_DATA_BASE_DIR = "user_data/packs"
-LOCAL_PACK_ID = "local_pack"
+PACK_DATA_BASE_DIR = _PACK_DATA_BASE_DIR
 # pack_id に許可する文字（英数字、ハイフン、アンダースコアのみ）
 PACK_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]+$')
 
@@ -229,6 +228,14 @@ class SecureExecutor:
         
         safe_context = self._sanitize_context(context)
         
+        # pip site-packages 確認
+        pip_site_packages = None
+        _sp = Path(PACK_DATA_BASE_DIR) / pack_id / "python" / "site-packages"
+        if _sp.is_dir():
+            pip_site_packages = _sp
+
+        pythonpath_value = "/component" + (":/pip-packages" if pip_site_packages else "")
+        
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
             json.dump(safe_context, f, ensure_ascii=False, default=str)
             context_file = f.name
@@ -255,12 +262,22 @@ class SecureExecutor:
                 "-e", f"RUMI_PACK_ID={pack_id}",
                 "-e", f"RUMI_COMPONENT_ID={component_id}",
                 "-e", f"RUMI_PHASE={phase}",
+                "-e", f"PYTHONPATH={pythonpath_value}",
                 "--label", "rumi.managed=true",
                 "--label", f"rumi.pack_id={pack_id}",
                 "--label", "rumi.type=executor",
+            ]
+
+            # pip site-packages マウント
+            if pip_site_packages:
+                docker_cmd.extend([
+                    "-v", f"{pip_site_packages.resolve()}:/pip-packages:ro",
+                ])
+
+            docker_cmd.extend([
                 "python:3.11-slim",
                 "python", "-c", self._get_executor_script(file_path.name)
-            ]
+            ])
             
             result = subprocess.run(
                 docker_cmd,
@@ -519,6 +536,14 @@ else:
         container_name = f"rumi-lib-{pack_id}-{lib_type}-{abs(hash(str(lib_file))) % 10000}"
         lib_dir = lib_file.parent
         
+        # pip site-packages 確認
+        pip_site_packages = None
+        _sp = Path(PACK_DATA_BASE_DIR) / pack_id / "python" / "site-packages"
+        if _sp.is_dir():
+            pip_site_packages = _sp
+
+        pythonpath_value = "/lib" + (":/pip-packages" if pip_site_packages else "")
+        
         # コンテキスト準備
         exec_context = {
             "pack_id": pack_id,
@@ -559,13 +584,23 @@ else:
                 # 環境変数
                 "-e", f"RUMI_PACK_ID={pack_id}",
                 "-e", f"RUMI_LIB_TYPE={lib_type}",
+                "-e", f"PYTHONPATH={pythonpath_value}",
                 # ラベル
                 "--label", "rumi.managed=true",
                 "--label", f"rumi.pack_id={pack_id}",
                 "--label", "rumi.type=lib_executor",
+            ]
+
+            # pip site-packages マウント
+            if pip_site_packages:
+                docker_cmd.extend([
+                    "-v", f"{pip_site_packages.resolve()}:/pip-packages:ro",
+                ])
+
+            docker_cmd.extend([
                 "python:3.11-slim",
                 "python", "-c", self._get_lib_executor_script(lib_file.name)
-            ]
+            ])
             
             proc_result = subprocess.run(
                 docker_cmd,

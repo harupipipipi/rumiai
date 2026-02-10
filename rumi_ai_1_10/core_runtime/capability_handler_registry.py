@@ -229,6 +229,27 @@ class CapabilityHandlerRegistry:
         ep_file, ep_func = entrypoint.rsplit(":", 1)
         handler_py_path = slug_dir / ep_file
         
+        # パストラバーサル検証
+        # 1. パス文字列レベルで .. を含むコンポーネントを拒否
+        if '..' in ep_file.split('/') or '..' in ep_file.split('\\'):
+            self._load_errors.append({
+                "slug": slug, "error": f"Path traversal detected in entrypoint: {entrypoint}",
+                "path": str(handler_json_path), "ts": self._now_ts(),
+            })
+            return None
+        
+        # 2. resolve() して slug_dir 配下であることを確認（シンボリックリンク対策）
+        try:
+            resolved_handler = handler_py_path.resolve()
+            resolved_slug = slug_dir.resolve()
+            resolved_handler.relative_to(resolved_slug)
+        except ValueError:
+            self._load_errors.append({
+                "slug": slug, "error": f"Path traversal detected in entrypoint: {entrypoint}",
+                "path": str(handler_json_path), "ts": self._now_ts(),
+            })
+            return None
+        
         if not handler_py_path.exists():
             self._load_errors.append({
                 "slug": slug, "error": f"Entrypoint file not found: {ep_file}",

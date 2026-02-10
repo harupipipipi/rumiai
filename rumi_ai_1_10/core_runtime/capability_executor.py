@@ -189,10 +189,25 @@ class CapabilityExecutor:
 
         handler_id = handler_def.handler_id
 
-        # 2. Trust チェック
-        trust_result = self._trust_store.is_trusted(
-            handler_id, handler_def.handler_py_sha256 or ""
-        )
+        # 2. Trust チェック（実行時に handler.py の sha256 を再計算）
+        try:
+            from .capability_handler_registry import compute_file_sha256
+            actual_sha256 = compute_file_sha256(handler_def.handler_py_path)
+        except Exception:
+            resp = CapabilityResponse(
+                success=False,
+                error="Permission denied",
+                error_type="trust_denied",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+            self._audit(
+                principal_id, permission_id, handler_id, resp, args, request_id,
+                trusted=False,
+                detail_reason="Failed to compute handler sha256 at execution time",
+            )
+            return resp
+
+        trust_result = self._trust_store.is_trusted(handler_id, actual_sha256)
         if not trust_result.trusted:
             resp = CapabilityResponse(
                 success=False,

@@ -11,10 +11,18 @@ Pack コンテナからの capability 実行要求を受ける。
 - principal_id ごとに個別のソケットファイル
 - length-prefix JSON プロトコル（rumi_syscall と同じ）
 - permissive モードでも UDS 経由を維持
+
+セキュリティ:
+- ソケットファイルはデフォルト 0660（RUMI_CAPABILITY_SOCKET_MODE=0666 で緩和可能）
+- ベースディレクトリは 0750
+- RUMI_CAPABILITY_SOCKET_GID で group を設定可能（best-effort）
+- 全てのパーミッション設定失敗は握りつぶし、audit/diagnostics に警告を残す
+- ソケットファイル名は sha256(principal_id)[:32] で衝突回避
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -32,6 +40,115 @@ MAX_RESPONSE_SIZE = 1 * 1024 * 1024
 
 _UNSAFE_CHARS = re.compile(r'[/\\:*?"<>|.\x00-\x1f]')
 
+# パーミッション定数
+_DEFAULT_SOCKET_MODE = 0o660
+_DEFAULT_DIR_MODE = 0o750
+_RELAXED_SOCKET_MODE = 0o666
+
+
+def _principal_socket_name(principal_id: str) -> str:
+    """principal_id から衝突しないソケットファイル名を生成"""
+    h = hashlib.sha256(principal_id.encode("utf-8")).hexdigest()[:32]
+    return f"{h}.sock"
+
+
+# ============================================================
+# パーミッション ユーティリティ（モジュールレベル）
+# ============================================================
+
+def _get_socket_mode() -> int:
+    """環境変数からソケットパーミッションモードを取得"""
+    raw = os.environ.get("RUMI_CAPABILITY_SOCKET_MODE", "").strip()
+    if raw == "0666":
+        return _RELAXED_SOCKET_MODE
+    return _DEFAULT_SOCKET_MODE
+
+
+def _get_socket_gid() -> Optional[int]:
+    """環境変数からソケットGIDを取得"""
+    raw = os.environ.get("RUMI_CAPABILITY_SOCKET_GID", "").strip()
+    if raw:
+        try:
+            return int(raw)
+        except ValueError:
+            return None
+    return None
+
+
+def _apply_dir_permissions(dir_path: Path) -> None:
+    """
+    ディレクトリにパーミッションを適用（best-effort）
+
+    - chmod 0750
+    - RUMI_CAPABILITY_SOCKET_GID 指定時は chown で group を合わせる
+    - 全て失敗しても例外を出さず、audit に警告を残す
+    """
+    try:
+        os.chmod(dir_path, _DEFAULT_DIR_MODE)
+    except (OSError, PermissionError) as e:
+        msg = f"Failed to chmod directory {dir_path} to 0750: {e}"
+        _audit_permission_warning("dir_chmod_failed", str(dir_path), msg)
+
+    gid = _get_socket_gid()
+    if gid is not None and hasattr(os, "chown"):
+        try:
+            os.chown(dir_path, -1, gid)
+        except (OSError, PermissionError) as e:
+            msg = f"Failed to chown directory {dir_path} to gid {gid}: {e}"
+            _audit_permission_warning("dir_chown_failed", str(dir_path), msg)
+
+
+def _apply_socket_permissions(sock_path: Path) -> None:
+    """
+    ソケットファイルにパーミッションを適用（best-effort）
+
+    - デフォルト chmod 0660
+    - RUMI_CAPABILITY_SOCKET_MODE=0666 の場合のみ 0666（audit に記録）
+    - RUMI_CAPABILITY_SOCKET_GID 指定時は chown で group を合わせる
+    """
+    mode = _get_socket_mode()
+
+    # 0666 が有効な場合は audit/diagnostics に記録
+    if mode == _RELAXED_SOCKET_MODE:
+        msg = (
+            f"SECURITY WARNING: Capability socket {sock_path} using relaxed mode 0666 "
+            f"(RUMI_CAPABILITY_SOCKET_MODE=0666). This is less secure."
+        )
+        _audit_permission_warning("relaxed_socket_mode", str(sock_path), msg)
+
+    try:
+        os.chmod(sock_path, mode)
+    except (OSError, PermissionError) as e:
+        msg = f"Failed to chmod socket {sock_path} to {oct(mode)}: {e}"
+        _audit_permission_warning("socket_chmod_failed", str(sock_path), msg)
+
+    gid = _get_socket_gid()
+    if gid is not None and hasattr(os, "chown"):
+        try:
+            os.chown(sock_path, -1, gid)
+        except (OSError, PermissionError) as e:
+            msg = f"Failed to chown socket {sock_path} to gid {gid}: {e}"
+            _audit_permission_warning("socket_chown_failed", str(sock_path), msg)
+
+
+def _audit_permission_warning(event_type: str, path: str, message: str) -> None:
+    """パーミッション設定の警告を監査ログに記録"""
+    try:
+        from .audit_logger import get_audit_logger
+        audit = get_audit_logger()
+        audit.log_security_event(
+            event_type=f"capability_proxy_{event_type}",
+            severity="warning",
+            description=message,
+            details={"path": path},
+        )
+    except Exception:
+        pass
+
+
+# ============================================================
+# プロトコル ユーティリティ
+# ============================================================
 
 def _sanitize_for_path(s: str) -> str:
     """ファイルシステム安全な文字列に変換"""
@@ -64,6 +181,10 @@ def _write_length_prefixed(sock: socket.socket, data: bytes) -> None:
     """length-prefix データを書き込む"""
     sock.sendall(struct.pack(">I", len(data)) + data)
 
+
+# ============================================================
+# UDS ハンドラー / サーバー
+# ============================================================
 
 class _PrincipalHandler(socketserver.BaseRequestHandler):
     """
@@ -128,7 +249,13 @@ class _ThreadedUnixServer(socketserver.ThreadingMixIn, socketserver.UnixStreamSe
         if sock_path.exists():
             sock_path.unlink()
         super().__init__(socket_path, handler_class)
+        # ソケットファイルにパーミッション適用（best-effort）
+        _apply_socket_permissions(Path(socket_path))
 
+
+# ============================================================
+# Host Capability Proxy Server
+# ============================================================
 
 class HostCapabilityProxyServer:
     """
@@ -185,6 +312,9 @@ class HostCapabilityProxyServer:
                 fallback.mkdir(parents=True, exist_ok=True)
                 self._base_dir = fallback
 
+            # ディレクトリパーミッション適用（best-effort）
+            _apply_dir_permissions(self._base_dir)
+
             # executor 初期化
             from .capability_executor import get_capability_executor
             self._executor = get_capability_executor()
@@ -220,9 +350,9 @@ class HostCapabilityProxyServer:
                     # ソケットファイルが消えた→再起動
                     self._stop_server(principal_id)
 
-            # ソケットパスを生成
-            safe_name = _sanitize_for_path(principal_id)
-            sock_path = self._base_dir / f"{safe_name}.sock"
+            # ソケットパスを生成（sha256ベースで衝突回避）
+            sock_name = _principal_socket_name(principal_id)
+            sock_path = self._base_dir / sock_name
 
             try:
                 server = _ThreadedUnixServer(
@@ -234,7 +364,7 @@ class HostCapabilityProxyServer:
 
                 thread = threading.Thread(
                     target=server.serve_forever,
-                    name=f"capability-proxy-{safe_name}",
+                    name=f"capability-proxy-{sock_name[:-5]}",
                     daemon=True,
                 )
                 thread.start()
@@ -318,7 +448,10 @@ class HostCapabilityProxyServer:
             }
 
 
+# ============================================================
 # グローバルインスタンス
+# ============================================================
+
 _global_proxy: Optional[HostCapabilityProxyServer] = None
 _proxy_lock = threading.Lock()
 

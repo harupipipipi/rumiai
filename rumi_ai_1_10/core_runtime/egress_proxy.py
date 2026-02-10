@@ -18,11 +18,18 @@ PR-B変更:
 - 内部宛て禁止をgrant判定より前に（B1）
 - 巨大レスポンスは必ず失敗化（B2）
 - Packへの返却は汎用理由、auditに詳細
+
+PR-C変更:
+- ソケットファイル名をsha256(pack_id)[:32]ベースで衝突回避
+- chmod 0666固定を廃止、デフォルト0660 + envで0666緩和可能
+- gidをenvで指定可能（best-effort）
+- capability_proxy.pyのパーミッション方式に統一
 """
 
 from __future__ import annotations
 
 import base64
+import hashlib
 import http.client
 import ipaddress
 import json
@@ -68,6 +75,113 @@ MAX_HEADER_VALUE_LENGTH = 8192
 # セキュリティブロック用の汎用エラーメッセージ（Pack向け）
 GENERIC_SECURITY_BLOCK_MESSAGE = "Request blocked by security policy"
 GENERIC_SECURITY_BLOCK_TYPE = "blocked"
+
+# Egress ソケットパーミッション定数
+_EGRESS_DEFAULT_SOCKET_MODE = 0o660
+_EGRESS_DEFAULT_DIR_MODE = 0o750
+_EGRESS_RELAXED_SOCKET_MODE = 0o666
+
+
+# ============================================================
+# ソケット命名ユーティリティ
+# ============================================================
+
+def _pack_socket_name(pack_id: str) -> str:
+    """pack_id から衝突しないソケットファイル名を生成"""
+    h = hashlib.sha256(pack_id.encode("utf-8")).hexdigest()[:32]
+    return f"{h}.sock"
+
+
+# ============================================================
+# Egress パーミッション ユーティリティ
+# ============================================================
+
+def _get_egress_socket_mode() -> int:
+    """環境変数からソケットパーミッションモードを取得"""
+    raw = os.environ.get("RUMI_EGRESS_SOCKET_MODE", "").strip()
+    if raw == "0666":
+        return _EGRESS_RELAXED_SOCKET_MODE
+    return _EGRESS_DEFAULT_SOCKET_MODE
+
+
+def _get_egress_socket_gid() -> Optional[int]:
+    """環境変数からソケットGIDを取得"""
+    raw = os.environ.get("RUMI_EGRESS_SOCKET_GID", "").strip()
+    if raw:
+        try:
+            return int(raw)
+        except ValueError:
+            return None
+    return None
+
+
+def _apply_egress_dir_permissions(dir_path: Path) -> None:
+    """
+    ディレクトリにパーミッションを適用（best-effort）
+
+    - chmod 0750
+    - RUMI_EGRESS_SOCKET_GID 指定時は chown で group を合わせる
+    - 全て失敗しても例外を出さず、audit に警告を残す
+    """
+    try:
+        os.chmod(dir_path, _EGRESS_DEFAULT_DIR_MODE)
+    except (OSError, PermissionError) as e:
+        _audit_egress_permission_warning("dir_chmod_failed", str(dir_path),
+                                          f"Failed to chmod directory {dir_path} to 0750: {e}")
+
+    gid = _get_egress_socket_gid()
+    if gid is not None and hasattr(os, "chown"):
+        try:
+            os.chown(dir_path, -1, gid)
+        except (OSError, PermissionError) as e:
+            _audit_egress_permission_warning("dir_chown_failed", str(dir_path),
+                                              f"Failed to chown directory {dir_path} to gid {gid}: {e}")
+
+
+def _apply_egress_socket_permissions(sock_path: Path) -> None:
+    """
+    ソケットファイルにパーミッションを適用（best-effort）
+
+    - デフォルト chmod 0660
+    - RUMI_EGRESS_SOCKET_MODE=0666 の場合のみ 0666（audit に記録）
+    - RUMI_EGRESS_SOCKET_GID 指定時は chown で group を合わせる
+    """
+    mode = _get_egress_socket_mode()
+
+    if mode == _EGRESS_RELAXED_SOCKET_MODE:
+        _audit_egress_permission_warning("relaxed_socket_mode", str(sock_path),
+            f"SECURITY WARNING: Egress socket {sock_path} using relaxed mode 0666 "
+            f"(RUMI_EGRESS_SOCKET_MODE=0666). This is less secure.")
+
+    try:
+        os.chmod(sock_path, mode)
+    except (OSError, PermissionError) as e:
+        _audit_egress_permission_warning("socket_chmod_failed", str(sock_path),
+                                          f"Failed to chmod socket {sock_path} to {oct(mode)}: {e}")
+
+    gid = _get_egress_socket_gid()
+    if gid is not None and hasattr(os, "chown"):
+        try:
+            os.chown(sock_path, -1, gid)
+        except (OSError, PermissionError) as e:
+            _audit_egress_permission_warning("socket_chown_failed", str(sock_path),
+                                              f"Failed to chown socket {sock_path} to gid {gid}: {e}")
+
+
+def _audit_egress_permission_warning(event_type: str, path: str, message: str) -> None:
+    """パーミッション設定の警告を監査ログに記録"""
+    try:
+        from .audit_logger import get_audit_logger
+        audit = get_audit_logger()
+        audit.log_security_event(
+            event_type=f"egress_proxy_{event_type}",
+            severity="warning",
+            description=message,
+            details={"path": path},
+        )
+    except Exception:
+        pass
+
 
 # 禁止IPレンジ（IPv4）
 BLOCKED_IPV4_NETWORKS = [
@@ -703,6 +817,7 @@ class UDSSocketManager:
             path = Path(env_dir)
             try:
                 path.mkdir(parents=True, exist_ok=True)
+                _apply_egress_dir_permissions(path)
                 self._base_dir = path
                 return path
             except Exception:
@@ -712,6 +827,7 @@ class UDSSocketManager:
         default = Path(self.DEFAULT_BASE_DIR)
         try:
             default.mkdir(parents=True, exist_ok=True)
+            _apply_egress_dir_permissions(default)
             self._base_dir = default
             return default
         except Exception:
@@ -721,6 +837,7 @@ class UDSSocketManager:
         fallback = Path(self.FALLBACK_BASE_DIR)
         try:
             fallback.mkdir(parents=True, exist_ok=True)
+            _apply_egress_dir_permissions(fallback)
             self._base_dir = fallback
             return fallback
         except Exception as e:
@@ -728,9 +845,7 @@ class UDSSocketManager:
     
     def get_socket_path(self, pack_id: str) -> Path:
         """Pack IDからソケットパスを取得"""
-        # pack_id をサニタイズ
-        safe_id = pack_id.replace("/", "_").replace(":", "_").replace("..", "_").replace("\\", "_")
-        return self._get_base_dir() / f"{safe_id}.sock"
+        return self._get_base_dir() / _pack_socket_name(pack_id)
     
     def ensure_socket(self, pack_id: str) -> Tuple[bool, str, Optional[Path]]:
         """ソケットファイルを確保（docker run前に必須）"""
@@ -807,11 +922,8 @@ class UDSEgressServer:
                 self._server_socket.listen(5)
                 self._server_socket.settimeout(1.0)  # accept用タイムアウト
                 
-                # パーミッション設定（コンテナ内の nobody からアクセス可能にする）
-                try:
-                    os.chmod(self.socket_path, 0o666)
-                except Exception:
-                    pass  # Windowsでは失敗する可能性
+                # パーミッション設定（best-effort、capability_proxyと同方式）
+                _apply_egress_socket_permissions(self.socket_path)
                 
                 self._running = True
                 self._thread = threading.Thread(target=self._serve_forever, daemon=True)

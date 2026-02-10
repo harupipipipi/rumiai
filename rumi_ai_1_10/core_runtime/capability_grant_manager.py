@@ -178,7 +178,10 @@ class CapabilityGrantManager:
             computed_sig = self._compute_hmac(data)
             if not hmac.compare_digest(stored_sig, computed_sig):
                 principal_id = data.get("principal_id", file_path.stem)
-                self._tampered_principals.add(principal_id)
+                # raw と sanitize 両方を登録して確実にブロック
+                self._tampered_principals.add(principal_id)  # raw
+                self._tampered_principals.add(sanitize_principal_id(principal_id))  # sanitized
+                self._tampered_principals.add(file_path.stem)  # ファイル名ベース（フォールバック）
                 self._audit_tamper(principal_id, file_path)
                 return None
         
@@ -230,8 +233,9 @@ class CapabilityGrantManager:
             GrantCheckResult
         """
         with self._lock:
-            # 改ざん検出済みの principal は拒否
-            if principal_id in self._tampered_principals:
+            # 改ざん検出済みの principal は拒否（raw と sanitize 両方で判定）
+            if (principal_id in self._tampered_principals
+                    or sanitize_principal_id(principal_id) in self._tampered_principals):
                 return GrantCheckResult(
                     allowed=False,
                     reason=f"Grant file for '{principal_id}' has been tampered with",
@@ -312,7 +316,8 @@ class CapabilityGrantManager:
                 config=config or {},
             )
             
-            self._tampered_principals.discard(principal_id)
+            self._tampered_principals.discard(principal_id)  # raw
+            self._tampered_principals.discard(sanitize_principal_id(principal_id))  # sanitized
             self._save_grant(grant)
             
             self._audit_grant_event(principal_id, permission_id, "grant", True)

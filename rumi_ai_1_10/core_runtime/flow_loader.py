@@ -1,11 +1,16 @@
 """
 flow_loader.py - Flow定義ファイルのローダー
 
-flows/(公式)と ecosystem/packs/{pack_id}/backend/flows/(pack提供)からYAMLファイルを読み込み、
-InterfaceRegistryに登録する。
+flows/(公式)、user_data/shared/flows/(共有)、pack提供flows、local_pack互換から
+YAMLファイルを読み込み、InterfaceRegistryに登録する。
+
+探索優先順（上書き規則）:
+  1. 公式 flows/ — 承認不要、上書き不可
+  2. user_data/shared/flows/ — 承認不要（source_type="shared"）、公式を上書き不可
+  3. pack提供 flows — 承認+ハッシュ一致のpackのみ
+  4. local_pack互換 ecosystem/flows/ — RUMI_LOCAL_PACK_MODE=require_approval のみ（deprecated）
 
 設計原則:
-- 公式Flow (flows/) は承認不要で常にロード
 - pack提供Flow は承認+ハッシュ一致のpackのみロード
 - local_pack互換: RUMI_LOCAL_PACK_MODE=require_approval の場合のみ
 - phases/priority/idによる決定的な実行順序
@@ -17,6 +22,10 @@ Phase2追加:
 
 PR-B追加:
 - hash_mismatch検知時にMODIFIED昇格 + network権限無効化（B3）
+
+パス刷新:
+- pack_subdir 基準で flows/ と backend/flows/ の両方を探索
+- user_data/shared/flows/ を shared source として追加
 
 PR-C追加:
 - FlowStep に principal_id を追加（Capability Proxy連携）
@@ -38,9 +47,15 @@ except ImportError:
     HAS_YAML = False
 
 
-# local_pack定数（approval_managerと共有）
-LOCAL_PACK_ID = "local_pack"
-LOCAL_PACK_DIR = "ecosystem/flows"
+from .paths import (
+    LOCAL_PACK_ID,
+    LOCAL_PACK_DIR,
+    OFFICIAL_FLOWS_DIR,
+    ECOSYSTEM_DIR,
+    discover_pack_locations,
+    get_pack_flow_dirs,
+    get_shared_flow_dir,
+)
 
 
 @dataclass
@@ -72,7 +87,7 @@ class FlowDefinition:
     defaults: Dict[str, Any]
     steps: List[FlowStep]
     source_file: Optional[Path] = None
-    source_type: str = "unknown"  # "official", "pack", "local_pack"
+    source_type: str = "unknown"  # "official", "shared", "pack", "local_pack"
     source_pack_id: Optional[str] = None  # pack提供の場合のpack_id
     
     def to_dict(self) -> Dict[str, Any]:
@@ -138,18 +153,17 @@ class FlowLoader:
     """
     Flowファイルローダー
     
-    flows/(公式)と ecosystem/packs/{pack_id}/backend/flows/(pack提供)から
+    flows/(公式)、user_data/shared/flows/(共有)、pack提供flows、local_pack互換から
     YAMLファイルを読み込み、正規化する。
     
     承認ゲート:
     - 公式Flow (flows/) は承認不要
+    - 共有Flow (user_data/shared/flows/) は承認不要
     - pack提供Flow は承認+ハッシュ一致が必要
-    - local_pack (ecosystem/flows/) は環境変数で制御
+    - local_pack (ecosystem/flows/) は環境変数で制御（deprecated）
     """
     
-    OFFICIAL_FLOWS_DIR = "flows"
-    PACKS_DIR = "ecosystem/packs"
-    PACK_FLOWS_SUBDIR = "backend/flows"
+    OFFICIAL_FLOWS_DIR = OFFICIAL_FLOWS_DIR
     
     def __init__(self, approval_manager=None):
         self._lock = threading.RLock()
@@ -271,6 +285,12 @@ class FlowLoader:
         """
         全Flowファイルをロード
         
+        探索優先順:
+          1. 公式 flows/
+          2. user_data/shared/flows/
+          3. pack提供 flows
+          4. local_pack互換 ecosystem/flows/
+        
         Returns:
             flow_id -> FlowDefinition のマップ
         """
@@ -280,16 +300,17 @@ class FlowLoader:
             self._skipped_flows.clear()
             
             # 1. 公式Flowをロード（承認不要）
-            official_dir = Path(self.OFFICIAL_FLOWS_DIR)
+            official_dir = Path(OFFICIAL_FLOWS_DIR)
             if official_dir.exists():
                 self._load_official_flows(official_dir)
             
-            # 2. pack提供Flowをロード（承認必須）
-            packs_dir = Path(self.PACKS_DIR)
-            if packs_dir.exists():
-                self._load_pack_flows(packs_dir)
+            # 2. shared Flowをロード（承認不要、source_type="shared"）
+            self._load_shared_flows()
             
-            # 3. local_pack互換（環境変数で制御）
+            # 3. pack提供Flowをロード（承認必須）
+            self._load_pack_flows_via_discovery()
+            
+            # 4. local_pack互換（環境変数で制御、deprecated）
             if self._is_local_pack_mode_enabled():
                 self._load_local_pack_flows()
             
@@ -318,42 +339,91 @@ class FlowLoader:
                     "ts": self._now_ts()
                 })
     
-    def _load_pack_flows(self, packs_dir: Path) -> None:
-        """pack提供Flowをロード（承認必須）"""
-        for pack_dir in sorted(packs_dir.iterdir()):
-            if not pack_dir.is_dir() or pack_dir.name.startswith("."):
+    def _load_shared_flows(self) -> None:
+        """
+        shared Flowをロード（承認不要、source_type="shared"）
+        
+        user_data/shared/flows/**/*.flow.yaml を読み込む。
+        公式Flowを上書きしない。
+        """
+        shared_dir = get_shared_flow_dir()
+        if not shared_dir.exists():
+            return
+        
+        for yaml_file in sorted(shared_dir.glob("**/*.flow.yaml")):
+            # modifiers配下はFlowではないのでスキップ
+            if "modifiers" in str(yaml_file):
                 continue
             
-            pack_id = pack_dir.name
+            result = self.load_flow_file(yaml_file, "shared", None)
+            
+            if result.success and result.flow_def:
+                if result.flow_id in self._loaded_flows:
+                    existing = self._loaded_flows[result.flow_id]
+                    if existing.source_type == "official":
+                        self._load_errors.append({
+                            "file": str(yaml_file),
+                            "error": f"Cannot override official flow '{result.flow_id}' from shared",
+                            "ts": self._now_ts()
+                        })
+                        continue
+                
+                self._loaded_flows[result.flow_id] = result.flow_def
+            else:
+                self._load_errors.append({
+                    "file": str(yaml_file),
+                    "errors": result.errors,
+                    "ts": self._now_ts()
+                })
+    
+    def _load_pack_flows_via_discovery(self) -> None:
+        """
+        pack提供Flowをロード（承認必須）
+        
+        discover_pack_locations() で検出された全packについて、
+        pack_subdir 基準で flows/ と backend/flows/ を探索する。
+        """
+        locations = discover_pack_locations(str(ECOSYSTEM_DIR))
+        
+        for loc in locations:
+            pack_id = loc.pack_id
             
             # 承認チェック
             is_approved, reason = self._check_pack_approval(pack_id)
             if not is_approved:
-                # このpackのflows配下をスキップ
-                flows_dir = pack_dir / self.PACK_FLOWS_SUBDIR
-                if flows_dir.exists():
-                    for yaml_file in flows_dir.glob("**/*.flow.yaml"):
+                for flows_dir in get_pack_flow_dirs(loc.pack_subdir):
+                    for yaml_file in sorted(flows_dir.glob("**/*.flow.yaml")):
                         if "modifiers" not in str(yaml_file):
                             self._record_skip(yaml_file, pack_id, reason or "not_approved")
                 continue
             
-            # pack提供Flowをロード
-            flows_dir = pack_dir / self.PACK_FLOWS_SUBDIR
-            if flows_dir.exists():
+            for flows_dir in get_pack_flow_dirs(loc.pack_subdir):
                 self._load_directory_flows(flows_dir, "pack", pack_id)
     
     def _load_local_pack_flows(self) -> None:
-        """local_pack互換: ecosystem/flows/ をロード"""
+        """
+        local_pack互換: ecosystem/flows/ をロード（deprecated）
+        
+        RUMI_LOCAL_PACK_MODE=require_approval の場合のみ。
+        優先順位最低。公式・shared・pack提供を上書きしない。
+        """
         # 承認チェック
         is_approved, reason = self._check_pack_approval(LOCAL_PACK_ID)
         if not is_approved:
             local_dir = Path(LOCAL_PACK_DIR)
             if local_dir.exists():
                 for yaml_file in local_dir.glob("**/*.flow.yaml"):
-                    # modifiers配下はFlowではないのでスキップ
                     if "modifiers" not in str(yaml_file):
                         self._record_skip(yaml_file, LOCAL_PACK_ID, reason or "not_approved")
             return
+        
+        # deprecated 警告
+        import sys
+        print(
+            "[FlowLoader] WARNING: local_pack (ecosystem/flows/) is deprecated. "
+            "Use user_data/shared/flows/ instead.",
+            file=sys.stderr,
+        )
         
         # ロード
         local_dir = Path(LOCAL_PACK_DIR)
@@ -368,11 +438,12 @@ class FlowLoader:
                 if result.success and result.flow_def:
                     if result.flow_id in self._loaded_flows:
                         existing = self._loaded_flows[result.flow_id]
-                        # 公式やpack提供を上書きしない
-                        if existing.source_type in ("official", "pack"):
+                        # 公式・shared・pack提供を上書きしない
+                        if existing.source_type in ("official", "shared", "pack"):
                             self._load_errors.append({
                                 "file": str(yaml_file),
-                                "error": f"Cannot override {existing.source_type} flow '{result.flow_id}' from local_pack",
+                                "error": f"Cannot override {existing.source_type} flow "
+                                         f"'{result.flow_id}' from local_pack",
                                 "ts": self._now_ts()
                             })
                             continue
@@ -386,7 +457,7 @@ class FlowLoader:
                     })
     
     def _load_directory_flows(self, directory: Path, source_type: str, pack_id: Optional[str]) -> None:
-        """ディレクトリ内のFlowファイルをロード"""
+        """ディレクトリ内のFlowファイルをロード（modifiers配下除外）"""
         for yaml_file in sorted(directory.glob("**/*.flow.yaml")):
             # modifiers配下はFlowではないのでスキップ
             if "modifiers" in str(yaml_file):
@@ -402,7 +473,18 @@ class FlowLoader:
                     if existing.source_type == "official" and source_type != "official":
                         self._load_errors.append({
                             "file": str(yaml_file),
-                            "error": f"Cannot override official flow '{result.flow_id}' from {source_type}",
+                            "error": f"Cannot override official flow "
+                                     f"'{result.flow_id}' from {source_type}",
+                            "ts": self._now_ts()
+                        })
+                        continue
+                    # shared を pack が上書きしようとした場合は shared 優先
+                    if existing.source_type == "shared" and source_type == "pack":
+                        self._load_errors.append({
+                            "file": str(yaml_file),
+                            "error": f"Cannot override shared flow "
+                                     f"'{result.flow_id}' from pack "
+                                     f"(shared takes precedence)",
                             "ts": self._now_ts()
                         })
                         continue
@@ -421,7 +503,7 @@ class FlowLoader:
         
         Args:
             file_path: YAMLファイルのパス
-            source_type: "official", "pack", "local_pack"
+            source_type: "official", "shared", "pack", "local_pack"
             pack_id: pack提供の場合のpack_id
         
         Returns:
