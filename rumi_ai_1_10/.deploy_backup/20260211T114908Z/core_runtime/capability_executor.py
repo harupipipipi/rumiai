@@ -13,7 +13,6 @@ Trust / Grant を検証し、ハンドラーをサブプロセスで実行する
 
 from __future__ import annotations
 
-import collections
 import json
 import os
 import subprocess
@@ -35,10 +34,6 @@ MAX_ARGS_SUMMARY_LENGTH = 500
 # デフォルトタイムアウト
 DEFAULT_TIMEOUT = 30.0
 MAX_TIMEOUT = 120.0
-
-# rate limit: secret.get のみ（無限ループ事故防止）
-SECRET_GET_PERMISSION_ID = "secret.get"
-DEFAULT_SECRET_GET_RATE_LIMIT = 60  # 回/分/principal
 
 
 @dataclass
@@ -89,12 +84,6 @@ class CapabilityExecutor:
         self._handler_registry = None
         self._trust_store = None
         self._grant_manager = None
-        # rate limit 状態: principal_id -> deque of timestamps
-        self._rate_limit_state = {}
-        self._rate_limit_lock = threading.Lock()
-        self._secret_get_rate_limit = int(
-            os.environ.get("RUMI_SECRET_GET_RATE_LIMIT",
-                           str(DEFAULT_SECRET_GET_RATE_LIMIT)))
 
     def _now_ts(self) -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -170,21 +159,6 @@ class CapabilityExecutor:
             )
             self._audit(principal_id, permission_id or "", None, resp, args, request_id)
             return resp
-
-        # rate limit: secret.get のみ（無限ループ事故防止）
-        if permission_id == SECRET_GET_PERMISSION_ID:
-            if not self._check_rate_limit(principal_id):
-                resp = CapabilityResponse(
-                    success=False,
-                    error="Rate limited",
-                    error_type="rate_limited",
-                    latency_ms=(time.time() - start_time) * 1000,
-                )
-                self._audit(
-                    principal_id, permission_id, None, resp, args, request_id,
-                    detail_reason=f"Rate limit exceeded ({self._secret_get_rate_limit}/min)",
-                )
-                return resp
 
         # 初期化チェック
         if not self._initialized:
@@ -468,32 +442,6 @@ def main():
 if __name__ == "__main__":
     main()
 '''
-
-    def _check_rate_limit(self, principal_id: str) -> bool:
-        """
-        secret.get の rate limit チェック（sliding window 60秒）。
-
-        Returns:
-            True = 許可, False = 超過
-        """
-        now = time.time()
-        window = 60.0
-
-        with self._rate_limit_lock:
-            if principal_id not in self._rate_limit_state:
-                self._rate_limit_state[principal_id] = collections.deque()
-
-            dq = self._rate_limit_state[principal_id]
-
-            # ウィンドウ外のエントリを削除
-            while dq and dq[0] < now - window:
-                dq.popleft()
-
-            if len(dq) >= self._secret_get_rate_limit:
-                return False
-
-            dq.append(now)
-            return True
 
     def _audit(
         self,

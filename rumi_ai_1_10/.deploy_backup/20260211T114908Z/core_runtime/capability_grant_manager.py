@@ -24,8 +24,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from .hierarchical_grant import parse_principal_chain, intersect_config
-
 _UNSAFE_CHARS = re.compile(r'[/\\:*?"<>|.\x00-\x1f]')
 
 
@@ -244,72 +242,52 @@ class CapabilityGrantManager:
                     principal_id=principal_id,
                     permission_id=permission_id,
                 )
-
-            # 階層 principal チェーン（parent__child 形式に対応）
-            chain = parse_principal_chain(principal_id)
-            configs = []
-
-            for ancestor_id in chain:
-                # 改ざんチェック（各階層）
-                if (ancestor_id in self._tampered_principals
-                        or sanitize_principal_id(ancestor_id) in self._tampered_principals):
-                    label = 'ancestor' if ancestor_id != principal_id else 'principal'
-                    return GrantCheckResult(
-                        allowed=False,
-                        reason=f"Grant file for {label} '{ancestor_id}' has been tampered with",
-                        principal_id=principal_id,
-                        permission_id=permission_id,
-                    )
-
-                grant = self._grants.get(ancestor_id)
-                label = 'ancestor' if ancestor_id != principal_id else 'principal'
-
-                if grant is None:
-                    return GrantCheckResult(
-                        allowed=False,
-                        reason=f"No capability grant for {label} '{ancestor_id}'",
-                        principal_id=principal_id,
-                        permission_id=permission_id,
-                    )
-
-                if not grant.enabled:
-                    return GrantCheckResult(
-                        allowed=False,
-                        reason=f"Capability grant for {label} '{ancestor_id}' is disabled",
-                        principal_id=principal_id,
-                        permission_id=permission_id,
-                    )
-
-                perm = grant.permissions.get(permission_id)
-                if perm is None:
-                    return GrantCheckResult(
-                        allowed=False,
-                        reason=f"Permission '{permission_id}' not granted to {label} '{ancestor_id}'",
-                        principal_id=principal_id,
-                        permission_id=permission_id,
-                    )
-
-                if not perm.enabled:
-                    return GrantCheckResult(
-                        allowed=False,
-                        reason=f"Permission '{permission_id}' is disabled for {label} '{ancestor_id}'",
-                        principal_id=principal_id,
-                        permission_id=permission_id,
-                    )
-
-                configs.append(dict(perm.config))
-
-            # 全階層 OK → config は intersection
-            final_config = intersect_config(configs) if len(configs) > 1 else (configs[0] if configs else {})
-
+            
+            # Grant が存在するか
+            grant = self._grants.get(principal_id)
+            if grant is None:
+                return GrantCheckResult(
+                    allowed=False,
+                    reason=f"No capability grant for principal '{principal_id}'",
+                    principal_id=principal_id,
+                    permission_id=permission_id,
+                )
+            
+            # principal 全体が有効か
+            if not grant.enabled:
+                return GrantCheckResult(
+                    allowed=False,
+                    reason=f"Capability grant for '{principal_id}' is disabled",
+                    principal_id=principal_id,
+                    permission_id=permission_id,
+                )
+            
+            # 該当 permission が存在するか
+            perm = grant.permissions.get(permission_id)
+            if perm is None:
+                return GrantCheckResult(
+                    allowed=False,
+                    reason=f"Permission '{permission_id}' not granted to '{principal_id}'",
+                    principal_id=principal_id,
+                    permission_id=permission_id,
+                )
+            
+            # 該当 permission が有効か
+            if not perm.enabled:
+                return GrantCheckResult(
+                    allowed=False,
+                    reason=f"Permission '{permission_id}' is disabled for '{principal_id}'",
+                    principal_id=principal_id,
+                    permission_id=permission_id,
+                )
+            
             return GrantCheckResult(
                 allowed=True,
                 reason="Granted",
                 principal_id=principal_id,
                 permission_id=permission_id,
-                config=final_config,
+                config=dict(perm.config),
             )
-
     
     def grant_permission(
         self,

@@ -93,7 +93,7 @@ steps:
     input:
       handler: "kernel:lib.process_all"
       args:
-        packs_dir: "ecosystem"
+        packs_dir: "ecosystem/packs"
 
   # === finalize phase ===
   - id: interfaces_publish

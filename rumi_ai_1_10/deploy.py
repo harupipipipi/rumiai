@@ -1,1825 +1,996 @@
-
-
-
-#!/usr/bin/env python3
 """
-deploy.py - Pack依存ライブラリ導入システムの新規ファイルをデプロイ
+deploy.py - 既存ファイル修正適用スクリプト
 
-実行方法:
+7つの既存ファイルにパッチを適用する。
+実行前にバックアップを作成し、失敗時はロールバックする。
+
+Usage:
     python deploy.py
-
-プロジェクトルートから実行してください。
-既存ファイルが存在する場合はバックアップを作成してから上書きします。
-"""
-
-import os
-import shutil
-from datetime import datetime
-from pathlib import Path
-
-PROJECT_ROOT = Path(__file__).parent
-
-FILES = {}
-
-# ======================================================================
-# 1. core_runtime/pip_installer.py
-# ======================================================================
-
-FILES["core_runtime/pip_installer.py"] = r'''"""
-pip_installer.py - Pack 依存ライブラリ導入システム
-
-Pack が同梱する requirements.lock を候補として検出し、
-ユーザーが API で承認すると、ビルダー用 Docker コンテナで
-PyPI から取得・展開する。
-
-永続化: capability_installer と同型
-  user_data/pip/requests/requests.jsonl   (イベントログ)
-  user_data/pip/requests/index.json       (最新状態)
-  user_data/pip/requests/blocked.json     (ブロック状態)
-
-candidate_key = "{pack_id}:{requirements_relpath}:{sha256(requirements.lock)}"
-
-状態: pending | installed | rejected | blocked | failed
-cooldown: 3600秒 (1時間)
-reject 3回で blocked
+    python deploy.py --dry-run
+    python deploy.py --rollback
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
-import subprocess
-import threading
-import time
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timezone, timedelta
+import argparse
+import os
+import shutil
+import sys
+import textwrap
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import List, Tuple
 
-from .paths import (
-    ECOSYSTEM_DIR,
-    PACK_DATA_BASE_DIR,
-    discover_pack_locations,
-    find_ecosystem_json,
-    PackLocation,
-)
+
+BACKUP_DIR = ".deploy_backup"
+
+
+def now_ts() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def log(msg: str) -> None:
+    print(f"[deploy] {msg}")
+
+
+def log_ok(msg: str) -> None:
+    print(f"[deploy]  OK  {msg}")
+
+
+def log_err(msg: str) -> None:
+    print(f"[deploy]  ERR {msg}", file=sys.stderr)
 
 
 # ======================================================================
-# 定数
+# バックアップ / ロールバック
 # ======================================================================
 
-PIP_REQUESTS_DIR = "user_data/pip/requests"
-PIP_REQUESTS_JSONL = "user_data/pip/requests/requests.jsonl"
-PIP_INDEX_FILE = "user_data/pip/requests/index.json"
-PIP_BLOCKED_FILE = "user_data/pip/requests/blocked.json"
+def backup_file(filepath: Path, backup_dir: Path) -> Path:
+    rel = filepath.resolve().relative_to(Path.cwd().resolve())
+    dest = backup_dir / str(rel)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(filepath, dest)
+    return dest
 
-COOLDOWN_SECONDS = 3600          # 1時間
-REJECT_THRESHOLD = 3             # 3回で blocked
 
-DEFAULT_INDEX_URL = "https://pypi.org/simple"
-BUILDER_IMAGE = "python:3.11-slim"
+def rollback(backup_dir: Path) -> None:
+    if not backup_dir.exists():
+        log_err(f"Backup directory not found: {backup_dir}")
+        sys.exit(1)
+    cwd = Path.cwd().resolve()
+    count = 0
+    for bf in backup_dir.rglob("*"):
+        if bf.is_file():
+            rel = bf.relative_to(backup_dir)
+            target = cwd / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(bf, target)
+            log_ok(f"Restored: {rel}")
+            count += 1
+    log(f"Rollback complete: {count} files restored from {backup_dir}")
 
-# requirements.lock 探索候補 (pack_subdir 基準)
-REQUIREMENTS_LOCK_CANDIDATES = [
-    "requirements.lock",
-    "backend/requirements.lock",
+
+# ======================================================================
+# 汎用ヘルパー
+# ======================================================================
+
+def find_line_index(lines: List[str], needle: str, start: int = 0) -> int:
+    """needle を含む行のインデックスを返す。見つからなければ -1。"""
+    for i in range(start, len(lines)):
+        if needle in lines[i]:
+            return i
+    return -1
+
+
+def find_line_index_stripped(lines: List[str], needle: str, start: int = 0) -> int:
+    """strip() 後に needle と一致する行のインデックスを返す。"""
+    for i in range(start, len(lines)):
+        if lines[i].strip() == needle:
+            return i
+    return -1
+
+
+def get_indent(line: str) -> str:
+    """行の先頭インデントを返す。"""
+    return line[: len(line) - len(line.lstrip())]
+
+
+# ======================================================================
+# 1. python_file_executor.py
+# ======================================================================
+
+def patch_python_file_executor(content: str) -> str:
+    """
+    principal 強制: effective_principal = resolved_pack 固定。
+    '# 2. 承認チェック' の直前にブロックを挿入する。
+    """
+    if "# principal 強制（v1）" in content:
+        return content  # 既に適用済み
+
+    lines = content.split("\n")
+
+    # '# 2. 承認チェック' を探す
+    idx = find_line_index(lines, "# 2. 承認チェック")
+    if idx == -1:
+        # フォールバック: 'approved, reason = self._approval_checker.is_approved' を探す
+        idx = find_line_index(lines, "self._approval_checker.is_approved")
+        if idx == -1:
+            raise ValueError("python_file_executor.py: cannot find insertion point for principal enforcement")
+        # その前の 'if resolved_pack:' を探す
+        for j in range(idx, max(idx - 10, 0), -1):
+            if "if resolved_pack:" in lines[j]:
+                idx = j
+                break
+
+    indent = get_indent(lines[idx])
+
+    block = [
+        f"{indent}# principal 強制（v1）: principal は必ず owner_pack に固定",
+        f"{indent}# FlowStep から principal_id が来ても無視（乱用事故防止）",
+        f"{indent}effective_principal = resolved_pack",
+        f"{indent}if principal_id is not None and principal_id != resolved_pack:",
+        f"{indent}    try:",
+        f"{indent}        from .audit_logger import get_audit_logger",
+        f"{indent}        _audit = get_audit_logger()",
+        f"{indent}        _audit.log_security_event(",
+        f'{indent}            event_type="principal_id_overridden",',
+        f'{indent}            severity="warning",',
+        f"{indent}            description=(",
+        f"""{indent}                f"principal_id '{{principal_id}}' overridden to \"""",
+        f"""{indent}                f"owner_pack '{{resolved_pack}}' (v1 principal enforcement)\"""",
+        f"{indent}            ),",
+        f"{indent}            details={{",
+        f'{indent}                "requested_principal": principal_id,',
+        f'{indent}                "effective_principal": resolved_pack,',
+        f"{indent}            }},",
+        f"{indent}        )",
+        f"{indent}    except Exception:",
+        f"{indent}        pass",
+        f"",
+    ]
+
+    lines = lines[:idx] + block + lines[idx:]
+    return "\n".join(lines)
+
+
+# ======================================================================
+# 2. kernel_handlers_runtime.py
+# ======================================================================
+
+def patch_kernel_handlers_runtime(content: str) -> str:
+    """
+    effective_principal = principal_id or owner_pack
+    → effective_principal = owner_pack
+    """
+    old = "effective_principal = principal_id or owner_pack"
+    new = "effective_principal = owner_pack  # v1 principal enforcement: always owner_pack"
+
+    if old not in content:
+        if "# v1 principal enforcement" in content:
+            return content  # 既に適用済み
+        raise ValueError("kernel_handlers_runtime.py: cannot find 'effective_principal = principal_id or owner_pack'")
+
+    return content.replace(old, new, 1)
+
+
+# ======================================================================
+# 3. kernel_core.py
+# ======================================================================
+
+def patch_kernel_core(content: str) -> str:
+    """
+    _execute_handler_step_async 内の handler 解決を統一。
+    IR のみ → _resolve_handler 優先 + IR フォールバック。
+    """
+    if "# handler 解決統一" in content:
+        return content  # 既に適用済み
+
+    lines = content.split("\n")
+
+    # _execute_handler_step_async メソッド内を探す
+    method_idx = find_line_index(lines, "async def _execute_handler_step_async")
+    if method_idx == -1:
+        raise ValueError("kernel_core.py: cannot find _execute_handler_step_async")
+
+    # メソッド内で 'self.interface_registry.get(handler_key' を探す
+    ir_get_idx = find_line_index(lines, 'self.interface_registry.get(handler_key', method_idx)
+    if ir_get_idx == -1:
+        raise ValueError("kernel_core.py: cannot find interface_registry.get(handler_key) in _execute_handler_step_async")
+
+    indent = get_indent(lines[ir_get_idx])
+
+    # 旧コードの範囲を特定:
+    # Line A: handler = self.interface_registry.get(handler_key, strategy="last")
+    # Line B: if not handler or not callable(handler):
+    # Line C:     return ctx, None
+    # Line D: resolved_args = self._resolve_value(step.get("args", {}), ctx)
+    old_start = ir_get_idx
+    old_end = ir_get_idx
+
+    # B行を探す
+    for j in range(ir_get_idx + 1, min(ir_get_idx + 5, len(lines))):
+        s = lines[j].strip()
+        if s.startswith("if not handler") or s.startswith("if handler is None"):
+            old_end = j
+            break
+
+    # C行 (return ctx, None)
+    for j in range(old_end + 1, min(old_end + 3, len(lines))):
+        if "return ctx, None" in lines[j]:
+            old_end = j
+            break
+
+    # D行 (resolved_args)
+    for j in range(old_end + 1, min(old_end + 3, len(lines))):
+        if "resolved_args" in lines[j] and "_resolve_value" in lines[j]:
+            old_end = j
+            break
+
+    new_block = [
+        f'{indent}resolved_args = self._resolve_value(step.get("args", {{}}), ctx)',
+        f"",
+        f"{indent}# handler 解決統一: kernel:* は _resolve_handler を優先し、",
+        f"{indent}# pipeline 実行と同じ経路で解決する（async/pipeline 非対称の解消）",
+        f"{indent}handler = self._resolve_handler(handler_key, resolved_args)",
+        f"",
+        f"{indent}# kernel:* で見つからなかった場合は IR にフォールバック",
+        f"{indent}if handler is None:",
+        f'{indent}    handler = self.interface_registry.get(handler_key, strategy="last")',
+        f"",
+        f"{indent}if handler is None or not callable(handler):",
+        f"{indent}    return ctx, None",
+    ]
+
+    lines = lines[:old_start] + new_block + lines[old_end + 1:]
+    return "\n".join(lines)
+
+
+# ======================================================================
+# 4. capability_grant_manager.py
+# ======================================================================
+
+def patch_capability_grant_manager(content: str) -> str:
+    """
+    - import hierarchical_grant を追加
+    - check() の本体を階層 grant 評価に書き換え
+    """
+    if "parse_principal_chain" in content:
+        return content  # 既に適用済み
+
+    # --- 1. import 追加 ---
+    import_line = "from .hierarchical_grant import parse_principal_chain, intersect_config"
+
+    lines = content.split("\n")
+
+    # 'from typing import' の行を探す
+    typing_idx = find_line_index(lines, "from typing import")
+    if typing_idx == -1:
+        raise ValueError("capability_grant_manager.py: cannot find 'from typing import'")
+
+    lines.insert(typing_idx + 1, "")
+    lines.insert(typing_idx + 2, import_line)
+
+    # --- 2. check() 本体の置換 ---
+    # check() メソッド内の 'with self._lock:' ブロック内、
+    # 改ざんチェックの後の '# Grant が存在するか' または
+    # 'grant = self._grants.get(principal_id)' から
+    # メソッド末尾の 'config=dict(perm.config)' を含む return まで。
+
+    content_rejoined = "\n".join(lines)
+    lines = content_rejoined.split("\n")
+
+    # check() メソッドを探す
+    check_idx = find_line_index(lines, "def check(self, principal_id")
+    if check_idx == -1:
+        raise ValueError("capability_grant_manager.py: cannot find 'def check('")
+
+    # check() メソッドの次のメソッド定義を探す（check の終わりを決定）
+    next_def_idx = -1
+    for j in range(check_idx + 1, len(lines)):
+        stripped = lines[j].strip()
+        # 同レベルの def（インデント4スペース）
+        if lines[j].startswith("    def ") and not lines[j].startswith("        "):
+            next_def_idx = j
+            break
+
+    if next_def_idx == -1:
+        # クラスの終わりまで
+        next_def_idx = len(lines)
+
+    # check() 内で旧コードの開始を探す
+    # 'grant = self._grants.get(principal_id)' を探す（改ざんチェック後）
+    old_body_start = -1
+    for j in range(check_idx, next_def_idx):
+        s = lines[j].strip()
+        if s == "grant = self._grants.get(principal_id)":
+            old_body_start = j
+            break
+        # コメント行も候補
+        if "Grant" in s and "存在" in s:
+            old_body_start = j
+            break
+
+    if old_body_start == -1:
+        # もうひとつのパターン: 直接 grant = を探す
+        for j in range(check_idx, next_def_idx):
+            if "self._grants.get(principal_id)" in lines[j] and "grant" in lines[j]:
+                old_body_start = j
+                break
+
+    if old_body_start == -1:
+        raise ValueError(
+            "capability_grant_manager.py: cannot find old check() body. "
+            "Searched for 'grant = self._grants.get(principal_id)' between lines "
+            f"{check_idx} and {next_def_idx}"
+        )
+
+    # old_body_start の前に日本語コメント行がある場合はそれも含める
+    if old_body_start > 0 and ("Grant" in lines[old_body_start - 1] or "存在" in lines[old_body_start - 1]):
+        old_body_start -= 1
+    # 空行も含める
+    if old_body_start > 0 and lines[old_body_start - 1].strip() == "":
+        old_body_start -= 1
+
+    old_body_end = next_def_idx
+
+    # 旧コードの最後の行を探す（return GrantCheckResult の閉じ括弧 ')'）
+    # next_def の直前の空行やコメントをスキップ
+    actual_end = old_body_end
+    for j in range(old_body_end - 1, old_body_start, -1):
+        s = lines[j].strip()
+        if s == "" or s.startswith("#"):
+            actual_end = j
+        else:
+            actual_end = j + 1
+            break
+
+    indent = "            "  # 12 spaces (inside with self._lock:)
+
+    new_body = [
+        f"",
+        f"{indent}# 階層 principal チェーン（parent__child 形式に対応）",
+        f"{indent}chain = parse_principal_chain(principal_id)",
+        f"{indent}configs = []",
+        f"",
+        f"{indent}for ancestor_id in chain:",
+        f"{indent}    # 改ざんチェック（各階層）",
+        f"{indent}    if (ancestor_id in self._tampered_principals",
+        f"{indent}            or sanitize_principal_id(ancestor_id) in self._tampered_principals):",
+        f"{indent}        label = 'ancestor' if ancestor_id != principal_id else 'principal'",
+        f"{indent}        return GrantCheckResult(",
+        f"{indent}            allowed=False,",
+        f'{indent}            reason=f"Grant file for {{label}} \'{{ancestor_id}}\' has been tampered with",',
+        f"{indent}            principal_id=principal_id,",
+        f"{indent}            permission_id=permission_id,",
+        f"{indent}        )",
+        f"",
+        f"{indent}    grant = self._grants.get(ancestor_id)",
+        f"{indent}    label = 'ancestor' if ancestor_id != principal_id else 'principal'",
+        f"",
+        f"{indent}    if grant is None:",
+        f"{indent}        return GrantCheckResult(",
+        f"{indent}            allowed=False,",
+        f'{indent}            reason=f"No capability grant for {{label}} \'{{ancestor_id}}\'",',
+        f"{indent}            principal_id=principal_id,",
+        f"{indent}            permission_id=permission_id,",
+        f"{indent}        )",
+        f"",
+        f"{indent}    if not grant.enabled:",
+        f"{indent}        return GrantCheckResult(",
+        f"{indent}            allowed=False,",
+        f'{indent}            reason=f"Capability grant for {{label}} \'{{ancestor_id}}\' is disabled",',
+        f"{indent}            principal_id=principal_id,",
+        f"{indent}            permission_id=permission_id,",
+        f"{indent}        )",
+        f"",
+        f"{indent}    perm = grant.permissions.get(permission_id)",
+        f"{indent}    if perm is None:",
+        f"{indent}        return GrantCheckResult(",
+        f"{indent}            allowed=False,",
+        f'{indent}            reason=f"Permission \'{{permission_id}}\' not granted to {{label}} \'{{ancestor_id}}\'",',
+        f"{indent}            principal_id=principal_id,",
+        f"{indent}            permission_id=permission_id,",
+        f"{indent}        )",
+        f"",
+        f"{indent}    if not perm.enabled:",
+        f"{indent}        return GrantCheckResult(",
+        f"{indent}            allowed=False,",
+        f'{indent}            reason=f"Permission \'{{permission_id}}\' is disabled for {{label}} \'{{ancestor_id}}\'",',
+        f"{indent}            principal_id=principal_id,",
+        f"{indent}            permission_id=permission_id,",
+        f"{indent}        )",
+        f"",
+        f"{indent}    configs.append(dict(perm.config))",
+        f"",
+        f"{indent}# 全階層 OK → config は intersection",
+        f"{indent}final_config = intersect_config(configs) if len(configs) > 1 else (configs[0] if configs else {{}})",
+        f"",
+        f"{indent}return GrantCheckResult(",
+        f"{indent}    allowed=True,",
+        f'{indent}    reason="Granted",',
+        f"{indent}    principal_id=principal_id,",
+        f"{indent}    permission_id=permission_id,",
+        f"{indent}    config=final_config,",
+        f"{indent})",
+        f"",
+    ]
+
+    lines = lines[:old_body_start] + new_body + lines[actual_end:]
+    return "\n".join(lines)
+
+
+# ======================================================================
+# 5. capability_executor.py
+# ======================================================================
+
+def patch_capability_executor(content: str) -> str:
+    """
+    - import collections 追加
+    - rate limit 定数追加
+    - __init__ に rate limit 状態追加
+    - execute() に secret.get rate limit 挿入
+    - _check_rate_limit メソッド追加
+    """
+    lines = content.split("\n")
+
+    # --- 1. import collections ---
+    if "import collections" not in content:
+        idx = find_line_index(lines, "import json")
+        if idx == -1:
+            raise ValueError("capability_executor.py: cannot find 'import json'")
+        lines.insert(idx, "import collections")
+
+    # --- 2. rate limit 定数 ---
+    if "SECRET_GET_PERMISSION_ID" not in content:
+        content_tmp = "\n".join(lines)
+        lines = content_tmp.split("\n")
+        idx = find_line_index(lines, "MAX_TIMEOUT")
+        if idx == -1:
+            raise ValueError("capability_executor.py: cannot find 'MAX_TIMEOUT'")
+        insert_lines = [
+            "",
+            "# rate limit: secret.get のみ（無限ループ事故防止）",
+            'SECRET_GET_PERMISSION_ID = "secret.get"',
+            "DEFAULT_SECRET_GET_RATE_LIMIT = 60  # 回/分/principal",
+        ]
+        lines = lines[:idx + 1] + insert_lines + lines[idx + 1:]
+
+    # --- 3. __init__ に rate limit 状態追加 ---
+    if "_rate_limit_state" not in "\n".join(lines):
+        content_tmp = "\n".join(lines)
+        lines = content_tmp.split("\n")
+        idx = find_line_index(lines, "self._grant_manager = None")
+        if idx == -1:
+            raise ValueError("capability_executor.py: cannot find 'self._grant_manager = None'")
+        indent = get_indent(lines[idx])
+        insert_lines = [
+            f"{indent}# rate limit 状態: principal_id -> deque of timestamps",
+            f"{indent}self._rate_limit_state = {{}}",
+            f"{indent}self._rate_limit_lock = threading.Lock()",
+            f"{indent}self._secret_get_rate_limit = int(",
+            f'{indent}    os.environ.get("RUMI_SECRET_GET_RATE_LIMIT",',
+            f"{indent}                   str(DEFAULT_SECRET_GET_RATE_LIMIT)))",
+        ]
+        lines = lines[:idx + 1] + insert_lines + lines[idx + 1:]
+
+    # --- 4. execute() に rate limit チェック挿入 ---
+    content_tmp = "\n".join(lines)
+    if "SECRET_GET_PERMISSION_ID" not in content_tmp.split("def execute(")[1].split("\n    def ")[0] if "def execute(" in content_tmp else "x":
+        lines = content_tmp.split("\n")
+        # '# 初期化チェック' を execute() 内で探す
+        exec_idx = find_line_index(lines, "def execute(")
+        if exec_idx == -1:
+            raise ValueError("capability_executor.py: cannot find 'def execute('")
+        init_check_idx = find_line_index(lines, "# 初期化チェック", exec_idx)
+        if init_check_idx == -1:
+            # フォールバック: 'if not self._initialized:' を探す
+            init_check_idx = find_line_index(lines, "if not self._initialized:", exec_idx)
+            if init_check_idx == -1:
+                raise ValueError("capability_executor.py: cannot find initialization check in execute()")
+
+        indent = get_indent(lines[init_check_idx])
+        insert_lines = [
+            f"{indent}# rate limit: secret.get のみ（無限ループ事故防止）",
+            f"{indent}if permission_id == SECRET_GET_PERMISSION_ID:",
+            f"{indent}    if not self._check_rate_limit(principal_id):",
+            f"{indent}        resp = CapabilityResponse(",
+            f"{indent}            success=False,",
+            f'{indent}            error="Rate limited",',
+            f'{indent}            error_type="rate_limited",',
+            f"{indent}            latency_ms=(time.time() - start_time) * 1000,",
+            f"{indent}        )",
+            f"{indent}        self._audit(",
+            f"{indent}            principal_id, permission_id, None, resp, args, request_id,",
+            f'{indent}            detail_reason=f"Rate limit exceeded ({{self._secret_get_rate_limit}}/min)",',
+            f"{indent}        )",
+            f"{indent}        return resp",
+            f"",
+        ]
+        lines = lines[:init_check_idx] + insert_lines + lines[init_check_idx:]
+
+    # --- 5. _check_rate_limit メソッド追加 ---
+    content_tmp = "\n".join(lines)
+    if "def _check_rate_limit" not in content_tmp:
+        lines = content_tmp.split("\n")
+        # _audit メソッドの直前に挿入
+        audit_idx = find_line_index(lines, "def _audit(")
+        if audit_idx == -1:
+            raise ValueError("capability_executor.py: cannot find 'def _audit('")
+
+        method_lines = [
+            "    def _check_rate_limit(self, principal_id: str) -> bool:",
+            '        """',
+            "        secret.get の rate limit チェック（sliding window 60秒）。",
+            "",
+            "        Returns:",
+            "            True = 許可, False = 超過",
+            '        """',
+            "        now = time.time()",
+            "        window = 60.0",
+            "",
+            "        with self._rate_limit_lock:",
+            "            if principal_id not in self._rate_limit_state:",
+            "                self._rate_limit_state[principal_id] = collections.deque()",
+            "",
+            "            dq = self._rate_limit_state[principal_id]",
+            "",
+            "            # ウィンドウ外のエントリを削除",
+            "            while dq and dq[0] < now - window:",
+            "                dq.popleft()",
+            "",
+            "            if len(dq) >= self._secret_get_rate_limit:",
+            "                return False",
+            "",
+            "            dq.append(now)",
+            "            return True",
+            "",
+        ]
+        lines = lines[:audit_idx] + method_lines + lines[audit_idx:]
+
+    return "\n".join(lines)
+
+
+# ======================================================================
+# 6. pack_api_server.py
+# ======================================================================
+
+def patch_pack_api_server(content: str) -> str:
+    """
+    - from pathlib import Path 追加
+    - GET endpoints 追加
+    - POST endpoints 追加
+    - handler methods 追加
+    """
+    lines = content.split("\n")
+
+    # --- 1. import Path ---
+    if "from pathlib import Path" not in content:
+        idx = find_line_index(lines, "from dataclasses import")
+        if idx == -1:
+            raise ValueError("pack_api_server.py: cannot find 'from dataclasses import'")
+        lines.insert(idx, "from pathlib import Path")
+
+    # --- 2. GET endpoints ---
+    content_tmp = "\n".join(lines)
+    if '"/api/secrets"' not in content_tmp:
+        lines = content_tmp.split("\n")
+
+        # "/api/docker/status" のレスポンス送信行の後に追加
+        docker_resp_idx = -1
+        docker_handler_idx = find_line_index(lines, '"/api/docker/status"')
+        if docker_handler_idx != -1:
+            # その後の _send_response 行を探す
+            for j in range(docker_handler_idx, min(docker_handler_idx + 5, len(lines))):
+                if "_send_response" in lines[j] and "docker" in "\n".join(lines[docker_handler_idx:j + 1]).lower():
+                    docker_resp_idx = j
+                    break
+
+        if docker_resp_idx == -1:
+            # フォールバック: capability/blocked の前に挿入
+            docker_resp_idx = find_line_index(lines, '"/api/capability/blocked"')
+            if docker_resp_idx == -1:
+                raise ValueError("pack_api_server.py: cannot find insertion point for GET endpoints")
+            docker_resp_idx -= 1  # その前の行
+
+        indent = "            "
+        new_get = [
+            f"",
+            f'{indent}elif path == "/api/secrets":',
+            f"{indent}    result = self._secrets_list()",
+            f"{indent}    self._send_response(APIResponse(True, result))",
+            f"",
+            f'{indent}elif path == "/api/stores":',
+            f"{indent}    result = self._stores_list()",
+            f"{indent}    self._send_response(APIResponse(True, result))",
+            f"",
+            f'{indent}elif path == "/api/units":',
+            f"{indent}    query = parse_qs(urlparse(self.path).query)",
+            f'{indent}    store_id = query.get("store_id", [None])[0]',
+            f"{indent}    result = self._units_list(store_id)",
+            f"{indent}    self._send_response(APIResponse(True, result))",
+        ]
+        lines = lines[:docker_resp_idx + 1] + new_get + lines[docker_resp_idx + 1:]
+
+    # --- 3. POST endpoints ---
+    content_tmp = "\n".join(lines)
+    if '"/api/packs/import"' not in content_tmp:
+        lines = content_tmp.split("\n")
+
+        # "/api/packs/scan" の _send_response 行の後に追加
+        scan_idx = find_line_index(lines, '"/api/packs/scan"')
+        if scan_idx == -1:
+            raise ValueError("pack_api_server.py: cannot find '/api/packs/scan'")
+        # scan の _send_response を探す
+        scan_resp_idx = scan_idx
+        for j in range(scan_idx, min(scan_idx + 5, len(lines))):
+            if "_send_response" in lines[j]:
+                scan_resp_idx = j
+                break
+
+        indent = "            "
+        new_post = [
+            f"",
+            f'{indent}elif path == "/api/packs/import":',
+            f'{indent}    source_path = body.get("path", "")',
+            f'{indent}    notes = body.get("notes", "")',
+            f"{indent}    if not source_path:",
+            f"""{indent}        self._send_response(APIResponse(False, error="Missing 'path'"), 400)""",
+            f"{indent}    else:",
+            f"{indent}        result = self._pack_import(source_path, notes)",
+            f'{indent}        if result.get("success"):',
+            f"{indent}            self._send_response(APIResponse(True, result))",
+            f"{indent}        else:",
+            f"""{indent}            self._send_response(APIResponse(False, error=result.get("error")), 400)""",
+            f"",
+            f'{indent}elif path == "/api/packs/apply":',
+            f'{indent}    staging_id = body.get("staging_id", "")',
+            f'{indent}    mode = body.get("mode", "replace")',
+            f"{indent}    if not staging_id:",
+            f"""{indent}        self._send_response(APIResponse(False, error="Missing 'staging_id'"), 400)""",
+            f"{indent}    else:",
+            f"{indent}        result = self._pack_apply(staging_id, mode)",
+            f'{indent}        if result.get("success"):',
+            f"{indent}            self._send_response(APIResponse(True, result))",
+            f"{indent}        else:",
+            f"""{indent}            self._send_response(APIResponse(False, error=result.get("error")), 400)""",
+            f"",
+            f'{indent}elif path == "/api/secrets/set":',
+            f"{indent}    result = self._secrets_set(body)",
+            f'{indent}    if result.get("success"):',
+            f"{indent}        self._send_response(APIResponse(True, result))",
+            f"{indent}    else:",
+            f"""{indent}        self._send_response(APIResponse(False, error=result.get("error")), 400)""",
+            f"",
+            f'{indent}elif path == "/api/secrets/delete":',
+            f"{indent}    result = self._secrets_delete(body)",
+            f'{indent}    if result.get("success"):',
+            f"{indent}        self._send_response(APIResponse(True, result))",
+            f"{indent}    else:",
+            f"""{indent}        self._send_response(APIResponse(False, error=result.get("error")), 400)""",
+            f"",
+            f'{indent}elif path == "/api/stores/create":',
+            f"{indent}    result = self._stores_create(body)",
+            f'{indent}    if result.get("success"):',
+            f"{indent}        self._send_response(APIResponse(True, result))",
+            f"{indent}    else:",
+            f"""{indent}        self._send_response(APIResponse(False, error=result.get("error")), 400)""",
+            f"",
+            f'{indent}elif path == "/api/units/publish":',
+            f"{indent}    result = self._units_publish(body)",
+            f'{indent}    if result.get("success"):',
+            f"{indent}        self._send_response(APIResponse(True, result))",
+            f"{indent}    else:",
+            f"""{indent}        self._send_response(APIResponse(False, error=result.get("error")), 400)""",
+            f"",
+            f'{indent}elif path == "/api/units/execute":',
+            f"{indent}    result = self._units_execute(body)",
+            f'{indent}    if result.get("success"):',
+            f"{indent}        self._send_response(APIResponse(True, result))",
+            f"{indent}    else:",
+            f'{indent}        status_code = 403 if result.get("error_type") in (',
+            f'{indent}            "approval_denied", "grant_denied", "trust_denied"',
+            f"{indent}        ) else 400",
+            f"""{indent}        self._send_response(APIResponse(False, error=result.get("error")), status_code)""",
+        ]
+        lines = lines[:scan_resp_idx + 1] + new_post + lines[scan_resp_idx + 1:]
+
+    # --- 4. handler methods ---
+    content_tmp = "\n".join(lines)
+    if "def _pack_import" not in content_tmp:
+        lines = content_tmp.split("\n")
+
+        # 'class PackAPIServer:' の直前に挿入
+        class_idx = find_line_index(lines, "class PackAPIServer:")
+        if class_idx == -1:
+            raise ValueError("pack_api_server.py: cannot find 'class PackAPIServer:'")
+
+        handler_code = [
+            "",
+            "    # ------------------------------------------------------------------",
+            "    # Pack import/apply",
+            "    # ------------------------------------------------------------------",
+            "",
+            '    def _pack_import(self, source_path: str, notes: str = "") -> dict:',
+            "        try:",
+            "            from .pack_importer import get_pack_importer",
+            "            importer = get_pack_importer()",
+            "            result = importer.import_pack(source_path, notes=notes)",
+            "            return result.to_dict()",
+            "        except Exception as e:",
+            '            return {"success": False, "error": str(e)}',
+            "",
+            '    def _pack_apply(self, staging_id: str, mode: str = "replace") -> dict:',
+            "        try:",
+            "            from .pack_applier import get_pack_applier",
+            "            applier = get_pack_applier()",
+            "            result = applier.apply(staging_id, mode=mode)",
+            "            return result.to_dict()",
+            "        except Exception as e:",
+            '            return {"success": False, "error": str(e)}',
+            "",
+            "    # ------------------------------------------------------------------",
+            "    # Secrets",
+            "    # ------------------------------------------------------------------",
+            "",
+            "    def _secrets_list(self) -> dict:",
+            "        try:",
+            "            from .secrets_store import get_secrets_store",
+            "            store = get_secrets_store()",
+            "            keys = store.list_keys()",
+            '            return {"secrets": [k.to_dict() for k in keys], "count": len(keys)}',
+            "        except Exception as e:",
+            '            return {"secrets": [], "error": str(e)}',
+            "",
+            "    def _secrets_set(self, body: dict) -> dict:",
+            '        key = body.get("key", "")',
+            '        value = body.get("value", "")',
+            "        if not key:",
+            """            return {"success": False, "error": "Missing 'key'"}""",
+            "        if not isinstance(value, str):",
+            """            return {"success": False, "error": "'value' must be a string"}""",
+            "        try:",
+            "            from .secrets_store import get_secrets_store",
+            "            store = get_secrets_store()",
+            "            result = store.set_secret(key, value)",
+            "            return result.to_dict()",
+            "        except Exception:",
+            '            return {"success": False, "error": "Failed to set secret"}',
+            "",
+            "    def _secrets_delete(self, body: dict) -> dict:",
+            '        key = body.get("key", "")',
+            "        if not key:",
+            """            return {"success": False, "error": "Missing 'key'"}""",
+            "        try:",
+            "            from .secrets_store import get_secrets_store",
+            "            store = get_secrets_store()",
+            "            result = store.delete_secret(key)",
+            "            return result.to_dict()",
+            "        except Exception as e:",
+            '            return {"success": False, "error": str(e)}',
+            "",
+            "    # ------------------------------------------------------------------",
+            "    # Store",
+            "    # ------------------------------------------------------------------",
+            "",
+            "    def _stores_list(self) -> dict:",
+            "        try:",
+            "            from .store_registry import get_store_registry",
+            "            reg = get_store_registry()",
+            "            stores = reg.list_stores()",
+            '            return {"stores": stores, "count": len(stores)}',
+            "        except Exception as e:",
+            '            return {"stores": [], "error": str(e)}',
+            "",
+            "    def _stores_create(self, body: dict) -> dict:",
+            '        store_id = body.get("store_id", "")',
+            '        root_path = body.get("root_path", "")',
+            "        if not store_id or not root_path:",
+            """            return {"success": False, "error": "Missing 'store_id' or 'root_path'"}""",
+            "        try:",
+            "            from .store_registry import get_store_registry",
+            "            reg = get_store_registry()",
+            "            result = reg.create_store(store_id, root_path)",
+            "            return result.to_dict()",
+            "        except Exception as e:",
+            '            return {"success": False, "error": str(e)}',
+            "",
+            "    # ------------------------------------------------------------------",
+            "    # Unit",
+            "    # ------------------------------------------------------------------",
+            "",
+            "    def _units_list(self, store_id=None) -> dict:",
+            "        try:",
+            "            from .store_registry import get_store_registry",
+            "            from .unit_registry import get_unit_registry",
+            "            store_reg = get_store_registry()",
+            "            unit_reg = get_unit_registry()",
+            "            if store_id:",
+            "                store_def = store_reg.get_store(store_id)",
+            "                if store_def is None:",
+            '                    return {"units": [], "error": f"Store not found: {store_id}"}',
+            "                units = unit_reg.list_units(Path(store_def.root_path))",
+            '                return {"units": [u.to_dict() for u in units], "count": len(units), "store_id": store_id}',
+            "            else:",
+            "                all_units = []",
+            "                for sd in store_reg.list_stores():",
+            '                    sid = sd.get("store_id", "")',
+            '                    rp = sd.get("root_path", "")',
+            "                    if rp:",
+            "                        units = unit_reg.list_units(Path(rp))",
+            "                        for u in units:",
+            "                            u.store_id = sid",
+            "                        all_units.extend(units)",
+            '                return {"units": [u.to_dict() for u in all_units], "count": len(all_units)}',
+            "        except Exception as e:",
+            '            return {"units": [], "error": str(e)}',
+            "",
+            "    def _units_publish(self, body: dict) -> dict:",
+            '        store_id = body.get("store_id", "")',
+            '        source_dir = body.get("source_dir", "")',
+            '        namespace = body.get("namespace", "")',
+            '        name = body.get("name", "")',
+            '        version = body.get("version", "")',
+            "        if not all([store_id, source_dir, namespace, name, version]):",
+            '            return {"success": False, "error": "Missing required fields"}',
+            "        try:",
+            "            from .store_registry import get_store_registry",
+            "            from .unit_registry import get_unit_registry",
+            "            store_reg = get_store_registry()",
+            "            store_def = store_reg.get_store(store_id)",
+            "            if store_def is None:",
+            '                return {"success": False, "error": f"Store not found: {store_id}"}',
+            "            unit_reg = get_unit_registry()",
+            "            result = unit_reg.publish_unit(",
+            "                Path(store_def.root_path), Path(source_dir),",
+            "                namespace, name, version, store_id=store_id,",
+            "            )",
+            "            return result.to_dict()",
+            "        except Exception as e:",
+            '            return {"success": False, "error": str(e)}',
+            "",
+            "    def _units_execute(self, body: dict) -> dict:",
+            '        principal_id = body.get("principal_id", "")',
+            '        unit_ref = body.get("unit_ref", {})',
+            '        mode = body.get("mode", "")',
+            '        args = body.get("args", {})',
+            '        timeout = body.get("timeout_seconds", 60.0)',
+            "        if not principal_id or not unit_ref or not mode:",
+            '            return {"success": False, "error": "Missing principal_id, unit_ref, or mode"}',
+            "        try:",
+            "            from .unit_executor import get_unit_executor",
+            "            executor = get_unit_executor()",
+            "            result = executor.execute(principal_id, unit_ref, mode, args, timeout)",
+            "            return result.to_dict()",
+            "        except Exception as e:",
+            '            return {"success": False, "error": str(e)}',
+            "",
+        ]
+        lines = lines[:class_idx] + handler_code + lines[class_idx:]
+
+    return "\n".join(lines)
+
+
+# ======================================================================
+# 7. flows/00_startup.flow.yaml
+# ======================================================================
+
+def patch_startup_flow(content: str) -> str:
+    """packs_dir: ecosystem/packs → ecosystem"""
+    replacements = [
+        ('packs_dir: "ecosystem/packs"', 'packs_dir: "ecosystem"'),
+        ("packs_dir: ecosystem/packs", "packs_dir: ecosystem"),
+        ("packs_dir: 'ecosystem/packs'", "packs_dir: 'ecosystem'"),
+    ]
+    for old, new in replacements:
+        if old in content:
+            return content.replace(old, new, 1)
+
+    if 'packs_dir: "ecosystem"' in content or "packs_dir: ecosystem" in content:
+        return content  # 既に修正済み
+
+    raise ValueError("00_startup.flow.yaml: cannot find packs_dir")
+
+
+# ======================================================================
+# パッチテーブル
+# ======================================================================
+
+PATCHES: List[Tuple[str, callable]] = [
+    ("core_runtime/python_file_executor.py", patch_python_file_executor),
+    ("core_runtime/kernel_handlers_runtime.py", patch_kernel_handlers_runtime),
+    ("core_runtime/kernel_core.py", patch_kernel_core),
+    ("core_runtime/capability_grant_manager.py", patch_capability_grant_manager),
+    ("core_runtime/capability_executor.py", patch_capability_executor),
+    ("core_runtime/pack_api_server.py", patch_pack_api_server),
+    ("flows/00_startup.flow.yaml", patch_startup_flow),
 ]
 
-# 状態定数
-STATUS_PENDING = "pending"
-STATUS_INSTALLED = "installed"
-STATUS_REJECTED = "rejected"
-STATUS_BLOCKED = "blocked"
-STATUS_FAILED = "failed"
-
 
 # ======================================================================
-# データクラス
+# メイン
 # ======================================================================
 
-@dataclass
-class PipCandidate:
-    """pip 候補の状態"""
-    candidate_key: str
-    pack_id: str
-    requirements_relpath: str
-    requirements_sha256: str
-    status: str = STATUS_PENDING
-    created_at: str = ""
-    updated_at: str = ""
-    reject_count: int = 0
-    cooldown_until: Optional[str] = None
-    last_error: Optional[str] = None
-    allow_sdist: bool = False
-    index_url: str = DEFAULT_INDEX_URL
-    notes: str = ""
-    actor: str = ""
-    reject_reason: str = ""
-
-    def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "PipCandidate":
-        known_fields = {f.name for f in cls.__dataclass_fields__.values()}
-        filtered = {k: v for k, v in data.items() if k in known_fields}
-        return cls(**filtered)
-
-
-@dataclass
-class ScanResult:
-    """スキャン結果"""
-    scanned_count: int = 0
-    pending_created: int = 0
-    skipped_blocked: int = 0
-    skipped_cooldown: int = 0
-    skipped_installed: int = 0
-    errors: List[str] = field(default_factory=list)
-
-    def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass
-class InstallResult:
-    """インストール結果"""
-    success: bool
-    candidate_key: str = ""
-    pack_id: str = ""
-    status: str = ""
-    site_packages_path: str = ""
-    packages: List[Dict[str, str]] = field(default_factory=list)
-    error: Optional[str] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass
-class RejectResult:
-    """却下結果"""
-    success: bool
-    candidate_key: str = ""
-    status: str = ""
-    reject_count: int = 0
-    cooldown_until: str = ""
-    error: Optional[str] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass
-class UnblockResult:
-    """ブロック解除結果"""
-    success: bool
-    candidate_key: str = ""
-    status: str = ""
-    error: Optional[str] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
-
-
-# ======================================================================
-# PipInstaller 本体
-# ======================================================================
-
-class PipInstaller:
-    """
-    Pack 依存ライブラリ導入マネージャ
-
-    スレッドセーフ: threading.RLock で保護
-    """
-
-    def __init__(
-        self,
-        requests_dir: Optional[str] = None,
-        ecosystem_dir: Optional[str] = None,
-    ):
-        self._requests_dir = Path(requests_dir or PIP_REQUESTS_DIR)
-        self._ecosystem_dir = ecosystem_dir or ECOSYSTEM_DIR
-        self._lock = threading.RLock()
-
-        # インメモリ状態
-        self._index: Dict[str, PipCandidate] = {}
-        self._blocked: Dict[str, Dict[str, Any]] = {}
-
-        self._ensure_dirs()
-        self._load_state()
-
-    # ------------------------------------------------------------------
-    # 時刻ヘルパー
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _now_ts() -> str:
-        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-    @staticmethod
-    def _parse_ts(ts_str: str) -> datetime:
-        """ISO 8601 文字列を datetime に変換"""
-        if ts_str.endswith("Z"):
-            ts_str = ts_str[:-1] + "+00:00"
-        return datetime.fromisoformat(ts_str)
-
-    # ------------------------------------------------------------------
-    # ファイル I/O
-    # ------------------------------------------------------------------
-
-    def _ensure_dirs(self) -> None:
-        self._requests_dir.mkdir(parents=True, exist_ok=True)
-
-    def _jsonl_path(self) -> Path:
-        return self._requests_dir / "requests.jsonl"
-
-    def _index_path(self) -> Path:
-        return self._requests_dir / "index.json"
-
-    def _blocked_path(self) -> Path:
-        return self._requests_dir / "blocked.json"
-
-    def _load_state(self) -> None:
-        """永続化された状態を読み込む"""
-        # index.json
-        idx_path = self._index_path()
-        if idx_path.exists():
-            try:
-                with open(idx_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                for key, item in data.get("items", {}).items():
-                    self._index[key] = PipCandidate.from_dict(item)
-            except Exception:
-                pass
-
-        # blocked.json
-        blk_path = self._blocked_path()
-        if blk_path.exists():
-            try:
-                with open(blk_path, "r", encoding="utf-8") as f:
-                    self._blocked = json.load(f)
-            except Exception:
-                self._blocked = {}
-
-    def _save_index(self) -> None:
-        """index.json を保存"""
-        data = {
-            "version": "1.0",
-            "updated_at": self._now_ts(),
-            "items": {k: v.to_dict() for k, v in self._index.items()},
-        }
-        with open(self._index_path(), "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-
-    def _save_blocked(self) -> None:
-        """blocked.json を保存"""
-        with open(self._blocked_path(), "w", encoding="utf-8") as f:
-            json.dump(self._blocked, f, ensure_ascii=False, indent=2)
-
-    def _append_event(self, event: Dict[str, Any]) -> None:
-        """requests.jsonl にイベントを追記"""
-        event.setdefault("ts", self._now_ts())
-        try:
-            with open(self._jsonl_path(), "a", encoding="utf-8") as f:
-                f.write(json.dumps(event, ensure_ascii=False) + "\n")
-        except Exception:
-            pass
-
-    # ------------------------------------------------------------------
-    # candidate_key 生成
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def compute_file_sha256(file_path: Path) -> str:
-        """ファイルの SHA-256 を計算"""
-        sha = hashlib.sha256()
-        with open(file_path, "rb") as f:
-            for chunk in iter(lambda: f.read(8192), b""):
-                sha.update(chunk)
-        return sha.hexdigest()
-
-    @staticmethod
-    def build_candidate_key(pack_id: str, relpath: str, sha256: str) -> str:
-        return f"{pack_id}:{relpath}:{sha256}"
-
-    @staticmethod
-    def parse_candidate_key(key: str) -> Tuple[str, str, str]:
-        """candidate_key を (pack_id, relpath, sha256) に分解"""
-        parts = key.split(":")
-        if len(parts) < 3:
-            raise ValueError(f"Invalid candidate_key: {key}")
-        pack_id = parts[0]
-        sha256 = parts[-1]
-        relpath = ":".join(parts[1:-1])
-        return pack_id, relpath, sha256
-
-    # ------------------------------------------------------------------
-    # requirements.lock 探索
-    # ------------------------------------------------------------------
-
-    def _find_requirements_lock(self, pack_subdir: Path) -> Optional[Tuple[Path, str]]:
-        """
-        pack_subdir 内で requirements.lock を探索
-
-        Returns:
-            (絶対パス, pack_subdir からの相対パス) or None
-        """
-        for relpath in REQUIREMENTS_LOCK_CANDIDATES:
-            candidate = pack_subdir / relpath
-            if candidate.exists() and candidate.is_file():
-                return candidate, relpath
-        return None
-
-    # ------------------------------------------------------------------
-    # スキャン
-    # ------------------------------------------------------------------
-
-    def scan_candidates(self, ecosystem_dir: Optional[str] = None) -> ScanResult:
-        """
-        全 Pack を走査し、requirements.lock を検出して pending を生成
-        """
-        result = ScanResult()
-        eco_dir = ecosystem_dir or self._ecosystem_dir
-
-        try:
-            locations = discover_pack_locations(eco_dir)
-        except Exception as e:
-            result.errors.append(f"discover_pack_locations failed: {e}")
-            return result
-
-        now = self._now_ts()
-
-        with self._lock:
-            for loc in locations:
-                result.scanned_count += 1
-                try:
-                    found = self._find_requirements_lock(loc.pack_subdir)
-                    if found is None:
-                        continue
-
-                    lock_path, relpath = found
-                    sha256 = self.compute_file_sha256(lock_path)
-                    ckey = self.build_candidate_key(loc.pack_id, relpath, sha256)
-
-                    # blocked チェック
-                    if ckey in self._blocked:
-                        result.skipped_blocked += 1
-                        continue
-
-                    # 既存エントリチェック
-                    existing = self._index.get(ckey)
-                    if existing:
-                        if existing.status == STATUS_INSTALLED:
-                            result.skipped_installed += 1
-                            continue
-                        if existing.status == STATUS_BLOCKED:
-                            result.skipped_blocked += 1
-                            continue
-                        if existing.status == STATUS_REJECTED:
-                            # cooldown チェック
-                            if existing.cooldown_until:
-                                try:
-                                    cd = self._parse_ts(existing.cooldown_until)
-                                    now_dt = self._parse_ts(now)
-                                    if now_dt < cd:
-                                        result.skipped_cooldown += 1
-                                        continue
-                                except Exception:
-                                    pass
-                            # cooldown 過ぎたら pending に戻す
-                            existing.status = STATUS_PENDING
-                            existing.updated_at = now
-                            self._save_index()
-                            self._append_event({
-                                "event": "pip_request_pending_again",
-                                "candidate_key": ckey,
-                                "pack_id": loc.pack_id,
-                            })
-                            result.pending_created += 1
-                            continue
-                        if existing.status == STATUS_PENDING:
-                            # 既に pending
-                            continue
-                        if existing.status == STATUS_FAILED:
-                            # failed → pending に戻す
-                            existing.status = STATUS_PENDING
-                            existing.updated_at = now
-                            self._save_index()
-                            result.pending_created += 1
-                            continue
-
-                    # 新規 pending 作成
-                    candidate = PipCandidate(
-                        candidate_key=ckey,
-                        pack_id=loc.pack_id,
-                        requirements_relpath=relpath,
-                        requirements_sha256=sha256,
-                        status=STATUS_PENDING,
-                        created_at=now,
-                        updated_at=now,
-                    )
-                    self._index[ckey] = candidate
-                    self._save_index()
-                    self._append_event({
-                        "event": "pip_request_created",
-                        "candidate_key": ckey,
-                        "pack_id": loc.pack_id,
-                        "requirements_relpath": relpath,
-                        "requirements_sha256": sha256,
-                    })
-                    self._audit_log("pip_request_created", True, {
-                        "pack_id": loc.pack_id,
-                        "candidate_key": ckey,
-                        "requirements_relpath": relpath,
-                        "requirements_sha256": sha256,
-                    })
-                    result.pending_created += 1
-
-                except Exception as e:
-                    result.errors.append(f"Pack {loc.pack_id}: {e}")
-
-        # scan 完了を audit に記録
-        self._audit_log("pip_scan_completed", True, {
-            "scanned_count": result.scanned_count,
-            "pending_created": result.pending_created,
-            "skipped_blocked": result.skipped_blocked,
-            "skipped_cooldown": result.skipped_cooldown,
-            "skipped_installed": result.skipped_installed,
-            "error_count": len(result.errors),
-        })
-
-        return result
-
-    # ------------------------------------------------------------------
-    # 一覧
-    # ------------------------------------------------------------------
-
-    def list_items(self, status_filter: str = "all") -> List[Dict[str, Any]]:
-        """候補を一覧"""
-        with self._lock:
-            items = []
-            for cand in self._index.values():
-                if status_filter != "all" and cand.status != status_filter:
-                    continue
-                items.append(cand.to_dict())
-            return items
-
-    def list_blocked(self) -> Dict[str, Any]:
-        """ブロック一覧"""
-        with self._lock:
-            return dict(self._blocked)
-
-    # ------------------------------------------------------------------
-    # approve + install
-    # ------------------------------------------------------------------
-
-    def approve_and_install(
-        self,
-        candidate_key: str,
-        actor: str = "api_user",
-        allow_sdist: bool = False,
-        index_url: str = DEFAULT_INDEX_URL,
-    ) -> InstallResult:
-        """
-        候補を承認し、ビルダーコンテナで pip install を実行
-        """
-        with self._lock:
-            cand = self._index.get(candidate_key)
-            if cand is None:
-                return InstallResult(
-                    success=False,
-                    candidate_key=candidate_key,
-                    error="Candidate not found",
-                )
-            if cand.status == STATUS_INSTALLED:
-                return InstallResult(
-                    success=False,
-                    candidate_key=candidate_key,
-                    status=STATUS_INSTALLED,
-                    error="Already installed",
-                )
-            if cand.status == STATUS_BLOCKED:
-                return InstallResult(
-                    success=False,
-                    candidate_key=candidate_key,
-                    status=STATUS_BLOCKED,
-                    error="Candidate is blocked",
-                )
-
-            cand.allow_sdist = allow_sdist
-            cand.index_url = index_url
-            cand.actor = actor
-
-        # install 実行 (ロック外 — I/O が長い)
-        self._audit_log("pip_install_started", True, {
-            "pack_id": cand.pack_id,
-            "candidate_key": candidate_key,
-            "allow_sdist": allow_sdist,
-            "index_url": index_url,
-        })
-
-        pack_id, relpath, sha256 = self.parse_candidate_key(candidate_key)
-
-        # パス確定
-        pack_data_dir = Path(PACK_DATA_BASE_DIR) / pack_id
-        pack_data_dir.mkdir(parents=True, exist_ok=True)
-        wheelhouse_dir = pack_data_dir / "python" / "wheelhouse"
-        site_packages_dir = pack_data_dir / "python" / "site-packages"
-        wheelhouse_dir.mkdir(parents=True, exist_ok=True)
-        site_packages_dir.mkdir(parents=True, exist_ok=True)
-
-        # pack_subdir を探す
-        pack_subdir = self._resolve_pack_subdir(pack_id)
-        if pack_subdir is None:
-            error_msg = f"Pack subdir not found for {pack_id}"
-            with self._lock:
-                cand.status = STATUS_FAILED
-                cand.last_error = error_msg
-                cand.updated_at = self._now_ts()
-                self._save_index()
-            self._audit_log("pip_install_failed", False, {
-                "pack_id": pack_id,
-                "candidate_key": candidate_key,
-                "error": error_msg,
-            })
-            return InstallResult(
-                success=False,
-                candidate_key=candidate_key,
-                pack_id=pack_id,
-                status=STATUS_FAILED,
-                error=error_msg,
-            )
-
-        # Docker 実行
-        try:
-            # Stage 1: download
-            dl_ok, dl_err = self._docker_pip_download(
-                pack_subdir=pack_subdir,
-                pack_data_dir=pack_data_dir,
-                requirements_relpath=relpath,
-                allow_sdist=allow_sdist,
-                index_url=index_url,
-            )
-            if not dl_ok:
-                raise RuntimeError(f"pip download failed: {dl_err}")
-
-            # Stage 2: install (offline)
-            inst_ok, inst_err = self._docker_pip_install(
-                pack_subdir=pack_subdir,
-                pack_data_dir=pack_data_dir,
-                requirements_relpath=relpath,
-            )
-            if not inst_ok:
-                raise RuntimeError(f"pip install failed: {inst_err}")
-
-            # Stage 3: packages 列挙
-            packages = self._docker_list_packages(pack_data_dir)
-
-            # Stage 4: state.json 作成
-            state = {
-                "candidate_key": candidate_key,
-                "requirements_sha256": sha256,
-                "allow_sdist": allow_sdist,
-                "index_url": index_url,
-                "installed_at": self._now_ts(),
-                "packages": packages,
-            }
-            state_path = pack_data_dir / "python" / "state.json"
-            with open(state_path, "w", encoding="utf-8") as f:
-                json.dump(state, f, ensure_ascii=False, indent=2)
-
-            # 成功
-            with self._lock:
-                cand.status = STATUS_INSTALLED
-                cand.updated_at = self._now_ts()
-                cand.last_error = None
-                self._save_index()
-                self._append_event({
-                    "event": "pip_install_completed",
-                    "candidate_key": candidate_key,
-                    "pack_id": pack_id,
-                    "packages_count": len(packages),
-                })
-
-            self._audit_log("pip_install_completed", True, {
-                "pack_id": pack_id,
-                "candidate_key": candidate_key,
-                "site_packages_path": str(site_packages_dir),
-                "packages_count": len(packages),
-                "allow_sdist": allow_sdist,
-                "index_url": index_url,
-            })
-
-            return InstallResult(
-                success=True,
-                candidate_key=candidate_key,
-                pack_id=pack_id,
-                status=STATUS_INSTALLED,
-                site_packages_path=str(site_packages_dir),
-                packages=packages,
-            )
-
-        except Exception as e:
-            error_msg = str(e)
-            with self._lock:
-                cand.status = STATUS_FAILED
-                cand.last_error = error_msg
-                cand.updated_at = self._now_ts()
-                self._save_index()
-                self._append_event({
-                    "event": "pip_install_failed",
-                    "candidate_key": candidate_key,
-                    "pack_id": pack_id,
-                    "error": error_msg,
-                })
-
-            self._audit_log("pip_install_failed", False, {
-                "pack_id": pack_id,
-                "candidate_key": candidate_key,
-                "error": error_msg,
-                "allow_sdist": allow_sdist,
-                "index_url": index_url,
-            })
-
-            return InstallResult(
-                success=False,
-                candidate_key=candidate_key,
-                pack_id=pack_id,
-                status=STATUS_FAILED,
-                error=error_msg,
-            )
-
-    # ------------------------------------------------------------------
-    # reject
-    # ------------------------------------------------------------------
-
-    def reject(
-        self,
-        candidate_key: str,
-        actor: str = "api_user",
-        reason: str = "",
-    ) -> RejectResult:
-        """候補を却下"""
-        with self._lock:
-            cand = self._index.get(candidate_key)
-            if cand is None:
-                return RejectResult(
-                    success=False,
-                    candidate_key=candidate_key,
-                    error="Candidate not found",
-                )
-
-            now = self._now_ts()
-            cand.reject_count += 1
-            cand.reject_reason = reason
-            cand.actor = actor
-            cand.updated_at = now
-
-            # cooldown 設定
-            cd_dt = self._parse_ts(now)
-            cd_until = (cd_dt + timedelta(seconds=COOLDOWN_SECONDS)).isoformat().replace("+00:00", "Z")
-            cand.cooldown_until = cd_until
-
-            if cand.reject_count >= REJECT_THRESHOLD:
-                # blocked へ
-                cand.status = STATUS_BLOCKED
-                self._blocked[candidate_key] = {
-                    "candidate_key": candidate_key,
-                    "pack_id": cand.pack_id,
-                    "blocked_at": now,
-                    "reject_count": cand.reject_count,
-                    "reason": reason,
-                }
-                self._save_blocked()
-                self._append_event({
-                    "event": "pip_request_blocked",
-                    "candidate_key": candidate_key,
-                    "pack_id": cand.pack_id,
-                    "reject_count": cand.reject_count,
-                    "reason": reason,
-                })
-                self._audit_log("pip_request_blocked", True, {
-                    "pack_id": cand.pack_id,
-                    "candidate_key": candidate_key,
-                    "reject_count": cand.reject_count,
-                    "reason": reason,
-                })
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Apply patches to existing files")
+    parser.add_argument("--dry-run", action="store_true", help="Show changes without writing")
+    parser.add_argument("--rollback", action="store_true", help="Rollback from last backup")
+    parser.add_argument("--backup-dir", default=None, help="Custom backup directory")
+    args = parser.parse_args()
+
+    ts = now_ts()
+    backup_dir = Path(args.backup_dir) if args.backup_dir else Path(BACKUP_DIR) / ts
+
+    if args.rollback:
+        base = Path(BACKUP_DIR)
+        if args.backup_dir:
+            rollback(Path(args.backup_dir))
+        elif base.exists():
+            backups = sorted([d for d in base.iterdir() if d.is_dir()], reverse=True)
+            if backups:
+                rollback(backups[0])
             else:
-                cand.status = STATUS_REJECTED
-                self._append_event({
-                    "event": "pip_request_rejected",
-                    "candidate_key": candidate_key,
-                    "pack_id": cand.pack_id,
-                    "reject_count": cand.reject_count,
-                    "reason": reason,
-                })
-                self._audit_log("pip_request_rejected", True, {
-                    "pack_id": cand.pack_id,
-                    "candidate_key": candidate_key,
-                    "reject_count": cand.reject_count,
-                    "reason": reason,
-                })
+                log_err("No backups found")
+                sys.exit(1)
+        else:
+            log_err("No backup directory found")
+            sys.exit(1)
+        return
 
-            self._save_index()
+    log(f"Starting patch deployment (dry_run={args.dry_run})")
+    log(f"Backup directory: {backup_dir}")
 
-            return RejectResult(
-                success=True,
-                candidate_key=candidate_key,
-                status=cand.status,
-                reject_count=cand.reject_count,
-                cooldown_until=cd_until,
-            )
+    # 存在確認
+    missing = [fp for fp, _ in PATCHES if not Path(fp).exists()]
+    if missing:
+        log_err(f"Missing files: {missing}")
+        sys.exit(1)
 
-    # ------------------------------------------------------------------
-    # unblock
-    # ------------------------------------------------------------------
+    # バックアップ
+    if not args.dry_run:
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        for filepath, _ in PATCHES:
+            bp = backup_file(Path(filepath), backup_dir)
+            log_ok(f"Backed up: {filepath}")
 
-    def unblock(
-        self,
-        candidate_key: str,
-        actor: str = "api_user",
-        reason: str = "",
-    ) -> UnblockResult:
-        """ブロック解除"""
-        with self._lock:
-            if candidate_key not in self._blocked:
-                # index にも blocked があるかチェック
-                cand = self._index.get(candidate_key)
-                if cand is None or cand.status != STATUS_BLOCKED:
-                    return UnblockResult(
-                        success=False,
-                        candidate_key=candidate_key,
-                        error="Candidate is not blocked",
-                    )
+    # パッチ適用
+    success = 0
+    failed = 0
 
-            # blocked 辞書から削除
-            self._blocked.pop(candidate_key, None)
-            self._save_blocked()
-
-            cand = self._index.get(candidate_key)
-            if cand:
-                now = self._now_ts()
-                cand.status = STATUS_PENDING
-                cand.reject_count = 0
-                cand.updated_at = now
-                # unblock 直後も 1h cooldown (抑制)
-                cd_dt = self._parse_ts(now)
-                cand.cooldown_until = (
-                    cd_dt + timedelta(seconds=COOLDOWN_SECONDS)
-                ).isoformat().replace("+00:00", "Z")
-                self._save_index()
-
-            self._append_event({
-                "event": "pip_unblocked",
-                "candidate_key": candidate_key,
-                "actor": actor,
-                "reason": reason,
-            })
-            self._audit_log("pip_unblocked", True, {
-                "candidate_key": candidate_key,
-                "actor": actor,
-                "reason": reason,
-            })
-
-            return UnblockResult(
-                success=True,
-                candidate_key=candidate_key,
-                status=STATUS_PENDING,
-            )
-
-    # ------------------------------------------------------------------
-    # Docker 実行 (ビルダーコンテナ)
-    # ------------------------------------------------------------------
-
-    def _resolve_pack_subdir(self, pack_id: str) -> Optional[Path]:
-        """pack_id から pack_subdir を解決"""
-        locations = discover_pack_locations(self._ecosystem_dir)
-        for loc in locations:
-            if loc.pack_id == pack_id:
-                return loc.pack_subdir
-        return None
-
-    def _docker_pip_download(
-        self,
-        pack_subdir: Path,
-        pack_data_dir: Path,
-        requirements_relpath: str,
-        allow_sdist: bool,
-        index_url: str,
-    ) -> Tuple[bool, Optional[str]]:
-        """
-        Stage 1: pip download をビルダーコンテナで実行
-
-        --network=bridge (download に必要)
-        """
-        cmd = [
-            "docker", "run", "--rm",
-            "--network=bridge",
-            "--cap-drop=ALL",
-            "--security-opt=no-new-privileges:true",
-            "--read-only",
-            "--tmpfs=/tmp:size=256m,nosuid",
-            "--memory=512m",
-            "--memory-swap=512m",
-            "--cpus=1.0",
-            "--pids-limit=100",
-            "--user=65534:65534",
-            "-v", f"{pack_data_dir.resolve()}:/data:rw",
-            "-v", f"{pack_subdir.resolve()}:/src:ro",
-            "--label", "rumi.managed=true",
-            "--label", "rumi.type=pip_builder",
-            BUILDER_IMAGE,
-            "pip", "download",
-            "-r", f"/src/{requirements_relpath}",
-            "-d", "/data/python/wheelhouse",
-            "-i", index_url,
-        ]
-
-        if not allow_sdist:
-            cmd.append("--only-binary=:all:")
-
+    for filepath, patch_fn in PATCHES:
+        p = Path(filepath)
+        log(f"Patching: {filepath}")
         try:
-            proc = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=300,
-            )
-            if proc.returncode != 0:
-                return False, proc.stderr or f"Exit code {proc.returncode}"
-            return True, None
-        except subprocess.TimeoutExpired:
-            return False, "pip download timed out (300s)"
+            original = p.read_text(encoding="utf-8")
+            patched = patch_fn(original)
+
+            if patched == original:
+                log_ok(f"Already patched: {filepath}")
+                success += 1
+                continue
+
+            if args.dry_run:
+                added = len(patched.splitlines()) - len(original.splitlines())
+                log_ok(f"Would modify: {filepath} ({added:+d} lines)")
+            else:
+                p.write_text(patched, encoding="utf-8")
+                log_ok(f"Patched: {filepath}")
+
+            success += 1
         except Exception as e:
-            return False, str(e)
-
-    def _docker_pip_install(
-        self,
-        pack_subdir: Path,
-        pack_data_dir: Path,
-        requirements_relpath: str,
-    ) -> Tuple[bool, Optional[str]]:
-        """
-        Stage 2: pip install (offline) をビルダーコンテナで実行
-
-        --network=none (オフラインインストール)
-        """
-        cmd = [
-            "docker", "run", "--rm",
-            "--network=none",
-            "--cap-drop=ALL",
-            "--security-opt=no-new-privileges:true",
-            "--read-only",
-            "--tmpfs=/tmp:size=256m,nosuid",
-            "--memory=512m",
-            "--memory-swap=512m",
-            "--cpus=1.0",
-            "--pids-limit=100",
-            "--user=65534:65534",
-            "-v", f"{pack_data_dir.resolve()}:/data:rw",
-            "-v", f"{pack_subdir.resolve()}:/src:ro",
-            "--label", "rumi.managed=true",
-            "--label", "rumi.type=pip_builder",
-            BUILDER_IMAGE,
-            "pip", "install",
-            "--no-index",
-            "--find-links", "/data/python/wheelhouse",
-            "-r", f"/src/{requirements_relpath}",
-            "--target", "/data/python/site-packages",
-        ]
-
-        try:
-            proc = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=300,
-            )
-            if proc.returncode != 0:
-                return False, proc.stderr or f"Exit code {proc.returncode}"
-            return True, None
-        except subprocess.TimeoutExpired:
-            return False, "pip install timed out (300s)"
-        except Exception as e:
-            return False, str(e)
-
-    def _docker_list_packages(
-        self,
-        pack_data_dir: Path,
-    ) -> List[Dict[str, str]]:
-        """
-        Stage 3: site-packages 内のパッケージ一覧を取得
-
-        importlib.metadata を使って dist-info を走査
-        """
-        script = (
-            "import sys, json; "
-            "sys.path.insert(0, '/data/python/site-packages'); "
-            "from importlib.metadata import distributions; "
-            "pkgs = [{'name': d.metadata['Name'], 'version': d.metadata['Version']} "
-            "for d in distributions(path=['/data/python/site-packages'])]; "
-            "print(json.dumps(pkgs))"
-        )
-
-        cmd = [
-            "docker", "run", "--rm",
-            "--network=none",
-            "--cap-drop=ALL",
-            "--security-opt=no-new-privileges:true",
-            "--read-only",
-            "--tmpfs=/tmp:size=64m,nosuid",
-            "--memory=256m",
-            "--user=65534:65534",
-            "-v", f"{pack_data_dir.resolve()}:/data:ro",
-            "--label", "rumi.managed=true",
-            "--label", "rumi.type=pip_builder",
-            BUILDER_IMAGE,
-            "python", "-c", script,
-        ]
-
-        try:
-            proc = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-            if proc.returncode == 0 and proc.stdout.strip():
-                return json.loads(proc.stdout.strip())
-        except Exception:
-            pass
-
-        return []
-
-    # ------------------------------------------------------------------
-    # site-packages パス解決 (外部から参照)
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def get_site_packages_path(pack_id: str) -> Optional[Path]:
-        """Pack の site-packages パスを返す (存在する場合のみ)"""
-        sp = Path(PACK_DATA_BASE_DIR) / pack_id / "python" / "site-packages"
-        if sp.is_dir():
-            return sp
-        return None
-
-    # ------------------------------------------------------------------
-    # 監査ログ
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _audit_log(event_type: str, success: bool, details: Dict[str, Any]) -> None:
-        """監査ログに記録"""
-        try:
-            from .audit_logger import get_audit_logger
-            audit = get_audit_logger()
-            audit.log_system_event(
-                event_type=event_type,
-                success=success,
-                details=details,
-                error=details.get("error"),
-            )
-        except Exception:
-            pass
-
-
-# ======================================================================
-# グローバルインスタンス
-# ======================================================================
-
-_global_pip_installer: Optional[PipInstaller] = None
-_pip_lock = threading.Lock()
-
-
-def get_pip_installer() -> PipInstaller:
-    """グローバルな PipInstaller を取得"""
-    global _global_pip_installer
-    if _global_pip_installer is None:
-        with _pip_lock:
-            if _global_pip_installer is None:
-                _global_pip_installer = PipInstaller()
-    return _global_pip_installer
-
-
-def reset_pip_installer(requests_dir: str = None, ecosystem_dir: str = None) -> PipInstaller:
-    """PipInstaller をリセット（テスト用）"""
-    global _global_pip_installer
-    with _pip_lock:
-        _global_pip_installer = PipInstaller(
-            requests_dir=requests_dir,
-            ecosystem_dir=ecosystem_dir,
-        )
-    return _global_pip_installer
-'''
-
-# ======================================================================
-# 2. tests/test_pip_installer.py
-# ======================================================================
-
-FILES["tests/test_pip_installer.py"] = r'''"""
-test_pip_installer.py - PipInstaller テスト
-
-pytest で実行: python -m pytest tests/test_pip_installer.py -v
-"""
-
-from __future__ import annotations
-
-import json
-import os
-import shutil
-import tempfile
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
-from unittest.mock import patch, MagicMock, call
-from urllib.parse import quote, unquote
-
-import pytest
-
-import sys
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from core_runtime.pip_installer import (
-    PipInstaller,
-    PipCandidate,
-    ScanResult,
-    InstallResult,
-    COOLDOWN_SECONDS,
-    REJECT_THRESHOLD,
-    STATUS_PENDING,
-    STATUS_INSTALLED,
-    STATUS_REJECTED,
-    STATUS_BLOCKED,
-    STATUS_FAILED,
-    DEFAULT_INDEX_URL,
-    BUILDER_IMAGE,
-    reset_pip_installer,
-)
-
-
-@pytest.fixture
-def tmp_env(tmp_path):
-    """テスト用の一時環境を構築"""
-    eco_dir = tmp_path / "ecosystem"
-    eco_dir.mkdir()
-
-    pack_dir = eco_dir / "test_pack"
-    pack_dir.mkdir()
-
-    eco_json = pack_dir / "ecosystem.json"
-    eco_json.write_text(json.dumps({
-        "pack_id": "test_pack",
-        "version": "1.0.0",
-    }))
-
-    req_lock = pack_dir / "requirements.lock"
-    req_lock.write_text("requests==2.31.0\nflask==3.0.0\n")
-
-    requests_dir = tmp_path / "pip_requests"
-    requests_dir.mkdir()
-
-    pack_data_dir = tmp_path / "pack_data"
-    pack_data_dir.mkdir()
-
-    return {
-        "tmp_path": tmp_path,
-        "eco_dir": eco_dir,
-        "pack_dir": pack_dir,
-        "req_lock": req_lock,
-        "requests_dir": requests_dir,
-        "pack_data_dir": pack_data_dir,
-    }
-
-
-@pytest.fixture
-def installer(tmp_env):
-    """PipInstaller インスタンスを作成"""
-    with patch("core_runtime.pip_installer.PACK_DATA_BASE_DIR", str(tmp_env["pack_data_dir"])):
-        inst = PipInstaller(
-            requests_dir=str(tmp_env["requests_dir"]),
-            ecosystem_dir=str(tmp_env["eco_dir"]),
-        )
-        yield inst
-
-
-class TestScan:
-    def test_scan_creates_pending(self, installer, tmp_env):
-        """1. scan が pending を作る"""
-        result = installer.scan_candidates()
-        assert result.scanned_count >= 1
-        assert result.pending_created == 1
-        items = installer.list_items("pending")
-        assert len(items) == 1
-        assert items[0]["pack_id"] == "test_pack"
-        assert items[0]["status"] == STATUS_PENDING
-        assert items[0]["requirements_relpath"] == "requirements.lock"
-
-    def test_scan_skips_installed(self, installer, tmp_env):
-        installer.scan_candidates()
-        items = installer.list_items("pending")
-        ckey = items[0]["candidate_key"]
-        with installer._lock:
-            installer._index[ckey].status = STATUS_INSTALLED
-            installer._save_index()
-        result = installer.scan_candidates()
-        assert result.skipped_installed == 1
-        assert result.pending_created == 0
-
-
-class TestReject:
-    def test_reject_sets_cooldown(self, installer, tmp_env):
-        """2. reject で cooldown_until が now+1h になる"""
-        installer.scan_candidates()
-        items = installer.list_items("pending")
-        ckey = items[0]["candidate_key"]
-        result = installer.reject(ckey, reason="not needed")
-        assert result.success is True
-        assert result.status == STATUS_REJECTED
-        assert result.reject_count == 1
-        assert result.cooldown_until != ""
-        cd = datetime.fromisoformat(result.cooldown_until.replace("Z", "+00:00"))
-        now = datetime.now(timezone.utc)
-        diff = (cd - now).total_seconds()
-        assert 3500 < diff < 3700
-
-    def test_reject_three_times_blocks(self, installer, tmp_env):
-        """3. reject 3回で blocked に入る"""
-        installer.scan_candidates()
-        items = installer.list_items("pending")
-        ckey = items[0]["candidate_key"]
-        for i in range(3):
-            result = installer.reject(ckey, reason=f"reject {i+1}")
-        assert result.status == STATUS_BLOCKED
-        assert result.reject_count == 3
-        blocked = installer.list_blocked()
-        assert ckey in blocked
-
-    def test_blocked_skipped_on_scan(self, installer, tmp_env):
-        """4. blocked は scan で pending に上がらない"""
-        installer.scan_candidates()
-        items = installer.list_items("pending")
-        ckey = items[0]["candidate_key"]
-        for _ in range(3):
-            installer.reject(ckey, reason="block it")
-        result = installer.scan_candidates()
-        assert result.skipped_blocked == 1
-        assert result.pending_created == 0
-
-
-class TestUnblock:
-    def test_unblock_removes_blocked(self, installer, tmp_env):
-        """5. unblock すると blocked 解除される"""
-        installer.scan_candidates()
-        items = installer.list_items("pending")
-        ckey = items[0]["candidate_key"]
-        for _ in range(3):
-            installer.reject(ckey, reason="block it")
-        assert installer.list_blocked().get(ckey) is not None
-        result = installer.unblock(ckey, reason="allow now")
-        assert result.success is True
-        assert result.status == STATUS_PENDING
-        assert installer.list_blocked().get(ckey) is None
-        items = installer.list_items("pending")
-        assert len(items) == 1
-        assert items[0]["candidate_key"] == ckey
-
-
-class TestApproveDockerCommand:
-    @patch("core_runtime.pip_installer.subprocess.run")
-    def test_approve_builds_correct_docker_commands(self, mock_run, installer, tmp_env):
-        """6. approve が docker コマンドを正しく組む (dry-run)"""
-        installer.scan_candidates()
-        items = installer.list_items("pending")
-        ckey = items[0]["candidate_key"]
-        pack_data = tmp_env["pack_data_dir"] / "test_pack" / "python"
-        (pack_data / "wheelhouse").mkdir(parents=True, exist_ok=True)
-        (pack_data / "site-packages").mkdir(parents=True, exist_ok=True)
-        mock_run.side_effect = [
-            MagicMock(returncode=0, stdout="", stderr=""),
-            MagicMock(returncode=0, stdout="", stderr=""),
-            MagicMock(returncode=0, stdout="[]", stderr=""),
-        ]
-        with patch("core_runtime.pip_installer.PACK_DATA_BASE_DIR", str(tmp_env["pack_data_dir"])):
-            result = installer.approve_and_install(ckey, allow_sdist=False)
-        assert result.success is True
-        assert result.status == STATUS_INSTALLED
-        assert mock_run.call_count == 3
-        dl_cmd = mock_run.call_args_list[0][0][0]
-        assert "pip" in dl_cmd
-        assert "download" in dl_cmd
-        assert "--only-binary=:all:" in dl_cmd
-        assert "--network=bridge" in dl_cmd
-        inst_cmd = mock_run.call_args_list[1][0][0]
-        assert "pip" in inst_cmd
-        assert "install" in inst_cmd
-        assert "--no-index" in inst_cmd
-        assert "--network=none" in inst_cmd
-
-    @patch("core_runtime.pip_installer.subprocess.run")
-    def test_allow_sdist_omits_only_binary(self, mock_run, installer, tmp_env):
-        """8. allow_sdist=true で --only-binary が付かない"""
-        installer.scan_candidates()
-        items = installer.list_items("pending")
-        ckey = items[0]["candidate_key"]
-        pack_data = tmp_env["pack_data_dir"] / "test_pack" / "python"
-        (pack_data / "wheelhouse").mkdir(parents=True, exist_ok=True)
-        (pack_data / "site-packages").mkdir(parents=True, exist_ok=True)
-        mock_run.side_effect = [
-            MagicMock(returncode=0, stdout="", stderr=""),
-            MagicMock(returncode=0, stdout="", stderr=""),
-            MagicMock(returncode=0, stdout="[]", stderr=""),
-        ]
-        with patch("core_runtime.pip_installer.PACK_DATA_BASE_DIR", str(tmp_env["pack_data_dir"])):
-            result = installer.approve_and_install(ckey, allow_sdist=True)
-        dl_cmd = mock_run.call_args_list[0][0][0]
-        assert "--only-binary=:all:" not in dl_cmd
-
-    @patch("core_runtime.pip_installer.subprocess.run")
-    def test_mount_constraints(self, mock_run, installer, tmp_env):
-        """10. マウントが /data RW と /src RO に限定されている"""
-        installer.scan_candidates()
-        items = installer.list_items("pending")
-        ckey = items[0]["candidate_key"]
-        pack_data = tmp_env["pack_data_dir"] / "test_pack" / "python"
-        (pack_data / "wheelhouse").mkdir(parents=True, exist_ok=True)
-        (pack_data / "site-packages").mkdir(parents=True, exist_ok=True)
-        mock_run.side_effect = [
-            MagicMock(returncode=0, stdout="", stderr=""),
-            MagicMock(returncode=0, stdout="", stderr=""),
-            MagicMock(returncode=0, stdout="[]", stderr=""),
-        ]
-        with patch("core_runtime.pip_installer.PACK_DATA_BASE_DIR", str(tmp_env["pack_data_dir"])):
-            installer.approve_and_install(ckey)
-        for i in range(2):
-            cmd = mock_run.call_args_list[i][0][0]
-            volumes = []
-            for j, arg in enumerate(cmd):
-                if arg == "-v" and j + 1 < len(cmd):
-                    volumes.append(cmd[j + 1])
-            assert len(volumes) == 2
-            rw_vols = [v for v in volumes if v.endswith(":rw")]
-            ro_vols = [v for v in volumes if v.endswith(":ro")]
-            assert len(rw_vols) == 1
-            assert len(ro_vols) == 1
-            assert ":/data:rw" in rw_vols[0]
-            assert ":/src:ro" in ro_vols[0]
-
-
-class TestCandidateKeyEncoding:
-    def test_candidate_key_url_encode_decode(self):
-        """7. candidate_key が URL encode/decode で崩れない"""
-        pack_id = "my_pack"
-        relpath = "requirements.lock"
-        sha256 = "abcdef1234567890" * 4
-        key = PipInstaller.build_candidate_key(pack_id, relpath, sha256)
-        assert ":" in key
-        encoded = quote(key, safe="")
-        assert ":" not in encoded
-        assert "%3A" in encoded
-        decoded = unquote(encoded)
-        assert decoded == key
-        p_pack, p_rel, p_sha = PipInstaller.parse_candidate_key(decoded)
-        assert p_pack == pack_id
-        assert p_rel == relpath
-        assert p_sha == sha256
-
-    def test_candidate_key_with_backend_relpath(self):
-        key = "my_pack:backend/requirements.lock:abc123"
-        p, r, s = PipInstaller.parse_candidate_key(key)
-        assert p == "my_pack"
-        assert r == "backend/requirements.lock"
-        assert s == "abc123"
-
-
-class TestDockerCommandOrder:
-    @patch("core_runtime.pip_installer.subprocess.run")
-    def test_download_before_install(self, mock_run, installer, tmp_env):
-        """9. download → install の順で実行される"""
-        installer.scan_candidates()
-        items = installer.list_items("pending")
-        ckey = items[0]["candidate_key"]
-        pack_data = tmp_env["pack_data_dir"] / "test_pack" / "python"
-        (pack_data / "wheelhouse").mkdir(parents=True, exist_ok=True)
-        (pack_data / "site-packages").mkdir(parents=True, exist_ok=True)
-        mock_run.side_effect = [
-            MagicMock(returncode=0, stdout="", stderr=""),
-            MagicMock(returncode=0, stdout="", stderr=""),
-            MagicMock(returncode=0, stdout="[]", stderr=""),
-        ]
-        with patch("core_runtime.pip_installer.PACK_DATA_BASE_DIR", str(tmp_env["pack_data_dir"])):
-            installer.approve_and_install(ckey)
-        assert mock_run.call_count == 3
-        assert "download" in mock_run.call_args_list[0][0][0]
-        assert "install" in mock_run.call_args_list[1][0][0]
-        assert "python" in mock_run.call_args_list[2][0][0]
-
-
-class TestPersistence:
-    def test_state_survives_reload(self, tmp_env):
-        with patch("core_runtime.pip_installer.PACK_DATA_BASE_DIR", str(tmp_env["pack_data_dir"])):
-            inst1 = PipInstaller(
-                requests_dir=str(tmp_env["requests_dir"]),
-                ecosystem_dir=str(tmp_env["eco_dir"]),
-            )
-            inst1.scan_candidates()
-            items1 = inst1.list_items("pending")
-            assert len(items1) == 1
-            inst2 = PipInstaller(
-                requests_dir=str(tmp_env["requests_dir"]),
-                ecosystem_dir=str(tmp_env["eco_dir"]),
-            )
-            items2 = inst2.list_items("pending")
-            assert len(items2) == 1
-            assert items2[0]["candidate_key"] == items1[0]["candidate_key"]
-'''
-
-# ======================================================================
-# 3. docs/pip_dependency_installation.md
-# ======================================================================
-
-FILES["docs/pip_dependency_installation.md"] = r'''# Pip Dependency Installation
-
-Pack が必要とする Python ライブラリ（PyPI パッケージ）を安全に導入するシステムの完成像ドキュメントです。
-
----
-
-## 概要
-
-Pack は `requirements.lock` を同梱することで、PyPI パッケージへの依存を宣言できます。ユーザーが API で承認すると、公式が起動するビルダー用 Docker コンテナで依存をダウンロード・インストールし、Pack 実行コンテナから `import` 可能にします。
-
-ホスト Python 環境は一切汚れません。全ての生成物は `user_data/packs/<pack_id>/python/` 配下に閉じ込められます。
-
----
-
-## API エンドポイント
-
-全て `Authorization: Bearer <token>` 必須。`candidate_key` は `:` を含むため URL encode が必要です。
-
-| メソッド | パス | 説明 |
-|----------|------|------|
-| POST | `/api/pip/candidates/scan` | 候補をスキャン |
-| GET | `/api/pip/requests?status=pending` | 申請一覧 |
-| POST | `/api/pip/requests/{candidate_key}/approve` | 承認＋インストール |
-| POST | `/api/pip/requests/{candidate_key}/reject` | 却下 |
-| GET | `/api/pip/blocked` | ブロック一覧 |
-| POST | `/api/pip/blocked/{candidate_key}/unblock` | ブロック解除 |
-
----
-
-## 状態遷移
-
-```
-  scan
-   │
-   ▼
-pending ──approve──▶ installed
-   │                     ▲
-   │ reject              │ (re-scan after fix)
-   ▼                     │
-rejected ──(cooldown 1h)──▶ pending
-   │
-   │ reject ×3
-   ▼
-blocked ──unblock──▶ pending
-```
-
-| 状態 | 説明 |
-|------|------|
-| `pending` | スキャンで検出され承認待ち |
-| `installed` | 承認済み、依存インストール完了 |
-| `rejected` | 却下（1h cooldown 後に再 scan で pending に戻る） |
-| `blocked` | 3回却下でブロック（unblock するまで scan に上がらない） |
-| `failed` | インストール失敗（再 scan で pending に戻る） |
-
----
-
-## セキュリティ方針
-
-### ビルダーコンテナ（download 用）
-
-`pip download` は `--network=bridge` で PyPI にアクセスしますが、以下で保護されます:
-
-- `--cap-drop=ALL`
-- `--security-opt=no-new-privileges:true`
-- `--read-only` + `--tmpfs=/tmp`
-- `--user=65534:65534` (nobody)
-- `--memory=512m`
-
-### ビルダーコンテナ（install 用）
-
-`pip install` は `--network=none`（完全オフライン）で実行します。
-
-### 実行コンテナ
-
-Pack のコード実行コンテナは引き続き `--network=none` です。site-packages は **読み取り専用** でマウントされます。
-
-### sdist 制御
-
-デフォルトでは wheel のみ許可（`--only-binary=:all:`）。sdist が必要な場合は `allow_sdist: true` を明示する必要があります。
-
----
-
-## 生成物
-
-```
-user_data/packs/<pack_id>/python/
-├── wheelhouse/         # pip download したファイル
-├── site-packages/      # pip install --target の展開先
-└── state.json          # インストールメタデータ
-```
-
-### state.json
-
-```json
-{
-  "candidate_key": "my_pack:requirements.lock:abc123...",
-  "requirements_sha256": "abc123...",
-  "allow_sdist": false,
-  "index_url": "https://pypi.org/simple",
-  "installed_at": "2025-01-15T10:00:00Z",
-  "packages": [
-    {"name": "requests", "version": "2.31.0"},
-    {"name": "flask", "version": "3.0.0"}
-  ]
-}
-```
-
----
-
-## candidate_key
-
-`{pack_id}:{requirements_relpath}:{sha256(requirements.lock)}`
-
-requirements.lock の内容が変わると sha256 が変わり、新しい candidate_key になります。
-
----
-
-## 監査ログ
-
-以下のイベントが `system` カテゴリに記録されます:
-
-- `pip_request_created`
-- `pip_request_rejected`
-- `pip_request_blocked`
-- `pip_install_started`
-- `pip_install_completed`
-- `pip_install_failed`
-- `pip_unblocked`
-
----
-
-## 関連ドキュメント
-
-- [requirements.lock 規約](spec/requirements_lock.md)
-- [運用手順](runbook/dependency_workflow.md)
-- [PYTHONPATH と site-packages](architecture/pythonpath_and_sitepackages.md)
-'''
-
-# ======================================================================
-# 4. docs/spec/requirements_lock.md
-# ======================================================================
-
-FILES["docs/spec/requirements_lock.md"] = r'''# requirements.lock 規約
-
-Pack が PyPI 依存を宣言するためのファイル仕様です。
-
----
-
-## 置き場所
-
-pack_subdir 基準で以下の順に探索し、最初に見つかったものを使います:
-
-1. `<pack_subdir>/requirements.lock`
-2. `<pack_subdir>/backend/requirements.lock`（互換）
-
-pack_subdir は `core_runtime/paths.py` の `discover_pack_locations()` で決定されます。
-
----
-
-## フォーマット
-
-標準の pip requirements 形式です。バージョンをピン留めすることを強く推奨します。
-
-### 推奨（ピン留め）
-
-```
-requests==2.31.0
-flask==3.0.0
-Jinja2==3.1.3
-```
-
-### 許容（範囲指定）
-
-```
-requests>=2.28,<3.0
-flask~=3.0
-```
-
-### 非推奨（バージョンなし）
-
-```
-requests
-flask
-```
-
-バージョンなしは再現性が低下するため非推奨です。
-
----
-
-## sdist 例外
-
-デフォルトでは wheel のみ許可です（`--only-binary=:all:`）。
-
-wheel が存在しないパッケージを含む場合、`pip download` が失敗し、ステータスは `failed` になります。
-
-ユーザーが approve 時に `allow_sdist: true` を指定すると、sdist からのビルドが許可されます。これは別扱いの承認として監査ログに記録されます。
-
----
-
-## ファイル名について
-
-ファイル名は `requirements.lock` 固定です。`requirements.txt` は検出対象外です。これは意図的で、ロックファイルであることを明示するためです。
-
----
-
-## ハッシュ
-
-candidate_key の一部として requirements.lock の SHA-256 ハッシュが使われます。ファイル内容が変わると新しい candidate_key になり、再承認が必要です。
-'''
-
-# ======================================================================
-# 5. docs/runbook/dependency_workflow.md
-# ======================================================================
-
-FILES["docs/runbook/dependency_workflow.md"] = r'''# Dependency Workflow 運用手順
-
-Pack の pip 依存を scan → approve → 確認する運用手順です。
-
----
-
-## 1. 候補をスキャン
-
-```bash
-curl -X POST http://localhost:8765/api/pip/candidates/scan \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{}'
-```
-
-レスポンス例:
-```json
-{
-  "success": true,
-  "data": {
-    "scanned_count": 5,
-    "pending_created": 2,
-    "skipped_blocked": 0,
-    "skipped_cooldown": 1,
-    "skipped_installed": 2,
-    "errors": []
-  }
-}
-```
-
----
-
-## 2. 承認待ち一覧を確認
-
-```bash
-curl "http://localhost:8765/api/pip/requests?status=pending" \
-  -H "Authorization: Bearer $TOKEN"
-```
-
----
-
-## 3. 承認（インストール実行）
-
-candidate_key は URL エンコードが必要です。
-
-```bash
-KEY=$(python3 -c "from urllib.parse import quote; print(quote('my_pack:requirements.lock:abc123def456', safe=''))")
-
-curl -X POST "http://localhost:8765/api/pip/requests/${KEY}/approve" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"allow_sdist": false}'
-```
-
-wheel のみで失敗する場合:
-```bash
-curl -X POST "http://localhost:8765/api/pip/requests/${KEY}/approve" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"allow_sdist": true}'
-```
-
----
-
-## 4. 却下
-
-```bash
-curl -X POST "http://localhost:8765/api/pip/requests/${KEY}/reject" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"reason": "不要なパッケージを含んでいる"}'
-```
-
-- 1回目・2回目: `rejected`（1時間 cooldown）
-- 3回目: `blocked`
-
----
-
-## 5. ブロック一覧確認
-
-```bash
-curl "http://localhost:8765/api/pip/blocked" \
-  -H "Authorization: Bearer $TOKEN"
-```
-
----
-
-## 6. ブロック解除
-
-```bash
-curl -X POST "http://localhost:8765/api/pip/blocked/${KEY}/unblock" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"reason": "再評価の結果許可"}'
-```
-
----
-
-## トラブル対応
-
-### インストールが failed になった
-
-1. `GET /api/pip/requests?status=failed` で `last_error` を確認
-2. wheel が無い場合は `allow_sdist: true` で再 approve
-3. ネットワークエラーの場合は Docker のネットワーク設定を確認
-4. 再 scan すると `failed` → `pending` に戻る
-
-### Docker が利用できない
-
-pip 依存インストールには Docker が必須です。`RUMI_SECURITY_MODE=permissive` でも Docker が必要です（ホスト環境を汚さないため）。
-
-### requirements.lock を更新した
-
-ファイル内容が変わると SHA-256 が変わり、新しい candidate_key になります。再度 scan → approve が必要です。古い候補はそのまま残ります。
-'''
-
-# ======================================================================
-# 6. docs/architecture/pythonpath_and_sitepackages.md
-# ======================================================================
-
-FILES["docs/architecture/pythonpath_and_sitepackages.md"] = r'''# PYTHONPATH と site-packages マウント仕様
-
-Pack コード実行時に pip 依存を `import` 可能にする仕組みの説明です。
-
----
-
-## 前提
-
-Pack のコード実行は3種類あります:
-
-| 実行種別 | ファイル | コンテナ内ワークスペース |
-|----------|----------|--------------------------|
-| `python_file_call` | `python_file_executor.py` | `/workspace` |
-| `component_phase` | `secure_executor.py` | `/component` |
-| `lib` | `secure_executor.py` | `/lib` |
-
-いずれも `--network=none` の Docker コンテナで実行されます。
-
----
-
-## site-packages の配置
-
-ビルダーコンテナが生成した site-packages は以下に配置されます:
-
-```
-user_data/packs/<pack_id>/python/site-packages/
-```
-
----
-
-## コンテナへのマウント
-
-実行コンテナ起動時に、site-packages ディレクトリが存在する場合のみ追加マウントされます:
-
-```
--v <host_site_packages>:/pip-packages:ro
-```
-
-マウントポイントは `/pip-packages` で、**読み取り専用** です。
-
----
-
-## PYTHONPATH
-
-`-e PYTHONPATH=...` 環境変数で `/pip-packages` を追加します。
-
-| 実行種別 | PYTHONPATH |
-|----------|-----------|
-| `python_file_call` | `/:/pip-packages` |
-| `component_phase` | `/component:/pip-packages` |
-| `lib` | `/lib:/pip-packages` |
-
-site-packages が存在しない場合は `/pip-packages` は追加されません。
-
----
-
-## Pack コードからの利用
-
-Pack のブロックコードでは通常通り `import` するだけです:
-
-```python
-# blocks/my_block.py
-import requests  # pip で導入された依存
-
-def run(input_data, context=None):
-    resp = requests.get("https://api.example.com/data")
-    return {"data": resp.json()}
-```
-
-PYTHONPATH に `/pip-packages` が含まれているため、Python のインポート機構が自動的に解決します。
-
----
-
-## permissive モード
-
-Docker が利用できない permissive モードでは、site-packages のマウントは行われません。ホスト Python の標準パスのみが使われます。開発時にホスト環境に直接 `pip install` している場合は動作しますが、本番環境では Docker が必須です。
-
----
-
-## セキュリティ
-
-- site-packages は **読み取り専用** でマウントされるため、Pack コードが依存ライブラリを改ざんすることはできません
-- マウントは Pack 単位で分離されており、Pack A の依存が Pack B から見えることはありません
-- ビルダーコンテナと実行コンテナは完全に分離されています
-'''
-
-
-# ======================================================================
-# デプロイ実行
-# ======================================================================
-
-def deploy():
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    created = []
-    backed_up = []
-    errors = []
-
-    for relpath, content in FILES.items():
-        target = PROJECT_ROOT / relpath
-        try:
-            # 親ディレクトリ作成
-            target.parent.mkdir(parents=True, exist_ok=True)
-
-            # 既存ファイルがあればバックアップ
-            if target.exists():
-                backup = target.with_suffix(f".bak.{timestamp}")
-                shutil.copy2(target, backup)
-                backed_up.append((str(relpath), str(backup.relative_to(PROJECT_ROOT))))
-
-            # 書き込み
-            target.write_text(content.lstrip("\n"), encoding="utf-8")
-            created.append(str(relpath))
-
-        except Exception as e:
-            errors.append((str(relpath), str(e)))
-
-    # レポート
-    print("=" * 60)
-    print("  deploy.py - 新規ファイルデプロイ完了")
-    print("=" * 60)
-    print()
-
-    print(f"作成/上書き ({len(created)} ファイル):")
-    for p in created:
-        print(f"  ✅ {p}")
-    print()
-
-    if backed_up:
-        print(f"バックアップ ({len(backed_up)} ファイル):")
-        for orig, bak in backed_up:
-            print(f"  📦 {orig} → {bak}")
-        print()
-
-    if errors:
-        print(f"エラー ({len(errors)} ファイル):")
-        for p, e in errors:
-            print(f"  ❌ {p}: {e}")
-        print()
-
-    if not errors:
-        print("全ファイル正常にデプロイされました。")
-        print()
-        print("次のステップ:")
-        print("  1. 修正ファイル (pack_api_server.py, python_file_executor.py,")
-        print("     secure_executor.py, docs/ecosystem.md) は diff を手動適用してください。")
-        print("  2. テスト実行: python -m pytest tests/test_pip_installer.py -v")
-    else:
-        print("一部エラーがあります。上記を確認してください。")
+            log_err(f"FAILED: {filepath}: {e}")
+            failed += 1
+            if not args.dry_run:
+                log_err("Rolling back all changes...")
+                rollback(backup_dir)
+                log_err("Rollback complete. No files were modified.")
+                sys.exit(1)
+
+    log("")
+    log(f"{'DRY RUN ' if args.dry_run else ''}Complete: {success} succeeded, {failed} failed")
+    if not args.dry_run and failed == 0:
+        log(f"Backup saved to: {backup_dir}")
+        log(f"To rollback: python deploy.py --rollback")
 
 
 if __name__ == "__main__":
-    deploy()
+    main()

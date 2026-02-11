@@ -578,18 +578,10 @@ class KernelCore:
         handler_key = step.get("handler")
         if not handler_key:
             return ctx, None
-        resolved_args = self._resolve_value(step.get("args", {}), ctx)
-
-        # handler 解決統一: kernel:* は _resolve_handler を優先し、
-        # pipeline 実行と同じ経路で解決する（async/pipeline 非対称の解消）
-        handler = self._resolve_handler(handler_key, resolved_args)
-
-        # kernel:* で見つからなかった場合は IR にフォールバック
-        if handler is None:
-            handler = self.interface_registry.get(handler_key, strategy="last")
-
-        if handler is None or not callable(handler):
+        handler = self.interface_registry.get(handler_key, strategy="last")
+        if not handler or not callable(handler):
             return ctx, None
+        resolved_args = self._resolve_value(step.get("args", {}), ctx)
         try:
             if asyncio.iscoroutinefunction(handler):
                 result = await handler(resolved_args, ctx)

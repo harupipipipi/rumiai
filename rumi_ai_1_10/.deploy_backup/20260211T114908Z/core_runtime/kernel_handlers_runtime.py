@@ -619,7 +619,7 @@ class KernelRuntimeHandlersMixin:
         uds_manager = self._get_uds_proxy_manager()
 
         # Capability Proxy: principal_id 用のソケットを確保
-        effective_principal = owner_pack  # v1 principal enforcement: always owner_pack
+        effective_principal = principal_id or owner_pack
         capability_sock_path = None
         if effective_principal:
             cap_proxy = self._get_capability_proxy()

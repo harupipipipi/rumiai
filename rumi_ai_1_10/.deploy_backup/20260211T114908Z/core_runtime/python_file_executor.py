@@ -379,28 +379,6 @@ class PythonFileExecutor:
         if not resolved_pack and not file_path.startswith("ecosystem/sandbox"):
             resolved_pack = owner_pack  # None — PathValidator が拒否
 
-        # principal 強制（v1）: principal は必ず owner_pack に固定
-        # FlowStep から principal_id が来ても無視（乱用事故防止）
-        effective_principal = resolved_pack
-        if principal_id is not None and principal_id != resolved_pack:
-            try:
-                from .audit_logger import get_audit_logger
-                _audit = get_audit_logger()
-                _audit.log_security_event(
-                    event_type="principal_id_overridden",
-                    severity="warning",
-                    description=(
-                        f"principal_id '{principal_id}' overridden to "
-                        f"owner_pack '{resolved_pack}' (v1 principal enforcement)"
-                    ),
-                    details={
-                        "requested_principal": principal_id,
-                        "effective_principal": resolved_pack,
-                    },
-                )
-            except Exception:
-                pass
-
         # 2. 承認チェック
         if resolved_pack:
             approved, reason = self._approval_checker.is_approved(resolved_pack)

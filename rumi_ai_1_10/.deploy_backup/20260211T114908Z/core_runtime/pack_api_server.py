@@ -12,7 +12,6 @@ import json
 import logging
 import secrets
 import threading
-from pathlib import Path
 from dataclasses import dataclass, asdict
 from typing import Any, Optional
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -111,20 +110,6 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                 result = self._get_docker_status()
                 self._send_response(APIResponse(True, result))
 
-            elif path == "/api/secrets":
-                result = self._secrets_list()
-                self._send_response(APIResponse(True, result))
-
-            elif path == "/api/stores":
-                result = self._stores_list()
-                self._send_response(APIResponse(True, result))
-
-            elif path == "/api/units":
-                query = parse_qs(urlparse(self.path).query)
-                store_id = query.get("store_id", [None])[0]
-                result = self._units_list(store_id)
-                self._send_response(APIResponse(True, result))
-
             elif path == "/api/capability/blocked":
                 result = self._capability_list_blocked()
                 self._send_response(APIResponse(True, result))
@@ -167,68 +152,6 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             if path == "/api/packs/scan":
                 result = self._scan_packs()
                 self._send_response(APIResponse(True, result))
-
-            elif path == "/api/packs/import":
-                source_path = body.get("path", "")
-                notes = body.get("notes", "")
-                if not source_path:
-                    self._send_response(APIResponse(False, error="Missing 'path'"), 400)
-                else:
-                    result = self._pack_import(source_path, notes)
-                    if result.get("success"):
-                        self._send_response(APIResponse(True, result))
-                    else:
-                        self._send_response(APIResponse(False, error=result.get("error")), 400)
-
-            elif path == "/api/packs/apply":
-                staging_id = body.get("staging_id", "")
-                mode = body.get("mode", "replace")
-                if not staging_id:
-                    self._send_response(APIResponse(False, error="Missing 'staging_id'"), 400)
-                else:
-                    result = self._pack_apply(staging_id, mode)
-                    if result.get("success"):
-                        self._send_response(APIResponse(True, result))
-                    else:
-                        self._send_response(APIResponse(False, error=result.get("error")), 400)
-
-            elif path == "/api/secrets/set":
-                result = self._secrets_set(body)
-                if result.get("success"):
-                    self._send_response(APIResponse(True, result))
-                else:
-                    self._send_response(APIResponse(False, error=result.get("error")), 400)
-
-            elif path == "/api/secrets/delete":
-                result = self._secrets_delete(body)
-                if result.get("success"):
-                    self._send_response(APIResponse(True, result))
-                else:
-                    self._send_response(APIResponse(False, error=result.get("error")), 400)
-
-            elif path == "/api/stores/create":
-                result = self._stores_create(body)
-                if result.get("success"):
-                    self._send_response(APIResponse(True, result))
-                else:
-                    self._send_response(APIResponse(False, error=result.get("error")), 400)
-
-            elif path == "/api/units/publish":
-                result = self._units_publish(body)
-                if result.get("success"):
-                    self._send_response(APIResponse(True, result))
-                else:
-                    self._send_response(APIResponse(False, error=result.get("error")), 400)
-
-            elif path == "/api/units/execute":
-                result = self._units_execute(body)
-                if result.get("success"):
-                    self._send_response(APIResponse(True, result))
-                else:
-                    status_code = 403 if result.get("error_type") in (
-                        "approval_denied", "grant_denied", "trust_denied"
-                    ) else 400
-                    self._send_response(APIResponse(False, error=result.get("error")), status_code)
 
             elif path == "/api/pip/candidates/scan":
                 ecosystem_dir = body.get("ecosystem_dir", None)
@@ -669,165 +592,6 @@ class PackAPIHandler(BaseHTTPRequestHandler):
         
         return {"success": True, "pack_id": pack_id}
 
-
-
-    # ------------------------------------------------------------------
-    # Pack import/apply
-    # ------------------------------------------------------------------
-
-    def _pack_import(self, source_path: str, notes: str = "") -> dict:
-        try:
-            from .pack_importer import get_pack_importer
-            importer = get_pack_importer()
-            result = importer.import_pack(source_path, notes=notes)
-            return result.to_dict()
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-    def _pack_apply(self, staging_id: str, mode: str = "replace") -> dict:
-        try:
-            from .pack_applier import get_pack_applier
-            applier = get_pack_applier()
-            result = applier.apply(staging_id, mode=mode)
-            return result.to_dict()
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-    # ------------------------------------------------------------------
-    # Secrets
-    # ------------------------------------------------------------------
-
-    def _secrets_list(self) -> dict:
-        try:
-            from .secrets_store import get_secrets_store
-            store = get_secrets_store()
-            keys = store.list_keys()
-            return {"secrets": [k.to_dict() for k in keys], "count": len(keys)}
-        except Exception as e:
-            return {"secrets": [], "error": str(e)}
-
-    def _secrets_set(self, body: dict) -> dict:
-        key = body.get("key", "")
-        value = body.get("value", "")
-        if not key:
-            return {"success": False, "error": "Missing 'key'"}
-        if not isinstance(value, str):
-            return {"success": False, "error": "'value' must be a string"}
-        try:
-            from .secrets_store import get_secrets_store
-            store = get_secrets_store()
-            result = store.set_secret(key, value)
-            return result.to_dict()
-        except Exception:
-            return {"success": False, "error": "Failed to set secret"}
-
-    def _secrets_delete(self, body: dict) -> dict:
-        key = body.get("key", "")
-        if not key:
-            return {"success": False, "error": "Missing 'key'"}
-        try:
-            from .secrets_store import get_secrets_store
-            store = get_secrets_store()
-            result = store.delete_secret(key)
-            return result.to_dict()
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-    # ------------------------------------------------------------------
-    # Store
-    # ------------------------------------------------------------------
-
-    def _stores_list(self) -> dict:
-        try:
-            from .store_registry import get_store_registry
-            reg = get_store_registry()
-            stores = reg.list_stores()
-            return {"stores": stores, "count": len(stores)}
-        except Exception as e:
-            return {"stores": [], "error": str(e)}
-
-    def _stores_create(self, body: dict) -> dict:
-        store_id = body.get("store_id", "")
-        root_path = body.get("root_path", "")
-        if not store_id or not root_path:
-            return {"success": False, "error": "Missing 'store_id' or 'root_path'"}
-        try:
-            from .store_registry import get_store_registry
-            reg = get_store_registry()
-            result = reg.create_store(store_id, root_path)
-            return result.to_dict()
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-    # ------------------------------------------------------------------
-    # Unit
-    # ------------------------------------------------------------------
-
-    def _units_list(self, store_id=None) -> dict:
-        try:
-            from .store_registry import get_store_registry
-            from .unit_registry import get_unit_registry
-            store_reg = get_store_registry()
-            unit_reg = get_unit_registry()
-            if store_id:
-                store_def = store_reg.get_store(store_id)
-                if store_def is None:
-                    return {"units": [], "error": f"Store not found: {store_id}"}
-                units = unit_reg.list_units(Path(store_def.root_path))
-                return {"units": [u.to_dict() for u in units], "count": len(units), "store_id": store_id}
-            else:
-                all_units = []
-                for sd in store_reg.list_stores():
-                    sid = sd.get("store_id", "")
-                    rp = sd.get("root_path", "")
-                    if rp:
-                        units = unit_reg.list_units(Path(rp))
-                        for u in units:
-                            u.store_id = sid
-                        all_units.extend(units)
-                return {"units": [u.to_dict() for u in all_units], "count": len(all_units)}
-        except Exception as e:
-            return {"units": [], "error": str(e)}
-
-    def _units_publish(self, body: dict) -> dict:
-        store_id = body.get("store_id", "")
-        source_dir = body.get("source_dir", "")
-        namespace = body.get("namespace", "")
-        name = body.get("name", "")
-        version = body.get("version", "")
-        if not all([store_id, source_dir, namespace, name, version]):
-            return {"success": False, "error": "Missing required fields"}
-        try:
-            from .store_registry import get_store_registry
-            from .unit_registry import get_unit_registry
-            store_reg = get_store_registry()
-            store_def = store_reg.get_store(store_id)
-            if store_def is None:
-                return {"success": False, "error": f"Store not found: {store_id}"}
-            unit_reg = get_unit_registry()
-            result = unit_reg.publish_unit(
-                Path(store_def.root_path), Path(source_dir),
-                namespace, name, version, store_id=store_id,
-            )
-            return result.to_dict()
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-    def _units_execute(self, body: dict) -> dict:
-        principal_id = body.get("principal_id", "")
-        unit_ref = body.get("unit_ref", {})
-        mode = body.get("mode", "")
-        args = body.get("args", {})
-        timeout = body.get("timeout_seconds", 60.0)
-        if not principal_id or not unit_ref or not mode:
-            return {"success": False, "error": "Missing principal_id, unit_ref, or mode"}
-        try:
-            from .unit_executor import get_unit_executor
-            executor = get_unit_executor()
-            result = executor.execute(principal_id, unit_ref, mode, args, timeout)
-            return result.to_dict()
-        except Exception as e:
-            return {"success": False, "error": str(e)}
 
 class PackAPIServer:
     def __init__(
