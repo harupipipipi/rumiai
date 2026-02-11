@@ -19,6 +19,9 @@ reject 3回で blocked
 
 from __future__ import annotations
 
+import ipaddress
+import re
+
 import hashlib
 import json
 import subprocess
@@ -58,6 +61,106 @@ REQUIREMENTS_LOCK_CANDIDATES = [
     "requirements.lock",
     "backend/requirements.lock",
 ]
+
+
+# ======================================================================
+# C-3: requirements.lock 検証
+# ======================================================================
+
+# NAME==VERSION のみ許可 (PEP 440 バージョン, extras 対応)
+_LOCK_LINE_PATTERN = re.compile(
+    r'^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?(\[[A-Za-z0-9,._-]+\])?\s*==\s*[^\s]+$'
+)
+
+# 禁止パターン
+_LOCK_FORBIDDEN_PATTERNS = [
+    re.compile(r'^\s*-e\b'),          # editable
+    re.compile(r'^\s*--'),             # pip options
+    re.compile(r'git\+', re.I),       # VCS
+    re.compile(r'https?://', re.I),    # URL
+    re.compile(r'file:', re.I),         # local file
+    re.compile(r'\.\.\/'),           # relative path
+    re.compile(r'^\s*/'),              # absolute path
+    re.compile(r'\s+@\s+'),          # direct reference (PEP 440)
+]
+
+
+def validate_requirements_lock(file_path: Path) -> Tuple[bool, Optional[str]]:
+    """
+    requirements.lock の内容を検証。
+
+    許可: NAME==VERSION 行のみ（コメント/空行は可）
+    禁止: URL, VCS, ローカル参照, pip オプション, @ direct ref
+
+    Returns:
+        (valid, error_reason)
+    """
+    try:
+        content = file_path.read_text(encoding="utf-8")
+    except Exception as e:
+        return False, f"Cannot read file: {e}"
+
+    for line_num, raw_line in enumerate(content.splitlines(), start=1):
+        line = raw_line.strip()
+
+        # 空行・コメント行はOK
+        if not line or line.startswith("#"):
+            continue
+
+        # 禁止パターンチェック
+        for pattern in _LOCK_FORBIDDEN_PATTERNS:
+            if pattern.search(line):
+                return False, (
+                    f"Line {line_num}: forbidden pattern detected: {raw_line!r}"
+                )
+
+        # NAME==VERSION 形式チェック
+        if not _LOCK_LINE_PATTERN.match(line):
+            return False, (
+                f"Line {line_num}: not a valid NAME==VERSION format: {raw_line!r}"
+            )
+
+    return True, None
+
+
+def validate_index_url(index_url: str) -> Tuple[bool, Optional[str]]:
+    """
+    index_url を検証。
+
+    - https のみ許可
+    - hostname が内部IP / localhost の場合は拒否
+
+    Returns:
+        (valid, error_reason)
+    """
+    if not index_url:
+        return True, None
+
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(index_url)
+    except Exception as e:
+        return False, f"Invalid URL: {e}"
+
+    if parsed.scheme != "https":
+        return False, f"index_url must use https, got: {parsed.scheme}"
+
+    hostname = parsed.hostname or ""
+
+    # localhost チェック
+    if hostname in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
+        return False, f"index_url hostname is localhost/loopback: {hostname}"
+
+    # IP リテラルチェック
+    try:
+        ip = ipaddress.ip_address(hostname)
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            return False, f"index_url hostname is internal/private IP: {hostname}"
+    except ValueError:
+        pass  # hostname（ドメイン名） — OK
+
+    return True, None
+
 
 # 状態定数
 STATUS_PENDING = "pending"
@@ -332,6 +435,20 @@ class PipInstaller:
                         continue
 
                     lock_path, relpath = found
+
+                    # C-3: scan 時点でも lock 内容を検証
+                    lock_valid, lock_err = validate_requirements_lock(lock_path)
+                    if not lock_valid:
+                        result.errors.append(
+                            f"Pack {loc.pack_id}: invalid requirements.lock: {lock_err}"
+                        )
+                        self._audit_log("pip_requirements_lock_invalid", False, {
+                            "pack_id": loc.pack_id,
+                            "relpath": relpath,
+                            "reason": lock_err,
+                        })
+                        continue
+
                     sha256 = self.compute_file_sha256(lock_path)
                     ckey = self.build_candidate_key(loc.pack_id, relpath, sha256)
 
@@ -443,6 +560,43 @@ class PipInstaller:
         with self._lock:
             return dict(self._blocked)
 
+
+    # ------------------------------------------------------------------
+    # Pack 承認チェック (C-2)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _check_pack_approval(pack_id: str) -> Tuple[bool, Optional[str]]:
+        """
+        Pack が承認済みかチェック。
+        strict モードでは ApprovalManager が利用不可でも拒否。
+        permissive モードでは ApprovalManager 不在時のみ許可 (fail-soft)。
+
+        Returns:
+            (approved, reason)
+        """
+        security_mode = os.environ.get("RUMI_SECURITY_MODE", "strict").lower()
+
+        try:
+            from .approval_manager import get_approval_manager, PackStatus
+            am = get_approval_manager()
+            status = am.get_status(pack_id)
+            if status is None:
+                return False, f"Pack '{pack_id}' not found in approval registry"
+            if status == PackStatus.APPROVED:
+                return True, None
+            if status == PackStatus.MODIFIED:
+                return False, f"Pack '{pack_id}' has been modified since approval"
+            if status == PackStatus.BLOCKED:
+                return False, f"Pack '{pack_id}' is blocked"
+            return False, f"Pack '{pack_id}' is not approved (status: {status.value})"
+        except ImportError:
+            if security_mode == "permissive":
+                return True, None
+            return False, "ApprovalManager not available (required in strict mode)"
+        except Exception as e:
+            return False, f"Approval check failed: {e}"
+
     # ------------------------------------------------------------------
     # approve + install
     # ------------------------------------------------------------------
@@ -466,11 +620,14 @@ class PipInstaller:
                     error="Candidate not found",
                 )
             if cand.status == STATUS_INSTALLED:
+                # C-4: idempotent — already installed is success
+                site_packages_dir = Path(PACK_DATA_BASE_DIR) / cand.pack_id / "python" / "site-packages"
                 return InstallResult(
-                    success=False,
+                    success=True,
                     candidate_key=candidate_key,
+                    pack_id=cand.pack_id,
                     status=STATUS_INSTALLED,
-                    error="Already installed",
+                    site_packages_path=str(site_packages_dir) if site_packages_dir.is_dir() else "",
                 )
             if cand.status == STATUS_BLOCKED:
                 return InstallResult(
@@ -478,6 +635,27 @@ class PipInstaller:
                     candidate_key=candidate_key,
                     status=STATUS_BLOCKED,
                     error="Candidate is blocked",
+                )
+
+
+            # C-2: Pack approval gate
+            approved, reason = self._check_pack_approval(cand.pack_id)
+            if not approved:
+                cand.status = STATUS_FAILED
+                cand.last_error = reason
+                cand.updated_at = self._now_ts()
+                self._save_index()
+                self._audit_log("pip_install_rejected_unapproved", False, {
+                    "pack_id": cand.pack_id,
+                    "candidate_key": candidate_key,
+                    "reason": reason,
+                })
+                return InstallResult(
+                    success=False,
+                    candidate_key=candidate_key,
+                    pack_id=cand.pack_id,
+                    status=STATUS_FAILED,
+                    error=reason,
                 )
 
             cand.allow_sdist = allow_sdist
@@ -493,6 +671,26 @@ class PipInstaller:
         })
 
         pack_id, relpath, sha256 = self.parse_candidate_key(candidate_key)
+
+        # C-3: index_url 検証
+        url_valid, url_err = validate_index_url(index_url)
+        if not url_valid:
+            with self._lock:
+                cand.status = STATUS_FAILED
+                cand.last_error = url_err
+                cand.updated_at = self._now_ts()
+                self._save_index()
+            self._audit_log("pip_install_rejected_bad_index_url", False, {
+                "pack_id": pack_id,
+                "candidate_key": candidate_key,
+                "index_url": index_url,
+                "reason": url_err,
+            })
+            return InstallResult(
+                success=False, candidate_key=candidate_key,
+                pack_id=pack_id, status=STATUS_FAILED, error=url_err,
+            )
+
 
         # パス確定
         pack_data_dir = Path(PACK_DATA_BASE_DIR) / pack_id
@@ -526,6 +724,27 @@ class PipInstaller:
 
         # Docker 実行
         try:
+
+            # C-3: TOCTOU — requirements.lock 再検証
+            lock_file = pack_subdir / relpath
+            if not lock_file.exists():
+                raise RuntimeError(f"requirements.lock disappeared: {lock_file}")
+
+            # SHA-256 TOCTOU チェック
+            current_sha = self.compute_file_sha256(lock_file)
+            if current_sha != sha256:
+                raise RuntimeError(
+                    f"requirements.lock SHA-256 changed since scan "
+                    f"(expected: {sha256[:16]}..., got: {current_sha[:16]}...)"
+                )
+
+            # 内容再検証
+            lock_valid, lock_err = validate_requirements_lock(lock_file)
+            if not lock_valid:
+                raise RuntimeError(
+                    f"requirements.lock content invalid on re-check: {lock_err}"
+                )
+
             # Stage 1: download
             dl_ok, dl_err = self._docker_pip_download(
                 pack_subdir=pack_subdir,

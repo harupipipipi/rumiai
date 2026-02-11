@@ -65,6 +65,36 @@ from .paths import (
 )
 
 
+
+# ============================================================
+# UDS GID ユーティリティ (A-1: --group-add 対応)
+# ============================================================
+
+def _read_gid_env(env_name: str) -> Optional[int]:
+    """
+    環境変数から GID を読み取る。
+    不正値 (空文字列, int変換不可) の場合は None を返す (fail-soft)。
+    """
+    raw = os.environ.get(env_name, "").strip()
+    if not raw:
+        return None
+    try:
+        gid = int(raw)
+        if gid < 0:
+            return None
+        return gid
+    except (ValueError, TypeError):
+        return None
+
+
+def _get_egress_gid() -> Optional[int]:
+    return _read_gid_env("RUMI_EGRESS_SOCKET_GID")
+
+
+def _get_capability_gid() -> Optional[int]:
+    return _read_gid_env("RUMI_CAPABILITY_SOCKET_GID")
+
+
 @dataclass
 class ExecutionContext:
     """python_file_call 実行コンテキスト"""
@@ -715,6 +745,10 @@ request = http_request
             if _sp.is_dir():
                 pip_site_packages = _sp
 
+        # GID for --group-add (A-1)
+        egress_gid = _get_egress_gid()
+        capability_gid = _get_capability_gid()
+
         # PYTHONPATH 構築
         pythonpath_parts = ["/"]
         if pip_site_packages:
@@ -782,6 +816,22 @@ request = http_request
                 "-v", f"{syscall_file}:/rumi_syscall.py:ro",  # syscallモジュール
                 "-e", f"PYTHONPATH={':'.join(pythonpath_parts)}",
             ]
+
+            # --group-add for UDS socket access (A-1)
+            group_add_gids: set = set()
+            if sock_path and sock_path.exists() and egress_gid is not None:
+                group_add_gids.add(egress_gid)
+            if capability_sock_path and capability_sock_path.exists() and capability_gid is not None:
+                group_add_gids.add(capability_gid)
+
+            for gid in sorted(group_add_gids):
+                docker_cmd.extend(["--group-add", str(gid)])
+
+            if group_add_gids:
+                result.warnings.append(
+                    f"Docker --group-add applied: {sorted(group_add_gids)}"
+                )
+
 
             # pip site-packages マウント（存在する場合）
             if pip_site_packages:

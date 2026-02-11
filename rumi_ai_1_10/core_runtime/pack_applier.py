@@ -203,14 +203,27 @@ class PackApplier:
         if existing_identity is None:
             return True, None
 
-        new_pid = new_identity.get("pack_id")
-        existing_pid = existing_identity.get("pack_id")
+        new_pid = new_identity.get("pack_id") or ""
+        existing_pid = existing_identity.get("pack_id") or ""
 
         if new_pid and existing_pid and new_pid != existing_pid:
             return False, (
-                f"pack_identity mismatch: existing='{existing_pid}', "
+                f"pack_id mismatch: existing='{existing_pid}', "
                 f"new='{new_pid}'"
             )
+
+        # Check pack_identity (e.g. "github:author/repo")
+        new_pi = new_identity.get("pack_identity") or ""
+        existing_pi = existing_identity.get("pack_identity") or ""
+
+        if new_pi and existing_pi and new_pi != existing_pi:
+            return False, (
+                f"pack_identity mismatch: existing pack_identity='{existing_pi}', "
+                f"new pack_identity='{new_pi}' "
+                f"(pack_id='{new_pid}'). "
+                f"To replace, manually remove the existing pack first."
+            )
+
         return True, None
 
     def _read_pack_identity(self, pack_dir: Path) -> Optional[Dict[str, Any]]:
@@ -220,7 +233,10 @@ class PackApplier:
         try:
             with open(eco_json, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            return {"pack_id": data.get("pack_id")}
+            return {
+                "pack_id": data.get("pack_id"),
+                "pack_identity": data.get("pack_identity"),
+            }
         except Exception:
             return None
 

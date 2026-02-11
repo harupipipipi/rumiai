@@ -17,14 +17,16 @@ Pack/Component開発者向けの包括的なドキュメントです。
 6. [Flow Modifier（差し込み）](#flow-modifier差し込み)
 7. [権限モデル](#権限モデル)
 8. [ネットワークアクセス](#ネットワークアクセス)
-9. [lib（install/update）](#libinstallupdate)
-10. [Dependency Installation (pip)](#dependency-installation-pip)
-11. [Pack開発ガイド](#pack開発ガイド)
-12. [InterfaceRegistry API](#interfaceregistry-api)
-13. [EventBus API](#eventbus-api)
-14. [監査ログ](#監査ログ)
-15. [セキュリティ](#セキュリティ)
-16. [トラブルシューティング](#トラブルシューティング)
+9. [Capability Grant](#capability-grant)
+10. [lib（install/update）](#libinstallupdate)
+11. [Dependency Installation (pip)](#dependency-installation-pip)
+12. [Pack開発ガイド](#pack開発ガイド)
+13. [InterfaceRegistry API](#interfaceregistry-api)
+14. [EventBus API](#eventbus-api)
+15. [監査ログ](#監査ログ)
+16. [セキュリティ](#セキュリティ)
+17. [Pending Export](#pending-export)
+18. [トラブルシューティング](#トラブルシューティング)
 
 ---
 
@@ -39,13 +41,14 @@ Rumi AI の公式コードは以下の概念を**一切知りません**：
 - 「AIクライアント」
 - 「フロントエンド」
 
-これらは全て `ecosystem/packs/` 内の Pack が定義します。公式が提供するのは：
+これらは全て Pack が定義します。公式が提供するのは：
 
 - Flow実行エンジン（ステップ順次実行）
 - InterfaceRegistry（登録箱）
 - EventBus（イベント通信）
 - Diagnostics（診断情報）
 - 権限・承認システム
+- Capability（Trust + Grant）
 
 ### Flow中心
 
@@ -96,8 +99,11 @@ core_runtime/
 ├── diagnostics.py         # 診断情報
 ├── approval_manager.py    # Pack承認管理
 ├── network_grant_manager.py # ネットワーク権限
-├── egress_proxy.py        # 外部通信プロキシ
+├── capability_grant_manager.py # Capability Grant管理
+├── capability_proxy.py    # Capability Proxy（UDS）
+├── egress_proxy.py        # 外部通信プロキシ（UDS）
 ├── lib_executor.py        # lib install/update
+├── pip_installer.py       # pip依存ライブラリ導入
 └── audit_logger.py        # 監査ログ
 ```
 
@@ -108,12 +114,14 @@ core_runtime/
   │
   ▼
 ┌─────────────────────┐
-│ 1. Flow読み込み      │ flows/, ecosystem/flows/
+│ 1. Flow読み込み      │ flows/, user_data/shared/flows/,
+│                      │ ecosystem/<pack_id>/backend/flows/
 └─────────────────────┘
   │
   ▼
 ┌─────────────────────┐
-│ 2. Modifier適用      │ ecosystem/flows/modifiers/
+│ 2. Modifier適用      │ user_data/shared/flows/modifiers/,
+│                      │ ecosystem/<pack_id>/backend/flows/modifiers/
 └─────────────────────┘
   │
   ▼
@@ -128,7 +136,12 @@ core_runtime/
   │
   ▼
 ┌─────────────────────┐
-│ 5. Flow実行         │ python_file_call等
+│ 5. Pending Export   │ user_data/pending/summary.json
+└─────────────────────┘
+  │
+  ▼
+┌─────────────────────┐
+│ 6. Flow実行         │ python_file_call等
 └─────────────────────┘
 ```
 
@@ -152,16 +165,32 @@ project_root/
 ├── flows/                     # ★公式Flow（起動・基盤）
 │   └── 00_startup.flow.yaml
 │
+├── user_data/
+│   ├── shared/
+│   │   ├── flows/             # ★shared Flow（共有の結線）
+│   │   │   ├── ai_response.flow.yaml
+│   │   │   └── ...
+│   │   └── flows/modifiers/   # ★差し込み定義（Flow modifier）
+│   │       ├── tool_inject.modifier.yaml
+│   │       └── ...
+│   │
+│   ├── permissions/
+│   │   ├── approvals/         # Pack承認状態
+│   │   ├── network/           # ネットワークGrant
+│   │   ├── capabilities/      # Capability Grant（principal別）
+│   │   └── .secret_key
+│   ├── audit/                 # 監査ログ
+│   │   ├── flow_execution_YYYY-MM-DD.jsonl
+│   │   ├── python_file_call_YYYY-MM-DD.jsonl
+│   │   └── network_YYYY-MM-DD.jsonl
+│   ├── pending/               # Pending Export
+│   │   └── summary.json
+│   ├── settings/
+│   │   └── lib_execution_records.json
+│   └── ...
+│
 ├── ecosystem/
-│   ├── flows/                 # ★ecosystem Flow（共有の結線）
-│   │   ├── ai_response.flow.yaml
-│   │   └── ...
-│   │
-│   ├── flows/modifiers/       # ★差し込み定義（Flow modifier）
-│   │   ├── tool_inject.modifier.yaml
-│   │   └── ...
-│   │
-│   └── packs/                 # Pack格納
+│   └── packs/                 # Pack格納（旧互換パス）
 │       └── {pack_id}/
 │           └── backend/
 │               ├── ecosystem.json
@@ -173,25 +202,26 @@ project_root/
 │               │       └── blocks/        # ★python_file_callブロック
 │               │           ├── generate.py
 │               │           └── ...
+│               ├── flows/                 # ★Pack提供のFlow
+│               │   └── *.flow.yaml
 │               └── lib/                   # ★lib（整理目的）
 │                   ├── install.py
 │                   └── update.py
 │
-├── user_data/
-│   ├── permissions/
-│   │   ├── approvals/         # Pack承認状態
-│   │   ├── network/           # ネットワークGrant
-│   │   └── .secret_key
-│   ├── audit/                 # 監査ログ
-│   │   ├── flow_execution_YYYY-MM-DD.jsonl
-│   │   ├── python_file_call_YYYY-MM-DD.jsonl
-│   │   └── network_YYYY-MM-DD.jsonl
-│   ├── settings/
-│   │   └── lib_execution_records.json
-│   └── ...
-│
 └── docs/
 ```
+
+### Flow 読み込み元（優先順）
+
+| 優先度 | パス | 用途 |
+|--------|------|------|
+| 1 | `flows/` | 公式Flow（起動・基盤） |
+| 2 | `user_data/shared/flows/` | ユーザー/外部ツールが配置する共有Flow |
+| 3 | `ecosystem/<pack_id>/backend/flows/` | Pack提供のFlow |
+| (deprecated) | `ecosystem/flows/` | local_pack互換（オプトイン、非推奨） |
+
+`ecosystem/flows/` は `RUMI_LOCAL_PACK_MODE=require_approval` でのみ有効です。
+デフォルトでは無効（off）です。新規Flowは上記1〜3に配置してください。
 
 ---
 
@@ -315,6 +345,15 @@ def run(input_data, context=None):
     }
 ```
 
+### principal_id の扱い（v1）
+
+v1 では、`principal_id` は常に `owner_pack` に強制上書きされます。
+Flow定義で `principal_id` を指定しても、実行時は `owner_pack` が使用されます。
+これは権限の乱用事故を防ぐための措置です。
+
+監査ログには `principal_id_overridden` として警告が記録されます。
+将来のバージョンで principal_id の独立運用が検討される場合があります。
+
 ### context で提供される関数
 
 #### network_check(domain, port)
@@ -357,8 +396,22 @@ def run(input_data, context):
 
 1. **承認必須**: 未承認Packのコードは実行されない
 2. **ハッシュ検証**: Modifiedなpackのコードは実行されない
-3. **パス制限**: `ecosystem/packs/` 配下のみ実行可能
+3. **パス制限**: `ecosystem/` 配下のみ実行可能（pack_subdir boundary 強制）
 4. **Docker隔離**: strictモードではコンテナ内で実行
+
+### UDS ソケット権限と --group-add
+
+strictモードでコンテナからUDSソケット（0660）にアクセスするには、専用GIDの設定が必要です：
+
+1. 専用 GID を決定（例: 1099）
+2. 環境変数を設定：
+   - `RUMI_EGRESS_SOCKET_GID=1099`
+   - `RUMI_CAPABILITY_SOCKET_GID=1099`
+3. ソケット作成時に自動的に指定 GID の group が設定されます
+4. docker run 時に `--group-add=1099` が自動付与されます
+
+GID が未設定の場合、ソケットは root:root で 0660 になりうるため、コンテナ（nobody:65534）からアクセスできません。
+`RUMI_EGRESS_SOCKET_MODE=0666` / `RUMI_CAPABILITY_SOCKET_MODE=0666` で緩和可能ですが、非推奨です。
 
 ---
 
@@ -427,6 +480,16 @@ requires:
 2. `priority` 昇順
 3. `modifier_id` 昇順
 
+### resolve_target（共有辞書での解決）
+
+```yaml
+# target_flow_id を共有辞書で解決する場合
+modifier_id: compat_modifier
+target_flow_id: old_flow_name
+resolve_target: true              # オプトイン
+resolve_namespace: "flow_id"      # デフォルト
+```
+
 ---
 
 ## 権限モデル
@@ -470,7 +533,7 @@ Pack配置 (ecosystem/packs/)
 ### 設計原則
 
 - Packは直接外部通信できない（Docker `network=none`）
-- 全ての外部通信は Egress Proxy を経由
+- 全ての外部通信は Egress Proxy（UDS）を経由
 - `owner_pack` の network grant で allow/deny を判定
 - 全リクエストを監査ログに記録
 
@@ -519,9 +582,134 @@ Pack配置 (ecosystem/packs/)
       port: 443
 ```
 
+### HTTP API（Pack API Server）
+
+全エンドポイントは `Authorization: Bearer YOUR_TOKEN` が必須です。
+
+| メソッド | パス | 説明 |
+|----------|------|------|
+| POST | `/api/network/grant` | ネットワーク権限を付与 |
+| POST | `/api/network/revoke` | ネットワーク権限を取り消し |
+| POST | `/api/network/check` | アクセス可否をチェック |
+| GET | `/api/network/list` | 全Grant一覧 |
+
+```bash
+# Grant付与
+curl -X POST http://localhost:8765/api/network/grant \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pack_id": "my_pack",
+    "allowed_domains": ["api.openai.com"],
+    "allowed_ports": [443]
+  }'
+
+# Grant一覧
+curl http://localhost:8765/api/network/list \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# アクセスチェック
+curl -X POST http://localhost:8765/api/network/check \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"pack_id": "my_pack", "domain": "api.openai.com", "port": 443}'
+
+# 取り消し
+curl -X POST http://localhost:8765/api/network/revoke \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"pack_id": "my_pack", "reason": "不要になった"}'
+```
+
 ### Modified時の自動無効化
 
 Packが `modified` 状態になると、ネットワーク権限は自動的に無効化されます。再承認後に再有効化されます。
+
+---
+
+## Capability Grant
+
+### 概要
+
+capability handler の承認（Trust + copy）後、実際に Pack が capability を使用するには Grant（principal × permission）の付与が必要です。
+
+Trust（sha256 allowlist）と Grant は独立して管理されます：
+- **Trust**: handler のコードを信頼するか
+- **Grant**: 誰がその capability を使えるか
+
+### Kernelハンドラ
+
+```yaml
+# Grant付与
+- type: handler
+  input:
+    handler: "kernel:capability.grant"
+    args:
+      principal_id: "my_pack"
+      permission_id: "fs.read"
+      config:                          # 任意: 追加設定
+        allowed_paths: ["/data"]
+
+# Grant取り消し
+- type: handler
+  input:
+    handler: "kernel:capability.revoke"
+    args:
+      principal_id: "my_pack"
+      permission_id: "fs.read"
+
+# Grant一覧
+- type: handler
+  input:
+    handler: "kernel:capability.list"
+    args:
+      principal_id: "my_pack"          # 任意: 指定時は1件、無い時は全件
+```
+
+### HTTP API
+
+全エンドポイントは `Authorization: Bearer YOUR_TOKEN` が必須です。
+
+| メソッド | パス | 説明 |
+|----------|------|------|
+| POST | `/api/capability/grants/grant` | Capability Grantを付与 |
+| POST | `/api/capability/grants/revoke` | Capability Grantを取り消し |
+| GET | `/api/capability/grants?principal_id=xxx` | Grant一覧（principal_id任意） |
+
+```bash
+# Grant付与
+curl -X POST http://localhost:8765/api/capability/grants/grant \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"principal_id": "my_pack", "permission_id": "fs.read"}'
+
+# Grant一覧
+curl "http://localhost:8765/api/capability/grants?principal_id=my_pack" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# Grant取り消し
+curl -X POST http://localhost:8765/api/capability/grants/revoke \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"principal_id": "my_pack", "permission_id": "fs.read"}'
+```
+
+### 運用フロー
+
+capability handler の approve（Trust + copy）から実際の使用までの全体フロー：
+
+```
+1. capability handler 候補をスキャン
+   POST /api/capability/candidates/scan
+
+2. 候補を承認（Trust登録 + コピー + Registry reload）
+   POST /api/capability/requests/{key}/approve
+
+3. Grant を付与（principal × permission）
+   POST /api/capability/grants/grant
+
+4. Pack（コンテナ）から rumi_capability.call(permission_id, ...) が通る
+```
 
 ---
 
@@ -564,12 +752,14 @@ def run(context=None):
             - lib_type: "install"
             - ts: タイムスタンプ
             - lib_dir: libディレクトリパス
+            - data_dir: 書き込み可能ディレクトリ（コンテナ内: /data）
     """
     pack_id = context.get("pack_id") if context else "unknown"
+    data_dir = context.get("data_dir") if context else None
     
     # 初期化処理
-    # - 設定ファイル作成
-    # - データベース初期化
+    # - data_dir 内に設定ファイル作成
+    # - data_dir 内にデータベース初期化
     # - 依存関係のセットアップ
     
     return {"status": "installed"}
@@ -583,6 +773,7 @@ def run(context=None):
     アップデート処理
     """
     pack_id = context.get("pack_id") if context else "unknown"
+    data_dir = context.get("data_dir") if context else None
     
     # マイグレーション処理
     # - スキーマ更新
@@ -595,6 +786,7 @@ def run(context=None):
 
 - 承認済みPackのみ実行可能
 - Modifiedなら実行されない
+- Docker隔離（strictモード）: RW マウントは `user_data/packs/{pack_id}/` のみ
 
 ---
 
@@ -611,6 +803,37 @@ pack_subdir 基準で探索されます:
 1. `<pack_subdir>/requirements.lock`
 2. `<pack_subdir>/backend/requirements.lock`（互換）
 
+### requirements.lock の許可構文
+
+サプライチェーン事故防止のため、以下の構文制限が強制されます：
+
+- **許可**: `NAME==VERSION` 行のみ（コメント行・空行は可）
+- **禁止**:
+  - `-e`（editable install）
+  - `git+`, `http://`, `https://`（URL/VCS参照）
+  - `file:`, `../`, `/`（ローカル参照）
+  - `--` で始まるオプション行
+  - `@` direct reference（例: `pkg @ https://...`）
+
+```
+# 正しい例
+requests==2.31.0
+flask==3.0.0
+numpy[extra]==1.26.0
+
+# 禁止される例
+-e git+https://github.com/user/repo.git
+requests>=2.31.0          # >= は不可、== のみ
+--index-url https://...
+pkg @ https://example.com/pkg.whl
+```
+
+### index_url の制約
+
+`approve` 時に指定する `index_url` は以下を満たす必要があります：
+- `https` スキームのみ（`http` は不可）
+- hostname が localhost / 127.0.0.1 / ::1 / プライベートIP / link-local の場合は拒否
+
 ### 承認フロー
 
 ```
@@ -619,6 +842,9 @@ scan → pending → approve → installed
                             → 3回 reject → blocked
                                             → unblock → pending
 ```
+
+承認には Pack 自体の承認（approved状態）が前提条件です。未承認 Pack の依存導入はできません（strict モード）。
+同一 candidate_key の二重 approve は冪等（success=true を返す）です。
 
 ### 生成物
 
@@ -678,7 +904,8 @@ def run(input_data, context=None):
 ### Flow定義
 
 ```yaml
-# ecosystem/flows/hello.flow.yaml
+# user_data/shared/flows/hello.flow.yaml
+# または ecosystem/<pack_id>/backend/flows/hello.flow.yaml
 
 flow_id: hello
 inputs:
@@ -716,6 +943,22 @@ steps:
   ]
 }
 ```
+
+### 開発の流れ
+
+1. **Pack を作る**: `ecosystem/packs/{pack_id}/backend/` に配置（または `ecosystem/{pack_id}/backend/`）
+2. **ecosystem.json を書く**: Pack のメタデータ（pack_id, pack_identity 必須）
+3. **blocks/ を書く**: `python_file_call` で呼ばれるコード
+4. **Flow を書く**: `user_data/shared/flows/` に配置し、blocks を結線
+5. **承認を得る**: ユーザーが Pack を承認
+6. **実行**: 承認後、Flow 実行時に blocks が呼ばれる
+
+### 注意事項
+
+- **InterfaceRegistry は内部 API**: Pack から直接 IR を操作しないでください
+- **外部通信は Egress Proxy 経由**: `context["http_request"]` を使用
+- **lib は Docker 隔離**: `user_data/packs/{pack_id}/` のみ書き込み可能
+- **pack_identity の一貫性**: 更新時に `pack_identity` が変わると apply が拒否されます
 
 ---
 
@@ -787,10 +1030,10 @@ eb.unsubscribe("user.created", handler_id)
 | `modifier_application` | Modifier適用 | `modifier_application_YYYY-MM-DD.jsonl` |
 | `python_file_call` | ブロック実行 | `python_file_call_YYYY-MM-DD.jsonl` |
 | `approval` | 承認操作 | `approval_YYYY-MM-DD.jsonl` |
-| `permission` | 権限操作 | `permission_YYYY-MM-DD.jsonl` |
+| `permission` | 権限操作（capability grant含む） | `permission_YYYY-MM-DD.jsonl` |
 | `network` | ネットワーク | `network_YYYY-MM-DD.jsonl` |
 | `security` | セキュリティ | `security_YYYY-MM-DD.jsonl` |
-| `system` | システム | `system_YYYY-MM-DD.jsonl` |
+| `system` | システム（pip, lib等） | `system_YYYY-MM-DD.jsonl` |
 
 ### エントリ形式
 
@@ -812,6 +1055,12 @@ eb.unsubscribe("user.created", handler_id)
   }
 }
 ```
+
+### 日付ローテーション
+
+監査ログはエントリの `ts` フィールドに基づいて正しい日付ファイルに振り分けられます。
+深夜を跨いだバッファ内エントリも、`ts` の日付に対応するファイルに書き込まれます。
+`ts` が不正な場合は当日のファイルにフォールバックします。
 
 ### Kernelハンドラ
 
@@ -853,9 +1102,12 @@ eb.unsubscribe("user.created", handler_id)
 | 承認ゲート | 未承認Packのコードは実行されない |
 | ハッシュ検証 | 承認後にファイル変更されると無効化 |
 | HMAC署名 | grants.jsonの改ざんを検出 |
-| パス制限 | 許可ディレクトリ外のファイル実行を拒否 |
-| Egress Proxy | 外部通信をallow listで制御 |
+| パス制限 | 許可ディレクトリ外のファイル実行を拒否（pack_subdir boundary強制） |
+| Egress Proxy（UDS） | 外部通信をallow listで制御 |
+| UDS group-add | ソケット権限を専用GIDで管理 |
 | 監査ログ | 全操作を記録 |
+| requirements.lock検証 | サプライチェーン攻撃防止 |
+| pack_identity検証 | 更新時の取り違え防止 |
 
 ### 脅威対策
 
@@ -866,6 +1118,63 @@ eb.unsubscribe("user.created", handler_id)
 | 設定改ざん | HMAC署名 |
 | 不正な外部通信 | Egress Proxy + allow list |
 | 権限昇格 | Pack単位の明示的Grant |
+| サプライチェーン攻撃 | requirements.lock 構文制限 + wheel-only |
+| Pack取り違え | pack_identity 比較で拒否 |
+| DNS rebinding | DNS解決結果の内部IP検査 |
+
+---
+
+## Pending Export
+
+### 概要
+
+起動時に `user_data/pending/summary.json` が自動生成されます。
+外部ツールはこのファイルを読むだけで承認待ち状況を把握できます。
+
+公式はこのファイルの内容を解釈しません（No Favoritism）。誰でも読める中立な出力です。
+
+### 出力形式
+
+```json
+{
+  "ts": "2026-02-11T15:00:00Z",
+  "version": "1.0",
+  "packs": {
+    "pending_count": 2,
+    "pending_ids": ["pack_a", "pack_b"],
+    "modified_count": 1,
+    "modified_ids": ["pack_c"],
+    "blocked_count": 0,
+    "blocked_ids": []
+  },
+  "capability": {
+    "pending_count": 1,
+    "rejected_count": 0,
+    "blocked_count": 0,
+    "failed_count": 0,
+    "installed_count": 3
+  },
+  "pip": {
+    "pending_count": 0,
+    "rejected_count": 0,
+    "blocked_count": 0,
+    "failed_count": 0,
+    "installed_count": 2
+  }
+}
+```
+
+### Kernelハンドラ
+
+```yaml
+- type: handler
+  input:
+    handler: "kernel:pending.export"
+    args:
+      output_dir: "user_data/pending"
+```
+
+個別モジュールが import できない場合でも、取得できた範囲だけ書き出します（fail-soft）。
 
 ---
 
@@ -875,10 +1184,12 @@ eb.unsubscribe("user.created", handler_id)
 
 ```bash
 # 承認状態を確認
-curl http://localhost:8765/api/packs/{pack_id}/status
+curl http://localhost:8765/api/packs/{pack_id}/status \
+  -H "Authorization: Bearer YOUR_TOKEN"
 
 # 承認
-curl -X POST http://localhost:8765/api/packs/{pack_id}/approve
+curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
+  -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
 ### Packが無効化された
@@ -887,20 +1198,36 @@ curl -X POST http://localhost:8765/api/packs/{pack_id}/approve
 
 ### ネットワークアクセスが拒否される
 
-```yaml
+```bash
 # Grantを確認
-- type: handler
-  input:
-    handler: "kernel:network.list"
+curl http://localhost:8765/api/network/list \
+  -H "Authorization: Bearer YOUR_TOKEN"
 
 # Grantを付与
-- type: handler
-  input:
-    handler: "kernel:network.grant"
-    args:
-      pack_id: "my_pack"
-      allowed_domains: ["api.example.com"]
-      allowed_ports: [443]
+curl -X POST http://localhost:8765/api/network/grant \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "pack_id": "my_pack",
+    "allowed_domains": ["api.example.com"],
+    "allowed_ports": [443]
+  }'
+```
+
+### Capability が使えない
+
+capability handler は approve だけでは使えません。Grant の付与が必要です：
+
+```bash
+# Grant一覧確認
+curl "http://localhost:8765/api/capability/grants?principal_id=my_pack" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# Grant付与
+curl -X POST http://localhost:8765/api/capability/grants/grant \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"principal_id": "my_pack", "permission_id": "fs.read"}'
 ```
 
 ### Modifierが適用されない
@@ -935,6 +1262,22 @@ curl -X POST http://localhost:8765/api/packs/{pack_id}/approve
       pack_id: "my_pack"
 ```
 
+### pip依存のインストールが失敗する
+
+1. Pack が承認済みか確認（未承認 Pack の依存導入は strict モードで拒否されます）
+2. requirements.lock の構文が正しいか確認（NAME==VERSION のみ許可）
+3. index_url が https で外部ホストか確認
+
+```bash
+# 候補をスキャン
+curl -X POST http://localhost:8765/api/pip/candidates/scan \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# 一覧確認
+curl "http://localhost:8765/api/pip/requests?status=pending" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
 ### Docker関連エラー
 
 ```
@@ -943,6 +1286,23 @@ Error: Docker is required but not available
 
 1. Docker Desktop が起動しているか確認
 2. 開発時は `RUMI_SECURITY_MODE=permissive` を設定
+
+### UDSソケットにアクセスできない
+
+strictモードでコンテナがUDSソケットに接続できない場合：
+
+1. `RUMI_EGRESS_SOCKET_GID` / `RUMI_CAPABILITY_SOCKET_GID` が設定されているか確認
+2. 設定した GID がソケットファイルに反映されているか確認（`ls -la /run/rumi/egress/packs/`）
+3. 最終手段として `RUMI_EGRESS_SOCKET_MODE=0666` で緩和（非推奨）
+
+### Pack更新時にidentityエラー
+
+```
+Error: pack_identity mismatch: existing pack_identity='github:author/old_repo', new pack_identity='github:author/new_repo'
+```
+
+既存Packと異なる `pack_identity` を持つPackで上書きしようとしています。
+意図的な置換の場合は、先に既存Packを手動で削除してから再度applyしてください。
 
 ---
 
@@ -953,7 +1313,7 @@ Error: Docker is required but not available
 | ハンドラ | 説明 |
 |---------|------|
 | `kernel:flow.load_all` | 全Flowをロード |
-| `kernel:flow.execute_by_id` | Flow IDで実行 |
+| `kernel:flow.execute_by_id` | Flow IDで実行（resolve オプション対応） |
 
 ### Modifier関連
 
@@ -970,6 +1330,14 @@ Error: Docker is required but not available
 | `kernel:network.revoke` | ネットワーク権限を取り消し |
 | `kernel:network.check` | アクセス可否をチェック |
 | `kernel:network.list` | 全Grantを一覧 |
+
+### Capability Grant
+
+| ハンドラ | 説明 |
+|---------|------|
+| `kernel:capability.grant` | Capability Grantを付与 |
+| `kernel:capability.revoke` | Capability Grantを取り消し |
+| `kernel:capability.list` | Capability Grantを一覧 |
 
 ### Egress Proxy関連
 
@@ -996,6 +1364,12 @@ Error: Docker is required but not available
 | `kernel:audit.query` | ログを検索 |
 | `kernel:audit.summary` | サマリーを取得 |
 | `kernel:audit.flush` | バッファをフラッシュ |
+
+### Pending Export
+
+| ハンドラ | 説明 |
+|---------|------|
+| `kernel:pending.export` | 承認待ち状況をsummary.jsonに書き出し |
 
 ### コンテキスト操作
 
@@ -1057,6 +1431,8 @@ ecosystem/packs/ai_client/
 """
 AI応答生成ブロック
 """
+import json
+
 
 def run(input_data, context=None):
     """
@@ -1095,7 +1471,6 @@ def run(input_data, context=None):
             "allowed": result.get("allowed", False)
         }
     
-    import json
     response_data = json.loads(result.get("body", "{}"))
     
     return {
@@ -1104,7 +1479,7 @@ def run(input_data, context=None):
     }
 ```
 
-### Flow定義 (ecosystem/flows/ai_response.flow.yaml)
+### Flow定義 (user_data/shared/flows/ai_response.flow.yaml)
 
 ```yaml
 flow_id: ai_response
@@ -1156,7 +1531,7 @@ steps:
       value: "${ctx.ai_result}"
 ```
 
-### Modifier例 (ecosystem/flows/modifiers/add_logging.modifier.yaml)
+### Modifier例 (user_data/shared/flows/modifiers/add_logging.modifier.yaml)
 
 ```yaml
 modifier_id: add_logging

@@ -111,6 +111,10 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                 result = self._get_docker_status()
                 self._send_response(APIResponse(True, result))
 
+            elif path == "/api/network/list":
+                result = self._network_list()
+                self._send_response(APIResponse(True, result))
+
             elif path == "/api/secrets":
                 result = self._secrets_list()
                 self._send_response(APIResponse(True, result))
@@ -127,6 +131,13 @@ class PackAPIHandler(BaseHTTPRequestHandler):
 
             elif path == "/api/capability/blocked":
                 result = self._capability_list_blocked()
+                self._send_response(APIResponse(True, result))
+
+            elif path == "/api/capability/grants":
+                # GET /api/capability/grants?principal_id=xxx
+                query = parse_qs(urlparse(self.path).query)
+                principal_id = query.get("principal_id", [None])[0]
+                result = self._capability_grants_list(principal_id)
                 self._send_response(APIResponse(True, result))
 
             elif path == "/api/capability/requests":
@@ -164,6 +175,47 @@ class PackAPIHandler(BaseHTTPRequestHandler):
         try:
             body = self._parse_body()
             
+            elif path == "/api/network/grant":
+                pack_id = body.get("pack_id", "")
+                allowed_domains = body.get("allowed_domains", [])
+                allowed_ports = body.get("allowed_ports", [])
+                if not pack_id:
+                    self._send_response(APIResponse(False, error="Missing pack_id"), 400)
+                elif not allowed_domains and not allowed_ports:
+                    self._send_response(APIResponse(False, error="Must specify allowed_domains or allowed_ports"), 400)
+                else:
+                    result = self._network_grant(
+                        pack_id, allowed_domains, allowed_ports,
+                        granted_by=body.get("granted_by", "api_user"),
+                        notes=body.get("notes", ""),
+                    )
+                    if result.get("success"):
+                        self._send_response(APIResponse(True, result))
+                    else:
+                        self._send_response(APIResponse(False, error=result.get("error", "Grant failed")), 400)
+
+            elif path == "/api/network/revoke":
+                pack_id = body.get("pack_id", "")
+                if not pack_id:
+                    self._send_response(APIResponse(False, error="Missing pack_id"), 400)
+                else:
+                    result = self._network_revoke(pack_id, reason=body.get("reason", ""))
+                    if result.get("success"):
+                        self._send_response(APIResponse(True, result))
+                    else:
+                        self._send_response(APIResponse(False, error=result.get("error", "Revoke failed")), 400)
+
+            elif path == "/api/network/check":
+                pack_id = body.get("pack_id", "")
+                domain = body.get("domain", "")
+                port = body.get("port")
+                if not pack_id or not domain or port is None:
+                    self._send_response(APIResponse(False, error="Missing pack_id, domain, or port"), 400)
+                else:
+                    result = self._network_check(pack_id, domain, int(port))
+                    self._send_response(APIResponse(True, result))
+
+
             if path == "/api/packs/scan":
                 result = self._scan_packs()
                 self._send_response(APIResponse(True, result))
@@ -313,6 +365,31 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                     else:
                         self._send_response(APIResponse(False, error=result.get("error", "Unblock failed")), 400)
             
+            elif path == "/api/capability/grants/grant":
+                principal_id = body.get("principal_id", "")
+                permission_id = body.get("permission_id", "")
+                config = body.get("config")
+                if not principal_id or not permission_id:
+                    self._send_response(APIResponse(False, error="Missing principal_id or permission_id"), 400)
+                else:
+                    result = self._capability_grants_grant(principal_id, permission_id, config)
+                    if result.get("success"):
+                        self._send_response(APIResponse(True, result))
+                    else:
+                        self._send_response(APIResponse(False, error=result.get("error", "Grant failed")), 400)
+
+            elif path == "/api/capability/grants/revoke":
+                principal_id = body.get("principal_id", "")
+                permission_id = body.get("permission_id", "")
+                if not principal_id or not permission_id:
+                    self._send_response(APIResponse(False, error="Missing principal_id or permission_id"), 400)
+                else:
+                    result = self._capability_grants_revoke(principal_id, permission_id)
+                    if result.get("success"):
+                        self._send_response(APIResponse(True, result))
+                    else:
+                        self._send_response(APIResponse(False, error=result.get("error", "Revoke failed")), 400)
+
             elif path.startswith("/api/packs/") and path.endswith("/approve"):
                 pack_id = path.split("/")[3]
                 result = self._approve_pack(pack_id)
@@ -479,6 +556,139 @@ class PackAPIHandler(BaseHTTPRequestHandler):
         self.container_orchestrator.stop_container(pack_id)
         self.container_orchestrator.remove_container(pack_id)
         return {"success": True, "pack_id": pack_id}
+
+    # ------------------------------------------------------------------
+    # Network Grant endpoints (B-2)
+    # ------------------------------------------------------------------
+
+    def _network_grant(self, pack_id: str, allowed_domains: list, allowed_ports: list,
+                       granted_by: str = "api_user", notes: str = "") -> dict:
+        try:
+            from .network_grant_manager import get_network_grant_manager
+            ngm = get_network_grant_manager()
+            grant = ngm.grant_network_access(
+                pack_id=pack_id,
+                allowed_domains=allowed_domains,
+                allowed_ports=allowed_ports,
+                granted_by=granted_by,
+                notes=notes,
+            )
+            return {"success": True, "pack_id": pack_id, "grant": grant.to_dict()}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _network_revoke(self, pack_id: str, reason: str = "") -> dict:
+        try:
+            from .network_grant_manager import get_network_grant_manager
+            ngm = get_network_grant_manager()
+            success = ngm.revoke_network_access(pack_id=pack_id, reason=reason)
+            return {"success": success, "pack_id": pack_id, "revoked": success}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _network_check(self, pack_id: str, domain: str, port: int) -> dict:
+        try:
+            from .network_grant_manager import get_network_grant_manager
+            ngm = get_network_grant_manager()
+            result = ngm.check_access(pack_id, domain, port)
+            return {
+                "allowed": result.allowed,
+                "reason": result.reason,
+                "pack_id": result.pack_id,
+                "domain": result.domain,
+                "port": result.port,
+            }
+        except Exception as e:
+            return {"allowed": False, "error": str(e)}
+
+    def _network_list(self) -> dict:
+        try:
+            from .network_grant_manager import get_network_grant_manager
+            ngm = get_network_grant_manager()
+            grants = ngm.get_all_grants()
+            disabled = ngm.get_disabled_packs()
+            return {
+                "grants": {k: v.to_dict() for k, v in grants.items()},
+                "grant_count": len(grants),
+                "disabled_packs": list(disabled),
+                "disabled_count": len(disabled),
+            }
+        except Exception as e:
+            return {"grants": {}, "error": str(e)}
+
+    # ------------------------------------------------------------------
+    # Capability Grant endpoints (G-1)
+    # ------------------------------------------------------------------
+
+    def _capability_grants_grant(self, principal_id: str, permission_id: str, config=None) -> dict:
+        try:
+            from .capability_grant_manager import get_capability_grant_manager
+            gm = get_capability_grant_manager()
+            gm.grant_permission(principal_id, permission_id, config)
+            try:
+                from .audit_logger import get_audit_logger
+                audit = get_audit_logger()
+                audit.log_permission_event(
+                    pack_id=principal_id,
+                    permission_type="capability_grant",
+                    action="grant",
+                    success=True,
+                    details={
+                        "principal_id": principal_id,
+                        "permission_id": permission_id,
+                        "has_config": config is not None,
+                        "source": "api",
+                    },
+                )
+            except Exception:
+                pass
+            return {"success": True, "principal_id": principal_id, "permission_id": permission_id, "granted": True}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _capability_grants_revoke(self, principal_id: str, permission_id: str) -> dict:
+        try:
+            from .capability_grant_manager import get_capability_grant_manager
+            gm = get_capability_grant_manager()
+            gm.revoke_permission(principal_id, permission_id)
+            try:
+                from .audit_logger import get_audit_logger
+                audit = get_audit_logger()
+                audit.log_permission_event(
+                    pack_id=principal_id,
+                    permission_type="capability_grant",
+                    action="revoke",
+                    success=True,
+                    details={
+                        "principal_id": principal_id,
+                        "permission_id": permission_id,
+                        "source": "api",
+                    },
+                )
+            except Exception:
+                pass
+            return {"success": True, "principal_id": principal_id, "permission_id": permission_id, "revoked": True}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _capability_grants_list(self, principal_id: str = None) -> dict:
+        try:
+            from .capability_grant_manager import get_capability_grant_manager
+            gm = get_capability_grant_manager()
+            if principal_id:
+                grant = gm.get_grant(principal_id)
+                if grant is None:
+                    return {"grants": {}, "count": 0, "principal_id": principal_id}
+                g_dict = grant.to_dict() if hasattr(grant, "to_dict") else grant
+                return {"grants": {principal_id: g_dict}, "count": 1, "principal_id": principal_id}
+            else:
+                all_grants = gm.get_all_grants()
+                result = {}
+                for pid, g in all_grants.items():
+                    result[pid] = g.to_dict() if hasattr(g, "to_dict") else g
+                return {"grants": result, "count": len(result)}
+        except Exception as e:
+            return {"grants": {}, "error": str(e)}
     
     # ------------------------------------------------------------------
     # Privilege endpoints

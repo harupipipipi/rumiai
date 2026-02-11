@@ -17,6 +17,11 @@ import traceback
 _kernel = None
 
 
+# Fallback L() — overwritten if core_runtime.lang loads successfully
+def L(key, **kwargs):
+    return key
+
+
 def main():
     global _kernel
     
@@ -32,8 +37,13 @@ def main():
     
     try:
         from core_runtime import Kernel
-        from core_runtime.lang import L, load_system_lang
-        
+        try:
+            from core_runtime.lang import L as _L, load_system_lang
+            global L
+            L = _L
+        except ImportError:
+            load_system_lang = lambda: None
+
         # Langシステム初期化
         load_system_lang()
         

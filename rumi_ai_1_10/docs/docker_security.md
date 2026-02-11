@@ -1,3 +1,6 @@
+
+
+```
 ================================================================================
 Rumi AI - Docker Security System ドキュメント（完全版）
 ================================================================================
@@ -16,7 +19,10 @@ Rumi AI - Docker Security System ドキュメント（完全版）
 10. lib システム
 10.5 lib 隔離実行
 11. 監査ログ
-12. トラブルシューティング
+12. UDS ソケット権限と --group-add
+13. Capability Grant 管理
+14. Pending Export
+15. トラブルシューティング
 
 ================================================================================
 1. 概要
@@ -89,6 +95,7 @@ Rumi AI Docker Security Systemは、Ecosystem内の各Packを完全に隔離さ�
   ├── Kernel（Flow実行エンジン）
   ├── 承認マネージャ（ApprovalManager）
   ├── ネットワーク権限マネージャ（NetworkGrantManager）
+  ├── Capability Grant マネージャ（CapabilityGrantManager）
   ├── Egress Proxy
   ├── 監査ログシステム（AuditLogger）
   └── lib実行システム（LibExecutor）
@@ -122,6 +129,7 @@ Rumi AI Docker Security Systemは、Ecosystem内の各Packを完全に隔離さ�
 | HMAC 署名         | grants.json の改ざんを検出                   |
 | パス制限          | 許可ルート外のファイルアクセスを拒否         |
 | ネットワーク制御  | Egress Proxy経由のみ、allowlist制御          |
+| UDS ソケット権限  | 0660 + 専用GID で接続可能性を制御            |
 | 監査ログ          | 全操作を記録、改ざん検知可能                 |
 
 【Pack状態遷移】
@@ -141,39 +149,32 @@ project_root/
 ├── flows/                          # 公式Flow（起動・基盤）
 │   └── 00_startup.flow.yaml
 │
-├── ecosystem/
-│   ├── flows/                      # Ecosystem Flow（共有の結線）
-│   │   ├── ai_response.flow.yaml
-│   │   └── ...
-│   │
-│   ├── flows/modifiers/            # Flow modifier（差し込み定義）
-│   │   ├── tool_inject.modifier.yaml
-│   │   └── ...
-│   │
-│   └── packs/                      # Pack格納
-│       └── {pack_id}/
-│           └── backend/
-│               ├── ecosystem.json
-│               ├── permissions.json
-│               ├── components/
-│               │   └── {component_id}/
-│               │       ├── manifest.json
-│               │       └── blocks/         # python_file_callで呼ばれるブロック
-│               │           ├── generate.py
-│               │           └── ...
-│               └── lib/                    # install/update スクリプト
-│                   ├── install.py
-│                   └── update.py
-│
 ├── user_data/
+│   ├── shared/
+│   │   ├── flows/                  # 共有Flow（外部ツール/packが配置可能）
+│   │   │   ├── ai_response.flow.yaml
+│   │   │   └── ...
+│   │   └── flows/modifiers/        # Flow modifier（差し込み定義）
+│   │       ├── tool_inject.modifier.yaml
+│   │       └── ...
+│   │
 │   ├── permissions/
-│   │   ├── approvals/              # Pack承認状態（未使用、将来用）
+│   │   ├── approvals/              # Pack承認状態
 │   │   ├── network/                # Pack単位ネットワーク権限
 │   │   │   └── {pack_id}.json
+│   │   ├── capabilities/           # Capability Grant（principal単位）
+│   │   │   └── {principal_id}.json
 │   │   └── .secret_key             # HMAC署名キー
 │   │
 │   ├── packs/                      # Pack別データディレクトリ（lib RW用）
-│   │   └── {pack_id}/              # 各Packの書き込み可能領域
+│   │   └── {pack_id}/
+│   │       └── python/             # pip依存 (approve後に生成)
+│   │           ├── wheelhouse/
+│   │           ├── site-packages/
+│   │           └── state.json
+│   │
+│   ├── pending/                    # Pending Export (起動時に自動生成)
+│   │   └── summary.json
 │   │
 │   ├── audit/                      # 監査ログ
 │   │   ├── flow_execution_YYYY-MM-DD.jsonl
@@ -186,18 +187,53 @@ project_root/
 │   │
 │   └── ...
 │
+├── ecosystem/
+│   └── packs/                      # Pack格納（旧 ecosystem/<pack_id>/ も可）
+│       └── {pack_id}/
+│           └── backend/
+│               ├── ecosystem.json
+│               ├── permissions.json
+│               ├── requirements.lock   # pip依存宣言（任意）
+│               ├── components/
+│               │   └── {component_id}/
+│               │       ├── manifest.json
+│               │       └── blocks/     # python_file_callで呼ばれるブロック
+│               │           ├── generate.py
+│               │           └── ...
+│               └── lib/                # install/update スクリプト
+│                   ├── install.py
+│                   └── update.py
+│
 └── core_runtime/
     ├── kernel.py                   # Flow実行エンジン
+    ├── kernel_handlers_runtime.py  # ランタイム系ハンドラ
     ├── flow_loader.py              # Flowファイルローダー
     ├── flow_modifier.py            # Flow modifier適用
     ├── python_file_executor.py     # python_file_call実行
     ├── approval_manager.py         # Pack承認管理
     ├── network_grant_manager.py    # ネットワーク権限管理
+    ├── capability_grant_manager.py # Capability Grant管理
+    ├── capability_proxy.py         # Capability Proxyサーバー
     ├── egress_proxy.py             # Egress Proxyサーバー
     ├── lib_executor.py             # lib実行管理
+    ├── pip_installer.py            # pip依存導入管理
+    ├── pack_applier.py             # Pack更新適用
+    ├── pack_api_server.py          # HTTP APIサーバー
     ├── secure_executor.py          # セキュア実行層（Docker隔離）
     ├── audit_logger.py             # 監査ログ
     └── ...
+
+【Flow 読み込み元（優先順）】
+
+| 優先度 | パス                                       | 用途                    |
+|--------|--------------------------------------------|-------------------------|
+| 1      | flows/                                     | 公式Flow（起動・基盤）  |
+| 2      | user_data/shared/flows/                    | 共有Flow                |
+| 3      | ecosystem/<pack_id>/backend/flows/         | Pack提供のFlow          |
+| (deprecated) | ecosystem/flows/                     | local_pack互換（オプトイン、非推奨） |
+
+ecosystem/flows/ は RUMI_LOCAL_PACK_MODE=require_approval でのみ有効。
+デフォルトでは無効（off）です。新規Flowは上記1～3に配置してください。
 
 ================================================================================
 5. 使用方法
@@ -212,20 +248,23 @@ project_root/
    python app.py
 
    開発モード（Docker不要）:
-   RUMI_SECURITY_MODE=permissive python app.py
+   python app.py --permissive
 
 【Pack管理】
 
+全エンドポイントは Authorization: Bearer YOUR_TOKEN が必須です。
+
 # 承認待ちPackを確認
-curl http://localhost:8765/api/packs/pending
+curl http://localhost:8765/api/packs/pending \
+  -H "Authorization: Bearer YOUR_TOKEN"
 
 # Packを承認
 curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
-  -H "Authorization: Bearer {token}"
+  -H "Authorization: Bearer YOUR_TOKEN"
 
 # Packを拒否
 curl -X POST http://localhost:8765/api/packs/{pack_id}/reject \
-  -H "Authorization: Bearer {token}" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"reason": "セキュリティ上の懸念"}'
 
@@ -233,7 +272,7 @@ curl -X POST http://localhost:8765/api/packs/{pack_id}/reject \
 
 # ネットワークアクセスを許可
 curl -X POST http://localhost:8765/api/network/grant \
-  -H "Authorization: Bearer {token}" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "pack_id": "my_pack",
@@ -243,9 +282,19 @@ curl -X POST http://localhost:8765/api/network/grant \
 
 # ネットワークアクセスを取り消し
 curl -X POST http://localhost:8765/api/network/revoke \
-  -H "Authorization: Bearer {token}" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"pack_id": "my_pack", "reason": "不要になった"}'
+
+# ネットワークGrant一覧
+curl http://localhost:8765/api/network/list \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# アクセスチェック
+curl -X POST http://localhost:8765/api/network/check \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"pack_id": "my_pack", "domain": "api.openai.com", "port": 443}'
 
 ================================================================================
 6. 権限システム
@@ -265,6 +314,12 @@ curl -X POST http://localhost:8765/api/network/revoke \
    - allowed_domains: 許可するドメインリスト
    - allowed_ports: 許可するポートリスト
    - Modified状態で自動無効化
+
+3. Capability Grant
+   - CapabilityGrantManagerで管理
+   - principal_id × permission_id の組み合わせで管理
+   - HMAC署名による改ざん検知
+   - 詳細はセクション13を参照
 
 【Grant ファイル形式】
 
@@ -300,7 +355,8 @@ user_data/permissions/network/{pack_id}.json:
 
 【Flowファイル形式】
 
-flows/*.flow.yaml または ecosystem/flows/*.flow.yaml:
+flows/*.flow.yaml, user_data/shared/flows/*.flow.yaml,
+または ecosystem/<pack_id>/backend/flows/*.flow.yaml:
 
 flow_id: ai_response
 inputs:
@@ -391,7 +447,7 @@ def run(input_data, context):
             - inputs: 入力データ
             - network_check: ネットワークチェック関数
             - http_request: Egress Proxy経由HTTPリクエスト関数
-    
+
     Returns:
         JSON互換の出力データ
     """
@@ -411,8 +467,18 @@ def run(input_data):
 3. ファイルパスの検証（許可ルート外は拒否）
 
 許可ルート:
-- ecosystem/packs/（承認済みPackディレクトリ）
+- ecosystem/（承認済みPackディレクトリ）
 - ecosystem/sandbox/（サンドボックス領域）
+
+【principal_id の扱い (v1)】
+
+v1 では principal_id は常に owner_pack に強制上書きされます。
+Flowで principal_id を指定しても、実行時は owner_pack が使用されます。
+これは権限の乱用事故を防ぐための措置です。
+
+監査ログには "principal_id_overridden" として警告が記録されます。
+
+将来のバージョンで principal_id の独立運用が検討される場合があります。
 
 【ネットワークアクセス】
 
@@ -423,7 +489,7 @@ def run(input_data, context):
     check = context["network_check"]("api.openai.com", 443)
     if not check["allowed"]:
         return {"error": check["reason"]}
-    
+
     # 2. Egress Proxy経由でリクエスト
     result = context["http_request"](
         method="POST",
@@ -432,10 +498,10 @@ def run(input_data, context):
         body='{"model": "gpt-4", ...}',
         timeout_seconds=30.0
     )
-    
+
     if not result["success"]:
         return {"error": result["error"]}
-    
+
     return {"response": result["body"]}
 
 ================================================================================
@@ -445,50 +511,52 @@ def run(input_data, context):
 【概要】
 
 全ての外部ネットワーク通信を仲介するプロキシサーバー。
-Pack単位のallowlistに基づいてallow/denyを判定し、監査ログに記録。
+Pack別UDSソケットでpack_idを確定し（payloadは無視）、
+network grant に基づいて allow/deny を判定し、監査ログに記録。
 
-【エンドポイント】
+【セキュリティ防御】
 
-POST http://127.0.0.1:8766/proxy/request
+- 内部IP禁止（localhost/private/link-local/CGNAT/multicast等）
+- DNS rebinding対策（解決結果が内部IPなら拒否）
+- リダイレクト上限（3ホップ、各ホップでgrant再チェック）
+- リクエスト/レスポンスサイズ制限（1MB / 4MB）
+- タイムアウト制限（最大120秒）
+- ヘッダー数/サイズ制限
+- メソッド制限（GET, HEAD, POST, PUT, DELETE, PATCH）
 
-リクエストボディ:
-{
-  "owner_pack": "my_pack",
-  "method": "GET",
-  "url": "https://api.example.com/data",
-  "headers": {"Accept": "application/json"},
-  "body": "",
-  "timeout_seconds": 30
-}
+【UDS ベースの通信】
 
-レスポンス:
-{
-  "success": true,
-  "status_code": 200,
-  "headers": {"Content-Type": "application/json"},
-  "body": "{...}",
-  "allowed": true
-}
+Pack実行コンテナは --network=none で動作します。
+外部通信は UDS ソケット経由でのみ可能です:
 
-拒否時のレスポンス:
-{
-  "success": false,
-  "allowed": false,
-  "rejection_reason": "Domain 'evil.com' not in allowed list",
-  "error": "Network access denied: ..."
-}
+  Pack (network=none) → UDS socket → Egress Proxy → 外部API
+                                          ↓
+                                    network grant確認
+                                          ↓
+                                      監査ログ記録
 
-【セキュリティ】
+Pack別にソケットが作成され、ソケットパスからpack_idが確定されます。
+payloadのowner_packフィールドは無視されます（セキュリティ上重要）。
 
-- ローカル接続のみ許可（127.0.0.1, ::1, localhost）
-- owner_pack 必須（ヘッダーまたはボディで指定）
-- NetworkGrantManagerでallow/deny判定
-- 全リクエストを監査ログに記録
+【HTTP API（Pack API Server）】
+
+全エンドポイントは Authorization: Bearer YOUR_TOKEN が必須です。
+
+| メソッド | パス                   | 説明                     |
+|----------|------------------------|--------------------------|
+| POST     | /api/network/grant     | ネットワーク権限を付与   |
+| POST     | /api/network/revoke    | ネットワーク権限を取り消し |
+| POST     | /api/network/check     | アクセス可否をチェック   |
+| GET      | /api/network/list      | 全Grant一覧              |
 
 【Kernel ハンドラ】
 
 | ハンドラ                    | 説明                     |
 |-----------------------------|--------------------------|
+| kernel:network.grant        | ネットワーク権限を付与   |
+| kernel:network.revoke       | ネットワーク権限を取り消し |
+| kernel:network.check        | アクセス可否をチェック   |
+| kernel:network.list         | 全Grant一覧              |
 | kernel:egress_proxy.start   | プロキシを起動           |
 | kernel:egress_proxy.stop    | プロキシを停止           |
 | kernel:egress_proxy.status  | プロキシの状態を取得     |
@@ -634,6 +702,7 @@ RW マウントは user_data/packs/{pack_id}/ のみに限定されます:
 
 local_pack（ecosystem/flows/** の仮想Pack）は lib をサポートしません。
 lib 実行要求は常にスキップされます。
+local_pack 自体が非推奨（deprecated）です。
 
 【context で提供される情報】
 
@@ -696,7 +765,7 @@ JSON Lines形式で永続化、カテゴリ別にファイル分割。
 | modifier_application  | modifier適用                   |
 | python_file_call      | python_file_call実行           |
 | approval              | Pack承認操作                   |
-| permission            | 権限操作                       |
+| permission            | 権限操作（capability grant含む）|
 | network               | ネットワークアクセス           |
 | security              | セキュリティイベント           |
 | system                | システムイベント               |
@@ -705,7 +774,14 @@ JSON Lines形式で永続化、カテゴリ別にファイル分割。
 
 user_data/audit/{category}_{date}.jsonl:
 
-{"ts":"2024-01-01T00:00:00Z","category":"python_file_call","severity":"info","action":"execute_python_file","success":true,"flow_id":"ai_response","step_id":"generate","phase":"generate","owner_pack":"ai_client","execution_mode":"host_permissive","details":{"file":"blocks/generate.py","execution_time_ms":123.45}}
+ファイル名の日付はエントリの ts から決定されます（深夜跨ぎ対応）。
+ts が不正な場合は書き込み時点の日付にフォールバックします。
+
+{"ts":"2024-01-01T00:00:00Z","category":"python_file_call","severity":"info",
+ "action":"execute_python_file","success":true,"flow_id":"ai_response",
+ "step_id":"generate","phase":"generate","owner_pack":"ai_client",
+ "execution_mode":"host_permissive","details":{"file":"blocks/generate.py",
+ "execution_time_ms":123.45}}
 
 【エントリ構造】
 
@@ -725,6 +801,16 @@ user_data/audit/{category}_{date}.jsonl:
   "rejection_reason": "拒否理由（拒否時）",
   "details": { ... }
 }
+
+【ネットワークログのフィールド】
+
+| フィールド             | 説明                             |
+|------------------------|----------------------------------|
+| success                | 許可されたか（allowed と同値）   |
+| details.allowed        | 許可されたか（明示的）           |
+| details.domain         | 対象ドメイン                     |
+| details.port           | 対象ポート                       |
+| rejection_reason       | 拒否理由（拒否時のみ）           |
 
 【Kernel ハンドラ】
 
@@ -748,32 +834,312 @@ result = kernel.execute_flow_sync("_internal", {
 })
 
 ================================================================================
-12. トラブルシューティング
+12. UDS ソケット権限と --group-add
+================================================================================
+
+【概要】
+
+strict モードでは、Pack 実行コンテナは --user=65534:65534 (nobody) で
+動作します。UDS ソケットがデフォルトの 0660 (root:root) のままだと、
+コンテナからソケットに接続できません。
+
+専用 GID を設定することで、0660 を維持しつつ安全に接続を可能にします。
+
+【設定手順】
+
+1. 専用 GID を決定（例: 1099）
+
+2. 環境変数を設定:
+   # Egress Proxy ソケット用
+   export RUMI_EGRESS_SOCKET_GID=1099
+
+   # Capability Proxy ソケット用
+   export RUMI_CAPABILITY_SOCKET_GID=1099
+
+3. ソケット作成時の動作:
+   - ソケットファイルが chmod 0660 で作成される
+   - 指定された GID で chown される（best-effort）
+   - ベースディレクトリは chmod 0750 で保護される
+
+4. docker run 時の動作:
+   - --group-add=1099 が自動的に付与される
+   - コンテナ内ユーザー (nobody:65534) がソケットのグループに所属
+   - ソケットへの接続が可能になる
+
+【環境変数一覧】
+
+| 環境変数                        | 説明                              | デフォルト |
+|---------------------------------|-----------------------------------|-----------|
+| RUMI_EGRESS_SOCKET_GID          | Egress ソケットのGID              | なし      |
+| RUMI_CAPABILITY_SOCKET_GID      | Capability ソケットのGID          | なし      |
+| RUMI_EGRESS_SOCKET_MODE         | Egress ソケットのパーミッション   | 0660      |
+| RUMI_CAPABILITY_SOCKET_MODE     | Capability ソケットのパーミッション | 0660    |
+| RUMI_EGRESS_SOCK_DIR            | Egress ソケットのベースディレクトリ | /run/rumi/egress/packs |
+| RUMI_CAPABILITY_SOCK_DIR        | Capability ソケットのベースディレクトリ | /run/rumi/capability/principals |
+
+【GID 未設定の場合の動作】
+
+- ソケットは root:root で 0660 になりうる
+- コンテナ (nobody:65534) からアクセスできない
+- --group-add は付与されない
+
+【0666 緩和モード（非推奨）】
+
+最終手段として、ソケットを 0666 に緩和できます:
+
+  export RUMI_EGRESS_SOCKET_MODE=0666
+  export RUMI_CAPABILITY_SOCKET_MODE=0666
+
+この場合:
+- 任意のユーザーがソケットに接続可能になる
+- 監査ログに SECURITY WARNING が記録される
+- 本番環境では非推奨
+
+【--group-add の適用条件】
+
+docker run に --group-add が付与されるのは以下の条件を全て満たす場合:
+
+1. 対応する GID 環境変数が設定されている（正の整数）
+2. 対応するソケットがコンテナにマウントされる
+
+つまり:
+- Egress ソケットをマウントする場合のみ RUMI_EGRESS_SOCKET_GID の group-add
+- Capability ソケットをマウントする場合のみ RUMI_CAPABILITY_SOCKET_GID の group-add
+- 両方マウントする場合は両方の GID が追加（重複する場合は1つ）
+
+【fail-soft 動作】
+
+- GID 値が不正（空文字列、負数、int変換不可）の場合: 警告のみ、group-add なし
+- chown 失敗の場合: 監査ログに警告、処理は続行
+- chmod 失敗の場合: 監査ログに警告、処理は続行
+
+================================================================================
+13. Capability Grant 管理
+================================================================================
+
+【概要】
+
+Capability システムは Trust と Grant の二段構えで動作します:
+
+- Trust: handler_id + sha256 の allowlist。handler.py の内容が信頼済みか判定
+- Grant: principal_id × permission_id の権限付与。誰がどの capability を使えるか管理
+
+capability handler を approve（Trust登録 + コピー）した後、実際に使用するには
+Grant の付与が必要です。公式は permission_id の意味を解釈しません（No Favoritism）。
+
+【Kernel ハンドラ】
+
+| ハンドラ                    | 説明                           |
+|-----------------------------|--------------------------------|
+| kernel:capability.grant     | Capability Grant を付与        |
+| kernel:capability.revoke    | Capability Grant を取り消し    |
+| kernel:capability.list      | Capability Grant を一覧        |
+
+使用例:
+
+# Grant 付与
+- type: handler
+  input:
+    handler: "kernel:capability.grant"
+    args:
+      principal_id: "my_pack"
+      permission_id: "fs.read"
+      config:
+        allowed_paths: ["/data"]
+
+# Grant 一覧
+- type: handler
+  input:
+    handler: "kernel:capability.list"
+    args:
+      principal_id: "my_pack"
+
+# Grant 取り消し
+- type: handler
+  input:
+    handler: "kernel:capability.revoke"
+    args:
+      principal_id: "my_pack"
+      permission_id: "fs.read"
+
+【HTTP API（Pack API Server）】
+
+全エンドポイントは Authorization: Bearer YOUR_TOKEN が必須です。
+
+| メソッド | パス                                     | 説明                 |
+|----------|------------------------------------------|----------------------|
+| POST     | /api/capability/grants/grant             | Grantを付与          |
+| POST     | /api/capability/grants/revoke            | Grantを取り消し      |
+| GET      | /api/capability/grants?principal_id=xxx  | Grant一覧            |
+
+使用例:
+
+# Grant 付与
+curl -X POST http://localhost:8765/api/capability/grants/grant \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "principal_id": "my_pack",
+    "permission_id": "fs.read",
+    "config": {"allowed_paths": ["/data"]}
+  }'
+
+# Grant 一覧
+curl "http://localhost:8765/api/capability/grants?principal_id=my_pack" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# Grant 取り消し
+curl -X POST http://localhost:8765/api/capability/grants/revoke \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"principal_id": "my_pack", "permission_id": "fs.read"}'
+
+【監査ログ】
+
+Grant 操作は permission カテゴリに記録されます:
+
+{
+  "ts": "2024-01-01T00:00:00Z",
+  "category": "permission",
+  "severity": "info",
+  "action": "permission_grant",
+  "success": true,
+  "owner_pack": "my_pack",
+  "details": {
+    "permission_type": "capability_grant",
+    "principal_id": "my_pack",
+    "permission_id": "fs.read",
+    "has_config": true,
+    "source": "api"
+  }
+}
+
+【HMAC 改ざん検知】
+
+CapabilityGrantManager は全ての grant ファイルに HMAC-SHA256 署名を付与します。
+ファイルが外部から改ざんされた場合、読み込み時に検知され無効化されます。
+
+================================================================================
+14. Pending Export
+================================================================================
+
+【概要】
+
+起動時に承認待ち状況を user_data/pending/summary.json に自動書き出しします。
+外部ツール（UI、CLI等）はこのファイルを読むだけで現在の状況を把握できます。
+
+公式はこの出力の消費者を知りません（No Favoritism）。
+誰でも読める中立な出力として扱われます。
+
+【生成タイミング】
+
+公式起動Flow（flows/00_startup.flow.yaml）の ecosystem フェーズで
+kernel:pending.export ハンドラが実行されます。
+
+fail_soft: true のため、生成に失敗しても起動は止まりません。
+
+【出力形式】
+
+user_data/pending/summary.json:
+
+{
+  "ts": "2026-02-11T15:00:00Z",
+  "version": "1.0",
+  "packs": {
+    "pending_count": 2,
+    "pending_ids": ["pack_a", "pack_b"],
+    "modified_count": 1,
+    "modified_ids": ["pack_c"],
+    "blocked_count": 0,
+    "blocked_ids": []
+  },
+  "capability": {
+    "pending_count": 1,
+    "rejected_count": 0,
+    "blocked_count": 0,
+    "failed_count": 0,
+    "installed_count": 3
+  },
+  "pip": {
+    "pending_count": 0,
+    "rejected_count": 0,
+    "blocked_count": 0,
+    "failed_count": 0,
+    "installed_count": 2
+  }
+}
+
+【fail-soft 動作】
+
+各モジュール（ApprovalManager、CapabilityInstaller、PipInstaller）が
+import できない場合、そのセクションには "error" キーが含まれます:
+
+{
+  "packs": {"error": "ApprovalManager not available"},
+  "capability": {"pending_count": 1, ...},
+  "pip": {"error": "PipInstaller not available"}
+}
+
+取れた範囲だけが書き出されます。
+
+【Kernel ハンドラ】
+
+| ハンドラ               | 説明                                     |
+|------------------------|------------------------------------------|
+| kernel:pending.export  | summary.json を生成                      |
+
+================================================================================
+15. トラブルシューティング
 ================================================================================
 
 【python_file_call が実行されない】
 
 1. Pack が承認されているか確認:
-   curl http://localhost:8765/api/packs/{pack_id}/status
+   curl http://localhost:8765/api/packs/{pack_id}/status \
+     -H "Authorization: Bearer YOUR_TOKEN"
 
 2. ファイルが存在するか確認:
    ls ecosystem/packs/{pack_id}/backend/blocks/
+   # または
+   ls ecosystem/{pack_id}/backend/blocks/
 
 3. 監査ログで拒否理由を確認:
-   cat user_data/audit/python_file_call_$(date +%Y-%m-%d).jsonl | grep "rejection"
+   cat user_data/audit/python_file_call_$(date +%Y-%m-%d).jsonl | \
+     jq 'select(.success == false)'
 
 【ネットワークアクセスが拒否される】
 
 1. ネットワーク権限を確認:
-   curl http://localhost:8765/api/network/list
+   curl http://localhost:8765/api/network/list \
+     -H "Authorization: Bearer YOUR_TOKEN"
 
 2. 許可するドメイン/ポートを追加:
    curl -X POST http://localhost:8765/api/network/grant \
-     -H "Authorization: Bearer {token}" \
+     -H "Authorization: Bearer YOUR_TOKEN" \
+     -H "Content-Type: application/json" \
      -d '{"pack_id": "...", "allowed_domains": ["..."], "allowed_ports": [443]}'
 
 3. PackがModified状態でないか確認:
-   curl http://localhost:8765/api/packs/{pack_id}/status
+   curl http://localhost:8765/api/packs/{pack_id}/status \
+     -H "Authorization: Bearer YOUR_TOKEN"
+
+【UDS ソケットに接続できない (strict モード)】
+
+1. GID が設定されているか確認:
+   echo $RUMI_EGRESS_SOCKET_GID
+   echo $RUMI_CAPABILITY_SOCKET_GID
+
+2. ソケットのパーミッションを確認:
+   ls -la /run/rumi/egress/packs/
+   ls -la /run/rumi/capability/principals/
+
+3. docker run に --group-add が付いているか確認:
+   # 監査ログまたは diagnostics の warnings に
+   # "Docker --group-add applied: [1099]" と記録されます
+
+4. 応急処置（非推奨）:
+   export RUMI_EGRESS_SOCKET_MODE=0666
+   export RUMI_CAPABILITY_SOCKET_MODE=0666
 
 【Pack が Modified になった】
 
@@ -781,7 +1147,23 @@ result = kernel.execute_flow_sync("_internal", {
 
 再承認する:
    curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
-     -H "Authorization: Bearer {token}"
+     -H "Authorization: Bearer YOUR_TOKEN"
+
+【Capability Grant が効かない】
+
+1. handler が approve（Trust登録 + コピー）されているか確認:
+   curl "http://localhost:8765/api/capability/requests?status=installed" \
+     -H "Authorization: Bearer YOUR_TOKEN"
+
+2. Grant が付与されているか確認:
+   curl "http://localhost:8765/api/capability/grants?principal_id=my_pack" \
+     -H "Authorization: Bearer YOUR_TOKEN"
+
+3. Grant を付与:
+   curl -X POST http://localhost:8765/api/capability/grants/grant \
+     -H "Authorization: Bearer YOUR_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"principal_id": "my_pack", "permission_id": "fs.read"}'
 
 【lib が実行されない】
 
@@ -798,7 +1180,8 @@ result = kernel.execute_flow_sync("_internal", {
    docker info
 
 5. 監査ログを確認:
-   cat user_data/audit/system_$(date +%Y-%m-%d).jsonl | jq 'select(.action | contains("lib"))'
+   cat user_data/audit/system_$(date +%Y-%m-%d).jsonl | \
+     jq 'select(.action | contains("lib"))'
 
 【lib の書き込みが失敗する】
 
@@ -813,6 +1196,26 @@ def run(context):
     with open(f"{data_dir}/config.json", "w") as f:
         f.write("{}")
 
+【pip 依存のインストールが拒否される】
+
+1. Pack が承認済みか確認（strict モードでは必須）:
+   curl http://localhost:8765/api/packs/{pack_id}/status \
+     -H "Authorization: Bearer YOUR_TOKEN"
+
+2. requirements.lock の形式を確認:
+   - NAME==VERSION 行のみ許可
+   - URL, VCS, ローカルパス, pipオプション, @ direct ref は禁止
+
+3. pip requests の状態を確認:
+   curl "http://localhost:8765/api/pip/requests?status=all" \
+     -H "Authorization: Bearer YOUR_TOKEN"
+
+4. blocked されている場合は unblock:
+   curl -X POST "http://localhost:8765/api/pip/blocked/{key}/unblock" \
+     -H "Authorization: Bearer YOUR_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"reason": "Re-evaluation"}'
+
 【Egress Proxy が起動しない】
 
 1. ポート競合を確認:
@@ -820,6 +1223,15 @@ def run(context):
 
 2. 別ポートで起動:
    # kernel:egress_proxy.start に port 引数を指定
+
+【pending summary.json が生成されない】
+
+1. user_data/pending/ ディレクトリの書き込み権限を確認
+
+2. 起動ログで pending_export ステップの結果を確認
+
+3. fail_soft: true のためエラーでも起動は止まりませんが、
+   diagnostics にエラーが記録されます
 
 【監査ログの確認方法】
 
@@ -837,15 +1249,25 @@ cat user_data/audit/python_file_call_$(date +%Y-%m-%d).jsonl | \
 cat user_data/audit/system_$(date +%Y-%m-%d).jsonl | \
   jq 'select(.action | contains("lib"))'
 
+# capability grant 操作を確認
+cat user_data/audit/permission_$(date +%Y-%m-%d).jsonl | \
+  jq 'select(.details.permission_type == "capability_grant")'
+
+# principal_id 上書き警告を確認
+cat user_data/audit/security_$(date +%Y-%m-%d).jsonl | \
+  jq 'select(.action == "principal_id_overridden")'
+
 【開発モードでの注意】
 
 RUMI_SECURITY_MODE=permissive で実行すると:
 - Docker なしでもコード実行可能
 - 警告が毎回表示される
 - 監査ログに "host_permissive" と記録される
+- pip 依存の承認チェックで ApprovalManager 不在でも許可される
 
 本番環境では必ず strict モードを使用してください。
 
 ================================================================================
                               ドキュメント終わり
 ================================================================================
+```

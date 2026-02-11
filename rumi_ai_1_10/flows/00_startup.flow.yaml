@@ -95,6 +95,17 @@ steps:
       args:
         packs_dir: "ecosystem"
 
+
+  - id: pending_export
+    phase: ecosystem
+    priority: 70
+    type: handler
+    input:
+      handler: "kernel:pending.export"
+      args:
+        output_dir: "user_data/pending"
+    output: pending_export_result
+
   # === finalize phase ===
   - id: interfaces_publish
     phase: finalize

@@ -104,6 +104,29 @@ class AuditLogger:
     def _get_log_file(self, category: str) -> Path:
         """カテゴリ別のログファイルパスを取得"""
         return self._audit_dir / f"{category}_{self._today_str()}.jsonl"
+
+    def _get_log_file_for_entry(self, category: str, entry_ts: str) -> Path:
+        """
+        エントリの ts から日付を抽出し、カテゴリ×日付のファイルパスを返す。
+        ts が不正/解析不能の場合は今日の日付にフォールバック (fail-soft)。
+        """
+        date_str = self._extract_date_from_ts(entry_ts)
+        return self._audit_dir / f"{category}_{date_str}.jsonl"
+
+    def _extract_date_from_ts(self, ts: str) -> str:
+        """ISO8601 タイムスタンプから YYYY-MM-DD を抽出。失敗時は今日。"""
+        if ts and len(ts) >= 10:
+            candidate = ts[:10]
+            if len(candidate) == 10 and candidate[4] == "-" and candidate[7] == "-":
+                try:
+                    int(candidate[:4])
+                    int(candidate[5:7])
+                    int(candidate[8:10])
+                    return candidate
+                except (ValueError, IndexError):
+                    pass
+        return self._today_str()
+
     
     def log(self, entry: AuditEntry) -> None:
         """監査ログを記録"""
@@ -114,21 +137,20 @@ class AuditLogger:
                 self._flush_buffer()
     
     def _flush_buffer(self) -> None:
-        """バッファをファイルに書き出し"""
+        """バッファをファイルに書き出し（D-1: エントリの ts で日付振り分け）"""
         if not self._buffer:
             return
         
-        # カテゴリ別にグループ化
-        by_category: Dict[str, List[AuditEntry]] = {}
+        # カテゴリ×日付別にグループ化
+        by_file: Dict[Path, List[AuditEntry]] = {}
         for entry in self._buffer:
-            cat = entry.category
-            if cat not in by_category:
-                by_category[cat] = []
-            by_category[cat].append(entry)
+            log_file = self._get_log_file_for_entry(entry.category, entry.ts)
+            if log_file not in by_file:
+                by_file[log_file] = []
+            by_file[log_file].append(entry)
         
-        # 各カテゴリのファイルに書き出し
-        for category, entries in by_category.items():
-            log_file = self._get_log_file(category)
+        # 各ファイルに書き出し
+        for log_file, entries in by_file.items():
             try:
                 with open(log_file, "a", encoding="utf-8") as f:
                     for entry in entries:
