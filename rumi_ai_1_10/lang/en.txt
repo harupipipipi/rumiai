@@ -7,13 +7,19 @@ app.version=2.0
 
 # Startup
 startup.begin=Starting Kernel...
+startup.starting=Starting Kernel...
 startup.success=Kernel started successfully
 startup.failed=Startup failed: {error}
 startup.docker_required=Docker is required but not available
 startup.headless=Running in headless mode
+startup.http_starting=HTTP server starting...
+startup.no_http=No HTTP server registered
+startup.install_http_pack=Install a Pack that provides io.http.server for web access
+startup.press_ctrl_c=Press Ctrl+C to exit
 
 # Shutdown
 shutdown.begin=Shutting down...
+shutdown.starting=Shutting down...
 shutdown.complete=Shutdown complete
 
 # Security

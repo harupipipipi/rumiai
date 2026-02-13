@@ -479,10 +479,15 @@ class KernelCore:
         return await self._execute_flow_internal(flow_id, context)
 
     def execute_flow_sync(self, flow_id: str, context: Optional[Dict[str, Any]] = None, timeout: Optional[float] = None) -> Dict[str, Any]:
+        effective_timeout = timeout or 300
         try:
             asyncio.get_running_loop()
+            from concurrent.futures import TimeoutError as FuturesTimeoutError
             with ThreadPoolExecutor() as pool:
-                return pool.submit(asyncio.run, self.execute_flow(flow_id, context, timeout)).result()
+                try:
+                    return pool.submit(asyncio.run, self.execute_flow(flow_id, context, timeout)).result(timeout=effective_timeout)
+                except FuturesTimeoutError:
+                    return {"_error": f"Flow '{flow_id}' timed out after {effective_timeout}s (sync)", "_flow_timeout": True}
         except RuntimeError:
             return asyncio.run(self.execute_flow(flow_id, context, timeout))
 

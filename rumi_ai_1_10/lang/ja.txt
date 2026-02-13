@@ -7,13 +7,19 @@ app.version=2.0
 
 # 起動
 startup.begin=カーネルを起動しています...
+startup.starting=カーネルを起動しています...
 startup.success=カーネルの起動が完了しました
 startup.failed=起動に失敗しました: {error}
 startup.docker_required=Dockerが必要ですが利用できません
 startup.headless=ヘッドレスモードで実行中
+startup.http_starting=HTTPサーバーを起動しています...
+startup.no_http=HTTPサーバーが登録されていません
+startup.install_http_pack=Webアクセス用にio.http.serverを提供するPackをインストールしてください
+startup.press_ctrl_c=Ctrl+Cで終了
 
 # シャットダウン
 shutdown.begin=シャットダウンしています...
+shutdown.starting=シャットダウンしています...
 shutdown.complete=シャットダウンが完了しました
 
 # セキュリティ
