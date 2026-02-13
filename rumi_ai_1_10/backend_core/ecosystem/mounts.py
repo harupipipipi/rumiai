@@ -76,22 +76,25 @@ class MountManager:
                 if key not in self._mounts:
                     self._mounts[key] = default_path
     
+    def _save_config_internal(self):
+        """設定ファイルを保存（ロック保持状態で呼び出す内部用）"""
+        self.config_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        data = {
+            "version": "1.0",
+            "mounts": self._mounts
+        }
+        
+        try:
+            with open(self.config_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except IOError as e:
+            print(f"[MountManager] 設定ファイル保存エラー: {e}")
+    
     def _save_config(self):
         """設定ファイルを保存"""
         with self._lock:
-            # 親ディレクトリを作成
-            self.config_path.parent.mkdir(parents=True, exist_ok=True)
-            
-            data = {
-                "version": "1.0",
-                "mounts": self._mounts
-            }
-            
-            try:
-                with open(self.config_path, 'w', encoding='utf-8') as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
-            except IOError as e:
-                print(f"[MountManager] 設定ファイル保存エラー: {e}")
+            self._save_config_internal()
     
     def get_path(self, mount_point: str, ensure_exists: bool = True) -> Path:
         """
@@ -137,9 +140,8 @@ class MountManager:
         """
         with self._lock:
             self._mounts[mount_point] = path
-        
-        if save:
-            self._save_config()
+            if save:
+                self._save_config_internal()
     
     def get_all_mounts(self) -> Dict[str, str]:
         """すべてのマウント設定を取得"""
@@ -166,7 +168,7 @@ class MountManager:
             if mount_point in self._mounts:
                 del self._mounts[mount_point]
                 if save:
-                    self._save_config()
+                    self._save_config_internal()
                 return True
         return False
     
@@ -174,9 +176,8 @@ class MountManager:
         """デフォルト設定にリセット"""
         with self._lock:
             self._mounts = dict(DEFAULT_MOUNTS)
-        
-        if save:
-            self._save_config()
+            if save:
+                self._save_config_internal()
     
     def validate_paths(self) -> Dict[str, Dict[str, Any]]:
         """

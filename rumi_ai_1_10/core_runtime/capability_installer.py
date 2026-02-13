@@ -796,9 +796,9 @@ class CapabilityInstaller:
             if handler_data.get("handler_id") != candidate.handler_id:
                 self._mark_failed(item, "handler_id changed since scan")
                 return ApproveResult(success=False, error="handler_id changed since scan (TOCTOU)")
-if handler_data.get("permission_id") != candidate.permission_id:
-    self._mark_failed(item, "permission_id changed since scan")
-    return ApproveResult(success=False, error="permission_id changed since scan (TOCTOU)")
+            if handler_data.get("permission_id") != candidate.permission_id:
+                self._mark_failed(item, "permission_id changed since scan")
+                return ApproveResult(success=False, error="permission_id changed since scan (TOCTOU)")
 
             entrypoint = handler_data.get("entrypoint", "handler.py:execute")
             valid, ep_error, handler_py_path = self._validate_entrypoint(entrypoint, source_dir)
