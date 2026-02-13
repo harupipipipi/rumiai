@@ -13,6 +13,7 @@ Docker利用可能時はコンテナ内で実行。
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import subprocess
@@ -24,6 +25,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, List
 
+
+logger = logging.getLogger(__name__)
 
 from .paths import LOCAL_PACK_ID, PACK_DATA_BASE_DIR as _PACK_DATA_BASE_DIR
 
@@ -71,11 +74,14 @@ class SecureExecutor:
             self._security_mode = self.MODE_STRICT
         
         if self._security_mode == self.MODE_PERMISSIVE:
+            _warning_msg = (
+                "PERMISSIVE MODE ENABLED: Pack code may execute on host "
+                "without Docker isolation. This is ONLY acceptable for "
+                "development. Set RUMI_SECURITY_MODE=strict for production."
+            )
+            logger.warning(_warning_msg)
             print("=" * 60, file=sys.stderr)
-            print("!!! SECURITY WARNING: PERMISSIVE MODE ENABLED !!!", file=sys.stderr)
-            print("Pack code may execute on host without Docker isolation.", file=sys.stderr)
-            print("This is ONLY acceptable for development.", file=sys.stderr)
-            print("Set RUMI_SECURITY_MODE=strict for production.", file=sys.stderr)
+            print(f"!!! SECURITY WARNING: {_warning_msg}", file=sys.stderr)
             print("=" * 60, file=sys.stderr)
     
     def _sanitize_pack_id(self, pack_id: str) -> tuple:
@@ -679,17 +685,8 @@ else:
         """ホスト上でlib実行（permissiveモード、警告付き）"""
         import time
         
-        warnings = [
-            "!!! SECURITY WARNING !!!",
-            "Executing lib code on host without Docker isolation.",
-            "This is only acceptable for development.",
-            "Set RUMI_SECURITY_MODE=strict and ensure Docker is running for production.",
-            f"Pack: {pack_id}, LibType: {lib_type}",
-            f"Data directory: {pack_data_dir}"
-        ]
-        
-        for w in warnings:
-            print(f"[SecureExecutor] {w}", file=sys.stderr)
+        warnings = [f"Executing lib on host without Docker: Pack={pack_id}, LibType={lib_type}"]
+        logger.debug("Permissive host execution: pack=%s lib_type=%s", pack_id, lib_type)
         
         module_name = f"rumi_lib_{pack_id}_{lib_type}_{abs(hash(str(lib_file)))}"
         
@@ -792,16 +789,8 @@ else:
         import time
         start_time = time.time()
         
-        warnings = [
-            "!!! SECURITY WARNING !!!",
-            "Executing Pack code on host without Docker isolation.",
-            "This is only acceptable for development.",
-            "Set RUMI_SECURITY_MODE=strict and ensure Docker is running for production.",
-            f"Pack: {pack_id}, Component: {component_id}, Phase: {phase}"
-        ]
-        
-        for w in warnings:
-            print(f"[SecureExecutor] {w}", file=sys.stderr)
+        warnings = [f"Executing on host without Docker: Pack={pack_id}, Component={component_id}, Phase={phase}"]
+        logger.debug("Permissive host execution: pack=%s component=%s phase=%s", pack_id, component_id, phase)
         
         module_name = f"rumi_exec_{pack_id}_{phase}_{abs(hash(str(file_path)))}"
         

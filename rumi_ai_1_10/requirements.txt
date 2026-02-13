@@ -1,6 +1,9 @@
 # Rumi AI OS - Core Dependencies
 pyyaml>=6.0
 
+# Secret at-rest encryption (recommended, base64 fallback if absent)
+cryptography>=41.0.0
+
 # Optional: Enhanced secret key storage (recommended for production)
 # keyring>=24.0.0
 

@@ -30,10 +30,18 @@ def main():
     parser.add_argument("--permissive", action="store_true", help="Run in permissive security mode (development only)")
     args = parser.parse_args()
     
-    # セキュリティモード設定
+    # セキュリティモード設定 — デフォルトは strict（secure）
+    import os
     if args.permissive:
-        import os
         os.environ["RUMI_SECURITY_MODE"] = "permissive"
+        print("=" * 60)
+        print("WARNING: Running in permissive mode. Sandbox is disabled.")
+        print("Pack code may execute on host without Docker isolation.")
+        print("Do NOT use --permissive in production.")
+        print("=" * 60)
+    else:
+        # 明示的に strict を設定（外部環境変数による意図しない permissive 化を防止）
+        os.environ.setdefault("RUMI_SECURITY_MODE", "strict")
     
     try:
         from core_runtime import Kernel
