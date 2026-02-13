@@ -515,6 +515,11 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                 else:
                     self._send_response(APIResponse(False, error=result.get("error")), 403)
 
+            # --- Route reload ---
+            elif path == "/api/routes/reload":
+                result = self._reload_pack_routes()
+                self._send_response(APIResponse(True, result))
+
             # --- Flow execution API ---
             elif path.startswith("/api/flows/") and path.endswith("/run"):
                 self._handle_flow_run(path, body)
@@ -530,6 +535,26 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             logger.exception(f"API error: {e}")
             self._send_response(APIResponse(False, error=str(e)), 500)
     
+
+    def do_PUT(self) -> None:
+        """PUT メソッド — Pack独自ルート専用"""
+        if not self._check_auth():
+            self._send_response(APIResponse(False, error="Unauthorized"), 401)
+            return
+
+        try:
+            body = self._parse_body()
+            path = urlparse(self.path).path
+
+            if self._match_pack_route(path, "PUT"):
+                self._handle_pack_route_request(path, body, "PUT")
+            else:
+                self._send_response(APIResponse(False, error="Not found"), 404)
+
+        except Exception as e:
+            logger.exception(f"API error: {e}")
+            self._send_response(APIResponse(False, error=str(e)), 500)
+
     def do_DELETE(self) -> None:
         if not self._check_auth():
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
@@ -544,9 +569,14 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                 self._send_response(APIResponse(True, result))
             
             elif path.startswith("/api/packs/"):
-                pack_id = path.split("/")[3]
-                result = self._uninstall_pack(pack_id)
-                self._send_response(APIResponse(True, result))
+                # Pack独自ルート (DELETE) を先にチェック
+                if self._match_pack_route(path, "DELETE"):
+                    body = self._parse_body()
+                    self._handle_pack_route_request(path, body, "DELETE")
+                else:
+                    pack_id = path.split("/")[3]
+                    result = self._uninstall_pack(pack_id)
+                    self._send_response(APIResponse(True, result))
             
             else:
                 self._send_response(APIResponse(False, error="Not found"), 404)
@@ -1069,27 +1099,44 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                 }
 
             # 結果から内部キーを除外
+            # フィルタ方針: _ プレフィックス除外 + kernel context オブジェクト除外
+            #              + callable 除外 + JSON直列化不可除外
             result_data = {}
             if isinstance(ctx, dict):
-                _internal_keys = {
+                # kernel context に注入される主要オブジェクト名のみ明示
+                _ctx_object_keys = {
                     "diagnostics", "install_journal", "interface_registry",
                     "event_bus", "lifecycle", "mount_manager", "registry",
-                    "active_ecosystem", "_flow_defaults", "_flow_call_stack",
-                    "_flow_id", "_flow_execution_id", "_flow_timeout",
-                    "_total_steps", "_current_step_index", "_disabled_targets",
-                    "permission_manager", "function_alias_registry",
-                    "flow_composer", "vocab_registry", "approval_manager",
+                    "active_ecosystem", "permission_manager",
+                    "function_alias_registry", "flow_composer",
+                    "vocab_registry", "approval_manager",
                     "container_orchestrator", "host_privilege_manager",
-                    "pack_api_server", "_packs_approved", "_packs_pending",
-                    "_packs_modified", "_docker_available", "_security_initialized",
-                    "_strict_mode", "_containers_started", "_discovered_components",
-                    "_parent_flow_execution_id", "_parent_flow_id",
+                    "pack_api_server",
                 }
                 result_data = {
                     k: v for k, v in ctx.items()
-                    if not k.startswith("_") and k not in _internal_keys
+                    if not k.startswith("_")
+                    and k not in _ctx_object_keys
+                    and not callable(v)
                     and _is_json_serializable(v)
                 }
+
+            # レスポンスサイズ制限 (デフォルト 4MB)
+            max_bytes = int(os.environ.get("RUMI_MAX_RESPONSE_BYTES", str(4 * 1024 * 1024)))
+            try:
+                result_json = json.dumps(result_data, ensure_ascii=False)
+                if len(result_json.encode("utf-8")) > max_bytes:
+                    logger.warning(
+                        f"Flow '{flow_id}' result exceeds {max_bytes} bytes, "
+                        f"truncating to keys only"
+                    )
+                    result_data = {
+                        "_truncated": True,
+                        "_reason": f"Result exceeded {max_bytes} byte limit",
+                        "_keys": sorted(result_data.keys()),
+                    }
+            except (TypeError, ValueError):
+                result_data = {"_error": "Result not JSON serializable"}
 
             # 監査ログ
             try:
@@ -1225,6 +1272,19 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                 "description": info.get("description", ""),
             })
         return {"routes": routes, "count": len(routes)}
+
+
+    def _reload_pack_routes(self) -> dict:
+        """POST /api/routes/reload — Packルートを再読み込み"""
+        try:
+            from backend_core.ecosystem.registry import get_registry
+            reg = get_registry()
+            count = self.load_pack_routes(reg)
+            logger.info(f"Pack routes reloaded: {count} routes")
+            return {"reloaded": True, "route_count": count}
+        except Exception as e:
+            logger.exception(f"Failed to reload pack routes: {e}")
+            return {"reloaded": False, "error": str(e)}
 
     # ------------------------------------------------------------------
     # Pack import/apply
