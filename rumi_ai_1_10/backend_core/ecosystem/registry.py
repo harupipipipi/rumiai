@@ -60,6 +60,7 @@ class PackInfo:
     subdir: Path = None  # ecosystem.jsonが見つかったサブディレクトリ
     components: Dict[str, ComponentInfo] = field(default_factory=dict)
     addons: List[Dict[str, Any]] = field(default_factory=list)
+    routes: List[Dict[str, Any]] = field(default_factory=list)
 
 
 class Registry:
@@ -79,6 +80,7 @@ class Registry:
         self._component_index: Dict[str, ComponentInfo] = {}  # uuid -> ComponentInfo
         self._type_index: Dict[str, List[ComponentInfo]] = {}  # type -> [ComponentInfo]
         self._patched_manifest_cache: Dict[str, Dict[str, Any]] = {}
+        self._pack_routes: Dict[str, List[Dict[str, Any]]] = {}  # pack_id -> routes
     
     def load_all_packs(self) -> Dict[str, PackInfo]:
         """
@@ -214,6 +216,11 @@ class Registry:
         if addons_dir.exists():
             self._load_addons(pack_info, addons_dir)
         
+        # Routesを読み込む
+        routes_file = pack_subdir / "routes.json"
+        if routes_file.exists():
+            self._load_routes(pack_info, routes_file)
+        
         return pack_info
     
     def _load_components(self, pack_info: PackInfo, components_dir: Path):
@@ -298,6 +305,82 @@ class Registry:
             except Exception as e:
                 print(f"      ✗ Addon読み込みエラー ({addon_file.name}): {e}")
     
+
+    def _load_routes(self, pack_info: PackInfo, routes_file: Path):
+        """
+        Packのルート定義を読み込む
+        
+        routes.json の形式:
+        {
+            "routes": [
+                {"method": "POST", "path": "/api/packs/{pack_id}/send", "flow_id": "chat_send", ...}
+            ]
+        }
+        """
+        try:
+            with open(routes_file, 'r', encoding='utf-8') as f:
+                routes_data = json.load(f)
+            
+            if not isinstance(routes_data, dict) or "routes" not in routes_data:
+                print(f"      警告: routes.json の形式が不正です: {routes_file}")
+                return
+            
+            raw_routes = routes_data.get("routes", [])
+            if not isinstance(raw_routes, list):
+                return
+            
+            valid_routes = []
+            pack_prefix = f"/api/packs/{pack_info.pack_id}/"
+            
+            for route in raw_routes:
+                if not isinstance(route, dict):
+                    continue
+                
+                method = route.get("method", "").upper()
+                path = route.get("path", "")
+                flow_id = route.get("flow_id", "")
+                
+                if not method or not path or not flow_id:
+                    print(f"      警告: ルート定義が不完全です: {route}")
+                    continue
+                
+                if method not in ("GET", "POST", "PUT", "DELETE"):
+                    print(f"      警告: 未サポートのHTTPメソッド: {method}")
+                    continue
+                
+                # パスが /api/packs/{pack_id}/ で始まることを強制
+                if not path.startswith(pack_prefix):
+                    print(f"      警告: パスは {pack_prefix} で始まる必要があります: {path}")
+                    continue
+                
+                valid_routes.append({
+                    "method": method,
+                    "path": path,
+                    "flow_id": flow_id,
+                    "pack_id": pack_info.pack_id,
+                    "description": route.get("description", ""),
+                    "timeout": min(max(route.get("timeout", 300), 1), 600),
+                })
+            
+            pack_info.routes = valid_routes
+            self._pack_routes[pack_info.pack_id] = valid_routes
+            
+            if valid_routes:
+                print(f"      ✓ Routes: {len(valid_routes)}個のエンドポイント")
+        
+        except json.JSONDecodeError as e:
+            print(f"      ✗ routes.json パースエラー ({routes_file}): {e}")
+        except Exception as e:
+            print(f"      ✗ routes.json 読み込みエラー ({routes_file}): {e}")
+    
+    def get_all_routes(self) -> Dict[str, List[Dict[str, Any]]]:
+        """全Packのルート定義を取得"""
+        return dict(self._pack_routes)
+    
+    def get_pack_routes(self, pack_id: str) -> List[Dict[str, Any]]:
+        """特定Packのルート定義を取得"""
+        return self._pack_routes.get(pack_id, [])
+
     def get_pack(self, pack_id: str) -> Optional[PackInfo]:
         """Pack IDでPackを取得"""
         return self.packs.get(pack_id)

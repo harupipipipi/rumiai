@@ -486,7 +486,8 @@ class KernelSystemHandlersMixin:
                 port=port,
                 approval_manager=ctx.get("approval_manager"),
                 container_orchestrator=ctx.get("container_orchestrator"),
-                host_privilege_manager=ctx.get("host_privilege_manager")
+                host_privilege_manager=ctx.get("host_privilege_manager"),
+                kernel=self
             )
             ctx["pack_api_server"] = api_server
 

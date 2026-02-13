@@ -42,6 +42,9 @@ class PackAPIHandler(BaseHTTPRequestHandler):
     internal_token: str = ""
     _allowed_origins: list = None
     _hmac_key_manager: HMACKeyManager = None
+    kernel = None  # Kernel インスタンス参照（Flow実行API用）
+    _pack_routes: dict = {}  # Pack独自ルーティングテーブル {(method, path): route_info}
+    _flow_semaphore = None  # 同時実行制御用Semaphore
     
     def log_message(self, format: str, *args) -> None:
         logger.info(f"API: {args[0]}")
@@ -219,6 +222,19 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                 status_filter = query.get("status", ["all"])[0]
                 result = self._pip_list_requests(status_filter)
                 self._send_response(APIResponse(True, result))
+
+            # --- Flow execution API ---
+            elif path == "/api/flows":
+                result = self._get_flow_list()
+                self._send_response(APIResponse(True, result))
+
+            # --- Pack custom routes (GET) ---
+            elif path == "/api/routes":
+                result = self._get_registered_routes()
+                self._send_response(APIResponse(True, result))
+
+            elif self._match_pack_route(path, "GET"):
+                self._handle_pack_route_request(path, {}, "GET")
             
             else:
                 self._send_response(APIResponse(False, error="Not found"), 404)
@@ -498,6 +514,14 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                     self._send_response(APIResponse(True, result))
                 else:
                     self._send_response(APIResponse(False, error=result.get("error")), 403)
+
+            # --- Flow execution API ---
+            elif path.startswith("/api/flows/") and path.endswith("/run"):
+                self._handle_flow_run(path, body)
+
+            # --- Pack custom routes (POST) ---
+            elif self._match_pack_route(path, "POST"):
+                self._handle_pack_route_request(path, body, "POST")
             
             else:
                 self._send_response(APIResponse(False, error="Not found"), 404)
@@ -942,6 +966,266 @@ class PackAPIHandler(BaseHTTPRequestHandler):
 
 
 
+
+
+    # ------------------------------------------------------------------
+    # Flow execution API
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def _get_flow_semaphore(cls) -> threading.Semaphore:
+        """同時実行制限用Semaphoreを取得（遅延初期化）"""
+        if cls._flow_semaphore is None:
+            max_concurrent = int(os.environ.get("RUMI_MAX_CONCURRENT_FLOWS", "10"))
+            cls._flow_semaphore = threading.Semaphore(max_concurrent)
+        return cls._flow_semaphore
+
+    def _handle_flow_run(self, path: str, body: dict) -> None:
+        """POST /api/flows/{flow_id}/run のハンドラ"""
+        parts = path.split("/")
+        # ["", "api", "flows", "{flow_id}", "run"]
+        if len(parts) < 5:
+            self._send_response(APIResponse(False, error="Invalid flow path"), 400)
+            return
+        flow_id = unquote(parts[3])
+
+        if not flow_id or not flow_id.strip():
+            self._send_response(APIResponse(False, error="Missing flow_id"), 400)
+            return
+
+        inputs = body.get("inputs", {})
+        if not isinstance(inputs, dict):
+            self._send_response(APIResponse(False, error="'inputs' must be an object"), 400)
+            return
+
+        timeout = body.get("timeout", 300)
+        if not isinstance(timeout, (int, float)):
+            timeout = 300
+        timeout = min(max(timeout, 1), 600)
+
+        result = self._run_flow(flow_id, inputs, timeout)
+        if result.get("success"):
+            self._send_response(APIResponse(True, result))
+        else:
+            status_code = result.get("status_code", 500)
+            self._send_response(APIResponse(False, error=result.get("error")), status_code)
+
+    def _run_flow(self, flow_id: str, inputs: dict, timeout: float) -> dict:
+        """
+        Flow を実行し結果を返す（共通メソッド）。
+        
+        Flow実行API と Pack独自ルートの両方から呼ばれる。
+        """
+        import time
+
+        if self.kernel is None:
+            return {"success": False, "error": "Kernel not initialized", "status_code": 503}
+
+        # Flow 存在チェック（InterfaceRegistry 経由）
+        ir = getattr(self.kernel, "interface_registry", None)
+        if ir is None:
+            return {"success": False, "error": "InterfaceRegistry not available", "status_code": 503}
+
+        flow_def = ir.get(f"flow.{flow_id}", strategy="last")
+        if flow_def is None:
+            available = [
+                k[5:] for k in (ir.list() or {}).keys()
+                if k.startswith("flow.")
+                and not k.startswith("flow.hooks")
+                and not k.startswith("flow.construct")
+            ]
+            return {
+                "success": False,
+                "error": f"Flow '{flow_id}' not found",
+                "available_flows": available,
+                "status_code": 404,
+            }
+
+        # 同時実行制限
+        sem = self._get_flow_semaphore()
+        acquired = sem.acquire(blocking=False)
+        if not acquired:
+            return {
+                "success": False,
+                "error": "Too many concurrent flow executions. Please retry later.",
+                "status_code": 429,
+            }
+
+        try:
+            start_time = time.monotonic()
+
+            ctx = self.kernel.execute_flow_sync(flow_id, inputs, timeout=timeout)
+
+            elapsed = round(time.monotonic() - start_time, 3)
+
+            # エラーチェック
+            if isinstance(ctx, dict) and ctx.get("_error"):
+                return {
+                    "success": False,
+                    "error": ctx["_error"],
+                    "flow_id": flow_id,
+                    "execution_time": elapsed,
+                    "status_code": 408 if ctx.get("_flow_timeout") else 500,
+                }
+
+            # 結果から内部キーを除外
+            result_data = {}
+            if isinstance(ctx, dict):
+                _internal_keys = {
+                    "diagnostics", "install_journal", "interface_registry",
+                    "event_bus", "lifecycle", "mount_manager", "registry",
+                    "active_ecosystem", "_flow_defaults", "_flow_call_stack",
+                    "_flow_id", "_flow_execution_id", "_flow_timeout",
+                    "_total_steps", "_current_step_index", "_disabled_targets",
+                    "permission_manager", "function_alias_registry",
+                    "flow_composer", "vocab_registry", "approval_manager",
+                    "container_orchestrator", "host_privilege_manager",
+                    "pack_api_server", "_packs_approved", "_packs_pending",
+                    "_packs_modified", "_docker_available", "_security_initialized",
+                    "_strict_mode", "_containers_started", "_discovered_components",
+                    "_parent_flow_execution_id", "_parent_flow_id",
+                }
+                result_data = {
+                    k: v for k, v in ctx.items()
+                    if not k.startswith("_") and k not in _internal_keys
+                    and _is_json_serializable(v)
+                }
+
+            # 監査ログ
+            try:
+                from .audit_logger import get_audit_logger
+                audit = get_audit_logger()
+                audit.log_system_event(
+                    event_type="flow_api_execution",
+                    success=True,
+                    details={
+                        "flow_id": flow_id,
+                        "execution_time": elapsed,
+                        "source": "api",
+                    },
+                )
+            except Exception:
+                pass
+
+            return {
+                "success": True,
+                "flow_id": flow_id,
+                "result": result_data,
+                "execution_time": elapsed,
+            }
+        except Exception as e:
+            logger.exception(f"Flow execution error: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "flow_id": flow_id,
+                "status_code": 500,
+            }
+        finally:
+            sem.release()
+
+    def _get_flow_list(self) -> dict:
+        """GET /api/flows — 実行可能なFlow一覧を返す"""
+        if self.kernel is None:
+            return {"flows": [], "error": "Kernel not initialized"}
+        ir = getattr(self.kernel, "interface_registry", None)
+        if ir is None:
+            return {"flows": [], "error": "InterfaceRegistry not available"}
+        all_keys = ir.list() or {}
+        flows = [
+            k[5:] for k in all_keys.keys()
+            if k.startswith("flow.")
+            and not k.startswith("flow.hooks")
+            and not k.startswith("flow.construct")
+        ]
+        return {"flows": sorted(flows), "count": len(flows)}
+
+    # ------------------------------------------------------------------
+    # Pack custom route endpoints
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def load_pack_routes(cls, registry) -> int:
+        """registryから全Packのルートを読み込み、ルーティングテーブルを構築"""
+        cls._pack_routes = {}
+        if registry is None:
+            return 0
+
+        try:
+            all_routes = registry.get_all_routes()
+        except AttributeError:
+            return 0
+
+        count = 0
+        for pack_id, routes in all_routes.items():
+            for route in routes:
+                key = (route["method"].upper(), route["path"])
+                cls._pack_routes[key] = {
+                    "pack_id": pack_id,
+                    "flow_id": route["flow_id"],
+                    "timeout": route.get("timeout", 300),
+                    "description": route.get("description", ""),
+                }
+                count += 1
+
+        if count > 0:
+            logger.info(f"Loaded {count} pack routes from registry")
+        return count
+
+    def _match_pack_route(self, path: str, method: str) -> bool:
+        """パスとメソッドがPack独自ルートにマッチするか判定"""
+        return (method.upper(), path) in self._pack_routes
+
+    def _handle_pack_route_request(self, path: str, body: dict, method: str) -> None:
+        """Pack独自ルートのリクエストを処理"""
+        route_info = self._pack_routes.get((method.upper(), path))
+        if not route_info:
+            self._send_response(APIResponse(False, error="Route not found"), 404)
+            return
+
+        pack_id = route_info["pack_id"]
+        flow_id = route_info["flow_id"]
+        timeout = route_info["timeout"]
+
+        # Pack承認チェック
+        if self.approval_manager:
+            from .approval_manager import PackStatus
+            status = self.approval_manager.get_status(pack_id)
+            if status != PackStatus.APPROVED:
+                self._send_response(
+                    APIResponse(False, error=f"Pack '{pack_id}' is not approved (status: {status})"),
+                    403,
+                )
+                return
+
+        # Flow実行（共通の _run_flow を使用）
+        inputs = body if isinstance(body, dict) else {}
+        inputs["_pack_route"] = {
+            "pack_id": pack_id,
+            "method": method,
+            "path": path,
+        }
+
+        result = self._run_flow(flow_id, inputs, timeout)
+        if result.get("success"):
+            self._send_response(APIResponse(True, result))
+        else:
+            status_code = result.get("status_code", 500)
+            self._send_response(APIResponse(False, error=result.get("error")), status_code)
+
+    def _get_registered_routes(self) -> dict:
+        """GET /api/routes — 登録済みPack独自ルート一覧を返す"""
+        routes = []
+        for (method, path), info in self._pack_routes.items():
+            routes.append({
+                "method": method,
+                "path": path,
+                "pack_id": info["pack_id"],
+                "flow_id": info["flow_id"],
+                "description": info.get("description", ""),
+            })
+        return {"routes": routes, "count": len(routes)}
+
     # ------------------------------------------------------------------
     # Pack import/apply
     # ------------------------------------------------------------------
@@ -1108,8 +1392,10 @@ class PackAPIServer:
         approval_manager = None,
         container_orchestrator = None,
         host_privilege_manager = None,
-        internal_token: str = None
+        internal_token: str = None,
+        kernel = None
     ):
+        self.kernel = kernel
         self.host = host
         self.port = port
         self.approval_manager = approval_manager
@@ -1136,6 +1422,15 @@ class PackAPIServer:
         PackAPIHandler.host_privilege_manager = self.host_privilege_manager
         PackAPIHandler.internal_token = self.internal_token
         PackAPIHandler._hmac_key_manager = self._hmac_key_manager
+        PackAPIHandler.kernel = self.kernel
+
+        # Packルートをregistryから読み込み
+        try:
+            from backend_core.ecosystem.registry import get_registry
+            reg = get_registry()
+            PackAPIHandler.load_pack_routes(reg)
+        except Exception as e:
+            logger.warning(f"Failed to load pack routes: {e}")
         
         self.server = HTTPServer((self.host, self.port), PackAPIHandler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -1168,7 +1463,8 @@ def initialize_pack_api_server(
     approval_manager = None,
     container_orchestrator = None,
     host_privilege_manager = None,
-    internal_token: str = None
+    internal_token: str = None,
+    kernel = None
 ) -> PackAPIServer:
     global _api_server
     
@@ -1181,7 +1477,8 @@ def initialize_pack_api_server(
         approval_manager=approval_manager,
         container_orchestrator=container_orchestrator,
         host_privilege_manager=host_privilege_manager,
-        internal_token=internal_token
+        internal_token=internal_token,
+        kernel=kernel
     )
     _api_server.start()
     return _api_server

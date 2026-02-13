@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Pack Routes Definition",
+  "description": "Pack独自HTTPエンドポイントの定義。各ルートはFlowの実行に帰着する。",
+  "type": "object",
+  "required": ["routes"],
+  "properties": {
+    "routes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["method", "path", "flow_id"],
+        "properties": {
+          "method": {
+            "type": "string",
+            "enum": ["GET", "POST", "PUT", "DELETE"],
+            "description": "HTTPメソッド"
+          },
+          "path": {
+            "type": "string",
+            "description": "エンドポイントパス。/api/packs/{pack_id}/ で始まること"
+          },
+          "flow_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "実行するFlowのID"
+          },
+          "description": {
+            "type": "string",
+            "description": "エンドポイントの説明"
+          },
+          "timeout": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 600,
+            "default": 300,
+            "description": "タイムアウト秒数"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
