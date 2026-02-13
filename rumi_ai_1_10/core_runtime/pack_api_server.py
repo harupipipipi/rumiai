@@ -10,6 +10,7 @@ from __future__ import annotations
 import hmac
 import json
 import logging
+import os
 import secrets
 import threading
 from pathlib import Path
@@ -37,6 +38,7 @@ class PackAPIHandler(BaseHTTPRequestHandler):
     container_orchestrator = None
     host_privilege_manager = None
     internal_token: str = ""
+    _allowed_origins: list = None
     
     def log_message(self, format: str, *args) -> None:
         logger.info(f"API: {args[0]}")
@@ -44,7 +46,10 @@ class PackAPIHandler(BaseHTTPRequestHandler):
     def _send_response(self, response: APIResponse, status: int = 200) -> None:
         self.send_response(status)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.send_header('Access-Control-Allow-Origin', '*')
+        origin = self._get_cors_origin(self.headers.get('Origin', ''))
+        if origin:
+            self.send_header('Access-Control-Allow-Origin', origin)
+            self.send_header('Vary', 'Origin')
         self.end_headers()
         self.wfile.write(response.to_json().encode('utf-8'))
     
@@ -69,10 +74,54 @@ class PackAPIHandler(BaseHTTPRequestHandler):
     
     def do_OPTIONS(self) -> None:
         self.send_response(200)
-        self.send_header('Access-Control-Allow-Origin', '*')
+        origin = self._get_cors_origin(self.headers.get('Origin', ''))
+        if origin:
+            self.send_header('Access-Control-Allow-Origin', origin)
+            self.send_header('Vary', 'Origin')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Authorization, Content-Type')
         self.end_headers()
+
+    @classmethod
+    def _get_allowed_origins(cls) -> list:
+        """
+        許可するオリジンリストを取得。
+        環境変数 RUMI_CORS_ORIGINS (カンマ区切り) でカスタマイズ可能。
+        未設定の場合は localhost 系のみ許可（安全なデフォルト）。
+        ワイルドカードポート指定: "http://localhost:*"
+        """
+        if cls._allowed_origins is not None:
+            return cls._allowed_origins
+
+        env_origins = os.environ.get("RUMI_CORS_ORIGINS", "")
+        if env_origins.strip():
+            cls._allowed_origins = [o.strip() for o in env_origins.split(",") if o.strip()]
+        else:
+            cls._allowed_origins = [
+                "http://localhost:*",
+                "http://127.0.0.1:*",
+            ]
+        return cls._allowed_origins
+
+    @classmethod
+    def _get_cors_origin(cls, request_origin: str) -> str:
+        """
+        リクエストの Origin が許可リストに含まれていれば返す。
+        含まれなければ空文字を返し、CORS ヘッダーを付与しない。
+        """
+        if not request_origin:
+            return ""
+        allowed = cls._get_allowed_origins()
+        for pattern in allowed:
+            if pattern == request_origin:
+                return request_origin
+            # "http://localhost:*" — ワイルドカードポート対応
+            if pattern.endswith(":*"):
+                prefix = pattern[:-1]  # e.g. "http://localhost:"
+                if request_origin.startswith(prefix):
+                    return request_origin
+        return ""
+
     
     def do_GET(self) -> None:
         if not self._check_auth():

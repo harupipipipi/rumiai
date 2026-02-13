@@ -97,7 +97,9 @@ def add_to_sys_path(path: str) -> bool:
     import sys
     try:
         if path and path not in sys.path:
-            sys.path.insert(0, path)
+            # Security: 末尾に追加し、標準ライブラリ・サードパーティの
+            # importハイジャックを防止する（Pack由来のパスで上書きさせない）
+            sys.path.append(path)
             return True
         return False
     except Exception:

@@ -354,8 +354,9 @@ class NetworkGrantManager:
     def _check_domain(self, domain: str, allowed: List[str]) -> bool:
         """ドメインが許可リストに含まれるかチェック"""
         if not allowed:
-            # 空リスト = ドメイン制限なし（許可）
-            return True
+            # Security: 空リスト = 全拒否（何も許可しない）
+            # 全ドメイン許可が必要な場合は ["*"] を明示的に指定すること
+            return False
         
         domain_lower = domain.lower()
         
@@ -364,6 +365,10 @@ class NetworkGrantManager:
             
             # 完全一致
             if domain_lower == pattern_lower:
+                return True
+
+            # ワイルドカード("*") = 全ドメイン許可（明示的な全許可）
+            if pattern_lower == "*":
                 return True
             
             # ワイルドカード(*.example.com)
@@ -381,8 +386,9 @@ class NetworkGrantManager:
     def _check_port(self, port: int, allowed: List[int]) -> bool:
         """ポートが許可リストに含まれるかチェック"""
         if not allowed:
-            # 空リスト = ポート制限なし（許可）
-            return True
+            # Security: 空リスト = 全拒否（何も許可しない）
+            # 全ポート許可が必要な場合は [0] を明示的に指定すること
+            return False
         if 0 in allowed:
             return True
         return port in allowed
