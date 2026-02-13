@@ -992,7 +992,7 @@ class KernelRuntimeHandlersMixin:
         """全Packのlibを処理"""
         try:
             from .lib_executor import get_lib_executor
-            packs_dir = Path(args.get("packs_dir", "ecosystem/packs"))
+            packs_dir = Path(args.get("packs_dir", "ecosystem"))
             executor = get_lib_executor()
             results = executor.process_all_packs(packs_dir, ctx)
             return {"_kernel_step_status": "success", "_kernel_step_meta": {"installed": results["installed"], "updated": results["updated"], "failed_count": len(results["failed"])}, "results": results}

@@ -139,8 +139,12 @@ class EcosystemInitializer:
     
     def _initialize_registry(self, result: Dict[str, Any]):
         """レジストリを初期化"""
-        # Registry 内部の探索ロジック（ecosystem/* + ecosystem/packs/* 互換）に委ねる
-        actual_ecosystem_dir = self.ecosystem_dir
+        # ecosystem_dir/packs が存在するならそちらを優先、なければそのまま使用
+        packs_dir = self.ecosystem_dir / "packs"
+        if packs_dir.exists() and packs_dir.is_dir():
+            actual_ecosystem_dir = packs_dir
+        else:
+            actual_ecosystem_dir = self.ecosystem_dir
         
         if not actual_ecosystem_dir.exists():
             result["errors"].append(f"エコシステムディレクトリが存在しません: {actual_ecosystem_dir}")

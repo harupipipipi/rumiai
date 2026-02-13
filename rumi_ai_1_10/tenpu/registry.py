@@ -8,6 +8,7 @@ Pack/Component/Addon のレジストリ
 """
 
 import json
+import os
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
@@ -123,10 +124,22 @@ class Registry:
         # アドオンをAddonManagerに読み込む
         try:
             from .addon_manager import get_addon_manager
-            addon_manager = get_addon_manager()
-            
-            for pack in self.packs.values():
-                addon_manager.load_addons_from_pack(pack)
+
+            # deprecated チェック: RUMI_ENABLE_DEPRECATED_ADDON=0 で無効化
+            _addon_enabled = os.environ.get("RUMI_ENABLE_DEPRECATED_ADDON", "1").strip()
+            if _addon_enabled in ("0", "false", "no"):
+                print(
+                    "[Registry] Addon system disabled via RUMI_ENABLE_DEPRECATED_ADDON=0. "
+                    "Use inbox capability (pack.inbox.send) for cross-pack extensions."
+                )
+            else:
+                addon_manager = get_addon_manager()
+                print(
+                    "[Registry] WARNING: Legacy addon system is DEPRECATED. "
+                    "Set RUMI_ENABLE_DEPRECATED_ADDON=0 to disable."
+                )
+                for pack in self.packs.values():
+                    addon_manager.load_addons_from_pack(pack)
         except ImportError:
             # Phase 5以前ではAddonManagerが存在しない可能性がある
             pass
@@ -358,6 +371,42 @@ class Registry:
         """タイプでコンポーネントを取得"""
         return self._type_index.get(component_type, [])
     
+    def resolve_component_for_type(
+        self,
+        component_type: str,
+        active_ecosystem_manager=None,
+    ) -> Optional["ComponentInfo"]:
+        """
+        コンポーネントタイプに対して最適なコンポーネントを解決する。
+        ActiveEcosystemManager の overrides/disabled を参照。
+        """
+        aem = active_ecosystem_manager
+        if aem is None:
+            try:
+                from .active_ecosystem import get_active_ecosystem_manager
+                aem = get_active_ecosystem_manager()
+            except Exception:
+                pass
+        components = self.get_components_by_type(component_type)
+        if not components:
+            return None
+        if aem:
+            try:
+                override_id = aem.get_override(component_type) if hasattr(aem, 'get_override') else None
+            except Exception:
+                override_id = None
+            if override_id:
+                for comp in components:
+                    if comp.id == override_id:
+                        if not (hasattr(aem, 'is_component_disabled') and aem.is_component_disabled(comp.full_id)):
+                            return comp
+                        break
+        for comp in components:
+            if aem and hasattr(aem, 'is_component_disabled') and aem.is_component_disabled(comp.full_id):
+                continue
+            return comp
+        return None
+
     def resolve_connectivity(
         self,
         component: ComponentInfo
@@ -411,6 +460,17 @@ class Registry:
             アドオン適用後のマニフェスト
         """
         manifest = dict(component.manifest)
+
+
+        # ActiveEcosystem の disabled チェック
+        _aem = None
+        try:
+            from .active_ecosystem import get_active_ecosystem_manager
+            _aem = get_active_ecosystem_manager()
+            if _aem.is_component_disabled(component.full_id):
+                return manifest
+        except Exception:
+            pass
         pack = self.packs.get(component.pack_id)
         
         if not pack:
@@ -425,6 +485,15 @@ class Registry:
         for addon in sorted_addons:
             if not addon.get('enabled', True):
                 continue
+
+            # disabled_addons チェック
+            if _aem:
+                try:
+                    _addon_full_id = f"{pack.pack_id}:{addon.get('addon_id', '')}"
+                    if _aem.is_addon_disabled(_addon_full_id):
+                        continue
+                except Exception:
+                    pass
             
             for target in addon.get('targets', []):
                 if self._matches_target(component, pack, target):
