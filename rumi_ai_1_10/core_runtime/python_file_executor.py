@@ -944,6 +944,29 @@ with open("/input.json", "r") as f:
 input_data = data.get("input_data", {{}})
 context = data.get("context", {{}})
 
+# --- B5: Pack API統一 — context にヘルパー関数を注入 ---
+import os
+try:
+    import rumi_syscall
+
+    def _http_request(method, url, headers=None, body=None, timeout_seconds=30.0):
+        return rumi_syscall.http_request(
+            method, url, headers=headers, body=body,
+            timeout_seconds=timeout_seconds
+        )
+
+    def _network_check(domain, port):
+        return {{"allowed": True, "reason": "Network access controlled by UDS Egress Proxy in container mode"}}
+
+    context["http_request"] = _http_request
+    context["network_check"] = _network_check
+except ImportError:
+    pass
+
+if os.path.exists("/run/rumi/capability.sock"):
+    context["capability_socket"] = "/run/rumi/capability.sock"
+# --- /B5 ---
+
 # ターゲットモジュールをロード
 target_file = "/workspace/{target_filename}"
 spec = importlib.util.spec_from_file_location("target_module", target_file)
