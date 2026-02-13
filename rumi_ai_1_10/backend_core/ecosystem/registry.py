@@ -8,7 +8,6 @@ Pack/Component/Addon のレジストリ
 """
 
 import json
-import os
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
@@ -120,29 +119,6 @@ class Registry:
                         print(f"  ✓ Pack読み込み成功: {pack_info.pack_id}")
                 except Exception as e:
                     print(f"  ✗ Pack読み込みエラー ({pack_dir.name}): {e}")
-        
-        # アドオンをAddonManagerに読み込む
-        try:
-            from .addon_manager import get_addon_manager
-
-            # deprecated チェック: RUMI_ENABLE_DEPRECATED_ADDON=0 で無効化
-            _addon_enabled = os.environ.get("RUMI_ENABLE_DEPRECATED_ADDON", "1").strip()
-            if _addon_enabled in ("0", "false", "no"):
-                print(
-                    "[Registry] Addon system disabled via RUMI_ENABLE_DEPRECATED_ADDON=0. "
-                    "Use inbox capability (pack.inbox.send) for cross-pack extensions."
-                )
-            else:
-                addon_manager = get_addon_manager()
-                print(
-                    "[Registry] WARNING: Legacy addon system is DEPRECATED. "
-                    "Set RUMI_ENABLE_DEPRECATED_ADDON=0 to disable."
-                )
-                for pack in self.packs.values():
-                    addon_manager.load_addons_from_pack(pack)
-        except ImportError:
-            # Phase 5以前ではAddonManagerが存在しない可能性がある
-            pass
         
         print(f"=== 読み込み完了: {len(self.packs)}個のPack ===\n")
         return self.packs
@@ -595,13 +571,8 @@ class Registry:
         if not pack:
             return component.manifest
         
-        try:
-            from .addon_manager import get_addon_manager
-            addon_manager = get_addon_manager()
-            patched, results = addon_manager.apply_addons_to_manifest(component, pack)
-        except ImportError:
-            # AddonManagerが存在しない場合は元のマニフェストを返す
-            patched = component.manifest
+        # 旧アドオンシステムは削除済み。素のマニフェストを使用する。
+        patched = component.manifest
         
         if use_cache:
             self._patched_manifest_cache[cache_key] = patched
