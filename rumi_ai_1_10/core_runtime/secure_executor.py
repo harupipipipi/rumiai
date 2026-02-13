@@ -348,7 +348,7 @@ class SecureExecutor:
 import sys
 import json
 
-sys.path.insert(0, "/component")
+sys.path.append("/component")
 
 with open("/context.json", "r") as f:
     context = json.load(f)
@@ -378,7 +378,7 @@ else:
 import sys
 import json
 
-sys.path.insert(0, "/lib")
+sys.path.append("/lib")
 
 with open("/context.json", "r") as f:
     context = json.load(f)
@@ -712,7 +712,7 @@ else:
             # lib ディレクトリを一時的にパスに追加
             lib_dir = str(lib_file.parent)
             if lib_dir not in sys.path:
-                sys.path.insert(0, lib_dir)
+                sys.path.append(lib_dir)
             
             try:
                 spec.loader.exec_module(module)

@@ -19,6 +19,8 @@ from typing import Any, Optional
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, unquote
 
+from .hmac_key_manager import get_hmac_key_manager, HMACKeyManager
+
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,7 @@ class PackAPIHandler(BaseHTTPRequestHandler):
     host_privilege_manager = None
     internal_token: str = ""
     _allowed_origins: list = None
+    _hmac_key_manager: HMACKeyManager = None
     
     def log_message(self, format: str, *args) -> None:
         logger.info(f"API: {args[0]}")
@@ -56,14 +59,24 @@ class PackAPIHandler(BaseHTTPRequestHandler):
     def _check_auth(self) -> bool:
         auth_header = self.headers.get('Authorization', '')
         
+        if not auth_header:
+            return False
+        
+        # Bearer プレフィックスを除去
+        if not auth_header.startswith("Bearer "):
+            return False
+        token = auth_header[7:]  # len("Bearer ") == 7
+        
+        # 1. HMACKeyManager 経由で検証（ローテーション対応）
+        if self._hmac_key_manager is not None:
+            return self._hmac_key_manager.verify_token(token)
+        
+        # 2. フォールバック: 従来の internal_token での検証（後方互換）
         if not self.internal_token:
             logger.error("API token not configured - rejecting request")
             return False
         
-        if not auth_header:
-            return False
-        
-        return hmac.compare_digest(auth_header, f"Bearer {self.internal_token}")
+        return hmac.compare_digest(token, self.internal_token)
     
     def _parse_body(self) -> dict:
         content_length = int(self.headers.get('Content-Length', 0))
@@ -1103,10 +1116,15 @@ class PackAPIServer:
         self.container_orchestrator = container_orchestrator
         self.host_privilege_manager = host_privilege_manager
         
+        # HMAC鍵管理: HMACKeyManager を使用
+        self._hmac_key_manager = get_hmac_key_manager()
+        
         if internal_token is None:
-            internal_token = secrets.token_urlsafe(32)
-            logger.warning(f"Generated API token: {internal_token}")
+            # HMACKeyManager からアクティブ鍵を取得
+            internal_token = self._hmac_key_manager.get_active_key()
+            logger.warning(f"Using HMAC-managed API token: {internal_token}")
             logger.warning("Set this token in client requests: Authorization: Bearer <token>")
+            logger.warning("Token rotation: set RUMI_HMAC_ROTATE=true and restart")
         
         self.internal_token = internal_token
         self.server: Optional[HTTPServer] = None
@@ -1117,6 +1135,7 @@ class PackAPIServer:
         PackAPIHandler.container_orchestrator = self.container_orchestrator
         PackAPIHandler.host_privilege_manager = self.host_privilege_manager
         PackAPIHandler.internal_token = self.internal_token
+        PackAPIHandler._hmac_key_manager = self._hmac_key_manager
         
         self.server = HTTPServer((self.host, self.port), PackAPIHandler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)

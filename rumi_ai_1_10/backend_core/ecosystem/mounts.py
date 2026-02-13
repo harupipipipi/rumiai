@@ -12,6 +12,12 @@ from pathlib import Path
 from typing import Dict, Optional, Any
 
 
+# モジュール基準ベースディレクトリ
+try:
+    from core_runtime.paths import BASE_DIR as _BASE_DIR
+except ImportError:
+    _BASE_DIR = None
+
 # デフォルトのマウント設定
 DEFAULT_MOUNTS = {
     # 汎用マウントのみ（具体的な用途名を定義しない）
@@ -43,7 +49,7 @@ class MountManager:
     
     def __init__(
         self,
-        config_path: str = "user_data/mounts.json",
+        config_path: str = None,
         base_dir: str = None
     ):
         """
@@ -51,8 +57,11 @@ class MountManager:
             config_path: マウント設定ファイルのパス
             base_dir: 相対パスの基準ディレクトリ（省略時はカレントディレクトリ）
         """
+        if config_path is None:
+            _bd = Path(base_dir) if base_dir else (_BASE_DIR if _BASE_DIR is not None else Path.cwd())
+            config_path = str(_bd / "user_data" / "mounts.json")
         self.config_path = Path(config_path)
-        self.base_dir = Path(base_dir) if base_dir else Path.cwd()
+        self.base_dir = Path(base_dir) if base_dir else (_BASE_DIR if _BASE_DIR is not None else Path.cwd())
         self._mounts: Dict[str, str] = {}
         self._lock = threading.Lock()
         

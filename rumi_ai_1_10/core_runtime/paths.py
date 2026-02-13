@@ -24,29 +24,29 @@ from typing import Dict, List, Optional, Tuple
 # ======================================================================
 
 # Pack供給元のルートディレクトリ
-ECOSYSTEM_DIR = "ecosystem"
+ECOSYSTEM_DIR = str(BASE_DIR / "ecosystem")
 
 # 互換: 旧 packs サブディレクトリ
 LEGACY_PACKS_SUBDIR = "packs"
 
 # 公式 Flow ディレクトリ（承認不要、上書き不可）
-OFFICIAL_FLOWS_DIR = "flows"
+OFFICIAL_FLOWS_DIR = str(BASE_DIR / "flows")
 
 # ユーザー管理の共有 Flow/Modifier ディレクトリ（承認不要）
-USER_SHARED_DIR = "user_data/shared"
-USER_SHARED_FLOWS_DIR = "user_data/shared/flows"
-USER_SHARED_MODIFIERS_DIR = "user_data/shared/flows/modifiers"
+USER_SHARED_DIR = str(BASE_DIR / "user_data" / "shared")
+USER_SHARED_FLOWS_DIR = str(BASE_DIR / "user_data" / "shared" / "flows")
+USER_SHARED_MODIFIERS_DIR = str(BASE_DIR / "user_data" / "shared" / "flows" / "modifiers")
 
 # local_pack 互換（deprecated、優先順位最低）
 LOCAL_PACK_ID = "local_pack"
-LOCAL_PACK_DIR = "ecosystem/flows"
-LOCAL_PACK_MODIFIERS_DIR = "ecosystem/flows/modifiers"
+LOCAL_PACK_DIR = str(BASE_DIR / "ecosystem" / "flows")
+LOCAL_PACK_MODIFIERS_DIR = str(BASE_DIR / "ecosystem" / "flows" / "modifiers")
 
 # 承認データ保存先
-GRANTS_DIR = "user_data/permissions"
+GRANTS_DIR = str(BASE_DIR / "user_data" / "permissions")
 
 # Pack data 保存先
-PACK_DATA_BASE_DIR = "user_data/packs"
+PACK_DATA_BASE_DIR = str(BASE_DIR / "user_data" / "packs")
 
 # Pack discovery 時に除外するディレクトリ名
 EXCLUDED_DIRS = frozenset({

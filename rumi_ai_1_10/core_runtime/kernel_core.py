@@ -29,6 +29,7 @@ from .interface_registry import InterfaceRegistry
 from .event_bus import EventBus
 from .component_lifecycle import ComponentLifecycleExecutor
 from .capability_proxy import get_capability_proxy
+from .paths import BASE_DIR, OFFICIAL_FLOWS_DIR, ECOSYSTEM_DIR, GRANTS_DIR
 
 
 @dataclass
@@ -141,7 +142,7 @@ class KernelCore:
             return self._load_single_flow(Path(path))
 
         # 1. New flow (正): flows/00_startup.flow.yaml を試行
-        new_flow_path = Path("flows/00_startup.flow.yaml")
+        new_flow_path = Path(OFFICIAL_FLOWS_DIR) / "00_startup.flow.yaml"
         if new_flow_path.exists():
             try:
                 flow_def = self._load_single_flow(new_flow_path)
@@ -215,7 +216,7 @@ class KernelCore:
         }
 
         # 旧ディレクトリを読み込み（互換性のため）
-        for legacy_dir in ["flow/core", "flow/ecosystem", "flow"]:
+        for legacy_dir in [str(BASE_DIR / "flow" / "core"), str(BASE_DIR / "flow" / "ecosystem"), str(BASE_DIR / "flow")]:
             legacy_path = Path(legacy_dir)
             if legacy_path.exists():
                 yaml_files = sorted(legacy_path.glob("*.flow.yaml"))
@@ -354,9 +355,9 @@ class KernelCore:
             "defaults": {"fail_soft": True, "on_missing_handler": "skip"},
             "pipelines": {
                 "startup": [
-                    {"id": "fallback.mounts", "run": {"handler": "kernel:mounts.init", "args": {"mounts_file": "user_data/mounts.json"}}},
-                    {"id": "fallback.registry", "run": {"handler": "kernel:registry.load", "args": {"ecosystem_dir": "ecosystem"}}},
-                    {"id": "fallback.active", "run": {"handler": "kernel:active_ecosystem.load", "args": {"config_file": "user_data/active_ecosystem.json"}}}
+                    {"id": "fallback.mounts", "run": {"handler": "kernel:mounts.init", "args": {"mounts_file": str(BASE_DIR / "user_data" / "mounts.json")}}},
+                    {"id": "fallback.registry", "run": {"handler": "kernel:registry.load", "args": {"ecosystem_dir": ECOSYSTEM_DIR}}},
+                    {"id": "fallback.active", "run": {"handler": "kernel:active_ecosystem.load", "args": {"config_file": str(BASE_DIR / "user_data" / "active_ecosystem.json")}}}
                 ]
             }
         }
@@ -641,7 +642,7 @@ class KernelCore:
             flow_def = self.interface_registry.get(f"flow.{flow_name}", strategy="last")
 
             if flow_def is None:
-                ecosystem_flow_path = Path("flow/ecosystem") / f"{flow_name}.flow.yaml"
+                ecosystem_flow_path = BASE_DIR / "flow" / "ecosystem" / f"{flow_name}.flow.yaml"
                 if ecosystem_flow_path.exists():
                     flow_def = self._load_single_flow(ecosystem_flow_path)
                     if "pipelines" in flow_def:
@@ -731,7 +732,9 @@ class KernelCore:
     # Flow 保存 / ユーザーFlow読み込み
     # ------------------------------------------------------------------
 
-    def save_flow_to_file(self, flow_id: str, flow_def: Dict[str, Any], path: str = "user_data/flows") -> str:
+    def save_flow_to_file(self, flow_id: str, flow_def: Dict[str, Any], path: str = None) -> str:
+        if path is None:
+            path = str(BASE_DIR / "user_data" / "flows")
         flow_dir = Path(path)
         flow_dir.mkdir(parents=True, exist_ok=True)
         file_path = flow_dir / f"{flow_id}.flow.json"
@@ -741,7 +744,9 @@ class KernelCore:
                                       status="success", meta={"path": str(file_path)})
         return str(file_path)
 
-    def load_user_flows(self, path: str = "user_data/flows") -> List[str]:
+    def load_user_flows(self, path: str = None) -> List[str]:
+        if path is None:
+            path = str(BASE_DIR / "user_data" / "flows")
         flow_dir = Path(path)
         if not flow_dir.exists():
             return []

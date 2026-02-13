@@ -26,7 +26,8 @@ from .spec.schema.validator import (
 try:
     from core_runtime.paths import ECOSYSTEM_DIR as _ECOSYSTEM_DIR, find_ecosystem_json as _find_ecosystem_json_paths
 except ImportError:
-    _ECOSYSTEM_DIR = "ecosystem"
+    from pathlib import Path as _FallbackPath
+    _ECOSYSTEM_DIR = str(_FallbackPath(__file__).resolve().parent.parent.parent / "ecosystem")
     _find_ecosystem_json_paths = None
 
 
