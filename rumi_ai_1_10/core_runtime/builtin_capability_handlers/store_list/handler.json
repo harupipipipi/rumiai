@@ -1,0 +1,24 @@
+{
+  "handler_id": "builtin.store.list",
+  "permission_id": "store.list",
+  "entrypoint": "handler.py:execute",
+  "description": "List all keys in a Store. Returns key names derived from .json files under store root.",
+  "risk": "low",
+  "input_schema": {
+    "type": "object",
+    "required": ["store_id"],
+    "properties": {
+      "store_id": {"type": "string"},
+      "prefix": {"type": "string", "description": "Optional key prefix filter"}
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "success": {"type": "boolean"},
+      "keys": {"type": "array", "items": {"type": "string"}},
+      "error": {"type": "string"},
+      "error_type": {"type": "string"}
+    }
+  }
+}

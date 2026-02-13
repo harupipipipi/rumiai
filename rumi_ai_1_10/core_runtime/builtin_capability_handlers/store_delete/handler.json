@@ -1,0 +1,23 @@
+{
+  "handler_id": "builtin.store.delete",
+  "permission_id": "store.delete",
+  "entrypoint": "handler.py:execute",
+  "description": "Delete a value from a Store by key. Removes <store_root>/<key>.json.",
+  "risk": "medium",
+  "input_schema": {
+    "type": "object",
+    "required": ["store_id", "key"],
+    "properties": {
+      "store_id": {"type": "string"},
+      "key": {"type": "string"}
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "success": {"type": "boolean"},
+      "error": {"type": "string"},
+      "error_type": {"type": "string"}
+    }
+  }
+}

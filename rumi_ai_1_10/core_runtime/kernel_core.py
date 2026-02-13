@@ -59,6 +59,7 @@ class KernelCore:
         self._shutdown_handlers: List[Callable[[], None]] = []
         self._capability_proxy = None
         self._executor: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=4)
+        self._flow_scheduler = None  # FlowScheduler instance (lazy)
         self._uds_proxy_manager = None  # UDS Egress Proxy Manager
 
         self.install_journal.set_interface_registry(self.interface_registry)
@@ -771,8 +772,68 @@ class KernelCore:
         if callable(fn):
             self._shutdown_handlers.append(fn)
 
+    # ------------------------------------------------------------------
+    # Flow Scheduler
+    # ------------------------------------------------------------------
+
+    def start_flow_scheduler(self) -> Dict[str, Any]:
+        """
+        FlowScheduler を初期化・起動する。
+
+        InterfaceRegistry に登録されている全 Flow から schedule フィールドを
+        スキャンし、スケジュールテーブルを構築して起動する。
+        Kernel を直接参照せず、execute_flow_sync コールバックで疎結合。
+
+        Returns:
+            {"started": bool, "registered_count": int, "entries": [...]}
+        """
+        try:
+            from .flow_scheduler import FlowScheduler, scan_flows_for_schedules
+        except ImportError as e:
+            self.diagnostics.record_step(
+                phase="scheduler", step_id="scheduler.import.failed",
+                handler="kernel:flow_scheduler.start", status="failed", error=e,
+            )
+            return {"started": False, "registered_count": 0, "error": str(e)}
+
+        scheduler = FlowScheduler(
+            execute_callback=self.execute_flow_sync,
+            diagnostics_callback=self.diagnostics.record_step,
+        )
+
+        scheduled_flows = scan_flows_for_schedules(self.interface_registry)
+        registered = 0
+        for item in scheduled_flows:
+            if scheduler.register(item["flow_id"], item["schedule"]):
+                registered += 1
+
+        if registered > 0:
+            scheduler.start()
+            self._flow_scheduler = scheduler
+
+        self.diagnostics.record_step(
+            phase="scheduler", step_id="scheduler.start",
+            handler="kernel:flow_scheduler.start", status="success",
+            meta={"registered_count": registered, "started": registered > 0},
+        )
+
+        return {
+            "started": registered > 0,
+            "registered_count": registered,
+            "entries": [f["flow_id"] for f in scheduled_flows],
+        }
+
     def shutdown(self) -> Dict[str, Any]:
         results: List[Dict[str, Any]] = []
+
+        # FlowScheduler を停止
+        if self._flow_scheduler is not None:
+            try:
+                self._flow_scheduler.stop()
+                results.append({"handler": "flow_scheduler", "status": "success"})
+            except Exception as e:
+                results.append({"handler": "flow_scheduler", "status": "failed", "error": str(e)})
+            self._flow_scheduler = None
 
         # Capability proxy を停止
         if self._capability_proxy:
@@ -859,6 +920,18 @@ class KernelCore:
         try:
             from .vocab_registry import get_vocab_registry
             ctx["vocab_registry"] = get_vocab_registry()
+        except Exception:
+            pass
+
+        try:
+            from .store_registry import get_store_registry
+            ctx["store_registry"] = get_store_registry()
+        except Exception:
+            pass
+
+        try:
+            from .unit_registry import get_unit_registry
+            ctx["unit_registry"] = get_unit_registry()
         except Exception:
             pass
 

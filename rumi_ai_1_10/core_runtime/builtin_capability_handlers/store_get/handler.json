@@ -1,0 +1,24 @@
+{
+  "handler_id": "builtin.store.get",
+  "permission_id": "store.get",
+  "entrypoint": "handler.py:execute",
+  "description": "Read a value from a Store by key. Returns JSON data stored at <store_root>/<key>.json.",
+  "risk": "low",
+  "input_schema": {
+    "type": "object",
+    "required": ["store_id", "key"],
+    "properties": {
+      "store_id": {"type": "string", "description": "Target store ID"},
+      "key": {"type": "string", "description": "Data key (may contain '/' for nested paths)"}
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "success": {"type": "boolean"},
+      "value": {"description": "The stored JSON value"},
+      "error": {"type": "string"},
+      "error_type": {"type": "string"}
+    }
+  }
+}

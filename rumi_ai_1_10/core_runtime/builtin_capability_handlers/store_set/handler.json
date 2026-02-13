@@ -1,0 +1,25 @@
+{
+  "handler_id": "builtin.store.set",
+  "permission_id": "store.set",
+  "entrypoint": "handler.py:execute",
+  "description": "Write a JSON value to a Store by key. Creates or overwrites <store_root>/<key>.json.",
+  "risk": "medium",
+  "input_schema": {
+    "type": "object",
+    "required": ["store_id", "key", "value"],
+    "properties": {
+      "store_id": {"type": "string"},
+      "key": {"type": "string"},
+      "value": {"description": "JSON-serializable value to store"}
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "success": {"type": "boolean"},
+      "path": {"type": "string"},
+      "error": {"type": "string"},
+      "error_type": {"type": "string"}
+    }
+  }
+}
