@@ -96,6 +96,7 @@ project_root/
 │   ├── python_file_executor.py     # python_file_call 実行
 │   ├── secure_executor.py          # Docker 隔離実行
 │   ├── container_orchestrator.py   # コンテナ管理
+│   ├── component_lifecycle.py      # Component ライフサイクル管理
 │   ├── host_privilege_manager.py   # ホスト権限管理
 │   ├── pack_api_server.py          # HTTP API サーバー
 │   │
@@ -122,10 +123,8 @@ project_root/
 │   ├── unit_trust_store.py         # Unit Trust Store
 │   ├── hierarchical_grant.py       # 階層権限（parent > child）
 │   │
-│   ├── lang.py                     # 言語ユーティリティ
-│   ├── permission_manager.py       # 権限管理
-│   ├── sandbox_bridge.py           # サンドボックスブリッジ
-│   └── sandbox_container.py        # サンドボックスコンテナ
+│   ├── lang.py                     # 多言語ユーティリティ
+│   └── permission_manager.py       # 権限管理
 │
 ├── backend_core/                   # エコシステム基盤
 │   └── ecosystem/
@@ -186,12 +185,31 @@ project_root/
 │   ├── guide/                      # インストールガイド（HTML）
 │   └── defaults/                   # default Pack テンプレート
 │
+├── lang/                           # 多言語メッセージ
+│   ├── en.txt
+│   └── ja.txt
+│
+├── tests/                          # テスト
+│   ├── test_capability_installer.py
+│   ├── test_capability_system.py
+│   ├── test_ecosystem_phase1.py
+│   ├── test_ecosystem_phase2.py
+│   ├── test_ecosystem_phase3.py
+│   ├── test_ecosystem_phase4.py
+│   ├── test_ecosystem_phase5.py
+│   ├── test_ecosystem_phase6.py
+│   ├── test_egress_audit.py
+│   ├── test_flow_resolution.py
+│   ├── test_inbox_and_patches.py
+│   ├── test_pip_installer.py
+│   ├── test_secure_execution.py
+│   └── test_shared_dict.py
+│
 └── docs/
     ├── architecture.md             # 設計と仕組みの全体像
     ├── pack-development.md         # Pack 開発ガイド
     ├── operations.md               # 運用ガイド
-    ├── roadmap.md                  # ロードマップ
-    └── internal_kernel_handlers.md # 内部ハンドラ一覧（参考）
+    └── roadmap.md                  # ロードマップ
 ```
 
 ---

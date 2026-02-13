@@ -440,10 +440,16 @@ Pack が capability handler を提供する場合、以下の規約に従いま�
 ### 配置
 
 ```
-ecosystem/<pack_id>/backend/share/capability_handlers/<slug>/
-├── handler.json
-└── handler.py
+ecosystem/<pack_id>/
+└── backend/
+    └── share/
+        └── capability_handlers/
+            └── <slug>/
+                ├── handler.json
+                └── handler.py
 ```
+
+Pack の `pack_subdir`（通常 `ecosystem/<pack_id>/backend/`）配下の `share/capability_handlers/<slug>/` に配置します。
 
 ### handler.json
 
@@ -512,8 +518,5 @@ file: components/comp1/blocks/foo.py
 - **lib の書き込み先は `/data` のみです。** それ以外のパスへの書き込みは `--read-only` により失敗します。
 - **pack_identity を変更しないでください。** 更新時に `pack_identity` が変わると apply が拒否されます。
 - **principal_id は v1 では owner_pack に強制上書きされます。** Flow 定義で `principal_id` を指定しても無視されます。
-
-### 内部ハンドラ一覧
-
-内部実装の参考として、Kernel ハンドラ一覧は [internal_kernel_handlers.md](internal_kernel_handlers.md) を参照してください。Pack 開発では直接使用せず、Flow / Modifier / Blocks を通じて機能を利用してください。
 ```
+

@@ -3,7 +3,7 @@
 ```markdown
 # Rumi AI OS — Roadmap
 
-最終更新: 2026-02-11
+最終更新: 2026-02-13
 
 設計思想・過去案を含む完全版ロードマップです。設計の全体像は [architecture.md](architecture.md) を参照してください。
 
@@ -156,10 +156,10 @@ Pack の通常実行は Docker 隔離で成立するので、ホストに Python
 
 ### 6.1 Store / Unit（共有領域と再利用単位）
 
-- 🧩 Store registry（複数 store、パス固定しない）
-- 🧩 Unit registry（data / python / binary）
-- 🧩 Unit trust store（sha256 allowlist）
-- 🧩 Unit execution gate（host / pack container / sandbox を選べる枠）
+- ✅ Store registry（複数 store、パス固定しない）— `core_runtime/store_registry.py` 実装済み
+- ✅ Unit registry（data / python / binary）— `core_runtime/unit_registry.py` 実装済み
+- ✅ Unit trust store（sha256 allowlist）— `core_runtime/unit_trust_store.py` 実装済み
+- 🟡 Unit execution gate（host_capability モードのみ実装済み。pack container / sandbox は未実装）— `core_runtime/unit_executor.py`
 - 🧩 「Pack 承認は必須、Unit 個別承認はユニット設定次第（pack が要求可能）」の運用整備
 
 > ここは「assets」という語は使わない。ecosystem が「互換再利用のためのストア」を作ればそれは成立する。
@@ -220,8 +220,9 @@ Pack の通常実行は Docker 隔離で成立するので、ホストに Python
 
 ## 10. 今後の論点（未確定を明文化）
 
-- Store / Unit をどこまで公式が標準化するか（枠だけ vs もう少し厚く）
+- Store / Unit の運用整備をどこまで公式が標準化するか（枠だけ vs もう少し厚く）
 - Unit の個別承認の UX（pending が増えすぎない設計）
+- Unit execution gate の pack container / sandbox モード実装
 - Python 無し配布の最短ルート（本体単一化 vs handler バイナリ化）
 - 階層権限の config 上限（intersection の定義: list は積集合、ports は最小等）
 

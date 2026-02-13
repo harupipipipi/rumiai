@@ -102,13 +102,16 @@ steps:
 
 ### Flow 読み込み元
 
-Flow は以下の順序で読み込まれます。同一 `flow_id` の場合は優先度の高い方が勝ちます。
+Flow は以下の順序で読み込まれます。同一 `flow_id` の場合は優先度の高い方が勝ちます（上位ソースの Flow を下位ソースが上書きすることはできません）。
 
-| 優先度 | パス | 用途 |
-|--------|------|------|
-| 1 | `flows/` | 公式 Flow（起動・基盤） |
-| 2 | `user_data/shared/flows/` | ユーザー/外部ツールが配置する共有 Flow |
-| 3 | `ecosystem/<pack_id>/backend/flows/` | Pack 提供の Flow |
+| 優先度 | パス | 用途 | 承認 |
+|--------|------|------|------|
+| 1 | `flows/` | 公式 Flow（起動・基盤） | 不要 |
+| 2 | `user_data/shared/flows/` | ユーザー/外部ツールが配置する共有 Flow | 不要 |
+| 3 | `ecosystem/<pack_id>/backend/flows/` | Pack 提供の Flow | Pack 承認必須 |
+| 4 | `ecosystem/flows/`（deprecated） | local_pack 互換 Flow | `RUMI_LOCAL_PACK_MODE=require_approval` 時のみ有効。承認必須 |
+
+上書きルール: 公式 Flow は誰も上書きできません。共有 Flow は公式を上書きできませんが、Pack 提供 Flow より優先されます。Pack 提供 Flow は公式・共有いずれも上書きできません。local_pack は最も低い優先度で、他の全てのソースを上書きできません。
 
 ### ステップタイプ
 
@@ -336,8 +339,10 @@ Pack 配置 (ecosystem/<pack_id>/)
 | `installed` | ❌ | 配置済み、未承認 |
 | `pending` | ❌ | 承認待ち |
 | `approved` | ✅ | 承認済み |
+| `running` | ✅ | 承認済みかつ実行中 |
 | `modified` | ❌ | 承認後にファイル変更を検出 |
 | `blocked` | ❌ | 拒否済み |
+| `error` | ❌ | エラー発生（承認処理中の失敗等） |
 
 ファイル変更で `modified` 状態になると、コード実行とネットワーク権限が自動的に無効化されます。再承認が必要です。
 

@@ -55,19 +55,17 @@ pip install -r requirements.txt
 
 ```bash
 # CLI モード
-./setup.sh --cli              # 対話メニュー
-./setup.sh --cli check        # 環境チェック
-./setup.sh --cli init         # 初期セットアップ
-./setup.sh --cli doctor       # 診断
-./setup.sh --cli recover      # リカバリー
-./setup.sh --cli run          # アプリ起動
+python bootstrap.py --cli              # 対話メニュー
+python bootstrap.py --cli check        # 環境チェック
+python bootstrap.py --cli init         # 初期セットアップ
+python bootstrap.py --cli doctor       # 診断
+python bootstrap.py --cli recover      # リカバリー
+python bootstrap.py --cli run          # アプリ起動
 
 # Web モード
-./setup.sh --web              # ブラウザ操作（デフォルトポート 8080）
-./setup.sh --web --port 9000  # ポート指定
+python bootstrap.py --web              # ブラウザ操作（デフォルトポート 8080）
+python bootstrap.py --web --port 9000  # ポート指定
 ```
-
-Windows の場合は `setup.bat` を使用してください。
 
 セットアップツールは以下を自動化します: Python / Git / Docker のチェック、仮想環境（.venv）の作成、依存関係のインストール、user_data ディレクトリの初期化、default pack のインストール（オプション）。
 
