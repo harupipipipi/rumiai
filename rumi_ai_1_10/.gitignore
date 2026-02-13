@@ -158,7 +158,6 @@ cython_debug/
 *~
 
 # Emacs
-*~
 \#*\#
 /.emacs.desktop
 /.emacs.desktop.lock
@@ -206,26 +205,47 @@ $RECYCLE.BIN/
 *.lnk
 
 # Linux
-*~
 .fuse_hidden*
 .directory
 .Trash-*
 .nfs*
 
 # ========================================
-# Project Specific
+# Project Specific — 除外対象
 # ========================================
+
+# エラーメモ（typo含むファイル名ごと除外）
+erroer_memo.txt
+
+# ngrok バイナリ（48MB — リポジトリに含めるべきでない）
+ngrok.exe
+ngrok
+
+# 空のデプロイスクリプト（未実装）
+deploy.py
+
+# 添付ファイル一時ディレクトリ
+tenpu/
+
+# チャット履歴（開発ログ — 機密情報を含む可能性あり）
+chats/
+
+# 不要フローディレクトリ
+flow.iranai/
+
+# ランタイムユーザーデータ
+userdata/
 
 # User data directory (contains user-specific data)
 user_data/
 
-# Legacy directories (should be deleted after migration)
-# Uncomment these after confirming migration is complete
-# chats/
-# tool/
-# prompt/
-# supporter/
-# ai_client/
+# ========================================
+# Project Specific — その他
+# ========================================
+
+# Kernel バックアップファイル
+*.bak
+*.bak.*
 
 # Debug logs
 debug.txt
@@ -234,9 +254,8 @@ debug.txt
 # Temporary files
 *.tmp
 *.temp
-*.bak
 
-# API keys and secrets (should use .env.local)
+# API keys and secrets
 .env.local
 secrets.json
 *_secret.json
@@ -247,7 +266,7 @@ secrets.json
 *.sqlite
 *.sqlite3
 
-# Uploaded files (if any)
+# Uploaded files
 uploads/
 temp_uploads/
 
@@ -285,5 +304,4 @@ test-output/
 
 # Generated docs
 docs/build/
-docs/_build/
 site/
