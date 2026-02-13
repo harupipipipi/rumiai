@@ -124,6 +124,59 @@
       "type": "object",
       "description": "追加のメタデータ（自由形式）",
       "additionalProperties": true
+    },
+    "components": {
+      "type": "object",
+      "description": "Pack内のComponentの定義マップ。キーはComponent識別子。",
+      "additionalProperties": {
+        "type": "object",
+        "description": "個別のComponent定義",
+        "required": ["type", "id"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Componentのtype（vocabularyで定義されたもの）"
+          },
+          "id": {
+            "type": "string",
+            "description": "Component識別子"
+          },
+          "version": {
+            "type": "string",
+            "description": "Componentバージョン"
+          },
+          "path": {
+            "type": "string",
+            "description": "Componentのディレクトリパス"
+          },
+          "connectivity": {
+            "type": "object",
+            "description": "Componentの接続情報",
+            "properties": {
+              "provides": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "このComponentが提供するインターフェース"
+              },
+              "requires": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "このComponentが要求するインターフェース"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "load_order": {
+      "type": "array",
+      "description": "Componentの読み込み順序。指定された順にComponentが初期化される。",
+      "items": {
+        "type": "string",
+        "description": "Component識別子（type:id 形式）"
+      }
     }
   },
   "additionalProperties": false

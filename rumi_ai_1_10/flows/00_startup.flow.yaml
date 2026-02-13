@@ -71,16 +71,16 @@ steps:
       args:
         check_hash: true
 
+  - id: api_init
+    phase: security
+    priority: 40
+    type: handler
+    input:
+      handler: "kernel:api.init"
+      args:
+        host: "127.0.0.1"
+        port: 8765
 
-- id: api_init
-  phase: security
-  priority: 40
-  type: handler
-  input:
-    handler: "kernel:api.init"
-    args:
-      host: "127.0.0.1"
-      port: 8765
   # === ecosystem phase ===
   - id: flow_load_all
     phase: ecosystem
@@ -104,7 +104,6 @@ steps:
       handler: "kernel:lib.process_all"
       args:
         packs_dir: "ecosystem"
-
 
   - id: pending_export
     phase: ecosystem
