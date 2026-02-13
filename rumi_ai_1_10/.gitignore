@@ -305,3 +305,5 @@ test-output/
 # Generated docs
 docs/build/
 site/
+user_data/
+

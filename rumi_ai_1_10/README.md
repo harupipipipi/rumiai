@@ -207,7 +207,7 @@ project_root/
 ### インストール
 
 ```bash
-git clone https://github.com/your-repo/rumi-ai.git
+git clone https://github.com/harupipipipi/rumiai.git
 cd rumi-ai
 python bootstrap.py --cli init
 ```
