@@ -37,6 +37,7 @@ PR-C追加:
 from __future__ import annotations
 
 import copy
+import logging
 import os
 import threading
 from dataclasses import dataclass, field
@@ -49,6 +50,8 @@ try:
     HAS_YAML = True
 except ImportError:
     HAS_YAML = False
+
+logger = logging.getLogger(__name__)
 
 from .flow_loader import FlowDefinition, FlowStep, FlowLoadResult
 
@@ -843,7 +846,31 @@ class FlowModifierApplier:
             pass
     
     def _log_modifier_success(self, modifier: FlowModifierDef) -> None:
-        """modifier成功をログに記録"""
+        """modifier成功をログに記録（警告付き）"""
+        # 明示的な警告ログ出力
+        step_id = modifier.step.get("id", "unknown") if modifier.step else "N/A"
+        logger.warning(
+            "[FlowModifier] WARNING: Pack '%s' is modifying flow '%s': "
+            "- %s step '%s': %s",
+            modifier.source_pack_id or "unknown",
+            modifier.target_flow_id,
+            modifier.action,
+            modifier.target_step_id or "N/A",
+            step_id,
+        )
+
+        # 無条件適用（requires が空）の場合は追加警告
+        if not modifier.requires.interfaces and not modifier.requires.capabilities:
+            logger.warning(
+                "[FlowModifier] NOTICE: Modifier '%s' from pack '%s' has no "
+                "'requires' conditions - it applies unconditionally to flow '%s'. "
+                "Consider adding 'requires' to limit scope.",
+                modifier.modifier_id,
+                modifier.source_pack_id or "unknown",
+                modifier.target_flow_id,
+            )
+
+        # 監査ログにも記録
         try:
             from .audit_logger import get_audit_logger
             audit = get_audit_logger()

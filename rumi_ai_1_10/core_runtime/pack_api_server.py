@@ -41,6 +41,7 @@ class PackAPIHandler(BaseHTTPRequestHandler):
     host_privilege_manager = None
     internal_token: str = ""
     _allowed_origins: list = None
+    _allowed_origins_from_env: bool = False
     _hmac_key_manager: HMACKeyManager = None
     kernel = None  # Kernel インスタンス参照（Flow実行API用）
     _pack_routes: dict = {}  # Pack独自ルーティングテーブル {(method, path): route_info}
@@ -103,8 +104,9 @@ class PackAPIHandler(BaseHTTPRequestHandler):
         """
         許可するオリジンリストを取得。
         環境変数 RUMI_CORS_ORIGINS (カンマ区切り) でカスタマイズ可能。
-        未設定の場合は localhost 系のみ許可（安全なデフォルト）。
-        ワイルドカードポート指定: "http://localhost:*"
+        未設定の場合は localhost の特定ポート(3000,5173,8080,8765)のみ許可。
+        ワイルドカードポート指定("http://localhost:*")は環境変数で
+        明示的に指定した場合のみ有効。
         """
         if cls._allowed_origins is not None:
             return cls._allowed_origins
@@ -112,11 +114,19 @@ class PackAPIHandler(BaseHTTPRequestHandler):
         env_origins = os.environ.get("RUMI_CORS_ORIGINS", "")
         if env_origins.strip():
             cls._allowed_origins = [o.strip() for o in env_origins.split(",") if o.strip()]
+            cls._allowed_origins_from_env = True
         else:
             cls._allowed_origins = [
-                "http://localhost:*",
-                "http://127.0.0.1:*",
+                "http://localhost:3000",    # 一般的なフロントエンド開発ポート
+                "http://localhost:5173",    # Vite デフォルト
+                "http://localhost:8080",    # 一般的な開発ポート
+                "http://localhost:8765",    # Pack API Server デフォルトポート
+                "http://127.0.0.1:3000",
+                "http://127.0.0.1:5173",
+                "http://127.0.0.1:8080",
+                "http://127.0.0.1:8765",
             ]
+            cls._allowed_origins_from_env = False
         return cls._allowed_origins
 
     @classmethod
@@ -131,8 +141,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
         for pattern in allowed:
             if pattern == request_origin:
                 return request_origin
-            # "http://localhost:*" — ワイルドカードポート対応
-            if pattern.endswith(":*"):
+            # "http://localhost:*" — ワイルドカードポート対応（環境変数で明示指定時のみ）
+            if cls._allowed_origins_from_env and pattern.endswith(":*"):
                 prefix = pattern[:-1]  # e.g. "http://localhost:"
                 if request_origin.startswith(prefix):
                     return request_origin
