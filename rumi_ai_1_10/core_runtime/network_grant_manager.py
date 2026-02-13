@@ -157,16 +157,20 @@ class NetworkGrantManager:
         with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         
-        # HMAC検証
+        # HMAC検証（署名なしファイルも改ざん扱いで拒否）
         stored_sig = data.pop("_hmac_signature", None)
-        if stored_sig:
-            computed_sig = self._compute_hmac(data)
-            if not hmac.compare_digest(stored_sig, computed_sig):
-                print(f"[NetworkGrantManager] HMAC verification failed for {file_path}")
-                # 改ざん検出 → 無効化
-                pack_id = data.get("pack_id", file_path.stem)
-                self._disabled_packs.add(pack_id)
-                return None
+        if not stored_sig:
+            pack_id = data.get("pack_id", file_path.stem)
+            print(f"[NetworkGrantManager] Missing HMAC signature for {file_path}")
+            self._disabled_packs.add(pack_id)
+            return None
+
+        computed_sig = self._compute_hmac(data)
+        if not hmac.compare_digest(stored_sig, computed_sig):
+            print(f"[NetworkGrantManager] HMAC verification failed for {file_path}")
+            pack_id = data.get("pack_id", file_path.stem)
+            self._disabled_packs.add(pack_id)
+            return None
         
         grant = NetworkGrant.from_dict(data)
         self._grants[grant.pack_id] = grant
@@ -371,10 +375,6 @@ class NetworkGrantManager:
                 # サブドメインも許可
                 if domain_lower.endswith("." + base_domain):
                     return True
-            
-            # サブドメイン許可(example.com は sub.example.com も許可)
-            if domain_lower.endswith("." + pattern_lower):
-                return True
         
         return False
     

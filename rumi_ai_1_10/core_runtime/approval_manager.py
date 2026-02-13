@@ -160,17 +160,26 @@ class ApprovalManager:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         
+        # HMAC検証（署名なしファイルも改ざん扱いで拒否）
         stored_sig = data.pop("_hmac_signature", None)
-        if stored_sig:
-            computed_sig = self._compute_hmac(data)
-            if not hmac.compare_digest(stored_sig, computed_sig):
-                pack_id = data.get("pack_id", path.stem.replace(".grants", ""))
-                self._approvals[pack_id] = PackApproval(
-                    pack_id=pack_id,
-                    status=PackStatus.MODIFIED,
-                    created_at=data.get("created_at", self._now_ts())
-                )
-                return
+        if not stored_sig:
+            pack_id = data.get("pack_id", path.stem.replace(".grants", ""))
+            self._approvals[pack_id] = PackApproval(
+                pack_id=pack_id,
+                status=PackStatus.MODIFIED,
+                created_at=data.get("created_at", self._now_ts())
+            )
+            return
+
+        computed_sig = self._compute_hmac(data)
+        if not hmac.compare_digest(stored_sig, computed_sig):
+            pack_id = data.get("pack_id", path.stem.replace(".grants", ""))
+            self._approvals[pack_id] = PackApproval(
+                pack_id=pack_id,
+                status=PackStatus.MODIFIED,
+                created_at=data.get("created_at", self._now_ts())
+            )
+            return
         
         pack_id = data.get("pack_id")
         if pack_id:

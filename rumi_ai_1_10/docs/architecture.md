@@ -385,8 +385,7 @@ Pack 別に UDS ソケットが作成され、ソケットパスから `pack_id`
   "_hmac_signature": "..."
 }
 ```
-
-ドメインマッチングは完全一致（`api.openai.com`）、ワイルドカード（`*.anthropic.com`）、サブドメイン許可（`openai.com` は `api.openai.com` も許可）に対応します。
+ドメインマッチングは完全一致（`api.openai.com`）とワイルドカード（`*.anthropic.com`）に対応します。サブドメインを許可する場合はワイルドカード形式で明示的に指定してください。
 
 ### Egress Proxy の防御機構
 

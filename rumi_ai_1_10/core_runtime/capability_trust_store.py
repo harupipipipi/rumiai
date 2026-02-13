@@ -198,10 +198,23 @@ class CapabilityTrustStore:
         Returns:
             成功したか
         """
+        # バリデーション（load() と同一基準）
+        if not handler_id or not isinstance(handler_id, str):
+            return False
+        if not sha256 or not isinstance(sha256, str):
+            return False
+        sha256_lower = sha256.lower()
+        if len(sha256_lower) != 64:
+            return False
+        try:
+            int(sha256_lower, 16)
+        except ValueError:
+            return False
+
         with self._lock:
             self._trusted[handler_id] = TrustedHandler(
                 handler_id=handler_id,
-                sha256=sha256.lower(),
+                sha256=sha256_lower,
                 note=note,
             )
             return self._save()

@@ -174,18 +174,24 @@ class CapabilityGrantManager:
         with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         
-        # HMAC 検証
+        # HMAC 検証（署名なしファイルも改ざん扱いで拒否）
         stored_sig = data.pop("_hmac_signature", None)
-        if stored_sig:
-            computed_sig = self._compute_hmac(data)
-            if not hmac.compare_digest(stored_sig, computed_sig):
-                principal_id = data.get("principal_id", file_path.stem)
-                # raw と sanitize 両方を登録して確実にブロック
-                self._tampered_principals.add(principal_id)  # raw
-                self._tampered_principals.add(sanitize_principal_id(principal_id))  # sanitized
-                self._tampered_principals.add(file_path.stem)  # ファイル名ベース（フォールバック）
-                self._audit_tamper(principal_id, file_path)
-                return None
+        if not stored_sig:
+            principal_id = data.get("principal_id", file_path.stem)
+            self._tampered_principals.add(principal_id)
+            self._tampered_principals.add(sanitize_principal_id(principal_id))
+            self._tampered_principals.add(file_path.stem)
+            self._audit_tamper(principal_id, file_path)
+            return None
+
+        computed_sig = self._compute_hmac(data)
+        if not hmac.compare_digest(stored_sig, computed_sig):
+            principal_id = data.get("principal_id", file_path.stem)
+            self._tampered_principals.add(principal_id)
+            self._tampered_principals.add(sanitize_principal_id(principal_id))
+            self._tampered_principals.add(file_path.stem)
+            self._audit_tamper(principal_id, file_path)
+            return None
         
         grant = CapabilityGrant.from_dict(data)
         if grant.principal_id:
