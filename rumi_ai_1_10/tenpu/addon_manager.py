@@ -116,7 +116,8 @@ class AddonManager:
     def get_addons_for_component(
         self,
         component: ComponentInfo,
-        pack: PackInfo
+        pack: PackInfo,
+        active_ecosystem_manager=None,
     ) -> List[AddonInfo]:
         """
         コンポーネントに適用可能なアドオンを取得
@@ -128,11 +129,30 @@ class AddonManager:
         Returns:
             適用可能なAddonInfoのリスト（優先度順）
         """
+        # ActiveEcosystemManager 取得
+        _aem_gac = active_ecosystem_manager
+        if _aem_gac is None:
+            try:
+                from .active_ecosystem import get_active_ecosystem_manager
+                _aem_gac = get_active_ecosystem_manager()
+            except Exception:
+                pass
+
+        # コンポーネントが disabled なら空を返す
+        if _aem_gac and hasattr(_aem_gac, 'is_component_disabled'):
+            if _aem_gac.is_component_disabled(component.full_id):
+                return []
+
         applicable = []
         
         for addon in self.addons.values():
             if not addon.enabled:
                 continue
+
+            # ActiveEcosystem の disabled_addons チェック
+            if _aem_gac and hasattr(_aem_gac, 'is_addon_disabled'):
+                if _aem_gac.is_addon_disabled(addon.full_id):
+                    continue
             
             for target in addon.data.get('targets', []):
                 if self._target_matches(target, component, pack):

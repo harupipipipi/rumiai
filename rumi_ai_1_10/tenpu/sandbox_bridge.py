@@ -11,7 +11,6 @@ import importlib.util
 import json
 import os
 import sys
-import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -142,7 +141,8 @@ class SandboxBridge:
             modified = False
             permissions = grant_data.get("permissions", {})
             
-            for perm_name, perm_config in list(permissions.items()):
+            for perm_name,
+ perm_config in list(permissions.items()):
                 if perm_name not in self._handlers:
                     perm_config["valid"] = False
                     perm_config["invalid_reason"] = "handler_not_found"
@@ -440,16 +440,13 @@ class SandboxBridge:
 
 
 _global_sandbox: Optional[SandboxBridge] = None
-_sandbox_lock = threading.Lock()
 
 
 def get_sandbox_bridge() -> SandboxBridge:
     """グローバルなSandboxBridgeを取得"""
     global _global_sandbox
     if _global_sandbox is None:
-        with _sandbox_lock:
-            if _global_sandbox is None:
-                _global_sandbox = SandboxBridge()
+        _global_sandbox = SandboxBridge()
     return _global_sandbox
 
 

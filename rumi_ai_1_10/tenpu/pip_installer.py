@@ -19,7 +19,6 @@ reject 3回で blocked
 
 from __future__ import annotations
 
-import os
 import ipaddress
 import re
 

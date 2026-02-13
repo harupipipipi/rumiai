@@ -140,31 +140,25 @@ class LibExecutor:
                 sha256.update(chunk)
         return sha256.hexdigest()
     
-    def _find_lib_dir(self, pack_dir: Path, pack_subdir: Optional[Path] = None) -> Optional[Path]:
+    def _find_lib_dir(self, pack_dir: Path) -> Optional[Path]:
         """
         pack_subdir 基準で lib ディレクトリを探索。
         paths.get_pack_lib_dirs() を使い候補順に返す。
         """
+        _, pack_subdir = find_ecosystem_json(pack_dir)
         if pack_subdir is None:
-            _, pack_subdir = find_ecosystem_json(pack_dir)
-            if pack_subdir is None:
-                pack_subdir = pack_dir  # フォールバック
+            pack_subdir = pack_dir  # フォールバック
         
         lib_dirs = get_pack_lib_dirs(pack_subdir)
         if lib_dirs:
             return lib_dirs[0]  # 最初に見つかった候補
         return None
     
-    def check_pack(self, pack_id: str, pack_dir: Path, pack_subdir: Optional[Path] = None) -> LibCheckResult:
+    def check_pack(self, pack_id: str, pack_dir: Path) -> LibCheckResult:
         """
         Pack の lib 実行要否をチェック
         
         local_pack は常にスキップ。
-        
-        Args:
-            pack_id: Pack ID
-            pack_dir: Packのルートディレクトリ
-            pack_subdir: pack_subdir (省略時は内部で探索)
         """
         result = LibCheckResult(pack_id=pack_id, needs_install=False, needs_update=False)
         
@@ -173,7 +167,7 @@ class LibExecutor:
             result.reason = "local_pack does not support lib execution"
             return result
         
-        lib_dir = self._find_lib_dir(pack_dir, pack_subdir)
+        lib_dir = self._find_lib_dir(pack_dir)
         if not lib_dir:
             result.reason = "No lib directory found"
             return result
@@ -351,7 +345,7 @@ class LibExecutor:
             results["processed"] += 1
             
             try:
-                check_result = self.check_pack(pack_id, pack_dir, pack_subdir=loc.pack_subdir)
+                check_result = self.check_pack(pack_id, pack_dir)
                 if check_result.needs_install and check_result.install_file:
                     exec_result = self.execute_lib(pack_id, check_result.install_file, "install", context)
                     if exec_result.success:

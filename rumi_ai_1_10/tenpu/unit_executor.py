@@ -46,7 +46,6 @@ class UnitExecutionResult:
     error_type: Optional[str] = None
     execution_mode: str = "unknown"
     latency_ms: float = 0.0
-    _stderr_head: Optional[str] = field(default=None, repr=False)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -313,7 +312,6 @@ class UnitExecutor:
                     error_type="execution_error",
                     execution_mode="host_capability",
                     latency_ms=latency,
-                    _stderr_head=(proc.stderr or "")[:500] or None,
                 )
 
             stdout = proc.stdout or ""
@@ -407,7 +405,6 @@ class UnitExecutor:
                     error_type="execution_error",
                     execution_mode="host_capability",
                     latency_ms=latency,
-                    _stderr_head=(proc.stderr or "")[:500] or None,
                 )
 
             stdout = proc.stdout or ""
@@ -510,20 +507,17 @@ if __name__ == "__main__":
         try:
             from .audit_logger import get_audit_logger
             audit = get_audit_logger()
-            details = {
-                "unit_ref": unit_ref,
-                "mode": mode,
-                "latency_ms": result.latency_ms,
-                "error_type": result.error_type,
-            }
-            if getattr(result, '_stderr_head', None):
-                details["stderr_head"] = result._stderr_head
             audit.log_permission_event(
                 pack_id=principal_id,
                 permission_type="unit_execution",
                 action="execute",
                 success=result.success,
-                details=details,
+                details={
+                    "unit_ref": unit_ref,
+                    "mode": mode,
+                    "latency_ms": result.latency_ms,
+                    "error_type": result.error_type,
+                },
                 rejection_reason=result.error if not result.success else None,
             )
         except Exception:

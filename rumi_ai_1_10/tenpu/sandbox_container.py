@@ -7,9 +7,6 @@ sandbox_container.py - Pack別コンテナ管理
 from __future__ import annotations
 
 import json
-import os
-import re
-import tempfile
 import subprocess
 import threading
 from dataclasses import dataclass, field
@@ -264,53 +261,24 @@ class SandboxContainerManager:
         
         container_name = f"rumi-pack-{pack_id}"
         
-        # handler名のバリデーション（英数字とアンダースコアのみ許可）
-        if not re.match(r'^[a-zA-Z0-9_]+$', handler):
-            return {"success": False, "error": f"Invalid handler name: {handler}"}
+        context_json = json.dumps(context).replace("'", "\'")
+        args_json = json.dumps(args).replace("'", "\'")
         
-        context_file = None
-        args_file = None
-        
-        try:
-            # コンテキストとargsを一時ファイルに書き出し
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
-                json.dump(context, f, ensure_ascii=False, default=str)
-                context_file = f.name
-            
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
-                json.dump(args, f, ensure_ascii=False, default=str)
-                args_file = f.name
-            
-            # docker cp でコンテナ内にコピー
-            cp_ctx = subprocess.run(
-                ["docker", "cp", context_file, f"{container_name}:/tmp/_rumi_context.json"],
-                capture_output=True, text=True, timeout=10
-            )
-            if cp_ctx.returncode != 0:
-                return {"success": False, "error": f"Failed to copy context: {cp_ctx.stderr}"}
-            
-            cp_args = subprocess.run(
-                ["docker", "cp", args_file, f"{container_name}:/tmp/_rumi_args.json"],
-                capture_output=True, text=True, timeout=10
-            )
-            if cp_args.returncode != 0:
-                return {"success": False, "error": f"Failed to copy args: {cp_args.stderr}"}
-            
-            exec_script = f"""
-import sys, json
+        exec_script = f"""
+import sys
+import json
 sys.path.insert(0, '/app/pack/backend')
 try:
-    with open('/tmp/_rumi_context.json', 'r') as f:
-        context = json.load(f)
-    with open('/tmp/_rumi_args.json', 'r') as f:
-        args = json.load(f)
     from handlers.{handler} import execute
+    context = json.loads('{context_json}')
+    args = json.loads('{args_json}')
     result = execute(context, args)
     print(json.dumps(result))
 except Exception as e:
     print(json.dumps({{"success": False, "error": str(e)}}))
 """
-            
+        
+        try:
             result = subprocess.run(
                 ["docker", "exec", container_name, "python", "-c", exec_script],
                 capture_output=True,
@@ -330,23 +298,6 @@ except Exception as e:
             return {"success": False, "error": "Execution timed out"}
         except Exception as e:
             return {"success": False, "error": f"Execution error: {e}"}
-        finally:
-            # ホスト側の一時ファイルをクリーンアップ
-            for tmp_file in (context_file, args_file):
-                if tmp_file:
-                    try:
-                        os.unlink(tmp_file)
-                    except Exception:
-                        pass
-            # コンテナ内の一時ファイルもクリーンアップ
-            try:
-                subprocess.run(
-                    ["docker", "exec", container_name, "rm", "-f",
-                     "/tmp/_rumi_context.json", "/tmp/_rumi_args.json"],
-                    capture_output=True, timeout=5
-                )
-            except Exception:
-                pass
     
     def get_container_info(self, pack_id: str) -> Optional[ContainerInfo]:
         """コンテナ情報を取得"""

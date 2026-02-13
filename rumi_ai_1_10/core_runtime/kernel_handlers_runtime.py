@@ -26,6 +26,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .flow_loader import FlowDefinition, FlowStep
 
+from .paths import ECOSYSTEM_DIR
+
 
 # B4: 環境変数でverboseモード判定
 def _is_diagnostics_verbose() -> bool:
@@ -1004,7 +1006,7 @@ class KernelRuntimeHandlersMixin:
         pack_id = args.get("pack_id")
         if not pack_id:
             return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "Missing pack_id"}}
-        pack_dir = Path(args.get("pack_dir", f"ecosystem/packs/{pack_id}"))
+        pack_dir = Path(args.get("pack_dir", f"{ECOSYSTEM_DIR}/{pack_id}"))
         try:
             from .lib_executor import get_lib_executor
             executor = get_lib_executor()
@@ -1021,7 +1023,7 @@ class KernelRuntimeHandlersMixin:
             return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "Missing pack_id or lib_type"}}
         if lib_type not in ("install", "update"):
             return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "lib_type must be 'install' or 'update'"}}
-        pack_dir = Path(args.get("pack_dir", f"ecosystem/packs/{pack_id}"))
+        pack_dir = Path(args.get("pack_dir", f"{ECOSYSTEM_DIR}/{pack_id}"))
         try:
             from .lib_executor import get_lib_executor
             executor = get_lib_executor()

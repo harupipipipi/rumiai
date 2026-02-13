@@ -375,28 +375,6 @@ class PermissionManager:
         return re.sub(pattern, replacer, s)
     
     # ===== 監査ログ =====
-
-    _SENSITIVE_KEY_PATTERNS = ("key", "token", "secret", "password", "credential", "auth")
-
-    def _mask_sensitive(self, config: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        config辞書のセンシティブなキーの値をマスクしたコピーを返す。
-        元のconfigは変更しない。
-        """
-        if not config or not isinstance(config, dict):
-            return config
-
-        masked = {}
-        for k, v in config.items():
-            k_lower = k.lower()
-            if any(pattern in k_lower for pattern in self._SENSITIVE_KEY_PATTERNS):
-                masked[k] = "***"
-            elif isinstance(v, dict):
-                masked[k] = self._mask_sensitive(v)
-            else:
-                masked[k] = v
-        return masked
-
     
     def _audit_log(
         self,
@@ -426,7 +404,7 @@ class PermissionManager:
                 "component_id": component_id,
                 "permission": permission,
                 "action": action,
-                "config": self._mask_sensitive(config) if config else config,
+                "config": config,
                 "result": result,
                 "mode": self._mode
             }

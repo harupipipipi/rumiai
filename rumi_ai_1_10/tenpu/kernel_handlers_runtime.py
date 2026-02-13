@@ -88,6 +88,12 @@ class KernelRuntimeHandlersMixin:
             "kernel:capability_proxy.init": self._h_capability_proxy_init,
             "kernel:capability_proxy.status": self._h_capability_proxy_status,
             "kernel:capability_proxy.stop_all": self._h_capability_proxy_stop_all,
+            # Capability Grant ハンドラ (G-1)
+            "kernel:capability.grant": self._h_capability_grant,
+            "kernel:capability.revoke": self._h_capability_revoke,
+            "kernel:capability.list": self._h_capability_list,
+            # Pending export ハンドラ (G-2)
+            "kernel:pending.export": self._h_pending_export,
         }
 
     # ------------------------------------------------------------------
@@ -619,7 +625,7 @@ class KernelRuntimeHandlersMixin:
         uds_manager = self._get_uds_proxy_manager()
 
         # Capability Proxy: principal_id 用のソケットを確保
-        effective_principal = principal_id or owner_pack
+        effective_principal = owner_pack  # v1 principal enforcement: always owner_pack
         capability_sock_path = None
         if effective_principal:
             cap_proxy = self._get_capability_proxy()
@@ -986,7 +992,7 @@ class KernelRuntimeHandlersMixin:
         """全Packのlibを処理"""
         try:
             from .lib_executor import get_lib_executor
-            packs_dir = Path(args.get("packs_dir", "ecosystem/packs"))
+            packs_dir = Path(args.get("packs_dir", "ecosystem"))
             executor = get_lib_executor()
             results = executor.process_all_packs(packs_dir, ctx)
             return {"_kernel_step_status": "success", "_kernel_step_meta": {"installed": results["installed"], "updated": results["updated"], "failed_count": len(results["failed"])}, "results": results}
@@ -1522,3 +1528,221 @@ class KernelRuntimeHandlersMixin:
             proxy.stop_all()
             return {"_kernel_step_status": "success", "_kernel_step_meta": {"stopped": len(active), "principals": active}}
         return {"_kernel_step_status": "success", "_kernel_step_meta": {"stopped": 0}}
+
+
+    # ------------------------------------------------------------------
+    # Capability Grant ハンドラ (G-1)
+    # ------------------------------------------------------------------
+
+    def _h_capability_grant(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """Capability Grant を付与"""
+        principal_id = args.get("principal_id")
+        permission_id = args.get("permission_id")
+        config = args.get("config")
+
+        if not principal_id or not permission_id:
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {"error": "Missing principal_id or permission_id"},
+            }
+
+        try:
+            from .capability_grant_manager import get_capability_grant_manager
+            gm = get_capability_grant_manager()
+            gm.grant_permission(principal_id, permission_id, config)
+
+            try:
+                from .audit_logger import get_audit_logger
+                audit = get_audit_logger()
+                audit.log_permission_event(
+                    pack_id=principal_id,
+                    permission_type="capability_grant",
+                    action="grant",
+                    success=True,
+                    details={
+                        "principal_id": principal_id,
+                        "permission_id": permission_id,
+                        "has_config": config is not None,
+                    },
+                )
+            except Exception:
+                pass
+
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_step_meta": {
+                    "principal_id": principal_id,
+                    "permission_id": permission_id,
+                    "granted": True,
+                },
+            }
+        except Exception as e:
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {"error": str(e)},
+            }
+
+    def _h_capability_revoke(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """Capability Grant を取り消し"""
+        principal_id = args.get("principal_id")
+        permission_id = args.get("permission_id")
+
+        if not principal_id or not permission_id:
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {"error": "Missing principal_id or permission_id"},
+            }
+
+        try:
+            from .capability_grant_manager import get_capability_grant_manager
+            gm = get_capability_grant_manager()
+            gm.revoke_permission(principal_id, permission_id)
+
+            try:
+                from .audit_logger import get_audit_logger
+                audit = get_audit_logger()
+                audit.log_permission_event(
+                    pack_id=principal_id,
+                    permission_type="capability_grant",
+                    action="revoke",
+                    success=True,
+                    details={
+                        "principal_id": principal_id,
+                        "permission_id": permission_id,
+                    },
+                )
+            except Exception:
+                pass
+
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_step_meta": {
+                    "principal_id": principal_id,
+                    "permission_id": permission_id,
+                    "revoked": True,
+                },
+            }
+        except Exception as e:
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {"error": str(e)},
+            }
+
+    def _h_capability_list(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """Capability Grant を一覧"""
+        principal_id = args.get("principal_id")
+
+        try:
+            from .capability_grant_manager import get_capability_grant_manager
+            gm = get_capability_grant_manager()
+
+            if principal_id:
+                grant = gm.get_grant(principal_id)
+                if grant is None:
+                    return {
+                        "_kernel_step_status": "success",
+                        "_kernel_step_meta": {"principal_id": principal_id, "found": False},
+                        "grant": None,
+                    }
+                return {
+                    "_kernel_step_status": "success",
+                    "_kernel_step_meta": {"principal_id": principal_id, "found": True},
+                    "grant": grant.to_dict() if hasattr(grant, "to_dict") else grant,
+                }
+            else:
+                all_grants = gm.get_all_grants()
+                result_grants = {}
+                for pid, g in all_grants.items():
+                    result_grants[pid] = g.to_dict() if hasattr(g, "to_dict") else g
+                return {
+                    "_kernel_step_status": "success",
+                    "_kernel_step_meta": {"grant_count": len(result_grants)},
+                    "grants": result_grants,
+                }
+        except Exception as e:
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {"error": str(e)},
+            }
+
+    # ------------------------------------------------------------------
+    # Pending Export ハンドラ (G-2)
+    # ------------------------------------------------------------------
+
+    def _h_pending_export(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """
+        承認待ち状況を user_data/pending/summary.json に書き出す。
+        個別モジュールが import できなくても取れた範囲だけ書く (fail-soft)。
+        """
+        import json as _json
+        from datetime import datetime, timezone
+        from pathlib import Path as _Path
+
+        output_dir = _Path(args.get("output_dir", "user_data/pending"))
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_file = output_dir / "summary.json"
+
+        summary: Dict[str, Any] = {
+            "ts": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "version": "1.0",
+            "packs": {},
+            "capability": {},
+            "pip": {},
+        }
+
+        # Packs
+        try:
+            from .approval_manager import get_approval_manager, PackStatus
+            am = get_approval_manager()
+            all_packs = am.scan_packs() if hasattr(am, "scan_packs") else []
+            pending_packs = [p for p in all_packs if am.get_status(p) in (PackStatus.INSTALLED, PackStatus.PENDING)] if all_packs else []
+            modified_packs = [p for p in all_packs if am.get_status(p) == PackStatus.MODIFIED] if all_packs else []
+            blocked_packs = [p for p in all_packs if am.get_status(p) == PackStatus.BLOCKED] if all_packs else []
+            summary["packs"] = {
+                "pending_count": len(pending_packs),
+                "pending_ids": pending_packs,
+                "modified_count": len(modified_packs),
+                "modified_ids": modified_packs,
+                "blocked_count": len(blocked_packs),
+                "blocked_ids": blocked_packs,
+            }
+        except Exception as e:
+            summary["packs"] = {"error": str(e)}
+
+        # Capability requests
+        try:
+            from .capability_installer import get_capability_installer
+            installer = get_capability_installer()
+            for status_name in ("pending", "rejected", "blocked", "failed", "installed"):
+                items = installer.list_items(status_name)
+                summary["capability"][f"{status_name}_count"] = len(items)
+        except Exception as e:
+            summary["capability"] = {"error": str(e)}
+
+        # Pip requests
+        try:
+            from .pip_installer import get_pip_installer
+            pip_inst = get_pip_installer()
+            for status_name in ("pending", "rejected", "blocked", "failed", "installed"):
+                items = pip_inst.list_items(status_name)
+                summary["pip"][f"{status_name}_count"] = len(items)
+        except Exception as e:
+            summary["pip"] = {"error": str(e)}
+
+        # Write
+        try:
+            with open(output_file, "w", encoding="utf-8") as f:
+                _json.dump(summary, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {"error": f"Failed to write summary: {e}"},
+            }
+
+        return {
+            "_kernel_step_status": "success",
+            "_kernel_step_meta": {
+                "output_file": str(output_file),
+                "packs_pending": summary.get("packs", {}).get("pending_count", 0),
+            },
+        }

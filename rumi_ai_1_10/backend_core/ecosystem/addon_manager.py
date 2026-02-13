@@ -8,6 +8,7 @@
 import json
 import copy
 import fnmatch
+import threading
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
@@ -526,18 +527,22 @@ class AddonManager:
 
 
 _global_addon_manager: Optional[AddonManager] = None
+_addon_lock = threading.Lock()
 
 
 def get_addon_manager() -> AddonManager:
     """グローバルなAddonManagerを取得"""
     global _global_addon_manager
     if _global_addon_manager is None:
-        _global_addon_manager = AddonManager()
+        with _addon_lock:
+            if _global_addon_manager is None:
+                _global_addon_manager = AddonManager()
     return _global_addon_manager
 
 
 def reload_addon_manager() -> AddonManager:
     """AddonManagerを再作成"""
     global _global_addon_manager
-    _global_addon_manager = AddonManager()
+    with _addon_lock:
+        _global_addon_manager = AddonManager()
     return _global_addon_manager
