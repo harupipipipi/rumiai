@@ -350,8 +350,7 @@ class NetworkGrantManager:
     def _check_domain(self, domain: str, allowed: List[str]) -> bool:
         """ドメインが許可リストに含まれるかチェック"""
         if not allowed:
-            # 空リスト = ドメイン制限なし（許可）
-            return True
+            return False
         
         domain_lower = domain.lower()
         
@@ -381,8 +380,7 @@ class NetworkGrantManager:
     def _check_port(self, port: int, allowed: List[int]) -> bool:
         """ポートが許可リストに含まれるかチェック"""
         if not allowed:
-            # 空リスト = ポート制限なし（許可）
-            return True
+            return False
         if 0 in allowed:
             return True
         return port in allowed

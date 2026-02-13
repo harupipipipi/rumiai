@@ -1,0 +1,48 @@
+{
+  "handler_id": "builtin.pack.inbox.send",
+  "permission_id": "pack.inbox.send",
+  "entrypoint": "handler.py:execute",
+  "description": "Send a JSON patch or replacement to another Pack component inbox.",
+  "risk": "medium",
+  "input_schema": {
+    "type": "object",
+    "required": ["to_pack_id", "target_component", "payload"],
+    "properties": {
+      "to_pack_id": {"type": "string"},
+      "target_component": {
+        "type": "object",
+        "required": ["type", "id"],
+        "properties": {
+          "type": {"type": "string"},
+          "id": {"type": "string"}
+        }
+      },
+      "payload": {
+        "type": "object",
+        "required": ["kind"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["manifest_json_patch", "file_json_patch", "file_replace_json"]
+          },
+          "file": {"type": "string"},
+          "create_if_missing": {"type": "boolean"},
+          "json": {"type": "object"},
+          "patch": {"type": "array"}
+        }
+      },
+      "priority": {"type": "integer"},
+      "request_id": {"type": "string"},
+      "notes": {"type": "string"}
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "success": {"type": "boolean"},
+      "stored_path": {"type": "string"},
+      "consumed": {"type": "object"},
+      "rejected_ops": {"type": "integer"}
+    }
+  }
+}

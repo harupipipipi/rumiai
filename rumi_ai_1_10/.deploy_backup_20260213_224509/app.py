@@ -67,23 +67,7 @@ def main():
             return
         
         # HTTPサーバーがPackから提供されている場合は起動
-        http_server = None
-
-        # interface_overrides で優先 Pack が指定されていればそれを使う
-        try:
-            from backend_core.ecosystem.active_ecosystem import get_active_ecosystem_manager
-            aem = get_active_ecosystem_manager()
-            override_pack = aem.get_interface_override("io.http.server")
-            if override_pack:
-                http_server = _kernel.interface_registry.get_by_owner(
-                    "io.http.server", override_pack
-                )
-        except Exception:
-            pass
-
-        # override が見つからなければ通常の last を使う
-        if http_server is None:
-            http_server = _kernel.interface_registry.get("io.http.server")
+        http_server = _kernel.interface_registry.get("io.http.server")
         if http_server and callable(http_server):
             print(f"[Rumi] {L('startup.http_starting')}")
             http_server(_kernel)

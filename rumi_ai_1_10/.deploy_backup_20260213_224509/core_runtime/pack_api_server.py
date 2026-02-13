@@ -170,11 +170,12 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return
         
+        path = urlparse(self.path).path
+        
         try:
             body = self._parse_body()
-            path = urlparse(self.path).path
-
-            if path == "/api/network/grant":
+            
+            elif path == "/api/network/grant":
                 pack_id = body.get("pack_id", "")
                 allowed_domains = body.get("allowed_domains", [])
                 allowed_ports = body.get("allowed_ports", [])
@@ -215,7 +216,7 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                     self._send_response(APIResponse(True, result))
 
 
-            elif path == "/api/packs/scan":
+            if path == "/api/packs/scan":
                 result = self._scan_packs()
                 self._send_response(APIResponse(True, result))
 

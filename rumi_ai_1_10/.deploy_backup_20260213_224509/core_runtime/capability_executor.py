@@ -215,25 +215,8 @@ class CapabilityExecutor:
 
         handler_id = handler_def.handler_id
 
-        # 2. Trust チェック
-        #    built-in handler は trust store バイパス（コア同梱のため信頼済み）
-        is_builtin = getattr(handler_def, 'is_builtin', False)
-        builtin_sha256 = None
-
-        if is_builtin:
-            # built-in: trust bypass だが実行時 sha256 を計算して audit に残す
-            try:
-                from .capability_handler_registry import compute_file_sha256
-                builtin_sha256 = compute_file_sha256(handler_def.handler_py_path)
-            except Exception:
-                builtin_sha256 = "compute_failed"
-        elif not is_builtin:
-            # 非 built-in: 元の trust チェック（以下に続く）
-            pass
-
-        # 2. Trust チェック（非 built-in のみ）（実行時に handler.py の sha256 を再計算）
-        if not is_builtin:
-          try:
+        # 2. Trust チェック（実行時に handler.py の sha256 を再計算）
+        try:
             from .capability_handler_registry import compute_file_sha256
             actual_sha256 = compute_file_sha256(handler_def.handler_py_path)
         except Exception:
@@ -359,7 +342,7 @@ class CapabilityExecutor:
                 capture_output=True,
                 text=True,
                 timeout=timeout_seconds,
-                cwd=str(Path(__file__).parent.parent) if getattr(handler_def, "is_builtin", False) else str(handler_def.handler_dir),
+                cwd=str(handler_def.handler_dir),
             )
 
             latency_ms = (time.time() - start_time) * 1000
@@ -524,7 +507,6 @@ if __name__ == "__main__":
         grant_allowed: Optional[bool] = None,
         grant_reason: Optional[str] = None,
         detail_reason: Optional[str] = None,
-        extra_details: Optional[Dict[str, Any]] = None,
     ) -> None:
         """監査ログに記録"""
         try:
@@ -548,9 +530,6 @@ if __name__ == "__main__":
                 details["grant_reason"] = grant_reason
             if detail_reason is not None:
                 details["detail_reason"] = detail_reason
-            if extra_details:
-                details.update(extra_details)
-
             if response.error:
                 details["error"] = response.error
                 details["error_type"] = response.error_type

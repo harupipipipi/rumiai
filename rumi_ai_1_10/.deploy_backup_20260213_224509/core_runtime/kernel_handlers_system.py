@@ -530,8 +530,8 @@ class KernelSystemHandlersMixin:
             phase="startup",
             step_id="container.start_approved",
             handler="kernel:container.start_approved",
-            status="success",
-            meta={"started": len(started), "failed_count": len(failed), "failed": failed}
+            status="success" if not failed else "partial",
+            meta={"started": len(started), "failed": len(failed)}
         )
         return {"_kernel_step_status": "success", "_kernel_step_meta": {"started": started, "failed": failed}}
 
@@ -547,44 +547,16 @@ class KernelSystemHandlersMixin:
             from backend_core.ecosystem.registry import get_registry
             reg = get_registry()
 
-
-            # ActiveEcosystem の overrides/disabled を反映
-            _active_eco = ctx.get("active_ecosystem")
-            _overrides = {}
-            _disabled_set = set()
-            if _active_eco:
-                try:
-                    _overrides = _active_eco.get_all_overrides() if hasattr(_active_eco, 'get_all_overrides') else {}
-                    _cfg = _active_eco.config
-                    _disabled_set = set(getattr(_cfg, 'disabled_components', []))
-                except Exception:
-                    pass
-            _override_selected = {}
-            for _ct, _ci in _overrides.items():
-                _override_selected[_ct] = _ci
-
             components = []
             for comp in reg.get_all_components():
                 pack_id = getattr(comp, "pack_id", None)
                 if approved_only and pack_id not in approved:
                     continue
-                _full_id = getattr(comp, "full_id", None)
-                _comp_type = getattr(comp, "type", None)
-                _comp_id = getattr(comp, "id", None)
-
-                # disabled チェック
-                if _full_id and _full_id in _disabled_set:
-                    continue
-                # override チェック
-                if _comp_type in _override_selected:
-                    if _comp_id != _override_selected[_comp_type]:
-                        continue
-
                 components.append({
-                    "full_id": _full_id,
+                    "full_id": getattr(comp, "full_id", None),
                     "pack_id": pack_id,
-                    "type": _comp_type,
-                    "id": _comp_id
+                    "type": getattr(comp, "type", None),
+                    "id": getattr(comp, "id", None)
                 })
 
             ctx["_discovered_components"] = components

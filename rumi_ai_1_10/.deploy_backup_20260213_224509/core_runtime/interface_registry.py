@@ -176,31 +176,6 @@ class InterfaceRegistry:
 
             return items[-1]["value"]
 
-    def get_by_owner(self, key: str, owner_pack: str) -> Any:
-        """
-        キーから特定の owner_pack が登録した値を取得。
-
-        meta の owner_pack, pack_id, source, _source_pack_id, registered_by の
-        いずれかが owner_pack に一致するエントリを探す。
-        見つからない場合は last を返す。
-        """
-        with self._lock:
-            items = self._store.get(key, [])
-            if not items:
-                return None
-            for item in reversed(items):
-                meta = item.get("meta", {})
-                item_owner = (
-                    meta.get("owner_pack")
-                    or meta.get("pack_id")
-                    or meta.get("source")
-                    or meta.get("_source_pack_id")
-                    or meta.get("registered_by")
-                )
-                if item_owner == owner_pack:
-                    return item["value"]
-            return items[-1]["value"]
-
     def get_schema(self, key: str) -> Tuple[Optional[Dict], Optional[Dict]]:
         """handlerのスキーマを取得"""
         with self._lock:

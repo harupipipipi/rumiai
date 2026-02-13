@@ -1,0 +1,36 @@
+{
+  "handler_id": "builtin.pack.update.propose_patch",
+  "permission_id": "pack.update.propose_patch",
+  "entrypoint": "handler.py:execute",
+  "description": "Propose a file modification to another Pack by creating a staging area. Does NOT auto-apply.",
+  "risk": "high",
+  "input_schema": {
+    "type": "object",
+    "required": ["target_pack_id", "changes"],
+    "properties": {
+      "target_pack_id": {"type": "string"},
+      "changes": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["file_path", "content"],
+          "properties": {
+            "file_path": {"type": "string"},
+            "content": {},
+            "sha256_before": {"type": "string"}
+          }
+        }
+      },
+      "notes": {"type": "string"},
+      "request_id": {"type": "string"}
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "success": {"type": "boolean"},
+      "staging_id": {"type": "string"},
+      "changed_paths": {"type": "array"}
+    }
+  }
+}

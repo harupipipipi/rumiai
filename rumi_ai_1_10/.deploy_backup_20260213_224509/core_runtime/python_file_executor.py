@@ -738,14 +738,6 @@ request = http_request
         unique_id = uuid.uuid4().hex[:12]
         container_name = f"rumi-pfc-{owner_pack or 'unknown'}-{unique_id}"
 
-
-        # Pack data ディレクトリ (inbox 等の読み取り用)
-        pack_data_dir = None
-        if owner_pack:
-            _pd = Path("user_data") / "packs" / owner_pack
-            _pd.mkdir(parents=True, exist_ok=True)
-            pack_data_dir = _pd
-
         # site-packages パスを確認 (pip 依存)
         pip_site_packages = None
         if owner_pack:
@@ -846,13 +838,6 @@ request = http_request
                 docker_cmd.extend([
                     "-v", f"{pip_site_packages.resolve()}:/pip-packages:ro",
                 ])
-
-            # Pack data マウント（inbox 等の読み取り用）
-            if pack_data_dir and pack_data_dir.exists():
-                docker_cmd.extend([
-                    "-v", f"{pack_data_dir.resolve()}:/data:ro",
-                ])
-
 
             # UDSソケットマウント（存在する場合）
             if sock_path and sock_path.exists():

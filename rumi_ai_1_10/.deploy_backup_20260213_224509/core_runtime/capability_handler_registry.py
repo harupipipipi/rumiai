@@ -38,7 +38,6 @@ class HandlerDefinition:
     handler_json_path: Optional[Path] = None
     handler_py_sha256: Optional[str] = None
     slug: Optional[str] = None
-    is_builtin: bool = False
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -50,7 +49,6 @@ class HandlerDefinition:
             "handler_dir": str(self.handler_dir) if self.handler_dir else None,
             "handler_py_sha256": self.handler_py_sha256,
             "slug": self.slug,
-            "is_builtin": self.is_builtin,
         }
 
 
@@ -83,20 +81,7 @@ class CapabilityHandlerRegistry:
         self._load_errors: List[Dict[str, Any]] = []
         self._duplicates: List[Dict[str, Any]] = []
         self._loaded: bool = False
-        self._builtin_handlers_dir: Optional[Path] = self._detect_builtin_dir()
     
-    @staticmethod
-    def _detect_builtin_dir() -> Optional[Path]:
-        """built-in handler ディレクトリを自動検出"""
-        try:
-            core_runtime_dir = Path(__file__).parent
-            builtin_dir = core_runtime_dir / "builtin_capability_handlers"
-            if builtin_dir.is_dir():
-                return builtin_dir
-        except Exception:
-            pass
-        return None
-
     def _now_ts(self) -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     
@@ -118,18 +103,8 @@ class CapabilityHandlerRegistry:
                 return RegistryLoadResult(success=True, handlers_loaded=0)
             
             permission_candidates: Dict[str, List[HandlerDefinition]] = {}
-
-            # built-in handlers
-            if self._builtin_handlers_dir and self._builtin_handlers_dir.exists():
-                self._scan_directory(self._builtin_handlers_dir, permission_candidates, is_builtin=True)
-
-            # user handlers
-            if self._handlers_dir.exists():
-                self._scan_directory(self._handlers_dir, permission_candidates, is_builtin=False)
-
-            # --- 以下の旧ループは _scan_directory に移行済み ---
-            if False:  # disabled: migrated to _scan_directory
-              for slug_dir in sorted(self._handlers_dir.iterdir()):
+            
+            for slug_dir in sorted(self._handlers_dir.iterdir()):
                 if not slug_dir.is_dir() or slug_dir.name.startswith("."):
                     continue
                 
@@ -205,46 +180,6 @@ class CapabilityHandlerRegistry:
                 duplicates=[],
             )
     
-    def _scan_directory(
-        self,
-        directory: Path,
-        permission_candidates: Dict[str, List["HandlerDefinition"]],
-        is_builtin: bool = False,
-    ) -> None:
-        """ディレクトリ内の handler をスキャン"""
-        for slug_dir in sorted(directory.iterdir()):
-            if not slug_dir.is_dir() or slug_dir.name.startswith("."):
-                continue
-            handler_json_path = slug_dir / "handler.json"
-            if not handler_json_path.exists():
-                self._load_errors.append({
-                    "slug": slug_dir.name,
-                    "error": "handler.json not found",
-                    "path": str(slug_dir),
-                    "ts": self._now_ts(),
-                })
-                continue
-            handler_def = self._load_handler(slug_dir, handler_json_path)
-            if handler_def is None:
-                continue
-            handler_def.is_builtin = is_builtin
-            if handler_def.handler_id in self._by_handler_id:
-                existing = self._by_handler_id[handler_def.handler_id]
-                self._load_errors.append({
-                    "slug": slug_dir.name,
-                    "error": f"Duplicate handler_id: {handler_def.handler_id}",
-                    "existing_slug": existing.slug,
-                    "existing_path": str(existing.handler_dir),
-                    "new_path": str(slug_dir),
-                    "ts": self._now_ts(),
-                })
-                continue
-            self._by_handler_id[handler_def.handler_id] = handler_def
-            pid = handler_def.permission_id
-            if pid not in permission_candidates:
-                permission_candidates[pid] = []
-            permission_candidates[pid].append(handler_def)
-
     def _load_handler(self, slug_dir: Path, handler_json_path: Path) -> Optional[HandlerDefinition]:
         """単一のハンドラーをロード"""
         slug = slug_dir.name

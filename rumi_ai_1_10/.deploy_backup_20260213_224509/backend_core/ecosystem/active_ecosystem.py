@@ -5,7 +5,6 @@
 """
 
 import json
-import copy
 import threading
 from pathlib import Path
 from typing import Dict, Optional, Any, List
@@ -17,11 +16,10 @@ from .mounts import get_mount_path
 @dataclass
 class ActiveEcosystemConfig:
     """アクティブエコシステム設定"""
-    active_pack_identity: Optional[str]
+    active_pack_identity: str
     overrides: Dict[str, str] = field(default_factory=dict)
     disabled_components: List[str] = field(default_factory=list)
     disabled_addons: List[str] = field(default_factory=list)
-    interface_overrides: Dict[str, str] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> Dict[str, Any]:
@@ -34,7 +32,6 @@ class ActiveEcosystemConfig:
             overrides=data.get('overrides', {}),
             disabled_components=data.get('disabled_components', []),
             disabled_addons=data.get('disabled_addons', []),
-            interface_overrides=data.get('interface_overrides', {}),
             metadata=data.get('metadata', {})
         )
 
@@ -114,46 +111,20 @@ class ActiveEcosystemManager:
     def config(self) -> ActiveEcosystemConfig:
         """現在の設定を取得"""
         with self._lock:
-            return copy.deepcopy(self._config)
+            return self._config
     
     @property
-    def active_pack_identity(self) -> Optional[str]:
+    def active_pack_identity(self) -> str:
         """アクティブなPack Identityを取得"""
         with self._lock:
             return self._config.active_pack_identity
     
     @active_pack_identity.setter
-    def active_pack_identity(self, value: Optional[str]):
+    def active_pack_identity(self, value: str):
         """アクティブなPack Identityを設定"""
         with self._lock:
             self._config.active_pack_identity = value
             self._save_config_internal()
-
-
-    def get_interface_override(self, interface_key: str) -> Optional[str]:
-        """インターフェースキーのオーバーライドを取得"""
-        with self._lock:
-            return self._config.interface_overrides.get(interface_key)
-
-    def set_interface_override(self, interface_key: str, pack_id: str):
-        """インターフェースキーのオーバーライドを設定"""
-        with self._lock:
-            self._config.interface_overrides[interface_key] = pack_id
-            self._save_config_internal()
-
-    def remove_interface_override(self, interface_key: str) -> bool:
-        """インターフェースオーバーライドを削除"""
-        with self._lock:
-            if interface_key in self._config.interface_overrides:
-                del self._config.interface_overrides[interface_key]
-                self._save_config_internal()
-                return True
-            return False
-
-    def get_all_interface_overrides(self) -> Dict[str, str]:
-        """すべてのインターフェースオーバーライドを取得"""
-        with self._lock:
-            return dict(self._config.interface_overrides)
     
     def get_override(self, component_type: str) -> Optional[str]:
         """

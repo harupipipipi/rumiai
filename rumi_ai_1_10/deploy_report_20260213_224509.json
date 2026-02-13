@@ -1,0 +1,317 @@
+[
+  {
+    "file": "app.py",
+    "patch_id": "app-01",
+    "success": true,
+    "description": "http_server 取得を interface_overrides 対応に変更",
+    "detail": ""
+  },
+  {
+    "file": "core_runtime/pack_api_server.py",
+    "patch_id": "pas-01",
+    "success": true,
+    "description": "Stage1: 孤立 elif → if に修正（構文エラー解消）",
+    "detail": ""
+  },
+  {
+    "file": "core_runtime/pack_api_server.py",
+    "patch_id": "pas-01b",
+    "success": true,
+    "description": "tryブロック外の重複 path 定義を削除",
+    "detail": ""
+  },
+  {
+    "file": "core_runtime/pack_api_server.py",
+    "patch_id": "pas-02",
+    "success": true,
+    "description": "Stage2: 2番目の if チェーン（重複 packs/*）を削除",
+    "detail": ""
+  },
+  {
+    "file": "core_runtime/pack_api_server.py",
+    "patch_id": "pas-A",
+    "success": true,
+    "description": "Step A: 孤立 elif → if に修正",
+    "detail": ""
+  },
+  {
+    "file": "core_runtime/pack_api_server.py",
+    "patch_id": "pas-B",
+    "success": true,
+    "description": "Step B: 2番目の if packs/scan → elif に変換（チェーン統合）",
+    "detail": ""
+  },
+  {
+    "file": "core_runtime/pack_api_server.py",
+    "patch_id": "pas-D",
+    "success": true,
+    "description": "Step D: tryブロック外の重複 path 定義を削除",
+    "detail": ""
+  },
+  {
+    "file": "core_runtime/network_grant_manager.py",
+    "patch_id": "ngm-01",
+    "success": true,
+    "description": "_check_domain: 空リスト時 False→True",
+    "detail": ""
+  },
+  {
+    "file": "core_runtime/network_grant_manager.py",
+    "patch_id": "ngm-02",
+    "success": true,
+    "description": "_check_port: 空リスト時 False→True",
+    "detail": ""
+  },
+  {
+    "file": "core_runtime/kernel_handlers_system.py",
+    "patch_id": "khs-01",
+    "success": true,
+    "description": "status=\"partial\" を排除",
+    "detail": ""
+  },
+  {
+    "file": "core_runtime/kernel_handlers_system.py",
+    "patch_id": "khs-02",
+    "success": true,
+    "description": "meta に failed_count と failed リスト追加",
+    "detail": ""
+  },
+  {
+    "file": "core_runtime/kernel_handlers_system.py",
+    "patch_id": "khs-03",
+    "success": true,
+    "description": "_h_component_discover: overrides/disabled 変数準備を追加",
+    "detail": ""
+  },
+  {
+    "file": "core_runtime/kernel_handlers_system.py",
+    "patch_id": "khs-04",
+    "success": true,
+    "description": "_h_component_discover: disabled/override フィルタ追加",
+    "detail": ""
+  },
+  {
+    "file": "core_runtime/capability_handler_registry.py",
+    "patch_id": "chr-01",
+    "success": true,
+    "description": "HandlerDefinition に is_builtin フィールド追加",
+    "detail": ""
+  },
+  {
+    "file": "core_runtime/capability_handler_registry.py",
+    "patch_id": "chr-02",
+    "success": true,
+    "description": "to_dict に is_builtin 追加",
+    "detail": ""
+  },
+  {
+    "file": "core_runtime/capability_handler_registry.py",
+    "patch_id": "chr-03",
+    "success": true,
+    "description": "__init__ に _builtin_handlers_dir 追加",
+    "detail": ""
+  },
+  {
+    "file": "core_runtime/capability_handler_registry.py",
+    "patch_id": "chr-04",
+    "success": true,
+    "description": "_detect_builtin_dir 静的メソッド追加",
+    "detail": ""
+  },
+  {
+    "file": "core_runtime/capability_handler_registry.py",
+    "patch_id": "chr-05",
+    "success": true,
+    "description": "_scan_directory メソッド追加",
+    "detail": ""
+  },
+  {
+    "file": "core_runtime/capability_handler_registry.py",
+    "patch_id": "chr-06",
+    "success": true,
+    "description": "load_all: _scan_directory 呼び出しに委譲",
+    "detail": ""
+  },
+  {
+    "file": "core_runtime/capability_executor.py",
+    "patch_id": "ce-01",
+    "success": true,
+    "description": "trust チェックに is_builtin 条件分岐を追加",
+    "detail": ""
+  },
+  {
+    "file": "core_runtime/capability_executor.py",
+    "patch_id": "ce-01b",
+    "success": true,
+    "description": "trust チェック try ブロックを is_builtin ガードで囲む",
+    "detail": ""
+  },
+  {
+    "file": "core_runtime/capability_executor.py",
+    "patch_id": "ce-02",
+    "success": true,
+    "description": "_audit に extra_details パラメータ追加",
+    "detail": ""
+  },
+  {
+    "file": "core_runtime/capability_executor.py",
+    "patch_id": "ce-02b",
+    "success": true,
+    "description": "_audit: extra_details を details に適用",
+    "detail": ""
+  },
+  {
+    "file": "core_runtime/capability_executor.py",
+    "patch_id": "ce-03",
+    "success": true,
+    "description": "サブプロセス cwd: built-in はプロジェクトルート使用",
+    "detail": ""
+  },
+  {
+    "file": "core_runtime/python_file_executor.py",
+    "patch_id": "pfe-01",
+    "success": true,
+    "description": "pack_data_dir 変数追加",
+    "detail": ""
+  },
+  {
+    "file": "core_runtime/python_file_executor.py",
+    "patch_id": "pfe-02",
+    "success": true,
+    "description": "/data:ro マウント追加",
+    "detail": ""
+  },
+  {
+    "file": "core_runtime/interface_registry.py",
+    "patch_id": "ir-01",
+    "success": true,
+    "description": "get_by_owner メソッド追加",
+    "detail": ""
+  },
+  {
+    "file": "core_runtime/kernel_core.py",
+    "patch_id": "kc-01",
+    "success": true,
+    "description": "fallback 警告メッセージ強化",
+    "detail": ""
+  },
+  {
+    "file": "core_runtime/kernel_core.py",
+    "patch_id": "kc-02",
+    "success": true,
+    "description": "警告を stderr にも出力",
+    "detail": ""
+  },
+  {
+    "file": "backend_core/ecosystem/active_ecosystem.py",
+    "patch_id": "ae-01",
+    "success": true,
+    "description": "import copy 追加",
+    "detail": ""
+  },
+  {
+    "file": "backend_core/ecosystem/active_ecosystem.py",
+    "patch_id": "ae-02",
+    "success": true,
+    "description": "active_pack_identity: str → Optional[str]",
+    "detail": ""
+  },
+  {
+    "file": "backend_core/ecosystem/active_ecosystem.py",
+    "patch_id": "ae-03",
+    "success": true,
+    "description": "interface_overrides フィールド追加",
+    "detail": ""
+  },
+  {
+    "file": "backend_core/ecosystem/active_ecosystem.py",
+    "patch_id": "ae-04",
+    "success": true,
+    "description": "from_dict に interface_overrides 追加",
+    "detail": ""
+  },
+  {
+    "file": "backend_core/ecosystem/active_ecosystem.py",
+    "patch_id": "ae-05",
+    "success": true,
+    "description": "config property: deepcopy で返すように変更",
+    "detail": ""
+  },
+  {
+    "file": "backend_core/ecosystem/active_ecosystem.py",
+    "patch_id": "ae-06",
+    "success": true,
+    "description": "active_pack_identity property 返り値型 → Optional[str]",
+    "detail": ""
+  },
+  {
+    "file": "backend_core/ecosystem/active_ecosystem.py",
+    "patch_id": "ae-07",
+    "success": true,
+    "description": "active_pack_identity setter 型 → Optional[str]",
+    "detail": ""
+  },
+  {
+    "file": "backend_core/ecosystem/active_ecosystem.py",
+    "patch_id": "ae-08",
+    "success": true,
+    "description": "interface_overrides メソッド群追加",
+    "detail": ""
+  },
+  {
+    "file": "backend_core/ecosystem/registry.py",
+    "patch_id": "reg-01",
+    "success": true,
+    "description": "import os 追加",
+    "detail": ""
+  },
+  {
+    "file": "backend_core/ecosystem/registry.py",
+    "patch_id": "reg-02",
+    "success": true,
+    "description": "resolve_component_for_type メソッド追加",
+    "detail": ""
+  },
+  {
+    "file": "backend_core/ecosystem/registry.py",
+    "patch_id": "reg-03",
+    "success": true,
+    "description": "addon deprecated 警告追加",
+    "detail": ""
+  },
+  {
+    "file": "backend_core/ecosystem/registry.py",
+    "patch_id": "reg-04",
+    "success": true,
+    "description": "apply_addons: disabled_components チェック追加",
+    "detail": ""
+  },
+  {
+    "file": "backend_core/ecosystem/registry.py",
+    "patch_id": "reg-04b",
+    "success": true,
+    "description": "apply_addons: disabled_addons チェック追加",
+    "detail": ""
+  },
+  {
+    "file": "backend_core/ecosystem/addon_manager.py",
+    "patch_id": "am-01",
+    "success": true,
+    "description": "get_addons_for_component: active_ecosystem_manager パラメータ追加",
+    "detail": ""
+  },
+  {
+    "file": "backend_core/ecosystem/addon_manager.py",
+    "patch_id": "am-02",
+    "success": true,
+    "description": "disabled_components チェック追加",
+    "detail": ""
+  },
+  {
+    "file": "backend_core/ecosystem/addon_manager.py",
+    "patch_id": "am-03",
+    "success": true,
+    "description": "disabled_addons チェック追加",
+    "detail": ""
+  }
+]

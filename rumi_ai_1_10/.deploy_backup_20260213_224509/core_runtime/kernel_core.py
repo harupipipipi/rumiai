@@ -177,14 +177,10 @@ class KernelCore:
     def _log_fallback_warning(self) -> None:
         """旧flow使用時の警告をログに記録"""
         warning_msg = (
-            "Using legacy flow path (flow/). This is DEPRECATED. "
-            "The canonical flow system is FlowLoader + FlowModifier via flows/00_startup.flow.yaml. "
-            "Legacy flow/ is fallback only and will be removed in a future version. "
-            "Startup must use kernel:flow.load_all to load the new flow system."
+            "Using legacy flow path (flow/). This is DEPRECATED and will be removed. "
+            "Please migrate to flows/00_startup.flow.yaml"
         )
         print(f"[Rumi] WARNING: {warning_msg}")
-        import sys as _sys
-        print(f"[Rumi] WARNING: {warning_msg}", file=_sys.stderr)
 
         self.diagnostics.record_step(
             phase="startup",
