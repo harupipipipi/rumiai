@@ -53,6 +53,8 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+import fnmatch
+
 from .flow_loader import FlowDefinition, FlowStep, FlowLoadResult
 
 
@@ -530,7 +532,8 @@ class FlowModifierLoader:
                     except Exception:
                         pass  # 解決失敗時は元の値を使用
                 
-                if target == flow_id:
+                # C6: fnmatch pattern matching for wildcard target_flow_id
+                if fnmatch.fnmatch(flow_id, target):
                     modifiers.append(m)
             
             # phase → priority → modifier_id でソート

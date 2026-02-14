@@ -798,9 +798,9 @@ def resolve_load_order(packs: Dict[str, "PackInfo"]) -> List[str]:
         cyclic = sorted(pid for pid in all_pack_ids if pid not in set(result))
         print(
             f"[Registry] ERROR: Circular dependency detected among packs: {cyclic}\n"
-            f"[Registry] Skipping cyclic packs from load_order, "
-            f"loading remaining in discovery order."
+            f"[Registry] Loading cyclic packs in alphabetical order at end of load_order."
         )
+        result.extend(cyclic)  # L2: append cyclic packs so they still get loaded
 
     return result
 

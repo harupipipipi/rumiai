@@ -89,10 +89,11 @@ class FlowDefinition:
     source_file: Optional[Path] = None
     source_type: str = "unknown"  # "official", "shared", "pack", "local_pack"
     source_pack_id: Optional[str] = None  # pack提供の場合のpack_id
+    schedule: Optional[Dict] = None  # schedule定義（cron/interval）
     
     def to_dict(self) -> Dict[str, Any]:
         """既存Kernelが処理できる形式に変換"""
-        return {
+        d = {
             "flow_id": self.flow_id,
             "inputs": self.inputs,
             "outputs": self.outputs,
@@ -103,6 +104,9 @@ class FlowDefinition:
             "_source_type": self.source_type,
             "_source_pack_id": self.source_pack_id,
         }
+        if self.schedule is not None:
+            d["schedule"] = self.schedule
+        return d
     
     def _step_to_dict(self, step: FlowStep) -> Dict[str, Any]:
         """ステップを辞書形式に変換"""
@@ -589,6 +593,12 @@ class FlowLoader:
         sorted_steps = self._sort_steps(steps, phases)
         
         # FlowDefinitionを作成
+        # schedule フィールド（オプション）
+        schedule = raw_data.get("schedule")
+        if schedule is not None and not isinstance(schedule, dict):
+            result.warnings.append("'schedule' should be a dict, ignoring")
+            schedule = None
+
         flow_def = FlowDefinition(
             flow_id=flow_id,
             inputs=inputs,
@@ -598,7 +608,8 @@ class FlowLoader:
             steps=sorted_steps,
             source_file=file_path,
             source_type=source_type,
-            source_pack_id=pack_id
+            source_pack_id=pack_id,
+            schedule=schedule
         )
         
         result.success = True

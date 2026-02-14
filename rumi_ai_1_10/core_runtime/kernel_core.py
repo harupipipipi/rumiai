@@ -260,6 +260,9 @@ class KernelCore:
             "defaults": flow_def.get("defaults", {"fail_soft": True, "on_missing_handler": "skip"}),
             "pipelines": {"startup": []}
         }
+        # C4: preserve schedule field through conversion
+        if flow_def.get("schedule"):
+            result["schedule"] = flow_def["schedule"]
 
         steps = flow_def.get("steps", [])
         phases = flow_def.get("phases", [])
@@ -562,6 +565,9 @@ class KernelCore:
                     construct = self.interface_registry.get(f"flow.construct.{step_type}")
                     if construct and callable(construct):
                         ctx = await construct(self, step, ctx) if asyncio.iscoroutinefunction(construct) else construct(self, step, ctx)
+                # C5: check flow control abort after step execution
+                if ctx.get("_flow_control_abort"):
+                    return ctx
                 for hook in self.interface_registry.get("flow.hooks.after_step", strategy="all"):
                     if callable(hook):
                         try:
@@ -607,9 +613,28 @@ class KernelCore:
             else:
                 loop = asyncio.get_event_loop()
                 result = await loop.run_in_executor(self._executor, lambda: handler(resolved_args, ctx))
+            # C7: unwrap output — strip _kernel_step_status wrapper
+            unwrapped = result["output"] if isinstance(result, dict) and "output" in result else result
+
+            # C5: flow control protocol — check for abort signal
+            if isinstance(unwrapped, dict) and unwrapped.get("__flow_control") == "abort":
+                output_key = step.get("output")
+                if output_key:
+                    ctx[output_key] = unwrapped
+                ctx["_flow_control_abort"] = True
+                ctx["_flow_control_abort_reason"] = unwrapped.get("reason", "abort requested by step")
+                self.diagnostics.record_step(
+                    phase="flow",
+                    step_id=f"{step.get('id', 'unknown')}.flow_control_abort",
+                    handler=step.get("handler", "unknown"),
+                    status="aborted",
+                    meta={"reason": ctx["_flow_control_abort_reason"], "__flow_control": "abort"}
+                )
+                return ctx, unwrapped
+
             if step.get("output"):
-                ctx[step["output"]] = result
-            return ctx, result
+                ctx[step["output"]] = unwrapped
+            return ctx, unwrapped
         except Exception:
             raise
 
@@ -932,6 +957,12 @@ class KernelCore:
         try:
             from .unit_registry import get_unit_registry
             ctx["unit_registry"] = get_unit_registry()
+        except Exception:
+            pass
+
+        try:
+            from .secrets_store import get_secrets_store
+            ctx["secrets_store"] = get_secrets_store()
         except Exception:
             pass
 
