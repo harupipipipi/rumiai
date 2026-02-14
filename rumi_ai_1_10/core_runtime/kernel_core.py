@@ -30,7 +30,7 @@ from .event_bus import EventBus
 from .component_lifecycle import ComponentLifecycleExecutor
 from .capability_proxy import get_capability_proxy
 from .paths import BASE_DIR, OFFICIAL_FLOWS_DIR, ECOSYSTEM_DIR, GRANTS_DIR
-
+import re
 
 @dataclass
 class KernelConfig:
