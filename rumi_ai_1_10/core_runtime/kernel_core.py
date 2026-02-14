@@ -960,11 +960,6 @@ class KernelCore:
         except Exception:
             pass
 
-        try:
-            from .secrets_store import get_secrets_store
-            ctx["secrets_store"] = get_secrets_store()
-        except Exception:
-            pass
 
         return ctx
 

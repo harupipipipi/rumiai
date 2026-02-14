@@ -37,7 +37,7 @@ DEFAULT_TIMEOUT = 30.0
 MAX_TIMEOUT = 120.0
 
 # rate limit: secret.get のみ（無限ループ事故防止）
-SECRET_GET_PERMISSION_ID = "secret.get"
+SECRET_GET_PERMISSION_ID = "secrets.get"
 DEFAULT_SECRET_GET_RATE_LIMIT = 60  # 回/分/principal
 
 
@@ -439,6 +439,12 @@ import json
 import importlib.util
 
 def main():
+    # Ensure cwd is in sys.path for handler imports
+    import os
+    cwd = os.getcwd()
+    if cwd not in sys.path:
+        sys.path.append(cwd)
+
     handler_path = {safe_path}
     func_name = {safe_func}
 
