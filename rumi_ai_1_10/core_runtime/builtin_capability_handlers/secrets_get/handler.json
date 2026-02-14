@@ -1,0 +1,36 @@
+{
+  "handler_id": "builtin.secrets.get",
+  "permission_id": "secrets.get",
+  "entrypoint": "handler.py:execute",
+  "description": "Read a secret value by key. Access is restricted to keys explicitly listed in grant_config.allowed_keys.",
+  "risk": "high",
+  "input_schema": {
+    "type": "object",
+    "required": ["key"],
+    "properties": {
+      "key": {
+        "type": "string",
+        "description": "Secret key name (must match ^[A-Z0-9_]{1,64}$)"
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "success": {"type": "boolean"},
+      "value": {"type": "string", "description": "The secret value (only on success)"},
+      "error": {"type": "string"},
+      "error_type": {"type": "string"}
+    }
+  },
+  "grant_config_schema": {
+    "type": "object",
+    "properties": {
+      "allowed_keys": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "Explicit list of secret key names this grant permits. Empty or missing = deny all."
+      }
+    }
+  }
+}
