@@ -11,6 +11,8 @@ import hmac
 import json
 import logging
 import os
+import base64
+import re
 import secrets
 import threading
 from pathlib import Path
@@ -82,12 +84,21 @@ class PackAPIHandler(BaseHTTPRequestHandler):
         
         return hmac.compare_digest(token, self.internal_token)
     
-    def _parse_body(self) -> dict:
+    def _read_raw_body(self) -> bytes:
+        """リクエストボディを読み取り、インスタンスに保持して返す"""
         content_length = int(self.headers.get('Content-Length', 0))
         if content_length == 0:
+            self._raw_body_bytes = b""
+            return b""
+        raw = self.rfile.read(content_length)
+        self._raw_body_bytes = raw
+        return raw
+
+    def _parse_body(self) -> dict:
+        raw = self._read_raw_body()
+        if not raw:
             return {}
-        body = self.rfile.read(content_length)
-        return json.loads(body.decode('utf-8'))
+        return json.loads(raw.decode('utf-8'))
     
     def do_OPTIONS(self) -> None:
         self.send_response(200)
@@ -95,7 +106,7 @@ class PackAPIHandler(BaseHTTPRequestHandler):
         if origin:
             self.send_header('Access-Control-Allow-Origin', origin)
             self.send_header('Vary', 'Origin')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Authorization, Content-Type')
         self.end_headers()
 
@@ -243,11 +254,12 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                 result = self._get_registered_routes()
                 self._send_response(APIResponse(True, result))
 
-            elif self._match_pack_route(path, "GET"):
-                self._handle_pack_route_request(path, {}, "GET")
-            
             else:
-                self._send_response(APIResponse(False, error="Not found"), 404)
+                match = self._match_pack_route(path, "GET")
+                if match:
+                    self._handle_pack_route_request(path, {}, "GET", match)
+                else:
+                    self._send_response(APIResponse(False, error="Not found"), 404)
                 
         except Exception as e:
             logger.exception(f"API error: {e}")
@@ -535,11 +547,12 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                 self._handle_flow_run(path, body)
 
             # --- Pack custom routes (POST) ---
-            elif self._match_pack_route(path, "POST"):
-                self._handle_pack_route_request(path, body, "POST")
-            
             else:
-                self._send_response(APIResponse(False, error="Not found"), 404)
+                match = self._match_pack_route(path, "POST")
+                if match:
+                    self._handle_pack_route_request(path, body, "POST", match)
+                else:
+                    self._send_response(APIResponse(False, error="Not found"), 404)
                 
         except Exception as e:
             logger.exception(f"API error: {e}")
@@ -556,8 +569,9 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             body = self._parse_body()
             path = urlparse(self.path).path
 
-            if self._match_pack_route(path, "PUT"):
-                self._handle_pack_route_request(path, body, "PUT")
+            match = self._match_pack_route(path, "PUT")
+            if match:
+                self._handle_pack_route_request(path, body, "PUT", match)
             else:
                 self._send_response(APIResponse(False, error="Not found"), 404)
 
@@ -580,9 +594,10 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             
             elif path.startswith("/api/packs/"):
                 # Pack独自ルート (DELETE) を先にチェック
-                if self._match_pack_route(path, "DELETE"):
+                match = self._match_pack_route(path, "DELETE")
+                if match:
                     body = self._parse_body()
-                    self._handle_pack_route_request(path, body, "DELETE")
+                    self._handle_pack_route_request(path, body, "DELETE", match)
                 else:
                     pack_id = path.split("/")[3]
                     result = self._uninstall_pack(pack_id)
@@ -1122,6 +1137,7 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                     "vocab_registry", "approval_manager",
                     "container_orchestrator", "host_privilege_manager",
                     "pack_api_server",
+                    "store_registry", "unit_registry",
                 }
                 result_data = {
                     k: v for k, v in ctx.items()
@@ -1217,11 +1233,21 @@ class PackAPIHandler(BaseHTTPRequestHandler):
         for pack_id, routes in all_routes.items():
             for route in routes:
                 key = (route["method"].upper(), route["path"])
+                # テンプレート解析情報を事前キャッシュ
+                segments = route["path"].strip("/").split("/")
+                param_indices = {}
+                for i, seg in enumerate(segments):
+                    if seg.startswith("{") and seg.endswith("}"):
+                        param_name = seg[1:-1]
+                        if re.fullmatch(r'[A-Za-z0-9_]+', param_name):
+                            param_indices[i] = param_name
                 cls._pack_routes[key] = {
                     "pack_id": pack_id,
                     "flow_id": route["flow_id"],
                     "timeout": route.get("timeout", 300),
                     "description": route.get("description", ""),
+                    "_segments": segments,
+                    "_param_indices": param_indices,
                 }
                 count += 1
 
@@ -1229,17 +1255,60 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             logger.info(f"Loaded {count} pack routes from registry")
         return count
 
-    def _match_pack_route(self, path: str, method: str) -> bool:
-        """パスとメソッドがPack独自ルートにマッチするか判定"""
-        return (method.upper(), path) in self._pack_routes
+    def _match_pack_route(self, path: str, method: str):
+        """パスとメソッドがPack独自ルートにマッチするか判定。
 
-    def _handle_pack_route_request(self, path: str, body: dict, method: str) -> None:
-        """Pack独自ルートのリクエストを処理"""
-        route_info = self._pack_routes.get((method.upper(), path))
-        if not route_info:
+        マッチした場合は (route_info, path_params) のタプルを返す。
+        マッチしない場合は None を返す。
+        {param} プレースホルダーによるパスパラメータキャプチャ対応。
+        """
+        method_upper = method.upper()
+
+        # 1. 完全一致（高速パス）
+        key = (method_upper, path)
+        if key in self._pack_routes:
+            return (self._pack_routes[key], {})
+
+        # 2. テンプレートマッチング
+        request_segments = path.strip("/").split("/")
+        for (m, _template_path), route_info in self._pack_routes.items():
+            if m != method_upper:
+                continue
+            tmpl_segments = route_info.get("_segments")
+            if tmpl_segments is None:
+                continue
+            if len(tmpl_segments) != len(request_segments):
+                continue
+            param_indices = route_info.get("_param_indices", {})
+            if not param_indices:
+                # パラメータなしテンプレートは完全一致で既にチェック済み
+                continue
+            path_params = {}
+            matched = True
+            for i, (tmpl_seg, req_seg) in enumerate(zip(tmpl_segments, request_segments)):
+                if i in param_indices:
+                    path_params[param_indices[i]] = unquote(req_seg)
+                elif tmpl_seg != req_seg:
+                    matched = False
+                    break
+            if matched:
+                return (route_info, path_params)
+
+        return None
+
+    def _handle_pack_route_request(self, path: str, body: dict, method: str,
+                                   match_result: tuple = None) -> None:
+        """Pack独自ルートのリクエストを処理。
+
+        match_result: _match_pack_route() の戻り値 (route_info, path_params)。
+        パスパラメータ、GETクエリパラメータ、raw body、headers を
+        Flow の inputs に統合して渡す。
+        """
+        if match_result is None:
             self._send_response(APIResponse(False, error="Route not found"), 404)
             return
 
+        route_info, path_params = match_result
         pack_id = route_info["pack_id"]
         flow_id = route_info["flow_id"]
         timeout = route_info["timeout"]
@@ -1255,8 +1324,28 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                 )
                 return
 
-        # Flow実行（共通の _run_flow を使用）
-        inputs = body if isinstance(body, dict) else {}
+        # --- inputs 構築（優先順位: クエリ < body < パスパラメータ） ---
+        inputs = {}
+
+        # 1. GET クエリパラメータ
+        query = parse_qs(urlparse(self.path).query)
+        for k, v in query.items():
+            inputs[k] = v[0] if len(v) == 1 else v
+
+        # 2. JSON ボディ（後方互換）
+        if isinstance(body, dict):
+            inputs.update(body)
+
+        # 3. パスパラメータ（最優先）
+        inputs.update(path_params)
+
+        # 4. メタデータ: raw body + headers 透過 (C3)
+        raw_bytes = getattr(self, "_raw_body_bytes", b"")
+        inputs["_raw_body"] = base64.b64encode(raw_bytes).decode("ascii")
+        inputs["_headers"] = {k.lower(): v for k, v in self.headers.items()}
+        inputs["_method"] = method
+        inputs["_path"] = path
+
         inputs["_pack_route"] = {
             "pack_id": pack_id,
             "method": method,
