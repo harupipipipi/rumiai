@@ -39,6 +39,7 @@ import ssl
 import stat
 import struct
 import threading
+import concurrent.futures
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -633,14 +634,21 @@ def execute_http_request(
             
             # ============================================================
             # 4. HTTP接続 & リクエスト実行
+            # (#13: DNS rebinding対策 — resolved IP に直接接続)
             # ============================================================
             conn = None
+            # resolved_ips は resolve_and_check_ip() で取得済み (TOCTOU回避)
+            connect_ip = resolved_ips[0] if resolved_ips else domain
             try:
+                raw_sock = socket.create_connection((connect_ip, port), timeout=timeout)
                 if parsed.scheme == "https":
                     context = ssl.create_default_context()
+                    ssl_sock = context.wrap_socket(raw_sock, server_hostname=domain)
                     conn = http.client.HTTPSConnection(domain, port, timeout=timeout, context=context)
+                    conn.sock = ssl_sock
                 else:
                     conn = http.client.HTTPConnection(domain, port, timeout=timeout)
+                    conn.sock = raw_sock
                 
                 path = parsed.path or "/"
                 if parsed.query:
@@ -903,6 +911,10 @@ class UDSEgressServer:
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
+        # #33: スレッドプール化
+        self._max_workers = int(os.environ.get("RUMI_EGRESS_MAX_WORKERS", "20"))
+        self._executor: Optional[concurrent.futures.ThreadPoolExecutor] = None
+        self._worker_semaphore: Optional[threading.Semaphore] = None
     
     def start(self) -> bool:
         """サーバーを起動"""
@@ -926,6 +938,12 @@ class UDSEgressServer:
                 _apply_egress_socket_permissions(self.socket_path)
                 
                 self._running = True
+                # #33: スレッドプール初期化
+                self._executor = concurrent.futures.ThreadPoolExecutor(
+                    max_workers=self._max_workers,
+                    thread_name_prefix=f"egress-{self.pack_id[:16]}",
+                )
+                self._worker_semaphore = threading.Semaphore(self._max_workers)
                 self._thread = threading.Thread(target=self._serve_forever, daemon=True)
                 self._thread.start()
                 
@@ -945,6 +963,13 @@ class UDSEgressServer:
                     self._server_socket.close()
                 except Exception:
                     pass
+            # #33: スレッドプールをシャットダウン
+            if self._executor:
+                try:
+                    self._executor.shutdown(wait=False)
+                except Exception:
+                    pass
+                self._executor = None
             if self._thread and self._thread.is_alive():
                 self._thread.join(timeout=5)
             self._cleanup()
@@ -961,16 +986,46 @@ class UDSEgressServer:
         self._thread = None
     
     def _serve_forever(self) -> None:
-        """リクエストを処理し続ける"""
+        """リクエストを処理し続ける (#33: ThreadPoolExecutor方式)"""
         while self._running:
             try:
                 client_sock, _ = self._server_socket.accept()
-                # 接続ごとにスレッド生成
-                threading.Thread(
-                    target=self._handle_client,
-                    args=(client_sock,),
-                    daemon=True
-                ).start()
+                # #33: セマフォで枯渇検知
+                if not self._worker_semaphore.acquire(blocking=False):
+                    # プール枯渇: 接続を拒否
+                    print(
+                        f"[UDSEgressServer] Thread pool exhausted for "
+                        f"pack '{self.pack_id}' (max_workers={self._max_workers}). "
+                        f"Rejecting connection."
+                    )
+                    try:
+                        response = {
+                            "success": False,
+                            "error": "Server busy: thread pool exhausted",
+                            "error_type": "pool_exhausted",
+                        }
+                        write_length_prefixed_json(client_sock, response)
+                    except Exception:
+                        pass
+                    finally:
+                        try:
+                            client_sock.close()
+                        except Exception:
+                            pass
+                    continue
+
+                # スレッドプールに投入
+                try:
+                    self._executor.submit(self._handle_client_pooled, client_sock)
+                except RuntimeError:
+                    # executor が shutdown 済み
+                    self._worker_semaphore.release()
+                    try:
+                        client_sock.close()
+                    except Exception:
+                        pass
+                    if self._running:
+                        break
             except socket.timeout:
                 continue
             except OSError:
@@ -980,6 +1035,13 @@ class UDSEgressServer:
             except Exception as e:
                 if self._running:
                     print(f"[UDSEgressServer] Accept error for {self.pack_id}: {e}")
+
+    def _handle_client_pooled(self, client_sock: socket.socket) -> None:
+        """スレッドプール用クライアントハンドラ (セマフォ解放付き) (#33)"""
+        try:
+            self._handle_client(client_sock)
+        finally:
+            self._worker_semaphore.release()
     
     def _handle_client(self, client_sock: socket.socket) -> None:
         """クライアント接続を処理"""

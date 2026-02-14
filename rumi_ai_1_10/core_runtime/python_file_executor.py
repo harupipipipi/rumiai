@@ -48,10 +48,23 @@ import sys
 import threading
 import traceback
 import uuid
+import concurrent.futures
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+
+# ============================================================
+# Docker可用性キャッシュ (#17)
+# ============================================================
+_docker_available_cache: "Optional[bool]" = None
+_docker_available_ts: float = 0.0
+_docker_cache_lock = threading.Lock()
+
+MAX_HOST_EXECUTION_TIMEOUT: int = int(os.environ.get("RUMI_HOST_EXEC_TIMEOUT", "120"))
+MAX_STDOUT_SIZE: int = 4 * 1024 * 1024  # 4MB (#14)
+_DOCKER_CHECK_CACHE_TTL: float = float(os.environ.get("RUMI_DOCKER_CHECK_CACHE_TTL", "60"))
 
 
 from .paths import (
@@ -577,17 +590,34 @@ class PythonFileExecutor:
             return None
 
     def _check_docker_available(self) -> bool:
-        """Docker利用可能性をチェック"""
-        try:
-            import subprocess
-            result = subprocess.run(
-                ["docker", "info"],
-                capture_output=True,
-                timeout=5
-            )
-            return result.returncode == 0
-        except Exception:
-            return False
+        """Docker利用可能性をチェック（モジュールレベルキャッシュ付き #17）"""
+        import time as _time
+        global _docker_available_cache, _docker_available_ts
+
+        now = _time.monotonic()
+        if _docker_available_cache is not None and (now - _docker_available_ts) < _DOCKER_CHECK_CACHE_TTL:
+            return _docker_available_cache
+
+        with _docker_cache_lock:
+            # ダブルチェック
+            now = _time.monotonic()
+            if _docker_available_cache is not None and (now - _docker_available_ts) < _DOCKER_CHECK_CACHE_TTL:
+                return _docker_available_cache
+
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ["docker", "info"],
+                    capture_output=True,
+                    timeout=5
+                )
+                _docker_available_cache = result.returncode == 0
+            except Exception:
+                _docker_available_cache = False
+
+            _docker_available_ts = _time.monotonic()
+
+        return _docker_available_cache
 
     def _get_syscall_module_content(self) -> str:
         """
@@ -881,33 +911,67 @@ request = http_request
                 "python", "/executor.py", file_path.name
             ])
 
-            # Docker実行
+            # Docker実行 (#14: stdout サイズ制限付き)
+            proc = None
             try:
-                proc_result = subprocess.run(
+                import time as _t14
+                proc = subprocess.Popen(
                     docker_cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout_seconds
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                 )
 
-                if proc_result.returncode == 0:
-                    # 出力をパース
-                    output_text = proc_result.stdout.strip()
-                    if output_text:
-                        try:
-                            result.output = json.loads(output_text)
-                        except json.JSONDecodeError:
-                            result.output = output_text
-                    else:
-                        result.output = None
+                # タイムアウト付きで stdout を制限読み取り
+                import selectors
+                stdout_chunks = []
+                stderr_chunks = []
+                stdout_total = 0
+                stdout_exceeded = False
+                deadline = _t14.monotonic() + timeout_seconds
 
-                    result.success = True
+                # communicate に頼らず、stdout を制限付きで読む
+                # ただし stderr も回収する必要があるため Popen.communicate 的に処理
+                raw_stdout = proc.stdout.read(MAX_STDOUT_SIZE + 1)
+                if len(raw_stdout) > MAX_STDOUT_SIZE:
+                    stdout_exceeded = True
+                    proc.kill()
+                    proc.wait(timeout=5)
+                    result.error = f"stdout exceeded size limit ({MAX_STDOUT_SIZE} bytes)"
+                    result.error_type = "response_too_large"
                 else:
-                    result.error = proc_result.stderr or f"Container exited with code {proc_result.returncode}"
-                    result.error_type = "container_execution_error"
+                    remaining_timeout = max(0.1, deadline - _t14.monotonic())
+                    try:
+                        raw_stderr = proc.stderr.read()
+                        proc.wait(timeout=remaining_timeout)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait(timeout=5)
+                        result.error = f"Execution timed out after {timeout_seconds}s"
+                        result.error_type = "timeout"
+                        raw_stderr = b""
+
+                    if not result.error:
+                        stderr_text = raw_stderr.decode("utf-8", errors="replace")
+                        stdout_text = raw_stdout.decode("utf-8", errors="replace").strip()
+
+                        if proc.returncode == 0:
+                            if stdout_text:
+                                try:
+                                    result.output = json.loads(stdout_text)
+                                except json.JSONDecodeError:
+                                    result.output = stdout_text
+                            else:
+                                result.output = None
+                            result.success = True
+                        else:
+                            result.error = stderr_text or f"Container exited with code {proc.returncode}"
+                            result.error_type = "container_execution_error"
 
             except subprocess.TimeoutExpired:
                 # タイムアウト時はコンテナを強制停止
+                if proc and proc.poll() is None:
+                    proc.kill()
+                    proc.wait(timeout=5)
                 subprocess.run(["docker", "kill", container_name], capture_output=True)
                 result.error = f"Execution timed out after {timeout_seconds}s"
                 result.error_type = "timeout"
@@ -1090,17 +1154,41 @@ else:
             if context.permission_proxy:
                 exec_context["permission_proxy"] = context.permission_proxy
 
-            # 実行
+            # 実行 (#4: タイムアウト付き — concurrent.futures.ThreadPoolExecutor)
             import inspect
             sig = inspect.signature(run_fn)
             param_count = len(sig.parameters)
 
-            if param_count >= 2:
-                output = run_fn(input_data, exec_context)
-            elif param_count == 1:
-                output = run_fn(input_data)
-            else:
-                output = run_fn()
+            effective_timeout = min(timeout_seconds, MAX_HOST_EXECUTION_TIMEOUT)
+
+            def _run_target():
+                if param_count >= 2:
+                    return run_fn(input_data, exec_context)
+                elif param_count == 1:
+                    return run_fn(input_data)
+                else:
+                    return run_fn()
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(_run_target)
+                try:
+                    output = future.result(timeout=effective_timeout)
+                except concurrent.futures.TimeoutError:
+                    result.error = f"Host execution timed out after {effective_timeout}s"
+                    result.error_type = "timeout"
+                    # 診断ログに記録
+                    if context.diagnostics_callback:
+                        try:
+                            context.diagnostics_callback({
+                                "event": "host_execution_timeout",
+                                "file_path": str(file_path),
+                                "owner_pack": owner_pack,
+                                "timeout_seconds": effective_timeout,
+                                "ts": self._now_ts(),
+                            })
+                        except Exception:
+                            pass
+                    return result
 
             # 出力をJSON互換に変換
             result.output = self._ensure_json_compatible(output)

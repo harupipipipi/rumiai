@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,6 +37,8 @@ LIB_UPDATE = "update"
 PACK_DATA_BASE_DIR = _PACK_DATA_BASE_DIR
 # pack_id に許可する文字（英数字、ハイフン、アンダースコアのみ）
 PACK_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]+$')
+# ファイル名に許可する文字（英数字、アンダースコア、ハイフン、ドットのみ）(#57)
+SAFE_FILENAME_PATTERN = re.compile(r'^[a-zA-Z0-9_.-]+$')
 
 
 @dataclass
@@ -230,7 +233,7 @@ class SecureExecutor:
         import time
         start_time = time.time()
         
-        container_name = f"rumi-exec-{pack_id}-{phase}-{abs(hash(component_id)) % 10000}"
+        container_name = f"rumi-exec-{pack_id}-{phase}-{uuid.uuid4().hex[:12]}"
         
         safe_context = self._sanitize_context(context)
         
@@ -344,6 +347,12 @@ class SecureExecutor:
     
     def _get_executor_script(self, filename: str) -> str:
         """コンテナ内で実行するPythonスクリプト"""
+        # #57: ファイル名バリデーション
+        if not SAFE_FILENAME_PATTERN.match(filename):
+            raise ValueError(
+                f"Unsafe filename rejected: {filename!r}. "
+                f"Only alphanumeric, underscore, hyphen, and dot are allowed."
+            )
         return f'''
 import sys
 import json
@@ -374,6 +383,12 @@ else:
     
     def _get_lib_executor_script(self, filename: str) -> str:
         """lib実行用のPythonスクリプト"""
+        # #57: ファイル名バリデーション
+        if not SAFE_FILENAME_PATTERN.match(filename):
+            raise ValueError(
+                f"Unsafe filename rejected: {filename!r}. "
+                f"Only alphanumeric, underscore, hyphen, and dot are allowed."
+            )
         return f'''
 import sys
 import json
@@ -539,7 +554,7 @@ else:
         """Dockerコンテナ内でlib実行"""
         import time
         
-        container_name = f"rumi-lib-{pack_id}-{lib_type}-{abs(hash(str(lib_file))) % 10000}"
+        container_name = f"rumi-lib-{pack_id}-{lib_type}-{uuid.uuid4().hex[:12]}"
         lib_dir = lib_file.parent
         
         # pip site-packages 確認
@@ -789,8 +804,18 @@ else:
         import time
         start_time = time.time()
         
-        warnings = [f"Executing on host without Docker: Pack={pack_id}, Component={component_id}, Phase={phase}"]
-        logger.debug("Permissive host execution: pack=%s component=%s phase=%s", pack_id, component_id, phase)
+        warnings = [
+            f"SECURITY WARNING: Executing on host without Docker isolation: "
+            f"Pack={pack_id}, Component={component_id}, Phase={phase}",
+            "本番環境ではDocker隔離を使用してください (RUMI_SECURITY_MODE=strict)。"
+            " permissiveモードは開発環境専用です。",
+        ]
+        logger.warning(
+            "SECURITY: Host execution without Docker isolation — "
+            "pack=%s component=%s phase=%s. "
+            "Use RUMI_SECURITY_MODE=strict with Docker for production.",
+            pack_id, component_id, phase
+        )
         
         module_name = f"rumi_exec_{pack_id}_{phase}_{abs(hash(str(file_path)))}"
         

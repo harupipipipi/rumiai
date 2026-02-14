@@ -63,8 +63,6 @@ class EcosystemInitializer:
             "packs_loaded": 0,
             "components_loaded": 0,
             "active_ecosystem_loaded": False,
-            "seeded": [],
-            "chats_migrated": False,
             "errors": []
         }
         
@@ -81,11 +79,7 @@ class EcosystemInitializer:
             # 4. アクティブエコシステムの初期化
             self._initialize_active_ecosystem(result)
             
-            # 5. assetsのseed展開（Pack assetsからコピー）
-            self._seed_assets(result)
             
-            # 6. chatsの移行
-            self._migrate_chats(result)
             
         except Exception as e:
             result["success"] = False
@@ -182,16 +176,6 @@ class EcosystemInitializer:
         self.active_ecosystem = get_active_ecosystem_manager()
         result["active_ecosystem_loaded"] = True
     
-    def _seed_assets(self, result: Dict[str, Any]):
-        """
-        アセットのseed展開（公式は実行しない）
-        
-        公式は具体的なアセット構造を知らない。
-        各コンポーネントがsetup.pyで自身のseedを行う。
-        """
-        # 公式は何もしない - コンポーネントの責務
-        pass
-    
     def _is_assets_empty(self, path: Path) -> bool:
         """
         assetsディレクトリが実質的に空かどうか判定
@@ -234,35 +218,6 @@ class EcosystemInitializer:
                         print(f"  [Seed] コピー失敗: {item.name} - {e}")
         
         return copied_count
-    
-    def _migrate_chats(self, result: Dict[str, Any]):
-        """
-        チャットデータの移行（公式は実行しない）
-        
-        公式は「チャット」という概念を知らない。
-        chatsコンポーネントがsetup.pyで自身の移行を行う。
-        """
-        # 公式は何もしない - コンポーネントの責務
-        pass
-    
-    def _is_chats_empty(self, path: Path) -> bool:
-        """
-        chatsディレクトリが空かどうか判定
-        
-        UUIDディレクトリが1つでも存在すれば「空ではない」
-        """
-        if not path.exists():
-            return True
-        
-        for item in path.iterdir():
-            if item.is_dir():
-                try:
-                    uuid.UUID(item.name)
-                    return False  # 有効なチャットディレクトリが存在
-                except ValueError:
-                    pass
-        
-        return True
     
     def validate(self) -> Dict[str, Any]:
         """

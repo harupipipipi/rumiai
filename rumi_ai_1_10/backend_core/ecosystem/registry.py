@@ -8,6 +8,7 @@ Pack/Component/Addon のレジストリ
 """
 
 import json
+import logging
 from collections import deque
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
@@ -30,6 +31,8 @@ except ImportError:
     from pathlib import Path as _FallbackPath
     _ECOSYSTEM_DIR = str(_FallbackPath(__file__).resolve().parent.parent.parent / "ecosystem")
     _find_ecosystem_json_paths = None
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -119,8 +122,17 @@ class Registry:
                 try:
                     pack_info = self._load_pack(pack_dir)
                     if pack_info:
-                        self.packs[pack_info.pack_id] = pack_info
-                        print(f"  ✓ Pack読み込み成功: {pack_info.pack_id}")
+                        if pack_info.pack_id in self.packs:
+                            logger.warning(
+                                "[Registry] Duplicate pack_id '%s' detected. "
+                                "Keeping first loaded from '%s', ignoring '%s'.",
+                                pack_info.pack_id,
+                                self.packs[pack_info.pack_id].path,
+                                pack_info.path,
+                            )
+                        else:
+                            self.packs[pack_info.pack_id] = pack_info
+                            print(f"  ✓ Pack読み込み成功: {pack_info.pack_id}")
                 except Exception as e:
                     print(f"  ✗ Pack読み込みエラー ({pack_dir.name}): {e}")
         
@@ -130,6 +142,18 @@ class Registry:
         if self.packs:
             auto_order = resolve_load_order(self.packs)
             print(f"  Auto-resolved load_order: {auto_order}")
+
+        # #20: connectivity requires 未充足チェック
+        for _pack_info in self.packs.values():
+            for _component in _pack_info.components.values():
+                _conn = self.resolve_connectivity(_component)
+                for _missing in _conn.get('missing_requires', []):
+                    logger.warning(
+                        "[Registry] Component '%s' has unsatisfied requirement: '%s'",
+                        _component.full_id,
+                        _missing,
+                    )
+
         
         return self.packs
     
@@ -320,7 +344,7 @@ class Registry:
         routes.json の形式:
         {
             "routes": [
-                {"method": "POST", "path": "/api/packs/{pack_id}/send", "flow_id": "chat_send", ...}
+                {"method": "POST", "path": "/api/packs/{pack_id}/execute", "flow_id": "example_flow", ...}
             ]
         }
         """

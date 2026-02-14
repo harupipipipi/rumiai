@@ -71,7 +71,7 @@ ecosystem に候補を同梱。scan → pending → approve/reject → blocked�
 
 ### 3.3 Secrets（API key の保存）
 
-`.env` を避ける（事故率低減）。`user_data/secrets/` に格納、ログに値を出さない。Pack に秘密ファイルを見せない。取得は capability（例: `secret.get`）経由が基本。
+`.env` を避ける（事故率低減）。`user_data/secrets/` に格納、ログに値を出さない。Pack に秘密ファイルを見せない。取得は capability（例: `secrets.get`）経由が基本。
 
 ### 3.4 Pack 配布形式
 
@@ -128,7 +128,7 @@ Pack の通常実行は Docker 隔離で成立するので、ホストに Python
 - ✅ user_data/secrets（1 key = 1 file、tombstone、journal）
 - ✅ API は list(mask) / set / delete のみ（再表示なし）
 - ✅ ログに値を出さない（監査・診断とも）
-- ✅ `secret.get` の rate_limit=60（事故防止）
+- ✅ `secrets.get` の rate_limit=60（事故防止）
 - 🧩 v1.1: OS keychain（keyring / DPAPI 等）は後回し
 
 ### 5.5 Pack import（フォルダ / zip / rumipack）

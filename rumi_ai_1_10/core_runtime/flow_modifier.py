@@ -373,6 +373,28 @@ class FlowModifierLoader:
                     continue
                 
                 self._loaded_modifiers[result.modifier_id] = result.modifier_def
+
+                # #61: ワイルドカード Modifier 警告
+                if result.modifier_def.target_flow_id == "*":
+                    logger.warning(
+                        "[FlowModifier] Modifier '%s' targets ALL flows (target_flow_id='*'). "
+                        "This modifier will be applied to every flow.",
+                        result.modifier_id,
+                    )
+                    try:
+                        from .audit_logger import get_audit_logger
+                        audit = get_audit_logger()
+                        audit.log_system_event(
+                            event_type="wildcard_modifier_loaded",
+                            success=True,
+                            details={
+                                "modifier_id": result.modifier_id,
+                                "source_pack_id": result.modifier_def.source_pack_id,
+                                "warning": "This modifier applies to ALL flows",
+                            }
+                        )
+                    except Exception:
+                        pass
             else:
                 self._load_errors.append({
                     "file": str(yaml_file),
@@ -551,10 +573,11 @@ class FlowModifierApplier:
     - inject相対位置を保持（再ソートしない）
     """
     
-    def __init__(self, interface_registry=None):
+    def __init__(self, interface_registry=None, dry_run: bool = False):
         self._interface_registry = interface_registry
         self._available_interfaces: Set[str] = set()
         self._available_capabilities: Set[str] = set()
+        self._dry_run = dry_run
     
     def set_interface_registry(self, ir) -> None:
         """InterfaceRegistryを設定"""
@@ -646,17 +669,27 @@ class FlowModifierApplier:
             
             # phaseチェック
             if modifier.phase not in flow_def.phases:
-                result = ModifierApplyResult(
-                    success=False,
-                    modifier_id=modifier.modifier_id,
-                    action=modifier.action,
-                    target_flow_id=modifier.target_flow_id,
-                    target_step_id=modifier.target_step_id,
-                    skipped_reason=f"phase_not_found: {modifier.phase}"
-                )
-                self._log_modifier_skip(modifier, result.skipped_reason)
-                results.append(result)
-                continue
+                # #8: append で phase 未存在の場合、最後の phase にフォールバック
+                if modifier.action == "append" and flow_def.phases:
+                    logger.info(
+                        "[FlowModifier] Phase '%s' not found for append modifier '%s'. "
+                        "Falling back to last phase '%s'.",
+                        modifier.phase, modifier.modifier_id, flow_def.phases[-1],
+                    )
+                    modifier = copy.copy(modifier)
+                    modifier.phase = flow_def.phases[-1]
+                else:
+                    result = ModifierApplyResult(
+                        success=False,
+                        modifier_id=modifier.modifier_id,
+                        action=modifier.action,
+                        target_flow_id=modifier.target_flow_id,
+                        target_step_id=modifier.target_step_id,
+                        skipped_reason=f"phase_not_found: {modifier.phase}"
+                    )
+                    self._log_modifier_skip(modifier, result.skipped_reason)
+                    results.append(result)
+                    continue
             
             if modifier.action == "inject_before":
                 target = modifier.target_step_id or ""
@@ -701,7 +734,13 @@ class FlowModifierApplier:
         
         # 2. inject_before を一括適用（同一注入点ごと）
         for target_step_id, group in inject_before_groups.items():
-            target_index = self._find_step_index(new_steps, target_step_id)
+            # #7: 特殊 target_step_id 値の解決
+            if target_step_id == "__first__":
+                target_index = 0 if new_steps else -1
+            elif target_step_id == "__last__":
+                target_index = (len(new_steps) - 1) if new_steps else -1
+            else:
+                target_index = self._find_step_index(new_steps, target_step_id)
             if target_index < 0:
                 # target不在：全てスキップ
                 for modifier in group:
@@ -733,7 +772,13 @@ class FlowModifierApplier:
         
         # 3. inject_after を一括適用（同一注入点ごと）
         for target_step_id, group in inject_after_groups.items():
-            target_index = self._find_step_index(new_steps, target_step_id)
+            # #7: 特殊 target_step_id 値の解決
+            if target_step_id == "__first__":
+                target_index = 0 if new_steps else -1
+            elif target_step_id == "__last__":
+                target_index = (len(new_steps) - 1) if new_steps else -1
+            else:
+                target_index = self._find_step_index(new_steps, target_step_id)
             if target_index < 0:
                 for modifier in group:
                     result = ModifierApplyResult(
@@ -790,6 +835,10 @@ class FlowModifierApplier:
             source_pack_id=flow_def.source_pack_id
         )
         
+        # #40: dry_run モードでは元の FlowDefinition を返す
+        if self._dry_run:
+            return flow_def, results
+
         return new_flow_def, results
     
     def _apply_single_modifier(
@@ -962,6 +1011,52 @@ class FlowModifierApplier:
         
         steps.pop(target_index)
         return True
+
+    def dry_run_report(
+        self,
+        flow_def: FlowDefinition,
+        modifiers: List[FlowModifierDef],
+    ) -> Dict[str, Any]:
+        """
+        dry-run: 実際の変更を行わず、適用されるはずの変更を記録して返す。
+
+        API 経由で呼び出す想定。内部的に dry_run=True の Applier を使う。
+
+        Args:
+            flow_def: 元の FlowDefinition
+            modifiers: 適用する modifier リスト
+
+        Returns:
+            {"dry_run": True, "flow_id": str, "changes": [...]}
+        """
+        # 一時的に dry_run を有効化
+        orig = self._dry_run
+        self._dry_run = True
+        try:
+            _, results = self.apply_modifiers(flow_def, modifiers)
+        finally:
+            self._dry_run = orig
+
+        changes = []
+        for r in results:
+            changes.append({
+                "modifier_id": r.modifier_id,
+                "action": r.action,
+                "target_flow_id": r.target_flow_id,
+                "target_step_id": r.target_step_id,
+                "success": r.success,
+                "skipped_reason": r.skipped_reason,
+                "errors": r.errors,
+            })
+
+        return {
+            "dry_run": True,
+            "flow_id": flow_def.flow_id,
+            "total_modifiers": len(modifiers),
+            "applied": sum(1 for c in changes if c["success"]),
+            "skipped": sum(1 for c in changes if not c["success"]),
+            "changes": changes,
+        }
 
 
 # グローバルインスタンス

@@ -27,6 +27,26 @@ from .hmac_key_manager import get_hmac_key_manager, HMACKeyManager
 logger = logging.getLogger(__name__)
 
 
+# --- pack_id validation (Fix #9) ---
+PACK_ID_RE = re.compile(r'^[a-zA-Z0-9_-]{1,64}$')
+_SAFE_ERROR_MSG = "Internal server error"
+
+
+def _log_internal_error(context: str, exc: Exception) -> None:
+    """Log exception details to audit log (or fallback to logger) without exposing to client."""
+    try:
+        from .audit_logger import get_audit_logger
+        audit = get_audit_logger()
+        audit.log_system_event(
+            event_type="api_internal_error",
+            success=False,
+            details={"context": context, "error": str(exc), "type": type(exc).__name__},
+        )
+    except Exception:
+        logger.exception(f"Internal error in {context}: {exc}")
+
+
+
 @dataclass
 class APIResponse:
     success: bool
@@ -51,6 +71,12 @@ class PackAPIHandler(BaseHTTPRequestHandler):
     
     def log_message(self, format: str, *args) -> None:
         logger.info(f"API: {args[0]}")
+
+    @staticmethod
+    def _validate_pack_id(pack_id: str) -> bool:
+        """pack_id が安全なパターンに合致するか検証する (Fix #9)"""
+        return bool(pack_id and PACK_ID_RE.match(pack_id))
+
     
     def _send_response(self, response: APIResponse, status: int = 200) -> None:
         self.send_response(status)
@@ -182,6 +208,9 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             
             elif path.startswith("/api/packs/") and path.endswith("/status"):
                 pack_id = path.split("/")[3]
+                if not self._validate_pack_id(pack_id):
+                    self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
+                    return
                 result = self._get_pack_status(pack_id)
                 if result:
                     self._send_response(APIResponse(True, result))
@@ -265,8 +294,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                     self._send_response(APIResponse(False, error="Not found"), 404)
                 
         except Exception as e:
-            logger.exception(f"API error: {e}")
-            self._send_response(APIResponse(False, error=str(e)), 500)
+            _log_internal_error("do_GET", e)
+            self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
     
     def do_POST(self) -> None:
         if not self._check_auth():
@@ -283,6 +312,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                 allowed_ports = body.get("allowed_ports", [])
                 if not pack_id:
                     self._send_response(APIResponse(False, error="Missing pack_id"), 400)
+                elif not self._validate_pack_id(pack_id):
+                    self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
                 elif not allowed_domains and not allowed_ports:
                     self._send_response(APIResponse(False, error="Must specify allowed_domains or allowed_ports"), 400)
                 else:
@@ -300,6 +331,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                 pack_id = body.get("pack_id", "")
                 if not pack_id:
                     self._send_response(APIResponse(False, error="Missing pack_id"), 400)
+                elif not self._validate_pack_id(pack_id):
+                    self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
                 else:
                     result = self._network_revoke(pack_id, reason=body.get("reason", ""))
                     if result.get("success"):
@@ -313,6 +346,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                 port = body.get("port")
                 if not pack_id or not domain or port is None:
                     self._send_response(APIResponse(False, error="Missing pack_id, domain, or port"), 400)
+                elif not self._validate_pack_id(pack_id):
+                    self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
                 else:
                     result = self._network_check(pack_id, domain, int(port))
                     self._send_response(APIResponse(True, result))
@@ -494,6 +529,9 @@ class PackAPIHandler(BaseHTTPRequestHandler):
 
             elif path.startswith("/api/packs/") and path.endswith("/approve"):
                 pack_id = path.split("/")[3]
+                if not self._validate_pack_id(pack_id):
+                    self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
+                    return
                 result = self._approve_pack(pack_id)
                 if result.get("success"):
                     self._send_response(APIResponse(True, result))
@@ -502,12 +540,18 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             
             elif path.startswith("/api/packs/") and path.endswith("/reject"):
                 pack_id = path.split("/")[3]
+                if not self._validate_pack_id(pack_id):
+                    self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
+                    return
                 reason = body.get("reason", "User rejected")
                 result = self._reject_pack(pack_id, reason)
                 self._send_response(APIResponse(True, result))
             
             elif path.startswith("/api/containers/") and path.endswith("/start"):
                 pack_id = path.split("/")[3]
+                if not self._validate_pack_id(pack_id):
+                    self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
+                    return
                 result = self._start_container(pack_id)
                 if result.get("success"):
                     self._send_response(APIResponse(True, result))
@@ -516,6 +560,9 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             
             elif path.startswith("/api/containers/") and path.endswith("/stop"):
                 pack_id = path.split("/")[3]
+                if not self._validate_pack_id(pack_id):
+                    self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
+                    return
                 result = self._stop_container(pack_id)
                 self._send_response(APIResponse(True, result))
             
@@ -523,6 +570,9 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                 parts = path.split("/")
                 pack_id = parts[3]
                 privilege_id = parts[5]
+                if not self._validate_pack_id(pack_id):
+                    self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
+                    return
                 result = self._grant_privilege(pack_id, privilege_id)
                 if result.get("success"):
                     self._send_response(APIResponse(True, result))
@@ -533,6 +583,9 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                 parts = path.split("/")
                 pack_id = parts[3]
                 privilege_id = parts[5]
+                if not self._validate_pack_id(pack_id):
+                    self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
+                    return
                 params = body.get("params", {})
                 result = self._execute_privilege(pack_id, privilege_id, params)
                 if result.get("success"):
@@ -558,8 +611,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                     self._send_response(APIResponse(False, error="Not found"), 404)
                 
         except Exception as e:
-            logger.exception(f"API error: {e}")
-            self._send_response(APIResponse(False, error=str(e)), 500)
+            _log_internal_error("do_POST", e)
+            self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
     
 
     def do_PUT(self) -> None:
@@ -579,8 +632,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                 self._send_response(APIResponse(False, error="Not found"), 404)
 
         except Exception as e:
-            logger.exception(f"API error: {e}")
-            self._send_response(APIResponse(False, error=str(e)), 500)
+            _log_internal_error("do_PUT", e)
+            self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
 
     def do_DELETE(self) -> None:
         if not self._check_auth():
@@ -592,26 +645,37 @@ class PackAPIHandler(BaseHTTPRequestHandler):
         try:
             if path.startswith("/api/containers/"):
                 pack_id = path.split("/")[3]
+                if not self._validate_pack_id(pack_id):
+                    self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
+                    return
                 result = self._remove_container(pack_id)
                 self._send_response(APIResponse(True, result))
             
             elif path.startswith("/api/packs/"):
-                # Pack独自ルート (DELETE) を先にチェック
-                match = self._match_pack_route(path, "DELETE")
-                if match:
-                    body = self._parse_body()
-                    self._handle_pack_route_request(path, body, "DELETE", match)
+                parts = path.strip("/").split("/")
+                # Built-in: DELETE /api/packs/{pack_id} (exactly 3 segments: api/packs/{id})
+                if len(parts) == 3:
+                    pack_id = parts[2]
+                    if not self._validate_pack_id(pack_id):
+                        self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
+                    else:
+                        result = self._uninstall_pack(pack_id)
+                        self._send_response(APIResponse(True, result))
                 else:
-                    pack_id = path.split("/")[3]
-                    result = self._uninstall_pack(pack_id)
-                    self._send_response(APIResponse(True, result))
+                    # Non-built-in sub-path → try Pack custom routes
+                    match = self._match_pack_route(path, "DELETE")
+                    if match:
+                        body = self._parse_body()
+                        self._handle_pack_route_request(path, body, "DELETE", match)
+                    else:
+                        self._send_response(APIResponse(False, error="Not found"), 404)
             
             else:
                 self._send_response(APIResponse(False, error="Not found"), 404)
                 
         except Exception as e:
-            logger.exception(f"API error: {e}")
-            self._send_response(APIResponse(False, error=str(e)), 500)
+            _log_internal_error("do_DELETE", e)
+            self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
     
     # ------------------------------------------------------------------
     # Pack endpoints
@@ -718,7 +782,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             )
             return {"success": True, "pack_id": pack_id, "grant": grant.to_dict()}
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            _log_internal_error("network_grant", e)
+            return {"success": False, "error": _SAFE_ERROR_MSG}
 
     def _network_revoke(self, pack_id: str, reason: str = "") -> dict:
         try:
@@ -727,7 +792,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             success = ngm.revoke_network_access(pack_id=pack_id, reason=reason)
             return {"success": success, "pack_id": pack_id, "revoked": success}
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            _log_internal_error("network_revoke", e)
+            return {"success": False, "error": _SAFE_ERROR_MSG}
 
     def _network_check(self, pack_id: str, domain: str, port: int) -> dict:
         try:
@@ -742,7 +808,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                 "port": result.port,
             }
         except Exception as e:
-            return {"allowed": False, "error": str(e)}
+            _log_internal_error("network_check", e)
+            return {"allowed": False, "error": _SAFE_ERROR_MSG}
 
     def _network_list(self) -> dict:
         try:
@@ -757,7 +824,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                 "disabled_count": len(disabled),
             }
         except Exception as e:
-            return {"grants": {}, "error": str(e)}
+            _log_internal_error("network_list", e)
+            return {"grants": {}, "error": _SAFE_ERROR_MSG}
 
     # ------------------------------------------------------------------
     # Capability Grant endpoints (G-1)
@@ -787,7 +855,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                 pass
             return {"success": True, "principal_id": principal_id, "permission_id": permission_id, "granted": True}
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            _log_internal_error("capability_grants_grant", e)
+            return {"success": False, "error": _SAFE_ERROR_MSG}
 
     def _capability_grants_revoke(self, principal_id: str, permission_id: str) -> dict:
         try:
@@ -812,7 +881,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                 pass
             return {"success": True, "principal_id": principal_id, "permission_id": permission_id, "revoked": True}
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            _log_internal_error("capability_grants_revoke", e)
+            return {"success": False, "error": _SAFE_ERROR_MSG}
 
     def _capability_grants_list(self, principal_id: str = None) -> dict:
         try:
@@ -831,7 +901,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                     result[pid] = g.to_dict() if hasattr(g, "to_dict") else g
                 return {"grants": result, "count": len(result)}
         except Exception as e:
-            return {"grants": {}, "error": str(e)}
+            _log_internal_error("capability_grants_list", e)
+            return {"grants": {}, "error": _SAFE_ERROR_MSG}
     
     # ------------------------------------------------------------------
     # Privilege endpoints
@@ -897,7 +968,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             result = installer.scan_candidates(ecosystem_dir)
             return result.to_dict()
         except Exception as e:
-            return {"error": str(e), "scanned_count": 0, "pending_created": 0}
+            _log_internal_error("capability_scan", e)
+            return {"error": _SAFE_ERROR_MSG, "scanned_count": 0, "pending_created": 0}
 
     def _capability_list_requests(self, status_filter: str = "all") -> dict:
         try:
@@ -906,7 +978,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             items = installer.list_items(status_filter)
             return {"items": items, "count": len(items), "status_filter": status_filter}
         except Exception as e:
-            return {"items": [], "error": str(e)}
+            _log_internal_error("capability_list_requests", e)
+            return {"items": [], "error": _SAFE_ERROR_MSG}
 
     def _capability_approve(self, candidate_key: str, notes: str = "") -> dict:
         try:
@@ -915,7 +988,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             result = installer.approve_and_install(candidate_key, actor="api_user", notes=notes)
             return result.to_dict()
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            _log_internal_error("capability_approve", e)
+            return {"success": False, "error": _SAFE_ERROR_MSG}
 
     def _capability_reject(self, candidate_key: str, reason: str = "") -> dict:
         try:
@@ -924,7 +998,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             result = installer.reject(candidate_key, actor="api_user", reason=reason)
             return result.to_dict()
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            _log_internal_error("capability_reject", e)
+            return {"success": False, "error": _SAFE_ERROR_MSG}
 
     def _capability_list_blocked(self) -> dict:
         try:
@@ -933,7 +1008,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             blocked = installer.list_blocked()
             return {"blocked": blocked, "count": len(blocked)}
         except Exception as e:
-            return {"blocked": {}, "error": str(e)}
+            _log_internal_error("capability_list_blocked", e)
+            return {"blocked": {}, "error": _SAFE_ERROR_MSG}
 
     def _capability_unblock(self, candidate_key: str, reason: str = "") -> dict:
         try:
@@ -942,7 +1018,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             result = installer.unblock(candidate_key, actor="api_user", reason=reason)
             return result.to_dict()
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            _log_internal_error("capability_unblock", e)
+            return {"success": False, "error": _SAFE_ERROR_MSG}
 
     # ------------------------------------------------------------------
     # Pip dependency endpoints
@@ -955,7 +1032,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             result = installer.scan_candidates(ecosystem_dir)
             return result.to_dict()
         except Exception as e:
-            return {"error": str(e), "scanned_count": 0, "pending_created": 0}
+            _log_internal_error("pip_scan", e)
+            return {"error": _SAFE_ERROR_MSG, "scanned_count": 0, "pending_created": 0}
 
     def _pip_list_requests(self, status_filter: str = "all") -> dict:
         try:
@@ -964,7 +1042,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             items = installer.list_items(status_filter)
             return {"items": items, "count": len(items), "status_filter": status_filter}
         except Exception as e:
-            return {"items": [], "error": str(e)}
+            _log_internal_error("pip_list_requests", e)
+            return {"items": [], "error": _SAFE_ERROR_MSG}
 
     def _pip_approve(self, candidate_key: str, allow_sdist: bool = False, index_url: str = "https://pypi.org/simple") -> dict:
         try:
@@ -976,7 +1055,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             )
             return result.to_dict()
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            _log_internal_error("pip_approve", e)
+            return {"success": False, "error": _SAFE_ERROR_MSG}
 
     def _pip_reject(self, candidate_key: str, reason: str = "") -> dict:
         try:
@@ -985,7 +1065,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             result = installer.reject(candidate_key, actor="api_user", reason=reason)
             return result.to_dict()
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            _log_internal_error("pip_reject", e)
+            return {"success": False, "error": _SAFE_ERROR_MSG}
 
     def _pip_list_blocked(self) -> dict:
         try:
@@ -994,7 +1075,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             blocked = installer.list_blocked()
             return {"blocked": blocked, "count": len(blocked)}
         except Exception as e:
-            return {"blocked": {}, "error": str(e)}
+            _log_internal_error("pip_list_blocked", e)
+            return {"blocked": {}, "error": _SAFE_ERROR_MSG}
 
     def _pip_unblock(self, candidate_key: str, reason: str = "") -> dict:
         try:
@@ -1003,7 +1085,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             result = installer.unblock(candidate_key, actor="api_user", reason=reason)
             return result.to_dict()
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            _log_internal_error("pip_unblock", e)
+            return {"success": False, "error": _SAFE_ERROR_MSG}
 
     # ------------------------------------------------------------------
     # Uninstall
@@ -1191,10 +1274,10 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                 "execution_time": elapsed,
             }
         except Exception as e:
-            logger.exception(f"Flow execution error: {e}")
+            _log_internal_error("run_flow", e)
             return {
                 "success": False,
-                "error": str(e),
+                "error": _SAFE_ERROR_MSG,
                 "flow_id": flow_id,
                 "status_code": 500,
             }
@@ -1387,21 +1470,51 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             logger.info(f"Pack routes reloaded: {count} routes")
             return {"reloaded": True, "route_count": count}
         except Exception as e:
-            logger.exception(f"Failed to reload pack routes: {e}")
-            return {"reloaded": False, "error": str(e)}
+            _log_internal_error("reload_pack_routes", e)
+            return {"reloaded": False, "error": _SAFE_ERROR_MSG}
 
     # ------------------------------------------------------------------
     # Pack import/apply
     # ------------------------------------------------------------------
 
     def _pack_import(self, source_path: str, notes: str = "") -> dict:
+        # Fix #30: restrict source_path to allowed directories
+        try:
+            resolved = Path(source_path).resolve()
+        except (OSError, ValueError):
+            return {"success": False, "error": "Invalid path"}
+
+        allowed_roots = [Path.cwd().resolve()]
+        env_paths = os.environ.get("RUMI_IMPORT_ALLOWED_PATHS", "")
+        if env_paths.strip():
+            for p in env_paths.split(":"):
+                p = p.strip()
+                if p:
+                    try:
+                        allowed_roots.append(Path(p).resolve())
+                    except (OSError, ValueError):
+                        pass
+
+        path_allowed = False
+        for root in allowed_roots:
+            try:
+                resolved.relative_to(root)
+                path_allowed = True
+                break
+            except ValueError:
+                continue
+
+        if not path_allowed:
+            return {"success": False, "error": "Source path is outside allowed directories"}
+
         try:
             from .pack_importer import get_pack_importer
             importer = get_pack_importer()
             result = importer.import_pack(source_path, notes=notes)
             return result.to_dict()
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            _log_internal_error("pack_import", e)
+            return {"success": False, "error": _SAFE_ERROR_MSG}
 
     def _pack_apply(self, staging_id: str, mode: str = "replace") -> dict:
         try:
@@ -1410,7 +1523,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             result = applier.apply(staging_id, mode=mode)
             return result.to_dict()
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            _log_internal_error("pack_apply", e)
+            return {"success": False, "error": _SAFE_ERROR_MSG}
 
     # ------------------------------------------------------------------
     # Secrets
@@ -1423,7 +1537,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             keys = store.list_keys()
             return {"secrets": [k.to_dict() for k in keys], "count": len(keys)}
         except Exception as e:
-            return {"secrets": [], "error": str(e)}
+            _log_internal_error("secrets_list", e)
+            return {"secrets": [], "error": _SAFE_ERROR_MSG}
 
     def _secrets_set(self, body: dict) -> dict:
         key = body.get("key", "")
@@ -1450,7 +1565,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             result = store.delete_secret(key)
             return result.to_dict()
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            _log_internal_error("secrets_delete", e)
+            return {"success": False, "error": _SAFE_ERROR_MSG}
 
     # ------------------------------------------------------------------
     # Store
@@ -1463,7 +1579,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             stores = reg.list_stores()
             return {"stores": stores, "count": len(stores)}
         except Exception as e:
-            return {"stores": [], "error": str(e)}
+            _log_internal_error("stores_list", e)
+            return {"stores": [], "error": _SAFE_ERROR_MSG}
 
     def _stores_create(self, body: dict) -> dict:
         store_id = body.get("store_id", "")
@@ -1476,7 +1593,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             result = reg.create_store(store_id, root_path)
             return result.to_dict()
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            _log_internal_error("stores_create", e)
+            return {"success": False, "error": _SAFE_ERROR_MSG}
 
     # ------------------------------------------------------------------
     # Unit
@@ -1491,7 +1609,7 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             if store_id:
                 store_def = store_reg.get_store(store_id)
                 if store_def is None:
-                    return {"units": [], "error": f"Store not found: {store_id}"}
+                    return {"units": [], "error": "Store not found"}
                 units = unit_reg.list_units(Path(store_def.root_path))
                 return {"units": [u.to_dict() for u in units], "count": len(units), "store_id": store_id}
             else:
@@ -1506,7 +1624,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                         all_units.extend(units)
                 return {"units": [u.to_dict() for u in all_units], "count": len(all_units)}
         except Exception as e:
-            return {"units": [], "error": str(e)}
+            _log_internal_error("units_list", e)
+            return {"units": [], "error": _SAFE_ERROR_MSG}
 
     def _units_publish(self, body: dict) -> dict:
         store_id = body.get("store_id", "")
@@ -1522,7 +1641,7 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             store_reg = get_store_registry()
             store_def = store_reg.get_store(store_id)
             if store_def is None:
-                return {"success": False, "error": f"Store not found: {store_id}"}
+                return {"success": False, "error": "Store not found"}
             unit_reg = get_unit_registry()
             result = unit_reg.publish_unit(
                 Path(store_def.root_path), Path(source_dir),
@@ -1530,7 +1649,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             )
             return result.to_dict()
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            _log_internal_error("units_publish", e)
+            return {"success": False, "error": _SAFE_ERROR_MSG}
 
     def _units_execute(self, body: dict) -> dict:
         principal_id = body.get("principal_id", "")
@@ -1546,7 +1666,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             result = executor.execute(principal_id, unit_ref, mode, args, timeout)
             return result.to_dict()
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            _log_internal_error("units_execute", e)
+            return {"success": False, "error": _SAFE_ERROR_MSG}
 
 class PackAPIServer:
     def __init__(
@@ -1560,7 +1681,24 @@ class PackAPIServer:
         kernel = None
     ):
         self.kernel = kernel
-        self.host = host
+        # Fix #3: bind address restriction — env var override + 0.0.0.0 warning
+        resolved_host = os.environ.get("RUMI_API_BIND_ADDRESS", host) or "127.0.0.1"
+        if resolved_host == "0.0.0.0":
+            logger.warning(
+                "SECURITY WARNING: API server binding to 0.0.0.0 (all interfaces). "
+                "This exposes the API to the network. Use 127.0.0.1 for local-only access."
+            )
+            try:
+                from .audit_logger import get_audit_logger
+                audit = get_audit_logger()
+                audit.log_system_event(
+                    event_type="api_bind_all_interfaces",
+                    success=True,
+                    details={"bind_address": "0.0.0.0", "warning": "Exposed to network"},
+                )
+            except Exception:
+                pass
+        self.host = resolved_host
         self.port = port
         self.approval_manager = approval_manager
         self.container_orchestrator = container_orchestrator

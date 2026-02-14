@@ -37,6 +37,14 @@ class KernelConfig:
     flow_path: str = "flow/project.flow.yaml"
 
 
+# --- Flow chain / resolve depth limits (Fix #58, #70) ---
+MAX_FLOW_CHAIN_DEPTH = 10
+MAX_RESOLVE_DEPTH = 20
+
+# --- Condition parser pattern (Fix #16) ---
+_CONDITION_OP_RE = re.compile(r'\s+(==|!=)\s+')
+
+
 class KernelCore:
     """
     Kernelエンジン本体
@@ -504,6 +512,14 @@ class KernelCore:
         ctx["_flow_execution_id"] = execution_id
         ctx["_flow_timeout"] = False
         call_stack = ctx.setdefault("_flow_call_stack", [])
+
+        # Fix #58: chain depth limit
+        if len(call_stack) >= MAX_FLOW_CHAIN_DEPTH:
+            return {
+                "_error": f"Flow chain depth limit exceeded ({MAX_FLOW_CHAIN_DEPTH}): {' -> '.join(call_stack)} -> {flow_id}",
+                "_flow_call_stack": list(call_stack),
+            }
+
         if flow_id in call_stack:
             return {"_error": f"Recursive flow detected: {' -> '.join(call_stack)} -> {flow_id}", "_flow_call_stack": list(call_stack)}
         call_stack.append(flow_id)
@@ -644,6 +660,19 @@ class KernelCore:
             return ctx, None
 
         call_stack = ctx.get("_flow_call_stack", [])
+
+        # Fix #58: chain depth limit
+        if len(call_stack) >= MAX_FLOW_CHAIN_DEPTH:
+            error_msg = f"Flow chain depth limit exceeded ({MAX_FLOW_CHAIN_DEPTH}): {' -> '.join(call_stack)} -> {flow_name}"
+            self.diagnostics.record_step(
+                phase="flow",
+                step_id=f"subflow.{flow_name}.depth_limit",
+                handler="kernel:subflow",
+                status="failed",
+                error={"type": "FlowChainDepthError", "message": error_msg}
+            )
+            return ctx, {"_error": error_msg}
+
         if flow_name in call_stack:
             error_msg = f"Recursive flow detected: {' -> '.join(call_stack)} -> {flow_name}"
             self.diagnostics.record_step(
@@ -725,33 +754,43 @@ class KernelCore:
     # ------------------------------------------------------------------
 
     def _eval_condition(self, condition: str, ctx: Dict[str, Any]) -> bool:
+        """条件式を評価する。
+
+        Fix #16: 正規表現で最初の演算子を検出し分割する。
+        左辺は変数参照（スペース付き演算子を含まない）前提。
+        値側に " == " や " != " が含まれていても誤動作しない。
+        """
         condition = condition.strip()
-        if " == " in condition:
-            left, right = condition.split(" == ", 1)
-            left_val = self._resolve_value(left.strip(), ctx)
-            right_val = right.strip().strip('"\'')
+
+        # 最初の == or != 演算子を検出（左辺は変数参照なので演算子を含まない前提）
+        m = _CONDITION_OP_RE.search(condition)
+        if m:
+            op = m.group(1)  # "==" or "!="
+            left = condition[:m.start()].strip()
+            right = condition[m.end():].strip()
+
+            left_val = self._resolve_value(left, ctx)
+            right_val = right.strip('"\'')
+
             if right_val.lower() == "true":
-                return left_val == True
-            if right_val.lower() == "false":
-                return left_val == False
-            try:
-                return left_val == int(right_val)
-            except ValueError:
-                pass
-            return str(left_val) == right_val
-        if " != " in condition:
-            left, right = condition.split(" != ", 1)
-            left_val = self._resolve_value(left.strip(), ctx)
-            right_val = right.strip().strip('"\'')
-            if right_val.lower() == "true":
-                return left_val != True
-            if right_val.lower() == "false":
-                return left_val != False
-            try:
-                return left_val != int(right_val)
-            except ValueError:
-                pass
-            return str(left_val) != right_val
+                target = True
+            elif right_val.lower() == "false":
+                target = False
+            else:
+                try:
+                    target = int(right_val)
+                except ValueError:
+                    target = right_val
+
+            if op == "==":
+                if isinstance(target, (bool, int)):
+                    return left_val == target
+                return str(left_val) == target
+            else:  # "!="
+                if isinstance(target, (bool, int)):
+                    return left_val != target
+                return str(left_val) != target
+
         return bool(self._resolve_value(condition, ctx))
 
     # ------------------------------------------------------------------
@@ -1019,11 +1058,14 @@ class KernelCore:
     # 変数解決
     # ------------------------------------------------------------------
 
-    def _resolve_value(self, value: Any, ctx: Dict[str, Any]) -> Any:
+    def _resolve_value(self, value: Any, ctx: Dict[str, Any], _depth: int = 0) -> Any:
+        # Fix #70: recursion depth limit
+        if _depth > MAX_RESOLVE_DEPTH:
+            return value
         if isinstance(value, dict):
-            return {k: self._resolve_value(v, ctx) for k, v in value.items()}
+            return {k: self._resolve_value(v, ctx, _depth + 1) for k, v in value.items()}
         if isinstance(value, list):
-            return [self._resolve_value(item, ctx) for item in value]
+            return [self._resolve_value(item, ctx, _depth + 1) for item in value]
         if not isinstance(value, str):
             return value
         if not value.startswith("${") or not value.endswith("}"):

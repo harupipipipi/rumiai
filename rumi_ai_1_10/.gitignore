@@ -307,3 +307,5 @@ docs/build/
 site/
 user_data/
 
+# Backup directory
+.backups/
