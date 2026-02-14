@@ -496,7 +496,7 @@ API key などの秘密値を安全に管理します。
 - `user_data/secrets/` に格納（1 key = 1 file、tombstone、journal）
 - ログに秘密値を一切出さない（監査・診断とも）
 - Pack に秘密ファイルを直接見せない
-- 取得は capability（例: `secret.get`）経由
+- 取得は capability（例: `secrets.get`）経由
 - API は list（mask 付き）/ set / delete のみ（再表示なし）
 
 ---
@@ -723,7 +723,7 @@ def convert(data, context=None):
 
 ### addon_manager
 
-`backend_core/ecosystem/addon_manager.py` に JSON Patch ベースの addon 機構が存在します。v1 で deprecated（新規利用停止、警告）、v2 で互換期間、v3 で削除予定です。
+`backend_core/ecosystem/addon_manager.py` に JSON Patch ベースの addon 機構が存在していましたが、Phase 2 で削除されました。現在はコードベースに存在しません。
 
 ### flow/ ディレクトリ
 

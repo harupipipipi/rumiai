@@ -21,10 +21,11 @@
 10. [Secrets 管理](#secrets-管理)
 11. [Pack Import / Apply](#pack-import--apply)
 12. [Docker / コンテナ管理](#docker--コンテナ管理)
-13. [UDS ソケット設定](#uds-ソケット設定)
-14. [監査ログの読み方](#監査ログの読み方)
-15. [Pending Export](#pending-export)
-16. [トラブルシューティング](#トラブルシューティング)
+13. [Flow 実行](#flow-実行)
+14. [UDS ソケット設定](#uds-ソケット設定)
+15. [監査ログの読み方](#監査ログの読み方)
+16. [Pending Export](#pending-export)
+17. [トラブルシューティング](#トラブルシューティング)
 
 ---
 
@@ -169,6 +170,35 @@ export RUMI_SECURITY_MODE=permissive
 | GET | `/api/secrets` | キー一覧（値はマスク） |
 | POST | `/api/secrets/set` | 秘密値を設定 |
 | POST | `/api/secrets/delete` | 秘密値を削除 |
+
+### Flow 実行
+
+| メソッド | パス | 説明 |
+|----------|------|------|
+| GET | `/api/flows` | 登録済み Flow 一覧 |
+| POST | `/api/flows/{flow_id}/run` | Flow を実行 |
+
+### Store
+
+| メソッド | パス | 説明 |
+|----------|------|------|
+| GET | `/api/stores` | Store 一覧 |
+| POST | `/api/stores/create` | Store を作成 |
+
+### Unit
+
+| メソッド | パス | 説明 |
+|----------|------|------|
+| GET | `/api/units?store_id=xxx` | Unit 一覧 |
+| POST | `/api/units/publish` | Unit を公開 |
+| POST | `/api/units/execute` | Unit を実行 |
+
+### Pack 独自ルート
+
+| メソッド | パス | 説明 |
+|----------|------|------|
+| GET | `/api/routes` | 登録済みルート一覧 |
+| POST | `/api/routes/reload` | ルートテーブルを再読み込み |
 
 ### Docker / コンテナ
 
@@ -506,6 +536,30 @@ curl -X POST http://localhost:8765/api/containers/{pack_id}/start \
 curl -X POST http://localhost:8765/api/containers/{pack_id}/stop \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
+
+---
+
+## Flow 実行
+
+### Flow 一覧の取得
+
+```bash
+curl http://localhost:8765/api/flows \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### Flow の実行
+
+```bash
+curl -X POST http://localhost:8765/api/flows/hello/run \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"inputs": {"name": "World"}, "timeout": 300}'
+```
+
+`inputs` は Flow の入力データ（dict）、`timeout` は最大実行時間（秒、デフォルト 300、最大 600）です。
+
+同時実行数は `RUMI_MAX_CONCURRENT_FLOWS` 環境変数で制限されます（デフォルト 10）。
 
 ---
 

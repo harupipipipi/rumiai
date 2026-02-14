@@ -195,15 +195,9 @@ Pack の通常実行は Docker 隔離で成立するので、ホストに Python
 
 ---
 
-## 8. Addon（現状と廃止方針）
+## 8. Addon（廃止済み）
 
-現状: `backend_core/ecosystem/addon_manager.py` に JSON Patch ベースの addon 機構が存在。
-
-廃止方針:
-
-- v1: deprecated（新規利用停止、警告）
-- v2: 互換期間（必要なら移行ガイド）
-- v3: 削除
+`backend_core/ecosystem/addon_manager.py` に存在していた JSON Patch ベースの addon 機構は削除済みです。Flow Modifier がその役割を代替します。
 
 ---
 
@@ -235,3 +229,5 @@ Pack の通常実行は Docker 隔離で成立するので、ホストに Python
 - auto update（ユーザーの明示操作無しに ecosystem を書き換える）
 - 監査ログに秘密値や復号可能情報を出す
 ```
+
+修正箇所は A3 の 1 箇所です。セクション 8 の見出しを「Addon（現状と廃止方針）」から「Addon（廃止済み）」に変更し、本文を addon_manager.py が削除済みであることを反映した記述に置き換えました。それ以外の箇所は修正指示に該当する変更がないため、原文のままです。

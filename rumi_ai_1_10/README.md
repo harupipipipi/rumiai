@@ -103,6 +103,7 @@ project_root/
 │   ├── flow_loader.py              # Flow YAML ローダー
 │   ├── flow_modifier.py            # Flow modifier 適用
 │   ├── flow_composer.py            # Flow 合成
+│   ├── flow_scheduler.py           # Flow スケジューラー（cron / interval）
 │   ├── function_alias.py           # 関数エイリアス
 │   ├── vocab_registry.py           # 語彙レジストリ
 │   ├── shared_dict/                # 共有辞書システム
@@ -134,8 +135,7 @@ project_root/
 │       ├── active_ecosystem.py     # アクティブ ecosystem 管理
 │       ├── initializer.py          # 初期化
 │       ├── uuid_utils.py           # UUID ユーティリティ
-│       ├── json_patch.py           # JSON Patch
-│       └── addon_manager.py        # Addon 管理（deprecated）
+│       └── json_patch.py           # JSON Patch
 │
 ├── ecosystem/                      # Pack 格納（外部供給物）
 │   ├── <pack_id>/                  # 推奨パス
@@ -143,6 +143,7 @@ project_root/
 │   │       ├── ecosystem.json
 │   │       ├── permissions.json
 │   │       ├── requirements.lock
+│   │       ├── routes.json
 │   │       ├── blocks/
 │   │       ├── flows/
 │   │       ├── components/
@@ -174,6 +175,7 @@ project_root/
 │   │       └── modifiers/
 │   ├── pending/                    # 承認待ちサマリー
 │   │   └── summary.json
+│   ├── stores/                     # Store データ
 │   └── settings/                   # 設定・共有辞書
 │       ├── shared_dict/
 │       └── lib_execution_records.json
