@@ -1,5 +1,4 @@
 
-
 ```markdown
 # Rumi AI OS — Pack Development Guide
 
@@ -127,7 +126,8 @@ def run(input_data, context=None):
             - owner_pack: 所有 Pack ID
             - inputs: 入力データ
             - network_check(domain, port) -> {allowed, reason}
-            - http_request(method, url, ...) -> ProxyResponse
+            - http_request(method, url, ...) -> dict
+            - capability_socket: Capability UDS ソケットパス（存在する場合）
 
     Returns:
         JSON 互換の dict
@@ -222,6 +222,8 @@ steps:
   output: context
 ```
 
+`handler` タイプは `input.handler` で指定された Kernel ハンドラー（`kernel:*`）または InterfaceRegistry 登録済みハンドラーを直接呼び出します。`input.args` がハンドラーの引数として渡されます。
+
 #### set
 
 ```yaml
@@ -233,6 +235,23 @@ steps:
     key: "model"
     value: "gpt-4"
 ```
+
+> **注意**: `set` タイプは InterfaceRegistry に登録された `flow.construct.set` ハンドラーによって処理されます。Flow ローダーは `set` を標準ステップタイプとして解釈しますが、実行は construct 経由です。`set` construct が登録されていない場合、ステップはスキップされます。
+
+#### flow（サブ Flow 呼び出し）
+
+```yaml
+- id: run_sub_pipeline
+  phase: main
+  priority: 50
+  type: flow
+  flow: sub_flow_id
+  args:
+    param1: "${ctx.value}"
+  output: sub_result
+```
+
+`flow` タイプは別の Flow をサブ Flow として呼び出します。再帰的な呼び出し（循環参照）は自動検出され、エラーになります。サブ Flow のコンテキストは親からディープコピーされ、`args` で指定した値が追加されます。
 
 ### 変数展開
 
@@ -268,7 +287,7 @@ steps:
   # ...
 ```
 
-cron 式は `*`、`*/N`、数値、カンマ区切り、範囲（`N-M`）、範囲+ステップ（`N-M/S`）をサポートします。同一 Flow の重複実行は自動的に防止されます。
+cron 式は `*`、`*/N`、数値、カンマ区切り、範囲（`N-M`）、範囲+ステップ（`N-M/S`）をサポートします。スケジューラーは 10 秒間隔の tick で評価されるため、cron の精度は分単位です。同一 Flow の重複実行は自動的に防止されます。
 
 ### Flow 制御プロトコル
 
@@ -284,6 +303,8 @@ def run(input_data, context=None):
 ```
 
 `{"__flow_control": "abort", "reason": "..."}` を返すと、以降のステップは実行されずにフローが中断されます。中断理由は diagnostics に記録されます。
+
+> 現時点で `__flow_control` がサポートする値は `"abort"` のみです。その他の値は無視されます。
 
 ---
 
@@ -326,6 +347,10 @@ step:
 | `append` | フェーズの末尾に追加 |
 | `replace` | 指定ステップを置換 |
 | `remove` | 指定ステップを削除 |
+
+> **phase の制約**: Modifier の `phase` は対象 Flow の `phases` リストに含まれている必要があります。存在しない phase を指定した場合、Modifier はスキップされます。
+
+> **適用順序**: Modifier は phase → priority → modifier_id の順でソートされ、決定的に適用されます。同一注入点（同じ `target_step_id` への `inject_before` / `inject_after`）に複数の Modifier がある場合は priority → step.id → modifier_id の順で一括挿入され、インデックスずれによる非決定性を防ぎます。`replace` / `remove` は inject / append より先に適用されます。
 
 ### ワイルドカード target_flow_id
 
@@ -396,6 +421,8 @@ def run(input_data, context=None):
         return {"error": result["error"]}
 ```
 
+> **タイムアウト上限**: `timeout_seconds` の最大値は 120 秒です。120 を超える値を指定しても 120 秒に切り詰められます。この上限は `rumi_syscall` と `rumi_capability` の両方に適用されます。
+
 ### アクセス可否の事前チェック
 
 ```python
@@ -450,7 +477,7 @@ curl -X POST http://localhost:8765/api/capability/grants/grant \
 ### 重要な制約
 
 - `get` は Capability 経由のみで取得可能です。シークレットの値を直接再表示する API は存在しません
-- `secrets.get` には rate limit が適用されます（デフォルト 60 回/分/Pack、`RUMI_SECRET_GET_RATE_LIMIT` で変更可能）
+- `secrets.get` には rate limit が適用されます（デフォルト 60 回/分/Pack、環境変数 `RUMI_SECRET_GET_RATE_LIMIT` で変更可能、sliding window 方式）
 - 値はログ・監査・例外メッセージに一切含まれません
 - キーの存在有無もエラーメッセージからは判別できません（"Access denied or secret not found" で統一）
 
@@ -499,14 +526,20 @@ result = rumi_capability.call("store.get", args={
     "key": "users/user_001"
 })
 if result["success"]:
-    user = result["output"]["value"]
+    output = result["output"]
+    if output.get("success"):
+        user = output["value"]
 
 # キー一覧
 result = rumi_capability.call("store.list", args={
     "store_id": "my_store",
     "prefix": "users/"
 })
+```
 
+> `store.list` の `output` には `success`（bool）と `keys`（キー名の配列）が含まれます。
+
+```python
 # 値の削除
 result = rumi_capability.call("store.delete", args={
     "store_id": "my_store",
@@ -533,6 +566,22 @@ curl -X POST http://localhost:8765/api/stores/create \
   -H "Content-Type: application/json" \
   -d '{"store_id": "my_store", "root_path": "user_data/stores/my_store"}'
 ```
+
+> **store_id の制約**: `store_id` は `^[a-zA-Z0-9_-]{1,64}$` に一致する必要があります。
+
+### Built-in Capability Handler 一覧
+
+以下の Capability Handler はコアランタイムに同梱されており、Trust 登録なしで利用可能です（Grant は別途必要）。
+
+| permission_id | handler_id | 説明 | risk |
+|---------------|-----------|------|------|
+| `secrets.get` | `builtin.secrets.get` | シークレット値の読み取り | high |
+| `store.get` | `builtin.store.get` | Store からの値の読み取り | low |
+| `store.set` | `builtin.store.set` | Store への値の書き込み | medium |
+| `store.delete` | `builtin.store.delete` | Store からの値の削除 | medium |
+| `store.list` | `builtin.store.list` | Store 内のキー一覧取得 | low |
+| `pack.inbox.send` | `builtin.pack.inbox.send` | 他 Pack コンポーネントの inbox へ JSON パッチ/置換を送信 | medium |
+| `pack.update.propose_patch` | `builtin.pack.update.propose_patch` | 他 Pack へのファイル変更を提案（ステージング作成、自動適用なし） | high |
 
 ---
 
@@ -893,11 +942,12 @@ curl http://localhost:8765/api/routes \
 - **外部通信は必ず Egress Proxy 経由**で行ってください。`context["http_request"]` を使用します。
 - **lib の書き込み先は `/data` のみです。** それ以外のパスへの書き込みは `--read-only` により失敗します。
 - **pack_identity を変更しないでください。** 更新時に `pack_identity` が変わると apply が拒否されます。
-- **principal_id は v1 では owner_pack に強制上書きされます。** Flow 定義で `principal_id` を指定しても無視されます。
-- **レスポンスサイズ上限は 4MB です。** Capability のレスポンスおよび Egress Proxy のレスポンスは最大 4MB（`RUMI_MAX_RESPONSE_BYTES` で変更可能）です。
+- **principal_id は v1 では owner_pack に強制上書きされます。** Flow 定義や Modifier で `principal_id` を指定しても、実行時には `owner_pack` の値が principal として使用されます。不一致が検出された場合は監査ログに警告が記録されます。
+- **レスポンスサイズ上限について**: Egress Proxy（`rumi_syscall`）および Capability クライアント（`rumi_capability`）のレスポンス上限は 4MB（`RUMI_MAX_RESPONSE_BYTES` で変更可能）です。ただし、Capability Executor（サーバー側サブプロセス実行）のレスポンス上限は 1MB です。
 - **store.set の値サイズ上限はデフォルト 1MB です。** Grant の `grant_config.max_value_bytes` で変更可能です。
 - **FlowScheduler の interval 最小値は 10 秒です。** 10 秒未満を指定しても 10 秒に切り上げられます。
 - **同時 Flow 実行数はデフォルト 10 です。** `RUMI_MAX_CONCURRENT_FLOWS` 環境変数で変更可能です。
+- **Capability 実行のタイムアウト上限は 120 秒です。** `rumi_capability.call()` の `timeout_seconds` に 120 を超える値を指定しても 120 秒に制限されます。デフォルトは 30 秒です。
 
 ---
 
@@ -918,7 +968,9 @@ curl http://localhost:8765/api/routes \
 | `patch(url, body=None, headers=None, timeout_seconds=30.0)` | PATCH ショートカット |
 | `head(url, headers=None, timeout_seconds=30.0)` | HEAD ショートカット |
 
-戻り値は dict で、`success`（bool）、`status_code`（int）、`headers`（dict）、`body`（str）、`error`（str）等を含みます。
+戻り値は dict で、`success`（bool）、`status_code`（int）、`headers`（dict）、`body`（str）、`error`（str）、`error_type`（str）、`latency_ms`（float）、`redirect_hops`（int）、`bytes_read`（int）、`final_url`（str）等を含みます。
+
+`request` は `http_request` のエイリアスです。`rumi_syscall.request(...)` でも同じ動作になります。
 
 ### rumi_capability（Capability 呼び出し）
 
@@ -928,7 +980,7 @@ curl http://localhost:8765/api/routes \
 |------|------|
 | `call(permission_id, args=None, timeout_seconds=30.0, request_id=None)` | Capability を実行 |
 
-戻り値は dict で、`success`（bool）、`output`（Any）、`error`（str）、`latency_ms`（float）を含みます。
+戻り値は dict で、`success`（bool）、`output`（Any）、`error`（str）、`error_type`（str）、`latency_ms`（float）を含みます。
 
 ```python
 import rumi_capability
