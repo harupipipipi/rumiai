@@ -98,7 +98,10 @@ class PackAPIHandler(BaseHTTPRequestHandler):
         raw = self._read_raw_body()
         if not raw:
             return {}
-        return json.loads(raw.decode('utf-8'))
+        try:
+            return json.loads(raw.decode('utf-8'))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return {}
     
     def do_OPTIONS(self) -> None:
         self.send_response(200)
@@ -1138,6 +1141,7 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                     "container_orchestrator", "host_privilege_manager",
                     "pack_api_server",
                     "store_registry", "unit_registry",
+                    "secrets_store",
                 }
                 result_data = {
                     k: v for k, v in ctx.items()
@@ -1342,7 +1346,8 @@ class PackAPIHandler(BaseHTTPRequestHandler):
         # 4. メタデータ: raw body + headers 透過 (C3)
         raw_bytes = getattr(self, "_raw_body_bytes", b"")
         inputs["_raw_body"] = base64.b64encode(raw_bytes).decode("ascii")
-        inputs["_headers"] = {k.lower(): v for k, v in self.headers.items()}
+        _REDACTED_HEADER_NAMES = {"authorization", "cookie", "proxy-authorization", "x-api-key"}
+        inputs["_headers"] = {k.lower(): v for k, v in self.headers.items() if k.lower() not in _REDACTED_HEADER_NAMES}
         inputs["_method"] = method
         inputs["_path"] = path
 
