@@ -11,16 +11,16 @@ Phase2追加: local_pack対応（ecosystem/flows/**の仮想pack）
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 import os
 import sys
+import time
 import threading
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 
 from .paths import (
@@ -31,6 +31,12 @@ from .paths import (
     discover_pack_locations,
     check_pack_id_mismatch,
     PackLocation,
+)
+
+from .hmac_key_manager import (
+    generate_or_load_signing_key,
+    compute_data_hmac,
+    verify_data_hmac,
 )
 
 
@@ -89,58 +95,36 @@ class ApprovalManager:
     ):
         self.packs_dir = Path(packs_dir)
         self.grants_dir = Path(grants_dir)
-        self._secret_key = secret_key or self._generate_or_load_key()
+        if secret_key:
+            self._secret_key: bytes = secret_key.encode("utf-8")
+        else:
+            self._secret_key = generate_or_load_signing_key(
+                self.grants_dir / ".secret_key",
+                env_var="RUMI_HMAC_SECRET",
+            )
         self._approvals: Dict[str, PackApproval] = {}
         self._pack_locations: Dict[str, PackLocation] = {}
         self._lock = threading.RLock()  # RLockで再入可能
         self._initialized = False
+        # #37: ハッシュキャッシュ (key=resolved_path, value=(hashes, monotonic_ts))
+        self._hash_cache: Dict[str, Tuple[Dict[str, str], float]] = {}
+        self._hash_cache_ttl: float = float(
+            os.environ.get("RUMI_HASH_CACHE_TTL_SEC", "30")
+        )
     
     def _now_ts(self) -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     
-    def _generate_or_load_key(self) -> str:
-        """シークレットキーを生成または読み込み"""
-        env_key = os.environ.get("RUMI_HMAC_SECRET")
-        if env_key and len(env_key) >= 32:
-            return env_key
-        
-        try:
-            import keyring
-            stored_key = keyring.get_password("rumi_ai_os", "hmac_secret")
-            if stored_key:
-                return stored_key
-            
-            new_key = hashlib.sha256(os.urandom(32)).hexdigest()
-            keyring.set_password("rumi_ai_os", "hmac_secret", new_key)
-            return new_key
-        except ImportError:
-            pass
-        except Exception:
-            pass
-        
-        key_file = self.grants_dir / ".secret_key"
-        self.grants_dir.mkdir(parents=True, exist_ok=True)
-        
-        if key_file.exists():
-            try:
-                import stat
-                mode = key_file.stat().st_mode
-                if mode & (stat.S_IRWXG | stat.S_IRWXO):
-                    print(f"[SECURITY WARNING] {key_file} has insecure permissions!", file=sys.stderr)
-            except Exception:
-                pass
-            
-            return key_file.read_text(encoding="utf-8").strip()
-        
-        key = hashlib.sha256(os.urandom(32)).hexdigest()
-        key_file.write_text(key, encoding="utf-8")
-        
-        try:
-            os.chmod(key_file, 0o600)
-        except (OSError, AttributeError):
-            pass
-        
-        return key
+    def _invalidate_hash_cache(self, pack_id: str) -> None:
+        """指定 pack のハッシュキャッシュを無効化する"""
+        if pack_id == LOCAL_PACK_ID:
+            local_dir = self._get_local_pack_dir()
+            if local_dir.exists():
+                self._hash_cache.pop(str(local_dir.resolve()), None)
+        else:
+            pack_dir = self._resolve_pack_dir(pack_id)
+            if pack_dir:
+                self._hash_cache.pop(str(pack_dir.resolve()), None)
     
     def initialize(self) -> None:
         """初期化: grants.jsonを読み込み"""
@@ -171,8 +155,7 @@ class ApprovalManager:
             )
             return
 
-        computed_sig = self._compute_hmac(data)
-        if not hmac.compare_digest(stored_sig, computed_sig):
+        if not verify_data_hmac(self._secret_key, data, stored_sig):
             pack_id = data.get("pack_id", path.stem.replace(".grants", ""))
             self._approvals[pack_id] = PackApproval(
                 pack_id=pack_id,
@@ -190,21 +173,11 @@ class ApprovalManager:
         self.grants_dir.mkdir(parents=True, exist_ok=True)
         
         data = approval.to_dict()
-        data["_hmac_signature"] = self._compute_hmac(data)
+        data["_hmac_signature"] = compute_data_hmac(self._secret_key, data)
         
         path = self.grants_dir / f"{approval.pack_id}.grants.json"
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-    
-    def _compute_hmac(self, data: Dict[str, Any]) -> str:
-        """HMACを計算"""
-        data_copy = {k: v for k, v in data.items() if not k.startswith("_hmac")}
-        payload = json.dumps(data_copy, sort_keys=True, ensure_ascii=False)
-        return hmac.new(
-            self._secret_key.encode("utf-8"),
-            payload.encode("utf-8"),
-            hashlib.sha256
-        ).hexdigest()
     
     def _is_local_pack_mode_enabled(self) -> bool:
         """local_packモードが有効かチェック"""
@@ -406,6 +379,9 @@ class ApprovalManager:
             
             self._save_grant(approval)
             
+            # キャッシュ無効化
+            self._invalidate_hash_cache(pack_id)
+            
             return ApprovalResult(success=True, pack_id=pack_id, status=PackStatus.APPROVED)
     
     def reject(self, pack_id: str, reason: str = "") -> ApprovalResult:
@@ -419,6 +395,9 @@ class ApprovalManager:
             approval.rejection_reason = reason
             
             self._save_grant(approval)
+            
+            # キャッシュ無効化
+            self._invalidate_hash_cache(pack_id)
             
             return ApprovalResult(success=True, pack_id=pack_id, status=PackStatus.BLOCKED)
     
@@ -458,7 +437,18 @@ class ApprovalManager:
         return True
     
     def _compute_pack_hashes(self, pack_dir: Path) -> Dict[str, str]:
-        """Packの全ファイルのハッシュを計算"""
+        """Packの全ファイルのハッシュを計算（TTLキャッシュ付き）"""
+        cache_key = str(pack_dir.resolve())
+        now = time.monotonic()
+        
+        # キャッシュチェック
+        cached = self._hash_cache.get(cache_key)
+        if cached is not None:
+            cached_result, cached_time = cached
+            if now - cached_time < self._hash_cache_ttl:
+                return dict(cached_result)
+        
+        # 計算
         hashes = {}
         
         for file_path in pack_dir.rglob("*"):
@@ -469,6 +459,9 @@ class ApprovalManager:
                 relative_path = str(file_path.relative_to(pack_dir))
                 hash_value = self._compute_file_hash(file_path)
                 hashes[relative_path] = hash_value
+        
+        # キャッシュ保存
+        self._hash_cache[cache_key] = (hashes, now)
         
         return hashes
     

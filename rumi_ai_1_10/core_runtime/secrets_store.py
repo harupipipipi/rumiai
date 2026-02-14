@@ -11,15 +11,13 @@ KEY制約: ^[A-Z0-9_]{1,64}$
 journal: user_data/secrets/journal.jsonl (値/長さ/ハッシュは入れない)
 
 暗号化:
-- Fernet (cryptography パッケージ) が利用可能な場合に使用
-- 利用不可の場合は base64 エンコード + 警告ログ（フォールバック）
+- Fernet (cryptography パッケージ) を使用（必須依存）
 - 暗号化キー: 環境変数 RUMI_SECRETS_KEY → user_data/.secrets_key → 自動生成
 - 後方互換性: 平文データ読み込み時に自動暗号化マイグレーション
 """
 
 from __future__ import annotations
 
-import base64
 import json
 import logging
 import os
@@ -31,6 +29,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from cryptography.fernet import Fernet
+
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +40,6 @@ SECRETS_KEY_FILE = "user_data/.secrets_key"
 
 # Fernet トークンは常に "gAAAAA" で始まる
 _FERNET_PREFIX = "gAAAAA"
-# base64 フォールバックのプレフィックス
-_B64_PREFIX = "b64:"
 
 
 # ------------------------------------------------------------------
@@ -49,11 +47,10 @@ _B64_PREFIX = "b64:"
 # ------------------------------------------------------------------
 
 class _CryptoBackend:
-    """Fernet / base64 フォールバックを抽象化する暗号化バックエンド"""
+    """Fernet 暗号化バックエンド"""
 
     def __init__(self) -> None:
-        self._fernet = None
-        self._use_fernet = False
+        self._fernet: Optional[Fernet] = None
         self._initialized = False
         self._init_lock = threading.Lock()
 
@@ -68,25 +65,8 @@ class _CryptoBackend:
 
     def _setup(self) -> None:
         key_bytes = self._load_or_generate_key()
-
-        try:
-            from cryptography.fernet import Fernet
-            self._fernet = Fernet(key_bytes)
-            self._use_fernet = True
-            logger.info("Secrets encryption: Fernet (cryptography) enabled.")
-        except ImportError:
-            self._use_fernet = False
-            logger.warning(
-                "cryptography package not installed. Secrets will use base64 "
-                "encoding as fallback. Install cryptography for real encryption: "
-                "pip install 'cryptography>=41.0.0'"
-            )
-        except Exception as e:
-            self._use_fernet = False
-            logger.warning(
-                "Failed to initialize Fernet encryption (%s). "
-                "Falling back to base64 encoding.", e
-            )
+        self._fernet = Fernet(key_bytes)
+        logger.info("Secrets encryption: Fernet (cryptography) enabled.")
 
     def _load_or_generate_key(self) -> bytes:
         """暗号化キーをロード、なければ生成して保存"""
@@ -108,13 +88,7 @@ class _CryptoBackend:
                 logger.warning("Failed to read key file %s: %s", SECRETS_KEY_FILE, e)
 
         # 3. 自動生成
-        try:
-            from cryptography.fernet import Fernet
-            new_key = Fernet.generate_key()
-        except ImportError:
-            # cryptography がない場合でも base64 フォールバック用のキーを生成
-            import secrets as _secrets_mod
-            new_key = base64.urlsafe_b64encode(_secrets_mod.token_bytes(32))
+        new_key = Fernet.generate_key()
 
         # ファイルに保存 (atomic write)
         try:
@@ -149,35 +123,23 @@ class _CryptoBackend:
         return new_key if isinstance(new_key, bytes) else new_key.encode("utf-8")
 
     def encrypt(self, plaintext: str) -> str:
-        """平文を暗号化（またはエンコード）して文字列を返す"""
+        """平文を暗号化して文字列を返す"""
         self._ensure_initialized()
-        if self._use_fernet and self._fernet:
-            return self._fernet.encrypt(plaintext.encode("utf-8")).decode("utf-8")
-        # base64 フォールバック
-        encoded = base64.urlsafe_b64encode(plaintext.encode("utf-8")).decode("utf-8")
-        return f"{_B64_PREFIX}{encoded}"
+        return self._fernet.encrypt(plaintext.encode("utf-8")).decode("utf-8")
 
     def decrypt(self, ciphertext: str) -> str:
-        """暗号文（またはエンコード済み文字列）を復号して平文を返す"""
+        """暗号文を復号して平文を返す"""
         self._ensure_initialized()
         if ciphertext.startswith(_FERNET_PREFIX):
-            if self._use_fernet and self._fernet:
-                return self._fernet.decrypt(ciphertext.encode("utf-8")).decode("utf-8")
-            raise ValueError(
-                "Fernet-encrypted secret found but cryptography package is not "
-                "available. Install cryptography to decrypt."
-            )
-        if ciphertext.startswith(_B64_PREFIX):
-            encoded = ciphertext[len(_B64_PREFIX):]
-            return base64.urlsafe_b64decode(encoded.encode("utf-8")).decode("utf-8")
-        # 平文と判断 — そのまま返す
+            return self._fernet.decrypt(ciphertext.encode("utf-8")).decode("utf-8")
+        # 平文と判断 — そのまま返す（マイグレーション対象）
         return ciphertext
 
     def is_encrypted(self, value: str) -> bool:
-        """値が暗号化/エンコード済みかどうか判定"""
+        """値が暗号化済みかどうか判定"""
         if not isinstance(value, str):
             return False
-        return value.startswith(_FERNET_PREFIX) or value.startswith(_B64_PREFIX)
+        return value.startswith(_FERNET_PREFIX)
 
 
 # グローバルバックエンドインスタンス

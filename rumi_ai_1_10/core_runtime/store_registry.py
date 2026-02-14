@@ -20,6 +20,25 @@ from typing import Any, Dict, List, Optional
 
 
 STORES_INDEX_PATH = "user_data/stores/index.json"
+STORES_BASE_DIR = Path("user_data/stores")
+
+
+def _validate_store_path(root_path: str) -> Optional[str]:
+    """
+    root_path が STORES_BASE_DIR 配下であることを検証する。
+
+    Returns:
+        エラーメッセージ (問題がなければ None)
+    """
+    if ".." in str(root_path):
+        return "root_path must not contain '..'"
+    resolved = Path(root_path).resolve()
+    base = STORES_BASE_DIR.resolve()
+    try:
+        resolved.relative_to(base)
+    except ValueError:
+        return f"root_path must be under {STORES_BASE_DIR}/"
+    return None
 
 
 @dataclass
@@ -110,6 +129,14 @@ class StoreRegistry:
             return StoreResult(
                 success=False, store_id=store_id, error="root_path is required",
             )
+
+        # パストラバーサル防止
+        path_err = _validate_store_path(root_path)
+        if path_err:
+            return StoreResult(
+                success=False, store_id=store_id, error=path_err,
+            )
+
         with self._lock:
             if store_id in self._stores:
                 return StoreResult(
@@ -156,6 +183,14 @@ class StoreRegistry:
                     success=False, store_id=store_id,
                     error=f"Store not found: {store_id}",
                 )
+
+            # パストラバーサル防止（登録済みパスも再検証）
+            path_err = _validate_store_path(store.root_path)
+            if path_err:
+                return StoreResult(
+                    success=False, store_id=store_id, error=path_err,
+                )
+
             if delete_files:
                 try:
                     rp = Path(store.root_path)

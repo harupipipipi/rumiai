@@ -14,15 +14,23 @@ Modified検出時の自動無効化を実装。
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
+import logging
 import os
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
+
+from .hmac_key_manager import (
+    generate_or_load_signing_key,
+    compute_data_hmac,
+    verify_data_hmac,
+)
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -86,7 +94,12 @@ class NetworkGrantManager:
     
     def __init__(self, grants_dir: str = None, secret_key: str = None):
         self._grants_dir = Path(grants_dir) if grants_dir else Path(self.GRANTS_DIR)
-        self._secret_key = secret_key or self._load_or_create_secret_key()
+        if secret_key:
+            self._secret_key: bytes = secret_key.encode("utf-8")
+        else:
+            self._secret_key = generate_or_load_signing_key(
+                Path(self.SECRET_KEY_FILE),
+            )
         self._grants: Dict[str, NetworkGrant] = {}
         self._disabled_packs: Set[str] = set()  # ModifiedでDisabledになったPack
         self._lock = threading.RLock()
@@ -100,38 +113,6 @@ class NetworkGrantManager:
     def _ensure_dir(self) -> None:
         """ディレクトリを作成"""
         self._grants_dir.mkdir(parents=True, exist_ok=True)
-    
-    def _load_or_create_secret_key(self) -> str:
-        """シークレットキーをロードまたは作成"""
-        key_file = Path(self.SECRET_KEY_FILE)
-        
-        if key_file.exists():
-            try:
-                return key_file.read_text(encoding="utf-8").strip()
-            except Exception:
-                pass
-        
-        # 新規作成
-        key = hashlib.sha256(os.urandom(32)).hexdigest()
-        key_file.parent.mkdir(parents=True, exist_ok=True)
-        key_file.write_text(key, encoding="utf-8")
-        
-        try:
-            os.chmod(key_file, 0o600)
-        except (OSError, AttributeError):
-            pass
-        
-        return key
-    
-    def _compute_hmac(self, data: Dict[str, Any]) -> str:
-        """HMAC署名を計算"""
-        data_copy = {k: v for k, v in data.items() if not k.startswith("_hmac")}
-        payload = json.dumps(data_copy, sort_keys=True, ensure_ascii=False)
-        return hmac.new(
-            self._secret_key.encode("utf-8"),
-            payload.encode("utf-8"),
-            hashlib.sha256
-        ).hexdigest()
     
     def _get_grant_file(self, pack_id: str) -> Path:
         """Pack IDからGrantファイルパスを取得"""
@@ -165,8 +146,7 @@ class NetworkGrantManager:
             self._disabled_packs.add(pack_id)
             return None
 
-        computed_sig = self._compute_hmac(data)
-        if not hmac.compare_digest(stored_sig, computed_sig):
+        if not verify_data_hmac(self._secret_key, data, stored_sig):
             print(f"[NetworkGrantManager] HMAC verification failed for {file_path}")
             pack_id = data.get("pack_id", file_path.stem)
             self._disabled_packs.add(pack_id)
@@ -180,7 +160,7 @@ class NetworkGrantManager:
         """Grantを保存"""
         try:
             data = grant.to_dict()
-            data["_hmac_signature"] = self._compute_hmac(data)
+            data["_hmac_signature"] = compute_data_hmac(self._secret_key, data)
             
             file_path = self._get_grant_file(grant.pack_id)
             with open(file_path, "w", encoding="utf-8") as f:
@@ -201,6 +181,20 @@ class NetworkGrantManager:
     ) -> NetworkGrant:
         """ネットワークアクセスを許可"""
         with self._lock:
+            # #31: ワイルドカードドメイン警告
+            if "*" in allowed_domains:
+                logger.warning(
+                    "Wildcard domain '*' granted for pack '%s' by '%s'. "
+                    "This allows unrestricted domain access.",
+                    pack_id, granted_by,
+                )
+                self._log_grant_event(pack_id, "wildcard_domain_warning", True, {
+                    "allowed_domains": allowed_domains,
+                    "granted_by": granted_by,
+                    "severity": "warning",
+                    "message": "Wildcard domain '*' grants unrestricted domain access",
+                })
+
             now = self._now_ts()
             
             existing = self._grants.get(pack_id)

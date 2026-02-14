@@ -1,5 +1,5 @@
 """
-hmac_key_manager.py - HMAC鍵のローテーション管理
+hmac_key_manager.py - HMAC鍵のローテーション管理 + 署名ユーティリティ
 
 鍵の生成・保存・ローテーション・グレースピリオド検証を提供する。
 
@@ -8,14 +8,21 @@ hmac_key_manager.py - HMAC鍵のローテーション管理
 ローテーショントリガー:
   - 環境変数 RUMI_HMAC_ROTATE=true で起動時にローテーション
   - プログラムから rotate() を呼び出し
+
+署名ユーティリティ (#65):
+  - generate_or_load_signing_key(key_path) → bytes
+  - compute_data_hmac(key, data_dict) → str
+  - verify_data_hmac(key, data_dict, expected_hmac) → bool
 """
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import json
 import os
 import secrets
+import tempfile
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
@@ -45,6 +52,117 @@ def _parse_ts(ts: str) -> datetime:
     return datetime.fromisoformat(ts)
 
 
+# ======================================================================
+# 署名ユーティリティ関数 (#65)
+# ======================================================================
+
+def generate_or_load_signing_key(
+    key_path: Path,
+    env_var: Optional[str] = None,
+) -> bytes:
+    """
+    署名用秘密鍵をロードまたは生成する。
+
+    優先順位:
+    1. env_var が指定されていれば環境変数から取得
+    2. key_path ファイルから読み込み
+    3. 新規生成して key_path に atomic write (0o600)
+
+    Args:
+        key_path: 鍵ファイルのパス
+        env_var:  環境変数名（省略可）
+
+    Returns:
+        鍵データ (bytes)
+    """
+    # 1. 環境変数
+    if env_var:
+        env_val = os.environ.get(env_var)
+        if env_val and len(env_val) >= 32:
+            return env_val.encode("utf-8")
+
+    # 2. ファイルから読み込み
+    if key_path.exists():
+        try:
+            key_data = key_path.read_text(encoding="utf-8").strip()
+            if key_data:
+                return key_data.encode("utf-8")
+        except Exception:
+            pass
+
+    # 3. 新規生成 + atomic write
+    key_str = hashlib.sha256(os.urandom(32)).hexdigest()
+    key_path.parent.mkdir(parents=True, exist_ok=True)
+
+    fd, tmp_path = tempfile.mkstemp(
+        dir=str(key_path.parent), prefix=".signing_key_tmp_"
+    )
+    try:
+        os.write(fd, key_str.encode("utf-8"))
+        os.close(fd)
+        fd = -1
+        os.replace(tmp_path, str(key_path))
+        try:
+            os.chmod(str(key_path), 0o600)
+        except (OSError, AttributeError):
+            pass
+    except Exception:
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+    return key_str.encode("utf-8")
+
+
+def compute_data_hmac(key: bytes, data_dict: Dict[str, Any]) -> str:
+    """
+    data_dict の HMAC-SHA256 署名を計算する。
+
+    '_hmac' で始まるキーは署名対象から除外する。
+
+    Args:
+        key:       署名鍵 (bytes)
+        data_dict: 署名対象のデータ
+
+    Returns:
+        hex ダイジェスト文字列
+    """
+    filtered = {k: v for k, v in data_dict.items() if not k.startswith("_hmac")}
+    payload = json.dumps(filtered, sort_keys=True, ensure_ascii=False)
+    return hmac.new(key, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def verify_data_hmac(
+    key: bytes,
+    data_dict: Dict[str, Any],
+    expected_hmac: str,
+) -> bool:
+    """
+    data_dict の HMAC-SHA256 署名を検証する。
+
+    Args:
+        key:           署名鍵 (bytes)
+        data_dict:     検証対象のデータ
+        expected_hmac: 期待される hex ダイジェスト
+
+    Returns:
+        True: 署名一致 / False: 不一致
+    """
+    computed = compute_data_hmac(key, data_dict)
+    return hmac.compare_digest(computed, expected_hmac)
+
+
+# ======================================================================
+# HMACKey データクラス
+# ======================================================================
+
 @dataclass
 class HMACKey:
     """HMAC鍵情報"""
@@ -70,6 +188,10 @@ class HMACKey:
             is_active=data.get("is_active", True),
         )
 
+
+# ======================================================================
+# HMACKeyManager
+# ======================================================================
 
 class HMACKeyManager:
     """
@@ -151,7 +273,7 @@ class HMACKeyManager:
         return new_key
 
     def _save_internal(self) -> None:
-        """鍵ファイルを保存（ロック保持状態で呼び出す内部用）"""
+        """鍵ファイルを atomic write で保存（ロック保持状態で呼び出す内部用）"""
         self._keys_path.parent.mkdir(parents=True, exist_ok=True)
         data = {
             "version": "1.0",
@@ -159,11 +281,33 @@ class HMACKeyManager:
             "grace_period_seconds": int(self._grace_period.total_seconds()),
             "keys": [k.to_dict() for k in self._keys],
         }
+        content = json.dumps(data, ensure_ascii=False, indent=2)
+
+        fd, tmp_path = tempfile.mkstemp(
+            dir=str(self._keys_path.parent),
+            prefix=".hmac_keys_tmp_",
+            suffix=".json",
+        )
         try:
-            with open(self._keys_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-        except IOError as e:
-            print(f"[HMACKeyManager] 鍵ファイル保存エラー: {e}")
+            os.write(fd, content.encode("utf-8"))
+            os.close(fd)
+            fd = -1
+            os.replace(tmp_path, str(self._keys_path))
+            try:
+                os.chmod(str(self._keys_path), 0o600)
+            except (OSError, AttributeError):
+                pass
+        except Exception:
+            if fd >= 0:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     def _cleanup_expired_keys_internal(self) -> None:
         """グレースピリオド超過した旧鍵を削除（ロック保持状態）"""
