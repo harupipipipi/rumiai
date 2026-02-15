@@ -1,9 +1,8 @@
 
-
 ```markdown
 # Rumi AI OS — Roadmap
 
-最終更新: 2026-02-13
+最終更新: 2026-02-15
 
 設計思想・過去案を含む完全版ロードマップです。設計の全体像は [architecture.md](architecture.md) を参照してください。
 
@@ -129,6 +128,7 @@ Pack の通常実行は Docker 隔離で成立するので、ホストに Python
 - ✅ API は list(mask) / set / delete のみ（再表示なし）
 - ✅ ログに値を出さない（監査・診断とも）
 - ✅ `secrets.get` の rate_limit=60（事故防止）
+- ✅ get_secret() ヘルパー関数（rumi_capability.py）— Wave 2 #32
 - 🧩 v1.1: OS keychain（keyring / DPAPI 等）は後回し
 
 ### 5.5 Pack import（フォルダ / zip / rumipack）
@@ -149,6 +149,38 @@ Pack の通常実行は Docker 隔離で成立するので、ホストに Python
 
 - ✅ async 経路と pipeline 経路の `kernel:*` 解決統一
 - ✅ startup flow の packs_dir 等の整合修正
+- ✅ _eval_condition パーサー改善（値内の == / != 対応）— Wave 1 #16
+- ✅ _resolve_value 再帰深度制限（MAX_RESOLVE_DEPTH=20）— Wave 1 #70
+- ✅ Flow チェーン深度制限（MAX_FLOW_CHAIN_DEPTH=10）— Wave 1 #58
+
+### 5.8 セキュリティ強化（Wave 1）
+
+- ✅ cryptography 必須化（base64フォールバック削除）— #1
+- ✅ API サーバー バインドアドレス制限（デフォルト 127.0.0.1）— #3
+- ✅ ホスト実行タイムアウト（ThreadPoolExecutor, 120s）— #4
+- ✅ pack_id バリデーション統一（^[a-zA-Z0-9_-]{1,64}$）— #9
+- ✅ Store root_path パストラバーサル防止 — #5, #12
+- ✅ コンテナ名 UUID 化（衝突回避）— #10
+- ✅ Docker stdout サイズ制限（4MB）— #14
+- ✅ Docker 可用性キャッシュ（60s TTL）— #17
+- ✅ DNS rebinding 緩和（egress_proxy）— #13
+- ✅ egress_proxy ThreadPool 化 — #33
+- ✅ HMAC 署名ロジック統合（HMACSigner）— #65
+- ✅ HMAC 鍵ファイル atomic write — #34
+- ✅ ワイルドカードドメイン警告 — #31
+- ✅ API エラーメッセージ秘匿 — #35
+- ✅ ファイル名バリデーション（secure_executor）— #57
+- ✅ pack_import パストラバーサル防止 — #30
+- ✅ DELETE ルート衝突解決 — #59
+
+### 5.9 エコシステム基盤強化（Wave 1）
+
+- ✅ Flow Modifier ワイルドカード警告・dry-run モード — #7, #40
+- ✅ Modifier phase 未指定時のデフォルト動作 — #8
+- ✅ 重複 pack_id 検出 — #15
+- ✅ connectivity requires 未充足警告 — #20
+- ✅ ワイルドカード Modifier 監査ログ — #61
+- ✅ No Favoritism: dead code 削除（initializer.py）、docstring 中性化 — NF1-3
 
 ---
 
@@ -160,6 +192,11 @@ Pack の通常実行は Docker 隔離で成立するので、ホストに Python
 - ✅ Unit registry（data / python / binary）— `core_runtime/unit_registry.py` 実装済み
 - ✅ Unit trust store（sha256 allowlist）— `core_runtime/unit_trust_store.py` 実装済み
 - 🟡 Unit execution gate（host_capability モードのみ実装済み。pack container / sandbox は未実装）— `core_runtime/unit_executor.py`
+- ✅ Store Compare-And-Swap（store.cas）— fcntl.flock ベース — Wave 2 #6
+- ✅ store.list ページネーション（limit / cursor / prefix）— Wave 2 #18
+- ✅ store.batch_get（最大100キー、900KB制限）— Wave 2 #19
+- ✅ 宣言的 Store 作成（ecosystem.json の stores フィールド）— Wave 2 #62
+- ✅ Pack 間 Store 共有（SharedStoreManager、手動承認）— Wave 2 #21
 - 🧩 「Pack 承認は必須、Unit 個別承認はユニット設定次第（pack が要求可能）」の運用整備
 
 > ここは「assets」という語は使わない。ecosystem が「互換再利用のためのストア」を作ればそれは成立する。
@@ -177,21 +214,55 @@ Pack の通常実行は Docker 隔離で成立するので、ホストに Python
 - 🧩 apply 操作は capability 経由に寄せ、API 直叩きは最小化
 - 🧩 バージョン履歴・ロールバック（staging / backup の標準運用）
 
+### 6.4 Capability 拡張（Wave 2）
+
+- ✅ flow.run Capability（同期 Flow-to-Flow 呼び出し、循環検出、深度制限）— Wave 2 #5
+- ✅ バッチ Capability Grant（最大50件、best-effort）— Wave 2 #63
+- ✅ スケジューラ タイムゾーン対応（zoneinfo、UTC フォールバック）— Wave 2 #60
+
+### 6.5 vocab による component 出力キー正規化（Pack 互換レイヤー）
+
+- 🧩 component type 単位での出力キー自動正規化
+- 🧩 vocab_registry の synonym グループ + converter を Flow 実行パスに統合
+- 🧩 正規化タイミングの標準化（ctx 格納前 vs 参照時）
+- 🧩 Pack 側の vocab.txt による synonym 宣言の推奨パターン整備
+
+#### 背景
+
+サードパーティ Pack の開発で判明した問題。kernel_core の _execute_handler_step_async は Flow ステップの return 値をそのまま ctx[step["output"]] に格納する。つまり default Pack が {"content": "...", "model": "gpt-4"} を返す構造で Flow が ${ctx.ai_response.content} を参照していると、別の Pack のように {"text": "...", "model_name": "..."} を返す Pack に差し替えた瞬間、全ての Flow ステップで content が null になり壊れる。
+
+vocab_registry はこの問題を解決する仕組みを既に持つが、「Flow 実行パスでの自動適用」が欠けている。
+
+#### 提案する実装案
+
+**方式 A（格納時正規化 — 推奨）**: kernel_core の ctx 格納前に vocab_registry で preferred term に変換。数行の変更で既存の仕組みが活きる。
+
+**方式 B（参照時正規化）**: _resolve_value で synonym フォールバック。格納データは変更しないが解決パスが複雑。
+
+**方式 C（opt-in 正規化）**: Flow ステップに normalize: true フラグ、または component manifest で output_vocab_group を宣言。既存影響ゼロだが Pack 作者が意識する必要あり。
+
+### 6.6 内部リファクタリング（P3 保留）
+
+- 🧩 グローバルシングルトン → DI コンテナ移行（テスタビリティ向上）
+- 🧩 Store バックエンド SQLite 化（ファイルベースからの移行オプション）
+- 🧩 pack_api_server.py の大規模ハンドラ分割（現在 ~80KB）
+- 🧩 Docker 実行ロジック共通化（python_file_executor / secure_executor の統合）
+
 ---
 
-## 7. v3（長期）: ユーザー獲得のための外側は ecosystem へ（公式は薄いまま）
+## 7. v3（長期）: ecosystem で実現すべき外側
 
-### 7.1 ローカル管理 UI（Electron 等）
+> v3 の項目は公式コアが実装すべきものではなく、ecosystem（Pack）として
+> 第三者が提供すべきものです。公式はこれらの機能を実現するための
+> 汎用的な仕組み（API サーバー、Store、Capability 等）を提供済みです。
 
-- 🧩 承認（pack / capability / pip / unit）を見える化
-- 🧩 Secrets UI（再表示無し・貼り付け時だけ表示）
-- 🧩 Store / Unit 管理 UI（互換再利用の操作）
-- 🧩 doctor（Docker 可否、UDS、audit、staging 状態、modified 一覧）
+### 7.1 管理 UI
+- 管理 UI は Pack として実装可能（pack_api_server の API を呼ぶフロントエンド Pack）
+- 公式は HTTP API を提供済み。UI は ecosystem の領域
 
-### 7.2 Supabase ログイン（任意）
-
-- 🧩 強制しない（プロフィール表示程度）
-- 🧩 無料プラン前提で会話保存等はしない
+### 7.2 外部認証連携
+- Supabase 等の認証は Pack が Secrets + capability 経由で実現可能
+- 公式は認証の仕組みを強制しない
 
 ---
 
@@ -219,6 +290,10 @@ Pack の通常実行は Docker 隔離で成立するので、ホストに Python
 - Unit execution gate の pack container / sandbox モード実装
 - Python 無し配布の最短ルート（本体単一化 vs handler バイナリ化）
 - 階層権限の config 上限（intersection の定義: list は積集合、ports は最小等）
+- vocab による出力キー正規化の適用範囲（全ステップ vs opt-in vs component type 限定）
+- vocab synonym の衝突解決（Pack A が content = 本文、Pack B が content = HTML全体 の場合）
+- converter の実行セキュリティ（任意 Python が走るため Trust が必要か）
+- provides パターンの統一（schema は ^[a-z][a-z0-9_]*$ だが pack-development.md の例は ai.client とドット区切り — どちらを正とするか）
 
 ---
 
@@ -229,5 +304,3 @@ Pack の通常実行は Docker 隔離で成立するので、ホストに Python
 - auto update（ユーザーの明示操作無しに ecosystem を書き換える）
 - 監査ログに秘密値や復号可能情報を出す
 ```
-
-修正箇所は A3 の 1 箇所です。セクション 8 の見出しを「Addon（現状と廃止方針）」から「Addon（廃止済み）」に変更し、本文を addon_manager.py が削除済みであることを反映した記述に置き換えました。それ以外の箇所は修正指示に該当する変更がないため、原文のままです。
