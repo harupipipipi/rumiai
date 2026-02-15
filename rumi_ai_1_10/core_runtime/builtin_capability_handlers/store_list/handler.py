@@ -1,8 +1,11 @@
 """
 store.list - Built-in Capability Handler
 
-Store 内の全キーを列挙する。
+Store 内のキーを列挙する。
+ページネーション対応: limit, cursor パラメータで制御。
 オプションの prefix フィルタでキーを絞り込める。
+
+後方互換: limit/cursor を指定しなければ従来通り全件返却。
 
 セキュリティ:
 - grant_config.allowed_store_ids で制限
@@ -11,8 +14,7 @@ Store 内の全キーを列挙する。
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 
 def execute(context: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
@@ -20,6 +22,8 @@ def execute(context: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
 
     store_id = args.get("store_id", "")
     prefix = args.get("prefix", "")
+    limit = args.get("limit")
+    cursor = args.get("cursor")
 
     # --- 入力バリデーション ---
     if not store_id or not isinstance(store_id, str):
@@ -30,52 +34,31 @@ def execute(context: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
     if allowed and store_id not in allowed:
         return _error("Store not in allowed_store_ids", "grant_denied")
 
-    # --- Store 解決 ---
-    store_root = _resolve_store_root(store_id)
-    if store_root is None:
-        return _error("Store not found: " + store_id, "store_not_found")
+    # --- limit バリデーション ---
+    if limit is not None:
+        try:
+            limit = int(limit)
+        except (TypeError, ValueError):
+            return _error("Invalid limit (must be integer)", "validation_error")
 
-    # --- キー列挙 ---
-    keys = _list_keys(store_root, prefix)
+    # --- cursor バリデーション ---
+    if cursor is not None and not isinstance(cursor, str):
+        return _error("Invalid cursor (must be string)", "validation_error")
 
-    return {"success": True, "keys": keys}
-
-
-def _resolve_store_root(store_id: str) -> Any:
+    # --- StoreRegistry の list_keys を呼び出す ---
     try:
         from core_runtime.store_registry import get_store_registry
         registry = get_store_registry()
-        store_def = registry.get_store(store_id)
-        if store_def is None:
-            return None
-        root = Path(store_def.root_path)
-        if not root.is_dir():
-            return None
-        return root.resolve()
-    except Exception:
-        return None
+        result = registry.list_keys(
+            store_id=store_id,
+            prefix=prefix or "",
+            limit=limit,
+            cursor=cursor,
+        )
+    except Exception as e:
+        return _error(f"Failed to list keys: {e}", "internal_error")
 
-
-def _list_keys(store_root: Path, prefix: str) -> List[str]:
-    """store_root 配下の .json ファイルからキー名を導出する。"""
-    keys: List[str] = []
-    try:
-        for json_file in sorted(store_root.rglob("*.json")):
-            if not json_file.is_file():
-                continue
-            # store_root からの相対パスをキー名に変換
-            try:
-                rel = json_file.relative_to(store_root)
-            except ValueError:
-                continue
-            # .json 拡張子を除去
-            key = str(rel.with_suffix("")).replace("\\", "/")
-            if prefix and not key.startswith(prefix):
-                continue
-            keys.append(key)
-    except OSError:
-        pass
-    return keys
+    return result
 
 
 def _error(message: str, error_type: str) -> Dict[str, Any]:

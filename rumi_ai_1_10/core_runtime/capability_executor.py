@@ -36,6 +36,13 @@ MAX_ARGS_SUMMARY_LENGTH = 500
 DEFAULT_TIMEOUT = 30.0
 MAX_TIMEOUT = 120.0
 
+# flow.run in-process dispatch
+FLOW_RUN_PERMISSION_ID = "flow.run"
+MAX_FLOW_CALL_DEPTH = 10
+
+# Thread-local storage for flow.run call stack
+_flow_call_stack_local = threading.local()
+
 # rate limit: secret.get のみ（無限ループ事故防止）
 SECRET_GET_PERMISSION_ID = "secrets.get"
 DEFAULT_SECRET_GET_RATE_LIMIT = 60  # 回/分/principal
@@ -95,6 +102,15 @@ class CapabilityExecutor:
         self._secret_get_rate_limit = int(
             os.environ.get("RUMI_SECRET_GET_RATE_LIMIT",
                            str(DEFAULT_SECRET_GET_RATE_LIMIT)))
+        self._kernel = None  # KernelCore reference for flow.run
+
+    def set_kernel(self, kernel) -> None:
+        """
+        Kernel インスタンスを注入する（flow.run インプロセス実行用）。
+
+        kernel_core._get_capability_proxy() から呼ばれる。
+        """
+        self._kernel = kernel
 
     def _now_ts(self) -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -278,19 +294,31 @@ class CapabilityExecutor:
             )
             return resp
 
-        # 4. サブプロセスで実行
-        resp = self._execute_handler_subprocess(
-            handler_def=handler_def,
-            principal_id=principal_id,
-            permission_id=permission_id,
-            grant_config=grant_result.config,
-            args=args,
-            timeout_seconds=timeout_seconds,
-            request_id=request_id,
-            start_time=start_time,
-        )
+        # 4. flow.run 特殊ディスパッチ（インプロセス実行）
+        if permission_id == FLOW_RUN_PERMISSION_ID:
+            resp = self._execute_flow_run(
+                principal_id=principal_id,
+                permission_id=permission_id,
+                grant_config=grant_result.config,
+                args=args,
+                timeout_seconds=timeout_seconds,
+                request_id=request_id,
+                start_time=start_time,
+            )
+        else:
+            # 5. 通常: サブプロセスで実行
+            resp = self._execute_handler_subprocess(
+                handler_def=handler_def,
+                principal_id=principal_id,
+                permission_id=permission_id,
+                grant_config=grant_result.config,
+                args=args,
+                timeout_seconds=timeout_seconds,
+                request_id=request_id,
+                start_time=start_time,
+            )
 
-        # 5. 監査（built-in の場合は sha256 を extra_details に記録）
+        # 6. 監査（built-in の場合は sha256 を extra_details に記録）
         extra = None
         if is_builtin:
             extra = {"builtin_sha256": builtin_sha256}
@@ -304,6 +332,144 @@ class CapabilityExecutor:
         )
 
         return resp
+
+    # ------------------------------------------------------------------
+    # flow.run インプロセス実行
+    # ------------------------------------------------------------------
+
+    def _execute_flow_run(
+        self,
+        principal_id: str,
+        permission_id: str,
+        grant_config: Dict[str, Any],
+        args: Dict[str, Any],
+        timeout_seconds: float,
+        request_id: str,
+        start_time: float,
+    ) -> CapabilityResponse:
+        """
+        flow.run をインプロセスで実行する。
+
+        サブプロセスではなく kernel_core.execute_flow_sync() を直接呼ぶ。
+        スレッドローカルの _flow_call_stack で循環呼び出し・深さ制限を行う。
+        """
+
+        # --- バリデーション ---
+        flow_id = args.get("flow_id")
+        if not flow_id or not isinstance(flow_id, str):
+            return CapabilityResponse(
+                success=False,
+                error="Missing or invalid 'flow_id' in args",
+                error_type="invalid_request",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        inputs = args.get("inputs") or {}
+        if not isinstance(inputs, dict):
+            return CapabilityResponse(
+                success=False,
+                error="'inputs' must be a dict",
+                error_type="invalid_request",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        # --- Kernel 参照チェック ---
+        if self._kernel is None:
+            return CapabilityResponse(
+                success=False,
+                error="Kernel not available for flow.run",
+                error_type="initialization_error",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        # --- Grant config: allowed_flow_ids 制限 ---
+        allowed_flow_ids = grant_config.get("allowed_flow_ids")
+        if allowed_flow_ids is not None:
+            if not isinstance(allowed_flow_ids, list):
+                allowed_flow_ids = [allowed_flow_ids]
+            if flow_id not in allowed_flow_ids:
+                return CapabilityResponse(
+                    success=False,
+                    error="Permission denied",
+                    error_type="grant_denied",
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+
+        # --- スレッドローカル call stack 取得/初期化 ---
+        if not hasattr(_flow_call_stack_local, "stack"):
+            _flow_call_stack_local.stack = []
+        call_stack = _flow_call_stack_local.stack
+
+        # --- 循環検出 ---
+        if flow_id in call_stack:
+            chain = " -> ".join(call_stack + [flow_id])
+            return CapabilityResponse(
+                success=False,
+                error=f"Recursive flow.run detected: {chain}",
+                error_type="recursive_flow",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        # --- 深さ制限 ---
+        if len(call_stack) >= MAX_FLOW_CALL_DEPTH:
+            chain = " -> ".join(call_stack + [flow_id])
+            return CapabilityResponse(
+                success=False,
+                error=f"Flow call depth limit exceeded ({MAX_FLOW_CALL_DEPTH}): {chain}",
+                error_type="flow_depth_exceeded",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        # --- タイムアウト計算 ---
+        effective_timeout = min(
+            float(args.get("timeout_seconds", timeout_seconds)),
+            MAX_TIMEOUT,
+        )
+        # 経過時間を差し引く（呼び出し元の残り時間を引き継ぐ）
+        elapsed = time.time() - start_time
+        remaining_timeout = max(effective_timeout - elapsed, 1.0)
+
+        # --- インプロセス実行 ---
+        call_stack.append(flow_id)
+        try:
+            context = {
+                "_flow_run_principal_id": principal_id,
+                "_flow_run_request_id": request_id,
+                "_flow_call_stack": list(call_stack),
+            }
+            context.update(inputs)
+
+            result = self._kernel.execute_flow_sync(
+                flow_id=flow_id,
+                context=context,
+                timeout=remaining_timeout,
+            )
+
+            latency_ms = (time.time() - start_time) * 1000
+
+            if isinstance(result, dict) and result.get("_error"):
+                return CapabilityResponse(
+                    success=False,
+                    error=result["_error"],
+                    error_type="flow_execution_error",
+                    latency_ms=latency_ms,
+                )
+
+            return CapabilityResponse(
+                success=True,
+                output=result,
+                latency_ms=latency_ms,
+            )
+
+        except Exception as e:
+            return CapabilityResponse(
+                success=False,
+                error=f"flow.run execution failed: {e}",
+                error_type="flow_execution_error",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+        finally:
+            call_stack.pop()
 
     def _execute_handler_subprocess(
         self,

@@ -11,13 +11,15 @@ threading.Timer ベースの tick 方式で10秒ごとにスケジュールテ�
 - グレースフル shutdown 対応
 - cron: 5フィールド（分 時 日 月 曜日）、*, */N, 数値, カンマ区切り, 範囲をサポート
 - interval: 最小10秒
+- timezone: オプショナル。zoneinfo (Python 3.9+) で DST 対応
 """
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional, Set
 
 
@@ -26,6 +28,45 @@ TICK_INTERVAL = 10.0
 
 # interval の最小値（秒）
 MIN_INTERVAL = 10.0
+
+# --- Timezone support (#60) -------------------------------------------
+
+logger = logging.getLogger(__name__)
+
+# zoneinfo は Python 3.9+ のみ。利用不可なら None にして UTC フォールバック。
+try:
+    from zoneinfo import ZoneInfo as _ZoneInfo  # type: ignore[import-untyped]
+
+    _HAS_ZONEINFO = True
+except ImportError:
+    _HAS_ZONEINFO = False
+    _ZoneInfo = None  # type: ignore[assignment,misc]
+    logger.warning(
+        "zoneinfo is not available (Python < 3.9). "
+        "All schedules will use UTC."
+    )
+
+_UTC = timezone.utc
+
+
+def _resolve_tz(tz_name: Optional[str]) -> Any:
+    """timezone 文字列を *tzinfo* に解決する。
+
+    * ``None`` / 空文字 → UTC
+    * *zoneinfo* 利用不可 → UTC（モジュールロード時に警告済み）
+    * 無効な文字列 → 警告ログ + UTC フォールバック
+    """
+    if not tz_name:
+        return _UTC
+    if not _HAS_ZONEINFO:
+        return _UTC
+    try:
+        return _ZoneInfo(tz_name)  # type: ignore[misc]
+    except (KeyError, Exception) as exc:
+        logger.warning(
+            "Invalid timezone %r, falling back to UTC: %s", tz_name, exc,
+        )
+        return _UTC
 
 
 class CronField:
@@ -164,6 +205,8 @@ class ScheduleEntry:
         "interval_seconds",
         "last_executed_at",
         "next_interval_at",
+        "_tz",
+        "_next_run_utc",
         "_last_cron_minute",
     )
 
@@ -172,17 +215,22 @@ class ScheduleEntry:
         flow_id: str,
         cron: Optional[CronExpression] = None,
         interval_seconds: Optional[float] = None,
+        tz: Any = None,
     ):
         self.flow_id = flow_id
         self.cron = cron
         self.interval_seconds = interval_seconds
         self.last_executed_at: float = 0.0  # monotonic
-        self.next_interval_at: float = 0.0  # monotonic
+        self.next_interval_at: float = 0.0  # monotonic (legacy fallback)
+        self._tz: Any = tz if tz is not None else _UTC
+        self._next_run_utc: Optional[datetime] = None
         self._last_cron_minute: int = -1  # 同一分内での多重発火防止
 
-    def should_run(self, now_mono: float, now_dt: datetime) -> bool:
+    def should_run(self, now_mono: float, now_utc: datetime) -> bool:
         """今の tick で実行すべきか判定する。"""
         if self.cron is not None:
+            # cron 評価は指定 TZ のローカル時刻で行う
+            now_dt = now_utc.astimezone(self._tz)
             # 同一分内で多重発火しないようにする
             current_minute = now_dt.year * 525960 + now_dt.month * 43800 + \
                 now_dt.day * 1440 + now_dt.hour * 60 + now_dt.minute
@@ -193,8 +241,26 @@ class ScheduleEntry:
                 return True
             return False
         if self.interval_seconds is not None:
+            # TZ-aware な _next_run_utc があればそちらで判定
+            if self._next_run_utc is not None:
+                return now_utc >= self._next_run_utc
             return now_mono >= self.next_interval_at
         return False
+
+    def compute_next_interval(self) -> None:
+        """次回 interval 実行時刻を計算する。
+
+        指定 TZ の wall-clock 上で *interval_seconds* を加算し、
+        UTC に変換して ``_next_run_utc`` に保存する。
+        aware datetime 同士の timedelta 加算は absolute-time ベースで
+        行われるため、DST 遷移を跨いでも正しく動作する。
+        """
+        if self.interval_seconds is None:
+            return
+        now_utc = datetime.now(_UTC)
+        now_local = now_utc.astimezone(self._tz)
+        next_local = now_local + timedelta(seconds=self.interval_seconds)
+        self._next_run_utc = next_local.astimezone(_UTC)
 
 
 class FlowScheduler:
@@ -240,13 +306,15 @@ class FlowScheduler:
 
         Args:
             flow_id: Flow ID
-            schedule_def: {'cron': '...'} or {'interval': N}
+            schedule_def: {'cron': '...'} or {'interval_seconds': N} or {'interval': N}
+                          オプション: {'timezone': 'Asia/Tokyo'}
 
         Returns:
             登録成功したか
         """
         cron_expr = schedule_def.get("cron")
-        interval = schedule_def.get("interval")
+        interval = schedule_def.get("interval_seconds") or schedule_def.get("interval")
+        tz_name = schedule_def.get("timezone")
 
         if not cron_expr and not interval:
             return False
@@ -270,16 +338,20 @@ class FlowScheduler:
         if interval:
             interval_seconds = max(float(interval), MIN_INTERVAL)
 
+        tz = _resolve_tz(tz_name)
+
         entry = ScheduleEntry(
             flow_id=flow_id,
             cron=cron,
             interval_seconds=interval_seconds,
+            tz=tz,
         )
 
         with self._lock:
             # interval の初回実行を interval_seconds 後に設定
             if interval_seconds is not None:
                 entry.next_interval_at = time.monotonic() + interval_seconds
+                entry.compute_next_interval()
             self._entries[flow_id] = entry
 
         self._diag(
@@ -291,6 +363,7 @@ class FlowScheduler:
                 "flow_id": flow_id,
                 "cron": cron_expr,
                 "interval": interval_seconds,
+                "timezone": str(tz),
             },
         )
         return True
@@ -355,6 +428,8 @@ class FlowScheduler:
                         "cron": entry.cron._raw if entry.cron else None,
                         "interval": entry.interval_seconds,
                         "last_executed_at": entry.last_executed_at,
+                        "timezone": str(entry._tz),
+                        "next_run_utc": entry._next_run_utc.isoformat() if entry._next_run_utc else None,
                         "is_running": fid in self._running_flows,
                     }
                     for fid, entry in self._entries.items()
@@ -375,7 +450,7 @@ class FlowScheduler:
             return
 
         now_mono = time.monotonic()
-        now_dt = datetime.now(timezone.utc)
+        now_utc = datetime.now(_UTC)
 
         with self._lock:
             entries_snapshot = list(self._entries.values())
@@ -389,7 +464,7 @@ class FlowScheduler:
                 if entry.flow_id in self._running_flows:
                     continue
 
-            if entry.should_run(now_mono, now_dt):
+            if entry.should_run(now_mono, now_utc):
                 with self._lock:
                     # ダブルチェック
                     if entry.flow_id in self._running_flows:
@@ -398,6 +473,7 @@ class FlowScheduler:
                     entry.last_executed_at = now_mono
                     if entry.interval_seconds is not None:
                         entry.next_interval_at = now_mono + entry.interval_seconds
+                        entry.compute_next_interval()
 
                 # executor に submit
                 if self._executor is not None:

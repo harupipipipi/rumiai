@@ -1,0 +1,28 @@
+{
+  "handler_id": "builtin.store.cas",
+  "permission_id": "store.cas",
+  "entrypoint": "handler.py:execute",
+  "description": "Compare-And-Swap: atomically update a Store value only if the current value matches the expected value. Provides optimistic concurrency control.",
+  "risk": "medium",
+  "input_schema": {
+    "type": "object",
+    "required": ["store_id", "key", "expected_value", "new_value"],
+    "properties": {
+      "store_id": {"type": "string"},
+      "key": {"type": "string"},
+      "expected_value": {"description": "Expected current value (null if key should not exist)"},
+      "new_value": {"description": "New value to set if expected matches current"}
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "success": {"type": "boolean"},
+      "store_id": {"type": "string"},
+      "key": {"type": "string"},
+      "error": {"type": "string"},
+      "error_type": {"type": "string"},
+      "current_value": {"description": "Current value on conflict"}
+    }
+  }
+}

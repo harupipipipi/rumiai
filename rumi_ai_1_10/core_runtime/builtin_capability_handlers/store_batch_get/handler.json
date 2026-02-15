@@ -1,0 +1,32 @@
+{
+  "handler_id": "builtin.store.batch_get",
+  "permission_id": "store.batch_get",
+  "entrypoint": "handler.py:execute",
+  "description": "Get multiple values from a Store in a single request. Returns found values and null for missing keys. Maximum 100 keys per request.",
+  "risk": "low",
+  "input_schema": {
+    "type": "object",
+    "required": ["store_id", "keys"],
+    "properties": {
+      "store_id": {"type": "string"},
+      "keys": {
+        "type": "array",
+        "items": {"type": "string"},
+        "maxItems": 100,
+        "description": "List of keys to retrieve (max 100)"
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "success": {"type": "boolean"},
+      "results": {"type": "object", "description": "Map of key -> value (null if not found)"},
+      "found": {"type": "integer"},
+      "not_found": {"type": "integer"},
+      "warnings": {"type": "array", "items": {"type": "string"}},
+      "error": {"type": "string"},
+      "error_type": {"type": "string"}
+    }
+  }
+}
