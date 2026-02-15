@@ -311,4 +311,5 @@ user_data/
 .backups/
 # Ecosystem pack data (ユーザー固有、リポジトリに含めない)
 ecosystem/
-.backups/
+# Tests (ローカルのみ)
+tests/
