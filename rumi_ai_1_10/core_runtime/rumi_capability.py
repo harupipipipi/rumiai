@@ -190,3 +190,25 @@ def call(
                 sock.close()
             except Exception:
                 pass
+
+
+def get_secret(key: str) -> Optional[str]:
+    """
+    Retrieve a secret value by key.
+
+    Convenience wrapper around ``rumi_capability.call("secrets.get", {"key": key})``.
+    Returns the secret value on success, or ``None`` on failure.
+
+    Args:
+        key: Secret key (uppercase, digits, underscores only, max 64 chars)
+
+    Returns:
+        Secret value string, or ``None`` if not found / access denied
+    """
+    try:
+        result = call("secrets.get", {"key": key})
+        if isinstance(result, dict) and result.get("success"):
+            return result.get("value")
+        return None
+    except Exception:
+        return None
