@@ -1,0 +1,11 @@
+{
+  "type": "frontend",
+  "id": "frontend_v1",
+  "version": "1.0.0",
+  "description": "Rumi AI OS チャットフロントエンド",
+  "entry": "index.html",
+  "connectivity": {
+    "requires": ["service.chats", "io.http.binders"],
+    "provides": ["ui.shell"]
+  }
+}

@@ -1,4 +1,38 @@
 
+
+## Phase 0: 初期分析
+
+既存の `pack-development.md` の全文が提供されました。ここに5つの未実装セクション（E-6, E-10, E-16, E-18, E-19）を適切な位置に挿入し、目次も更新した完全版を生成します。
+
+ソースコード分析は前回完了済みです。
+
+## Phase 1: 計画作成
+
+### 概要
+既存の `pack-development.md` に5セクションを挿入し、目次を更新した完全版を出力する。
+
+### 挿入位置の設計
+- E-6（Flow → HTTP レスポンスマッピング）→ 「Flow 定義」セクションの末尾（スケジュール実行・Flow制御プロトコルの後）
+- E-10（型ヒント・バリデーション）→ 「ブロック（blocks）」セクション内に統合、またはブロックの後・Flow定義の前に独立セクション
+- E-16（context["http_request"] 詳細仕様）→ 「ネットワークアクセス」セクションの後
+- E-18（HTTP ステータスコード制御）→ 「Pack 独自エンドポイント（routes.json）」セクションの後
+- E-19（エラーハンドリング ベストプラクティス）→ E-18の後、「注意事項」の前
+
+目次番号を再割当して整合性を保ちます。
+
+### 実装ステップ
+1. 目次に5セクションを追加
+2. E-6をFlow定義セクション末尾に挿入
+3. E-10をブロックセクションの後に独立セクションとして挿入
+4. E-16をネットワークアクセスの後に挿入
+5. E-18をroutes.jsonの後に挿入
+6. E-19をE-18の後に挿入
+7. 全文検証
+
+この計画で進めます。
+
+## Phase 2-4: 実装・検証・最終出力
+
 ```markdown
 # Rumi AI OS — Pack Development Guide
 
@@ -12,23 +46,28 @@ Pack 開発者向けのガイドです。設計の全体像は [architecture.md]
 2. [最小構成](#最小構成)
 3. [ecosystem.json](#ecosystemjson)
 4. [ブロック（blocks）](#ブロックblocks)
-5. [Flow 定義](#flow-定義)
-6. [Flow Modifier](#flow-modifier)
-7. [ネットワークアクセス](#ネットワークアクセス)
-8. [Secrets の利用（Pack から）](#secrets-の利用pack-から)
-9. [Capability の利用](#capability-の利用)
-10. [Store API（Capability 経由）](#store-apicapability-経由)
-11. [Pack 間連携パターン](#pack-間連携パターン)
-12. [lib（install / update）](#libinstall--update)
-13. [pip 依存（requirements.lock）](#pip-依存requirementslock)
-14. [permissions.json](#permissionsjson)
-15. [Capability Handler の同梱](#capability-handler-の同梱)
-16. [vocab / converter（上級）](#vocab--converter上級)
-17. [Component（上級）](#component上級)
-18. [Pack 独自エンドポイント（routes.json）](#pack-独自エンドポイントroutesjson)
-19. [注意事項](#注意事項)
-20. [API リファレンス](#api-リファレンス)
-21. [チュートリアル: 簡単な Pack を作る](#チュートリアル-簡単な-pack-を作る)
+5. [型ヒント・バリデーション](#型ヒントバリデーション)
+6. [Flow 定義](#flow-定義)
+7. [Flow → HTTP レスポンスマッピング](#flow--http-レスポンスマッピング)
+8. [Flow Modifier](#flow-modifier)
+9. [ネットワークアクセス](#ネットワークアクセス)
+10. [context\["http\_request"\] 詳細仕様](#contexthttp_request-詳細仕様)
+11. [Secrets の利用（Pack から）](#secrets-の利用pack-から)
+12. [Capability の利用](#capability-の利用)
+13. [Store API（Capability 経由）](#store-apicapability-経由)
+14. [Pack 間連携パターン](#pack-間連携パターン)
+15. [lib（install / update）](#libinstall--update)
+16. [pip 依存（requirements.lock）](#pip-依存requirementslock)
+17. [permissions.json](#permissionsjson)
+18. [Capability Handler の同梱](#capability-handler-の同梱)
+19. [vocab / converter（上級）](#vocab--converter上級)
+20. [Component（上級）](#component上級)
+21. [Pack 独自エンドポイント（routes.json）](#pack-独自エンドポイントroutesjson)
+22. [HTTP ステータスコード制御](#http-ステータスコード制御)
+23. [エラーハンドリング ベストプラクティス](#エラーハンドリング-ベストプラクティス)
+24. [注意事項](#注意事項)
+25. [API リファレンス](#api-リファレンス)
+26. [チュートリアル: 簡単な Pack を作る](#チュートリアル-簡単な-pack-を作る)
 
 ---
 
@@ -141,6 +180,107 @@ def run(input_data, context=None):
 ### 戻り値
 
 JSON 互換の dict を返してください。戻り値は Flow の `output` フィールドで指定したコンテキストキーにそのまま格納されます。Kernel 内部のラッパー（`_kernel_step_status` 等）は自動的に除去され、ブロックが返した値がそのまま `ctx[output_key]` に入ります。
+
+---
+
+## 型ヒント・バリデーション
+
+### run() 関数のシグネチャ
+
+`python_file_call` で呼び出される `run()` 関数は、以下の3パターンのいずれかを受け付けます。実行エンジンが `inspect.signature` で引数の数を自動検出します。
+
+```python
+# パターン1: 入力データとコンテキストの両方を受け取る（推奨）
+def run(input_data: dict, context: dict) -> dict | None:
+    ...
+
+# パターン2: 入力データのみ受け取る
+def run(input_data: dict) -> dict | None:
+    ...
+
+# パターン3: 引数なし
+def run() -> dict | None:
+    ...
+```
+
+### input_data の型保証
+
+`input_data` は Flow 定義の `input` フィールドを JSON シリアライズ/デシリアライズした値です。したがって、含まれる型は JSON 由来の以下の型に限定されます。
+
+| JSON 型 | Python 型 |
+|---------|----------|
+| object | `dict` |
+| array | `list` |
+| string | `str` |
+| number（整数） | `int` |
+| number（小数） | `float` |
+| boolean | `bool` |
+| null | `None` |
+
+`input_data` 自体は通常 `dict` ですが、Flow 定義で直接スカラー値やリストを指定した場合はその型になります。
+
+### context の型
+
+`context` は `dict[str, Any]` です。主なキーは以下の通りです。
+
+| キー | 型 | 説明 |
+|------|----|------|
+| `flow_id` | `str` | 実行中の Flow ID |
+| `step_id` | `str` | 実行中のステップ ID |
+| `phase` | `str` | 実行フェーズ名 |
+| `ts` | `str` | 実行開始タイムスタンプ（ISO 8601 UTC） |
+| `owner_pack` | `str \| None` | 所有 Pack ID |
+| `inputs` | `dict` | input_data と同一 |
+| `http_request` | `Callable` | HTTP リクエスト関数（[context\["http\_request"\] 詳細仕様](#contexthttp_request-詳細仕様) 参照） |
+| `network_check` | `Callable` | ネットワークアクセスチェック関数 |
+| `capability_socket` | `str \| None` | Capability UDS ソケットパス |
+
+### 戻り値の型
+
+`run()` の戻り値は JSON シリアライズ可能な値（`dict`、`list`、`str`、`int`、`float`、`bool`、`None`）であることが必要です。`None` を返した場合、Flow の output は `null` として扱われます。戻り値が `dict` の場合、その内容が Flow の `output` 変数に格納されます。
+
+### バリデーションのベストプラクティス
+
+`input_data` の内容は外部（Flow 定義やユーザー入力）由来であるため、必ずバリデーションを行ってください。
+
+```python
+def run(input_data: dict, context: dict) -> dict:
+    # 1. 型チェック（早期リターン）
+    if not isinstance(input_data, dict):
+        return {"error": "input_data must be a dict"}
+
+    # 2. 必須フィールドの存在チェック
+    url = input_data.get("url")
+    if not url:
+        return {"error": "missing required field: url"}
+
+    # 3. 型の厳密チェック
+    if not isinstance(url, str):
+        return {"error": "field 'url' must be a string"}
+
+    timeout = input_data.get("timeout", 30)
+    if not isinstance(timeout, (int, float)):
+        return {"error": "field 'timeout' must be a number"}
+
+    # 4. 値の範囲チェック
+    if timeout <= 0 or timeout > 120:
+        return {"error": "field 'timeout' must be between 0 and 120"}
+
+    # 5. 本処理
+    result = context["http_request"](
+        method="GET",
+        url=url,
+        timeout_seconds=timeout,
+    )
+    return {"result": result}
+```
+
+**推奨事項:**
+
+- 例外を投げるのではなく、`{"error": "..."}` を返して正常終了させる
+- 必須フィールドは関数の先頭でまとめてチェックする
+- `isinstance()` で型を厳密に確認する
+- 数値の範囲やリストの長さにも上限を設ける
 
 ---
 
@@ -308,6 +448,75 @@ def run(input_data, context=None):
 
 ---
 
+## Flow → HTTP レスポンスマッピング
+
+Pack の `routes.json` で定義したエンドポイントが HTTP リクエストを受けると、Pack API Server（`pack_api_server.py`）は対応する Flow を実行し、その結果を HTTP レスポンスに変換して返却します。
+
+### レスポンス変換の仕組み
+
+現在の実装では、Flow の実行結果（`outputs`）は **常に JSON 形式で返却** されます。レスポンスは `APIResponse` データクラスを経由して生成されます。
+
+```python
+@dataclass
+class APIResponse:
+    success: bool
+    data: Any = None
+    error: Optional[str] = None
+
+    def to_json(self) -> str:
+        return json.dumps(asdict(self), ensure_ascii=False, indent=2)
+```
+
+Flow の実行が成功した場合:
+
+```json
+{
+  "success": true,
+  "data": { "...Flow outputs がここに入る..." },
+  "error": null
+}
+```
+
+Flow の実行が失敗した場合:
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": "エラーメッセージ"
+}
+```
+
+### ステータスコード
+
+Pack API Server の `_send_response` は以下の HTTP ステータスコードを使用します。
+
+| 状況 | ステータスコード |
+|------|-----------------|
+| Flow 実行成功 | `200 OK` |
+| 認証失敗 | `401 Unauthorized` |
+| 入力不正 | `400 Bad Request` |
+| ルート未発見 | `404 Not Found` |
+| 内部エラー | `500 Internal Server Error` |
+
+### ヘッダー
+
+レスポンスには以下のヘッダーが自動付与されます。
+
+| ヘッダー | 値 | 条件 |
+|---------|-----|------|
+| `Content-Type` | `application/json; charset=utf-8` | 常に付与 |
+| `Access-Control-Allow-Origin` | リクエスト元 Origin | CORS 許可リストに一致する場合 |
+| `Vary` | `Origin` | CORS ヘッダー付与時 |
+
+### 特殊キーによる制御
+
+現時点では `_status_code`、`_headers`、`_body` 等の特殊キーによる HTTP レスポンスの直接制御は **サポートされていません**。Flow の outputs は常に `APIResponse` の `data` フィールドに格納され、`application/json` 形式で返却されます。
+
+カスタムステータスコードやヘッダーの制御が必要な場合は、[HTTP ステータスコード制御](#http-ステータスコード制御) を参照してください。
+
+---
+
 ## Flow Modifier
 
 既存 Flow に後から機能を差し込む仕組みです。
@@ -439,6 +648,139 @@ def run(input_data, context=None):
 ### Grant の取得方法
 
 ユーザーまたは運用者が API で付与します。詳細は [operations.md](operations.md) の「ネットワーク権限管理」を参照してください。
+
+---
+
+## context["http_request"] 詳細仕様
+
+`python_file_call` の `run(input_data, context)` で渡される `context["http_request"]` は、Pack コードが外部 HTTP 通信を行うための唯一の手段です。
+
+### 関数シグネチャ
+
+```python
+def http_request(
+    method: str,
+    url: str,
+    headers: dict[str, str] | None = None,
+    body: str | None = None,
+    timeout_seconds: float = 30.0,
+) -> dict[str, Any]:
+    ...
+```
+
+### パラメータ
+
+| パラメータ | 型 | デフォルト | 説明 |
+|------------|-----|-----------|------|
+| `method` | `str` | （必須） | HTTP メソッド。`GET`, `POST`, `PUT`, `DELETE`, `PATCH`, `HEAD` |
+| `url` | `str` | （必須） | リクエスト先の完全な URL |
+| `headers` | `dict[str, str] \| None` | `None` | HTTP リクエストヘッダー |
+| `body` | `str \| None` | `None` | リクエストボディ（文字列）。JSON を送る場合は `json.dumps()` した文字列を渡す |
+| `timeout_seconds` | `float` | `30.0` | タイムアウト秒数。最大 `120.0` 秒に制限される |
+
+### 戻り値
+
+成功時:
+
+```python
+{
+    "success": True,
+    "status_code": 200,          # int: HTTPステータスコード
+    "headers": {"Content-Type": "application/json", ...},  # dict: レスポンスヘッダー
+    "body": "...",               # str: レスポンスボディ
+    "latency_ms": 123.4,         # float: 所要時間（ミリ秒）
+    "redirect_hops": 0,          # int: リダイレクト回数
+    "bytes_read": 1024,          # int: 読み取りバイト数
+    "final_url": "https://...",  # str: 最終URL（リダイレクト後）
+}
+```
+
+失敗時:
+
+```python
+{
+    "success": False,
+    "error": "エラーメッセージ",     # str: エラー内容
+    "error_type": "timeout",       # str: エラー種別
+}
+```
+
+### error_type 一覧
+
+| error_type | 説明 |
+|------------|------|
+| `socket_not_found` | Egress Proxy ソケットが見つからない |
+| `permission_denied` | ソケットへのアクセス権限がない |
+| `connection_refused` | Egress Proxy への接続が拒否された |
+| `timeout` | リクエストがタイムアウトした |
+| `syscall_error` | プロトコルレベルのエラー |
+| `json_decode_error` | レスポンスの JSON パースに失敗 |
+| `grant_denied` | Network Grant によりアクセスが拒否された |
+
+### UDS Egress Proxy 経由の通信
+
+Pack コードからの全ての外部 HTTP 通信は **UDS（Unix Domain Socket）Egress Proxy** を経由します。Pack コードが直接ネットワーク通信を行うことはできません。
+
+通信フロー:
+
+```
+Pack コード (run関数)
+  → context["http_request"]()
+    → UDS ソケット (/run/rumi/egress.sock)
+      → Egress Proxy (Kernel 側)
+        → Network Grant Manager でアクセス許可を検証
+          → 許可されていれば外部 HTTP リクエストを実行
+          → 拒否されていれば grant_denied エラーを返却
+```
+
+### コンテナモードとホストモードの違い
+
+| 項目 | コンテナモード（strict） | ホストモード（permissive） |
+|------|--------------------------|---------------------------|
+| ネットワーク | `--network=none`（完全隔離） | ホストのネットワークを使用 |
+| 通信経路 | UDS ソケット経由のみ | UDS ソケット経由（ヘルパー関数経由） |
+| ソケットパス | `/run/rumi/egress.sock`（コンテナ内マウント） | Kernel が管理する実パス |
+| Grant 検証 | Egress Proxy が検証 | Egress Proxy が検証 |
+| セキュリティ | Docker 隔離 + UDS 制限 | 警告付きで実行（本番非推奨） |
+
+コンテナモード（`RUMI_SECURITY_MODE=strict`）では、Docker コンテナは `--network=none` で起動されるため、UDS ソケット以外の通信手段はありません。ホストモード（`RUMI_SECURITY_MODE=permissive`）では Docker なしで実行されますが、`context["http_request"]` は同様に Egress Proxy を経由するため、Network Grant による制御は有効です。
+
+### 使用例
+
+```python
+def run(input_data: dict, context: dict) -> dict:
+    # GET リクエスト
+    result = context["http_request"](
+        method="GET",
+        url="https://api.example.com/data",
+        headers={"Accept": "application/json"},
+        timeout_seconds=10.0,
+    )
+
+    if not result["success"]:
+        return {"error": result["error"]}
+
+    return {"status": result["status_code"], "body": result["body"]}
+```
+
+```python
+def run(input_data: dict, context: dict) -> dict:
+    import json
+
+    # POST JSON リクエスト
+    result = context["http_request"](
+        method="POST",
+        url="https://api.example.com/items",
+        headers={"Content-Type": "application/json"},
+        body=json.dumps({"name": input_data.get("name")}),
+        timeout_seconds=15.0,
+    )
+
+    if not result["success"]:
+        return {"error": result["error"], "error_type": result.get("error_type")}
+
+    return {"created": True, "response": result["body"]}
+```
 
 ---
 
@@ -933,6 +1275,147 @@ curl -X POST http://localhost:8765/api/routes/reload \
 curl http://localhost:8765/api/routes \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
+
+---
+
+## HTTP ステータスコード制御
+
+### 現在の仕様
+
+現在の Pack API Server の実装では、Pack の `routes.json` エンドポイントから返却される HTTP ステータスコードを Pack 側から **直接制御することはできません**。
+
+Flow の outputs に `_status_code` 等の特殊キーを含めても、それはレスポンスの `data` フィールドにそのまま含まれるだけで、HTTP ステータスコードには反映されません。
+
+### ステータスコードの決定ロジック
+
+Pack API Server は以下のロジックでステータスコードを決定します。
+
+| 判定順 | 状況 | ステータスコード |
+|--------|------|-----------------|
+| 1 | 認証失敗 | `401` |
+| 2 | 入力バリデーション失敗 | `400` |
+| 3 | ルート未発見 | `404` |
+| 4 | Flow 実行成功 | `200`（固定） |
+| 5 | Flow 実行でエラー dict 返却 | `200`（data にエラーが含まれるが HTTP は 200） |
+| 6 | Flow 実行で例外発生 | `500` |
+
+つまり、Flow が正常に完了して `{"error": "not found"}` を返した場合でも、HTTP ステータスコードは `200 OK` になります。
+
+### 推奨パターン
+
+現在の制約のもとでは、エラーをクライアントに伝える場合はレスポンスボディ内の `success` フィールドと `error` フィールドを使用してください。
+
+```python
+def run(input_data: dict, context: dict) -> dict:
+    item_id = input_data.get("id")
+    if not item_id:
+        return {"error": "missing id", "error_code": "MISSING_ID"}
+
+    # ... 処理 ...
+
+    if not found:
+        return {"error": "item not found", "error_code": "NOT_FOUND"}
+
+    return {"item": item_data}
+```
+
+クライアント側では `data.error` の有無で成功/失敗を判定します。
+
+### 将来対応予定
+
+将来のバージョンで、Flow outputs 内の特殊キー（`_status_code`、`_headers` 等）を認識して HTTP レスポンスに反映する機能の追加が検討されています。
+
+---
+
+## エラーハンドリング ベストプラクティス
+
+### python_file_call の run() で例外が発生した場合
+
+`run()` 関数内で捕捉されない例外が発生すると、実行エンジンは以下の処理を行います。
+
+**コンテナモード**: Docker プロセスが非ゼロの終了コードで終了し、stderr の内容がエラーメッセージとして記録されます。`ExecutionResult` の `success` は `False`、`error_type` は `"container_execution_error"` になります。
+
+**ホストモード（permissive）**: 例外が `ThreadPoolExecutor` の `Future` から伝播し、同様に `ExecutionResult` の `success` が `False` になります。
+
+いずれの場合も、Kernel のハンドラ（`_h_python_file_call`）は `_kernel_step_status: "failed"` を返します。
+
+### 推奨: try-except で包んで error dict を return する
+
+例外を外に漏らすと、スタックトレースがログに記録されるだけで呼び出し元の Flow に有用な情報が渡りません。必ず try-except で包み、構造化されたエラー情報を返してください。
+
+```python
+def run(input_data: dict, context: dict) -> dict:
+    try:
+        url = input_data["url"]
+        result = context["http_request"](
+            method="GET",
+            url=url,
+            timeout_seconds=input_data.get("timeout", 30),
+        )
+
+        if not result["success"]:
+            return {
+                "error": result["error"],
+                "error_type": result.get("error_type", "unknown"),
+            }
+
+        return {"data": result["body"], "status_code": result["status_code"]}
+
+    except KeyError as e:
+        return {"error": f"missing required field: {e}"}
+    except Exception as e:
+        return {"error": str(e), "error_type": type(e).__name__}
+```
+
+### Flow の step 失敗時の動作
+
+Flow 内のステップが失敗した場合の動作は、Flow 定義の `defaults` とステップごとの `on_error` 設定によって決まります。
+
+| 設定 | 動作 |
+|------|------|
+| `defaults.fail_soft: true`（デフォルト） | ステップ失敗を記録して次のステップへ進む |
+| `defaults.fail_soft: false` | ステップ失敗時に Flow 全体を中断する |
+| `on_error.action: "abort"` | このステップの失敗時に Flow を中断する |
+| `on_error.action: "continue"` | このステップの失敗時でも次へ進む |
+| `on_error.action: "disable_target"` | 対象を無効化して次へ進む |
+
+Flow レベルのエラーハンドラが InterfaceRegistry に `flow.error_handler` として登録されている場合、ステップ例外発生時にそのハンドラが呼び出されます。エラーハンドラは `"abort"`（中断）、`"retry"`（再試行）、またはそれ以外（継続）を返すことで動作を制御できます。
+
+### capability.call() 失敗時の戻り値の扱い方
+
+`rumi_capability` モジュール経由で Capability を呼び出した場合、失敗時は `success: False` を含む dict が返されます。
+
+```python
+import rumi_capability
+
+result = rumi_capability.call(
+    capability_id="store_get",
+    input_data={"store_id": "my_store", "key": "my_key"},
+)
+
+if not result.get("success", False):
+    # エラー処理
+    error_msg = result.get("error", "Unknown error")
+    error_type = result.get("error_type", "unknown")
+    return {"error": error_msg, "error_type": error_type}
+
+# 成功時の処理
+value = result.get("output", {}).get("value")
+```
+
+Capability 呼び出しの失敗原因には以下があります。
+
+| error_type | 説明 |
+|------------|------|
+| `approval_denied` | Capability の使用が承認されていない |
+| `grant_denied` | Capability Grant が付与されていない |
+| `trust_denied` | Trust Store による検証に失敗した |
+| `handler_not_found` | 指定された Capability Handler が存在しない |
+| `execution_error` | Handler の実行中にエラーが発生した |
+| `timeout` | 実行がタイムアウトした |
+| `socket_not_found` | Capability ソケットが見つからない |
+
+これらのエラーも try-except ではなく、戻り値の `success` フィールドで判定することを推奨します。
 
 ---
 

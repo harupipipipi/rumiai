@@ -1,0 +1,51 @@
+{
+  "type": "supporter_pack",
+  "id": "supporter_v1",
+  "version": "1.0.0",
+  "display_name": "Supporter Pack",
+  "description": "Pre/Post処理サポーターシステム。AI呼び出し前後の入力修正、コンテキスト追加、応答後処理を提供します。",
+  "entry": {
+    "backend": "python:supporter_loader",
+    "frontend": null
+  },
+  "connectivity": {
+    "accepts": [
+      "ai_client_provider"
+    ],
+    "provides": [
+      "pre_processing",
+      "post_processing"
+    ],
+    "requires": []
+  },
+  "storage": {
+    "uses_mounts": [
+      "data.settings"
+    ],
+    "layout": "component_defined"
+  },
+  "addon_policy": {
+    "allowed_manifest_paths": [
+      "/connectivity/accepts",
+      "/extensions"
+    ],
+    "editable_files": [
+      {
+        "path_glob": "supporter/*/manifest.json",
+        "allowed_json_pointer_prefixes": [
+          "/ai_config",
+          "/extensions"
+        ]
+      }
+    ],
+    "deny_all": false
+  },
+  "extensions": {},
+  "metadata": {
+    "timing_modes": [
+      "pre",
+      "post",
+      "both"
+    ]
+  }
+}

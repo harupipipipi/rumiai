@@ -1,0 +1,20 @@
+{
+  "type": "settings",
+  "id": "settings_v1",
+  "version": "1.0.0",
+  "description": "ユーザー設定管理コンポーネント",
+  "connectivity": {
+    "accepts": [],
+    "provides": ["settings_manager"],
+    "requires": []
+  },
+  "storage": {
+    "mounts": {
+      "data.settings": "./user_data/settings"
+    }
+  },
+  "addon_policy": {
+    "allowed_manifest_paths": ["/connectivity"],
+    "deny_all": false
+  }
+}
