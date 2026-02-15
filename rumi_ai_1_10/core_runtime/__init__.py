@@ -41,6 +41,7 @@ from .pack_api_server import (
     initialize_pack_api_server,
     shutdown_pack_api_server,
 )
+from .docker_run_builder import DockerRunBuilder
 from .secure_executor import (
     SecureExecutor,
     ExecutionResult,
@@ -169,6 +170,8 @@ __all__ = [
     "get_pack_api_server",
     "initialize_pack_api_server",
     "shutdown_pack_api_server",
+    # Docker Run Builder
+    "DockerRunBuilder",
     # Secure Executor
     "SecureExecutor",
     "ExecutionResult",

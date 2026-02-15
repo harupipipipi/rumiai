@@ -67,6 +67,8 @@ MAX_STDOUT_SIZE: int = 4 * 1024 * 1024  # 4MB (#14)
 _DOCKER_CHECK_CACHE_TTL: float = float(os.environ.get("RUMI_DOCKER_CHECK_CACHE_TTL", "60"))
 
 
+from .docker_run_builder import DockerRunBuilder
+
 from .paths import (
     ECOSYSTEM_DIR,
     PACK_DATA_BASE_DIR,
@@ -833,27 +835,14 @@ request = http_request
                 f.write(executor_script)
                 script_file = f.name
 
-            # Docker実行コマンドを構築
-            docker_cmd = [
-                "docker", "run",
-                "--rm",
-                "--name", container_name,
-                "--network=none",  # ネットワーク隔離（重要！）
-                "--cap-drop=ALL",  # 全権限を削除
-                "--security-opt=no-new-privileges:true",
-                "--read-only",  # 読み取り専用ファイルシステム
-                "--tmpfs=/tmp:size=64m,noexec,nosuid",  # 一時領域
-                "--memory=256m",
-                "--memory-swap=256m",
-                "--cpus=0.5",
-                "--pids-limit=100",
-                "--user=65534:65534",  # nobody ユーザー
-                "-v", f"{file_path.parent.resolve()}:/workspace:ro",  # ソースディレクトリ（読み取り専用）
-                "-v", f"{input_file}:/input.json:ro",  # 入力ファイル
-                "-v", f"{script_file}:/executor.py:ro",  # 実行スクリプト
-                "-v", f"{syscall_file}:/rumi_syscall.py:ro",  # syscallモジュール
-                "-e", f"PYTHONPATH={':'.join(pythonpath_parts)}",
-            ]
+            # Docker実行コマンドを構築 (DockerRunBuilder)
+            builder = DockerRunBuilder(name=container_name)
+            builder.pids_limit(100)
+            builder.volume(f"{file_path.parent.resolve()}:/workspace:ro")
+            builder.volume(f"{input_file}:/input.json:ro")
+            builder.volume(f"{script_file}:/executor.py:ro")
+            builder.volume(f"{syscall_file}:/rumi_syscall.py:ro")
+            builder.env("PYTHONPATH", ":".join(pythonpath_parts))
 
             # --group-add for UDS socket access (A-1)
             group_add_gids: set = set()
@@ -863,53 +852,41 @@ request = http_request
                 group_add_gids.add(capability_gid)
 
             for gid in sorted(group_add_gids):
-                docker_cmd.extend(["--group-add", str(gid)])
+                builder.group_add(gid)
 
             if group_add_gids:
                 result.warnings.append(
                     f"Docker --group-add applied: {sorted(group_add_gids)}"
                 )
 
-
             # pip site-packages マウント（存在する場合）
             if pip_site_packages:
-                docker_cmd.extend([
-                    "-v", f"{pip_site_packages.resolve()}:/pip-packages:ro",
-                ])
+                builder.volume(f"{pip_site_packages.resolve()}:/pip-packages:ro")
 
             # Pack data マウント（inbox 等の読み取り用）
             if pack_data_dir and pack_data_dir.exists():
-                docker_cmd.extend([
-                    "-v", f"{pack_data_dir.resolve()}:/data:ro",
-                ])
-
+                builder.volume(f"{pack_data_dir.resolve()}:/data:ro")
 
             # UDSソケットマウント（存在する場合）
             if sock_path and sock_path.exists():
-                docker_cmd.extend([
-                    "-v", f"{sock_path}:/run/rumi/egress.sock:rw",  # UDSソケット（単体マウント）
-                ])
+                builder.volume(f"{sock_path}:/run/rumi/egress.sock:rw")
 
             # Capability ソケットマウント（存在する場合）
             if capability_sock_path and capability_sock_path.exists():
-                docker_cmd.extend([
-                    "-v", f"{capability_sock_path}:/run/rumi/capability.sock:rw",
-                ])
+                builder.volume(f"{capability_sock_path}:/run/rumi/capability.sock:rw")
 
             # rumi_capability.py マウント（存在する場合）
             if capability_file:
-                docker_cmd.extend([
-                    "-v", f"{capability_file}:/rumi_capability.py:ro",
-                ])
+                builder.volume(f"{capability_file}:/rumi_capability.py:ro")
 
-            docker_cmd.extend([
-                "-w", "/workspace",
-                "--label", "rumi.managed=true",
-                "--label", f"rumi.pack_id={owner_pack or 'unknown'}",
-                "--label", "rumi.type=python_file_call",
-                "python:3.11-slim",
-                "python", "/executor.py", file_path.name
-            ])
+            builder.workdir("/workspace")
+            builder.label("rumi.managed", "true")
+            builder.label("rumi.pack_id", owner_pack or "unknown")
+            builder.label("rumi.type", "python_file_call")
+            builder.image("python:3.11-slim")
+            builder.command(["python", "/executor.py", file_path.name])
+
+            docker_cmd = builder.build()
 
             # Docker実行 (#14: stdout サイズ制限付き)
             proc = None

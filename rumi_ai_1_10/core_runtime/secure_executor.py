@@ -29,6 +29,7 @@ from typing import Any, Dict, Optional, List
 
 logger = logging.getLogger(__name__)
 
+from .docker_run_builder import DockerRunBuilder
 from .paths import LOCAL_PACK_ID, PACK_DATA_BASE_DIR as _PACK_DATA_BASE_DIR
 
 # lib 実行用定数
@@ -250,43 +251,28 @@ class SecureExecutor:
             context_file = f.name
         
         try:
-            docker_cmd = [
-                "docker", "run",
-                "--rm",
-                "--name", container_name,
-                "--network=none",
-                "--cap-drop=ALL",
-                "--security-opt=no-new-privileges:true",
-                "--read-only",
-                "--tmpfs=/tmp:size=64m,noexec,nosuid",
-                "--memory=256m",
-                "--memory-swap=256m",
-                "--cpus=0.5",
-                "--pids-limit=50",
-                "--user=65534:65534",
-                "--ulimit=nproc=50:50",
-                "--ulimit=nofile=100:100",
-                "-v", f"{component_dir.resolve()}:/component:ro",
-                "-v", f"{context_file}:/context.json:ro",
-                "-e", f"RUMI_PACK_ID={pack_id}",
-                "-e", f"RUMI_COMPONENT_ID={component_id}",
-                "-e", f"RUMI_PHASE={phase}",
-                "-e", f"PYTHONPATH={pythonpath_value}",
-                "--label", "rumi.managed=true",
-                "--label", f"rumi.pack_id={pack_id}",
-                "--label", "rumi.type=executor",
-            ]
+            # Docker実行コマンドを構築 (DockerRunBuilder)
+            builder = DockerRunBuilder(name=container_name)
+            builder.ulimit("nproc=50:50")
+            builder.ulimit("nofile=100:100")
+            builder.volume(f"{component_dir.resolve()}:/component:ro")
+            builder.volume(f"{context_file}:/context.json:ro")
+            builder.env("RUMI_PACK_ID", pack_id)
+            builder.env("RUMI_COMPONENT_ID", component_id)
+            builder.env("RUMI_PHASE", phase)
+            builder.env("PYTHONPATH", pythonpath_value)
+            builder.label("rumi.managed", "true")
+            builder.label("rumi.pack_id", pack_id)
+            builder.label("rumi.type", "executor")
 
             # pip site-packages マウント
             if pip_site_packages:
-                docker_cmd.extend([
-                    "-v", f"{pip_site_packages.resolve()}:/pip-packages:ro",
-                ])
+                builder.volume(f"{pip_site_packages.resolve()}:/pip-packages:ro")
 
-            docker_cmd.extend([
-                "python:3.11-slim",
-                "python", "-c", self._get_executor_script(file_path.name)
-            ])
+            builder.image("python:3.11-slim")
+            builder.command(["python", "-c", self._get_executor_script(file_path.name)])
+
+            docker_cmd = builder.build()
             
             result = subprocess.run(
                 docker_cmd,
@@ -580,48 +566,33 @@ else:
             context_file = f.name
         
         try:
-            docker_cmd = [
-                "docker", "run",
-                "--rm",
-                "--name", container_name,
-                "--network=none",
-                "--cap-drop=ALL",
-                "--security-opt=no-new-privileges:true",
-                "--read-only",
-                "--tmpfs=/tmp:size=64m,noexec,nosuid",
-                "--memory=256m",
-                "--memory-swap=256m",
-                "--cpus=0.5",
-                "--pids-limit=50",
-                "--user=65534:65534",
-                "--ulimit=nproc=50:50",
-                "--ulimit=nofile=100:100",
-                # lib ディレクトリ（読み取り専用）
-                "-v", f"{lib_dir.resolve()}:/lib:ro",
-                # Pack データディレクトリ（読み書き可能）
-                "-v", f"{pack_data_dir.resolve()}:/data:rw",
-                # コンテキストファイル
-                "-v", f"{context_file}:/context.json:ro",
-                # 環境変数
-                "-e", f"RUMI_PACK_ID={pack_id}",
-                "-e", f"RUMI_LIB_TYPE={lib_type}",
-                "-e", f"PYTHONPATH={pythonpath_value}",
-                # ラベル
-                "--label", "rumi.managed=true",
-                "--label", f"rumi.pack_id={pack_id}",
-                "--label", "rumi.type=lib_executor",
-            ]
+            # Docker実行コマンドを構築 (DockerRunBuilder)
+            builder = DockerRunBuilder(name=container_name)
+            builder.ulimit("nproc=50:50")
+            builder.ulimit("nofile=100:100")
+            # lib ディレクトリ（読み取り専用）
+            builder.volume(f"{lib_dir.resolve()}:/lib:ro")
+            # Pack データディレクトリ（読み書き可能）
+            builder.volume(f"{pack_data_dir.resolve()}:/data:rw")
+            # コンテキストファイル
+            builder.volume(f"{context_file}:/context.json:ro")
+            # 環境変数
+            builder.env("RUMI_PACK_ID", pack_id)
+            builder.env("RUMI_LIB_TYPE", lib_type)
+            builder.env("PYTHONPATH", pythonpath_value)
+            # ラベル
+            builder.label("rumi.managed", "true")
+            builder.label("rumi.pack_id", pack_id)
+            builder.label("rumi.type", "lib_executor")
 
             # pip site-packages マウント
             if pip_site_packages:
-                docker_cmd.extend([
-                    "-v", f"{pip_site_packages.resolve()}:/pip-packages:ro",
-                ])
+                builder.volume(f"{pip_site_packages.resolve()}:/pip-packages:ro")
 
-            docker_cmd.extend([
-                "python:3.11-slim",
-                "python", "-c", self._get_lib_executor_script(lib_file.name)
-            ])
+            builder.image("python:3.11-slim")
+            builder.command(["python", "-c", self._get_lib_executor_script(lib_file.name)])
+
+            docker_cmd = builder.build()
             
             proc_result = subprocess.run(
                 docker_cmd,
