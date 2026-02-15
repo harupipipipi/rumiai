@@ -155,12 +155,18 @@
             "properties": {
               "provides": {
                 "type": "array",
-                "items": { "type": "string" },
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
+                },
                 "description": "このComponentが提供するインターフェース"
               },
               "requires": {
                 "type": "array",
-                "items": { "type": "string" },
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
+                },
                 "description": "このComponentが要求するインターフェース"
               }
             },

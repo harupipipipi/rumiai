@@ -93,7 +93,7 @@
           "description": "受け入れ可能なComponent type",
           "items": {
             "type": "string",
-            "pattern": "^[a-z][a-z0-9_]*$"
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
           },
           "uniqueItems": true,
           "default": []
@@ -103,7 +103,7 @@
           "description": "提供するインターフェース",
           "items": {
             "type": "string",
-            "pattern": "^[a-z][a-z0-9_]*$"
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
           },
           "uniqueItems": true,
           "default": []
@@ -113,7 +113,7 @@
           "description": "必須の依存Component type",
           "items": {
             "type": "string",
-            "pattern": "^[a-z][a-z0-9_]*$"
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*$"
           },
           "uniqueItems": true,
           "default": []
