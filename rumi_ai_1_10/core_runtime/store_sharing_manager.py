@@ -1,0 +1,243 @@
+"""
+store_sharing_manager.py - Pack間Store共有管理
+
+Packが自分のStoreを他のPackに共有する仕組みを管理する。
+
+保存先: user_data/stores/sharing.json
+
+設計原則:
+- provider_pack_id が所有する store_id を consumer_pack_id に共有
+- 承認(approve) / 取消(revoke) の明示的な操作が必要
+- スレッドセーフ
+"""
+
+from __future__ import annotations
+
+import json
+import threading
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+
+SHARING_INDEX_PATH = "user_data/stores/sharing.json"
+
+
+@dataclass
+class SharingEntry:
+    """単一の共有エントリ"""
+    provider_pack_id: str
+    consumer_pack_id: str
+    store_id: str
+    approved_at: str
+    approved_by: str = "api_user"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "provider_pack_id": self.provider_pack_id,
+            "consumer_pack_id": self.consumer_pack_id,
+            "store_id": self.store_id,
+            "approved_at": self.approved_at,
+            "approved_by": self.approved_by,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "SharingEntry":
+        return cls(
+            provider_pack_id=data.get("provider_pack_id", ""),
+            consumer_pack_id=data.get("consumer_pack_id", ""),
+            store_id=data.get("store_id", ""),
+            approved_at=data.get("approved_at", ""),
+            approved_by=data.get("approved_by", "api_user"),
+        )
+
+    @property
+    def key(self) -> str:
+        """一意キー"""
+        return f"{self.provider_pack_id}:{self.consumer_pack_id}:{self.store_id}"
+
+
+class SharedStoreManager:
+    """
+    Pack間Store共有を管理する。
+
+    データ構造 (sharing.json):
+    {
+        "version": "1.0",
+        "updated_at": "...",
+        "entries": {
+            "<provider>:<consumer>:<store_id>": { ... SharingEntry ... }
+        }
+    }
+    """
+
+    def __init__(self, index_path: Optional[str] = None):
+        self._index_path = Path(index_path or SHARING_INDEX_PATH)
+        self._lock = threading.RLock()
+        self._entries: Dict[str, SharingEntry] = {}
+        self._load()
+
+    @staticmethod
+    def _now_ts() -> str:
+        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    # ------------------------------------------------------------------
+    # 永続化
+    # ------------------------------------------------------------------
+
+    def _load(self) -> None:
+        if not self._index_path.exists():
+            return
+        try:
+            with open(self._index_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            for key, edata in data.get("entries", {}).items():
+                self._entries[key] = SharingEntry.from_dict(edata)
+        except Exception:
+            pass
+
+    def _save(self) -> None:
+        self._index_path.parent.mkdir(parents=True, exist_ok=True)
+        data = {
+            "version": "1.0",
+            "updated_at": self._now_ts(),
+            "entries": {k: e.to_dict() for k, e in self._entries.items()},
+        }
+        tmp = self._index_path.with_suffix(".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        tmp.replace(self._index_path)
+
+    # ------------------------------------------------------------------
+    # 公開API
+    # ------------------------------------------------------------------
+
+    def approve_sharing(
+        self,
+        provider_pack_id: str,
+        consumer_pack_id: str,
+        store_id: str,
+        approved_by: str = "api_user",
+    ) -> Dict[str, Any]:
+        """共有を承認する。"""
+        if not provider_pack_id or not consumer_pack_id or not store_id:
+            return {
+                "success": False,
+                "error": "provider_pack_id, consumer_pack_id, and store_id are required",
+            }
+
+        if provider_pack_id == consumer_pack_id:
+            return {
+                "success": False,
+                "error": "provider and consumer must be different packs",
+            }
+
+        entry = SharingEntry(
+            provider_pack_id=provider_pack_id,
+            consumer_pack_id=consumer_pack_id,
+            store_id=store_id,
+            approved_at=self._now_ts(),
+            approved_by=approved_by,
+        )
+
+        with self._lock:
+            self._entries[entry.key] = entry
+            self._save()
+
+        self._audit("store_sharing_approved", True, entry.to_dict())
+
+        return {
+            "success": True,
+            "provider_pack_id": provider_pack_id,
+            "consumer_pack_id": consumer_pack_id,
+            "store_id": store_id,
+        }
+
+    def revoke_sharing(
+        self,
+        provider_pack_id: str,
+        consumer_pack_id: str,
+        store_id: str,
+    ) -> Dict[str, Any]:
+        """共有を取り消す。"""
+        key = f"{provider_pack_id}:{consumer_pack_id}:{store_id}"
+
+        with self._lock:
+            if key not in self._entries:
+                return {
+                    "success": False,
+                    "error": f"No sharing entry found for {key}",
+                }
+            del self._entries[key]
+            self._save()
+
+        self._audit("store_sharing_revoked", True, {
+            "provider_pack_id": provider_pack_id,
+            "consumer_pack_id": consumer_pack_id,
+            "store_id": store_id,
+        })
+
+        return {
+            "success": True,
+            "provider_pack_id": provider_pack_id,
+            "consumer_pack_id": consumer_pack_id,
+            "store_id": store_id,
+        }
+
+    def list_shared_stores(self) -> List[Dict[str, Any]]:
+        """全ての共有エントリを返す。"""
+        with self._lock:
+            return [e.to_dict() for e in self._entries.values()]
+
+    def is_sharing_approved(
+        self,
+        consumer_pack_id: str,
+        store_id: str,
+    ) -> bool:
+        """consumer_pack_id が store_id にアクセスできるか判定する。"""
+        with self._lock:
+            for entry in self._entries.values():
+                if entry.consumer_pack_id == consumer_pack_id and entry.store_id == store_id:
+                    return True
+        return False
+
+    # ------------------------------------------------------------------
+    # 監査ログ
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _audit(event_type: str, success: bool, details: Dict[str, Any]) -> None:
+        try:
+            from .audit_logger import get_audit_logger
+            get_audit_logger().log_system_event(
+                event_type=event_type, success=success, details=details,
+            )
+        except Exception:
+            pass
+
+
+# ------------------------------------------------------------------
+# グローバルインスタンス
+# ------------------------------------------------------------------
+
+_global_shared_store_manager: Optional[SharedStoreManager] = None
+_ssm_lock = threading.Lock()
+
+
+def get_shared_store_manager() -> SharedStoreManager:
+    """グローバルな SharedStoreManager を取得"""
+    global _global_shared_store_manager
+    if _global_shared_store_manager is None:
+        with _ssm_lock:
+            if _global_shared_store_manager is None:
+                _global_shared_store_manager = SharedStoreManager()
+    return _global_shared_store_manager
+
+
+def reset_shared_store_manager(index_path: str = None) -> SharedStoreManager:
+    """リセット（テスト用）"""
+    global _global_shared_store_manager
+    with _ssm_lock:
+        _global_shared_store_manager = SharedStoreManager(index_path)
+    return _global_shared_store_manager

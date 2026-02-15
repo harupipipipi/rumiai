@@ -29,6 +29,19 @@ from .hierarchical_grant import parse_principal_chain, intersect_config
 _UNSAFE_CHARS = re.compile(r'[/\\:*?"<>|.\x00-\x1f]')
 
 
+BATCH_GRANT_MAX_ITEMS = 50
+
+
+@dataclass
+class BatchGrantResult:
+    """batch_grant の結果"""
+    success: bool
+    results: List[Dict[str, Any]] = field(default_factory=list)
+    granted_count: int = 0
+    failed_count: int = 0
+
+
+
 def sanitize_principal_id(principal_id: str) -> str:
     """principal_id をファイルシステム安全な文字列に変換"""
     return _UNSAFE_CHARS.sub("_", principal_id)
@@ -388,6 +401,88 @@ class CapabilityGrantManager:
             self._audit_grant_event(principal_id, "*", "revoke_all", True)
             return True
     
+
+    def batch_grant(
+        self,
+        grants: List[Dict[str, Any]],
+    ) -> BatchGrantResult:
+        """
+        複数の Grant 操作を一括で実行する (best-effort)。
+
+        各要素は {"principal_id": str, "permission_id": str, "config": dict|None}。
+        最大 BATCH_GRANT_MAX_ITEMS 件。個別失敗は結果に含め、他は続行する。
+
+        Args:
+            grants: Grant 操作のリスト
+
+        Returns:
+            BatchGrantResult
+        """
+        if not isinstance(grants, list):
+            return BatchGrantResult(
+                success=False,
+                results=[],
+                granted_count=0,
+                failed_count=0,
+            )
+
+        if len(grants) > BATCH_GRANT_MAX_ITEMS:
+            return BatchGrantResult(
+                success=False,
+                results=[{
+                    "principal_id": "",
+                    "permission_id": "",
+                    "granted": False,
+                    "error": f"Too many grants: {len(grants)} exceeds max {BATCH_GRANT_MAX_ITEMS}",
+                }],
+                granted_count=0,
+                failed_count=1,
+            )
+
+        results: List[Dict[str, Any]] = []
+        granted_count = 0
+        failed_count = 0
+
+        for item in grants:
+            principal_id = item.get("principal_id", "")
+            permission_id = item.get("permission_id", "")
+            config = item.get("config")
+
+            if not principal_id or not permission_id:
+                results.append({
+                    "principal_id": principal_id,
+                    "permission_id": permission_id,
+                    "granted": False,
+                    "error": "Missing principal_id or permission_id",
+                })
+                failed_count += 1
+                continue
+
+            try:
+                self.grant_permission(principal_id, permission_id, config)
+                results.append({
+                    "principal_id": principal_id,
+                    "permission_id": permission_id,
+                    "granted": True,
+                    "error": None,
+                })
+                granted_count += 1
+            except Exception as e:
+                results.append({
+                    "principal_id": principal_id,
+                    "permission_id": permission_id,
+                    "granted": False,
+                    "error": str(e),
+                })
+                failed_count += 1
+
+        return BatchGrantResult(
+            success=True,
+            results=results,
+            granted_count=granted_count,
+            failed_count=failed_count,
+        )
+
     def get_grant(self, principal_id: str) -> Optional[CapabilityGrant]:
         """Grant を取得"""
         with self._lock:

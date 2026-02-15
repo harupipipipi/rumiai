@@ -178,6 +178,33 @@ class StoreRegistry:
             })
             return StoreResult(success=True, store_id=store_id)
 
+
+    def is_store_accessible(
+        self,
+        store_id: str,
+        pack_id: str,
+        allowed_store_ids: "Optional[List[str]]" = None,
+    ) -> bool:
+        """
+        pack_id が store_id にアクセスできるか判定する。
+
+        チェック順:
+        1. allowed_store_ids (grant の config 由来) に含まれれば許可
+        2. SharedStoreManager.is_sharing_approved() が True なら許可
+        3. それ以外は拒否
+
+        W2-A の get / set から呼び出されることを想定。
+        """
+        if allowed_store_ids is not None and store_id in allowed_store_ids:
+            return True
+
+        try:
+            from .store_sharing_manager import get_shared_store_manager
+            ssm = get_shared_store_manager()
+            return ssm.is_sharing_approved(pack_id, store_id)
+        except Exception:
+            return False
+
     def list_stores(self) -> List[Dict[str, Any]]:
         with self._lock:
             return [s.to_dict() for s in self._stores.values()]

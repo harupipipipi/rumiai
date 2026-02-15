@@ -241,6 +241,11 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                 result = self._stores_list()
                 self._send_response(APIResponse(True, result))
 
+
+            elif path == "/api/stores/shared":
+                result = self._stores_shared_list()
+                self._send_response(APIResponse(True, result))
+
             elif path == "/api/units":
                 query = parse_qs(urlparse(self.path).query)
                 store_id = query.get("store_id", [None])[0]
@@ -502,6 +507,35 @@ class PackAPIHandler(BaseHTTPRequestHandler):
                     else:
                         self._send_response(APIResponse(False, error=result.get("error", "Unblock failed")), 400)
             
+
+            elif path == "/api/capability/grants/batch":
+                grants_list = body.get("grants", [])
+                result = self._capability_grants_batch(grants_list)
+                if result.get("success"):
+                    self._send_response(APIResponse(True, result))
+                else:
+                    self._send_response(APIResponse(False, error=result.get("error", "Batch grant failed")), 400)
+
+            elif path == "/api/stores/shared/approve":
+                provider_pack_id = body.get("provider_pack_id", "")
+                consumer_pack_id = body.get("consumer_pack_id", "")
+                store_id = body.get("store_id", "")
+                result = self._stores_shared_approve(provider_pack_id, consumer_pack_id, store_id)
+                if result.get("success"):
+                    self._send_response(APIResponse(True, result))
+                else:
+                    self._send_response(APIResponse(False, error=result.get("error", "Approve failed")), 400)
+
+            elif path == "/api/stores/shared/revoke":
+                provider_pack_id = body.get("provider_pack_id", "")
+                consumer_pack_id = body.get("consumer_pack_id", "")
+                store_id = body.get("store_id", "")
+                result = self._stores_shared_revoke(provider_pack_id, consumer_pack_id, store_id)
+                if result.get("success"):
+                    self._send_response(APIResponse(True, result))
+                else:
+                    self._send_response(APIResponse(False, error=result.get("error", "Revoke failed")), 400)
+
             elif path == "/api/capability/grants/grant":
                 principal_id = body.get("principal_id", "")
                 permission_id = body.get("permission_id", "")
@@ -904,6 +938,93 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             _log_internal_error("capability_grants_list", e)
             return {"grants": {}, "error": _SAFE_ERROR_MSG}
     
+
+    # ------------------------------------------------------------------
+    # Batch Capability Grant endpoint (#63)
+    # ------------------------------------------------------------------
+
+    def _capability_grants_batch(self, grants_list: list) -> dict:
+        """POST /api/capability/grants/batch"""
+        try:
+            from .capability_grant_manager import get_capability_grant_manager
+            gm = get_capability_grant_manager()
+            result = gm.batch_grant(grants_list)
+            try:
+                from .audit_logger import get_audit_logger
+                audit = get_audit_logger()
+                audit.log_permission_event(
+                    pack_id="batch",
+                    permission_type="capability_grant",
+                    action="batch_grant",
+                    success=True,
+                    details={
+                        "requested_count": len(grants_list),
+                        "granted_count": result.granted_count,
+                        "failed_count": result.failed_count,
+                        "source": "api",
+                    },
+                )
+            except Exception:
+                pass
+            return {
+                "success": result.success,
+                "results": result.results,
+                "granted_count": result.granted_count,
+                "failed_count": result.failed_count,
+            }
+        except Exception as e:
+            _log_internal_error("capability_grants_batch", e)
+            return {"success": False, "error": _SAFE_ERROR_MSG}
+
+    # ------------------------------------------------------------------
+    # Store Sharing endpoints (#21)
+    # ------------------------------------------------------------------
+
+    def _stores_shared_list(self) -> dict:
+        """GET /api/stores/shared"""
+        try:
+            from .store_sharing_manager import get_shared_store_manager
+            ssm = get_shared_store_manager()
+            entries = ssm.list_shared_stores()
+            return {"entries": entries, "count": len(entries)}
+        except Exception as e:
+            _log_internal_error("stores_shared_list", e)
+            return {"entries": [], "error": _SAFE_ERROR_MSG}
+
+    def _stores_shared_approve(
+        self, provider_pack_id: str, consumer_pack_id: str, store_id: str,
+    ) -> dict:
+        """POST /api/stores/shared/approve"""
+        if not provider_pack_id or not consumer_pack_id or not store_id:
+            return {
+                "success": False,
+                "error": "Missing provider_pack_id, consumer_pack_id, or store_id",
+            }
+        try:
+            from .store_sharing_manager import get_shared_store_manager
+            ssm = get_shared_store_manager()
+            return ssm.approve_sharing(provider_pack_id, consumer_pack_id, store_id)
+        except Exception as e:
+            _log_internal_error("stores_shared_approve", e)
+            return {"success": False, "error": _SAFE_ERROR_MSG}
+
+    def _stores_shared_revoke(
+        self, provider_pack_id: str, consumer_pack_id: str, store_id: str,
+    ) -> dict:
+        """POST /api/stores/shared/revoke"""
+        if not provider_pack_id or not consumer_pack_id or not store_id:
+            return {
+                "success": False,
+                "error": "Missing provider_pack_id, consumer_pack_id, or store_id",
+            }
+        try:
+            from .store_sharing_manager import get_shared_store_manager
+            ssm = get_shared_store_manager()
+            return ssm.revoke_sharing(provider_pack_id, consumer_pack_id, store_id)
+        except Exception as e:
+            _log_internal_error("stores_shared_revoke", e)
+            return {"success": False, "error": _SAFE_ERROR_MSG}
+
     # ------------------------------------------------------------------
     # Privilege endpoints
     # ------------------------------------------------------------------
