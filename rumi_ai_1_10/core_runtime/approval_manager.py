@@ -378,7 +378,10 @@ class ApprovalManager:
             approval.rejection_reason = None
             
             self._save_grant(approval)
-            
+
+            # #62: 宣言的Store作成
+            self._create_declared_stores(pack_id)
+
             # キャッシュ無効化
             self._invalidate_hash_cache(pack_id)
             
@@ -501,6 +504,66 @@ class ApprovalManager:
                 verified_packs.add(pack_id)
         
         return verified_packs
+
+    # ------------------------------------------------------------------ #
+    # #62  宣言的Store作成
+    # ------------------------------------------------------------------ #
+
+    def _create_declared_stores(self, pack_id: str) -> None:
+        """
+        Pack の ecosystem.json にある stores 宣言を読み取り、
+        StoreRegistry に登録する。local_pack はスキップ。
+        """
+        if pack_id == LOCAL_PACK_ID:
+            return
+
+        stores_decl = self._read_stores_declaration(pack_id)
+        if not stores_decl:
+            return
+
+        try:
+            from .store_registry import get_store_registry
+            registry = get_store_registry()
+            results = registry.create_store_for_pack(pack_id, stores_decl)
+
+            for r in results:
+                if not r.success and r.error:
+                    self._audit_store_creation(pack_id, r.store_id, False, r.error)
+                elif r.success:
+                    self._audit_store_creation(pack_id, r.store_id, True, None)
+        except Exception:
+            pass
+
+    def _read_stores_declaration(self, pack_id: str) -> List[Dict[str, Any]]:
+        """ecosystem.json から stores フィールドを読み取る"""
+        loc = self._pack_locations.get(pack_id)
+        if loc is None:
+            return []
+        try:
+            with open(loc.ecosystem_json_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("stores", [])
+        except Exception:
+            return []
+
+    def _audit_store_creation(
+        self, pack_id: str, store_id: str, success: bool, error: Optional[str]
+    ) -> None:
+        try:
+            from .audit_logger import get_audit_logger
+            audit = get_audit_logger()
+            audit.log_system_event(
+                event_type="declarative_store_creation",
+                success=success,
+                details={
+                    "pack_id": pack_id,
+                    "store_id": store_id or "",
+                    "error": error,
+                },
+            )
+        except Exception:
+            pass
+
 
 
 _global_approval_manager: Optional[ApprovalManager] = None
