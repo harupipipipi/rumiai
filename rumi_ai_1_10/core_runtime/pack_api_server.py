@@ -1710,7 +1710,7 @@ class PackAPIServer:
         if internal_token is None:
             # HMACKeyManager からアクティブ鍵を取得
             internal_token = self._hmac_key_manager.get_active_key()
-            logger.warning(f"Using HMAC-managed API token: {internal_token}")
+            logger.info("Using HMAC-managed API token: [REDACTED]")
             logger.warning("Set this token in client requests: Authorization: Bearer <token>")
             logger.warning("Token rotation: set RUMI_HMAC_ROTATE=true and restart")
         
