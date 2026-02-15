@@ -1,0 +1,20 @@
+{
+  "handler_id": "builtin.flow_run",
+  "permission_id": "flow.run",
+  "entrypoint": "handler.py:execute",
+  "description": "Execute another flow synchronously (in-process dispatch by capability_executor)",
+  "risk": "medium",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "flow_id": {"type": "string", "description": "Target flow ID to execute"},
+      "inputs": {"type": "object", "description": "Input context for the target flow"},
+      "timeout_seconds": {"type": "number", "description": "Timeout in seconds (default 30)"}
+    },
+    "required": ["flow_id"]
+  },
+  "output_schema": {
+    "type": "object",
+    "description": "Flow execution result context"
+  }
+}

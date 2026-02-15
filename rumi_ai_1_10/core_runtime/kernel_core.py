@@ -110,6 +110,10 @@ class KernelCore:
             try:
                 self._capability_proxy = get_capability_proxy()
                 self._capability_proxy.initialize()
+
+                # flow.run 用に Kernel 参照を executor に注入
+                from .capability_executor import get_capability_executor
+                get_capability_executor().set_kernel(self)
             except Exception as e:
                 self.diagnostics.record_step(
                     phase="startup", step_id="capability_proxy.init.auto",
