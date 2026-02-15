@@ -1,6 +1,0 @@
-{
-  "pack_id": "example_pack",
-  "pack_identity": "local:example_pack",
-  "version": "1.0.0",
-  "description": "Example pack for testing python_file_call"
-}
