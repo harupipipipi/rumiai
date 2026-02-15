@@ -653,6 +653,9 @@ class KernelCore:
                 return ctx, unwrapped
 
             if step.get("output"):
+                # vocab normalization: dict キーを優先語に正規化
+                if isinstance(unwrapped, dict) and step.get("vocab_normalize", True):
+                    unwrapped = self._vocab_normalize_output(unwrapped, step, ctx)
                 ctx[step["output"]] = unwrapped
             return ctx, unwrapped
         except Exception:

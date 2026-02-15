@@ -48,6 +48,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 
+MAX_NORMALIZE_DEPTH = 5
+
 VOCAB_FILENAME = "vocab.txt"
 CONVERTERS_DIRNAME = "converters"
 
@@ -481,6 +483,77 @@ class VocabRegistry:
                 for gid, g in self._groups.items()
             ]
     
+    def normalize_dict_keys(
+        self,
+        data,
+        max_depth: int = MAX_NORMALIZE_DEPTH,
+        _current_depth: int = 0,
+    ):
+        """
+        dict のキーを優先語（preferred）に正規化する。
+
+        Flow ctx 格納時に呼ばれる。トップレベルおよびネストされた dict の
+        キーを vocab グループの preferred term に変換する。
+
+        - ``_`` プレフィックス付きキーは正規化しない（内部制御用）
+        - list 内の dict も再帰的に処理する
+        - 深さ制限付き（デフォルト MAX_NORMALIZE_DEPTH=5）
+
+        Returns:
+            (normalized_data, changes) — changes は
+            ``[(original_key, preferred_key), ...]`` のリスト。
+            変換が発生しなかった場合は空リスト。
+        """
+        if not isinstance(data, dict) or _current_depth > max_depth:
+            return data, []
+
+        changes = []
+        normalized = {}
+
+        with self._lock:
+            for key, value in data.items():
+                # 内部制御キー（_xxx）はスキップ
+                if isinstance(key, str) and key.startswith("_"):
+                    new_key = key
+                else:
+                    new_key = self._resolve_key_unlocked(key)
+                    if new_key != key:
+                        # 衝突検出: 同じ preferred に複数キーが変換された場合
+                        if new_key in normalized:
+                            changes.append((f"COLLISION:{key}", new_key))
+                        changes.append((key, new_key))
+
+                # ネストされた dict / list 内の dict も再帰処理
+                if isinstance(value, dict) and _current_depth < max_depth:
+                    value, sub_changes = self.normalize_dict_keys(
+                        value, max_depth, _current_depth + 1
+                    )
+                    changes.extend(sub_changes)
+                elif isinstance(value, list) and _current_depth < max_depth:
+                    new_list = []
+                    for item in value:
+                        if isinstance(item, dict):
+                            item, sub_changes = self.normalize_dict_keys(
+                                item, max_depth, _current_depth + 1
+                            )
+                            changes.extend(sub_changes)
+                        new_list.append(item)
+                    value = new_list
+
+                normalized[new_key] = value
+
+        return normalized, changes
+
+    def _resolve_key_unlocked(self, key: str) -> str:
+        """ロック取得済みの状態でキーを解決する（内部用）"""
+        if not isinstance(key, str):
+            return key
+        key_lower = key.strip().lower()
+        group_id = self._term_to_group.get(key_lower)
+        if group_id is None:
+            return key
+        return self._groups[group_id].preferred
+
     def list_converters(self) -> List[Dict[str, Any]]:
         """全変換スクリプトを取得"""
         with self._lock:
