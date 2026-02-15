@@ -275,17 +275,6 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-
-# Tool-specific virtual environments
-ecosystem/default/backend/assets/tool/*/.venv/
-ecosystem/default/backend/assets/prompt/*/.venv/
-ecosystem/default/backend/assets/supporter/*/.venv/
-ecosystem/default/backend/assets/ai_client/*/.venv/
-
-# Tool-specific userdata
-ecosystem/default/backend/assets/tool/*/userdata/
-ecosystem/default/backend/assets/prompt/*/userdata/
-
 # Generated files
 *.generated.*
 
@@ -310,6 +299,7 @@ user_data/
 # Backup directory
 .backups/
 # Ecosystem pack data (ユーザー固有、リポジトリに含めない)
-ecosystem/
+ecosystem/*
+!ecosystem/.gitkeep
 # Tests (ローカルのみ)
 tests/
