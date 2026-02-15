@@ -23,28 +23,26 @@ from urllib.parse import urlparse, parse_qs, unquote
 
 from .hmac_key_manager import get_hmac_key_manager, HMACKeyManager
 
+from .api import (
+    PackHandlersMixin,
+    ContainerHandlersMixin,
+    NetworkHandlersMixin,
+    CapabilityGrantHandlersMixin,
+    StoreShareHandlersMixin,
+    PrivilegeHandlersMixin,
+)
+from .api._helpers import _log_internal_error, _SAFE_ERROR_MSG
+
 
 logger = logging.getLogger(__name__)
 
 
 # --- pack_id validation (Fix #9) ---
 PACK_ID_RE = re.compile(r'^[a-zA-Z0-9_-]{1,64}$')
-_SAFE_ERROR_MSG = "Internal server error"
+# _SAFE_ERROR_MSG: moved to api._helpers
 
 
-def _log_internal_error(context: str, exc: Exception) -> None:
-    """Log exception details to audit log (or fallback to logger) without exposing to client."""
-    try:
-        from .audit_logger import get_audit_logger
-        audit = get_audit_logger()
-        audit.log_system_event(
-            event_type="api_internal_error",
-            success=False,
-            details={"context": context, "error": str(exc), "type": type(exc).__name__},
-        )
-    except Exception:
-        logger.exception(f"Internal error in {context}: {exc}")
-
+# _log_internal_error: moved to api._helpers
 
 
 @dataclass
@@ -57,7 +55,15 @@ class APIResponse:
         return json.dumps(asdict(self), ensure_ascii=False, indent=2)
 
 
-class PackAPIHandler(BaseHTTPRequestHandler):
+class PackAPIHandler(
+    PackHandlersMixin,
+    ContainerHandlersMixin,
+    NetworkHandlersMixin,
+    CapabilityGrantHandlersMixin,
+    StoreShareHandlersMixin,
+    PrivilegeHandlersMixin,
+    BaseHTTPRequestHandler,
+):
     approval_manager = None
     container_orchestrator = None
     host_privilege_manager = None
@@ -712,358 +718,6 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
     
     # ------------------------------------------------------------------
-    # Pack endpoints
-    # ------------------------------------------------------------------
-
-    def _get_all_packs(self) -> list:
-        if not self.approval_manager:
-            return []
-        packs = self.approval_manager.scan_packs()
-        return [
-            {
-                "pack_id": p,
-                "status": self.approval_manager.get_status(p).value if self.approval_manager.get_status(p) else "unknown"
-            }
-            for p in packs
-        ]
-    
-    def _get_pending_packs(self) -> list:
-        if not self.approval_manager:
-            return []
-        return self.approval_manager.get_pending_packs()
-    
-    def _get_pack_status(self, pack_id: str) -> Optional[dict]:
-        if not self.approval_manager:
-            return None
-        status = self.approval_manager.get_status(pack_id)
-        if not status:
-            return None
-        approval = self.approval_manager.get_approval(pack_id)
-        return {
-            "pack_id": pack_id,
-            "status": status.value,
-            "approval": asdict(approval) if approval else None
-        }
-    
-    def _scan_packs(self) -> dict:
-        if not self.approval_manager:
-            return {"scanned": 0}
-        packs = self.approval_manager.scan_packs()
-        return {"scanned": len(packs), "packs": packs}
-    
-    def _approve_pack(self, pack_id: str) -> dict:
-        if not self.approval_manager:
-            return {"success": False, "error": "ApprovalManager not initialized"}
-        result = self.approval_manager.approve(pack_id)
-        return {"success": result.success, "error": result.error}
-    
-    def _reject_pack(self, pack_id: str, reason: str) -> dict:
-        if not self.approval_manager:
-            return {"success": False}
-        self.approval_manager.reject(pack_id, reason)
-        return {"success": True, "pack_id": pack_id, "reason": reason}
-    
-    # ------------------------------------------------------------------
-    # Container endpoints
-    # ------------------------------------------------------------------
-
-    def _get_containers(self) -> list:
-        if not self.container_orchestrator:
-            return []
-        return self.container_orchestrator.list_containers()
-    
-    def _start_container(self, pack_id: str) -> dict:
-        if not self.container_orchestrator:
-            return {"success": False, "error": "ContainerOrchestrator not initialized"}
-        
-        if self.approval_manager:
-            from .approval_manager import PackStatus
-            status = self.approval_manager.get_status(pack_id)
-            if status != PackStatus.APPROVED:
-                return {"success": False, "error": f"Pack not approved: {status}"}
-        
-        result = self.container_orchestrator.start_container(pack_id)
-        return {"success": result.success, "container_id": result.container_id, "error": result.error}
-    
-    def _stop_container(self, pack_id: str) -> dict:
-        if not self.container_orchestrator:
-            return {"success": False}
-        result = self.container_orchestrator.stop_container(pack_id)
-        return {"success": result.success}
-    
-    def _remove_container(self, pack_id: str) -> dict:
-        if not self.container_orchestrator:
-            return {"success": False}
-        self.container_orchestrator.stop_container(pack_id)
-        self.container_orchestrator.remove_container(pack_id)
-        return {"success": True, "pack_id": pack_id}
-
-    # ------------------------------------------------------------------
-    # Network Grant endpoints (B-2)
-    # ------------------------------------------------------------------
-
-    def _network_grant(self, pack_id: str, allowed_domains: list, allowed_ports: list,
-                       granted_by: str = "api_user", notes: str = "") -> dict:
-        try:
-            from .network_grant_manager import get_network_grant_manager
-            ngm = get_network_grant_manager()
-            grant = ngm.grant_network_access(
-                pack_id=pack_id,
-                allowed_domains=allowed_domains,
-                allowed_ports=allowed_ports,
-                granted_by=granted_by,
-                notes=notes,
-            )
-            return {"success": True, "pack_id": pack_id, "grant": grant.to_dict()}
-        except Exception as e:
-            _log_internal_error("network_grant", e)
-            return {"success": False, "error": _SAFE_ERROR_MSG}
-
-    def _network_revoke(self, pack_id: str, reason: str = "") -> dict:
-        try:
-            from .network_grant_manager import get_network_grant_manager
-            ngm = get_network_grant_manager()
-            success = ngm.revoke_network_access(pack_id=pack_id, reason=reason)
-            return {"success": success, "pack_id": pack_id, "revoked": success}
-        except Exception as e:
-            _log_internal_error("network_revoke", e)
-            return {"success": False, "error": _SAFE_ERROR_MSG}
-
-    def _network_check(self, pack_id: str, domain: str, port: int) -> dict:
-        try:
-            from .network_grant_manager import get_network_grant_manager
-            ngm = get_network_grant_manager()
-            result = ngm.check_access(pack_id, domain, port)
-            return {
-                "allowed": result.allowed,
-                "reason": result.reason,
-                "pack_id": result.pack_id,
-                "domain": result.domain,
-                "port": result.port,
-            }
-        except Exception as e:
-            _log_internal_error("network_check", e)
-            return {"allowed": False, "error": _SAFE_ERROR_MSG}
-
-    def _network_list(self) -> dict:
-        try:
-            from .network_grant_manager import get_network_grant_manager
-            ngm = get_network_grant_manager()
-            grants = ngm.get_all_grants()
-            disabled = ngm.get_disabled_packs()
-            return {
-                "grants": {k: v.to_dict() for k, v in grants.items()},
-                "grant_count": len(grants),
-                "disabled_packs": list(disabled),
-                "disabled_count": len(disabled),
-            }
-        except Exception as e:
-            _log_internal_error("network_list", e)
-            return {"grants": {}, "error": _SAFE_ERROR_MSG}
-
-    # ------------------------------------------------------------------
-    # Capability Grant endpoints (G-1)
-    # ------------------------------------------------------------------
-
-    def _capability_grants_grant(self, principal_id: str, permission_id: str, config=None) -> dict:
-        try:
-            from .capability_grant_manager import get_capability_grant_manager
-            gm = get_capability_grant_manager()
-            gm.grant_permission(principal_id, permission_id, config)
-            try:
-                from .audit_logger import get_audit_logger
-                audit = get_audit_logger()
-                audit.log_permission_event(
-                    pack_id=principal_id,
-                    permission_type="capability_grant",
-                    action="grant",
-                    success=True,
-                    details={
-                        "principal_id": principal_id,
-                        "permission_id": permission_id,
-                        "has_config": config is not None,
-                        "source": "api",
-                    },
-                )
-            except Exception:
-                pass
-            return {"success": True, "principal_id": principal_id, "permission_id": permission_id, "granted": True}
-        except Exception as e:
-            _log_internal_error("capability_grants_grant", e)
-            return {"success": False, "error": _SAFE_ERROR_MSG}
-
-    def _capability_grants_revoke(self, principal_id: str, permission_id: str) -> dict:
-        try:
-            from .capability_grant_manager import get_capability_grant_manager
-            gm = get_capability_grant_manager()
-            gm.revoke_permission(principal_id, permission_id)
-            try:
-                from .audit_logger import get_audit_logger
-                audit = get_audit_logger()
-                audit.log_permission_event(
-                    pack_id=principal_id,
-                    permission_type="capability_grant",
-                    action="revoke",
-                    success=True,
-                    details={
-                        "principal_id": principal_id,
-                        "permission_id": permission_id,
-                        "source": "api",
-                    },
-                )
-            except Exception:
-                pass
-            return {"success": True, "principal_id": principal_id, "permission_id": permission_id, "revoked": True}
-        except Exception as e:
-            _log_internal_error("capability_grants_revoke", e)
-            return {"success": False, "error": _SAFE_ERROR_MSG}
-
-    def _capability_grants_list(self, principal_id: str = None) -> dict:
-        try:
-            from .capability_grant_manager import get_capability_grant_manager
-            gm = get_capability_grant_manager()
-            if principal_id:
-                grant = gm.get_grant(principal_id)
-                if grant is None:
-                    return {"grants": {}, "count": 0, "principal_id": principal_id}
-                g_dict = grant.to_dict() if hasattr(grant, "to_dict") else grant
-                return {"grants": {principal_id: g_dict}, "count": 1, "principal_id": principal_id}
-            else:
-                all_grants = gm.get_all_grants()
-                result = {}
-                for pid, g in all_grants.items():
-                    result[pid] = g.to_dict() if hasattr(g, "to_dict") else g
-                return {"grants": result, "count": len(result)}
-        except Exception as e:
-            _log_internal_error("capability_grants_list", e)
-            return {"grants": {}, "error": _SAFE_ERROR_MSG}
-    
-
-    # ------------------------------------------------------------------
-    # Batch Capability Grant endpoint (#63)
-    # ------------------------------------------------------------------
-
-    def _capability_grants_batch(self, grants_list: list) -> dict:
-        """POST /api/capability/grants/batch"""
-        try:
-            from .capability_grant_manager import get_capability_grant_manager
-            gm = get_capability_grant_manager()
-            result = gm.batch_grant(grants_list)
-            try:
-                from .audit_logger import get_audit_logger
-                audit = get_audit_logger()
-                audit.log_permission_event(
-                    pack_id="batch",
-                    permission_type="capability_grant",
-                    action="batch_grant",
-                    success=True,
-                    details={
-                        "requested_count": len(grants_list),
-                        "granted_count": result.granted_count,
-                        "failed_count": result.failed_count,
-                        "source": "api",
-                    },
-                )
-            except Exception:
-                pass
-            return {
-                "success": result.success,
-                "results": result.results,
-                "granted_count": result.granted_count,
-                "failed_count": result.failed_count,
-            }
-        except Exception as e:
-            _log_internal_error("capability_grants_batch", e)
-            return {"success": False, "error": _SAFE_ERROR_MSG}
-
-    # ------------------------------------------------------------------
-    # Store Sharing endpoints (#21)
-    # ------------------------------------------------------------------
-
-    def _stores_shared_list(self) -> dict:
-        """GET /api/stores/shared"""
-        try:
-            from .store_sharing_manager import get_shared_store_manager
-            ssm = get_shared_store_manager()
-            entries = ssm.list_shared_stores()
-            return {"entries": entries, "count": len(entries)}
-        except Exception as e:
-            _log_internal_error("stores_shared_list", e)
-            return {"entries": [], "error": _SAFE_ERROR_MSG}
-
-    def _stores_shared_approve(
-        self, provider_pack_id: str, consumer_pack_id: str, store_id: str,
-    ) -> dict:
-        """POST /api/stores/shared/approve"""
-        if not provider_pack_id or not consumer_pack_id or not store_id:
-            return {
-                "success": False,
-                "error": "Missing provider_pack_id, consumer_pack_id, or store_id",
-            }
-        try:
-            from .store_sharing_manager import get_shared_store_manager
-            ssm = get_shared_store_manager()
-            return ssm.approve_sharing(provider_pack_id, consumer_pack_id, store_id)
-        except Exception as e:
-            _log_internal_error("stores_shared_approve", e)
-            return {"success": False, "error": _SAFE_ERROR_MSG}
-
-    def _stores_shared_revoke(
-        self, provider_pack_id: str, consumer_pack_id: str, store_id: str,
-    ) -> dict:
-        """POST /api/stores/shared/revoke"""
-        if not provider_pack_id or not consumer_pack_id or not store_id:
-            return {
-                "success": False,
-                "error": "Missing provider_pack_id, consumer_pack_id, or store_id",
-            }
-        try:
-            from .store_sharing_manager import get_shared_store_manager
-            ssm = get_shared_store_manager()
-            return ssm.revoke_sharing(provider_pack_id, consumer_pack_id, store_id)
-        except Exception as e:
-            _log_internal_error("stores_shared_revoke", e)
-            return {"success": False, "error": _SAFE_ERROR_MSG}
-
-    # ------------------------------------------------------------------
-    # Privilege endpoints
-    # ------------------------------------------------------------------
-
-    def _get_privileges(self) -> list:
-        if not self.host_privilege_manager:
-            return []
-        return self.host_privilege_manager.list_privileges()
-    
-    def _grant_privilege(self, pack_id: str, privilege_id: str) -> dict:
-        if not self.host_privilege_manager:
-            return {"success": False, "error": "HostPrivilegeManager not initialized"}
-        result = self.host_privilege_manager.grant(pack_id, privilege_id)
-        return {"success": result.success, "error": result.error}
-    
-    def _execute_privilege(self, pack_id: str, privilege_id: str, params: dict) -> dict:
-        if not self.host_privilege_manager:
-            return {"success": False, "error": "HostPrivilegeManager not initialized"}
-        result = self.host_privilege_manager.execute(pack_id, privilege_id, params)
-        return {"success": result.success, "result": result.data, "error": result.error}
-    
-    # ------------------------------------------------------------------
-    # Docker status
-    # ------------------------------------------------------------------
-
-    def _get_docker_status(self) -> dict:
-        if self.container_orchestrator:
-            available = self.container_orchestrator.is_docker_available()
-        else:
-            import subprocess
-            try:
-                subprocess.run(["docker", "info"], capture_output=True, check=True, timeout=5)
-                available = True
-            except:
-                available = False
-        
-        return {"available": available, "required": True}
-    
-    # ------------------------------------------------------------------
     # Capability Handler candidate endpoints
     # ------------------------------------------------------------------
 
@@ -1225,9 +879,6 @@ class PackAPIHandler(BaseHTTPRequestHandler):
             self.host_privilege_manager.revoke_all(pack_id)
         
         return {"success": True, "pack_id": pack_id}
-
-
-
 
 
     # ------------------------------------------------------------------
