@@ -1,26 +1,26 @@
 """
-store_registry.py - ストア定義・作成・列挙・削除 (DI Container 対応)
+store_registry.py - ストア定義・作成・列挙・削除 (SQLite / DI Container 対応)
 
 Store（共有領域）を管理する。
 公式は "tool/chat/asset" の意味を一切解釈しない。
 
-保存先: user_data/stores/index.json
+永続化: SQLite (user_data/stores/stores.db)  WAL モード
 
 追加機能:
 - #62 create_store_for_pack: 宣言的Store作成
-- #6  cas: Compare-And-Swap
+- #6  cas: Compare-And-Swap (BEGIN IMMEDIATE + value_hash)
 - #18 list_keys: ページネーション付きキー列挙
 - #19 batch_get: 複数キー一括取得
 """
 
 from __future__ import annotations
 
-import base64
-import bisect
+import hashlib
 import json
 import os
 import re
 import shutil
+import sqlite3
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -28,12 +28,21 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
+# ---------------------------------------------------------------------------
+# 定数
+# ---------------------------------------------------------------------------
+
 STORES_INDEX_PATH = "user_data/stores/index.json"
 STORES_BASE_DIR = Path("user_data/stores")
+STORES_DB_PATH = "user_data/stores/stores.db"
 MAX_STORES_PER_PACK = 10
 MAX_VALUE_BYTES_CAS = 1 * 1024 * 1024  # 1MB
-CAS_LOCK_TIMEOUT = 5  # seconds
+CAS_LOCK_TIMEOUT = 5  # seconds (互換用に残す)
 
+
+# ---------------------------------------------------------------------------
+# ユーティリティ
+# ---------------------------------------------------------------------------
 
 def _validate_store_path(root_path: str) -> Optional[str]:
     """
@@ -52,6 +61,29 @@ def _validate_store_path(root_path: str) -> Optional[str]:
         return f"root_path must be under {STORES_BASE_DIR}/"
     return None
 
+
+def _normalize_value_hash(value: Any) -> str:
+    """
+    値の正規化ハッシュ (SHA-256) を計算する。
+
+    json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(',', ':'))
+    の SHA-256 hex digest を返す。CAS 比較に使用する。
+
+    Args:
+        value: ハッシュ対象の Python オブジェクト
+
+    Returns:
+        SHA-256 hex digest 文字列
+    """
+    canonical = json.dumps(
+        value, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# データクラス
+# ---------------------------------------------------------------------------
 
 @dataclass
 class StoreDefinition:
@@ -92,42 +124,117 @@ class StoreResult:
         }
 
 
+# ---------------------------------------------------------------------------
+# StoreRegistry
+# ---------------------------------------------------------------------------
+
 class StoreRegistry:
     MAX_BATCH_KEYS = 100
     MAX_BATCH_RESPONSE_BYTES = 900 * 1024  # 900KB
 
-    def __init__(self, index_path: Optional[str] = None):
-        self._index_path = Path(index_path or STORES_INDEX_PATH)
-        self._lock = threading.RLock()
-        self._stores: Dict[str, StoreDefinition] = {}
-        self._load()
+    def __init__(self, db_path: Optional[str] = None):
+        self._db_path = Path(db_path or STORES_DB_PATH)
+        self._local = threading.local()
+
+        # 起動時: stale tmp を削除
+        from .store_migration import cleanup_stale_tmp
+        cleanup_stale_tmp(self._db_path)
+
+        # マイグレーション: DB が無く index.json があれば自動移行
+        index_path = Path(STORES_INDEX_PATH)
+        if not self._db_path.exists() and index_path.exists():
+            from .store_migration import migrate_json_to_sqlite
+            migrate_json_to_sqlite(self._db_path, index_path)
+
+        # DB 初期化（テーブル作成 + PRAGMA）
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_db()
+
+    # ------------------------------------------------------------------ #
+    # Connection 管理
+    # ------------------------------------------------------------------ #
+
+    def _get_conn(self) -> sqlite3.Connection:
+        """
+        現スレッド用の SQLite connection を返す（遅延初期化）。
+
+        per-thread connection で WAL モードと組み合わせ、
+        スレッドセーフな並行アクセスを実現する。
+        """
+        conn: Optional[sqlite3.Connection] = getattr(
+            self._local, "conn", None
+        )
+        if conn is None:
+            conn = sqlite3.connect(
+                str(self._db_path),
+                timeout=10.0,
+                check_same_thread=False,
+            )
+            conn.row_factory = sqlite3.Row
+            self._apply_pragmas(conn)
+            self._local.conn = conn
+        return conn
+
+    @staticmethod
+    def _apply_pragmas(conn: sqlite3.Connection) -> None:
+        """PRAGMA を設定する。"""
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA busy_timeout = 5000")
+        conn.execute("PRAGMA synchronous = NORMAL")
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA cache_size = -8000")
+
+    def _init_db(self) -> None:
+        """テーブルを作成し user_version を設定する。"""
+        conn = self._get_conn()
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS stores (
+                store_id   TEXT PRIMARY KEY,
+                root_path  TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                created_by TEXT NOT NULL DEFAULT ''
+            );
+            CREATE TABLE IF NOT EXISTS store_data (
+                store_id   TEXT NOT NULL
+                    REFERENCES stores(store_id) ON DELETE CASCADE,
+                key        TEXT NOT NULL,
+                value      TEXT NOT NULL,
+                value_hash TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (store_id, key)
+            );
+        """)
+        conn.execute("PRAGMA user_version = 1")
+        conn.commit()
+
+    def close(self) -> None:
+        """
+        現スレッドの SQLite connection をクローズする。
+
+        マルチスレッド環境では各スレッドが自身の connection を
+        close する必要がある。
+        """
+        conn: Optional[sqlite3.Connection] = getattr(
+            self._local, "conn", None
+        )
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            self._local.conn = None
+
+    # ------------------------------------------------------------------ #
+    # タイムスタンプ
+    # ------------------------------------------------------------------ #
 
     @staticmethod
     def _now_ts() -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
-    def _load(self) -> None:
-        if not self._index_path.exists():
-            return
-        try:
-            with open(self._index_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            for sid, sdata in data.get("stores", {}).items():
-                self._stores[sid] = StoreDefinition.from_dict(sdata)
-        except Exception:
-            pass
-
-    def _save(self) -> None:
-        self._index_path.parent.mkdir(parents=True, exist_ok=True)
-        data = {
-            "version": "1.0",
-            "updated_at": self._now_ts(),
-            "stores": {sid: s.to_dict() for sid, s in self._stores.items()},
-        }
-        tmp = self._index_path.with_suffix(".tmp")
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        tmp.replace(self._index_path)
+    # ------------------------------------------------------------------ #
+    # Store CRUD
+    # ------------------------------------------------------------------ #
 
     def create_store(
         self,
@@ -152,32 +259,130 @@ class StoreRegistry:
                 success=False, store_id=store_id, error=path_err,
             )
 
-        with self._lock:
-            if store_id in self._stores:
-                return StoreResult(
-                    success=False, store_id=store_id,
-                    error=f"Store already exists: {store_id}",
-                )
-            rp = Path(root_path)
+        rp = Path(root_path)
+        try:
+            rp.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            return StoreResult(
+                success=False, store_id=store_id,
+                error=f"Failed to create root_path: {e}",
+            )
+
+        resolved_root = str(rp.resolve())
+        now = self._now_ts()
+        conn = self._get_conn()
+        try:
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO stores "
+                "(store_id, root_path, created_at, created_by) "
+                "VALUES (?, ?, ?, ?)",
+                (store_id, resolved_root, now, created_by),
+            )
+            conn.commit()
+        except sqlite3.Error as e:
+            return StoreResult(
+                success=False, store_id=store_id,
+                error=f"Database error: {e}",
+            )
+
+        if cur.rowcount == 0:
+            return StoreResult(
+                success=False, store_id=store_id,
+                error=f"Store already exists: {store_id}",
+            )
+
+        self._audit("store_created", True, {
+            "store_id": store_id, "root_path": resolved_root,
+        })
+        return StoreResult(success=True, store_id=store_id)
+
+    def get_store(self, store_id: str) -> Optional[StoreDefinition]:
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT store_id, root_path, created_at, created_by "
+            "FROM stores WHERE store_id = ?",
+            (store_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return StoreDefinition(
+            store_id=row["store_id"],
+            root_path=row["root_path"],
+            created_at=row["created_at"],
+            created_by=row["created_by"],
+        )
+
+    def list_stores(self) -> List[Dict[str, Any]]:
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT store_id, root_path, created_at, created_by FROM stores"
+        ).fetchall()
+        return [
+            {
+                "store_id": r["store_id"],
+                "root_path": r["root_path"],
+                "created_at": r["created_at"],
+                "created_by": r["created_by"],
+            }
+            for r in rows
+        ]
+
+    def delete_store(
+        self,
+        store_id: str,
+        delete_files: bool = False,
+    ) -> StoreResult:
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT root_path FROM stores WHERE store_id = ?",
+            (store_id,),
+        ).fetchone()
+
+        if row is None:
+            return StoreResult(
+                success=False, store_id=store_id,
+                error=f"Store not found: {store_id}",
+            )
+
+        root_path = row["root_path"]
+
+        # パストラバーサル防止（登録済みパスも再検証）
+        path_err = _validate_store_path(root_path)
+        if path_err:
+            return StoreResult(
+                success=False, store_id=store_id, error=path_err,
+            )
+
+        if delete_files:
             try:
-                rp.mkdir(parents=True, exist_ok=True)
+                rp = Path(root_path)
+                if rp.exists():
+                    shutil.rmtree(rp)
             except Exception as e:
                 return StoreResult(
                     success=False, store_id=store_id,
-                    error=f"Failed to create root_path: {e}",
+                    error=f"Failed to delete files: {e}",
                 )
-            self._stores[store_id] = StoreDefinition(
-                store_id=store_id,
-                root_path=str(rp.resolve()),
-                created_at=self._now_ts(),
-                created_by=created_by,
-            )
-            self._save()
-            self._audit("store_created", True, {
-                "store_id": store_id, "root_path": str(rp.resolve()),
-            })
-            return StoreResult(success=True, store_id=store_id)
 
+        try:
+            conn.execute(
+                "DELETE FROM stores WHERE store_id = ?", (store_id,)
+            )
+            conn.commit()
+        except sqlite3.Error as e:
+            return StoreResult(
+                success=False, store_id=store_id,
+                error=f"Database error: {e}",
+            )
+
+        self._audit("store_deleted", True, {
+            "store_id": store_id, "delete_files": delete_files,
+        })
+        return StoreResult(success=True, store_id=store_id)
+
+    # ------------------------------------------------------------------ #
+    # is_store_accessible
+    # ------------------------------------------------------------------ #
 
     def is_store_accessible(
         self,
@@ -192,8 +397,6 @@ class StoreRegistry:
         1. allowed_store_ids (grant の config 由来) に含まれれば許可
         2. SharedStoreManager.is_sharing_approved() が True なら許可
         3. それ以外は拒否
-
-        W2-A の get / set から呼び出されることを想定。
         """
         if allowed_store_ids is not None and store_id in allowed_store_ids:
             return True
@@ -204,51 +407,6 @@ class StoreRegistry:
             return ssm.is_sharing_approved(pack_id, store_id)
         except Exception:
             return False
-
-    def list_stores(self) -> List[Dict[str, Any]]:
-        with self._lock:
-            return [s.to_dict() for s in self._stores.values()]
-
-    def get_store(self, store_id: str) -> Optional[StoreDefinition]:
-        with self._lock:
-            return self._stores.get(store_id)
-
-    def delete_store(
-        self,
-        store_id: str,
-        delete_files: bool = False,
-    ) -> StoreResult:
-        with self._lock:
-            store = self._stores.get(store_id)
-            if store is None:
-                return StoreResult(
-                    success=False, store_id=store_id,
-                    error=f"Store not found: {store_id}",
-                )
-
-            # パストラバーサル防止（登録済みパスも再検証）
-            path_err = _validate_store_path(store.root_path)
-            if path_err:
-                return StoreResult(
-                    success=False, store_id=store_id, error=path_err,
-                )
-
-            if delete_files:
-                try:
-                    rp = Path(store.root_path)
-                    if rp.exists():
-                        shutil.rmtree(rp)
-                except Exception as e:
-                    return StoreResult(
-                        success=False, store_id=store_id,
-                        error=f"Failed to delete files: {e}",
-                    )
-            del self._stores[store_id]
-            self._save()
-            self._audit("store_deleted", True, {
-                "store_id": store_id, "delete_files": delete_files,
-            })
-            return StoreResult(success=True, store_id=store_id)
 
     # ------------------------------------------------------------------ #
     # #62  Declarative store creation (called from approval_manager)
@@ -313,10 +471,11 @@ class StoreRegistry:
 
             root_path = str(STORES_BASE_DIR / qualified_id)
 
-            with self._lock:
-                if qualified_id in self._stores:
-                    results.append(StoreResult(success=True, store_id=qualified_id))
-                    continue
+            # 既存チェック — 存在すれば成功扱い
+            existing = self.get_store(qualified_id)
+            if existing is not None:
+                results.append(StoreResult(success=True, store_id=qualified_id))
+                continue
 
             result = self.create_store(
                 store_id=qualified_id,
@@ -328,7 +487,7 @@ class StoreRegistry:
         return results
 
     # ------------------------------------------------------------------ #
-    # #6  Compare-And-Swap
+    # #6  Compare-And-Swap (SQLite CAS)
     # ------------------------------------------------------------------ #
 
     def cas(
@@ -340,19 +499,11 @@ class StoreRegistry:
     ) -> Dict[str, Any]:
         """
         Compare-And-Swap: expected_value が現在値と一致する場合のみ
-        new_value で上書きする。ファイルレベルロック使用。
+        new_value で上書きする。
 
-        Linux/macOS のみ対応。
+        BEGIN IMMEDIATE + value_hash 比較で CAS を実現。
+        fcntl/signal を使用しないため全プラットフォーム対応。
         """
-        import platform
-        if platform.system() == "Windows":
-            raise NotImplementedError(
-                "store.cas is not supported on Windows (requires fcntl)"
-            )
-
-        import fcntl
-        import signal
-
         store_def = self.get_store(store_id)
         if store_def is None:
             return {
@@ -361,32 +512,13 @@ class StoreRegistry:
                 "error_type": "store_not_found",
             }
 
-        store_root = Path(store_def.root_path)
-        if not store_root.is_dir():
-            return {
-                "success": False,
-                "error": f"Store root not found: {store_id}",
-                "error_type": "store_not_found",
-            }
-
-        file_path = store_root / (key + ".json")
-        file_path = Path(os.path.normpath(file_path))
-
-        # boundary check
-        try:
-            resolved = file_path.resolve()
-            resolved.relative_to(store_root.resolve())
-        except (ValueError, OSError):
-            return {
-                "success": False,
-                "error": "Path traversal detected",
-                "error_type": "security_error",
-            }
-
         # value size check
         try:
             new_value_json = json.dumps(
-                new_value, ensure_ascii=False, default=str
+                new_value,
+                sort_keys=True,
+                ensure_ascii=False,
+                separators=(",", ":"),
             )
         except (TypeError, ValueError) as e:
             return {
@@ -402,94 +534,99 @@ class StoreRegistry:
                 "error_type": "payload_too_large",
             }
 
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        lock_path = file_path.with_suffix(".lock")
+        new_hash = hashlib.sha256(
+            new_value_json.encode("utf-8")
+        ).hexdigest()
+        now = self._now_ts()
 
-        lock_fd = None
+        conn = self._get_conn()
         try:
-            lock_fd = open(lock_path, "w")
+            conn.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError as e:
+            return {
+                "success": False,
+                "error": f"CAS lock timeout: {e}",
+                "error_type": "timeout",
+            }
 
-            old_handler = signal.signal(
-                signal.SIGALRM,
-                lambda s, f: (_ for _ in ()).throw(
-                    TimeoutError("CAS lock timeout")
-                ),
-            )
-            signal.alarm(CAS_LOCK_TIMEOUT)
-            try:
-                fcntl.flock(lock_fd, fcntl.LOCK_EX)
-            finally:
-                signal.alarm(0)
-                signal.signal(signal.SIGALRM, old_handler)
+        try:
+            row = conn.execute(
+                "SELECT value, value_hash FROM store_data "
+                "WHERE store_id = ? AND key = ?",
+                (store_id, key),
+            ).fetchone()
 
-            # --- critical section ---
-            current_value = None
-            exists = file_path.exists()
+            exists = row is not None
 
-            if exists:
-                try:
-                    with open(file_path, "r", encoding="utf-8") as f:
-                        current_value = json.load(f)
-                except (json.JSONDecodeError, OSError) as e:
-                    return {
-                        "success": False,
-                        "error": f"Failed to read current value: {e}",
-                        "error_type": "read_error",
-                    }
-
-            # compare
             if not exists and expected_value is None:
-                pass  # create OK
-            elif not exists and expected_value is not None:
+                # create: キーが存在せず expected_value が None → 新規作成
+                conn.execute(
+                    "INSERT INTO store_data "
+                    "(store_id, key, value, value_hash, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (store_id, key, new_value_json, new_hash, now),
+                )
+                conn.commit()
+                return {"success": True, "store_id": store_id, "key": key}
+
+            if not exists and expected_value is not None:
+                conn.rollback()
                 return {
                     "success": False,
                     "error": "Key does not exist but expected_value is not None",
                     "error_type": "conflict",
                     "current_value": None,
                 }
-            elif exists and expected_value is None:
+
+            # exists is True from here
+            current_value_json = row["value"]
+            current_hash = row["value_hash"]
+
+            try:
+                current_value = json.loads(current_value_json)
+            except (json.JSONDecodeError, TypeError):
+                current_value = None
+
+            if expected_value is None:
+                conn.rollback()
                 return {
                     "success": False,
                     "error": "Key exists but expected_value is None",
                     "error_type": "conflict",
                     "current_value": current_value,
                 }
-            else:
-                if current_value != expected_value:
-                    return {
-                        "success": False,
-                        "error": "Value mismatch (conflict)",
-                        "error_type": "conflict",
-                        "current_value": current_value,
-                    }
 
-            # swap — atomic write
-            tmp_path = file_path.with_suffix(".cas_tmp")
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                f.write(new_value_json)
-            tmp_path.replace(file_path)
+            # compare via hash
+            expected_hash = _normalize_value_hash(expected_value)
+            if current_hash != expected_hash:
+                conn.rollback()
+                return {
+                    "success": False,
+                    "error": "Value mismatch (conflict)",
+                    "error_type": "conflict",
+                    "current_value": current_value,
+                }
 
+            # swap: UPDATE
+            conn.execute(
+                "UPDATE store_data "
+                "SET value = ?, value_hash = ?, updated_at = ? "
+                "WHERE store_id = ? AND key = ?",
+                (new_value_json, new_hash, now, store_id, key),
+            )
+            conn.commit()
             return {"success": True, "store_id": store_id, "key": key}
 
-        except TimeoutError:
-            return {
-                "success": False,
-                "error": "CAS lock timeout",
-                "error_type": "timeout",
-            }
-        except OSError as e:
+        except sqlite3.Error as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
             return {
                 "success": False,
                 "error": f"CAS I/O error: {e}",
                 "error_type": "io_error",
             }
-        finally:
-            if lock_fd is not None:
-                try:
-                    fcntl.flock(lock_fd, fcntl.LOCK_UN)
-                    lock_fd.close()
-                except Exception:
-                    pass
 
     # ------------------------------------------------------------------ #
     # #18  List with pagination
@@ -505,6 +642,8 @@ class StoreRegistry:
         """
         Store 内のキーを列挙する（ページネーション対応）。
 
+        prefix フィルタ: WHERE key >= :prefix AND key < :prefix_upper
+        cursor (keyset pagination): WHERE key > :cursor
         limit/cursor 両方 None なら全件返却（後方互換）。
         """
         store_def = self.get_store(store_id)
@@ -515,43 +654,42 @@ class StoreRegistry:
                 "error_type": "store_not_found",
             }
 
-        store_root = Path(store_def.root_path)
-        if not store_root.is_dir():
-            return {
-                "success": False,
-                "error": "Store root not found",
-                "error_type": "store_not_found",
-            }
+        conn = self._get_conn()
 
-        # Enumerate all keys
-        all_keys: List[str] = []
-        try:
-            for json_file in sorted(store_root.rglob("*.json")):
-                if not json_file.is_file():
-                    continue
-                try:
-                    rel = json_file.relative_to(store_root)
-                except ValueError:
-                    continue
-                key = str(rel.with_suffix("")).replace("\\", "/")
-                if prefix and not key.startswith(prefix):
-                    continue
-                all_keys.append(key)
-        except OSError:
-            pass
+        # ---- Build WHERE clause ----
+        conditions: List[str] = ["store_id = ?"]
+        params: List[Any] = [store_id]
 
-        total_estimate = len(all_keys)
+        if prefix:
+            prefix_upper = prefix + "\uffff"
+            conditions.append("key >= ?")
+            params.append(prefix)
+            conditions.append("key < ?")
+            params.append(prefix_upper)
+
+        where = " AND ".join(conditions)
+
+        # Total estimate (prefix-filtered count)
+        total_estimate: int = conn.execute(
+            f"SELECT COUNT(*) FROM store_data WHERE {where}",
+            params,
+        ).fetchone()[0]
 
         # No pagination → return all (backward compatible)
         if limit is None and cursor is None:
+            rows = conn.execute(
+                f"SELECT key FROM store_data WHERE {where} ORDER BY key",
+                params,
+            ).fetchall()
             return {
                 "success": True,
-                "keys": all_keys,
+                "keys": [r["key"] for r in rows],
                 "next_cursor": None,
                 "has_more": False,
                 "total_estimate": total_estimate,
             }
 
+        # Pagination
         if limit is None:
             limit = 100
         if not isinstance(limit, int) or limit < 1:
@@ -559,30 +697,34 @@ class StoreRegistry:
         if limit > 1000:
             limit = 1000
 
-        start_idx = 0
+        page_conditions = list(conditions)
+        page_params = list(params)
+
         if cursor:
-            try:
-                decoded = base64.b64decode(cursor).decode("utf-8")
-            except Exception:
-                return {
-                    "success": False,
-                    "error": "Invalid cursor",
-                    "error_type": "validation_error",
-                }
-            start_idx = bisect.bisect_right(all_keys, decoded)
+            page_conditions.append("key > ?")
+            page_params.append(cursor)
 
-        page = all_keys[start_idx : start_idx + limit]
-        has_more = (start_idx + limit) < total_estimate
+        page_where = " AND ".join(page_conditions)
 
-        next_cursor = None
-        if has_more and page:
-            next_cursor = base64.b64encode(
-                page[-1].encode("utf-8")
-            ).decode("ascii")
+        # Fetch limit + 1 to detect has_more
+        rows = conn.execute(
+            f"SELECT key FROM store_data WHERE {page_where} "
+            f"ORDER BY key LIMIT ?",
+            page_params + [limit + 1],
+        ).fetchall()
+
+        keys = [r["key"] for r in rows]
+        has_more = len(keys) > limit
+        if has_more:
+            keys = keys[:limit]
+
+        next_cursor: Optional[str] = None
+        if has_more and keys:
+            next_cursor = keys[-1]
 
         return {
             "success": True,
-            "keys": page,
+            "keys": keys,
             "next_cursor": next_cursor,
             "has_more": has_more,
             "total_estimate": total_estimate,
@@ -623,13 +765,20 @@ class StoreRegistry:
                 "error_type": "store_not_found",
             }
 
-        store_root = Path(store_def.root_path)
-        if not store_root.is_dir():
-            return {
-                "success": False,
-                "error": "Store root not found",
-                "error_type": "store_not_found",
-            }
+        conn = self._get_conn()
+
+        # 一括取得: 有効なキーだけ SQL で取得
+        valid_keys = [k for k in keys if k and isinstance(k, str)]
+        fetched: Dict[str, str] = {}
+        if valid_keys:
+            placeholders = ",".join("?" for _ in valid_keys)
+            rows = conn.execute(
+                f"SELECT key, value FROM store_data "
+                f"WHERE store_id = ? AND key IN ({placeholders})",
+                [store_id] + valid_keys,
+            ).fetchall()
+            for r in rows:
+                fetched[r["key"]] = r["value"]
 
         results: Dict[str, Any] = {}
         found = 0
@@ -649,26 +798,8 @@ class StoreRegistry:
                 not_found += 1
                 continue
 
-            file_path = store_root / (key + ".json")
-            file_path = Path(os.path.normpath(file_path))
-
-            try:
-                resolved = file_path.resolve()
-                resolved.relative_to(store_root.resolve())
-            except (ValueError, OSError):
-                results[key] = None
-                not_found += 1
-                continue
-
-            if not file_path.exists():
-                results[key] = None
-                not_found += 1
-                continue
-
-            try:
-                raw = file_path.read_text(encoding="utf-8")
-                value = json.loads(raw)
-            except (json.JSONDecodeError, OSError):
+            raw = fetched.get(key)
+            if raw is None:
                 results[key] = None
                 not_found += 1
                 continue
@@ -686,7 +817,12 @@ class StoreRegistry:
                 continue
 
             cumulative_size += entry_size
-            results[key] = value
+            try:
+                results[key] = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                results[key] = None
+                not_found += 1
+                continue
             found += 1
 
         resp: Dict[str, Any] = {
@@ -694,10 +830,13 @@ class StoreRegistry:
             "results": results,
             "found": found,
             "not_found": not_found,
+            "warnings": warnings,
         }
-        if warnings:
-            resp["warnings"] = warnings
         return resp
+
+    # ------------------------------------------------------------------ #
+    # 監査ログ
+    # ------------------------------------------------------------------ #
 
     @staticmethod
     def _audit(event_type: str, success: bool, details: Dict[str, Any]) -> None:
@@ -709,6 +848,10 @@ class StoreRegistry:
         except Exception:
             pass
 
+
+# ---------------------------------------------------------------------------
+# グローバルアクセサ
+# ---------------------------------------------------------------------------
 
 def get_store_registry() -> StoreRegistry:
     """
@@ -723,20 +866,20 @@ def get_store_registry() -> StoreRegistry:
     return get_container().get("store_registry")
 
 
-def reset_store_registry(index_path: str = None) -> StoreRegistry:
+def reset_store_registry(db_path: str = None) -> StoreRegistry:
     """
     StoreRegistry をリセットする（テスト用）。
 
     新しいインスタンスを生成し、DI コンテナのキャッシュを置き換える。
 
     Args:
-        index_path: インデックスファイルパス（省略時はデフォルト）
+        db_path: SQLite DB ファイルパス（省略時はデフォルト）
 
     Returns:
         新しい StoreRegistry インスタンス
     """
     from .di_container import get_container
-    new_instance = StoreRegistry(index_path)
+    new_instance = StoreRegistry(db_path)
     container = get_container()
     container.set_instance("store_registry", new_instance)
     return new_instance
