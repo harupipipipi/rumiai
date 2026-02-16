@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -39,6 +40,17 @@ MAX_STORES_PER_PACK = 10
 MAX_VALUE_BYTES_CAS = 1 * 1024 * 1024  # 1MB
 CAS_LOCK_TIMEOUT = 5  # seconds (互換用に残す)
 
+# Sentinel: CAS で「キーが存在しないことを期待する」ことを示す。
+# 従来は expected_value=None がこの意味だったが、JSON null を期待する
+# ユースケースに対応するため sentinel に変更。
+# **破壊的変更**: 既存の expected_value=None 呼び出しは
+# 「JSON null を期待」に意味が変わる。「キー不存在を期待」する場合は
+# expected_value を省略する（デフォルト _EXPECT_MISSING が適用される）。
+_EXPECT_MISSING = object()
+
+# key バリデーション用パターン（スラッシュ許可 — キー階層で使用中）
+_KEY_PATTERN = re.compile(r'^[a-zA-Z0-9_/.:\-]{1,512}$')
+
 
 # ---------------------------------------------------------------------------
 # ユーティリティ
@@ -59,6 +71,23 @@ def _validate_store_path(root_path: str) -> Optional[str]:
         resolved.relative_to(base)
     except ValueError:
         return f"root_path must be under {STORES_BASE_DIR}/"
+    return None
+
+
+def _validate_key(key: str) -> Optional[str]:
+    """
+    Store key (または prefix) の文字種・長さを検証する。
+
+    許可パターン: ^[a-zA-Z0-9_/.:-]{1,512}$
+
+    Args:
+        key: 検証対象のキー文字列
+
+    Returns:
+        エラーメッセージ (問題がなければ None)
+    """
+    if not isinstance(key, str) or not _KEY_PATTERN.match(key):
+        return f"Invalid key: must match {_KEY_PATTERN.pattern} (got {repr(key)[:80]})"
     return None
 
 
@@ -353,17 +382,8 @@ class StoreRegistry:
                 success=False, store_id=store_id, error=path_err,
             )
 
-        if delete_files:
-            try:
-                rp = Path(root_path)
-                if rp.exists():
-                    shutil.rmtree(rp)
-            except Exception as e:
-                return StoreResult(
-                    success=False, store_id=store_id,
-                    error=f"Failed to delete files: {e}",
-                )
-
+        # I-6: DB 削除を先に実行し、ファイル削除は後に行う。
+        # DB 削除失敗時にファイルだけ消える事故を防ぐ。
         try:
             conn.execute(
                 "DELETE FROM stores WHERE store_id = ?", (store_id,)
@@ -374,6 +394,18 @@ class StoreRegistry:
                 success=False, store_id=store_id,
                 error=f"Database error: {e}",
             )
+
+        if delete_files:
+            try:
+                rp = Path(root_path)
+                if rp.exists():
+                    shutil.rmtree(rp)
+            except Exception as e:
+                # DB 上は削除済みなのでファイル削除失敗は警告のみ
+                logging.getLogger(__name__).warning(
+                    "Store %s: DB deleted but file cleanup failed: %s",
+                    store_id, e,
+                )
 
         self._audit("store_deleted", True, {
             "store_id": store_id, "delete_files": delete_files,
@@ -494,8 +526,8 @@ class StoreRegistry:
         self,
         store_id: str,
         key: str,
-        expected_value: Any,
-        new_value: Any,
+        expected_value: Any = _EXPECT_MISSING,
+        new_value: Any = _EXPECT_MISSING,
     ) -> Dict[str, Any]:
         """
         Compare-And-Swap: expected_value が現在値と一致する場合のみ
@@ -503,7 +535,30 @@ class StoreRegistry:
 
         BEGIN IMMEDIATE + value_hash 比較で CAS を実現。
         fcntl/signal を使用しないため全プラットフォーム対応。
+
+        **破壊的変更 (I-5)**:
+        - expected_value 省略 (= _EXPECT_MISSING): キーが存在しないことを期待
+          （旧 expected_value=None の挙動）
+        - expected_value=None: JSON null が格納されていることを期待
+        - expected_value=<値>: その値が格納されていることを期待（従来通り）
         """
+        # new_value は必須（デフォルトはシグネチャ制約のためのダミー）
+        if new_value is _EXPECT_MISSING:
+            return {
+                "success": False,
+                "error": "new_value is required",
+                "error_type": "validation_error",
+            }
+
+        # key バリデーション
+        key_err = _validate_key(key)
+        if key_err:
+            return {
+                "success": False,
+                "error": key_err,
+                "error_type": "validation_error",
+            }
+
         store_def = self.get_store(store_id)
         if store_def is None:
             return {
@@ -558,8 +613,8 @@ class StoreRegistry:
 
             exists = row is not None
 
-            if not exists and expected_value is None:
-                # create: キーが存在せず expected_value が None → 新規作成
+            if not exists and expected_value is _EXPECT_MISSING:
+                # create: キーが存在せず expected_value が _EXPECT_MISSING → 新規作成
                 conn.execute(
                     "INSERT INTO store_data "
                     "(store_id, key, value, value_hash, updated_at) "
@@ -569,11 +624,11 @@ class StoreRegistry:
                 conn.commit()
                 return {"success": True, "store_id": store_id, "key": key}
 
-            if not exists and expected_value is not None:
+            if not exists and expected_value is not _EXPECT_MISSING:
                 conn.rollback()
                 return {
                     "success": False,
-                    "error": "Key does not exist but expected_value is not None",
+                    "error": "Key does not exist but expected_value was provided",
                     "error_type": "conflict",
                     "current_value": None,
                 }
@@ -587,11 +642,11 @@ class StoreRegistry:
             except (json.JSONDecodeError, TypeError):
                 current_value = None
 
-            if expected_value is None:
+            if expected_value is _EXPECT_MISSING:
                 conn.rollback()
                 return {
                     "success": False,
-                    "error": "Key exists but expected_value is None",
+                    "error": "Key already exists but expected it to be missing",
                     "error_type": "conflict",
                     "current_value": current_value,
                 }
@@ -646,6 +701,16 @@ class StoreRegistry:
         cursor (keyset pagination): WHERE key > :cursor
         limit/cursor 両方 None なら全件返却（後方互換）。
         """
+        # prefix バリデーション（空文字列は許可）
+        if prefix:
+            prefix_err = _validate_key(prefix)
+            if prefix_err:
+                return {
+                    "success": False,
+                    "error": prefix_err,
+                    "error_type": "validation_error",
+                }
+
         store_def = self.get_store(store_id)
         if store_def is None:
             return {
@@ -768,7 +833,7 @@ class StoreRegistry:
         conn = self._get_conn()
 
         # 一括取得: 有効なキーだけ SQL で取得
-        valid_keys = [k for k in keys if k and isinstance(k, str)]
+        valid_keys = [k for k in keys if k and isinstance(k, str) and _validate_key(k) is None]
         fetched: Dict[str, str] = {}
         if valid_keys:
             placeholders = ",".join("?" for _ in valid_keys)
@@ -783,6 +848,7 @@ class StoreRegistry:
         results: Dict[str, Any] = {}
         found = 0
         not_found = 0
+        truncated = 0
         warnings: List[str] = []
         cumulative_size = 0
         size_exceeded = False
@@ -790,11 +856,16 @@ class StoreRegistry:
         for key in keys:
             if size_exceeded:
                 results[key] = None
-                not_found += 1
+                truncated += 1
                 continue
 
             if not key or not isinstance(key, str):
                 results[key if key else ""] = None
+                not_found += 1
+                continue
+
+            if _validate_key(key) is not None:
+                results[key] = None
                 not_found += 1
                 continue
 
@@ -808,7 +879,7 @@ class StoreRegistry:
             if cumulative_size + entry_size > self.MAX_BATCH_RESPONSE_BYTES:
                 size_exceeded = True
                 results[key] = None
-                not_found += 1
+                truncated += 1
                 remaining_count = len(keys) - len(results)
                 warnings.append(
                     f"Response size limit (900KB) exceeded at key '{key}'. "
@@ -830,6 +901,7 @@ class StoreRegistry:
             "results": results,
             "found": found,
             "not_found": not_found,
+            "truncated": truncated,
             "warnings": warnings,
         }
         return resp
