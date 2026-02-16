@@ -1,7 +1,0 @@
-{
-  "type": "service",
-  "id": "services_chats_v1",
-  "version": "1.0.0",
-  "connectivity": { "provides": ["service.chats"], "requires": [] },
-  "metadata": { "description": "Chatサービス（ChatManager提供）" }
-}

@@ -1,7 +1,0 @@
-{
-  "type": "foundation",
-  "id": "foundation_v1",
-  "version": "1.0.0",
-  "connectivity": { "provides": ["foundation.http.routes"], "requires": [] },
-  "metadata": { "description": "共通基盤（safe_add_url_rule など）" }
-}
