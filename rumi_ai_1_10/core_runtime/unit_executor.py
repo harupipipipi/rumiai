@@ -9,13 +9,14 @@ unit_executor.py - ユニット実行ゲート / モード選択
 - sandbox: v1 では枠のみ (mode_not_implemented)
 
 実行前チェック（必須）:
-1. principal（Pack）が承認済み + hash一致（ApprovalManager）
-2. permission_id の grant を階層評価で満たす（上位も必要）
-3. mode が unit.json の exec_modes_allowed に含まれる
-4. kind が ALLOWED_KINDS に含まれる（unknown_kind 防止）
-5. kind=python/binary: UnitTrust が一致（sha256 allowlist）
-5.5. TOCTOU 緩和: Trust チェック後にファイル内容を読み込み再検証
-6. 監査ログ（allowed/denied）を記録（値は入れない）
+1. Pack承認チェック (ApprovalManager)
+2. ストアとユニットを解決
+3. mode検証 (exec_modes_allowed)
+4. permission_id の階層grantチェック
+4.5. kindホワイトリスト (ALLOWED_KINDS)
+5. Trustチェック (kind=python/binary)
+5.5. TOCTOU緩和
+6. 実行＋監査ログ
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import stat as stat_module
 import subprocess
 import sys
@@ -42,8 +44,18 @@ DEFAULT_TIMEOUT = 60.0
 MAX_TIMEOUT = 300.0
 MAX_RESPONSE_SIZE = 1 * 1024 * 1024
 
+# --- Security: input format validation (A-4) ---
+_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_.\-]{1,128}$")
+
 # --- Security: kind whitelist (I-02) ---
 ALLOWED_KINDS = frozenset({"data", "python", "binary"})
+
+# --- Security: subprocess environment whitelist (A-7) ---
+SUBPROCESS_ENV_WHITELIST = frozenset({
+    "PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE",
+    "TERM", "PYTHONPATH", "PYTHONHASHSEED",
+    "TMPDIR", "TMP", "TEMP",
+})
 
 
 @dataclass
@@ -75,6 +87,14 @@ class UnitExecutor:
     def _now_ts() -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
+    @staticmethod
+    def _build_subprocess_env() -> Dict[str, str]:
+        """Build a filtered environment dict for subprocess execution."""
+        return {
+            k: v for k, v in os.environ.items()
+            if k in SUBPROCESS_ENV_WHITELIST
+        }
+
     def execute(
         self,
         principal_id: str,
@@ -100,6 +120,20 @@ class UnitExecutor:
                 start_time, mode, principal_id, unit_ref,
             )
 
+        # A-4: 入力形式検証
+        for _name, _val in (
+            ("principal_id", principal_id),
+            ("store_id", store_id),
+            ("unit_id", unit_id),
+            ("version", version),
+        ):
+            if not _ID_PATTERN.match(_val):
+                return self._denied(
+                    "Invalid input format", "invalid_request",
+                    start_time, mode, principal_id, unit_ref,
+                    internal_detail=f"Field '{_name}' failed format validation",
+                )
+
         # 1. Pack 承認チェック
         try:
             from .approval_manager import get_approval_manager
@@ -107,13 +141,15 @@ class UnitExecutor:
             is_valid, reason = am.is_pack_approved_and_verified(principal_id)
             if not is_valid:
                 return self._denied(
-                    f"Pack not approved: {reason}", "approval_denied",
+                    "Pack not approved", "approval_denied",
                     start_time, mode, principal_id, unit_ref,
+                    internal_detail=f"Pack not approved: {reason}",
                 )
         except Exception as e:
             return self._denied(
-                f"Approval check failed: {e}", "approval_error",
+                "Approval check failed", "approval_error",
                 start_time, mode, principal_id, unit_ref,
+                internal_detail=f"Approval check failed: {e}",
             )
 
         # 2. ストアとユニットを解決
@@ -125,8 +161,9 @@ class UnitExecutor:
             store_def = store_reg.get_store(store_id)
             if store_def is None:
                 return self._denied(
-                    f"Store not found: {store_id}", "store_not_found",
+                    "Store not found", "store_not_found",
                     start_time, mode, principal_id, unit_ref,
+                    internal_detail=f"Store not found: {store_id}",
                 )
 
             unit_reg = get_unit_registry()
@@ -137,21 +174,23 @@ class UnitExecutor:
             unit_meta = unit_reg.get_unit_by_ref(store_root, unit_ref_obj)
             if unit_meta is None:
                 return self._denied(
-                    f"Unit not found: {unit_id} v{version}", "unit_not_found",
+                    "Unit not found", "unit_not_found",
                     start_time, mode, principal_id, unit_ref,
+                    internal_detail=f"Unit not found: {unit_id} v{version}",
                 )
         except Exception as e:
             return self._denied(
-                f"Unit resolution failed: {e}", "resolution_error",
+                "Unit resolution failed", "resolution_error",
                 start_time, mode, principal_id, unit_ref,
+                internal_detail=f"Unit resolution failed: {e}",
             )
 
         # 3. mode 検証
         if mode not in unit_meta.exec_modes_allowed:
             return self._denied(
-                f"Mode '{mode}' not in exec_modes_allowed: "
-                f"{unit_meta.exec_modes_allowed}",
+                "Mode not allowed",
                 "mode_not_allowed", start_time, mode, principal_id, unit_ref,
+                internal_detail=f"Mode '{mode}' not in exec_modes_allowed: {unit_meta.exec_modes_allowed}",
             )
 
         # 4. permission_id の階層 grant チェック
@@ -162,22 +201,25 @@ class UnitExecutor:
                 grant_result = gm.check(principal_id, unit_meta.permission_id)
                 if not grant_result.allowed:
                     return self._denied(
-                        f"Permission denied: {grant_result.reason}",
+                        "Permission denied",
                         "grant_denied",
                         start_time, mode, principal_id, unit_ref,
+                        internal_detail=f"Permission denied: {grant_result.reason}",
                     )
             except Exception as e:
                 return self._denied(
-                    f"Grant check failed: {e}", "grant_error",
+                    "Grant check failed", "grant_error",
                     start_time, mode, principal_id, unit_ref,
+                    internal_detail=f"Grant check failed: {e}",
                 )
 
         # 4.5. kind ホワイトリスト (I-02)
         if unit_meta.kind not in ALLOWED_KINDS:
             return self._denied(
-                f"Unknown kind: {unit_meta.kind}",
+                "Unknown kind",
                 "unknown_kind",
                 start_time, mode, principal_id, unit_ref,
+                internal_detail=f"Unknown kind: {unit_meta.kind}",
             )
 
         # 5. Trust チェック（kind=python/binary のみ）
@@ -211,14 +253,16 @@ class UnitExecutor:
                 trust_result = trust.is_trusted(unit_id, version, actual_sha256)
                 if not trust_result.trusted:
                     return self._denied(
-                        f"Unit trust denied: {trust_result.reason}",
+                        "Trust check denied",
                         "trust_denied",
                         start_time, mode, principal_id, unit_ref,
+                        internal_detail=f"Unit trust denied: {trust_result.reason}",
                     )
             except Exception as e:
                 return self._denied(
-                    f"Trust check failed: {e}", "trust_error",
+                    "Trust check failed", "trust_error",
                     start_time, mode, principal_id, unit_ref,
+                    internal_detail=f"Trust check failed: {e}",
                 )
 
         # 5.5. TOCTOU 緩和 (I-03): Trust チェック後にファイル内容を読み込み二重検証
@@ -228,9 +272,10 @@ class UnitExecutor:
                 content = ep_path.read_bytes()
             except Exception as e:
                 return self._denied(
-                    f"Failed to read entrypoint for TOCTOU verification: {e}",
+                    "TOCTOU verification failed",
                     "toctou_read_error",
                     start_time, mode, principal_id, unit_ref,
+                    internal_detail=f"Failed to read entrypoint for TOCTOU verification: {e}",
                 )
             content_sha256 = hashlib.sha256(content).hexdigest()
             if content_sha256 != trust_sha256:
@@ -311,8 +356,16 @@ class UnitExecutor:
         if not ep_path.exists():
             return UnitExecutionResult(
                 success=False,
-                error=f"Entrypoint not found: {unit_meta.entrypoint}",
+                error="Entrypoint not found",
                 error_type="entrypoint_not_found",
+                execution_mode="host_capability",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+        if ep_path.is_symlink():
+            return UnitExecutionResult(
+                success=False,
+                error="Symlink entrypoint not allowed",
+                error_type="symlink_denied",
                 execution_mode="host_capability",
                 latency_ms=(time.time() - start_time) * 1000,
             )
@@ -335,7 +388,9 @@ class UnitExecutor:
                     suffix=".py", prefix="rumi_verified_ep_",
                 )
                 try:
-                    os.write(fd, verified_content)
+                    written = os.write(fd, verified_content)
+                    if written != len(verified_content):
+                        raise OSError(f"Partial write: {written}/{len(verified_content)}")
                 finally:
                     os.close(fd)
                 os.chmod(verified_ep_file, 0o500)
@@ -372,6 +427,7 @@ class UnitExecutor:
                 text=True,
                 timeout=timeout_seconds,
                 cwd=str(unit_meta.unit_dir),
+                env=self._build_subprocess_env(),
             )
             latency = (time.time() - start_time) * 1000
 
@@ -448,8 +504,16 @@ class UnitExecutor:
         if not ep_path.exists():
             return UnitExecutionResult(
                 success=False,
-                error=f"Entrypoint not found: {unit_meta.entrypoint}",
+                error="Entrypoint not found",
                 error_type="entrypoint_not_found",
+                execution_mode="host_capability",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+        if ep_path.is_symlink():
+            return UnitExecutionResult(
+                success=False,
+                error="Symlink entrypoint not allowed",
+                error_type="symlink_denied",
                 execution_mode="host_capability",
                 latency_ms=(time.time() - start_time) * 1000,
             )
@@ -492,7 +556,9 @@ class UnitExecutor:
                     prefix="rumi_verified_bin_",
                 )
                 try:
-                    os.write(fd, verified_content)
+                    written = os.write(fd, verified_content)
+                    if written != len(verified_content):
+                        raise OSError(f"Partial write: {written}/{len(verified_content)}")
                 finally:
                     os.close(fd)
                 os.chmod(verified_bin_file, 0o500)
@@ -522,6 +588,7 @@ class UnitExecutor:
                 text=True,
                 timeout=timeout_seconds,
                 cwd=str(unit_meta.unit_dir),
+                env=self._build_subprocess_env(),
             )
             latency = (time.time() - start_time) * 1000
 
@@ -620,6 +687,7 @@ if __name__ == "__main__":
         mode: str,
         principal_id: str,
         unit_ref: Dict[str, str],
+        internal_detail: str = "",
     ) -> UnitExecutionResult:
         result = UnitExecutionResult(
             success=False,
@@ -628,7 +696,7 @@ if __name__ == "__main__":
             execution_mode=mode,
             latency_ms=(time.time() - start_time) * 1000,
         )
-        self._audit_execution(principal_id, unit_ref, mode, result)
+        self._audit_execution(principal_id, unit_ref, mode, result, internal_detail)
         return result
 
     @staticmethod
@@ -637,6 +705,7 @@ if __name__ == "__main__":
         unit_ref: Dict[str, str],
         mode: str,
         result: UnitExecutionResult,
+        internal_detail: str = "",
     ) -> None:
         try:
             from .audit_logger import get_audit_logger
@@ -649,6 +718,8 @@ if __name__ == "__main__":
             }
             if getattr(result, '_stderr_head', None):
                 details["stderr_head"] = result._stderr_head
+            if internal_detail:
+                details["internal_detail"] = internal_detail
             audit.log_permission_event(
                 pack_id=principal_id,
                 permission_type="unit_execution",
