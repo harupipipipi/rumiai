@@ -10,6 +10,7 @@ unit_id + version + sha256 を記録。
 from __future__ import annotations
 
 import json
+import re
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -19,6 +20,8 @@ from typing import Any, Dict, List, Optional
 
 DEFAULT_TRUST_DIR = "user_data/units/trust"
 TRUST_FILE_NAME = "trusted_units.json"
+
+_SHA256_RE = re.compile(r"[0-9a-f]{64}")
 
 
 @dataclass
@@ -47,6 +50,8 @@ class UnitTrustStore:
         self._trusted: Dict[tuple, TrustedUnit] = {}
         self._loaded = False
         self._load_error: Optional[str] = None
+        self._load_warnings: List[str] = []
+        self._cache_version: int = 0
 
     @staticmethod
     def _now_ts() -> str:
@@ -55,6 +60,8 @@ class UnitTrustStore:
     def load(self) -> bool:
         with self._lock:
             self._trusted.clear()
+            self._load_warnings.clear()
+            self._cache_version += 1
             self._loaded = False
             self._load_error = None
 
@@ -75,17 +82,37 @@ class UnitTrustStore:
 
             for entry in data.get("trusted", []):
                 if not isinstance(entry, dict):
+                    self._load_warnings.append(
+                        "Skipped non-dict entry in trusted list"
+                    )
                     continue
+
                 uid = entry.get("unit_id", "")
                 ver = entry.get("version", "")
                 sha = entry.get("sha256", "")
-                if uid and ver and sha:
-                    self._trusted[(uid, ver)] = TrustedUnit(
-                        unit_id=uid,
-                        version=ver,
-                        sha256=sha.lower(),
-                        note=entry.get("note", ""),
+
+                if not isinstance(uid, str) or not uid:
+                    self._load_warnings.append(
+                        f"Skipped entry: invalid unit_id={uid!r}"
                     )
+                    continue
+                if not isinstance(ver, str) or not ver:
+                    self._load_warnings.append(
+                        f"Skipped entry: invalid version={ver!r} (unit_id={uid!r})"
+                    )
+                    continue
+                if not isinstance(sha, str) or not _SHA256_RE.fullmatch(sha.lower()):
+                    self._load_warnings.append(
+                        f"Skipped entry: invalid sha256={sha!r} (unit_id={uid!r}, version={ver!r})"
+                    )
+                    continue
+
+                self._trusted[(uid, ver)] = TrustedUnit(
+                    unit_id=uid,
+                    version=ver,
+                    sha256=sha.lower(),
+                    note=entry.get("note", ""),
+                )
 
             self._loaded = True
             return True
@@ -147,6 +174,7 @@ class UnitTrustStore:
                 sha256=sha256.lower(),
                 note=note,
             )
+            self._cache_version += 1
             return self._save()
 
     def remove_trust(self, unit_id: str, version: str) -> bool:
@@ -155,6 +183,7 @@ class UnitTrustStore:
             if key not in self._trusted:
                 return False
             del self._trusted[key]
+            self._cache_version += 1
             return self._save()
 
     def list_trusted(self) -> List[TrustedUnit]:
@@ -164,6 +193,21 @@ class UnitTrustStore:
     def is_loaded(self) -> bool:
         with self._lock:
             return self._loaded
+
+    @property
+    def load_warnings(self) -> List[str]:
+        with self._lock:
+            return list(self._load_warnings)
+
+    def invalidate_cache(self) -> None:
+        with self._lock:
+            self._loaded = False
+            self._cache_version += 1
+
+    @property
+    def cache_version(self) -> int:
+        with self._lock:
+            return self._cache_version
 
     def _save(self) -> bool:
         try:
