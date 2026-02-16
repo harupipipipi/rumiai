@@ -9,6 +9,7 @@ Store（共有領域）を管理する。
 追加機能:
 - #62 create_store_for_pack: 宣言的Store作成
 - #6  cas: Compare-And-Swap (BEGIN IMMEDIATE + value_hash)
+- I-1  audit_store_usage: ストアキーサイズ集計
 - #18 list_keys: ページネーション付きキー列挙
 - #19 batch_get: 複数キー一括取得
 """
@@ -536,11 +537,33 @@ class StoreRegistry:
         BEGIN IMMEDIATE + value_hash 比較で CAS を実現。
         fcntl/signal を使用しないため全プラットフォーム対応。
 
-        **破壊的変更 (I-5)**:
-        - expected_value 省略 (= _EXPECT_MISSING): キーが存在しないことを期待
-          （旧 expected_value=None の挙動）
-        - expected_value=None: JSON null が格納されていることを期待
-        - expected_value=<値>: その値が格納されていることを期待（従来通り）
+        **セマンティクス (I-5 改善)**:
+
+        ``expected_value`` の 3 つの状態と対応する動作:
+
+        1. **省略 (デフォルト ``_EXPECT_MISSING``)**:
+           キーがストア内に **存在しない** ことを期待する。
+           - キーが存在しない → ``new_value`` で新規作成 (成功)
+           - キーが既に存在する → ``conflict`` エラーを返す
+
+        2. **``expected_value=None``** (Python の ``None`` / JSON ``null``):
+           キーが存在し、その値が **JSON null** であることを期待する。
+           - キーが存在し値が ``null`` → ``new_value`` で上書き (成功)
+           - キーが存在し値が ``null`` 以外 → ``conflict`` (ハッシュ不一致)
+           - キーが存在しない → ``conflict`` (キー不存在)
+
+        3. **``expected_value=<任意の値>``**:
+           キーが存在し、その値が ``expected_value`` と一致することを期待する。
+           比較は value_hash (SHA-256) で行われる。
+           - 一致 → ``new_value`` で上書き (成功)
+           - 不一致 → ``conflict``
+           - キー不存在 → ``conflict``
+
+        .. note::
+           Wave 5-B 以前は ``expected_value=None`` が「キー不存在を期待」の
+           意味だったが、sentinel ``_EXPECT_MISSING`` の導入により
+           ``None`` は純粋に JSON null を指すようになった。
+           「キー不存在を期待」する場合は ``expected_value`` を省略すること。
         """
         # new_value は必須（デフォルトはシグネチャ制約のためのダミー）
         if new_value is _EXPECT_MISSING:
@@ -905,6 +928,77 @@ class StoreRegistry:
             "warnings": warnings,
         }
         return resp
+
+    # ------------------------------------------------------------------ #
+    # I-1  Store usage audit
+    # ------------------------------------------------------------------ #
+
+    def audit_store_usage(self, store_id: str) -> Dict[str, Any]:
+        """
+        ストア内の全キーサイズを集計する。
+
+        SQLite の集約関数のみで処理するためキー数に依存せず高速。
+        スキーマ変更は不要（SELECT のみ）。
+
+        Args:
+            store_id: 集計対象のストア ID
+
+        Returns:
+            {
+                "store_id": str,
+                "key_count": int,
+                "total_size_bytes": int,
+                "largest_key": str,
+                "largest_size_bytes": int,
+            }
+            ストアが存在しない場合は error キーを含む dict を返す。
+        """
+        store_def = self.get_store(store_id)
+        if store_def is None:
+            return {
+                "success": False,
+                "error": f"Store not found: {store_id}",
+                "error_type": "store_not_found",
+            }
+
+        conn = self._get_conn()
+
+        # 集計: キー数 + 合計サイズ (LENGTH(CAST(... AS BLOB)) でバイト数)
+        agg_row = conn.execute(
+            "SELECT COUNT(*) AS key_count, "
+            "COALESCE(SUM(LENGTH(CAST(value AS BLOB))), 0) AS total_size_bytes "
+            "FROM store_data WHERE store_id = ?",
+            (store_id,),
+        ).fetchone()
+
+        key_count: int = agg_row["key_count"]
+        total_size_bytes: int = agg_row["total_size_bytes"]
+
+        # 最大キー
+        largest_key = ""
+        largest_size_bytes = 0
+        if key_count > 0:
+            largest_row = conn.execute(
+                "SELECT key, LENGTH(CAST(value AS BLOB)) AS size_bytes "
+                "FROM store_data WHERE store_id = ? "
+                "ORDER BY LENGTH(CAST(value AS BLOB)) DESC LIMIT 1",
+                (store_id,),
+            ).fetchone()
+            if largest_row is not None:
+                largest_key = largest_row["key"]
+                largest_size_bytes = largest_row["size_bytes"]
+
+        result = {
+            "store_id": store_id,
+            "key_count": key_count,
+            "total_size_bytes": total_size_bytes,
+            "largest_key": largest_key,
+            "largest_size_bytes": largest_size_bytes,
+        }
+
+        self._audit("store_usage_audit", True, result)
+
+        return result
 
     # ------------------------------------------------------------------ #
     # 監査ログ

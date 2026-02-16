@@ -6,6 +6,10 @@ unit_id + version + sha256 を記録。
 
 保存先: user_data/units/trust/trusted_units.json
 
+F-2 追加:
+  - TrustedUnit.kind フィールド ("python" | "binary"、デフォルト "python")
+  - add_trust() / is_trusted() / list_trusted() に kind フィルタ
+
 Wave 6-D additions:
   - A-20: add_trust() input validation (ValueError on bad input)
   - A-15: hot-reload via mtime check + auto_reload flag
@@ -29,6 +33,8 @@ TRUST_FILE_NAME = "trusted_units.json"
 
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 
+VALID_TRUST_KINDS = frozenset({"python", "binary"})
+
 
 @dataclass
 class TrustedUnit:
@@ -36,6 +42,7 @@ class TrustedUnit:
     version: str
     sha256: str
     note: str = ""
+    kind: str = "python"
 
 
 @dataclass
@@ -186,11 +193,21 @@ class UnitTrustStore:
                     )
                     continue
 
+                # F-2: kind field with validation
+                kind_val = entry.get("kind", "python")
+                if kind_val not in VALID_TRUST_KINDS:
+                    self._load_warnings.append(
+                        f"Invalid kind={kind_val!r} for unit_id={uid!r}, "
+                        f"defaulting to 'python'"
+                    )
+                    kind_val = "python"
+
                 self._trusted[(uid, ver)] = TrustedUnit(
                     unit_id=uid,
                     version=ver,
                     sha256=sha.lower(),
                     note=entry.get("note", ""),
+                    kind=kind_val,
                 )
 
             self._loaded = True
@@ -232,7 +249,22 @@ class UnitTrustStore:
         unit_id: str,
         version: str,
         actual_sha256: str,
+        kind: Optional[str] = None,
     ) -> UnitTrustCheckResult:
+        """
+        Check if a unit is trusted.
+
+        Args:
+            unit_id: The unit identifier.
+            version: The unit version.
+            actual_sha256: The actual SHA-256 hash of the unit entrypoint.
+            kind: Optional kind filter. If specified, the trusted entry must
+                  match this kind. If None (default), any kind matches.
+                  This maintains backward compatibility.
+
+        Returns:
+            UnitTrustCheckResult with trust status and details.
+        """
         with self._lock:
             if self._auto_reload:
                 self.reload_if_modified()
@@ -250,6 +282,18 @@ class UnitTrustStore:
                 return UnitTrustCheckResult(
                     trusted=False,
                     reason=f"Unit '{unit_id}' version '{version}' not in trust list",
+                    unit_id=unit_id,
+                    version=version,
+                    actual_sha256=actual_sha256,
+                )
+            # F-2: kind filter
+            if kind is not None and entry.kind != kind:
+                return UnitTrustCheckResult(
+                    trusted=False,
+                    reason=(
+                        f"Unit '{unit_id}' version '{version}' is "
+                        f"kind='{entry.kind}', expected kind='{kind}'"
+                    ),
                     unit_id=unit_id,
                     version=version,
                     actual_sha256=actual_sha256,
@@ -283,7 +327,25 @@ class UnitTrustStore:
         version: str,
         sha256: str,
         note: str = "",
+        kind: str = "python",
     ) -> bool:
+        """
+        Add a trusted unit entry.
+
+        Args:
+            unit_id: The unit identifier.
+            version: The unit version.
+            sha256: The SHA-256 hash of the unit entrypoint.
+            note: Optional human-readable note.
+            kind: The unit kind, either "python" or "binary".
+                  Defaults to "python" for backward compatibility.
+
+        Returns:
+            True if the entry was saved successfully.
+
+        Raises:
+            ValueError: If any input is invalid.
+        """
         # --- input validation (before lock – no state mutation) ---
         try:
             self._validate_trust_input(unit_id, version, sha256)
@@ -300,12 +362,30 @@ class UnitTrustStore:
             )
             raise
 
+        # F-2: kind validation
+        if kind not in VALID_TRUST_KINDS:
+            exc = ValueError(
+                f"kind must be one of {sorted(VALID_TRUST_KINDS)}, got {kind!r}"
+            )
+            self._log_audit(
+                "trust_add_rejected",
+                "warning",
+                str(exc),
+                details={
+                    "unit_id": unit_id,
+                    "version": version,
+                    "kind": kind,
+                },
+            )
+            raise exc
+
         with self._lock:
             self._trusted[(unit_id, version)] = TrustedUnit(
                 unit_id=unit_id,
                 version=version,
                 sha256=sha256.lower(),
                 note=note or "",
+                kind=kind,
             )
             self._cache_version += 1
             return self._save()
@@ -319,9 +399,23 @@ class UnitTrustStore:
             self._cache_version += 1
             return self._save()
 
-    def list_trusted(self) -> List[TrustedUnit]:
+    def list_trusted(self, kind: Optional[str] = None) -> List[TrustedUnit]:
+        """
+        List all trusted units, optionally filtered by kind.
+
+        Args:
+            kind: If specified, only return entries matching this kind.
+                  If None (default), return all entries.
+                  Backward compatible: existing callers with no arguments
+                  get all entries.
+
+        Returns:
+            List of TrustedUnit entries.
+        """
         with self._lock:
-            return list(self._trusted.values())
+            if kind is None:
+                return list(self._trusted.values())
+            return [t for t in self._trusted.values() if t.kind == kind]
 
     def is_loaded(self) -> bool:
         with self._lock:
@@ -358,6 +452,7 @@ class UnitTrustStore:
                         "version": t.version,
                         "sha256": t.sha256,
                         "note": t.note,
+                        "kind": t.kind,
                     }
                     for t in self._trusted.values()
                 ],

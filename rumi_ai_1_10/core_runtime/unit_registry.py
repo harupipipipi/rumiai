@@ -1,5 +1,5 @@
 """
-unit_registry.py - ストア内ユニットの登録・列挙・メタ読み取り
+unit_registry.py - ストア内ユニットの登録・列挙・メタ読み取り・アーティファクト管理
 
 Store 配下のユニット（data / python / binary）を管理する。
 公式は意味を解釈しない（No Favoritism）。
@@ -8,6 +8,10 @@ Store 配下のユニット（data / python / binary）を管理する。
   <store_root>/<unit_namespace>/<unit_name>/<unit_version>/
     unit.json（必須）
     + 実体ファイル群
+
+F-1 追加:
+  - UnitMeta.artifacts フィールド
+  - list_artifacts() メソッド（SHA256 ハッシュ付き、パストラバーサル防止）
 """
 
 from __future__ import annotations
@@ -43,6 +47,7 @@ class UnitMeta:
     store_id: str = ""
     namespace: str = ""
     name: str = ""
+    artifacts: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -59,6 +64,7 @@ class UnitMeta:
             "namespace": self.namespace,
             "name": self.name,
             "unit_dir": str(self.unit_dir) if self.unit_dir else None,
+            "artifacts": self.artifacts,
         }
 
     @classmethod
@@ -78,6 +84,7 @@ class UnitMeta:
             store_id=data.get("store_id", ""),
             namespace=data.get("namespace", ""),
             name=data.get("name", ""),
+            artifacts=data.get("artifacts", []),
         )
 
 
@@ -208,7 +215,7 @@ class UnitRegistry:
     def get_unit_by_ref(
         self,
         store_root: Path,
-        unit_ref: UnitRef,
+        unit_ref: "UnitRef",
     ) -> Optional[UnitMeta]:
         if not store_root.is_dir():
             return None
@@ -363,6 +370,111 @@ class UnitRegistry:
                 h.update(chunk)
         return h.hexdigest()
 
+    # ------------------------------------------------------------------
+    # F-1: Artifacts handling
+    # ------------------------------------------------------------------
+
+    def list_artifacts(
+        self,
+        store_root: Path,
+        unit_ref: "UnitRef",
+    ) -> Dict[str, Any]:
+        """
+        指定ユニットのアーティファクトファイル一覧と SHA256 ハッシュを返す。
+
+        unit.json の "artifacts" に記載されたファイルを対象にする。
+        パストラバーサルが検出された場合はエラーを返す。
+
+        Args:
+            store_root: ストアのルートディレクトリ
+            unit_ref: 対象ユニットの参照情報
+
+        Returns:
+            {
+                "success": True,
+                "unit_id": str,
+                "version": str,
+                "artifacts": [
+                    {"path": str, "sha256": str, "size_bytes": int, "exists": bool},
+                    ...
+                ]
+            }
+            失敗時は {"success": False, "error": str}
+        """
+        meta = self.get_unit_by_ref(store_root, unit_ref)
+        if meta is None:
+            return {
+                "success": False,
+                "error": f"Unit not found: {unit_ref.unit_id}@{unit_ref.version}",
+            }
+
+        unit_dir = meta.unit_dir
+        if unit_dir is None or not unit_dir.is_dir():
+            return {
+                "success": False,
+                "error": "Unit directory not found",
+            }
+
+        if not meta.artifacts:
+            return {
+                "success": True,
+                "unit_id": meta.unit_id,
+                "version": meta.version,
+                "artifacts": [],
+            }
+
+        result_artifacts: List[Dict[str, Any]] = []
+        for artifact_path_str in meta.artifacts:
+            if not isinstance(artifact_path_str, str) or not artifact_path_str:
+                continue
+
+            artifact_path = unit_dir / artifact_path_str
+
+            # パストラバーサル防止
+            if not is_path_within(artifact_path, unit_dir):
+                return {
+                    "success": False,
+                    "error": f"Path traversal detected: {artifact_path_str}",
+                }
+
+            if not artifact_path.is_file():
+                result_artifacts.append({
+                    "path": artifact_path_str,
+                    "sha256": None,
+                    "size_bytes": 0,
+                    "exists": False,
+                })
+                continue
+
+            # SHA256 ハッシュ計算
+            h = hashlib.sha256()
+            size = 0
+            with open(artifact_path, "rb") as f:
+                while True:
+                    chunk = f.read(65536)
+                    if not chunk:
+                        break
+                    h.update(chunk)
+                    size += len(chunk)
+
+            result_artifacts.append({
+                "path": artifact_path_str,
+                "sha256": h.hexdigest(),
+                "size_bytes": size,
+                "exists": True,
+            })
+
+        return {
+            "success": True,
+            "unit_id": meta.unit_id,
+            "version": meta.version,
+            "artifacts": result_artifacts,
+        }
+
+    # ------------------------------------------------------------------
+    # Internal
+    # ------------------------------------------------------------------
+
     def _load_unit_json(
         self,
         unit_json_path: Path,
@@ -388,6 +500,7 @@ class UnitRegistry:
                 unit_dir=unit_dir,
                 namespace=namespace,
                 name=name,
+                artifacts=data.get("artifacts", []),
             )
         except Exception:
             return None
