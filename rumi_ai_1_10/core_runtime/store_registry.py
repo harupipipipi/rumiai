@@ -1,5 +1,5 @@
 """
-store_registry.py - ストア定義・作成・列挙・削除
+store_registry.py - ストア定義・作成・列挙・削除 (DI Container 対応)
 
 Store（共有領域）を管理する。
 公式は "tool/chat/asset" の意味を一切解釈しない。
@@ -710,21 +710,33 @@ class StoreRegistry:
             pass
 
 
-_global_store_registry: Optional[StoreRegistry] = None
-_store_lock = threading.Lock()
-
-
 def get_store_registry() -> StoreRegistry:
-    global _global_store_registry
-    if _global_store_registry is None:
-        with _store_lock:
-            if _global_store_registry is None:
-                _global_store_registry = StoreRegistry()
-    return _global_store_registry
+    """
+    グローバルな StoreRegistry を取得する。
+
+    DI コンテナ経由で遅延初期化・キャッシュされる。
+
+    Returns:
+        StoreRegistry インスタンス
+    """
+    from .di_container import get_container
+    return get_container().get("store_registry")
 
 
 def reset_store_registry(index_path: str = None) -> StoreRegistry:
-    global _global_store_registry
-    with _store_lock:
-        _global_store_registry = StoreRegistry(index_path)
-    return _global_store_registry
+    """
+    StoreRegistry をリセットする（テスト用）。
+
+    新しいインスタンスを生成し、DI コンテナのキャッシュを置き換える。
+
+    Args:
+        index_path: インデックスファイルパス（省略時はデフォルト）
+
+    Returns:
+        新しい StoreRegistry インスタンス
+    """
+    from .di_container import get_container
+    new_instance = StoreRegistry(index_path)
+    container = get_container()
+    container.set_instance("store_registry", new_instance)
+    return new_instance

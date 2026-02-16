@@ -209,7 +209,8 @@ def reset_container() -> None:
 
 def _register_defaults(container: DIContainer) -> None:
     """
-    AuditLogger, HMACKeyManager, VocabRegistry の
+    AuditLogger, HMACKeyManager, VocabRegistry,
+    NetworkGrantManager, StoreRegistry の
     デフォルトファクトリをコンテナに登録する。
 
     Args:
@@ -227,6 +228,16 @@ def _register_defaults(container: DIContainer) -> None:
         from .vocab_registry import VocabRegistry
         return VocabRegistry()
 
+    def _network_grant_manager_factory() -> "NetworkGrantManager":  # noqa: F821
+        from .network_grant_manager import NetworkGrantManager
+        return NetworkGrantManager()
+
+    def _store_registry_factory() -> "StoreRegistry":  # noqa: F821
+        from .store_registry import StoreRegistry
+        return StoreRegistry()
+
     container.register("audit_logger", _audit_logger_factory)
     container.register("hmac_key_manager", _hmac_key_manager_factory)
     container.register("vocab_registry", _vocab_registry_factory)
+    container.register("network_grant_manager", _network_grant_manager_factory)
+    container.register("store_registry", _store_registry_factory)

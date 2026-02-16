@@ -995,8 +995,8 @@ class KernelCore:
             pass
 
         try:
-            from .store_registry import get_store_registry
-            ctx["store_registry"] = get_store_registry()
+            from .di_container import get_container
+            ctx["store_registry"] = get_container().get_or_none("store_registry")
         except Exception:
             pass
 

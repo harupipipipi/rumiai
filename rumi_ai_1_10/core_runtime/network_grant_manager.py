@@ -1,5 +1,5 @@
 """
-network_grant_manager.py - ネットワーク権限管理
+network_grant_manager.py - ネットワーク権限管理 (DI Container 対応)
 
 Pack単位でのネットワークアクセス許可を管理する。
 allowed_domains / allowed_ports による制御と、
@@ -464,24 +464,33 @@ class NetworkGrantManager:
             return True
 
 
-# グローバルインスタンス
-_global_network_grant_manager: Optional[NetworkGrantManager] = None
-_network_lock = threading.Lock()
-
-
 def get_network_grant_manager() -> NetworkGrantManager:
-    """グローバルなNetworkGrantManagerを取得"""
-    global _global_network_grant_manager
-    if _global_network_grant_manager is None:
-        with _network_lock:
-            if _global_network_grant_manager is None:
-                _global_network_grant_manager = NetworkGrantManager()
-    return _global_network_grant_manager
+    """
+    グローバルな NetworkGrantManager を取得する。
+
+    DI コンテナ経由で遅延初期化・キャッシュされる。
+
+    Returns:
+        NetworkGrantManager インスタンス
+    """
+    from .di_container import get_container
+    return get_container().get("network_grant_manager")
 
 
 def reset_network_grant_manager(grants_dir: str = None) -> NetworkGrantManager:
-    """NetworkGrantManagerをリセット(テスト用)"""
-    global _global_network_grant_manager
-    with _network_lock:
-        _global_network_grant_manager = NetworkGrantManager(grants_dir)
-    return _global_network_grant_manager
+    """
+    NetworkGrantManager をリセットする（テスト用）。
+
+    新しいインスタンスを生成し、DI コンテナのキャッシュを置き換える。
+
+    Args:
+        grants_dir: Grant ファイルの保存ディレクトリ（省略時はデフォルト）
+
+    Returns:
+        新しい NetworkGrantManager インスタンス
+    """
+    from .di_container import get_container
+    new_instance = NetworkGrantManager(grants_dir)
+    container = get_container()
+    container.set_instance("network_grant_manager", new_instance)
+    return new_instance

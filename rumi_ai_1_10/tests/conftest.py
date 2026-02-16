@@ -52,6 +52,13 @@ def _reset_singletons():
         reset_container()
     except Exception:
         pass
+    # network_grant_manager (DI-managed; legacy global cleared for safety)
+    try:
+        from core_runtime import network_grant_manager as _ngm
+        if hasattr(_ngm, '_global_network_grant_manager'):
+            _ngm._global_network_grant_manager = None
+    except Exception:
+        pass
     # hmac_key_manager
     try:
         from core_runtime import hmac_key_manager as _hkm
@@ -64,10 +71,11 @@ def _reset_singletons():
         _cts._global_trust_store = None
     except Exception:
         pass
-    # store_registry
+    # store_registry (DI-managed; legacy global cleared for safety)
     try:
         from core_runtime import store_registry as _sr
-        _sr._global_store_registry = None
+        if hasattr(_sr, '_global_store_registry'):
+            _sr._global_store_registry = None
     except Exception:
         pass
     # vocab_registry
