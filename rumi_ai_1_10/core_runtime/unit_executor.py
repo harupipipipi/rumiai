@@ -12,14 +12,19 @@ unit_executor.py - ユニット実行ゲート / モード選択
 1. principal（Pack）が承認済み + hash一致（ApprovalManager）
 2. permission_id の grant を階層評価で満たす（上位も必要）
 3. mode が unit.json の exec_modes_allowed に含まれる
-4. kind=python/binary: UnitTrust が一致（sha256 allowlist）
-5. 監査ログ（allowed/denied）を記録（値は入れない）
+4. kind が ALLOWED_KINDS に含まれる（unknown_kind 防止）
+5. kind=python/binary: UnitTrust が一致（sha256 allowlist）
+5.5. TOCTOU 緩和: Trust チェック後にファイル内容を読み込み再検証
+6. 監査ログ（allowed/denied）を記録（値は入れない）
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import platform
+import stat as stat_module
 import subprocess
 import sys
 import tempfile
@@ -36,6 +41,9 @@ from .paths import is_path_within
 DEFAULT_TIMEOUT = 60.0
 MAX_TIMEOUT = 300.0
 MAX_RESPONSE_SIZE = 1 * 1024 * 1024
+
+# --- Security: kind whitelist (I-02) ---
+ALLOWED_KINDS = frozenset({"data", "python", "binary"})
 
 
 @dataclass
@@ -164,7 +172,17 @@ class UnitExecutor:
                     start_time, mode, principal_id, unit_ref,
                 )
 
+        # 4.5. kind ホワイトリスト (I-02)
+        if unit_meta.kind not in ALLOWED_KINDS:
+            return self._denied(
+                f"Unknown kind: {unit_meta.kind}",
+                "unknown_kind",
+                start_time, mode, principal_id, unit_ref,
+            )
+
         # 5. Trust チェック（kind=python/binary のみ）
+        verified_content: Optional[bytes] = None
+        trust_sha256: Optional[str] = None
         if unit_meta.kind in ("python", "binary"):
             if not unit_meta.entrypoint:
                 return self._denied(
@@ -184,6 +202,7 @@ class UnitExecutor:
                         "trust_error",
                         start_time, mode, principal_id, unit_ref,
                     )
+                trust_sha256 = actual_sha256
 
                 from .unit_trust_store import get_unit_trust_store
                 trust = get_unit_trust_store()
@@ -202,10 +221,30 @@ class UnitExecutor:
                     start_time, mode, principal_id, unit_ref,
                 )
 
+        # 5.5. TOCTOU 緩和 (I-03): Trust チェック後にファイル内容を読み込み二重検証
+        if unit_meta.kind in ("python", "binary") and trust_sha256 is not None:
+            ep_path = unit_meta.unit_dir / unit_meta.entrypoint
+            try:
+                content = ep_path.read_bytes()
+            except Exception as e:
+                return self._denied(
+                    f"Failed to read entrypoint for TOCTOU verification: {e}",
+                    "toctou_read_error",
+                    start_time, mode, principal_id, unit_ref,
+                )
+            content_sha256 = hashlib.sha256(content).hexdigest()
+            if content_sha256 != trust_sha256:
+                return self._denied(
+                    "Entrypoint content changed after trust check (TOCTOU detected)",
+                    "toctou_mismatch",
+                    start_time, mode, principal_id, unit_ref,
+                )
+            verified_content = content
+
         # 6. 実行
         if mode == "host_capability":
             result = self._execute_host_capability(
-                unit_meta, args, timeout_seconds, start_time,
+                unit_meta, args, timeout_seconds, start_time, verified_content,
             )
         elif mode == "pack_container":
             result = UnitExecutionResult(
@@ -241,14 +280,15 @@ class UnitExecutor:
         args: Dict[str, Any],
         timeout_seconds: float,
         start_time: float,
+        verified_content: Optional[bytes] = None,
     ) -> UnitExecutionResult:
         if unit_meta.kind == "python":
             return self._execute_python_host(
-                unit_meta, args, timeout_seconds, start_time,
+                unit_meta, args, timeout_seconds, start_time, verified_content,
             )
         elif unit_meta.kind == "binary":
             return self._execute_binary_host(
-                unit_meta, args, timeout_seconds, start_time,
+                unit_meta, args, timeout_seconds, start_time, verified_content,
             )
         else:
             return UnitExecutionResult(
@@ -265,6 +305,7 @@ class UnitExecutor:
         args: Dict[str, Any],
         timeout_seconds: float,
         start_time: float,
+        verified_content: Optional[bytes] = None,
     ) -> UnitExecutionResult:
         ep_path = unit_meta.unit_dir / unit_meta.entrypoint
         if not ep_path.exists():
@@ -284,8 +325,36 @@ class UnitExecutor:
                 latency_ms=(time.time() - start_time) * 1000,
             )
 
-        runner = self._generate_python_runner(str(ep_path))
+        # TOCTOU 緩和: verified_content がある場合は一時ファイル経由で実行
+        verified_ep_file: Optional[str] = None
         runner_file = None
+        target_ep_path = str(ep_path)
+        if verified_content is not None:
+            try:
+                fd, verified_ep_file = tempfile.mkstemp(
+                    suffix=".py", prefix="rumi_verified_ep_",
+                )
+                try:
+                    os.write(fd, verified_content)
+                finally:
+                    os.close(fd)
+                os.chmod(verified_ep_file, 0o500)
+                target_ep_path = verified_ep_file
+            except Exception:
+                if verified_ep_file:
+                    try:
+                        os.unlink(verified_ep_file)
+                    except Exception:
+                        pass
+                return UnitExecutionResult(
+                    success=False,
+                    error="Failed to create verified entrypoint temp file",
+                    error_type="internal_error",
+                    execution_mode="host_capability",
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+
+        runner = self._generate_python_runner(target_ep_path)
         try:
             with tempfile.NamedTemporaryFile(
                 mode="w", suffix=".py", delete=False, encoding="utf-8",
@@ -361,6 +430,11 @@ class UnitExecutor:
                     os.unlink(runner_file)
                 except Exception:
                     pass
+            if verified_ep_file:
+                try:
+                    os.unlink(verified_ep_file)
+                except Exception:
+                    pass
 
     def _execute_binary_host(
         self,
@@ -368,6 +442,7 @@ class UnitExecutor:
         args: Dict[str, Any],
         timeout_seconds: float,
         start_time: float,
+        verified_content: Optional[bytes] = None,
     ) -> UnitExecutionResult:
         ep_path = unit_meta.unit_dir / unit_meta.entrypoint
         if not ep_path.exists():
@@ -386,12 +461,62 @@ class UnitExecutor:
                 execution_mode="host_capability",
                 latency_ms=(time.time() - start_time) * 1000,
             )
+
+        # I-06: setuid/setgid チェック（Windows 以外のみ）
+        if platform.system() != "Windows":
+            try:
+                ep_stat = os.stat(str(ep_path))
+                if ep_stat.st_mode & (stat_module.S_ISUID | stat_module.S_ISGID):
+                    return UnitExecutionResult(
+                        success=False,
+                        error="Entrypoint has setuid/setgid bits set",
+                        error_type="security_violation",
+                        execution_mode="host_capability",
+                        latency_ms=(time.time() - start_time) * 1000,
+                    )
+            except OSError:
+                return UnitExecutionResult(
+                    success=False,
+                    error="Failed to stat entrypoint for security check",
+                    error_type="internal_error",
+                    execution_mode="host_capability",
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+
+        # TOCTOU 緩和: verified_content がある場合は一時ファイル経由で実行
+        verified_bin_file: Optional[str] = None
+        target_bin_path = str(ep_path)
+        if verified_content is not None:
+            try:
+                fd, verified_bin_file = tempfile.mkstemp(
+                    prefix="rumi_verified_bin_",
+                )
+                try:
+                    os.write(fd, verified_content)
+                finally:
+                    os.close(fd)
+                os.chmod(verified_bin_file, 0o500)
+                target_bin_path = verified_bin_file
+            except Exception:
+                if verified_bin_file:
+                    try:
+                        os.unlink(verified_bin_file)
+                    except Exception:
+                        pass
+                return UnitExecutionResult(
+                    success=False,
+                    error="Failed to create verified binary temp file",
+                    error_type="internal_error",
+                    execution_mode="host_capability",
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+
         try:
             input_json = json.dumps(
                 {"args": args}, ensure_ascii=False, default=str,
             )
             proc = subprocess.run(
-                [str(ep_path)],
+                [target_bin_path],
                 input=input_json,
                 capture_output=True,
                 text=True,
@@ -440,6 +565,12 @@ class UnitExecutor:
                 execution_mode="host_capability",
                 latency_ms=(time.time() - start_time) * 1000,
             )
+        finally:
+            if verified_bin_file:
+                try:
+                    os.unlink(verified_bin_file)
+                except Exception:
+                    pass
 
     def _generate_python_runner(self, handler_py_path: str) -> str:
         safe_path = json.dumps(handler_py_path)
