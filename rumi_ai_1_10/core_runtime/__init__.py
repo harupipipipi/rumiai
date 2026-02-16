@@ -8,6 +8,11 @@ PR-B追加:
 
 from .kernel import Kernel, KernelConfig
 from .diagnostics import Diagnostics
+from .di_container import (
+    DIContainer,
+    get_container,
+    reset_container,
+)
 from .install_journal import InstallJournal, InstallJournalConfig
 from .interface_registry import InterfaceRegistry
 from .event_bus import EventBus
@@ -139,6 +144,10 @@ __all__ = [
     "Kernel",
     "KernelConfig",
     "Diagnostics",
+    # DI Container
+    "DIContainer",
+    "get_container",
+    "reset_container",
     "InstallJournal",
     "InstallJournalConfig",
     "InterfaceRegistry",

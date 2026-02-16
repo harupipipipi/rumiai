@@ -1,5 +1,5 @@
 """
-hmac_key_manager.py - HMAC鍵のローテーション管理 + 署名ユーティリティ
+hmac_key_manager.py - HMAC鍵のローテーション管理 + 署名ユーティリティ (DI Container 対応)
 
 鍵の生成・保存・ローテーション・グレースピリオド検証を提供する。
 
@@ -426,40 +426,50 @@ class HMACKeyManager:
             }
 
 
-# ======================================================================
-# グローバルインスタンス
-# ======================================================================
-
-_global_hmac_key_manager: Optional[HMACKeyManager] = None
-_hmac_lock = threading.Lock()
-
-
 def get_hmac_key_manager() -> HMACKeyManager:
-    """グローバルな HMACKeyManager を取得（遅延初期化）"""
-    global _global_hmac_key_manager
-    if _global_hmac_key_manager is None:
-        with _hmac_lock:
-            if _global_hmac_key_manager is None:
-                _global_hmac_key_manager = HMACKeyManager()
-    return _global_hmac_key_manager
+    """
+    グローバルな HMACKeyManager を取得する（遅延初期化）。
+
+    DI コンテナ経由でキャッシュされる。
+
+    Returns:
+        HMACKeyManager インスタンス
+    """
+    from .di_container import get_container
+    return get_container().get("hmac_key_manager")
 
 
 def initialize_hmac_key_manager(
     keys_path: Optional[str] = None,
     grace_period_seconds: int = DEFAULT_GRACE_PERIOD_SECONDS,
 ) -> HMACKeyManager:
-    """HMACKeyManager を明示的に初期化"""
-    global _global_hmac_key_manager
-    with _hmac_lock:
-        _global_hmac_key_manager = HMACKeyManager(
-            keys_path=keys_path,
-            grace_period_seconds=grace_period_seconds,
-        )
-    return _global_hmac_key_manager
+    """
+    HMACKeyManager を明示的に初期化する。
+
+    指定パラメータで新しいインスタンスを生成し、DI コンテナに設定する。
+
+    Args:
+        keys_path:            鍵ファイルのパス
+        grace_period_seconds: グレースピリオド（秒）
+
+    Returns:
+        新しい HMACKeyManager インスタンス
+    """
+    from .di_container import get_container
+    instance = HMACKeyManager(
+        keys_path=keys_path,
+        grace_period_seconds=grace_period_seconds,
+    )
+    get_container().set_instance("hmac_key_manager", instance)
+    return instance
 
 
 def reset_hmac_key_manager() -> None:
-    """HMACKeyManager をリセット（テスト用）"""
-    global _global_hmac_key_manager
-    with _hmac_lock:
-        _global_hmac_key_manager = None
+    """
+    HMACKeyManager をリセットする（テスト用）。
+
+    DI コンテナのキャッシュを破棄する。
+    次回 get_hmac_key_manager() で再生成される。
+    """
+    from .di_container import get_container
+    get_container().reset("hmac_key_manager")

@@ -989,8 +989,8 @@ class KernelCore:
             pass
 
         try:
-            from .vocab_registry import get_vocab_registry
-            ctx["vocab_registry"] = get_vocab_registry()
+            from .di_container import get_container
+            ctx["vocab_registry"] = get_container().get_or_none("vocab_registry")
         except Exception:
             pass
 

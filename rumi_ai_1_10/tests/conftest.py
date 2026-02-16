@@ -46,6 +46,12 @@ def _clean_env_vars(monkeypatch):
 def _reset_singletons():
     """各テスト後にグローバルシングルトンをリセットする"""
     yield
+    # DI Container (must be first — clears all DI-managed singletons)
+    try:
+        from core_runtime.di_container import reset_container
+        reset_container()
+    except Exception:
+        pass
     # hmac_key_manager
     try:
         from core_runtime import hmac_key_manager as _hkm

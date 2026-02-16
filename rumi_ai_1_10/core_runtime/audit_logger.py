@@ -1,5 +1,5 @@
 """
-audit_logger.py - 監査ログシステム
+audit_logger.py - 監査ログシステム (DI Container 対応)
 
 Flow実行、modifier適用、python_file_call、権限操作などの
 監査ログを永続化する。
@@ -559,26 +559,36 @@ class AuditLogger:
         return deleted
 
 
-# グローバルインスタンス
-_global_audit_logger: Optional[AuditLogger] = None
-_audit_lock = threading.Lock()
-
-
 def get_audit_logger() -> AuditLogger:
-    """グローバルなAuditLoggerを取得"""
-    global _global_audit_logger
-    if _global_audit_logger is None:
-        with _audit_lock:
-            if _global_audit_logger is None:
-                _global_audit_logger = AuditLogger()
-    return _global_audit_logger
+    """
+    グローバルな AuditLogger を取得する。
+
+    DI コンテナ経由で遅延初期化・キャッシュされる。
+
+    Returns:
+        AuditLogger インスタンス
+    """
+    from .di_container import get_container
+    return get_container().get("audit_logger")
 
 
 def reset_audit_logger(audit_dir: str = None) -> AuditLogger:
-    """AuditLoggerをリセット(テスト用)"""
-    global _global_audit_logger
-    with _audit_lock:
-        if _global_audit_logger:
-            _global_audit_logger.flush()
-        _global_audit_logger = AuditLogger(audit_dir)
-    return _global_audit_logger
+    """
+    AuditLogger をリセットする（テスト用）。
+
+    既存インスタンスを flush した後、新しいインスタンスで置き換える。
+
+    Args:
+        audit_dir: 監査ログディレクトリ（省略時はデフォルト）
+
+    Returns:
+        新しい AuditLogger インスタンス
+    """
+    from .di_container import get_container
+    container = get_container()
+    old = container.get_or_none("audit_logger")
+    if old is not None:
+        old.flush()
+    new_instance = AuditLogger(audit_dir)
+    container.set_instance("audit_logger", new_instance)
+    return new_instance

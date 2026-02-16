@@ -1,5 +1,5 @@
 """
-vocab_registry.py - 語彙統一システム
+vocab_registry.py - 語彙統一システム (DI Container 対応)
 
 双方向の同義語解決とデータ変換機能を提供する。
 
@@ -625,23 +625,29 @@ class VocabRegistry:
             self._group_counter = 0
 
 
-_global_vocab_registry: Optional[VocabRegistry] = None
-_vocab_lock = threading.Lock()
-
-
 def get_vocab_registry() -> VocabRegistry:
-    """グローバルなVocabRegistryを取得"""
-    global _global_vocab_registry
-    if _global_vocab_registry is None:
-        with _vocab_lock:
-            if _global_vocab_registry is None:
-                _global_vocab_registry = VocabRegistry()
-    return _global_vocab_registry
+    """
+    グローバルな VocabRegistry を取得する。
+
+    DI コンテナ経由で遅延初期化・キャッシュされる。
+
+    Returns:
+        VocabRegistry インスタンス
+    """
+    from .di_container import get_container
+    return get_container().get("vocab_registry")
 
 
 def reset_vocab_registry() -> VocabRegistry:
-    """VocabRegistryをリセット（テスト用）"""
-    global _global_vocab_registry
-    with _vocab_lock:
-        _global_vocab_registry = VocabRegistry()
-    return _global_vocab_registry
+    """
+    VocabRegistry をリセットする（テスト用）。
+
+    新しい空の VocabRegistry を生成し、DI コンテナに設定する。
+
+    Returns:
+        新しい VocabRegistry インスタンス
+    """
+    from .di_container import get_container
+    new_instance = VocabRegistry()
+    get_container().set_instance("vocab_registry", new_instance)
+    return new_instance
