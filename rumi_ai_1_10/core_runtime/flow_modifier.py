@@ -1059,43 +1059,69 @@ class FlowModifierApplier:
         }
 
 
-# グローバルインスタンス
+# グローバル変数（後方互換のため残存。DI コンテナ優先）
 _global_modifier_loader: Optional[FlowModifierLoader] = None
 _global_modifier_applier: Optional[FlowModifierApplier] = None
 _modifier_lock = threading.Lock()
 
 
 def get_modifier_loader() -> FlowModifierLoader:
-    """グローバルなFlowModifierLoaderを取得"""
-    global _global_modifier_loader
-    if _global_modifier_loader is None:
-        with _modifier_lock:
-            if _global_modifier_loader is None:
-                _global_modifier_loader = FlowModifierLoader()
-    return _global_modifier_loader
+    """
+    グローバルな FlowModifierLoader を取得する。
+
+    DI コンテナ経由で遅延初期化・キャッシュされる。
+
+    Returns:
+        FlowModifierLoader インスタンス
+    """
+    from .di_container import get_container
+    return get_container().get("modifier_loader")
 
 
 def get_modifier_applier() -> FlowModifierApplier:
-    """グローバルなFlowModifierApplierを取得"""
-    global _global_modifier_applier
-    if _global_modifier_applier is None:
-        with _modifier_lock:
-            if _global_modifier_applier is None:
-                _global_modifier_applier = FlowModifierApplier()
-    return _global_modifier_applier
+    """
+    グローバルな FlowModifierApplier を取得する。
+
+    DI コンテナ経由で遅延初期化・キャッシュされる。
+
+    Returns:
+        FlowModifierApplier インスタンス
+    """
+    from .di_container import get_container
+    return get_container().get("modifier_applier")
 
 
 def reset_modifier_loader() -> FlowModifierLoader:
-    """FlowModifierLoaderをリセット(テスト用)"""
+    """
+    FlowModifierLoader をリセットする（テスト用）。
+
+    新しいインスタンスを生成し、DI コンテナのキャッシュを置き換える。
+
+    Returns:
+        新しい FlowModifierLoader インスタンス
+    """
     global _global_modifier_loader
     with _modifier_lock:
         _global_modifier_loader = FlowModifierLoader()
+    # DI コンテナのキャッシュも更新（_modifier_lock の外で実行してデッドロック回避）
+    from .di_container import get_container
+    get_container().set_instance("modifier_loader", _global_modifier_loader)
     return _global_modifier_loader
 
 
 def reset_modifier_applier() -> FlowModifierApplier:
-    """FlowModifierApplierをリセット(テスト用)"""
+    """
+    FlowModifierApplier をリセットする（テスト用）。
+
+    新しいインスタンスを生成し、DI コンテナのキャッシュを置き換える。
+
+    Returns:
+        新しい FlowModifierApplier インスタンス
+    """
     global _global_modifier_applier
     with _modifier_lock:
         _global_modifier_applier = FlowModifierApplier()
+    # DI コンテナのキャッシュも更新（_modifier_lock の外で実行してデッドロック回避）
+    from .di_container import get_container
+    get_container().set_instance("modifier_applier", _global_modifier_applier)
     return _global_modifier_applier

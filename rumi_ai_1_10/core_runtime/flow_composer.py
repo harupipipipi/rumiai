@@ -469,24 +469,37 @@ class FlowComposer:
             self._applied_modifiers.clear()
 
 
-# グローバルインスタンス
+# グローバル変数（後方互換のため残存。DI コンテナ優先）
 _global_flow_composer: Optional[FlowComposer] = None
 _composer_lock = threading.Lock()
 
 
 def get_flow_composer() -> FlowComposer:
-    """グローバルなFlowComposerインスタンスを取得"""
-    global _global_flow_composer
-    if _global_flow_composer is None:
-        with _composer_lock:
-            if _global_flow_composer is None:
-                _global_flow_composer = FlowComposer()
-    return _global_flow_composer
+    """
+    グローバルな FlowComposer を取得する。
+
+    DI コンテナ経由で遅延初期化・キャッシュされる。
+
+    Returns:
+        FlowComposer インスタンス
+    """
+    from .di_container import get_container
+    return get_container().get("flow_composer")
 
 
 def reset_flow_composer() -> FlowComposer:
-    """FlowComposerをリセット（テスト用）"""
+    """
+    FlowComposer をリセットする（テスト用）。
+
+    新しいインスタンスを生成し、DI コンテナのキャッシュを置き換える。
+
+    Returns:
+        新しい FlowComposer インスタンス
+    """
     global _global_flow_composer
     with _composer_lock:
         _global_flow_composer = FlowComposer()
+    # DI コンテナのキャッシュも更新（_composer_lock の外で実行してデッドロック回避）
+    from .di_container import get_container
+    get_container().set_instance("flow_composer", _global_flow_composer)
     return _global_flow_composer

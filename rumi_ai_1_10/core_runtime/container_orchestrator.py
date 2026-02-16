@@ -183,23 +183,37 @@ class ContainerOrchestrator:
             return []
 
 
+# グローバル変数（後方互換のため残存。DI コンテナ優先）
 _global_orchestrator: Optional[ContainerOrchestrator] = None
 _co_lock = threading.Lock()
 
 
 def get_container_orchestrator() -> ContainerOrchestrator:
-    """グローバルなContainerOrchestratorを取得"""
-    global _global_orchestrator
-    if _global_orchestrator is None:
-        with _co_lock:
-            if _global_orchestrator is None:
-                _global_orchestrator = ContainerOrchestrator()
-    return _global_orchestrator
+    """
+    グローバルな ContainerOrchestrator を取得する。
+
+    DI コンテナ経由で遅延初期化・キャッシュされる。
+
+    Returns:
+        ContainerOrchestrator インスタンス
+    """
+    from .di_container import get_container
+    return get_container().get("container_orchestrator")
 
 
 def initialize_container_orchestrator() -> ContainerOrchestrator:
-    """ContainerOrchestratorを初期化"""
+    """
+    ContainerOrchestrator を初期化する。
+
+    新しいインスタンスを生成し、DI コンテナのキャッシュを置き換える。
+
+    Returns:
+        初期化済み ContainerOrchestrator インスタンス
+    """
     global _global_orchestrator
     with _co_lock:
         _global_orchestrator = ContainerOrchestrator()
+    # DI コンテナのキャッシュも更新（_co_lock の外で実行してデッドロック回避）
+    from .di_container import get_container
+    get_container().set_instance("container_orchestrator", _global_orchestrator)
     return _global_orchestrator

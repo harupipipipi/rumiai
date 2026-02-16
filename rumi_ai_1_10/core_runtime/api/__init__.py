@@ -17,6 +17,14 @@ from .network_handlers import NetworkHandlersMixin
 from .capability_grant_handlers import CapabilityGrantHandlersMixin
 from .store_share_handlers import StoreShareHandlersMixin
 from .privilege_handlers import PrivilegeHandlersMixin
+from .capability_installer_handlers import CapabilityInstallerHandlersMixin
+from .pip_handlers import PipHandlersMixin
+from .secrets_handlers import SecretsHandlersMixin
+from .store_handlers import StoreHandlersMixin
+from .unit_handlers import UnitHandlersMixin
+from .flow_handlers import FlowHandlersMixin
+from .route_handlers import RouteHandlersMixin
+from .pack_lifecycle_handlers import PackLifecycleHandlersMixin
 
 __all__ = [
     "PackHandlersMixin",
@@ -25,4 +33,12 @@ __all__ = [
     "CapabilityGrantHandlersMixin",
     "StoreShareHandlersMixin",
     "PrivilegeHandlersMixin",
+    "CapabilityInstallerHandlersMixin",
+    "PipHandlersMixin",
+    "SecretsHandlersMixin",
+    "StoreHandlersMixin",
+    "UnitHandlersMixin",
+    "FlowHandlersMixin",
+    "RouteHandlersMixin",
+    "PackLifecycleHandlersMixin",
 ]

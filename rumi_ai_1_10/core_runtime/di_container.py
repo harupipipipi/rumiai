@@ -211,7 +211,10 @@ def _register_defaults(container: DIContainer) -> None:
     """
     AuditLogger, HMACKeyManager, VocabRegistry,
     NetworkGrantManager, StoreRegistry,
-    ApprovalManager, PermissionManager の
+    ApprovalManager, PermissionManager,
+    ContainerOrchestrator, HostPrivilegeManager,
+    FlowComposer, FunctionAliasRegistry,
+    SecretsStore, FlowModifierLoader, FlowModifierApplier の
     デフォルトファクトリをコンテナに登録する。
 
     Args:
@@ -245,6 +248,63 @@ def _register_defaults(container: DIContainer) -> None:
         from .permission_manager import PermissionManager
         return PermissionManager()
 
+    def _container_orchestrator_factory() -> "ContainerOrchestrator":  # noqa: F821
+        from .container_orchestrator import ContainerOrchestrator
+        return ContainerOrchestrator()
+
+    def _host_privilege_manager_factory() -> "HostPrivilegeManager":  # noqa: F821
+        from .host_privilege_manager import HostPrivilegeManager
+        return HostPrivilegeManager()
+
+    def _flow_composer_factory() -> "FlowComposer":  # noqa: F821
+        from .flow_composer import FlowComposer
+        return FlowComposer()
+
+    def _function_alias_registry_factory() -> "FunctionAliasRegistry":  # noqa: F821
+        from .function_alias import FunctionAliasRegistry
+        return FunctionAliasRegistry()
+
+    def _secrets_store_factory() -> "SecretsStore":  # noqa: F821
+        from .secrets_store import SecretsStore
+        return SecretsStore()
+
+    def _modifier_loader_factory() -> "FlowModifierLoader":  # noqa: F821
+        from .flow_modifier import FlowModifierLoader
+        return FlowModifierLoader()
+
+    def _modifier_applier_factory() -> "FlowModifierApplier":  # noqa: F821
+        from .flow_modifier import FlowModifierApplier
+        return FlowModifierApplier()
+
+
+
+    def _container_orchestrator_factory() -> "ContainerOrchestrator":  # noqa: F821
+        from .container_orchestrator import ContainerOrchestrator
+        return ContainerOrchestrator()
+
+    def _host_privilege_manager_factory() -> "HostPrivilegeManager":  # noqa: F821
+        from .host_privilege_manager import HostPrivilegeManager
+        return HostPrivilegeManager()
+
+    def _flow_composer_factory() -> "FlowComposer":  # noqa: F821
+        from .flow_composer import FlowComposer
+        return FlowComposer()
+
+    def _function_alias_registry_factory() -> "FunctionAliasRegistry":  # noqa: F821
+        from .function_alias import FunctionAliasRegistry
+        return FunctionAliasRegistry()
+
+    def _secrets_store_factory() -> "SecretsStore":  # noqa: F821
+        from .secrets_store import SecretsStore
+        return SecretsStore()
+
+    def _modifier_loader_factory() -> "FlowModifierLoader":  # noqa: F821
+        from .flow_modifier import FlowModifierLoader
+        return FlowModifierLoader()
+
+    def _modifier_applier_factory() -> "FlowModifierApplier":  # noqa: F821
+        from .flow_modifier import FlowModifierApplier
+        return FlowModifierApplier()
     container.register("audit_logger", _audit_logger_factory)
     container.register("hmac_key_manager", _hmac_key_manager_factory)
     container.register("vocab_registry", _vocab_registry_factory)
@@ -252,3 +312,18 @@ def _register_defaults(container: DIContainer) -> None:
     container.register("store_registry", _store_registry_factory)
     container.register("approval_manager", _approval_manager_factory)
     container.register("permission_manager", _permission_manager_factory)
+    container.register("container_orchestrator", _container_orchestrator_factory)
+    container.register("host_privilege_manager", _host_privilege_manager_factory)
+    container.register("flow_composer", _flow_composer_factory)
+    container.register("function_alias_registry", _function_alias_registry_factory)
+    container.register("secrets_store", _secrets_store_factory)
+    container.register("modifier_loader", _modifier_loader_factory)
+    container.register("modifier_applier", _modifier_applier_factory)
+    container.register("container_orchestrator", _container_orchestrator_factory)
+    container.register("host_privilege_manager", _host_privilege_manager_factory)
+    container.register("flow_composer", _flow_composer_factory)
+    container.register("function_alias_registry", _function_alias_registry_factory)
+    container.register("secrets_store", _secrets_store_factory)
+    container.register("modifier_loader", _modifier_loader_factory)
+    container.register("modifier_applier", _modifier_applier_factory)
+

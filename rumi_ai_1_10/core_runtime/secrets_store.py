@@ -479,21 +479,40 @@ class SecretsStore:
             pass
 
 
+# グローバル変数（後方互換のため残存。DI コンテナ優先）
 _global_secrets_store: Optional[SecretsStore] = None
 _secrets_lock = threading.Lock()
 
 
 def get_secrets_store() -> SecretsStore:
-    global _global_secrets_store
-    if _global_secrets_store is None:
-        with _secrets_lock:
-            if _global_secrets_store is None:
-                _global_secrets_store = SecretsStore()
-    return _global_secrets_store
+    """
+    グローバルな SecretsStore を取得する。
+
+    DI コンテナ経由で遅延初期化・キャッシュされる。
+
+    Returns:
+        SecretsStore インスタンス
+    """
+    from .di_container import get_container
+    return get_container().get("secrets_store")
 
 
 def reset_secrets_store(secrets_dir: str = None) -> SecretsStore:
+    """
+    SecretsStore をリセットする（テスト用）。
+
+    新しいインスタンスを生成し、DI コンテナのキャッシュを置き換える。
+
+    Args:
+        secrets_dir: Secrets ディレクトリ（省略時はデフォルト）
+
+    Returns:
+        新しい SecretsStore インスタンス
+    """
     global _global_secrets_store
     with _secrets_lock:
         _global_secrets_store = SecretsStore(secrets_dir)
+    # DI コンテナのキャッシュも更新（_secrets_lock の外で実行してデッドロック回避）
+    from .di_container import get_container
+    get_container().set_instance("secrets_store", _global_secrets_store)
     return _global_secrets_store

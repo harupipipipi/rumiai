@@ -72,23 +72,37 @@ class HostPrivilegeManager:
             ]
 
 
+# グローバル変数（後方互換のため残存。DI コンテナ優先）
 _global_privilege_manager: Optional[HostPrivilegeManager] = None
 _hpm_lock = threading.Lock()
 
 
 def get_host_privilege_manager() -> HostPrivilegeManager:
-    """グローバルなHostPrivilegeManagerを取得"""
-    global _global_privilege_manager
-    if _global_privilege_manager is None:
-        with _hpm_lock:
-            if _global_privilege_manager is None:
-                _global_privilege_manager = HostPrivilegeManager()
-    return _global_privilege_manager
+    """
+    グローバルな HostPrivilegeManager を取得する。
+
+    DI コンテナ経由で遅延初期化・キャッシュされる。
+
+    Returns:
+        HostPrivilegeManager インスタンス
+    """
+    from .di_container import get_container
+    return get_container().get("host_privilege_manager")
 
 
 def initialize_host_privilege_manager() -> HostPrivilegeManager:
-    """HostPrivilegeManagerを初期化"""
+    """
+    HostPrivilegeManager を初期化する。
+
+    新しいインスタンスを生成し、DI コンテナのキャッシュを置き換える。
+
+    Returns:
+        初期化済み HostPrivilegeManager インスタンス
+    """
     global _global_privilege_manager
     with _hpm_lock:
         _global_privilege_manager = HostPrivilegeManager()
+    # DI コンテナのキャッシュも更新（_hpm_lock の外で実行してデッドロック回避）
+    from .di_container import get_container
+    get_container().set_instance("host_privilege_manager", _global_privilege_manager)
     return _global_privilege_manager

@@ -124,32 +124,46 @@ class FunctionAliasRegistry:
             self._alias_to_canonical.clear()
 
 
+# グローバル変数（後方互換のため残存。DI コンテナ優先）
 _global_function_alias_registry: Optional[FunctionAliasRegistry] = None
 _registry_lock = threading.Lock()
 
 
 def get_function_alias_registry() -> FunctionAliasRegistry:
     """
+    グローバルな FunctionAliasRegistry を取得する。
+
+    DI コンテナ経由で遅延初期化・キャッシュされる。
+
     @deprecated: get_vocab_registry() を使用してください
+
+    Returns:
+        FunctionAliasRegistry インスタンス
     """
     warnings.warn(
         "get_function_alias_registry() is deprecated. Use get_vocab_registry() instead.",
         DeprecationWarning,
         stacklevel=2
     )
-    global _global_function_alias_registry
-    if _global_function_alias_registry is None:
-        with _registry_lock:
-            if _global_function_alias_registry is None:
-                _global_function_alias_registry = FunctionAliasRegistry()
-    return _global_function_alias_registry
+    from .di_container import get_container
+    return get_container().get("function_alias_registry")
 
 
 def reset_function_alias_registry() -> FunctionAliasRegistry:
-    """FunctionAliasRegistryをリセット（テスト用）"""
+    """
+    FunctionAliasRegistry をリセットする（テスト用）。
+
+    新しいインスタンスを生成し、DI コンテナのキャッシュを置き換える。
+
+    Returns:
+        新しい FunctionAliasRegistry インスタンス
+    """
     global _global_function_alias_registry
     with _registry_lock:
         _global_function_alias_registry = FunctionAliasRegistry()
+    # DI コンテナのキャッシュも更新（_registry_lock の外で実行してデッドロック回避）
+    from .di_container import get_container
+    get_container().set_instance("function_alias_registry", _global_function_alias_registry)
     return _global_function_alias_registry
 
 

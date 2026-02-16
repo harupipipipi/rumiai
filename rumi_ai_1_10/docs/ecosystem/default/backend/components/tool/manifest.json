@@ -1,0 +1,53 @@
+{
+  "type": "tool_pack",
+  "id": "tool_v1",
+  "version": "1.0.0",
+  "display_name": "Tool Pack",
+  "description": "Function Calling対応のツールシステム。動的読み込み、専用仮想環境、UIサポートを提供します。",
+  "entry": {
+    "backend": "python:tool_loader",
+    "frontend": null
+  },
+  "connectivity": {
+    "accepts": [],
+    "provides": [
+      "function_calling",
+      "tool_execution"
+    ],
+    "requires": []
+  },
+  "storage": {
+    "uses_mounts": [
+      "data.cache"
+    ],
+    "layout": "component_defined"
+  },
+  "addon_policy": {
+    "allowed_manifest_paths": [
+      "/extensions"
+    ],
+    "editable_files": [
+      {
+        "path_glob": "tool/*/manifest.json",
+        "allowed_json_pointer_prefixes": [
+          "/settings_schema",
+          "/extensions"
+        ]
+      }
+    ],
+    "deny_all": false
+  },
+  "extensions": {},
+  "settings_schema": {
+    "auto_install_deps": {
+      "type": "boolean",
+      "label": "依存関係の自動インストール",
+      "description": "ツールの依存関係を自動的にインストールします",
+      "default": true
+    }
+  },
+  "metadata": {
+    "supports_direct_invoke": true,
+    "supports_ui": true
+  }
+}

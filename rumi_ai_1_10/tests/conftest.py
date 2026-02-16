@@ -96,3 +96,91 @@ def _reset_singletons():
         _pm._global_permission_manager = None
     except Exception:
         pass
+    # container_orchestrator (DI-managed; legacy global cleared for safety)
+    try:
+        from core_runtime import container_orchestrator as _co
+        if hasattr(_co, '_global_orchestrator'):
+            _co._global_orchestrator = None
+    except Exception:
+        pass
+    # host_privilege_manager (DI-managed; legacy global cleared for safety)
+    try:
+        from core_runtime import host_privilege_manager as _hpm
+        if hasattr(_hpm, '_global_privilege_manager'):
+            _hpm._global_privilege_manager = None
+    except Exception:
+        pass
+    # flow_composer (DI-managed; legacy global cleared for safety)
+    try:
+        from core_runtime import flow_composer as _fc
+        if hasattr(_fc, '_global_flow_composer'):
+            _fc._global_flow_composer = None
+    except Exception:
+        pass
+    # function_alias_registry (DI-managed; legacy global cleared for safety)
+    try:
+        from core_runtime import function_alias as _fa
+        if hasattr(_fa, '_global_function_alias_registry'):
+            _fa._global_function_alias_registry = None
+    except Exception:
+        pass
+    # secrets_store (DI-managed; legacy global cleared for safety)
+    try:
+        from core_runtime import secrets_store as _ss
+        if hasattr(_ss, '_global_secrets_store'):
+            _ss._global_secrets_store = None
+    except Exception:
+        pass
+    # modifier_loader / modifier_applier (DI-managed; legacy global cleared for safety)
+    try:
+        from core_runtime import flow_modifier as _fm
+        if hasattr(_fm, '_global_modifier_loader'):
+            _fm._global_modifier_loader = None
+        if hasattr(_fm, '_global_modifier_applier'):
+            _fm._global_modifier_applier = None
+    except Exception:
+        pass
+    # container_orchestrator (DI-managed; legacy global cleared for safety)
+    try:
+        from core_runtime import container_orchestrator as _co
+        if hasattr(_co, '_global_orchestrator'):
+            _co._global_orchestrator = None
+    except Exception:
+        pass
+    # host_privilege_manager (DI-managed; legacy global cleared for safety)
+    try:
+        from core_runtime import host_privilege_manager as _hpm
+        if hasattr(_hpm, '_global_privilege_manager'):
+            _hpm._global_privilege_manager = None
+    except Exception:
+        pass
+    # flow_composer (DI-managed; legacy global cleared for safety)
+    try:
+        from core_runtime import flow_composer as _fc
+        if hasattr(_fc, '_global_flow_composer'):
+            _fc._global_flow_composer = None
+    except Exception:
+        pass
+    # function_alias_registry (DI-managed; legacy global cleared for safety)
+    try:
+        from core_runtime import function_alias as _fa
+        if hasattr(_fa, '_global_function_alias_registry'):
+            _fa._global_function_alias_registry = None
+    except Exception:
+        pass
+    # secrets_store (DI-managed; legacy global cleared for safety)
+    try:
+        from core_runtime import secrets_store as _ss
+        if hasattr(_ss, '_global_secrets_store'):
+            _ss._global_secrets_store = None
+    except Exception:
+        pass
+    # modifier_loader / modifier_applier (DI-managed; legacy globals cleared for safety)
+    try:
+        from core_runtime import flow_modifier as _fm
+        if hasattr(_fm, '_global_modifier_loader'):
+            _fm._global_modifier_loader = None
+        if hasattr(_fm, '_global_modifier_applier'):
+            _fm._global_modifier_applier = None
+    except Exception:
+        pass
