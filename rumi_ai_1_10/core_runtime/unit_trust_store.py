@@ -5,11 +5,17 @@ unit_trust_store.py - 実行系ユニットの sha256 trust allowlist
 unit_id + version + sha256 を記録。
 
 保存先: user_data/units/trust/trusted_units.json
+
+Wave 6-D additions:
+  - A-20: add_trust() input validation (ValueError on bad input)
+  - A-15: hot-reload via mtime check + auto_reload flag
+  - Bugfix: load() failure no longer increments _cache_version
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 from dataclasses import dataclass
@@ -43,7 +49,20 @@ class UnitTrustCheckResult:
 
 
 class UnitTrustStore:
-    def __init__(self, trust_dir: Optional[str] = None):
+    """Trust allowlist for executable units.
+
+    Parameters:
+        trust_dir: Override directory for trusted_units.json.
+        auto_reload: When True, ``is_trusted()`` automatically calls
+            ``reload_if_modified()`` before each check.  Can also be
+            activated via the ``RUMI_TRUST_AUTO_RELOAD=1`` env-var.
+    """
+
+    def __init__(
+        self,
+        trust_dir: Optional[str] = None,
+        auto_reload: bool = False,
+    ):
         self._trust_dir = Path(trust_dir or DEFAULT_TRUST_DIR)
         self._trust_file = self._trust_dir / TRUST_FILE_NAME
         self._lock = threading.RLock()
@@ -52,21 +71,81 @@ class UnitTrustStore:
         self._load_error: Optional[str] = None
         self._load_warnings: List[str] = []
         self._cache_version: int = 0
+        self._last_mtime: float = 0.0
+        self._auto_reload: bool = (
+            auto_reload
+            or os.environ.get("RUMI_TRUST_AUTO_RELOAD") == "1"
+        )
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
 
     @staticmethod
     def _now_ts() -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
+    @staticmethod
+    def _validate_trust_input(
+        unit_id: Any,
+        version: Any,
+        sha256: Any,
+    ) -> None:
+        """Validate ``add_trust`` arguments; raise ``ValueError`` on failure."""
+        if not isinstance(unit_id, str) or not unit_id:
+            raise ValueError(
+                f"unit_id must be a non-empty string, got {unit_id!r}"
+            )
+        if not isinstance(version, str) or not version:
+            raise ValueError(
+                f"version must be a non-empty string, got {version!r}"
+            )
+        if not isinstance(sha256, str) or not _SHA256_RE.fullmatch(sha256.lower()):
+            raise ValueError(
+                f"sha256 must be a 64-character hex string, got {sha256!r}"
+            )
+
+    def _log_audit(
+        self,
+        event_type: str,
+        severity: str,
+        description: str,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Best-effort audit logging — never raises."""
+        try:
+            from core_runtime.audit_logger import get_audit_logger
+            get_audit_logger().log_security_event(
+                event_type=event_type,
+                severity=severity,
+                description=description,
+                details=details,
+            )
+        except Exception:
+            pass
+
+    def _get_file_mtime(self) -> float:
+        """Return mtime of the trust file, or ``0.0`` if it does not exist."""
+        try:
+            return self._trust_file.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    # ------------------------------------------------------------------
+    # Load / reload
+    # ------------------------------------------------------------------
+
     def load(self) -> bool:
         with self._lock:
             self._trusted.clear()
             self._load_warnings.clear()
-            self._cache_version += 1
             self._loaded = False
             self._load_error = None
 
             if not self._trust_file.exists():
                 self._loaded = True
+                self._cache_version += 1
+                self._last_mtime = 0.0
                 return True
 
             try:
@@ -115,7 +194,38 @@ class UnitTrustStore:
                 )
 
             self._loaded = True
+            self._cache_version += 1
+            self._last_mtime = self._get_file_mtime()
             return True
+
+    def _check_file_modified(self) -> bool:
+        """Return ``True`` if trust file mtime differs from last recorded."""
+        current = self._get_file_mtime()
+        return current != self._last_mtime
+
+    def reload_if_modified(self) -> bool:
+        """Reload trust data if the backing file was modified on disk.
+
+        Returns:
+            ``True`` if a reload was performed (regardless of load success),
+            ``False`` if the file was unchanged.
+        """
+        with self._lock:
+            if not self._check_file_modified():
+                return False
+            success = self.load()
+            if success:
+                self._log_audit(
+                    "trust_store_reloaded",
+                    "info",
+                    "Trust store reloaded due to file modification",
+                    details={"cache_version": self._cache_version},
+                )
+            return True
+
+    # ------------------------------------------------------------------
+    # Query
+    # ------------------------------------------------------------------
 
     def is_trusted(
         self,
@@ -124,6 +234,9 @@ class UnitTrustStore:
         actual_sha256: str,
     ) -> UnitTrustCheckResult:
         with self._lock:
+            if self._auto_reload:
+                self.reload_if_modified()
+
             if not self._loaded:
                 return UnitTrustCheckResult(
                     trusted=False,
@@ -160,6 +273,10 @@ class UnitTrustStore:
                 actual_sha256=actual_lower,
             )
 
+    # ------------------------------------------------------------------
+    # Mutation
+    # ------------------------------------------------------------------
+
     def add_trust(
         self,
         unit_id: str,
@@ -167,12 +284,28 @@ class UnitTrustStore:
         sha256: str,
         note: str = "",
     ) -> bool:
+        # --- input validation (before lock – no state mutation) ---
+        try:
+            self._validate_trust_input(unit_id, version, sha256)
+        except ValueError as exc:
+            self._log_audit(
+                "trust_add_rejected",
+                "warning",
+                str(exc),
+                details={
+                    "unit_id": repr(unit_id),
+                    "version": repr(version),
+                    "sha256": repr(sha256),
+                },
+            )
+            raise
+
         with self._lock:
             self._trusted[(unit_id, version)] = TrustedUnit(
                 unit_id=unit_id,
                 version=version,
                 sha256=sha256.lower(),
-                note=note,
+                note=note or "",
             )
             self._cache_version += 1
             return self._save()
@@ -209,6 +342,10 @@ class UnitTrustStore:
         with self._lock:
             return self._cache_version
 
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
     def _save(self) -> bool:
         try:
             self._trust_dir.mkdir(parents=True, exist_ok=True)
@@ -231,6 +368,10 @@ class UnitTrustStore:
         except Exception:
             return False
 
+
+# ------------------------------------------------------------------
+# Global singleton helpers
+# ------------------------------------------------------------------
 
 _global_unit_trust: Optional[UnitTrustStore] = None
 _unit_trust_lock = threading.Lock()
