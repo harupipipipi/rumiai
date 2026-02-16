@@ -19,7 +19,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .paths import is_path_within
 
@@ -114,10 +114,55 @@ class PublishResult:
 class UnitRegistry:
     def __init__(self):
         self._lock = threading.RLock()
+        # A-6: O(1) index map — (unit_id, version) -> ver_dir Path
+        self._index: Dict[Tuple[str, str], Path] = {}
+        self._index_root: Optional[Path] = None
 
     @staticmethod
     def _now_ts() -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    # ------------------------------------------------------------------
+    # A-6: Index management
+    # ------------------------------------------------------------------
+
+    def build_index(self, store_root: Path) -> None:
+        """
+        Build an O(1) lookup index for (unit_id, version) -> ver_dir.
+
+        Scans the store directory tree once and populates self._index.
+        Thread-safe via self._lock.
+        """
+        new_index: Dict[Tuple[str, str], Path] = {}
+        resolved_root = store_root.resolve()
+        if resolved_root.is_dir():
+            for ns_dir in sorted(resolved_root.iterdir()):
+                if not ns_dir.is_dir() or ns_dir.name.startswith("."):
+                    continue
+                for name_dir in sorted(ns_dir.iterdir()):
+                    if not name_dir.is_dir() or name_dir.name.startswith("."):
+                        continue
+                    for ver_dir in sorted(name_dir.iterdir()):
+                        if not ver_dir.is_dir() or ver_dir.name.startswith("."):
+                            continue
+                        unit_json = ver_dir / "unit.json"
+                        if unit_json.exists():
+                            meta = self._load_unit_json(
+                                unit_json, ver_dir, ns_dir.name, name_dir.name,
+                            )
+                            if meta and meta.unit_id and meta.version:
+                                key = (meta.unit_id, meta.version)
+                                if key not in new_index:
+                                    new_index[key] = ver_dir
+        with self._lock:
+            self._index = new_index
+            self._index_root = resolved_root
+
+    def invalidate_index(self) -> None:
+        """Clear the O(1) lookup index. Thread-safe."""
+        with self._lock:
+            self._index.clear()
+            self._index_root = None
 
     def list_units(self, store_root: Path) -> List[UnitMeta]:
         results = []
@@ -139,6 +184,8 @@ class UnitRegistry:
                         )
                         if meta:
                             results.append(meta)
+        # A-6: Build index as side-effect of list_units
+        self.build_index(store_root)
         return results
 
     def get_unit(
@@ -165,6 +212,52 @@ class UnitRegistry:
     ) -> Optional[UnitMeta]:
         if not store_root.is_dir():
             return None
+
+        # A-6: Try O(1) index lookup first
+        resolved_root = store_root.resolve()
+        with self._lock:
+            index_valid = (
+                bool(self._index)
+                and self._index_root is not None
+                and self._index_root == resolved_root
+            )
+            if index_valid:
+                ver_dir = self._index.get(
+                    (unit_ref.unit_id, unit_ref.version)
+                )
+
+        if index_valid:
+            if ver_dir is not None and ver_dir.is_dir():
+                unit_json = ver_dir / "unit.json"
+                if unit_json.exists():
+                    # Derive namespace and name from path structure:
+                    # ver_dir = store_root / namespace / name / version
+                    try:
+                        rel = ver_dir.relative_to(resolved_root)
+                        parts = rel.parts  # (namespace, name, version)
+                        if len(parts) >= 2:
+                            ns_name = parts[0]
+                            unit_name = parts[1]
+                        else:
+                            ns_name = ""
+                            unit_name = ""
+                    except (ValueError, IndexError):
+                        ns_name = ""
+                        unit_name = ""
+                    meta = self._load_unit_json(
+                        unit_json, ver_dir, ns_name, unit_name,
+                    )
+                    if (
+                        meta
+                        and meta.unit_id == unit_ref.unit_id
+                        and meta.version == unit_ref.version
+                    ):
+                        meta.store_id = unit_ref.store_id
+                        return meta
+            # Index hit but data mismatch or dir gone — fall through to scan
+            # (Do NOT return None immediately; the index may be stale)
+
+        # Fallback: O(n) full scan (backward compatible)
         for ns_dir in sorted(store_root.iterdir()):
             if not ns_dir.is_dir() or ns_dir.name.startswith("."):
                 continue
@@ -240,6 +333,9 @@ class UnitRegistry:
             return PublishResult(
                 success=False, unit_id=meta.unit_id, error=f"Failed to copy: {e}",
             )
+
+        # A-6: Invalidate index after publish (new unit added)
+        self.invalidate_index()
 
         self._audit("unit_published", True, {
             "store_id": store_id,

@@ -44,6 +44,10 @@ DEFAULT_TIMEOUT = 60.0
 MAX_TIMEOUT = 300.0
 MAX_RESPONSE_SIZE = 1 * 1024 * 1024
 
+# --- A-11: Rate limiting constants ---
+MAX_EXECUTIONS_PER_MINUTE = 30
+RATE_WINDOW_SEC = 60.0
+
 # --- Security: input format validation (A-4) ---
 _ID_PATTERN = re.compile(r"^[a-zA-Z0-9_.\-]{1,128}$")
 
@@ -57,6 +61,9 @@ SUBPROCESS_ENV_WHITELIST = frozenset({
     "TMPDIR", "TMP", "TEMP",
 })
 
+# --- A-14: Fields to strip from external-facing result dicts ---
+_RESULT_STRIP_KEYS = frozenset({"_stderr_head", "stderr", "stderr_head"})
+
 
 @dataclass
 class UnitExecutionResult:
@@ -69,7 +76,8 @@ class UnitExecutionResult:
     _stderr_head: Optional[str] = field(default=None, repr=False)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        # A-14: Explicit guard — never expose stderr in external response
+        d = {
             "success": self.success,
             "output": self.output,
             "error": self.error,
@@ -77,11 +85,17 @@ class UnitExecutionResult:
             "execution_mode": self.execution_mode,
             "latency_ms": self.latency_ms,
         }
+        # Belt-and-suspenders: strip any stderr-related keys
+        for k in _RESULT_STRIP_KEYS:
+            d.pop(k, None)
+        return d
 
 
 class UnitExecutor:
     def __init__(self):
         self._lock = threading.Lock()
+        # A-11: per-pack_id sliding window rate limiter
+        self._rate_limiter: Dict[str, List[float]] = {}
 
     @staticmethod
     def _now_ts() -> str:
@@ -95,6 +109,52 @@ class UnitExecutor:
             if k in SUBPROCESS_ENV_WHITELIST
         }
 
+    def _get_rate_limit(self) -> int:
+        """Return effective rate limit, allowing env-var override."""
+        env_val = os.environ.get("RUMI_UNIT_RATE_LIMIT")
+        if env_val is not None:
+            try:
+                v = int(env_val)
+                if v > 0:
+                    return v
+            except (ValueError, TypeError):
+                pass
+        return MAX_EXECUTIONS_PER_MINUTE
+
+    def _check_rate_limit(self, pack_id: str) -> Optional[UnitExecutionResult]:
+        """
+        A-11: Sliding-window rate limit check.
+
+        Records the current timestamp and checks whether the pack has
+        exceeded the maximum number of executions within RATE_WINDOW_SEC.
+
+        Returns None if allowed, or a UnitExecutionResult if rate-limited.
+        """
+        now = time.monotonic()
+        limit = self._get_rate_limit()
+        with self._lock:
+            timestamps = self._rate_limiter.get(pack_id)
+            if timestamps is None:
+                timestamps = []
+                self._rate_limiter[pack_id] = timestamps
+
+            # Prune timestamps outside the window
+            cutoff = now - RATE_WINDOW_SEC
+            while timestamps and timestamps[0] < cutoff:
+                timestamps.pop(0)
+
+            if len(timestamps) >= limit:
+                return UnitExecutionResult(
+                    success=False,
+                    error=f"Rate limit exceeded: {limit} executions per {RATE_WINDOW_SEC}s",
+                    error_type="rate_limit_exceeded",
+                    execution_mode="unknown",
+                )
+
+            # Record this attempt
+            timestamps.append(now)
+        return None
+
     def execute(
         self,
         principal_id: str,
@@ -103,21 +163,33 @@ class UnitExecutor:
         args: Dict[str, Any],
         timeout_seconds: float = DEFAULT_TIMEOUT,
     ) -> UnitExecutionResult:
+        # A-13: Use monotonic clock for execution time measurement
+        mono_start = time.monotonic()
         start_time = time.time()
         store_id = unit_ref.get("store_id", "")
         unit_id = unit_ref.get("unit_id", "")
         version = unit_ref.get("version", "")
         timeout_seconds = min(float(timeout_seconds), MAX_TIMEOUT)
 
+        # A-13: Audit enrichment context (populated as we progress)
+        audit_ctx: Dict[str, Any] = {
+            "unit_kind": None,
+            "exec_mode": mode,
+            "entrypoint": None,
+            "trust_verified": False,
+        }
+
         if not principal_id:
             return self._denied(
                 "Missing principal_id", "invalid_request",
                 start_time, mode, principal_id, unit_ref,
+                mono_start=mono_start, audit_extra=audit_ctx,
             )
         if not store_id or not unit_id or not version:
             return self._denied(
                 "Missing store_id, unit_id, or version", "invalid_request",
                 start_time, mode, principal_id, unit_ref,
+                mono_start=mono_start, audit_extra=audit_ctx,
             )
 
         # A-4: 入力形式検証
@@ -132,7 +204,24 @@ class UnitExecutor:
                     "Invalid input format", "invalid_request",
                     start_time, mode, principal_id, unit_ref,
                     internal_detail=f"Field '{_name}' failed format validation",
+                    mono_start=mono_start, audit_extra=audit_ctx,
                 )
+
+        # A-11: Rate limit check (pack_id = principal_id)
+        rate_result = self._check_rate_limit(principal_id)
+        if rate_result is not None:
+            rate_result.execution_mode = mode
+            rate_result.latency_ms = (time.time() - start_time) * 1000
+            # A-11+A-13: Audit the rate limit event
+            self._audit_execution(
+                principal_id, unit_ref, mode, rate_result,
+                audit_extra={
+                    **audit_ctx,
+                    "execution_time_ms": (time.monotonic() - mono_start) * 1000,
+                    "denial_reason": "rate_limit_exceeded",
+                },
+            )
+            return rate_result
 
         # 1. Pack 承認チェック
         try:
@@ -144,12 +233,14 @@ class UnitExecutor:
                     "Pack not approved", "approval_denied",
                     start_time, mode, principal_id, unit_ref,
                     internal_detail=f"Pack not approved: {reason}",
+                    mono_start=mono_start, audit_extra=audit_ctx,
                 )
         except Exception as e:
             return self._denied(
                 "Approval check failed", "approval_error",
                 start_time, mode, principal_id, unit_ref,
                 internal_detail=f"Approval check failed: {e}",
+                mono_start=mono_start, audit_extra=audit_ctx,
             )
 
         # 2. ストアとユニットを解決
@@ -164,6 +255,7 @@ class UnitExecutor:
                     "Store not found", "store_not_found",
                     start_time, mode, principal_id, unit_ref,
                     internal_detail=f"Store not found: {store_id}",
+                    mono_start=mono_start, audit_extra=audit_ctx,
                 )
 
             unit_reg = get_unit_registry()
@@ -177,13 +269,22 @@ class UnitExecutor:
                     "Unit not found", "unit_not_found",
                     start_time, mode, principal_id, unit_ref,
                     internal_detail=f"Unit not found: {unit_id} v{version}",
+                    mono_start=mono_start, audit_extra=audit_ctx,
                 )
         except Exception as e:
             return self._denied(
                 "Unit resolution failed", "resolution_error",
                 start_time, mode, principal_id, unit_ref,
                 internal_detail=f"Unit resolution failed: {e}",
+                mono_start=mono_start, audit_extra=audit_ctx,
             )
+
+        # A-13: Populate audit context now that we have unit_meta
+        audit_ctx["unit_kind"] = unit_meta.kind
+        audit_ctx["entrypoint"] = (
+            Path(unit_meta.entrypoint).name
+            if unit_meta.entrypoint else None
+        )
 
         # 3. mode 検証
         if mode not in unit_meta.exec_modes_allowed:
@@ -191,6 +292,7 @@ class UnitExecutor:
                 "Mode not allowed",
                 "mode_not_allowed", start_time, mode, principal_id, unit_ref,
                 internal_detail=f"Mode '{mode}' not in exec_modes_allowed: {unit_meta.exec_modes_allowed}",
+                mono_start=mono_start, audit_extra=audit_ctx,
             )
 
         # 4. permission_id の階層 grant チェック
@@ -205,12 +307,14 @@ class UnitExecutor:
                         "grant_denied",
                         start_time, mode, principal_id, unit_ref,
                         internal_detail=f"Permission denied: {grant_result.reason}",
+                        mono_start=mono_start, audit_extra=audit_ctx,
                     )
             except Exception as e:
                 return self._denied(
                     "Grant check failed", "grant_error",
                     start_time, mode, principal_id, unit_ref,
                     internal_detail=f"Grant check failed: {e}",
+                    mono_start=mono_start, audit_extra=audit_ctx,
                 )
 
         # 4.5. kind ホワイトリスト (I-02)
@@ -220,6 +324,7 @@ class UnitExecutor:
                 "unknown_kind",
                 start_time, mode, principal_id, unit_ref,
                 internal_detail=f"Unknown kind: {unit_meta.kind}",
+                mono_start=mono_start, audit_extra=audit_ctx,
             )
 
         # 5. Trust チェック（kind=python/binary のみ）
@@ -231,6 +336,7 @@ class UnitExecutor:
                     "No entrypoint for executable unit",
                     "missing_entrypoint",
                     start_time, mode, principal_id, unit_ref,
+                    mono_start=mono_start, audit_extra=audit_ctx,
                 )
             try:
                 from .unit_registry import get_unit_registry as _gur
@@ -243,6 +349,7 @@ class UnitExecutor:
                         "Failed to compute entrypoint sha256",
                         "trust_error",
                         start_time, mode, principal_id, unit_ref,
+                        mono_start=mono_start, audit_extra=audit_ctx,
                     )
                 trust_sha256 = actual_sha256
 
@@ -257,13 +364,18 @@ class UnitExecutor:
                         "trust_denied",
                         start_time, mode, principal_id, unit_ref,
                         internal_detail=f"Unit trust denied: {trust_result.reason}",
+                        mono_start=mono_start, audit_extra=audit_ctx,
                     )
             except Exception as e:
                 return self._denied(
                     "Trust check failed", "trust_error",
                     start_time, mode, principal_id, unit_ref,
                     internal_detail=f"Trust check failed: {e}",
+                    mono_start=mono_start, audit_extra=audit_ctx,
                 )
+
+        # A-13: Mark trust_verified in audit context
+        audit_ctx["trust_verified"] = trust_sha256 is not None
 
         # 5.5. TOCTOU 緩和 (I-03): Trust チェック後にファイル内容を読み込み二重検証
         if unit_meta.kind in ("python", "binary") and trust_sha256 is not None:
@@ -276,6 +388,7 @@ class UnitExecutor:
                     "toctou_read_error",
                     start_time, mode, principal_id, unit_ref,
                     internal_detail=f"Failed to read entrypoint for TOCTOU verification: {e}",
+                    mono_start=mono_start, audit_extra=audit_ctx,
                 )
             content_sha256 = hashlib.sha256(content).hexdigest()
             if content_sha256 != trust_sha256:
@@ -283,6 +396,7 @@ class UnitExecutor:
                     "Entrypoint content changed after trust check (TOCTOU detected)",
                     "toctou_mismatch",
                     start_time, mode, principal_id, unit_ref,
+                    mono_start=mono_start, audit_extra=audit_ctx,
                 )
             verified_content = content
 
@@ -316,7 +430,12 @@ class UnitExecutor:
                 latency_ms=(time.time() - start_time) * 1000,
             )
 
-        self._audit_execution(principal_id, unit_ref, mode, result)
+        # A-13: Compute execution_time_ms from monotonic clock
+        audit_ctx["execution_time_ms"] = (time.monotonic() - mono_start) * 1000
+
+        self._audit_execution(
+            principal_id, unit_ref, mode, result, audit_extra=audit_ctx,
+        )
         return result
 
     def _execute_host_capability(
@@ -431,6 +550,9 @@ class UnitExecutor:
             )
             latency = (time.time() - start_time) * 1000
 
+            # A-14: Log stderr but never include in result
+            stderr_head = (proc.stderr or "")[:500] or None
+
             if proc.returncode != 0:
                 return UnitExecutionResult(
                     success=False,
@@ -438,10 +560,11 @@ class UnitExecutor:
                     error_type="execution_error",
                     execution_mode="host_capability",
                     latency_ms=latency,
-                    _stderr_head=(proc.stderr or "")[:500] or None,
+                    _stderr_head=stderr_head,
                 )
 
             stdout = proc.stdout or ""
+            # A-14: Enforce MAX_RESPONSE_SIZE on stdout
             if len(stdout.encode("utf-8")) > MAX_RESPONSE_SIZE:
                 return UnitExecutionResult(
                     success=False,
@@ -592,6 +715,9 @@ class UnitExecutor:
             )
             latency = (time.time() - start_time) * 1000
 
+            # A-14: Log stderr but never include in result
+            stderr_head = (proc.stderr or "")[:500] or None
+
             if proc.returncode != 0:
                 return UnitExecutionResult(
                     success=False,
@@ -599,10 +725,21 @@ class UnitExecutor:
                     error_type="execution_error",
                     execution_mode="host_capability",
                     latency_ms=latency,
-                    _stderr_head=(proc.stderr or "")[:500] or None,
+                    _stderr_head=stderr_head,
                 )
 
             stdout = proc.stdout or ""
+
+            # A-14: Enforce MAX_RESPONSE_SIZE on stdout (parity with python host)
+            if len(stdout.encode("utf-8")) > MAX_RESPONSE_SIZE:
+                return UnitExecutionResult(
+                    success=False,
+                    error="Response too large",
+                    error_type="response_too_large",
+                    execution_mode="host_capability",
+                    latency_ms=latency,
+                )
+
             output = None
             if stdout.strip():
                 try:
@@ -688,6 +825,9 @@ if __name__ == "__main__":
         principal_id: str,
         unit_ref: Dict[str, str],
         internal_detail: str = "",
+        *,
+        mono_start: Optional[float] = None,
+        audit_extra: Optional[Dict[str, Any]] = None,
     ) -> UnitExecutionResult:
         result = UnitExecutionResult(
             success=False,
@@ -696,7 +836,15 @@ if __name__ == "__main__":
             execution_mode=mode,
             latency_ms=(time.time() - start_time) * 1000,
         )
-        self._audit_execution(principal_id, unit_ref, mode, result, internal_detail)
+        # A-13: Build enriched audit_extra with denial_reason
+        extra = dict(audit_extra) if audit_extra else {}
+        if mono_start is not None:
+            extra["execution_time_ms"] = (time.monotonic() - mono_start) * 1000
+        extra["denial_reason"] = error
+        self._audit_execution(
+            principal_id, unit_ref, mode, result, internal_detail,
+            audit_extra=extra,
+        )
         return result
 
     @staticmethod
@@ -706,11 +854,13 @@ if __name__ == "__main__":
         mode: str,
         result: UnitExecutionResult,
         internal_detail: str = "",
+        *,
+        audit_extra: Optional[Dict[str, Any]] = None,
     ) -> None:
         try:
             from .audit_logger import get_audit_logger
             audit = get_audit_logger()
-            details = {
+            details: Dict[str, Any] = {
                 "unit_ref": unit_ref,
                 "mode": mode,
                 "latency_ms": result.latency_ms,
@@ -720,6 +870,9 @@ if __name__ == "__main__":
                 details["stderr_head"] = result._stderr_head
             if internal_detail:
                 details["internal_detail"] = internal_detail
+            # A-13: Merge enrichment fields
+            if audit_extra:
+                details.update(audit_extra)
             audit.log_permission_event(
                 pack_id=principal_id,
                 permission_type="unit_execution",
