@@ -30,6 +30,12 @@ from .event_bus import EventBus
 from .component_lifecycle import ComponentLifecycleExecutor
 from .capability_proxy import get_capability_proxy
 from .paths import BASE_DIR, OFFICIAL_FLOWS_DIR, ECOSYSTEM_DIR, GRANTS_DIR
+from .kernel_variable_resolver import VariableResolver, MAX_RESOLVE_DEPTH as _RESOLVER_MAX_DEPTH
+from .kernel_context_builder import KernelContextBuilder
+from .kernel_flow_converter import FlowConverter
+
+import logging
+_logger = logging.getLogger("rumi.kernel.core")
 import re
 
 @dataclass
@@ -39,8 +45,7 @@ class KernelConfig:
 
 # --- Flow chain / resolve depth limits (Fix #58, #70) ---
 MAX_FLOW_CHAIN_DEPTH = 10
-MAX_RESOLVE_DEPTH = 20
-
+MAX_RESOLVE_DEPTH = _RESOLVER_MAX_DEPTH  # re-export from resolver
 # --- Condition parser pattern (Fix #16) ---
 _CONDITION_OP_RE = re.compile(r'\s+(==|!=)\s+')
 
@@ -69,6 +74,18 @@ class KernelCore:
         self._executor: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=4)
         self._flow_scheduler = None  # FlowScheduler instance (lazy)
         self._uds_proxy_manager = None  # UDS Egress Proxy Manager
+
+
+        # K-1: 委譲オブジェクト
+        self._variable_resolver = VariableResolver(max_depth=MAX_RESOLVE_DEPTH)
+        self._context_builder = KernelContextBuilder(
+            diagnostics=self.diagnostics,
+            install_journal=self.install_journal,
+            interface_registry=self.interface_registry,
+            event_bus=self.event_bus,
+            lifecycle=self.lifecycle,
+        )
+        self._flow_converter = FlowConverter()
 
         self.install_journal.set_interface_registry(self.interface_registry)
 
@@ -262,74 +279,9 @@ class KernelCore:
         return self._flow
 
     def _convert_new_flow_to_pipelines(self, flow_def: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        New flow形式（phases/steps）をpipelines形式に変換
+        """後方互換ラッパー。FlowConverter に委譲 (M-10)。"""
+        return self._flow_converter.convert_new_flow_to_pipelines(flow_def)
 
-        Kernel.run_startup() が pipelines 形式を期待しているため
-        """
-        result = {
-            "flow_version": "2.0",
-            "defaults": flow_def.get("defaults", {"fail_soft": True, "on_missing_handler": "skip"}),
-            "pipelines": {"startup": []}
-        }
-        # C4: preserve schedule field through conversion
-        if flow_def.get("schedule"):
-            result["schedule"] = flow_def["schedule"]
-
-        steps = flow_def.get("steps", [])
-        phases = flow_def.get("phases", [])
-
-        # phase順 → priority順 → id順 でソート
-        phase_order = {p: i for i, p in enumerate(phases)}
-        sorted_steps = sorted(
-            steps,
-            key=lambda s: (phase_order.get(s.get("phase", ""), 999), s.get("priority", 100), s.get("id", ""))
-        )
-
-        # pipelines形式に変換
-        for step in sorted_steps:
-            pipeline_step = {
-                "id": step.get("id"),
-                "run": {}
-            }
-
-            # type による変換
-            step_type = step.get("type", "handler")
-            step_input = step.get("input", {})
-
-            if step_type == "handler":
-                if isinstance(step_input, dict):
-                    pipeline_step["run"]["handler"] = step_input.get("handler", "kernel:noop")
-                    pipeline_step["run"]["args"] = step_input.get("args", {})
-                else:
-                    pipeline_step["run"]["handler"] = "kernel:noop"
-                    pipeline_step["run"]["args"] = {}
-            elif step_type == "python_file_call":
-                pipeline_step["run"]["handler"] = "kernel:python_file_call"
-                pipeline_step["run"]["args"] = {
-                    "file": step.get("file"),
-                    "owner_pack": step.get("owner_pack"),
-                    "principal_id": step.get("principal_id"),
-                    "input": step_input,
-                    "timeout_seconds": step.get("timeout_seconds", 60.0),
-                    "_step_id": step.get("id"),
-                    "_phase": step.get("phase"),
-                }
-            else:
-                pipeline_step["run"]["handler"] = "kernel:noop"
-                pipeline_step["run"]["args"] = {}
-
-            # when条件があれば追加
-            if step.get("when"):
-                pipeline_step["when"] = step["when"]
-
-            # output があれば追加
-            if step.get("output"):
-                pipeline_step["output"] = step["output"]
-
-            result["pipelines"]["startup"].append(pipeline_step)
-
-        return result
 
     def _merge_flow(self, base: Dict[str, Any], new: Dict[str, Any], source_file: Path = None) -> Dict[str, Any]:
         result = copy.deepcopy(base)
@@ -496,17 +448,34 @@ class KernelCore:
         return await self._execute_flow_internal(flow_id, context)
 
     def execute_flow_sync(self, flow_id: str, context: Optional[Dict[str, Any]] = None, timeout: Optional[float] = None) -> Dict[str, Any]:
+        """
+        Flow を同期的に実行する。
+
+        S-4: asyncio.get_running_loop() の RuntimeError 依存をやめ、
+        Python 3.9+ 互換のパターンに変更。
+        """
         effective_timeout = timeout or 300
+        coro = self.execute_flow(flow_id, context, timeout)
+
+        # S-4: ループの状態を安全に判定
         try:
-            asyncio.get_running_loop()
-            from concurrent.futures import TimeoutError as FuturesTimeoutError
-            with ThreadPoolExecutor() as pool:
-                try:
-                    return pool.submit(asyncio.run, self.execute_flow(flow_id, context, timeout)).result(timeout=effective_timeout)
-                except FuturesTimeoutError:
-                    return {"_error": f"Flow '{flow_id}' timed out after {effective_timeout}s (sync)", "_flow_timeout": True}
+            loop = asyncio.get_running_loop()
+            is_running = loop.is_running()
         except RuntimeError:
-            return asyncio.run(self.execute_flow(flow_id, context, timeout))
+            is_running = False
+
+        if is_running:
+            # 既にイベントループが走っている → run_coroutine_threadsafe で安全にスケジュール
+            from concurrent.futures import TimeoutError as FuturesTimeoutError
+            future = asyncio.run_coroutine_threadsafe(coro, loop)
+            try:
+                return future.result(timeout=effective_timeout)
+            except FuturesTimeoutError:
+                return {"_error": f"Flow '{flow_id}' timed out after {effective_timeout}s (sync)", "_flow_timeout": True}
+        else:
+            # イベントループなし → asyncio.run で実行
+            return asyncio.run(coro)
+
 
     async def _execute_flow_internal(self, flow_id: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         ctx = self._build_kernel_context()
@@ -533,6 +502,15 @@ class KernelCore:
                 available = [k[5:] for k in (self.interface_registry.list() or {}).keys()
                             if k.startswith("flow.") and not k.startswith("flow.hooks") and not k.startswith("flow.construct")]
                 return {"_error": f"Flow '{flow_id}' not found", "_available": available}
+            # M-8: modifier 適用前のオリジナルを保存
+            original_key = f"flow._original.{flow_id}"
+            if self.interface_registry.get(original_key, strategy="last") is None:
+                self.interface_registry.register(
+                    original_key,
+                    copy.deepcopy(flow_def),
+                    meta={"_is_original": True, "_flow_id": flow_id},
+                )
+
             steps = flow_def.get("steps", [])
             ctx["_total_steps"] = len(steps)
             self.diagnostics.record_step(phase="flow", step_id=f"flow.{flow_id}.start", handler="kernel:execute_flow",
@@ -945,69 +923,9 @@ class KernelCore:
     # ------------------------------------------------------------------
 
     def _build_kernel_context(self) -> Dict[str, Any]:
-        ctx: Dict[str, Any] = {"diagnostics": self.diagnostics, "install_journal": self.install_journal,
-                               "interface_registry": self.interface_registry, "event_bus": self.event_bus,
-                               "lifecycle": self.lifecycle, "mount_manager": None, "registry": None, "active_ecosystem": None}
-        try:
-            from backend_core.ecosystem.mounts import get_mount_manager
-            ctx["mount_manager"] = get_mount_manager()
-        except Exception:
-            pass
-        try:
-            from backend_core.ecosystem.registry import get_registry
-            ctx["registry"] = get_registry()
-        except Exception:
-            pass
-        try:
-            from backend_core.ecosystem.active_ecosystem import get_active_ecosystem_manager
-            ctx["active_ecosystem"] = get_active_ecosystem_manager()
-        except Exception:
-            pass
-        try:
-            self.lifecycle.interface_registry = self.interface_registry
-            self.lifecycle.event_bus = self.event_bus
-        except Exception:
-            pass
-        ctx.setdefault("_disabled_targets", {"packs": set(), "components": set()})
+        """KernelContextBuilder に委譲。M-7: Null安全対応済み。"""
+        return self._context_builder.build()
 
-        try:
-            from .permission_manager import get_permission_manager
-            ctx["permission_manager"] = get_permission_manager()
-        except ImportError:
-            pass
-
-        try:
-            from .function_alias import get_function_alias_registry
-            ctx["function_alias_registry"] = get_function_alias_registry()
-        except Exception:
-            pass
-
-        try:
-            from .flow_composer import get_flow_composer
-            ctx["flow_composer"] = get_flow_composer()
-        except Exception:
-            pass
-
-        try:
-            from .di_container import get_container
-            ctx["vocab_registry"] = get_container().get_or_none("vocab_registry")
-        except Exception:
-            pass
-
-        try:
-            from .di_container import get_container
-            ctx["store_registry"] = get_container().get_or_none("store_registry")
-        except Exception:
-            pass
-
-        try:
-            from .unit_registry import get_unit_registry
-            ctx["unit_registry"] = get_unit_registry()
-        except Exception:
-            pass
-
-
-        return ctx
 
     # ------------------------------------------------------------------
     # Flow Step 実行（同期・pipeline用）
@@ -1065,28 +983,14 @@ class KernelCore:
     # 変数解決
     # ------------------------------------------------------------------
 
-    def _resolve_value(self, value: Any, ctx: Dict[str, Any], _depth: int = 0) -> Any:
-        # Fix #70: recursion depth limit
-        if _depth > MAX_RESOLVE_DEPTH:
-            return value
-        if isinstance(value, dict):
-            return {k: self._resolve_value(v, ctx, _depth + 1) for k, v in value.items()}
-        if isinstance(value, list):
-            return [self._resolve_value(item, ctx, _depth + 1) for item in value]
-        if not isinstance(value, str):
-            return value
-        if not value.startswith("${") or not value.endswith("}"):
-            return value
-        if value.startswith("${ctx."):
-            path = value[6:-1]
-            current = ctx
-            for part in path.split("."):
-                if isinstance(current, dict) and part in current:
-                    current = current[part]
-                else:
-                    return None
-            return current
-        return ctx.get(value[2:-1])
+    def _resolve_value(self, value, ctx, depth=0):
+        """後方互換ラッパー。VariableResolver に委譲 (K-1)。"""
+        return self._variable_resolver.resolve_value(value, ctx, depth)
+
+    def _resolve_args(self, args, ctx):
+        """後方互換ラッパー。VariableResolver に委譲 (K-1)。"""
+        return self._variable_resolver.resolve_args(args, ctx)
+
 
     def _resolve_args(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
         return {k: self._resolve_value(v, ctx) for k, v in args.items()} if isinstance(args, dict) else {}

@@ -106,3 +106,22 @@ def initialize_host_privilege_manager() -> HostPrivilegeManager:
     from .di_container import get_container
     get_container().set_instance("host_privilege_manager", _global_privilege_manager)
     return _global_privilege_manager
+
+
+def reset_host_privilege_manager() -> "HostPrivilegeManager":
+    """
+    HostPrivilegeManager をリセットする（テスト用）。
+
+    新しいインスタンスを生成し、DI コンテナのキャッシュを置き換える。
+
+    Returns:
+        新しい HostPrivilegeManager インスタンス
+    """
+    global _global_privilege_manager
+    from .di_container import get_container
+    container = get_container()
+    new = HostPrivilegeManager()
+    with _hpm_lock:
+        _global_privilege_manager = new
+    container.set_instance("host_privilege_manager", new)
+    return new

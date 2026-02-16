@@ -1,22 +1,18 @@
-"""Pack 独自ルート管理ハンドラ Mixin"""
+"""Pack 独自ルート ハンドラ Mixin"""
 from __future__ import annotations
 
 import logging
-import re
-from typing import Optional
 from urllib.parse import unquote
 
 from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
 
 logger = logging.getLogger(__name__)
 
-_ROUTE_PATH_RE = re.compile(r'^/api/[a-zA-Z0-9_/.\-:]+$')
-
 
 class RouteHandlersMixin:
-    """Pack独自ルーティングの管理・マッチング・実行ハンドラ"""
+    """Pack 独自ルート (load / match / handle / reload) のハンドラ"""
 
-    _pack_routes: dict = {}
+    _pack_routes: dict = {}  # {(method, path): route_info}
 
     @classmethod
     def load_pack_routes(cls, registry) -> int:
@@ -32,116 +28,142 @@ class RouteHandlersMixin:
 
         count = 0
         for pack_id, routes in all_routes.items():
-            if not isinstance(routes, list):
-                continue
             for route in routes:
-                if not isinstance(route, dict):
-                    continue
                 method = route.get("method", "GET").upper()
                 path = route.get("path", "")
-                if not path or not _ROUTE_PATH_RE.match(path):
-                    logger.warning(f"Skipping invalid route path: {path} (pack: {pack_id})")
+                if not path:
                     continue
-                key = (method, path)
-                cls._pack_routes[key] = {
-                    "pack_id": pack_id,
-                    "route": route,
-                }
-                count += 1
-        logger.info(f"Loaded {count} pack custom routes")
-        return count
-
-    @classmethod
-    def _match_pack_route(cls, path: str, method: str) -> Optional[dict]:
-        """パスとメソッドに一致するPack独自ルートを検索"""
-        key = (method.upper(), path)
-        match = cls._pack_routes.get(key)
-        if match:
-            return match
-
-        for (route_method, route_path), route_info in cls._pack_routes.items():
-            if route_method != method.upper():
-                continue
-            if "{" not in route_path:
-                continue
-            pattern = re.sub(r'\{[^}]+\}', r'([^/]+)', route_path)
-            pattern = f'^{pattern}$'
-            m = re.match(pattern, path)
-            if m:
-                result = dict(route_info)
-                result["path_params"] = m.groups()
-                return result
-        return None
-
-    def _handle_pack_route_request(self, path: str, body: dict,
-                                   method: str, match: dict) -> None:
-        """Pack独自ルートへのリクエストを処理"""
-        from ..pack_api_server import APIResponse
-
-        pack_id = match.get("pack_id", "")
-        route = match.get("route", {})
-        handler_type = route.get("handler", "flow")
-
-        try:
-            if handler_type == "flow":
                 flow_id = route.get("flow_id", "")
                 if not flow_id:
-                    self._send_response(
-                        APIResponse(False, error="Route has no flow_id configured"), 500
-                    )
-                    return
-                inputs = dict(body)
-                path_params = match.get("path_params", ())
-                param_names = re.findall(r'\{([^}]+)\}', route.get("path", ""))
-                for name, value in zip(param_names, path_params):
-                    inputs[name] = unquote(value)
-                inputs["_route_method"] = method
-                inputs["_route_path"] = path
+                    continue
 
-                timeout = route.get("timeout", 300)
-                result = self._run_flow(flow_id, inputs, timeout)
-                if result.get("success"):
-                    self._send_response(APIResponse(True, result))
+                route_info = {
+                    "pack_id": pack_id,
+                    "flow_id": flow_id,
+                    "description": route.get("description", ""),
+                    "input_mapping": route.get("input_mapping", {}),
+                }
+
+                # テンプレートセグメント解析
+                segments = path.strip("/").split("/")
+                param_indices = {}
+                for i, seg in enumerate(segments):
+                    if seg.startswith("{") and seg.endswith("}"):
+                        param_name = seg[1:-1]
+                        param_indices[i] = param_name
+
+                if param_indices:
+                    route_info["_segments"] = segments
+                    route_info["_param_indices"] = param_indices
                 else:
-                    status_code = result.get("status_code", 500)
-                    self._send_response(
-                        APIResponse(False, error=result.get("error")), status_code
-                    )
-            elif handler_type == "proxy":
-                self._send_response(
-                    APIResponse(False, error="Proxy routes not yet implemented"), 501
-                )
-            else:
-                self._send_response(
-                    APIResponse(False, error=f"Unknown handler type: {handler_type}"), 500
-                )
-        except Exception as e:
-            _log_internal_error("handle_pack_route_request", e)
-            from ..pack_api_server import APIResponse as _AR
-            self._send_response(_AR(False, error=_SAFE_ERROR_MSG), 500)
+                    route_info["_segments"] = None
+                    route_info["_param_indices"] = {}
 
-    @classmethod
-    def _get_registered_routes(cls) -> dict:
-        """GET /api/routes — 登録済みPack独自ルート一覧"""
+                cls._pack_routes[(method, path)] = route_info
+                count += 1
+                logger.debug(
+                    "Registered pack route: %s %s -> %s/%s",
+                    method, path, pack_id, flow_id,
+                )
+
+        logger.info("Loaded %d pack routes", count)
+        return count
+
+    def _match_pack_route(self, path: str, method: str):
+        """パスとメソッドがPack独自ルートにマッチするか判定。
+
+        マッチした場合は (route_info, path_params) のタプルを返す。
+        マッチしない場合は None を返す。
+        {param} プレースホルダーによるパスパラメータキャプチャ対応。
+        """
+        method_upper = method.upper()
+
+        # 1. 完全一致（高速パス）
+        key = (method_upper, path)
+        if key in self._pack_routes:
+            return (self._pack_routes[key], {})
+
+        # 2. テンプレートマッチング
+        request_segments = path.strip("/").split("/")
+        for (m, _template_path), route_info in self._pack_routes.items():
+            if m != method_upper:
+                continue
+            tmpl_segments = route_info.get("_segments")
+            if tmpl_segments is None:
+                continue
+            if len(tmpl_segments) != len(request_segments):
+                continue
+            param_indices = route_info.get("_param_indices", {})
+            if not param_indices:
+                continue
+            path_params = {}
+            matched = True
+            for i, (tmpl_seg, req_seg) in enumerate(zip(tmpl_segments, request_segments)):
+                if i in param_indices:
+                    path_params[param_indices[i]] = unquote(req_seg)
+                elif tmpl_seg != req_seg:
+                    matched = False
+                    break
+            if matched:
+                return (route_info, path_params)
+
+        return None
+
+    def _handle_pack_route_request(self, path: str, body: dict, method: str, match) -> None:
+        """Pack独自ルートへのリクエストをFlow実行に委譲する"""
+        from ..pack_api_server import APIResponse
+
+        route_info, path_params = match
+        flow_id = route_info["flow_id"]
+        input_mapping = route_info.get("input_mapping", {})
+
+        # 入力を構築
+        inputs = {}
+        if body and isinstance(body, dict):
+            inputs.update(body)
+        if path_params:
+            inputs["_path_params"] = path_params
+        inputs["_method"] = method
+        inputs["_path"] = path
+
+        # input_mapping を適用
+        if input_mapping and isinstance(input_mapping, dict):
+            for target_key, source_expr in input_mapping.items():
+                if isinstance(source_expr, str) and source_expr.startswith("path."):
+                    param_name = source_expr[5:]
+                    if param_name in path_params:
+                        inputs[target_key] = path_params[param_name]
+
+        result = self._run_flow(flow_id, inputs, timeout=300)
+        if result.get("success"):
+            self._send_response(APIResponse(True, result))
+        else:
+            status_code = result.get("status_code", 500)
+            self._send_response(
+                APIResponse(False, error=result.get("error")), status_code,
+            )
+
+    def _get_registered_routes(self) -> dict:
+        """GET /api/routes — 登録済みPack独自ルート一覧を返す"""
         routes = []
-        for (method, path), info in cls._pack_routes.items():
+        for (method, path), info in self._pack_routes.items():
             routes.append({
                 "method": method,
                 "path": path,
-                "pack_id": info.get("pack_id", ""),
-                "handler": info.get("route", {}).get("handler", "flow"),
+                "pack_id": info["pack_id"],
+                "flow_id": info["flow_id"],
+                "description": info.get("description", ""),
             })
         return {"routes": routes, "count": len(routes)}
 
-    @classmethod
-    def _reload_pack_routes(cls) -> dict:
-        """POST /api/routes/reload — ルートを再読み込み"""
+    def _reload_pack_routes(self) -> dict:
+        """POST /api/routes/reload — Packルートを再読み込み"""
         try:
-            from ..di_container import get_container
-            container = get_container()
-            registry = container.get("registry", default=None)
-            count = cls.load_pack_routes(registry)
-            return {"success": True, "loaded": count}
+            from backend_core.ecosystem.registry import get_registry
+            reg = get_registry()
+            count = self.load_pack_routes(reg)
+            logger.info(f"Pack routes reloaded: {count} routes")
+            return {"reloaded": True, "route_count": count}
         except Exception as e:
             _log_internal_error("reload_pack_routes", e)
-            return {"success": False, "error": _SAFE_ERROR_MSG, "loaded": 0}
+            return {"reloaded": False, "error": _SAFE_ERROR_MSG}

@@ -46,13 +46,20 @@ def _clean_env_vars(monkeypatch):
 def _reset_singletons():
     """各テスト後にグローバルシングルトンをリセットする"""
     yield
+    # ================================================================
     # DI Container (must be first — clears all DI-managed singletons)
+    # ================================================================
     try:
         from core_runtime.di_container import reset_container
         reset_container()
     except Exception:
         pass
-    # network_grant_manager (DI-managed; legacy global cleared for safety)
+
+    # ================================================================
+    # Legacy global variables (cleared for safety, not yet removed)
+    # ================================================================
+
+    # network_grant_manager
     try:
         from core_runtime import network_grant_manager as _ngm
         if hasattr(_ngm, '_global_network_grant_manager'):
@@ -71,7 +78,7 @@ def _reset_singletons():
         _cts._global_trust_store = None
     except Exception:
         pass
-    # store_registry (DI-managed; legacy global cleared for safety)
+    # store_registry
     try:
         from core_runtime import store_registry as _sr
         if hasattr(_sr, '_global_store_registry'):
@@ -96,42 +103,42 @@ def _reset_singletons():
         _pm._global_permission_manager = None
     except Exception:
         pass
-    # container_orchestrator (DI-managed; legacy global cleared for safety)
+    # container_orchestrator
     try:
         from core_runtime import container_orchestrator as _co
         if hasattr(_co, '_global_orchestrator'):
             _co._global_orchestrator = None
     except Exception:
         pass
-    # host_privilege_manager (DI-managed; legacy global cleared for safety)
+    # host_privilege_manager
     try:
         from core_runtime import host_privilege_manager as _hpm
         if hasattr(_hpm, '_global_privilege_manager'):
             _hpm._global_privilege_manager = None
     except Exception:
         pass
-    # flow_composer (DI-managed; legacy global cleared for safety)
+    # flow_composer
     try:
         from core_runtime import flow_composer as _fc
         if hasattr(_fc, '_global_flow_composer'):
             _fc._global_flow_composer = None
     except Exception:
         pass
-    # function_alias_registry (DI-managed; legacy global cleared for safety)
+    # function_alias_registry
     try:
         from core_runtime import function_alias as _fa
         if hasattr(_fa, '_global_function_alias_registry'):
             _fa._global_function_alias_registry = None
     except Exception:
         pass
-    # secrets_store (DI-managed; legacy global cleared for safety)
+    # secrets_store
     try:
         from core_runtime import secrets_store as _ss
         if hasattr(_ss, '_global_secrets_store'):
             _ss._global_secrets_store = None
     except Exception:
         pass
-    # modifier_loader / modifier_applier (DI-managed; legacy global cleared for safety)
+    # modifier_loader / modifier_applier
     try:
         from core_runtime import flow_modifier as _fm
         if hasattr(_fm, '_global_modifier_loader'):
@@ -140,47 +147,59 @@ def _reset_singletons():
             _fm._global_modifier_applier = None
     except Exception:
         pass
-    # container_orchestrator (DI-managed; legacy global cleared for safety)
+
+    # ================================================================
+    # Wave 5: New DI-managed services (legacy globals cleared)
+    # ================================================================
+
+    # pack_api_server
     try:
-        from core_runtime import container_orchestrator as _co
-        if hasattr(_co, '_global_orchestrator'):
-            _co._global_orchestrator = None
+        from core_runtime import pack_api_server as _pas
+        if hasattr(_pas, '_api_server'):
+            _pas._api_server = None
     except Exception:
         pass
-    # host_privilege_manager (DI-managed; legacy global cleared for safety)
+    # egress_proxy (UDS proxy manager)
     try:
-        from core_runtime import host_privilege_manager as _hpm
-        if hasattr(_hpm, '_global_privilege_manager'):
-            _hpm._global_privilege_manager = None
+        from core_runtime import egress_proxy as _ep
+        if hasattr(_ep, '_global_uds_proxy_manager'):
+            _ep._global_uds_proxy_manager = None
+        if hasattr(_ep, '_global_egress_proxy'):
+            _ep._global_egress_proxy = None
     except Exception:
         pass
-    # flow_composer (DI-managed; legacy global cleared for safety)
+    # python_file_executor
     try:
-        from core_runtime import flow_composer as _fc
-        if hasattr(_fc, '_global_flow_composer'):
-            _fc._global_flow_composer = None
+        from core_runtime import python_file_executor as _pfe
+        if hasattr(_pfe, '_global_executor'):
+            _pfe._global_executor = None
     except Exception:
         pass
-    # function_alias_registry (DI-managed; legacy global cleared for safety)
+    # secure_executor
     try:
-        from core_runtime import function_alias as _fa
-        if hasattr(_fa, '_global_function_alias_registry'):
-            _fa._global_function_alias_registry = None
+        from core_runtime import secure_executor as _se
+        if hasattr(_se, '_global_secure_executor'):
+            _se._global_secure_executor = None
     except Exception:
         pass
-    # secrets_store (DI-managed; legacy global cleared for safety)
+    # lib_executor
     try:
-        from core_runtime import secrets_store as _ss
-        if hasattr(_ss, '_global_secrets_store'):
-            _ss._global_secrets_store = None
+        from core_runtime import lib_executor as _le
+        if hasattr(_le, '_global_lib_executor'):
+            _le._global_lib_executor = None
     except Exception:
         pass
-    # modifier_loader / modifier_applier (DI-managed; legacy globals cleared for safety)
+    # unit_executor
     try:
-        from core_runtime import flow_modifier as _fm
-        if hasattr(_fm, '_global_modifier_loader'):
-            _fm._global_modifier_loader = None
-        if hasattr(_fm, '_global_modifier_applier'):
-            _fm._global_modifier_applier = None
+        from core_runtime import unit_executor as _ue
+        if hasattr(_ue, '_global_unit_executor'):
+            _ue._global_unit_executor = None
+    except Exception:
+        pass
+    # capability_executor
+    try:
+        from core_runtime import capability_executor as _ce
+        if hasattr(_ce, '_global_executor'):
+            _ce._global_executor = None
     except Exception:
         pass

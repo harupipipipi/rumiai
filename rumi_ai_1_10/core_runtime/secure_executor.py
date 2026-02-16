@@ -867,18 +867,22 @@ _executor_lock = threading.Lock()
 
 
 def get_secure_executor() -> SecureExecutor:
-    """グローバルなSecureExecutorを取得"""
-    global _global_secure_executor
-    if _global_secure_executor is None:
-        with _executor_lock:
-            if _global_secure_executor is None:
-                _global_secure_executor = SecureExecutor()
-    return _global_secure_executor
+    """
+    グローバルなSecureExecutorを取得する。
+
+    DI コンテナ経由で遅延初期化・キャッシュされる。
+    """
+    from .di_container import get_container
+    return get_container().get("secure_executor")
 
 
 def reset_secure_executor() -> SecureExecutor:
     """SecureExecutorをリセット（テスト用）"""
     global _global_secure_executor
+    from .di_container import get_container
+    container = get_container()
+    new = SecureExecutor()
     with _executor_lock:
-        _global_secure_executor = SecureExecutor()
-    return _global_secure_executor
+        _global_secure_executor = new
+    container.set_instance("secure_executor", new)
+    return new

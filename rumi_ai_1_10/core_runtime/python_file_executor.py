@@ -1363,18 +1363,22 @@ _executor_lock = threading.Lock()
 
 
 def get_python_file_executor() -> PythonFileExecutor:
-    """グローバルなPythonFileExecutorを取得"""
-    global _global_executor
-    if _global_executor is None:
-        with _executor_lock:
-            if _global_executor is None:
-                _global_executor = PythonFileExecutor()
-    return _global_executor
+    """
+    グローバルなPythonFileExecutorを取得する。
+
+    DI コンテナ経由で遅延初期化・キャッシュされる。
+    """
+    from .di_container import get_container
+    return get_container().get("python_file_executor")
 
 
 def reset_python_file_executor() -> PythonFileExecutor:
     """PythonFileExecutorをリセット（テスト用）"""
     global _global_executor
+    from .di_container import get_container
+    container = get_container()
+    new = PythonFileExecutor()
     with _executor_lock:
-        _global_executor = PythonFileExecutor()
-    return _global_executor
+        _global_executor = new
+    container.set_instance("python_file_executor", new)
+    return new

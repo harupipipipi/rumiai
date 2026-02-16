@@ -217,3 +217,22 @@ def initialize_container_orchestrator() -> ContainerOrchestrator:
     from .di_container import get_container
     get_container().set_instance("container_orchestrator", _global_orchestrator)
     return _global_orchestrator
+
+
+def reset_container_orchestrator() -> "ContainerOrchestrator":
+    """
+    ContainerOrchestrator をリセットする（テスト用）。
+
+    新しいインスタンスを生成し、DI コンテナのキャッシュを置き換える。
+
+    Returns:
+        新しい ContainerOrchestrator インスタンス
+    """
+    global _global_orchestrator
+    from .di_container import get_container
+    container = get_container()
+    new = ContainerOrchestrator()
+    with _co_lock:
+        _global_orchestrator = new
+    container.set_instance("container_orchestrator", new)
+    return new

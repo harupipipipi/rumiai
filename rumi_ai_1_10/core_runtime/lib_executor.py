@@ -399,16 +399,22 @@ _lib_lock = threading.Lock()
 
 
 def get_lib_executor() -> LibExecutor:
-    global _global_lib_executor
-    if _global_lib_executor is None:
-        with _lib_lock:
-            if _global_lib_executor is None:
-                _global_lib_executor = LibExecutor()
-    return _global_lib_executor
+    """
+    グローバルなLibExecutorを取得する。
+
+    DI コンテナ経由で遅延初期化・キャッシュされる。
+    """
+    from .di_container import get_container
+    return get_container().get("lib_executor")
 
 
 def reset_lib_executor(records_file: str = None) -> LibExecutor:
+    """LibExecutorをリセット（テスト用）"""
     global _global_lib_executor
+    from .di_container import get_container
+    container = get_container()
+    new = LibExecutor(records_file)
     with _lib_lock:
-        _global_lib_executor = LibExecutor(records_file)
-    return _global_lib_executor
+        _global_lib_executor = new
+    container.set_instance("lib_executor", new)
+    return new

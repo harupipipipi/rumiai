@@ -731,89 +731,6 @@ class PackAPIHandler(
             _log_internal_error("do_DELETE", e)
             self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
     
-    def _match_pack_route(self, path: str, method: str):
-        """パスとメソッドがPack独自ルートにマッチするか判定。
-
-        マッチした場合は (route_info, path_params) のタプルを返す。
-        マッチしない場合は None を返す。
-        {param} プレースホルダーによるパスパラメータキャプチャ対応。
-        """
-        method_upper = method.upper()
-
-        # 1. 完全一致（高速パス）
-        key = (method_upper, path)
-        if key in self._pack_routes:
-            return (self._pack_routes[key], {})
-
-        # 2. テンプレートマッチング
-        request_segments = path.strip("/").split("/")
-        for (m, _template_path), route_info in self._pack_routes.items():
-            if m != method_upper:
-                continue
-            tmpl_segments = route_info.get("_segments")
-            if tmpl_segments is None:
-                continue
-            if len(tmpl_segments) != len(request_segments):
-                continue
-            param_indices = route_info.get("_param_indices", {})
-            if not param_indices:
-                # パラメータなしテンプレートは完全一致で既にチェック済み
-                continue
-            path_params = {}
-            matched = True
-            for i, (tmpl_seg, req_seg) in enumerate(zip(tmpl_segments, request_segments)):
-                if i in param_indices:
-                    path_params[param_indices[i]] = unquote(req_seg)
-                elif tmpl_seg != req_seg:
-                    matched = False
-                    break
-            if matched:
-                return (route_info, path_params)
-
-        return None
-
-    def _get_registered_routes(self) -> dict:
-        """GET /api/routes — 登録済みPack独自ルート一覧を返す"""
-        routes = []
-        for (method, path), info in self._pack_routes.items():
-            routes.append({
-                "method": method,
-                "path": path,
-                "pack_id": info["pack_id"],
-                "flow_id": info["flow_id"],
-                "description": info.get("description", ""),
-            })
-        return {"routes": routes, "count": len(routes)}
-
-
-    def _reload_pack_routes(self) -> dict:
-        """POST /api/routes/reload — Packルートを再読み込み"""
-        try:
-            from backend_core.ecosystem.registry import get_registry
-            reg = get_registry()
-            count = self.load_pack_routes(reg)
-            logger.info(f"Pack routes reloaded: {count} routes")
-            return {"reloaded": True, "route_count": count}
-        except Exception as e:
-            _log_internal_error("reload_pack_routes", e)
-            return {"reloaded": False, "error": _SAFE_ERROR_MSG}
-
-    # ------------------------------------------------------------------
-    # Pack import/apply
-    # ------------------------------------------------------------------
-
-    # ------------------------------------------------------------------
-    # Secrets
-    # ------------------------------------------------------------------
-
-    # ------------------------------------------------------------------
-    # Store
-    # ------------------------------------------------------------------
-
-    # ------------------------------------------------------------------
-    # Unit
-    # ------------------------------------------------------------------
-
     def __init__(
         self,
         host: str = "127.0.0.1",
@@ -900,6 +817,15 @@ _api_server: Optional[PackAPIServer] = None
 
 
 def get_pack_api_server() -> Optional[PackAPIServer]:
+    """
+    グローバルな PackAPIServer を取得する。
+
+    DI コンテナ経由で取得を試み、未初期化なら None を返す。
+    """
+    from .di_container import get_container
+    instance = get_container().get_or_none("pack_api_server")
+    if instance is not None:
+        return instance
     return _api_server
 
 
@@ -927,6 +853,9 @@ def initialize_pack_api_server(
         kernel=kernel
     )
     _api_server.start()
+    # DI コンテナのキャッシュも更新
+    from .di_container import get_container
+    get_container().set_instance("pack_api_server", _api_server)
     return _api_server
 
 
@@ -935,3 +864,9 @@ def shutdown_pack_api_server() -> None:
     if _api_server:
         _api_server.stop()
         _api_server = None
+    # DI コンテナのキャッシュもクリア
+    try:
+        from .di_container import get_container
+        get_container().reset("pack_api_server")
+    except Exception:
+        pass

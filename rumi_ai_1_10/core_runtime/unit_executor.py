@@ -890,9 +890,22 @@ _executor_lock = threading.Lock()
 
 
 def get_unit_executor() -> UnitExecutor:
+    """
+    グローバルなUnitExecutorを取得する。
+
+    DI コンテナ経由で遅延初期化・キャッシュされる。
+    """
+    from .di_container import get_container
+    return get_container().get("unit_executor")
+
+
+def reset_unit_executor() -> UnitExecutor:
+    """UnitExecutorをリセット（テスト用）"""
     global _global_unit_executor
-    if _global_unit_executor is None:
-        with _executor_lock:
-            if _global_unit_executor is None:
-                _global_unit_executor = UnitExecutor()
-    return _global_unit_executor
+    from .di_container import get_container
+    container = get_container()
+    new = UnitExecutor()
+    with _executor_lock:
+        _global_unit_executor = new
+    container.set_instance("unit_executor", new)
+    return new

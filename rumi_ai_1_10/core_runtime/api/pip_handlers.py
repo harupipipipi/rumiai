@@ -1,4 +1,4 @@
-"""Pip 依存ライブラリ管理ハンドラ Mixin"""
+"""Pip 依存ライブラリ ハンドラ Mixin"""
 from __future__ import annotations
 
 from typing import Optional
@@ -7,7 +7,7 @@ from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
 
 
 class PipHandlersMixin:
-    """pip 依存ライブラリの scan / approve / reject / block 管理ハンドラ"""
+    """pip 依存ライブラリ スキャン / 承認 / 拒否 / ブロック管理のハンドラ"""
 
     def _pip_scan(self, ecosystem_dir: Optional[str] = None) -> dict:
         try:
@@ -29,8 +29,7 @@ class PipHandlersMixin:
             _log_internal_error("pip_list_requests", e)
             return {"items": [], "error": _SAFE_ERROR_MSG}
 
-    def _pip_approve(self, candidate_key: str, allow_sdist: bool = False,
-                     index_url: str = "https://pypi.org/simple") -> dict:
+    def _pip_approve(self, candidate_key: str, allow_sdist: bool = False, index_url: str = "https://pypi.org/simple") -> dict:
         try:
             from ..pip_installer import get_pip_installer
             installer = get_pip_installer()

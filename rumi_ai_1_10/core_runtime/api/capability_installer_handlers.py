@@ -8,7 +8,7 @@ from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
 
 
 class CapabilityInstallerHandlersMixin:
-    """Capability Handler 候補の scan / approve / reject / block 管理ハンドラ"""
+    """Capability Handler 候補スキャン / 承認 / 拒否 / ブロック管理のハンドラ"""
 
     @staticmethod
     def _extract_capability_key(path: str, prefix: str, suffix: str) -> Optional[str]:

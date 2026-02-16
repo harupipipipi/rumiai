@@ -1206,13 +1206,13 @@ _uds_proxy_lock = threading.Lock()
 
 
 def get_uds_egress_proxy_manager() -> UDSEgressProxyManager:
-    """グローバルなUDSEgressProxyManagerを取得"""
-    global _global_uds_proxy_manager
-    if _global_uds_proxy_manager is None:
-        with _uds_proxy_lock:
-            if _global_uds_proxy_manager is None:
-                _global_uds_proxy_manager = UDSEgressProxyManager()
-    return _global_uds_proxy_manager
+    """
+    グローバルなUDSEgressProxyManagerを取得する。
+
+    DI コンテナ経由で遅延初期化・キャッシュされる。
+    """
+    from .di_container import get_container
+    return get_container().get("egress_proxy_manager")
 
 
 def initialize_uds_egress_proxy(
@@ -1228,6 +1228,9 @@ def initialize_uds_egress_proxy(
             network_grant_manager=network_grant_manager,
             audit_logger=audit_logger
         )
+    # DI コンテナのキャッシュも更新
+    from .di_container import get_container
+    get_container().set_instance("egress_proxy_manager", _global_uds_proxy_manager)
     return _global_uds_proxy_manager
 
 
@@ -1238,6 +1241,12 @@ def shutdown_uds_egress_proxy() -> None:
         if _global_uds_proxy_manager:
             _global_uds_proxy_manager.stop_all()
             _global_uds_proxy_manager = None
+    # DI コンテナのキャッシュもクリア
+    try:
+        from .di_container import get_container
+        get_container().reset("egress_proxy_manager")
+    except Exception:
+        pass
 
 
 # ============================================================

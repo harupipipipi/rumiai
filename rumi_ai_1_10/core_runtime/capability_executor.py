@@ -748,18 +748,22 @@ _executor_lock = threading.Lock()
 
 
 def get_capability_executor() -> CapabilityExecutor:
-    """グローバルなCapabilityExecutorを取得"""
-    global _global_executor
-    if _global_executor is None:
-        with _executor_lock:
-            if _global_executor is None:
-                _global_executor = CapabilityExecutor()
-    return _global_executor
+    """
+    グローバルなCapabilityExecutorを取得する。
+
+    DI コンテナ経由で遅延初期化・キャッシュされる。
+    """
+    from .di_container import get_container
+    return get_container().get("capability_executor")
 
 
 def reset_capability_executor() -> CapabilityExecutor:
     """リセット（テスト用）"""
     global _global_executor
+    from .di_container import get_container
+    container = get_container()
+    new = CapabilityExecutor()
     with _executor_lock:
-        _global_executor = CapabilityExecutor()
-    return _global_executor
+        _global_executor = new
+    container.set_instance("capability_executor", new)
+    return new

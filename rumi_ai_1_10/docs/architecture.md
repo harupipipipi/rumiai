@@ -1,5 +1,4 @@
 
-
 ```markdown
 # Rumi AI OS — Architecture
 
@@ -619,6 +618,84 @@ def convert(data, context=None):
     """tool 形式 → function_calling 形式に変換"""
     return transformed_data
 ```
+
+### Converter セキュリティ検査
+
+#### 問題
+
+`ConverterASTChecker` は converter スクリプトを AST 解析し、`blocked_imports`（`os`, `subprocess`, `socket` 等）の使用を検出して拒否します。しかし現在の検査は converter ファイル単体のみを対象としています。converter が `from .helper import func` や `import local_module` のようにローカルモジュールを import している場合、import 先のファイルに blocked import が含まれていても検出できません。
+
+```
+converter.py          ← 検査される（Level 0）
+ └─ import helper     ← helper.py は検査されない
+     └─ import os     ← blocked import が素通り
+```
+
+#### 検査レベル定義
+
+| レベル | 検査範囲 | メリット | デメリット | 実装コスト |
+|--------|---------|----------|-----------|-----------|
+| Level 0（現状） | converter ファイル単体 | 実装済み、高速、副作用なし | ローカル import 経由で blocked import を迂回可能 | なし |
+| Level 1（推奨） | converter + 同一ディレクトリの `.py` を再帰走査 | 最も一般的な迂回パターンを防止。実装がシンプル | 同一ディレクトリ外の依存は未検査 | 低（約 50 行） |
+| Level 2 | import グラフを pack_subdir 全体で再帰走査 | 完全な依存ツリーを検査可能 | 実装が複雑。再帰深度管理・循環検出・パス解決の考慮が必要。パフォーマンスコストあり | 中〜高（約 150 行） |
+
+#### 推奨: Level 1
+
+Level 1 を次 Wave で実装することを推奨します。
+
+- converter のローカル依存は通常同一ディレクトリに配置される（`converters/` 配下にヘルパーを置くパターン）
+- 同一ディレクトリ限定であればパス解決が単純で、誤検知リスクが低い
+- Level 2 は converter が複数ディレクトリにまたがる設計を前提とするが、現状の converter 規約ではそのようなケースは稀
+
+Level 2 はユースケースが確認された時点で検討します。
+
+#### Level 1 疑似コード
+
+```python
+def check_converter_with_locals(
+    converter_path: Path,
+    blocked: set[str],
+) -> list[str]:
+    """converter と同一ディレクトリのローカル .py を再帰的に AST 検査する。"""
+    violations: list[str] = []
+    converter_dir = converter_path.parent
+    visited: set[Path] = set()
+
+    def _check(target: Path) -> None:
+        if target in visited:
+            return                          # 循環 import 防止
+        visited.add(target)
+        tree = ast.parse(target.read_text())
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.Import, ast.ImportFrom)):
+                continue
+            # ast.Import      → [alias.name for alias in node.names]
+            # ast.ImportFrom   → node.module（相対 import の場合 None あり）
+            for name in _extract_module_names(node):
+                if name in blocked:
+                    violations.append(f"{target.name}: blocked import '{name}'")
+                # 同一ディレクトリに .py があればローカル依存として再帰検査
+                local = converter_dir / f"{name.split('.')[0]}.py"
+                if local.exists() and local != target:
+                    _check(local)
+
+    _check(converter_path)
+    return violations
+```
+
+> `_extract_module_names()` は `ast.Import` / `ast.ImportFrom` ノードからモジュール名文字列のリストを返すヘルパーです。既存の `ConverterASTChecker` のロジックを流用できます。
+
+#### テスト計画（Level 1）
+
+| # | シナリオ | 期待結果 |
+|---|---------|---------|
+| 1 | converter 単体に `import subprocess` | 拒否 |
+| 2 | converter → `from .helper import x` → `helper.py` に `import os` | 拒否（ローカル依存経由の blocked import 検出） |
+| 3 | converter → `from .helper import x` → `helper.py` はクリーン | 許可 |
+| 4 | converter → `import requests`（外部パッケージ、ローカルに `.py` なし） | 許可（ローカルファイル不在のためスキップ） |
+| 5 | converter → `helper.py` → `from .utils import y` → `utils.py` に `import socket` | 拒否（再帰走査で検出） |
+| 6 | 循環 import: converter → helper → converter | 無限ループせず正常終了（visited set で防止） |
+| 7 | converter ディレクトリ外への import（`from ..other import z`） | スキップ（Level 1 の検査範囲外。Level 2 で対応） |
 
 ---
 

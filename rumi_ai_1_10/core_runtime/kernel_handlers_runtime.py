@@ -19,6 +19,8 @@ Mixin方式でKernelクラスに合成される。
 
 from __future__ import annotations
 
+import copy
+
 import os
 import sys
 from pathlib import Path
@@ -27,6 +29,10 @@ from typing import Any, Dict, List, Optional, Tuple
 from .flow_loader import FlowDefinition, FlowStep
 
 from .paths import ECOSYSTEM_DIR
+from .kernel_flow_converter import FlowConverter
+
+# M-10: 共通 FlowConverter インスタンス
+_flow_converter = FlowConverter()
 
 
 # B4: 環境変数でverboseモード判定
@@ -209,7 +215,18 @@ class KernelRuntimeHandlersMixin:
                     applied_modifiers = []
 
                 # 4. IRに登録(1回のみ)
-                converted = self._convert_new_flow_to_legacy(final_flow)
+                converted = _flow_converter.convert_flow_def_to_legacy(final_flow)
+
+                # M-8: modifier 適用前のオリジナルを保存
+                if modifiers_for_flow and applied_modifiers:
+                    original_key = f"flow._original.{flow_id}"
+                    original_converted = _flow_converter.convert_flow_def_to_legacy(flow_def)
+                    self.interface_registry.register(
+                        original_key,
+                        original_converted,
+                        meta={"_is_original": True, "_flow_id": flow_id},
+                    )
+
                 ir_key = f"flow.{flow_id}"
                 self.interface_registry.register(ir_key, converted, meta={
                     "_source_file": str(final_flow.source_file) if final_flow.source_file else None,
@@ -394,83 +411,9 @@ class KernelRuntimeHandlersMixin:
                 )
 
     def _convert_new_flow_to_legacy(self, flow_def: FlowDefinition) -> Dict[str, Any]:
-        """
-        新形式FlowDefinitionを既存Kernelが処理できる形式に変換
+        """後方互換ラッパー。FlowConverter に委譲 (M-10)。"""
+        return _flow_converter.convert_flow_def_to_legacy(flow_def)
 
-        新形式: phases, inputs, outputs, steps(type: python_file_call等)
-        既存形式: steps(handler, args, when, output)
-        """
-        legacy_steps = []
-
-        for step in flow_def.steps:
-            legacy_step = {
-                "id": step.id,
-                "phase": step.phase,
-                "priority": step.priority,
-            }
-
-            # whenの変換
-            if step.when:
-                legacy_step["when"] = step.when
-
-            # outputの変換
-            if step.output:
-                legacy_step["output"] = step.output
-
-            # typeごとの変換
-            if step.type == "python_file_call":
-                legacy_step["handler"] = "kernel:python_file_call"
-                legacy_step["args"] = {
-                    "file": step.file,
-                    "owner_pack": step.owner_pack,
-                    "principal_id": step.principal_id,
-                    "input": step.input,
-                    "timeout_seconds": step.timeout_seconds,
-                    "_step_id": step.id,
-                    "_phase": step.phase,
-                }
-                if step.output:
-                    legacy_step["output"] = step.output
-            elif step.type == "set":
-                # set: コンテキストに値を設定
-                legacy_step["handler"] = "kernel:ctx.set"
-                if isinstance(step.input, dict):
-                    legacy_step["args"] = {
-                        "key": step.input.get("key", step.output or ""),
-                        "value": step.input.get("value"),
-                    }
-                else:
-                    legacy_step["args"] = {"key": step.output or "", "value": step.input}
-            elif step.type == "if":
-                # if: 条件分岐(簡易版)
-                legacy_step["handler"] = "kernel:noop"
-                if isinstance(step.input, dict):
-                    legacy_step["when"] = step.input.get("condition", "false")
-            elif step.type == "handler":
-                # handler: 既存のIRハンドラを呼び出し
-                if isinstance(step.input, dict):
-                    legacy_step["handler"] = step.input.get("handler", "kernel:noop")
-                    legacy_step["args"] = step.input.get("args", {})
-                else:
-                    legacy_step["handler"] = str(step.input) if step.input else "kernel:noop"
-                    legacy_step["args"] = {}
-            else:
-                # 未知のtype: noopとして扱い、警告を記録
-                legacy_step["handler"] = "kernel:noop"
-                legacy_step["args"] = {"_unknown_type": step.type, "_raw": step.raw}
-
-            legacy_steps.append(legacy_step)
-
-        return {
-            "flow_id": flow_def.flow_id,
-            "inputs": flow_def.inputs,
-            "outputs": flow_def.outputs,
-            "phases": flow_def.phases,
-            "defaults": flow_def.defaults,
-            "steps": legacy_steps,
-            "_source_file": str(flow_def.source_file) if flow_def.source_file else None,
-            "_source_type": flow_def.source_type,
-        }
 
     # ------------------------------------------------------------------
     # flow.execute_by_id
@@ -827,7 +770,7 @@ class KernelRuntimeHandlersMixin:
                 all_results.extend(results)
 
                 # IRを更新
-                converted = self._convert_new_flow_to_legacy(modified_flow)
+                converted = _flow_converter.convert_flow_def_to_legacy(modified_flow)
                 self.interface_registry.register(f"flow.{flow_id}", converted, meta={
                     "_source_file": str(modified_flow.source_file) if modified_flow.source_file else None,
                     "_source_type": modified_flow.source_type,

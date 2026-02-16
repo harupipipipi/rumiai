@@ -1,4 +1,4 @@
-"""Flow 実行 API ハンドラ Mixin"""
+"""Flow 実行 ハンドラ Mixin"""
 from __future__ import annotations
 
 import json
@@ -6,6 +6,7 @@ import logging
 import os
 import threading
 import time
+from typing import Any
 from urllib.parse import unquote
 
 from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
@@ -13,13 +14,18 @@ from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
 logger = logging.getLogger(__name__)
 
 
-def _is_json_serializable(value) -> bool:
-    """値が JSON 直列化可能かどうかを簡易判定する。"""
-    try:
-        json.dumps(value)
+def _is_json_serializable(value: Any) -> bool:
+    """値がJSON直列化可能か簡易判定する"""
+    if value is None or isinstance(value, (bool, int, float, str)):
         return True
-    except (TypeError, ValueError, OverflowError):
-        return False
+    if isinstance(value, (list, tuple)):
+        return all(_is_json_serializable(v) for v in value)
+    if isinstance(value, dict):
+        return all(
+            isinstance(k, str) and _is_json_serializable(v)
+            for k, v in value.items()
+        )
+    return False
 
 
 class FlowHandlersMixin:
@@ -37,11 +43,11 @@ class FlowHandlersMixin:
 
     def _handle_flow_run(self, path: str, body: dict) -> None:
         """POST /api/flows/{flow_id}/run のハンドラ"""
-        # APIResponse は PackAPIHandler 本体で定義されている
-        # 循環 import を避けるため遅延 import
+        # APIResponse は pack_api_server で定義されている — self 経由で利用
         from ..pack_api_server import APIResponse
 
         parts = path.split("/")
+        # ["", "api", "flows", "{flow_id}", "run"]
         if len(parts) < 5:
             self._send_response(APIResponse(False, error="Invalid flow path"), 400)
             return
@@ -77,6 +83,7 @@ class FlowHandlersMixin:
         if self.kernel is None:
             return {"success": False, "error": "Kernel not initialized", "status_code": 503}
 
+        # Flow 存在チェック（InterfaceRegistry 経由）
         ir = getattr(self.kernel, "interface_registry", None)
         if ir is None:
             return {"success": False, "error": "InterfaceRegistry not available", "status_code": 503}
@@ -96,6 +103,7 @@ class FlowHandlersMixin:
                 "status_code": 404,
             }
 
+        # 同時実行制限
         sem = self._get_flow_semaphore()
         acquired = sem.acquire(blocking=False)
         if not acquired:
@@ -107,9 +115,12 @@ class FlowHandlersMixin:
 
         try:
             start_time = time.monotonic()
+
             ctx = self.kernel.execute_flow_sync(flow_id, inputs, timeout=timeout)
+
             elapsed = round(time.monotonic() - start_time, 3)
 
+            # エラーチェック
             if isinstance(ctx, dict) and ctx.get("_error"):
                 return {
                     "success": False,
@@ -119,6 +130,7 @@ class FlowHandlersMixin:
                     "status_code": 408 if ctx.get("_flow_timeout") else 500,
                 }
 
+            # 結果から内部キーを除外
             result_data = {}
             if isinstance(ctx, dict):
                 _ctx_object_keys = {
@@ -140,6 +152,7 @@ class FlowHandlersMixin:
                     and _is_json_serializable(v)
                 }
 
+            # レスポンスサイズ制限 (デフォルト 4MB)
             max_bytes = int(os.environ.get("RUMI_MAX_RESPONSE_BYTES", str(4 * 1024 * 1024)))
             try:
                 result_json = json.dumps(result_data, ensure_ascii=False)
@@ -156,6 +169,7 @@ class FlowHandlersMixin:
             except (TypeError, ValueError):
                 result_data = {"_error": "Result not JSON serializable"}
 
+            # 監査ログ
             try:
                 from ..audit_logger import get_audit_logger
                 audit = get_audit_logger()
