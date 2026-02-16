@@ -90,3 +90,9 @@ def _reset_singletons():
         _am._global_approval_manager = None
     except Exception:
         pass
+    # permission_manager
+    try:
+        from core_runtime import permission_manager as _pm
+        _pm._global_permission_manager = None
+    except Exception:
+        pass

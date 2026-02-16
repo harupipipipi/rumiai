@@ -566,27 +566,45 @@ class ApprovalManager:
 
 
 
+# グローバル変数（後方互換のため残存。DI コンテナ優先）
 _global_approval_manager: Optional[ApprovalManager] = None
 _am_lock = threading.Lock()
 
 
 def get_approval_manager() -> ApprovalManager:
-    """グローバルなApprovalManagerを取得"""
-    global _global_approval_manager
-    if _global_approval_manager is None:
-        with _am_lock:
-            if _global_approval_manager is None:
-                _global_approval_manager = ApprovalManager()
-    return _global_approval_manager
+    """
+    グローバルな ApprovalManager を取得する。
+
+    DI コンテナ経由で遅延初期化・キャッシュされる。
+
+    Returns:
+        ApprovalManager インスタンス
+    """
+    from .di_container import get_container
+    return get_container().get("approval_manager")
 
 
 def initialize_approval_manager(
     packs_dir: str = ECOSYSTEM_DIR,
     grants_dir: str = GRANTS_DIR,
 ) -> ApprovalManager:
-    """ApprovalManagerを初期化"""
+    """
+    ApprovalManager を特定の引数で初期化する。
+
+    新しいインスタンスを生成・初期化し、DI コンテナのキャッシュを置き換える。
+
+    Args:
+        packs_dir: Pack ディレクトリ（省略時はデフォルト）
+        grants_dir: Grant ファイルの保存ディレクトリ（省略時はデフォルト）
+
+    Returns:
+        初期化済み ApprovalManager インスタンス
+    """
     global _global_approval_manager
     with _am_lock:
         _global_approval_manager = ApprovalManager(packs_dir=packs_dir, grants_dir=grants_dir)
         _global_approval_manager.initialize()
+    # DI コンテナのキャッシュも更新（_am_lock の外で実行してデッドロック回避）
+    from .di_container import get_container
+    get_container().set_instance("approval_manager", _global_approval_manager)
     return _global_approval_manager

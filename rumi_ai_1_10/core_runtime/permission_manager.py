@@ -463,28 +463,37 @@ class PermissionManager:
 
 
 
-# グローバルインスタンス
+# グローバル変数（後方互換のため残存。DI コンテナ優先）
 _global_permission_manager: Optional[PermissionManager] = None
 _pm_lock = threading.Lock()
 
 
-
-
 def get_permission_manager() -> PermissionManager:
-    """グローバルなPermissionManagerインスタンスを取得"""
-    global _global_permission_manager
-    if _global_permission_manager is None:
-        with _pm_lock:
-            if _global_permission_manager is None:
-                _global_permission_manager = PermissionManager()
-    return _global_permission_manager
+    """
+    グローバルな PermissionManager を取得する。
 
+    DI コンテナ経由で遅延初期化・キャッシュされる。
 
+    Returns:
+        PermissionManager インスタンス
+    """
+    from .di_container import get_container
+    return get_container().get("permission_manager")
 
 
 def reset_permission_manager() -> PermissionManager:
-    """PermissionManagerをリセット（テスト用）"""
+    """
+    PermissionManager をリセットする（テスト用）。
+
+    新しいインスタンスを生成し、DI コンテナのキャッシュを置き換える。
+
+    Returns:
+        新しい PermissionManager インスタンス
+    """
     global _global_permission_manager
     with _pm_lock:
         _global_permission_manager = PermissionManager()
+    # DI コンテナのキャッシュも更新（_pm_lock の外で実行してデッドロック回避）
+    from .di_container import get_container
+    get_container().set_instance("permission_manager", _global_permission_manager)
     return _global_permission_manager
