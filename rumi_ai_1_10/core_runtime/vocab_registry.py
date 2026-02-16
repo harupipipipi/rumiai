@@ -39,11 +39,14 @@ Usage:
 
 from __future__ import annotations
 
+import ast
 import importlib.util
+import logging
 import sys
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
@@ -53,6 +56,189 @@ MAX_NORMALIZE_DEPTH = 5
 VOCAB_FILENAME = "vocab.txt"
 CONVERTERS_DIRNAME = "converters"
 
+logger = logging.getLogger(__name__)
+
+
+# ===================================================================
+# C-2-impl: CollisionStrategy
+# ===================================================================
+
+class CollisionStrategy(Enum):
+    """normalize_dict_keys() での衝突解決戦略"""
+    KEEP_FIRST = "keep_first"     # 先勝ち（新デフォルト）
+    KEEP_LAST = "keep_last"       # 後勝ち（旧動作）
+    RAISE = "raise"               # 例外送出
+    MERGE_LIST = "merge_list"     # リストにマージ
+    WARN = "warn"                 # 警告ログ + keep_first
+
+
+DEFAULT_COLLISION_STRATEGY = CollisionStrategy.WARN
+
+
+class VocabKeyCollisionError(Exception):
+    """CollisionStrategy.RAISE 時に送出される例外"""
+    def __init__(self, key: str, existing_value: Any, new_value: Any):
+        self.key = key
+        self.existing_value = existing_value
+        self.new_value = new_value
+        super().__init__(
+            f"Vocab key collision on '{key}': "
+            f"existing={existing_value!r}, new={new_value!r}"
+        )
+
+
+# ===================================================================
+# C-3-L1: ConverterPolicy
+# ===================================================================
+
+@dataclass
+class ConverterPolicy:
+    """converter のロードポリシー"""
+    allow_external: bool = False
+    require_trusted: bool = True
+    max_file_size_bytes: int = 100_000
+    blocked_imports: Set[str] = field(default_factory=lambda: {
+        "subprocess", "os.system", "shutil.rmtree",
+        "socket", "http", "urllib", "ctypes",
+    })
+
+
+# ===================================================================
+# C-3-L3: ConverterASTChecker
+# ===================================================================
+
+class ConverterASTChecker:
+    """AST レベルのセキュリティ検査"""
+
+    _DANGEROUS_CALLS: Set[str] = {"exec", "eval", "compile", "__import__"}
+
+    def check(
+        self, source_code: str, blocked_imports: Set[str]
+    ) -> Tuple[bool, List[str]]:
+        """
+        AST 検査。blocked_imports に該当する import があれば拒否。
+
+        Returns:
+            (is_safe, warnings)
+        """
+        warn_list: List[str] = []
+
+        try:
+            tree = ast.parse(source_code)
+        except SyntaxError as e:
+            return False, [f"SyntaxError: {e}"]
+
+        for node in ast.walk(tree):
+            # --- Import 検査 ---
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if self._is_blocked(alias.name, blocked_imports):
+                        warn_list.append(
+                            f"Blocked import: '{alias.name}'"
+                        )
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                for alias in node.names:
+                    full = f"{module}.{alias.name}" if module else alias.name
+                    if self._is_blocked(full, blocked_imports) or self._is_blocked(module, blocked_imports):
+                        warn_list.append(
+                            f"Blocked import: 'from {module} import {alias.name}'"
+                        )
+
+            # --- 危険な関数呼び出し検査 ---
+            if isinstance(node, ast.Call):
+                func_name = self._extract_call_name(node)
+                if func_name in self._DANGEROUS_CALLS:
+                    warn_list.append(
+                        f"Dangerous call: '{func_name}()'"
+                    )
+
+        is_safe = len(warn_list) == 0
+        return is_safe, warn_list
+
+    @staticmethod
+    def _is_blocked(name: str, blocked: Set[str]) -> bool:
+        """name が blocked のいずれかに前方一致するか判定"""
+        for b in blocked:
+            if name == b or name.startswith(b + "."):
+                return True
+        return False
+
+    @staticmethod
+    def _extract_call_name(node: ast.Call) -> str:
+        """Call ノードから関数名を抽出（簡易版）"""
+        if isinstance(node.func, ast.Name):
+            return node.func.id
+        if isinstance(node.func, ast.Attribute):
+            return node.func.attr
+        return ""
+
+
+# ===================================================================
+# C-3-L2: ConverterIntegrityChecker
+# ===================================================================
+
+class ConverterIntegrityChecker:
+    """converter ファイルの整合性検証"""
+
+    def __init__(self, policy: ConverterPolicy | None = None):
+        self._policy = policy or ConverterPolicy()
+        self._ast_checker = ConverterASTChecker()
+
+    def check_file(self, file_path: Path) -> Tuple[bool, List[str]]:
+        """
+        converter ファイルを検証する。
+
+        Returns:
+            (is_safe, warnings)
+        """
+        warn_list: List[str] = []
+
+        # 1. ファイル存在チェック
+        if not file_path.exists():
+            return False, ["File does not exist"]
+
+        # 2. ファイルサイズチェック
+        size = file_path.stat().st_size
+        if size > self._policy.max_file_size_bytes:
+            return False, [
+                f"File too large: {size} bytes "
+                f"(max {self._policy.max_file_size_bytes})"
+            ]
+
+        # 3. ソース読み込み
+        try:
+            source = file_path.read_text(encoding="utf-8")
+        except Exception as e:
+            return False, [f"Cannot read file: {e}"]
+
+        # 4. AST パース
+        try:
+            tree = ast.parse(source)
+        except SyntaxError as e:
+            return False, [f"SyntaxError: {e}"]
+
+        # 5. convert() 関数定義チェック
+        has_convert = any(
+            isinstance(node, ast.FunctionDef) and node.name == "convert"
+            for node in ast.walk(tree)
+        )
+        if not has_convert:
+            warn_list.append("No 'convert()' function defined")
+
+        # 6. blocked imports / 危険呼び出し (AST Checker に委譲)
+        ast_safe, ast_warnings = self._ast_checker.check(
+            source, self._policy.blocked_imports
+        )
+        warn_list.extend(ast_warnings)
+
+        is_safe = len(warn_list) == 0
+        return is_safe, warn_list
+
+
+# ===================================================================
+# データクラス (既存)
+# ===================================================================
 
 @dataclass
 class VocabGroup:
@@ -224,11 +410,41 @@ class VocabRegistry:
         from_term: str,
         to_term: str,
         file_path: Path,
-        source_pack: Optional[str] = None
+        source_pack: Optional[str] = None,
+        policy: Optional[ConverterPolicy] = None,
     ) -> bool:
         """変換スクリプトを登録"""
         if not file_path.exists():
             return False
+        
+        # --- policy チェック (C-3-L1) ---
+        if policy is not None:
+            checker = ConverterIntegrityChecker(policy)
+            is_safe, warnings_list = checker.check_file(file_path)
+            if not is_safe:
+                for w in warnings_list:
+                    logger.warning(
+                        "Converter rejected (%s -> %s): %s",
+                        from_term, to_term, w,
+                    )
+                self._log_converter_policy_rejection(
+                    from_term, to_term, file_path, warnings_list
+                )
+                return False
+            elif warnings_list:
+                for w in warnings_list:
+                    logger.warning(
+                        "Converter warning (%s -> %s): %s",
+                        from_term, to_term, w,
+                    )
+
+            # require_trusted チェック（将来拡張ポイント）
+            if policy.require_trusted:
+                logger.info(
+                    "Converter trust check deferred (%s -> %s): "
+                    "trust store integration pending",
+                    from_term, to_term,
+                )
         
         from_lower = from_term.strip().lower()
         to_lower = to_term.strip().lower()
@@ -243,6 +459,31 @@ class VocabRegistry:
             )
         
         return True
+    
+    def _log_converter_policy_rejection(
+        self,
+        from_term: str,
+        to_term: str,
+        file_path: Path,
+        warnings_list: List[str],
+    ) -> None:
+        """converter ポリシー拒否を監査ログに記録"""
+        try:
+            from .audit_logger import get_audit_logger
+            audit = get_audit_logger()
+            audit.log_security_event(
+                event_type="converter_policy_rejection",
+                severity="warning",
+                description=f"Converter rejected: {from_term} -> {to_term}",
+                details={
+                    "from_term": from_term,
+                    "to_term": to_term,
+                    "file_path": str(file_path),
+                    "warnings": warnings_list,
+                },
+            )
+        except Exception:
+            pass
     
     def has_converter(self, from_term: str, to_term: str) -> bool:
         """変換スクリプトが存在するか確認"""
@@ -285,7 +526,6 @@ class VocabRegistry:
         
         convert_fn = self._get_converter_function(converter_info)
         if convert_fn is None:
-            # 変換関数のロード失敗を監査ログに記録
             self._log_conversion(
                 from_term=from_term,
                 to_term=to_term,
@@ -301,7 +541,6 @@ class VocabRegistry:
             else:
                 result = convert_fn(data)
             
-            # 成功時のログ（オプション）
             if log_success:
                 self._log_conversion(
                     from_term=from_term,
@@ -312,7 +551,6 @@ class VocabRegistry:
             
             return result, True
         except Exception as e:
-            # 失敗時は必ず監査ログに記録
             self._log_conversion(
                 from_term=from_term,
                 to_term=to_term,
@@ -358,7 +596,7 @@ class VocabRegistry:
                 details=details
             )
         except Exception:
-            pass  # 監査ログのエラーで処理を止めない
+            pass
     
     def _get_converter_function(self, info: ConverterInfo) -> Optional[Callable]:
         """変換関数を取得"""
@@ -488,6 +726,8 @@ class VocabRegistry:
         data,
         max_depth: int = MAX_NORMALIZE_DEPTH,
         _current_depth: int = 0,
+        collision_strategy: CollisionStrategy = None,
+        on_collision: Callable = None,
     ):
         """
         dict のキーを優先語（preferred）に正規化する。
@@ -498,6 +738,9 @@ class VocabRegistry:
         - ``_`` プレフィックス付きキーは正規化しない（内部制御用）
         - list 内の dict も再帰的に処理する
         - 深さ制限付き（デフォルト MAX_NORMALIZE_DEPTH=5）
+        - collision_strategy=None の場合は DEFAULT_COLLISION_STRATEGY (WARN)
+        - on_collision が指定された場合はカスタムコールバック:
+          on_collision(key, existing_value, new_value) -> value
 
         Returns:
             (normalized_data, changes) — changes は
@@ -507,6 +750,7 @@ class VocabRegistry:
         if not isinstance(data, dict) or _current_depth > max_depth:
             return data, []
 
+        strategy = collision_strategy or DEFAULT_COLLISION_STRATEGY
         changes = []
         normalized = {}
 
@@ -518,15 +762,14 @@ class VocabRegistry:
                 else:
                     new_key = self._resolve_key_unlocked(key)
                     if new_key != key:
-                        # 衝突検出: 同じ preferred に複数キーが変換された場合
-                        if new_key in normalized:
-                            changes.append((f"COLLISION:{key}", new_key))
                         changes.append((key, new_key))
 
                 # ネストされた dict / list 内の dict も再帰処理
                 if isinstance(value, dict) and _current_depth < max_depth:
                     value, sub_changes = self.normalize_dict_keys(
-                        value, max_depth, _current_depth + 1
+                        value, max_depth, _current_depth + 1,
+                        collision_strategy=strategy,
+                        on_collision=on_collision,
                     )
                     changes.extend(sub_changes)
                 elif isinstance(value, list) and _current_depth < max_depth:
@@ -534,13 +777,52 @@ class VocabRegistry:
                     for item in value:
                         if isinstance(item, dict):
                             item, sub_changes = self.normalize_dict_keys(
-                                item, max_depth, _current_depth + 1
+                                item, max_depth, _current_depth + 1,
+                                collision_strategy=strategy,
+                                on_collision=on_collision,
                             )
                             changes.extend(sub_changes)
                         new_list.append(item)
                     value = new_list
 
-                normalized[new_key] = value
+                # --- 衝突解決 ---
+                if new_key in normalized:
+                    existing_value = normalized[new_key]
+                    # 後方互換: COLLISION ログエントリは常に追加
+                    changes.append((f"COLLISION:{key}", new_key))
+
+                    # 監査ログ記録
+                    self._log_collision(new_key, existing_value, value, strategy)
+
+                    if on_collision is not None:
+                        # カスタムコールバック優先
+                        normalized[new_key] = on_collision(
+                            new_key, existing_value, value
+                        )
+                    elif strategy == CollisionStrategy.KEEP_FIRST:
+                        pass  # 先勝ち: 既存値を維持
+                    elif strategy == CollisionStrategy.KEEP_LAST:
+                        normalized[new_key] = value
+                    elif strategy == CollisionStrategy.RAISE:
+                        raise VocabKeyCollisionError(
+                            new_key, existing_value, value
+                        )
+                    elif strategy == CollisionStrategy.MERGE_LIST:
+                        if isinstance(existing_value, list):
+                            existing_value.append(value)
+                        else:
+                            normalized[new_key] = [existing_value, value]
+                    elif strategy == CollisionStrategy.WARN:
+                        logger.warning(
+                            "Vocab key collision on '%s': "
+                            "keeping first value, discarding new",
+                            new_key,
+                        )
+                        # WARN = 警告 + keep_first
+                    else:
+                        pass  # fallback: keep_first
+                else:
+                    normalized[new_key] = value
 
         return normalized, changes
 
@@ -553,6 +835,30 @@ class VocabRegistry:
         if group_id is None:
             return key
         return self._groups[group_id].preferred
+
+    def _log_collision(
+        self,
+        key: str,
+        existing_value: Any,
+        new_value: Any,
+        strategy: CollisionStrategy,
+    ) -> None:
+        """衝突イベントを監査ログに記録"""
+        try:
+            from .audit_logger import get_audit_logger
+            audit = get_audit_logger()
+            audit.log_system_event(
+                event_type="vocab_key_collision",
+                success=True,
+                details={
+                    "key": key,
+                    "strategy": strategy.value,
+                    "existing_value_type": type(existing_value).__name__,
+                    "new_value_type": type(new_value).__name__,
+                },
+            )
+        except Exception:
+            pass
 
     def list_converters(self) -> List[Dict[str, Any]]:
         """全変換スクリプトを取得"""
@@ -580,7 +886,6 @@ class VocabRegistry:
             }
         """
         with self._lock:
-            # Pack別にグループを集計
             groups_by_pack: Dict[str, List[Dict[str, Any]]] = {}
             for gid, group in self._groups.items():
                 pack_id = group.source_pack or "_unknown"
@@ -592,7 +897,6 @@ class VocabRegistry:
                     "members": sorted(group.members),
                 })
             
-            # Pack別にconverterを集計
             converters_by_pack: Dict[str, List[Dict[str, Any]]] = {}
             for converter in self._converters.values():
                 pack_id = converter.source_pack or "_unknown"
