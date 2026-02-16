@@ -427,6 +427,41 @@ class TestBatchGet(_TempDirMixin, TestCase):
         self.assertIsInstance(result["warnings"], list)
         reg.close()
 
+    # ---- I-8: 900KB truncation test ----
+
+    def test_batch_get_900kb_truncation(self) -> None:
+        """累計 900KB 超過時に残りが null + warnings が出る。"""
+        reg = self._make_registry()
+        reg.create_store("s", self._store_root("s"))
+        # 各キーに ~100KB のデータを書き込み（10件で ~1000KB > 900KB）
+        chunk = "x" * (100 * 1024)
+        for i in range(10):
+            reg.cas("s", f"big{i:02d}", None, chunk)
+
+        keys = [f"big{i:02d}" for i in range(10)]
+        result = reg.batch_get("s", keys)
+        self.assertTrue(result["success"])
+
+        # 一部が null になっている（900KB 上限で打ち切り）
+        non_null = [k for k in keys if result["results"][k] is not None]
+        null_keys = [k for k in keys if result["results"][k] is None]
+        self.assertGreater(len(non_null), 0)
+        self.assertGreater(len(null_keys), 0)
+
+        # warnings が出力されている
+        self.assertGreater(len(result["warnings"]), 0)
+        self.assertTrue(
+            any("900KB" in w for w in result["warnings"]),
+            f"Expected '900KB' in warnings, got: {result['warnings']}",
+        )
+
+        # truncated フィールド（5-B I-4 対応後に追加される可能性あり）
+        truncated = result.get("truncated", 0)
+        if "truncated" in result:
+            self.assertEqual(truncated, len(null_keys))
+
+        reg.close()
+
 
 # ======================================================================
 # create_store_for_pack
@@ -530,9 +565,12 @@ class TestValidateStorePath(TestCase):
     def test_valid(self) -> None:
         p = str(STORES_BASE_DIR / "good")
         err = _validate_store_path(p)
-        # テスト環境ではディレクトリが存在しない場合もあるが
-        # resolve() の挙動で結果が変わる。ここでは ".." チェックのみ確認
-        # (環境依存のため、エラーが出なければ OK)
+        # STORES_BASE_DIR が存在する場合は None を返す
+        # テスト環境では resolve() の結果で変わるため、
+        # ".." が含まれない正常パスではエラーが出ないことを確認
+        # (環境依存のため err が None でない場合もあるが ".." 由来でないことを確認)
+        if err is not None:
+            self.assertNotIn("..", err)
 
 
 # ======================================================================

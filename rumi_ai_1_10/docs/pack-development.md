@@ -142,6 +142,17 @@ connectivity の `requires` / `provides` は、起動時の Pack ロード順序
 
 現時点では connectivity のランタイムでの効果は load_order 自動解決のみです。将来的に拡張される可能性があります。
 
+#### connectivity パターン例
+
+| provides | 意味 | 典型的な Pack |
+|----------|------|--------------|
+| `ai.client` | AI API クライアント | OpenAI / Anthropic クライアント |
+| `tool.registry` | ツール登録 | ツールマネージャー |
+| `memory.store` | 記憶ストア | メモリ管理 |
+| `ui.chat` | チャット UI | フロントエンド |
+
+provides / requires の値はドット区切りの自由文字列です。OS は値の意味を解釈せず、load_order の自動解決にのみ使用します。Pack 開発者間で名前を合わせてください。
+
 ---
 
 ## ブロック（blocks）

@@ -338,6 +338,49 @@ class TestTOCTOUMitigation(unittest.TestCase):
         finally:
             _exit(patches)
 
+    # ---- A-18: binary kind TOCTOU tests ----
+
+    def test_binary_toctou_mismatch_detected(self):
+        """If trust hash != re-read hash for binary kind, reject with toctou_mismatch."""
+        meta = _StubUnitMeta(
+            kind="binary",
+            unit_dir=self._ep_dir,
+            entrypoint="handler.py",
+        )
+        wrong_sha = hashlib.sha256(b"TAMPERED").hexdigest()
+        patches = _build_gate_patches(unit_meta=meta, trust_sha=wrong_sha)
+        _enter(patches)
+        try:
+            result = _make_executor().execute(
+                _PRINCIPAL, _UNIT_REF, "host_capability", {},
+            )
+            self.assertFalse(result.success)
+            self.assertEqual(result.error_type, "toctou_mismatch")
+        finally:
+            _exit(patches)
+
+    def test_binary_toctou_read_error(self):
+        """If binary entrypoint disappears after trust check, toctou_read_error."""
+        meta = _StubUnitMeta(
+            kind="binary",
+            unit_dir=self._ep_dir,
+            entrypoint="handler.py",
+        )
+        patches = _build_gate_patches(
+            unit_meta=meta, trust_sha=self._ep_sha,
+        )
+        _enter(patches)
+        try:
+            # Remove file to trigger read error
+            (self._ep_dir / "handler.py").unlink()
+            result = _make_executor().execute(
+                _PRINCIPAL, _UNIT_REF, "host_capability", {},
+            )
+            self.assertFalse(result.success)
+            self.assertEqual(result.error_type, "toctou_read_error")
+        finally:
+            _exit(patches)
+
 
 # ========================================================================
 # Test: setuid/setgid check (I-06)
@@ -486,6 +529,33 @@ class TestSetuidSetgidCheck(unittest.TestCase):
                     _PRINCIPAL, _UNIT_REF, "host_capability", {},
                 )
             self.assertNotEqual(result.error_type, "security_violation")
+        finally:
+            _exit(patches)
+
+    # ---- A-18: os.stat() failure test ----
+
+    @patch(_P_PLATFORM, return_value="Linux")
+    def test_stat_oserror_returns_internal_error(self, _):
+        """os.stat() raising OSError should yield internal_error."""
+        meta = _StubUnitMeta(
+            kind="binary",
+            unit_dir=self._ep_dir,
+            entrypoint="run.bin",
+        )
+        patches = _build_gate_patches(
+            unit_meta=meta, trust_sha=self._ep_sha,
+        )
+        _enter(patches)
+        try:
+            with patch(
+                "rumi_ai_1_10.core_runtime.unit_executor.os.stat",
+                side_effect=OSError("Permission denied"),
+            ):
+                result = _make_executor().execute(
+                    _PRINCIPAL, _UNIT_REF, "host_capability", {},
+                )
+            self.assertFalse(result.success)
+            self.assertEqual(result.error_type, "internal_error")
         finally:
             _exit(patches)
 

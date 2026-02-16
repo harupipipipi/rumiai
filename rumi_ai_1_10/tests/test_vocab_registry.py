@@ -316,3 +316,58 @@ class TestLoadPackVocab:
         r2 = vr.load_pack_vocab(pack_dir, "mypack")
         assert r1["groups"] == 1
         assert r2["groups"] == 0  # already loaded, skipped
+
+
+# ===================================================================
+# normalize_dict_keys (I-11)
+# ===================================================================
+
+class TestNormalizeDictKeys:
+
+    def test_basic_normalization(self):
+        vr = VocabRegistry()
+        vr.register_group(["tool", "function_calling", "tools"])
+        data = {"function_calling": [{"name": "search"}]}
+        result, changes = vr.normalize_dict_keys(data)
+        assert "tool" in result
+        assert result["tool"] == [{"name": "search"}]
+        assert len(changes) > 0
+
+    def test_no_change_when_preferred(self):
+        vr = VocabRegistry()
+        vr.register_group(["tool", "function_calling"])
+        data = {"tool": [{"name": "search"}]}
+        result, changes = vr.normalize_dict_keys(data)
+        assert "tool" in result
+        assert len(changes) == 0
+
+    def test_unknown_key_unchanged(self):
+        vr = VocabRegistry()
+        data = {"unknown_key": "value"}
+        result, changes = vr.normalize_dict_keys(data)
+        assert "unknown_key" in result
+
+    def test_nested_dict_normalized(self):
+        vr = VocabRegistry()
+        vr.register_group(["tool", "function_calling"])
+        data = {"outer": {"function_calling": "inner_value"}}
+        result, changes = vr.normalize_dict_keys(data)
+        # normalize_dict_keys は再帰的にネストされた dict も正規化する
+        assert "outer" in result
+        # nested dict の function_calling は tool に変換される
+        assert "tool" in result["outer"]
+
+    def test_collision_detection(self):
+        vr = VocabRegistry()
+        vr.register_group(["tool", "function_calling"])
+        data = {"tool": "v1", "function_calling": "v2"}
+        result, changes = vr.normalize_dict_keys(data)
+        # Both map to "tool" — collision should be detected in changes
+        collision_entries = [c for c in changes if c[0].startswith("COLLISION:")]
+        assert len(collision_entries) > 0
+
+    def test_empty_dict(self):
+        vr = VocabRegistry()
+        result, changes = vr.normalize_dict_keys({})
+        assert result == {}
+        assert changes == []
