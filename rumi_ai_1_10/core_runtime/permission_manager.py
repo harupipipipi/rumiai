@@ -11,6 +11,9 @@ Dockerモードではsandbox_bridgeに委譲。
 - 公式は具体的な権限名をハードコードしない（グループ名は設定可能）
 - 安全側にデフォルト（permissiveモードは開発用）
 - ecosystem側で権限ポリシーを登録可能
+
+Agent 7-F 変更:
+  G-1: pack.update パーミッション標準化 (check_permission)
 """
 
 
@@ -20,6 +23,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
@@ -66,6 +70,10 @@ class PermissionManager:
         # 権限チェック
         if pm.has_permission("my_pack:tool:mytool", "file_read"):
             pass
+        
+        # G-1: リソース指定のパーミッションチェック
+        if pm.check_permission("admin", "pack.update", "my_pack"):
+            pass
     """
     
     def __init__(self, mode: str = "permissive"):
@@ -103,6 +111,73 @@ class PermissionManager:
         """現在のモードを取得"""
         return self._mode
     
+    # ===== G-1: リソース指定パーミッションチェック =====
+
+    def check_permission(
+        self,
+        principal_id: str,
+        permission_type: str,
+        resource_id: str = "",
+    ) -> bool:
+        """
+        リソースに対するパーミッションを判定する。
+
+        pack.update パーミッション:
+            approve 済みの Pack のみ更新可能。
+            ApprovalManager から Pack の状態を取得し、
+            APPROVED であれば True を返す。
+
+        その他のパーミッション:
+            has_permission(principal_id, permission_type) に委譲。
+
+        Args:
+            principal_id: 操作主体ID
+            permission_type: パーミッションタイプ（例: "pack.update"）
+            resource_id: 対象リソースID（例: pack_id）
+
+        Returns:
+            True: 許可 / False: 拒否
+        """
+        if permission_type == "pack.update":
+            return self._check_pack_update_permission(principal_id, resource_id)
+
+        return self.has_permission(principal_id, permission_type)
+
+    def _check_pack_update_permission(
+        self,
+        principal_id: str,
+        pack_id: str,
+    ) -> bool:
+        """
+        pack.update パーミッションを判定する。
+
+        デフォルト: APPROVED 状態の Pack のみ更新可能。
+        permissive モードでは APPROVED チェックのみ（権限チェック省略）。
+        secure モードでは権限チェックも実施。
+        """
+        # Pack が APPROVED かチェック
+        try:
+            from .approval_manager import get_approval_manager, PackStatus
+            am = get_approval_manager()
+            status = am.get_status(pack_id)
+            if status is None:
+                return False
+            if status != PackStatus.APPROVED:
+                return False
+        except Exception:
+            print(
+                f"[PermissionManager] WARNING: Failed to check pack status for {pack_id}",
+                file=sys.stderr,
+            )
+            return False
+
+        # permissive モードでは APPROVED チェックだけで許可
+        if self._mode == "permissive":
+            return True
+
+        # secure モードでは追加の権限チェック
+        return self.has_permission(principal_id, "pack.update")
+
     # ===== 権限リクエスト・チェック =====
     
     def request(

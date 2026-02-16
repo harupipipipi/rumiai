@@ -6,6 +6,12 @@ Packのインストール、承認、ハッシュ検証を管理する。
 
 Phase2追加: local_pack対応（ecosystem/flows/**の仮想pack）
 パス刷新: pack供給元を ecosystem/ 直下に変更（ecosystem/packs/ 互換あり）
+
+Agent 7-F 変更:
+  S-9:  HMAC検証失敗時のaudit log記録
+  M-12: scan_packsのI/Oをロック外に移動
+  G-2:  apply_update capability
+  G-3:  version history / rollback
 """
 
 from __future__ import annotations
@@ -61,6 +67,7 @@ class PackApproval:
     file_hashes: Dict[str, str] = field(default_factory=dict)
     permissions_requested: List[Dict[str, Any]] = field(default_factory=list)
     rejection_reason: Optional[str] = None
+    version_history: List[Dict[str, Any]] = field(default_factory=list)  # G-3
     
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
@@ -70,6 +77,8 @@ class PackApproval:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'PackApproval':
         data = dict(data)
+        # 後方互換: version_history がなければ空リスト
+        data.setdefault("version_history", [])
         if isinstance(data.get("status"), str):
             data["status"] = PackStatus(data["status"])
         return cls(**data)
@@ -148,6 +157,18 @@ class ApprovalManager:
         stored_sig = data.pop("_hmac_signature", None)
         if not stored_sig:
             pack_id = data.get("pack_id", path.stem.replace(".grants", ""))
+            # S-9: HMAC検証失敗（署名なし）を監査ログに記録
+            try:
+                from .audit_logger import get_audit_logger
+                get_audit_logger().log_security_event(
+                    event_type="hmac_verification_failed",
+                    severity="critical",
+                    description="Grant file has no HMAC signature — possible tampering",
+                    pack_id=pack_id,
+                    details={"file_path": str(path), "reason": "missing_signature"},
+                )
+            except Exception:
+                pass
             self._approvals[pack_id] = PackApproval(
                 pack_id=pack_id,
                 status=PackStatus.MODIFIED,
@@ -157,6 +178,18 @@ class ApprovalManager:
 
         if not verify_data_hmac(self._secret_key, data, stored_sig):
             pack_id = data.get("pack_id", path.stem.replace(".grants", ""))
+            # S-9: HMAC検証失敗（署名不一致）を監査ログに記録
+            try:
+                from .audit_logger import get_audit_logger
+                get_audit_logger().log_security_event(
+                    event_type="hmac_verification_failed",
+                    severity="critical",
+                    description="Grant file HMAC signature mismatch — possible tampering",
+                    pack_id=pack_id,
+                    details={"file_path": str(path), "reason": "signature_mismatch"},
+                )
+            except Exception:
+                pass
             self._approvals[pack_id] = PackApproval(
                 pack_id=pack_id,
                 status=PackStatus.MODIFIED,
@@ -223,11 +256,14 @@ class ApprovalManager:
         discover_pack_locations() を使って ecosystem/* と ecosystem/packs/* を走査。
         canonical pack_id はディレクトリ名。
         ecosystem.json の pack_id が異なる場合は警告を記録。
+
+        M-12: ロック内ではメモリ更新のみ行い、ファイルI/Oはロック外で実行。
         """
         packs = []
         
         locations = discover_pack_locations(str(self.packs_dir))
-        
+
+        pending_saves = []  # M-12: ロック外でバッチI/O
         for loc in locations:
             pack_id = loc.pack_id
             self._pack_locations[pack_id] = loc
@@ -245,7 +281,7 @@ class ApprovalManager:
                         status=PackStatus.INSTALLED,
                         created_at=self._now_ts()
                     )
-                    self._save_grant(self._approvals[pack_id])
+                    pending_saves.append(pack_id)
         
         # local_pack対応: RUMI_LOCAL_PACK_MODE=require_approval の場合のみ
         if self._is_local_pack_mode_enabled():
@@ -259,7 +295,14 @@ class ApprovalManager:
                             status=PackStatus.INSTALLED,
                             created_at=self._now_ts()
                         )
-                        self._save_grant(self._approvals[LOCAL_PACK_ID])
+                        pending_saves.append(LOCAL_PACK_ID)
+
+        # M-12: ロック外でバッチI/O
+        for pid in pending_saves:
+            with self._lock:
+                approval = self._approvals.get(pid)
+            if approval:
+                self._save_grant(approval)
         
         return packs
     
@@ -376,6 +419,14 @@ class ApprovalManager:
             approval.approved_at = self._now_ts()
             approval.file_hashes = file_hashes
             approval.rejection_reason = None
+
+            # G-3: バージョン履歴を記録
+            approval.version_history.append({
+                "version": len(approval.version_history) + 1,
+                "timestamp": approval.approved_at,
+                "action": "approve",
+                "file_hashes": dict(file_hashes),
+            })
             
             self._save_grant(approval)
 
@@ -504,6 +555,152 @@ class ApprovalManager:
                 verified_packs.add(pack_id)
         
         return verified_packs
+
+    # ------------------------------------------------------------------ #
+    # G-2: apply_update
+    # ------------------------------------------------------------------ #
+
+    def apply_update(self, pack_id: str, new_hashes: Dict[str, str]) -> ApprovalResult:
+        """
+        Pack更新を適用する。
+
+        new_hashes が現在の承認済みハッシュと一致すれば APPROVED を維持。
+        不一致の場合は MODIFIED に変更し再承認を要求。
+        結果は audit log に記録される。
+
+        Args:
+            pack_id: Pack ID
+            new_hashes: 更新後のファイルハッシュ
+
+        Returns:
+            ApprovalResult
+        """
+        with self._lock:
+            approval = self._approvals.get(pack_id)
+            if not approval:
+                return ApprovalResult(success=False, pack_id=pack_id, error="Pack not found")
+
+            old_hashes = dict(approval.file_hashes)
+            hashes_match = (old_hashes == new_hashes)
+
+            if hashes_match:
+                # ハッシュ一致: APPROVED 維持
+                result_status = approval.status
+            else:
+                # ハッシュ不一致: MODIFIED → 要再承認
+                approval.status = PackStatus.MODIFIED
+                approval.file_hashes = dict(new_hashes)
+                result_status = PackStatus.MODIFIED
+
+                # G-3: バージョン履歴に update イベントを記録
+                approval.version_history.append({
+                    "version": len(approval.version_history) + 1,
+                    "timestamp": self._now_ts(),
+                    "action": "update_modified",
+                    "file_hashes": dict(new_hashes),
+                })
+
+                self._save_grant(approval)
+
+            # キャッシュ無効化
+            self._invalidate_hash_cache(pack_id)
+
+        # audit log（ロック外）
+        try:
+            from .audit_logger import get_audit_logger
+            get_audit_logger().log_security_event(
+                event_type="pack_update_applied",
+                severity="info" if hashes_match else "warning",
+                description=(
+                    f"Pack update applied: hashes {'match' if hashes_match else 'mismatch'}"
+                ),
+                pack_id=pack_id,
+                details={
+                    "hashes_match": hashes_match,
+                    "result_status": result_status.value,
+                },
+            )
+        except Exception:
+            pass
+
+        return ApprovalResult(
+            success=True, pack_id=pack_id, status=result_status,
+        )
+
+    # ------------------------------------------------------------------ #
+    # G-3: version history / rollback
+    # ------------------------------------------------------------------ #
+
+    def get_version_history(self, pack_id: str) -> List[Dict[str, Any]]:
+        """Pack のバージョン履歴を取得する。"""
+        with self._lock:
+            approval = self._approvals.get(pack_id)
+            if not approval:
+                return []
+            return list(approval.version_history)
+
+    def rollback_to_version(self, pack_id: str, version_index: int) -> ApprovalResult:
+        """
+        指定バージョンのハッシュで再承認する。
+
+        Args:
+            pack_id: Pack ID
+            version_index: version_history 内のインデックス（0始まり）
+
+        Returns:
+            ApprovalResult
+        """
+        with self._lock:
+            approval = self._approvals.get(pack_id)
+            if not approval:
+                return ApprovalResult(
+                    success=False, pack_id=pack_id, error="Pack not found",
+                )
+
+            if version_index < 0 or version_index >= len(approval.version_history):
+                return ApprovalResult(
+                    success=False, pack_id=pack_id,
+                    error=f"Invalid version index: {version_index}",
+                )
+
+            target_version = approval.version_history[version_index]
+            target_hashes = target_version.get("file_hashes", {})
+
+            approval.status = PackStatus.APPROVED
+            approval.approved_at = self._now_ts()
+            approval.file_hashes = dict(target_hashes)
+            approval.rejection_reason = None
+
+            # バージョン履歴にロールバックイベントを記録
+            approval.version_history.append({
+                "version": len(approval.version_history) + 1,
+                "timestamp": approval.approved_at,
+                "action": "rollback",
+                "rollback_to_version_index": version_index,
+                "file_hashes": dict(target_hashes),
+            })
+
+            self._save_grant(approval)
+
+            # キャッシュ無効化
+            self._invalidate_hash_cache(pack_id)
+
+        # audit log（ロック外）
+        try:
+            from .audit_logger import get_audit_logger
+            get_audit_logger().log_security_event(
+                event_type="pack_version_rollback",
+                severity="warning",
+                description=f"Pack rolled back to version index {version_index}",
+                pack_id=pack_id,
+                details={"version_index": version_index},
+            )
+        except Exception:
+            pass
+
+        return ApprovalResult(
+            success=True, pack_id=pack_id, status=PackStatus.APPROVED,
+        )
 
     # ------------------------------------------------------------------ #
     # #62  宣言的Store作成
