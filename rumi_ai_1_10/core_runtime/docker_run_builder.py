@@ -9,6 +9,7 @@ build() は List[str] を返すだけであり、subprocess の呼び出し方�
 セキュリティベースライン (デフォルト):
   --rm, --network=none, --cap-drop=ALL,
   --security-opt=no-new-privileges:true, --read-only,
+  --dns=127.0.0.1 (--network=none 時のみ / Defense-in-Depth),
   --tmpfs=/tmp:size=64m,noexec,nosuid,
   --memory=256m, --memory-swap=256m, --cpus=0.5,
   --user=65534:65534
@@ -44,12 +45,14 @@ class DockerRunBuilder:
     DEFAULT_CPUS = "0.5"
     DEFAULT_PIDS_LIMIT = 50
     DEFAULT_USER = "65534:65534"
+    DEFAULT_NETWORK = "none"
     DEFAULT_TMPFS = "/tmp:size=64m,noexec,nosuid"
 
     def __init__(self, name: str) -> None:
         self._name: str = name
         self._pids_limit_val: int = self.DEFAULT_PIDS_LIMIT
         self._user: str = self.DEFAULT_USER
+        self._network: str = self.DEFAULT_NETWORK
         self._ulimits: List[str] = []
         self._volumes: List[str] = []
         self._envs: List[List[str]] = []
@@ -59,7 +62,24 @@ class DockerRunBuilder:
         self._image_val: Optional[str] = None
         self._command_val: List[str] = []
 
+    # ---- Safety guards (L-13) ----
+
+    def __iter__(self):
+        raise TypeError(
+            "DockerRunBuilder is not iterable. "
+            "Did you forget to call .build()? "
+            "Use: subprocess.run(builder.build(), ...)"
+        )
+
+    def __str__(self):
+        return "<DockerRunBuilder: call .build() to get command list>"
+
     # ---- パラメータ設定 (メソッドチェーン対応) ----
+
+    def network(self, net: str) -> "DockerRunBuilder":
+        """--network を設定 (デフォルト: none)"""
+        self._network = net
+        return self
 
     def pids_limit(self, limit: int) -> "DockerRunBuilder":
         """--pids-limit を設定 (デフォルト: 50)"""
@@ -142,17 +162,25 @@ class DockerRunBuilder:
             "--rm",
             "--name", self._name,
             # --- セキュリティベースライン ---
-            "--network=none",
+            f"--network={self._network}",
             "--cap-drop=ALL",
             "--security-opt=no-new-privileges:true",
             "--read-only",
+        ]
+
+        # M-11: DNS リーク防御 (Defense-in-Depth)
+        # --network=none 時のみ内部 DNS を明示指定し、万一の DNS リークを防ぐ
+        if self._network == "none":
+            cmd.append("--dns=127.0.0.1")
+
+        cmd.extend([
             f"--tmpfs={self.DEFAULT_TMPFS}",
             f"--memory={self.DEFAULT_MEMORY}",
             f"--memory-swap={self.DEFAULT_MEMORY_SWAP}",
             f"--cpus={self.DEFAULT_CPUS}",
             f"--pids-limit={self._pids_limit_val}",
             f"--user={self._user}",
-        ]
+        ])
 
         # ulimits
         for spec in self._ulimits:
