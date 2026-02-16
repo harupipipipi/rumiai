@@ -245,6 +245,56 @@ class TestBackwardCompatibility:
         assert get_vocab_registry() is new
         assert get_container().get("vocab_registry") is new
 
+    # --- HMACKeyManager backward compatibility tests ---
+
+    def test_get_hmac_key_manager_returns_di_instance(self, tmp_path) -> None:
+        from core_runtime.hmac_key_manager import (
+            get_hmac_key_manager,
+            initialize_hmac_key_manager,
+        )
+        initialize_hmac_key_manager(keys_path=str(tmp_path / "hmac_keys.json"))
+        container = get_container()
+        di_instance = container.get("hmac_key_manager")
+        func_instance = get_hmac_key_manager()
+        assert di_instance is func_instance
+
+    def test_initialize_hmac_key_manager_updates_di(self, tmp_path) -> None:
+        from core_runtime.hmac_key_manager import (
+            HMACKeyManager,
+            get_hmac_key_manager,
+            initialize_hmac_key_manager,
+        )
+        old = initialize_hmac_key_manager(
+            keys_path=str(tmp_path / "hmac_keys_old.json"),
+        )
+        new = initialize_hmac_key_manager(
+            keys_path=str(tmp_path / "hmac_keys_new.json"),
+        )
+        assert old is not new
+        assert isinstance(new, HMACKeyManager)
+        assert get_hmac_key_manager() is new
+        assert get_container().get("hmac_key_manager") is new
+
+    def test_reset_hmac_key_manager_clears_cache(self, tmp_path) -> None:
+        from core_runtime.hmac_key_manager import (
+            get_hmac_key_manager,
+            initialize_hmac_key_manager,
+            reset_hmac_key_manager,
+        )
+        old = initialize_hmac_key_manager(
+            keys_path=str(tmp_path / "hmac_keys.json"),
+        )
+        assert get_hmac_key_manager() is old
+        reset_hmac_key_manager()
+        # After reset the cache is cleared; a new initialize creates a
+        # distinct instance that is picked up by get_hmac_key_manager().
+        new = initialize_hmac_key_manager(
+            keys_path=str(tmp_path / "hmac_keys_2.json"),
+        )
+        assert old is not new
+        assert get_hmac_key_manager() is new
+        assert get_container().get("hmac_key_manager") is new
+
 
 # ===================================================================
 # get_container / reset_container
