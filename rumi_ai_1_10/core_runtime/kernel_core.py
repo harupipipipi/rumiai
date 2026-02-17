@@ -990,7 +990,3 @@ class KernelCore:
     def _resolve_args(self, args, ctx):
         """後方互換ラッパー。VariableResolver に委譲 (K-1)。"""
         return self._variable_resolver.resolve_args(args, ctx)
-
-
-    def _resolve_args(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
-        return {k: self._resolve_value(v, ctx) for k, v in args.items()} if isinstance(args, dict) else {}
