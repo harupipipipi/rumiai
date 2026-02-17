@@ -173,6 +173,88 @@ class ConverterASTChecker:
             return node.func.attr
         return ""
 
+    @staticmethod
+    def _extract_module_names(node: ast.AST) -> List[str]:
+        """Import / ImportFrom ノードからモジュール名を抽出する。
+
+        Returns:
+            モジュール名のリスト。ImportFrom の場合は module 自体と
+            module.alias の両方を含む。
+        """
+        names: List[str] = []
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                names.append(alias.name)
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if module:
+                names.append(module)
+            for alias in node.names:
+                full = f"{module}.{alias.name}" if module else alias.name
+                names.append(full)
+        return names
+
+    def check_with_locals(
+        self, converter_path: Path, blocked_imports: Set[str]
+    ) -> Tuple[bool, List[str]]:
+        """
+        Level 1 AST 検査: converter + 同一ディレクトリの .py を再帰走査。
+
+        converter がローカルモジュールを import している場合、
+        そのモジュールも再帰的に検査し、blocked import の迂回を防止する。
+
+        同一ディレクトリ外のファイルは検査しない（Level 1 の仕様）。
+        visited set により循環 import を安全に処理する。
+
+        Args:
+            converter_path: converter ファイルのパス
+            blocked_imports: ブロックする import 名の集合
+
+        Returns:
+            (is_safe, violations)
+        """
+        violations: List[str] = []
+        converter_dir = converter_path.parent.resolve()
+        visited: Set[Path] = set()
+
+        def _check(target: Path) -> None:
+            resolved = target.resolve()
+            if resolved in visited:
+                return
+            visited.add(resolved)
+
+            try:
+                source = target.read_text(encoding="utf-8")
+                tree = ast.parse(source)
+            except (OSError, SyntaxError):
+                return
+
+            for node in ast.walk(tree):
+                if not isinstance(node, (ast.Import, ast.ImportFrom)):
+                    continue
+
+                # converter 外への相対 import (level >= 2) はスキップ
+                if isinstance(node, ast.ImportFrom) and (node.level or 0) >= 2:
+                    continue
+
+                for name in self._extract_module_names(node):
+                    if self._is_blocked(name, blocked_imports):
+                        violations.append(
+                            f"{target.name}: blocked import '{name}'"
+                        )
+
+                    # ローカルファイルへの再帰走査
+                    top = name.split(".")[0]
+                    if top:
+                        local = converter_dir / f"{top}.py"
+                        if local.exists() and local.resolve() != resolved:
+                            _check(local)
+
+        _check(converter_path)
+
+        is_safe = len(violations) == 0
+        return is_safe, violations
+
 
 # ===================================================================
 # C-3-L2: ConverterIntegrityChecker
@@ -231,6 +313,17 @@ class ConverterIntegrityChecker:
             source, self._policy.blocked_imports
         )
         warn_list.extend(ast_warnings)
+
+        # 7. Level 1: ローカル依存の再帰検査
+        local_safe, local_warnings = self._ast_checker.check_with_locals(
+            file_path, self._policy.blocked_imports
+        )
+        # 重複を除外してマージ
+        existing = set(warn_list)
+        for w in local_warnings:
+            if w not in existing:
+                warn_list.append(w)
+                existing.add(w)
 
         is_safe = len(warn_list) == 0
         return is_safe, warn_list
