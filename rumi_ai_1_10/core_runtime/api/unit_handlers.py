@@ -60,6 +60,14 @@ class UnitHandlersMixin:
         try:
             from ..store_registry import get_store_registry
             from ..unit_registry import get_unit_registry
+            from ..paths import is_path_within, ECOSYSTEM_DIR
+
+            if not is_path_within(Path(source_dir), Path(ECOSYSTEM_DIR)):
+                return {
+                    "success": False,
+                    "error": "source_dir is outside allowed directory",
+                }
+
             store_reg = get_store_registry()
             store_def = store_reg.get_store(store_id)
             if store_def is None:
