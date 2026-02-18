@@ -14,6 +14,13 @@ journal: user_data/secrets/journal.jsonl (値/長さ/ハッシュは入れない
 - Fernet (cryptography パッケージ) を使用（必須依存）
 - 暗号化キー: 環境変数 RUMI_SECRETS_KEY → user_data/.secrets_key → 自動生成
 - 後方互換性: 平文データ読み込み時に自動暗号化マイグレーション
+
+平文フォールバックポリシー:
+- 環境変数 RUMI_SECRETS_ALLOW_PLAINTEXT (デフォルト "auto")
+  - "auto": 未暗号化シークレットが存在する間は平文を許可。全て暗号化済みになったら自動で禁止
+  - "true": 常に平文を許可（マイグレーション中の一時使用）
+  - "false": 常に平文を禁止
+- マイグレーション完了マーカー: user_data/secrets/.migration_complete
 """
 
 from __future__ import annotations
@@ -40,6 +47,9 @@ SECRETS_KEY_FILE = "user_data/.secrets_key"
 
 # Fernet トークンは常に "gAAAAA" で始まる
 _FERNET_PREFIX = "gAAAAA"
+
+PLAINTEXT_POLICY_ENV = "RUMI_SECRETS_ALLOW_PLAINTEXT"
+MIGRATION_MARKER_FILE = ".migration_complete"
 
 
 # ------------------------------------------------------------------
@@ -127,13 +137,28 @@ class _CryptoBackend:
         self._ensure_initialized()
         return self._fernet.encrypt(plaintext.encode("utf-8")).decode("utf-8")
 
-    def decrypt(self, ciphertext: str) -> str:
-        """暗号文を復号して平文を返す"""
+    def decrypt(self, ciphertext: str, *, allow_plaintext: bool = False) -> str:
+        """暗号文を復号して平文を返す
+
+        Args:
+            ciphertext: 暗号化された文字列（または平文）
+            allow_plaintext: True の場合、非 Fernet 値を平文として返す。
+                             False の場合、非 Fernet 値は ValueError を発生。
+        """
         self._ensure_initialized()
         if ciphertext.startswith(_FERNET_PREFIX):
             return self._fernet.decrypt(ciphertext.encode("utf-8")).decode("utf-8")
-        # 平文と判断 — そのまま返す（マイグレーション対象）
-        return ciphertext
+        # 非 Fernet 値 — ポリシーに従う
+        if allow_plaintext:
+            logger.warning(
+                "Plaintext fallback used during decryption. "
+                "This secret should be migrated to encrypted storage."
+            )
+            return ciphertext
+        raise ValueError(
+            "Decryption failed: value is not a valid Fernet token and "
+            "plaintext fallback is disabled by policy."
+        )
 
     def is_encrypted(self, value: str) -> bool:
         """値が暗号化済みかどうか判定"""
@@ -256,6 +281,8 @@ class SecretsStore:
         self._secrets_dir = Path(secrets_dir or SECRETS_DIR)
         self._lock = threading.RLock()
         self._secrets_dir.mkdir(parents=True, exist_ok=True)
+        # auto モードの初期化: マーカーがなければ全スキャンして判定
+        self._init_migration_marker()
 
     @staticmethod
     def _now_ts() -> str:
@@ -271,6 +298,104 @@ class SecretsStore:
 
     def _key_path(self, key: str) -> Path:
         return self._secrets_dir / f"{key}.json"
+
+    # ----------------------------------------------------------
+    # 平文フォールバック ポリシー
+    # ----------------------------------------------------------
+
+    @staticmethod
+    def _get_plaintext_policy() -> str:
+        """環境変数から平文ポリシーを取得する。
+
+        Returns:
+            "auto" | "true" | "false"
+        """
+        raw = os.environ.get(PLAINTEXT_POLICY_ENV, "auto").strip().lower()
+        if raw in ("auto", "true", "false"):
+            return raw
+        logger.warning(
+            "Invalid %s value '%s'; falling back to 'auto'.",
+            PLAINTEXT_POLICY_ENV, raw,
+        )
+        return "auto"
+
+    def _migration_marker_path(self) -> Path:
+        return self._secrets_dir / MIGRATION_MARKER_FILE
+
+    def _has_migration_marker(self) -> bool:
+        """マイグレーション完了マーカーが存在するか"""
+        return self._migration_marker_path().exists()
+
+    def _write_migration_marker(self) -> None:
+        """マイグレーション完了マーカーを書き込む"""
+        try:
+            marker_path = self._migration_marker_path()
+            marker_path.write_text(
+                json.dumps({
+                    "completed_at": self._now_ts(),
+                    "note": "All secrets migrated to encrypted storage.",
+                }, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            logger.info("Migration complete marker written: %s", marker_path)
+        except Exception as e:
+            logger.warning("Failed to write migration marker: %s", e)
+
+    def _check_all_encrypted(self) -> bool:
+        """全ての既存シークレットが暗号化済みか確認する。
+
+        削除済み(tombstone)のシークレットは空文字なのでスキップ。
+        """
+        if not self._secrets_dir.exists():
+            return True
+        for f in self._secrets_dir.glob("*.json"):
+            try:
+                with open(f, "r", encoding="utf-8") as fp:
+                    data = json.load(fp)
+                # tombstone は value が空文字 → 暗号化不要
+                if data.get("deleted_at"):
+                    continue
+                raw_value = data.get("value", "")
+                if raw_value and not _crypto.is_encrypted(raw_value):
+                    return False
+            except Exception:
+                continue
+        return True
+
+    def _init_migration_marker(self) -> None:
+        """起動時にマイグレーション状態を確認し、必要に応じてマーカーを書き込む。
+
+        auto モードでマーカーが未作成の場合のみ全スキャンを実行する。
+        全シークレットが暗号化済みであればマーカーを書き込み、
+        以降のポリシー判定を O(1) にする。
+        """
+        if self._get_plaintext_policy() != "auto":
+            return
+        if self._has_migration_marker():
+            return
+        if self._check_all_encrypted():
+            self._write_migration_marker()
+
+    def _is_plaintext_allowed(self) -> bool:
+        """現在のポリシーに基づき平文フォールバックが許可されるか判定する。
+
+        Returns:
+            True: 平文フォールバックを許可
+            False: 平文フォールバックを拒否
+        """
+        policy = self._get_plaintext_policy()
+
+        if policy == "true":
+            return True
+        if policy == "false":
+            return False
+
+        # policy == "auto"
+        # マーカーが存在する → 全暗号化済み → 平文禁止
+        # マーカーが存在しない → まだ未暗号化シークレットあり → 平文許可
+        return not self._has_migration_marker()
+
+    # ----------------------------------------------------------
 
     def set_secret(
         self,
@@ -408,9 +533,14 @@ class SecretsStore:
                 if raw_value is None:
                     return None
 
+                # 平文ポリシー判定
+                allow_plaintext = self._is_plaintext_allowed()
+
                 # 復号
                 try:
-                    plaintext = _crypto.decrypt(raw_value)
+                    plaintext = _crypto.decrypt(
+                        raw_value, allow_plaintext=allow_plaintext
+                    )
                 except Exception as e:
                     logger.error("Failed to decrypt secret '%s': %s", key, e)
                     return None
@@ -434,6 +564,12 @@ class SecretsStore:
             path = self._key_path(key)
             _atomic_write_json(path, migrated_data)
             logger.info("Migrated secret '%s' from plaintext to encrypted storage.", key)
+
+            # マイグレーション後に全暗号化チェック → マーカー書き込み
+            if self._get_plaintext_policy() == "auto" and not self._has_migration_marker():
+                if self._check_all_encrypted():
+                    self._write_migration_marker()
+
         except Exception as e:
             # マイグレーション失敗でも元データは atomic write により保持
             logger.warning(
