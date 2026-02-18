@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import threading
 from dataclasses import dataclass, field
@@ -44,6 +45,9 @@ HANDLERS_DEST_DIR = "user_data/capabilities/handlers"
 
 DEFAULT_COOLDOWN_SECONDS = 3600
 DEFAULT_REJECT_THRESHOLD = 3
+
+# slug バリデーション: 英数字・アンダースコア・ハイフンのみ許可
+_SLUG_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 # ecosystem 走査時に除外するディレクトリ名
 _EXCLUDED_PACK_DIRS = frozenset({
@@ -460,6 +464,43 @@ class CapabilityInstaller:
         return f"{pack_id}:{slug}:{handler_id}:{sha256}"
 
     # ------------------------------------------------------------------
+    # Slug validation (security)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _validate_slug(slug: str) -> Tuple[bool, Optional[str]]:
+        """
+        slug が安全な文字のみで構成されているか検証する。
+
+        許可パターン: ^[a-zA-Z0-9_-]+$
+
+        Returns:
+            (valid, error_message)
+        """
+        if not slug:
+            return False, "slug is empty"
+        if not _SLUG_PATTERN.match(slug):
+            return False, f"Invalid slug (must match [a-zA-Z0-9_-]+): {slug!r}"
+        return True, None
+
+    # ------------------------------------------------------------------
+    # Symlink check (security)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _check_no_symlinks(*paths: Path) -> Tuple[bool, Optional[str]]:
+        """
+        指定されたパスがシンボリックリンクでないことを確認する。
+
+        Returns:
+            (valid, error_message)
+        """
+        for p in paths:
+            if os.path.islink(p):
+                return False, f"Symbolic link detected (security risk): {p}"
+        return True, None
+
+    # ------------------------------------------------------------------
     # Entrypoint validation (security)
     # ------------------------------------------------------------------
 
@@ -583,6 +624,16 @@ class CapabilityInstaller:
                 for slug_dir in slug_dirs:
                     result.scanned_count += 1
                     slug = slug_dir.name
+
+                    # slug バリデーション
+                    slug_valid, slug_error = self._validate_slug(slug)
+                    if not slug_valid:
+                        result.errors.append({
+                            "pack_id": pack_id,
+                            "slug": slug,
+                            "error": slug_error,
+                        })
+                        continue
 
                     # handler.json を読む
                     handler_json_path = slug_dir / "handler.json"
@@ -748,12 +799,15 @@ class CapabilityInstaller:
 
         手順:
         1. index から候補を取得
-        2. TOCTOU対策: source_dir を再検証 + sha256 再計算
-        3. Trust に登録
-        4. user_data にコピー
-        5. Registry/Executor を再ロード
-        6. index を更新
-        7. イベントログ + 監査ログに記録
+        2. slug バリデーション
+        3. TOCTOU対策: source_dir を再検証 + sha256 再計算
+        4. Trust に登録
+        5. dest_dir 境界チェック
+        6. TOCTOU最終防御: コピー直前に symlink チェック + sha256 再計算
+        7. user_data にコピー
+        8. Registry/Executor を再ロード
+        9. index を更新
+        10. イベントログ + 監査ログに記録
         """
         with self._lock:
             # 1. index から取得
@@ -780,7 +834,13 @@ class CapabilityInstaller:
             candidate = item.candidate
             source_dir = Path(candidate.source_dir)
 
-            # 2. TOCTOU対策: 再検証
+            # 2. slug バリデーション
+            slug_valid, slug_error = self._validate_slug(candidate.slug)
+            if not slug_valid:
+                self._mark_failed(item, f"Invalid slug: {slug_error}")
+                return ApproveResult(success=False, error=f"Invalid slug: {slug_error}")
+
+            # 3. TOCTOU対策: 再検証
             handler_json_path = source_dir / "handler.json"
             if not handler_json_path.exists():
                 self._mark_failed(item, "Source handler.json not found during approve")
@@ -819,7 +879,7 @@ class CapabilityInstaller:
                     error="SHA-256 mismatch: handler.py content changed since scan (TOCTOU)",
                 )
 
-            # 3. Trust に登録
+            # 4. Trust に登録
             try:
                 trust_store = _get_trust_store()
                 if not trust_store.is_loaded():
@@ -836,8 +896,46 @@ class CapabilityInstaller:
                 self._mark_failed(item, f"Trust registration error: {e}")
                 return ApproveResult(success=False, error=f"Trust registration error: {e}")
 
-            # 4. user_data にコピー
+            # 5. user_data にコピー
             dest_dir = self._handlers_dest_dir / candidate.slug
+
+            # dest_dir 境界チェック: _handlers_dest_dir 配下であることを確認
+            try:
+                resolved_dest = dest_dir.resolve()
+                resolved_base = self._handlers_dest_dir.resolve()
+                resolved_dest.relative_to(resolved_base)
+            except (ValueError, OSError):
+                self._mark_failed(item, "Path traversal detected in destination path")
+                return ApproveResult(
+                    success=False,
+                    error="Path traversal detected in destination path",
+                )
+
+            # TOCTOU最終防御: コピー直前にシンボリックリンクチェック + SHA256再計算
+            ep_file_for_check = entrypoint.rsplit(":", 1)[0] if ":" in entrypoint else "handler.py"
+            source_json_path = source_dir / "handler.json"
+            source_py_path = source_dir / ep_file_for_check
+
+            symlink_ok, symlink_error = self._check_no_symlinks(
+                source_json_path, source_py_path,
+            )
+            if not symlink_ok:
+                self._mark_failed(item, symlink_error)
+                return ApproveResult(success=False, error=symlink_error)
+
+            try:
+                final_sha256 = self._compute_sha256(source_py_path)
+            except Exception as e:
+                self._mark_failed(item, f"Failed to compute sha256 (pre-copy): {e}")
+                return ApproveResult(success=False, error=f"Failed to compute sha256 (pre-copy): {e}")
+
+            if final_sha256 != candidate.handler_py_sha256:
+                self._mark_failed(item, "SHA-256 mismatch at copy time (TOCTOU race detected)")
+                return ApproveResult(
+                    success=False,
+                    error="SHA-256 mismatch at copy time: handler.py content changed between approval and copy (TOCTOU)",
+                )
+
             try:
                 copy_result = self._copy_handler(source_dir, dest_dir, candidate)
                 if not copy_result[0]:
@@ -847,7 +945,7 @@ class CapabilityInstaller:
                 self._mark_failed(item, f"Copy error: {e}")
                 return ApproveResult(success=False, error=f"Copy error: {e}")
 
-            # 5. Registry/Executor を再ロード
+            # 6. Registry/Executor を再ロード
             try:
                 registry = _get_handler_registry()
                 registry.load_all()
@@ -861,7 +959,7 @@ class CapabilityInstaller:
             except Exception:
                 pass
 
-            # 6. index 更新
+            # 7. index 更新
             item.status = CandidateStatus.INSTALLED
             item.installed_to = str(dest_dir)
             item.cooldown_until = None
@@ -869,7 +967,7 @@ class CapabilityInstaller:
             item.last_error = None
             self._save_index()
 
-            # 7. イベントログ
+            # 8. イベントログ
             self._append_event(
                 event="capability_handler.approved_and_installed",
                 candidate_key=candidate_key,
@@ -935,6 +1033,10 @@ class CapabilityInstaller:
             return False, "Source handler.json not found"
         if not source_py.exists():
             return False, f"Source {ep_file} not found"
+
+        # シンボリックリンクチェック（多層防御）
+        if os.path.islink(source_json) or os.path.islink(source_py):
+            return False, "Symbolic link detected in source files (security risk)"
 
         if dest_dir.exists():
             existing_json_path = dest_dir / "handler.json"
