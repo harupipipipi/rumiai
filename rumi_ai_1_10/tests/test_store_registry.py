@@ -1,12 +1,10 @@
 """
-test_store_registry.py - P0: StoreRegistry のテスト
+test_store_registry.py - StoreRegistry のテスト (SQLite ベース)
 
 対象: core_runtime/store_registry.py
 """
 from __future__ import annotations
 
-import json
-import platform
 from pathlib import Path
 
 import pytest
@@ -16,21 +14,25 @@ from core_runtime.store_registry import StoreRegistry
 
 
 # ===================================================================
-# Fixture: STORES_BASE_DIR を tmp_path にリダイレクト
+# Fixture: STORES_BASE_DIR / STORES_INDEX_PATH を tmp_path にリダイレクト
 # ===================================================================
 
 @pytest.fixture(autouse=True)
-def _patch_stores_base_dir(tmp_path, monkeypatch):
-    """STORES_BASE_DIR をテスト用の tmp_path/stores にリダイレクトする"""
+def _patch_stores_paths(tmp_path, monkeypatch):
+    """STORES_BASE_DIR / STORES_INDEX_PATH をテスト用 tmp_path にリダイレクト"""
     stores_base = tmp_path / "stores"
     stores_base.mkdir()
     monkeypatch.setattr(sr_module, "STORES_BASE_DIR", stores_base)
+    # 存在しないパスにして JSON→SQLite migration を回避
+    monkeypatch.setattr(
+        sr_module, "STORES_INDEX_PATH", str(tmp_path / "nonexistent_index.json")
+    )
 
 
 def _make_registry(tmp_path: Path) -> StoreRegistry:
-    """テスト用の StoreRegistry を作成する"""
-    index_path = str(tmp_path / "index.json")
-    return StoreRegistry(index_path=index_path)
+    """テスト用の StoreRegistry を作成する (SQLite ベース)"""
+    db_path = str(tmp_path / "test_stores.db")
+    return StoreRegistry(db_path=db_path)
 
 
 # ===================================================================
@@ -48,13 +50,15 @@ class TestCreateStore:
         assert Path(root).is_dir()
 
     def test_create_store_persists(self, tmp_path):
-        idx = str(tmp_path / "index.json")
+        db = str(tmp_path / "persist_test.db")
         root = str(tmp_path / "stores" / "my-store")
-        reg1 = StoreRegistry(index_path=idx)
+        reg1 = StoreRegistry(db_path=db)
         reg1.create_store("my-store", root)
+        reg1.close()
 
-        reg2 = StoreRegistry(index_path=idx)
+        reg2 = StoreRegistry(db_path=db)
         assert reg2.get_store("my-store") is not None
+        reg2.close()
 
     def test_reject_duplicate_store_id(self, tmp_path):
         reg = _make_registry(tmp_path)
@@ -219,30 +223,23 @@ class TestListAndGet:
 
 
 # ===================================================================
-# CAS (Compare-And-Swap) — Linux/macOS のみ
+# CAS (Compare-And-Swap) — SQLite ベース (全プラットフォーム対応)
 # ===================================================================
 
-_skip_windows = pytest.mark.skipif(
-    platform.system() == "Windows",
-    reason="CAS requires fcntl (Linux/macOS only)",
-)
-
-
-@_skip_windows
 class TestCAS:
 
     def test_cas_create(self, tmp_path):
         reg = _make_registry(tmp_path)
         root = str(tmp_path / "stores" / "cas-store")
         reg.create_store("cas-store", root)
-        result = reg.cas("cas-store", "mykey", expected_value=None, new_value={"v": 1})
+        result = reg.cas("cas-store", "mykey", new_value={"v": 1})
         assert result["success"] is True
 
     def test_cas_update(self, tmp_path):
         reg = _make_registry(tmp_path)
         root = str(tmp_path / "stores" / "cas-store")
         reg.create_store("cas-store", root)
-        reg.cas("cas-store", "mykey", expected_value=None, new_value={"v": 1})
+        reg.cas("cas-store", "mykey", new_value={"v": 1})
         result = reg.cas("cas-store", "mykey", expected_value={"v": 1}, new_value={"v": 2})
         assert result["success"] is True
 
@@ -250,7 +247,7 @@ class TestCAS:
         reg = _make_registry(tmp_path)
         root = str(tmp_path / "stores" / "cas-store")
         reg.create_store("cas-store", root)
-        reg.cas("cas-store", "mykey", expected_value=None, new_value={"v": 1})
+        reg.cas("cas-store", "mykey", new_value={"v": 1})
         result = reg.cas("cas-store", "mykey", expected_value={"v": 999}, new_value={"v": 2})
         assert result["success"] is False
         assert result["error_type"] == "conflict"
@@ -263,26 +260,30 @@ class TestCAS:
         assert result["success"] is False
         assert result["error_type"] == "conflict"
 
-    def test_cas_key_exists_but_expected_none(self, tmp_path):
+    def test_cas_key_exists_but_expected_missing(self, tmp_path):
+        """キーが既に存在するのに expected_value 省略 (= 不存在期待) で CAS → conflict"""
         reg = _make_registry(tmp_path)
         root = str(tmp_path / "stores" / "cas-store")
         reg.create_store("cas-store", root)
-        reg.cas("cas-store", "mykey", expected_value=None, new_value={"v": 1})
-        result = reg.cas("cas-store", "mykey", expected_value=None, new_value={"v": 2})
+        reg.cas("cas-store", "mykey", new_value={"v": 1})
+        # expected_value 省略 = _EXPECT_MISSING → キー存在で conflict
+        result = reg.cas("cas-store", "mykey", new_value={"v": 2})
         assert result["success"] is False
         assert result["error_type"] == "conflict"
 
     def test_cas_store_not_found(self, tmp_path):
         reg = _make_registry(tmp_path)
-        result = reg.cas("missing", "k", expected_value=None, new_value=1)
+        result = reg.cas("missing", "k", new_value=1)
         assert result["success"] is False
 
-    def test_cas_path_traversal(self, tmp_path):
+    def test_cas_invalid_key(self, tmp_path):
+        """不正なキー (スペース含み) でバリデーションエラー"""
         reg = _make_registry(tmp_path)
         root = str(tmp_path / "stores" / "cas-store")
         reg.create_store("cas-store", root)
-        result = reg.cas("cas-store", "../../etc/passwd", expected_value=None, new_value="x")
+        result = reg.cas("cas-store", "bad key!", new_value="x")
         assert result["success"] is False
+        assert result["error_type"] == "validation_error"
 
 
 # ===================================================================
@@ -291,16 +292,18 @@ class TestCAS:
 
 class TestListKeys:
 
-    def _populate(self, tmp_path, reg, store_id, keys):
-        root = tmp_path / "stores" / store_id
-        root.mkdir(parents=True, exist_ok=True)
-        reg.create_store(store_id, str(root))
+    @staticmethod
+    def _populate(reg, store_id, keys, tmp_path):
+        """CAS 経由でキーを投入する"""
+        root = str(tmp_path / "stores" / store_id)
+        reg.create_store(store_id, root)
         for k in keys:
-            (root / f"{k}.json").write_text('"val"', encoding="utf-8")
+            result = reg.cas(store_id, k, new_value="val")
+            assert result["success"], f"Failed to populate key {k}: {result}"
 
     def test_list_all_keys(self, tmp_path):
         reg = _make_registry(tmp_path)
-        self._populate(tmp_path, reg, "s1", ["a", "b", "c"])
+        self._populate(reg, "s1", ["a", "b", "c"], tmp_path)
         result = reg.list_keys("s1")
         assert result["success"] is True
         assert sorted(result["keys"]) == ["a", "b", "c"]
@@ -308,14 +311,14 @@ class TestListKeys:
 
     def test_list_with_prefix(self, tmp_path):
         reg = _make_registry(tmp_path)
-        self._populate(tmp_path, reg, "s1", ["foo_1", "foo_2", "bar_1"])
+        self._populate(reg, "s1", ["foo_1", "foo_2", "bar_1"], tmp_path)
         result = reg.list_keys("s1", prefix="foo")
         assert result["success"] is True
         assert sorted(result["keys"]) == ["foo_1", "foo_2"]
 
     def test_pagination(self, tmp_path):
         reg = _make_registry(tmp_path)
-        self._populate(tmp_path, reg, "s1", [f"k{i:03d}" for i in range(10)])
+        self._populate(reg, "s1", [f"k{i:03d}" for i in range(10)], tmp_path)
         # First page
         r1 = reg.list_keys("s1", limit=3)
         assert r1["success"] is True
@@ -344,9 +347,7 @@ class TestListKeys:
 
     def test_list_keys_empty_store(self, tmp_path):
         reg = _make_registry(tmp_path)
-        root = tmp_path / "stores" / "empty"
-        root.mkdir(parents=True)
-        reg.create_store("empty", str(root))
+        reg.create_store("empty", str(tmp_path / "stores" / "empty"))
         result = reg.list_keys("empty")
         assert result["success"] is True
         assert result["keys"] == []
@@ -358,18 +359,18 @@ class TestListKeys:
 
 class TestBatchGet:
 
-    def _populate(self, tmp_path, reg, store_id, data):
-        root = tmp_path / "stores" / store_id
-        root.mkdir(parents=True, exist_ok=True)
-        reg.create_store(store_id, str(root))
+    @staticmethod
+    def _populate(reg, store_id, data, tmp_path):
+        """CAS 経由でキー/値ペアを投入する"""
+        root = str(tmp_path / "stores" / store_id)
+        reg.create_store(store_id, root)
         for k, v in data.items():
-            (root / f"{k}.json").write_text(
-                json.dumps(v, ensure_ascii=False), encoding="utf-8"
-            )
+            result = reg.cas(store_id, k, new_value=v)
+            assert result["success"], f"Failed to populate {k}: {result}"
 
     def test_batch_get_found(self, tmp_path):
         reg = _make_registry(tmp_path)
-        self._populate(tmp_path, reg, "s1", {"a": 1, "b": 2, "c": 3})
+        self._populate(reg, "s1", {"a": 1, "b": 2, "c": 3}, tmp_path)
         result = reg.batch_get("s1", ["a", "c"])
         assert result["success"] is True
         assert result["results"]["a"] == 1
@@ -379,7 +380,7 @@ class TestBatchGet:
 
     def test_batch_get_partial(self, tmp_path):
         reg = _make_registry(tmp_path)
-        self._populate(tmp_path, reg, "s1", {"a": 1})
+        self._populate(reg, "s1", {"a": 1}, tmp_path)
         result = reg.batch_get("s1", ["a", "missing"])
         assert result["found"] == 1
         assert result["not_found"] == 1
@@ -392,9 +393,7 @@ class TestBatchGet:
 
     def test_batch_get_too_many_keys(self, tmp_path):
         reg = _make_registry(tmp_path)
-        root = tmp_path / "stores" / "s1"
-        root.mkdir(parents=True)
-        reg.create_store("s1", str(root))
+        reg.create_store("s1", str(tmp_path / "stores" / "s1"))
         keys = [f"k{i}" for i in range(101)]
         result = reg.batch_get("s1", keys)
         assert result["success"] is False
@@ -402,8 +401,6 @@ class TestBatchGet:
 
     def test_batch_get_empty_keys(self, tmp_path):
         reg = _make_registry(tmp_path)
-        root = tmp_path / "stores" / "s1"
-        root.mkdir(parents=True)
-        reg.create_store("s1", str(root))
+        reg.create_store("s1", str(tmp_path / "stores" / "s1"))
         result = reg.batch_get("s1", [])
         assert result["success"] is False
