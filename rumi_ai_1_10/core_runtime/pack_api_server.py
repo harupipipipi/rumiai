@@ -47,6 +47,10 @@ logger = logging.getLogger(__name__)
 
 # --- pack_id validation (Fix #9) ---
 PACK_ID_RE = re.compile(r'^[a-zA-Z0-9_-]{1,64}$')
+# --- 汎用 ID validation ---
+SAFE_ID_RE = re.compile(r'^[a-zA-Z0-9_.:/-]{1,256}$')
+# --- リクエストボディサイズ上限 (10 MB) ---
+MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024
 # _SAFE_ERROR_MSG: moved to api._helpers
 
 
@@ -97,6 +101,11 @@ class PackAPIHandler(
         """pack_id が安全なパターンに合致するか検証する (Fix #9)"""
         return bool(pack_id and PACK_ID_RE.match(pack_id))
 
+    @staticmethod
+    def _is_safe_id(value: str) -> bool:
+        """汎用 ID バリデーション。staging_id, privilege_id, flow_id 等に使用する。"""
+        return bool(value and SAFE_ID_RE.match(value))
+
     
     def _send_response(self, response: APIResponse, status: int = 200) -> None:
         self.send_response(status)
@@ -130,24 +139,47 @@ class PackAPIHandler(
         
         return hmac.compare_digest(token, self.internal_token)
     
-    def _read_raw_body(self) -> bytes:
-        """リクエストボディを読み取り、インスタンスに保持して返す"""
+    def _read_raw_body(self) -> Optional[bytes]:
+        """リクエストボディを読み取り、インスタンスに保持して返す。
+
+        サイズ超過時は 413 レスポンスを送信し None を返す。
+
+        Returns:
+            bytes: 読み取ったボディ。
+            None: サイズ超過（レスポンス送信済み）。
+        """
         content_length = int(self.headers.get('Content-Length', 0))
         if content_length == 0:
             self._raw_body_bytes = b""
             return b""
+        if content_length > MAX_REQUEST_BODY_BYTES:
+            self._send_response(
+                APIResponse(False, error="Request body too large"), 413
+            )
+            return None
         raw = self.rfile.read(content_length)
         self._raw_body_bytes = raw
         return raw
 
-    def _parse_body(self) -> dict:
+    def _parse_body(self) -> Optional[dict]:
+        """リクエストボディをJSONとしてパースする。
+
+        Returns:
+            dict: パース結果。空ボディは {} を返す。
+            None: サイズ超過 / パース失敗（レスポンス送信済み）。
+        """
         raw = self._read_raw_body()
+        if raw is None:
+            return None  # _read_raw_body がエラーレスポンスを送信済み
         if not raw:
             return {}
         try:
             return json.loads(raw.decode('utf-8'))
         except (json.JSONDecodeError, UnicodeDecodeError):
-            return {}
+            self._send_response(
+                APIResponse(False, error="Invalid JSON in request body"), 400
+            )
+            return None
     
     def do_OPTIONS(self) -> None:
         self.send_response(200)
@@ -329,6 +361,8 @@ class PackAPIHandler(
         
         try:
             body = self._parse_body()
+            if body is None:
+                return  # レスポンス送信済み（サイズ超過 or JSONパース失敗）
             path = urlparse(self.path).path
 
             if path == "/api/network/grant":
@@ -388,6 +422,18 @@ class PackAPIHandler(
                 if not source_path:
                     self._send_response(APIResponse(False, error="Missing 'path'"), 400)
                 else:
+                    # パストラバーサル防止: ecosystem/ 配下のみ許可
+                    _eco_base = Path(
+                        os.environ.get("RUMI_ECOSYSTEM_DIR", "ecosystem")
+                    ).resolve()
+                    try:
+                        _resolved = Path(source_path).resolve()
+                        _resolved.relative_to(_eco_base)
+                    except (ValueError, OSError):
+                        self._send_response(
+                            APIResponse(False, error="Path must be within ecosystem directory"), 400
+                        )
+                        return
                     result = self._pack_import(source_path, notes)
                     if result.get("success"):
                         self._send_response(APIResponse(True, result))
@@ -399,6 +445,8 @@ class PackAPIHandler(
                 mode = body.get("mode", "replace")
                 if not staging_id:
                     self._send_response(APIResponse(False, error="Missing 'staging_id'"), 400)
+                elif not self._is_safe_id(staging_id):
+                    self._send_response(APIResponse(False, error="Invalid staging_id"), 400)
                 else:
                     result = self._pack_apply(staging_id, mode)
                     if result.get("success"):
@@ -451,7 +499,7 @@ class PackAPIHandler(
 
             elif path.startswith("/api/pip/requests/") and path.endswith("/approve"):
                 candidate_key = self._extract_capability_key(path, "/api/pip/requests/", "/approve")
-                if candidate_key is None:
+                if candidate_key is None or not self._is_safe_id(candidate_key):
                     self._send_response(APIResponse(False, error="Invalid candidate_key"), 400)
                 else:
                     allow_sdist = body.get("allow_sdist", False)
@@ -464,7 +512,7 @@ class PackAPIHandler(
 
             elif path.startswith("/api/pip/requests/") and path.endswith("/reject"):
                 candidate_key = self._extract_capability_key(path, "/api/pip/requests/", "/reject")
-                if candidate_key is None:
+                if candidate_key is None or not self._is_safe_id(candidate_key):
                     self._send_response(APIResponse(False, error="Invalid candidate_key"), 400)
                 else:
                     reason = body.get("reason", "")
@@ -476,7 +524,7 @@ class PackAPIHandler(
 
             elif path.startswith("/api/pip/blocked/") and path.endswith("/unblock"):
                 candidate_key = self._extract_capability_key(path, "/api/pip/blocked/", "/unblock")
-                if candidate_key is None:
+                if candidate_key is None or not self._is_safe_id(candidate_key):
                     self._send_response(APIResponse(False, error="Invalid candidate_key"), 400)
                 else:
                     reason = body.get("reason", "")
@@ -493,7 +541,7 @@ class PackAPIHandler(
 
             elif path.startswith("/api/capability/requests/") and path.endswith("/approve"):
                 candidate_key = self._extract_capability_key(path, "/api/capability/requests/", "/approve")
-                if candidate_key is None:
+                if candidate_key is None or not self._is_safe_id(candidate_key):
                     self._send_response(APIResponse(False, error="Invalid candidate_key"), 400)
                 else:
                     notes = body.get("notes", "")
@@ -505,7 +553,7 @@ class PackAPIHandler(
 
             elif path.startswith("/api/capability/requests/") and path.endswith("/reject"):
                 candidate_key = self._extract_capability_key(path, "/api/capability/requests/", "/reject")
-                if candidate_key is None:
+                if candidate_key is None or not self._is_safe_id(candidate_key):
                     self._send_response(APIResponse(False, error="Invalid candidate_key"), 400)
                 else:
                     reason = body.get("reason", "")
@@ -517,7 +565,7 @@ class PackAPIHandler(
 
             elif path.startswith("/api/capability/blocked/") and path.endswith("/unblock"):
                 candidate_key = self._extract_capability_key(path, "/api/capability/blocked/", "/unblock")
-                if candidate_key is None:
+                if candidate_key is None or not self._is_safe_id(candidate_key):
                     self._send_response(APIResponse(False, error="Invalid candidate_key"), 400)
                 else:
                     reason = body.get("reason", "")
@@ -627,6 +675,9 @@ class PackAPIHandler(
                 if not self._validate_pack_id(pack_id):
                     self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
                     return
+                if not self._is_safe_id(privilege_id):
+                    self._send_response(APIResponse(False, error="Invalid privilege_id"), 400)
+                    return
                 result = self._grant_privilege(pack_id, privilege_id)
                 if result.get("success"):
                     self._send_response(APIResponse(True, result))
@@ -639,6 +690,9 @@ class PackAPIHandler(
                 privilege_id = parts[5]
                 if not self._validate_pack_id(pack_id):
                     self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
+                    return
+                if not self._is_safe_id(privilege_id):
+                    self._send_response(APIResponse(False, error="Invalid privilege_id"), 400)
                     return
                 params = body.get("params", {})
                 result = self._execute_privilege(pack_id, privilege_id, params)
@@ -654,6 +708,13 @@ class PackAPIHandler(
 
             # --- Flow execution API ---
             elif path.startswith("/api/flows/") and path.endswith("/run"):
+                # flow_id バリデーション（flow_handlers 呼び出し前に検証）
+                _flow_parts = path.split("/")
+                if len(_flow_parts) >= 5:
+                    _flow_id_raw = unquote(_flow_parts[3])
+                    if not self._is_safe_id(_flow_id_raw):
+                        self._send_response(APIResponse(False, error="Invalid flow_id"), 400)
+                        return
                 self._handle_flow_run(path, body)
 
             # --- Pack custom routes (POST) ---
@@ -677,6 +738,8 @@ class PackAPIHandler(
 
         try:
             body = self._parse_body()
+            if body is None:
+                return  # レスポンス送信済み
             path = urlparse(self.path).path
 
             match = self._match_pack_route(path, "PUT")
@@ -720,6 +783,8 @@ class PackAPIHandler(
                     match = self._match_pack_route(path, "DELETE")
                     if match:
                         body = self._parse_body()
+                        if body is None:
+                            return  # レスポンス送信済み
                         self._handle_pack_route_request(path, body, "DELETE", match)
                     else:
                         self._send_response(APIResponse(False, error="Not found"), 404)
