@@ -9,6 +9,18 @@ from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
 logger = logging.getLogger(__name__)
 
 
+def _is_safe_path_param(value: str) -> bool:
+    """パスパラメータが安全かどうかを検証する。
+
+    null バイトやパストラバーサルシーケンスを含む値を拒否する。
+    """
+    if "\x00" in value:
+        return False
+    if ".." in value:
+        return False
+    return True
+
+
 class RouteHandlersMixin:
     """Pack 独自ルート (load / match / handle / reload) のハンドラ"""
 
@@ -100,7 +112,11 @@ class RouteHandlersMixin:
             matched = True
             for i, (tmpl_seg, req_seg) in enumerate(zip(tmpl_segments, request_segments)):
                 if i in param_indices:
-                    path_params[param_indices[i]] = unquote(req_seg)
+                    decoded = unquote(req_seg)
+                    if not _is_safe_path_param(decoded):
+                        matched = False
+                        break
+                    path_params[param_indices[i]] = decoded
                 elif tmpl_seg != req_seg:
                     matched = False
                     break
@@ -114,7 +130,19 @@ class RouteHandlersMixin:
         from ..pack_api_server import APIResponse
 
         route_info, path_params = match
+        pack_id = route_info["pack_id"]
         flow_id = route_info["flow_id"]
+
+        # Flow スコープ検証: flow_id は当該 Pack のスコープ内でなければならない
+        if not (flow_id.startswith(pack_id + ".") or flow_id == pack_id):
+            logger.warning(
+                "Flow scope violation: pack_id=%s, flow_id=%s", pack_id, flow_id,
+            )
+            self._send_response(
+                APIResponse(False, error="Flow scope violation"), 403,
+            )
+            return
+
         input_mapping = route_info.get("input_mapping", {})
 
         # 入力を構築
