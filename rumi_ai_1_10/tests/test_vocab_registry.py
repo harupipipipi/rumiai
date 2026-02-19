@@ -9,7 +9,12 @@ from pathlib import Path
 
 import pytest
 
-from core_runtime.vocab_registry import VocabRegistry
+from core_runtime.vocab_registry import (
+    CollisionStrategy,
+    MAX_NORMALIZE_DEPTH,
+    VocabKeyCollisionError,
+    VocabRegistry,
+)
 
 
 # ===================================================================
@@ -371,3 +376,216 @@ class TestNormalizeDictKeys:
         result, changes = vr.normalize_dict_keys({})
         assert result == {}
         assert changes == []
+
+
+# ===================================================================
+# CollisionStrategy variants (C-2-impl)
+# ===================================================================
+
+class TestCollisionStrategyKeepFirst:
+
+    def test_keep_first(self):
+        vr = VocabRegistry()
+        vr.register_group(["tool", "function_calling"])
+        data = {"tool": "first", "function_calling": "second"}
+        result, changes = vr.normalize_dict_keys(
+            data, collision_strategy=CollisionStrategy.KEEP_FIRST
+        )
+        assert result["tool"] == "first"
+
+
+class TestCollisionStrategyKeepLast:
+
+    def test_keep_last(self):
+        vr = VocabRegistry()
+        vr.register_group(["tool", "function_calling"])
+        data = {"tool": "first", "function_calling": "second"}
+        result, changes = vr.normalize_dict_keys(
+            data, collision_strategy=CollisionStrategy.KEEP_LAST
+        )
+        assert result["tool"] == "second"
+
+
+class TestCollisionStrategyRaise:
+
+    def test_raise_on_collision(self):
+        vr = VocabRegistry()
+        vr.register_group(["tool", "function_calling"])
+        data = {"tool": "first", "function_calling": "second"}
+        with pytest.raises(VocabKeyCollisionError) as exc_info:
+            vr.normalize_dict_keys(
+                data, collision_strategy=CollisionStrategy.RAISE
+            )
+        assert exc_info.value.key == "tool"
+        assert exc_info.value.existing_value == "first"
+        assert exc_info.value.new_value == "second"
+
+
+class TestCollisionStrategyMergeList:
+
+    def test_merge_list(self):
+        vr = VocabRegistry()
+        vr.register_group(["tool", "function_calling"])
+        data = {"tool": "first", "function_calling": "second"}
+        result, changes = vr.normalize_dict_keys(
+            data, collision_strategy=CollisionStrategy.MERGE_LIST
+        )
+        assert result["tool"] == ["first", "second"]
+
+    def test_merge_list_triple(self):
+        vr = VocabRegistry()
+        vr.register_group(["tool", "function_calling", "tools"])
+        data = {"tool": "a", "function_calling": "b", "tools": "c"}
+        result, changes = vr.normalize_dict_keys(
+            data, collision_strategy=CollisionStrategy.MERGE_LIST
+        )
+        assert result["tool"] == ["a", "b", "c"]
+
+
+class TestCollisionStrategyWarn:
+
+    def test_warn_keeps_first(self):
+        vr = VocabRegistry()
+        vr.register_group(["tool", "function_calling"])
+        data = {"tool": "first", "function_calling": "second"}
+        result, changes = vr.normalize_dict_keys(
+            data, collision_strategy=CollisionStrategy.WARN
+        )
+        # WARN = 警告ログ + keep_first
+        assert result["tool"] == "first"
+
+
+class TestCollisionOnCallback:
+
+    def test_on_collision_callback(self):
+        vr = VocabRegistry()
+        vr.register_group(["tool", "function_calling"])
+        data = {"tool": "first", "function_calling": "second"}
+
+        def custom_handler(key, existing, new):
+            return f"{existing}+{new}"
+
+        result, changes = vr.normalize_dict_keys(
+            data, on_collision=custom_handler
+        )
+        assert result["tool"] == "first+second"
+
+
+# ===================================================================
+# normalize_dict_keys: _ prefix skip
+# ===================================================================
+
+class TestNormalizeDictKeysUnderscorePrefix:
+
+    def test_underscore_prefix_skipped(self):
+        vr = VocabRegistry()
+        vr.register_group(["tool", "function_calling"])
+        data = {"_internal": "keep", "function_calling": "convert"}
+        result, changes = vr.normalize_dict_keys(data)
+        assert "_internal" in result
+        assert "tool" in result
+        # _internal は正規化対象外
+        rename_changes = [
+            (orig, norm) for orig, norm in changes
+            if not orig.startswith("COLLISION:")
+        ]
+        originals = [c[0] for c in rename_changes]
+        assert "_internal" not in originals
+
+    def test_underscore_prefix_value_still_normalized(self):
+        """_ プレフィックスキーの値（dict）は再帰的に正規化される。"""
+        vr = VocabRegistry()
+        vr.register_group(["tool", "function_calling"])
+        data = {"_meta": {"function_calling": "inner"}}
+        result, changes = vr.normalize_dict_keys(data)
+        assert "_meta" in result
+        assert "tool" in result["_meta"]
+
+
+# ===================================================================
+# normalize_dict_keys: MAX_NORMALIZE_DEPTH
+# ===================================================================
+
+class TestNormalizeDictKeysDepth:
+
+    def test_max_depth_stops_recursion(self):
+        vr = VocabRegistry()
+        vr.register_group(["tool", "function_calling"])
+        # MAX_NORMALIZE_DEPTH + 1 レベルのネストを構築
+        data: dict = {"function_calling": "leaf"}
+        for _ in range(MAX_NORMALIZE_DEPTH + 1):
+            data = {"wrapper": data}
+        result, changes = vr.normalize_dict_keys(data)
+        # 最深部まで降りる
+        inner = result
+        for _ in range(MAX_NORMALIZE_DEPTH + 1):
+            inner = inner["wrapper"]
+        # 深さ制限超過: function_calling が変換されずに残っている
+        assert "function_calling" in inner
+
+    def test_within_depth_converted(self):
+        vr = VocabRegistry()
+        vr.register_group(["tool", "function_calling"])
+        data = {"outer": {"function_calling": "val"}}
+        result, changes = vr.normalize_dict_keys(data)
+        assert "tool" in result["outer"]
+
+    def test_list_within_depth_converted(self):
+        """リスト内の dict も深さ制限内なら正規化される。"""
+        vr = VocabRegistry()
+        vr.register_group(["tool", "function_calling"])
+        data = {"items": [{"function_calling": "v1"}, {"function_calling": "v2"}]}
+        result, changes = vr.normalize_dict_keys(data)
+        for item in result["items"]:
+            assert "tool" in item
+
+
+# ===================================================================
+# get_registration_summary
+# ===================================================================
+
+class TestGetRegistrationSummary:
+
+    def test_summary_basic(self, tmp_path):
+        vr = VocabRegistry()
+        vr.register_group(["tool", "function_calling"], source_pack="pack_a")
+        vr.register_group(["alpha", "beta"], source_pack="pack_b")
+
+        converter_file = tmp_path / "tool_to_fc.py"
+        converter_file.write_text("def convert(d): return d\n", encoding="utf-8")
+        vr.register_converter("tool", "fc", converter_file, source_pack="pack_a")
+
+        summary = vr.get_registration_summary()
+        assert summary["totals"]["groups"] == 2
+        assert summary["totals"]["converters"] == 1
+        assert "pack_a" in summary["groups_by_pack"]
+        assert "pack_b" in summary["groups_by_pack"]
+        assert "pack_a" in summary["converters_by_pack"]
+
+    def test_summary_empty(self):
+        vr = VocabRegistry()
+        summary = vr.get_registration_summary()
+        assert summary["totals"]["groups"] == 0
+        assert summary["totals"]["converters"] == 0
+        assert summary["totals"]["packs"] == 0
+        assert summary["loaded_packs"] == []
+
+    def test_summary_after_load_pack(self, tmp_path):
+        pack_dir = tmp_path / "mypack"
+        pack_dir.mkdir()
+        (pack_dir / "vocab.txt").write_text(
+            "tool, function_calling\n", encoding="utf-8"
+        )
+        vr = VocabRegistry()
+        vr.load_pack_vocab(pack_dir, "mypack")
+
+        summary = vr.get_registration_summary()
+        assert "mypack" in summary["loaded_packs"]
+        assert summary["totals"]["packs"] == 1
+
+    def test_summary_unknown_pack(self):
+        """source_pack 未指定のグループは _unknown に分類される。"""
+        vr = VocabRegistry()
+        vr.register_group(["x", "y"])  # source_pack=None
+        summary = vr.get_registration_summary()
+        assert "_unknown" in summary["groups_by_pack"]
