@@ -93,6 +93,10 @@ class UnitHandlersMixin:
         mode = body.get("mode", "host_capability")
         args = body.get("args", {})
         timeout = body.get("timeout", 60.0)
+        if not isinstance(timeout, (int, float)):
+            timeout = 60.0
+        else:
+            timeout = min(max(timeout, 1), 300)
 
         if not principal_id:
             return {"success": False, "error": "Missing 'principal_id'"}
