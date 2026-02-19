@@ -1,15 +1,33 @@
 """Pip 依存ライブラリ ハンドラ Mixin"""
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
 
 from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
+from ..paths import is_path_within, ECOSYSTEM_DIR
+
+# index_url 許可リスト — ここに含まれない URL は拒否する
+_ALLOWED_INDEX_URLS: frozenset[str] = frozenset({
+    "https://pypi.org/simple",
+})
+
+# Code root（ecosystem ディレクトリの親 = プロジェクトルート）
+_CODE_ROOT: Path = Path(ECOSYSTEM_DIR).parent
 
 
 class PipHandlersMixin:
     """pip 依存ライブラリ スキャン / 承認 / 拒否 / ブロック管理のハンドラ"""
 
     def _pip_scan(self, ecosystem_dir: Optional[str] = None) -> dict:
+        if ecosystem_dir is not None:
+            resolved = Path(ecosystem_dir).resolve()
+            if not is_path_within(resolved, _CODE_ROOT):
+                return {
+                    "error": "ecosystem_dir is outside the allowed project root.",
+                    "scanned_count": 0,
+                    "pending_created": 0,
+                }
         try:
             from ..pip_installer import get_pip_installer
             installer = get_pip_installer()
@@ -30,6 +48,11 @@ class PipHandlersMixin:
             return {"items": [], "error": _SAFE_ERROR_MSG}
 
     def _pip_approve(self, candidate_key: str, allow_sdist: bool = False, index_url: str = "https://pypi.org/simple") -> dict:
+        if index_url not in _ALLOWED_INDEX_URLS:
+            return {
+                "success": False,
+                "error": f"index_url is not in the allowed list. Allowed: {sorted(_ALLOWED_INDEX_URLS)}",
+            }
         try:
             from ..pip_installer import get_pip_installer
             installer = get_pip_installer()

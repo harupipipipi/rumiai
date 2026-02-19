@@ -1,10 +1,15 @@
 """Capability Installer ハンドラ Mixin"""
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
 from urllib.parse import unquote
 
 from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
+from ..paths import is_path_within, ECOSYSTEM_DIR
+
+# Code root（ecosystem ディレクトリの親 = プロジェクトルート）
+_CODE_ROOT: Path = Path(ECOSYSTEM_DIR).parent
 
 
 class CapabilityInstallerHandlersMixin:
@@ -26,6 +31,14 @@ class CapabilityInstallerHandlersMixin:
         return unquote(encoded_key)
 
     def _capability_scan(self, ecosystem_dir: Optional[str] = None) -> dict:
+        if ecosystem_dir is not None:
+            resolved = Path(ecosystem_dir).resolve()
+            if not is_path_within(resolved, _CODE_ROOT):
+                return {
+                    "error": "ecosystem_dir is outside the allowed project root.",
+                    "scanned_count": 0,
+                    "pending_created": 0,
+                }
         try:
             from ..capability_installer import get_capability_installer
             installer = get_capability_installer()
