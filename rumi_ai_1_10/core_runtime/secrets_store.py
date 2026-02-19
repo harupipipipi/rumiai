@@ -590,19 +590,20 @@ class SecretsStore:
     def _append_journal(
         self, action: str, key: str, actor: str, reason: str = "",
     ) -> None:
-        entry: Dict[str, Any] = {
-            "ts": self._now_ts(),
-            "action": action,
-            "key": key,
-            "actor": actor,
-        }
-        if reason:
-            entry["reason"] = reason
-        try:
-            with open(self._secrets_dir / "journal.jsonl", "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        except Exception:
-            pass
+        with self._lock:
+            entry: Dict[str, Any] = {
+                "ts": self._now_ts(),
+                "action": action,
+                "key": key,
+                "actor": actor,
+            }
+            if reason:
+                entry["reason"] = reason
+            try:
+                with open(self._secrets_dir / "journal.jsonl", "a", encoding="utf-8") as f:
+                    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            except Exception:
+                pass
 
     @staticmethod
     def _audit(event_type: str, success: bool, details: Dict[str, Any]) -> None:
