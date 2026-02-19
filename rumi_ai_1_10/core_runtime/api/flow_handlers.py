@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 import time
 from typing import Any
@@ -12,6 +13,24 @@ from urllib.parse import unquote
 from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# パス検出: 3階層以上の Unix/Windows ファイルパスを <path> に置換
+# ---------------------------------------------------------------------------
+_RE_FILE_PATH = re.compile(r'(?:[A-Za-z]:)?(?:[/\\][\w.\-]+){3,}')
+
+# メモリアドレス (例: at 0x7f3a...)
+_RE_MEM_ADDR = re.compile(r'\bat\s+0x[0-9a-fA-F]+')
+
+# トレースバック判定用キーワード
+_TRACEBACK_PREFIXES = (
+    "Traceback (most recent",
+    "Traceback(most recent",
+    'File "',
+    "  File ",
+    "During handling of",
+    "The above exception",
+)
 
 
 def _is_json_serializable(value: Any) -> bool:
@@ -28,10 +47,78 @@ def _is_json_serializable(value: Any) -> bool:
     return False
 
 
+def _sanitize_error(error_str: Any) -> str:
+    """エラー文字列からスタックトレースやファイルパスを除去する。
+
+    * トレースバック行(``File "..."`` 等)を除去
+    * 3階層以上のファイルパスを ``<path>`` に置換
+    * メモリアドレスを除去
+    * 最初の意味のある行を最大 200 文字で返す
+    * 何も残らなければ ``_SAFE_ERROR_MSG`` を返す
+    """
+    if not isinstance(error_str, str) or not error_str.strip():
+        return _SAFE_ERROR_MSG
+
+    lines: list[str] = []
+    for raw_line in error_str.splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        # トレースバック関連行を除去
+        if any(stripped.startswith(p) for p in _TRACEBACK_PREFIXES):
+            continue
+        # Python キャレット行 (構文エラー表示) を除去
+        if stripped.lstrip().startswith("^"):
+            continue
+        # インデントされたコード行 (traceback 内) を除去
+        if raw_line.startswith("    ") and not raw_line.startswith("    " * 2 + " "):
+            # トレースバック内のソースコード行は4スペースインデント
+            # ただし通常のエラーメッセージがインデントされることは稀
+            # lines に既にデータがなく、かつインデント行なら traceback の一部とみなす
+            if not lines:
+                continue
+        lines.append(stripped)
+
+    if not lines:
+        return _SAFE_ERROR_MSG
+
+    # 最初の意味のある行を採用
+    result = lines[-1]  # 通常、例外メッセージは最後の行
+
+    # ファイルパスを置換
+    result = _RE_FILE_PATH.sub("<path>", result)
+    # メモリアドレスを除去
+    result = _RE_MEM_ADDR.sub("", result)
+    # 連続空白を正規化
+    result = re.sub(r"\s{2,}", " ", result).strip()
+
+    if not result:
+        return _SAFE_ERROR_MSG
+
+    # 200文字で切り詰め
+    if len(result) > 200:
+        result = result[:197] + "..."
+
+    return result
+
+
 class FlowHandlersMixin:
     """Flow 実行 API のハンドラ"""
 
     _flow_semaphore = None  # 同時実行制御用Semaphore
+
+    # Flow結果から除外する内部オブジェクトキー
+    _CTX_OBJECT_KEYS: frozenset[str] = frozenset({
+        "diagnostics", "install_journal", "interface_registry",
+        "event_bus", "lifecycle", "mount_manager", "registry",
+        "active_ecosystem", "permission_manager",
+        "function_alias_registry", "flow_composer",
+        "vocab_registry", "approval_manager",
+        "container_orchestrator", "host_privilege_manager",
+        "pack_api_server",
+        "store_registry", "unit_registry",
+        "secrets_store",
+    })
 
     @classmethod
     def _get_flow_semaphore(cls) -> threading.Semaphore:
@@ -90,16 +177,9 @@ class FlowHandlersMixin:
 
         flow_def = ir.get(f"flow.{flow_id}", strategy="last")
         if flow_def is None:
-            available = [
-                k[5:] for k in (ir.list() or {}).keys()
-                if k.startswith("flow.")
-                and not k.startswith("flow.hooks")
-                and not k.startswith("flow.construct")
-            ]
             return {
                 "success": False,
                 "error": f"Flow '{flow_id}' not found",
-                "available_flows": available,
                 "status_code": 404,
             }
 
@@ -124,7 +204,7 @@ class FlowHandlersMixin:
             if isinstance(ctx, dict) and ctx.get("_error"):
                 return {
                     "success": False,
-                    "error": ctx["_error"],
+                    "error": _sanitize_error(ctx["_error"]),
                     "flow_id": flow_id,
                     "execution_time": elapsed,
                     "status_code": 408 if ctx.get("_flow_timeout") else 500,
@@ -133,21 +213,10 @@ class FlowHandlersMixin:
             # 結果から内部キーを除外
             result_data = {}
             if isinstance(ctx, dict):
-                _ctx_object_keys = {
-                    "diagnostics", "install_journal", "interface_registry",
-                    "event_bus", "lifecycle", "mount_manager", "registry",
-                    "active_ecosystem", "permission_manager",
-                    "function_alias_registry", "flow_composer",
-                    "vocab_registry", "approval_manager",
-                    "container_orchestrator", "host_privilege_manager",
-                    "pack_api_server",
-                    "store_registry", "unit_registry",
-                    "secrets_store",
-                }
                 result_data = {
                     k: v for k, v in ctx.items()
                     if not k.startswith("_")
-                    and k not in _ctx_object_keys
+                    and k not in self._CTX_OBJECT_KEYS
                     and not callable(v)
                     and _is_json_serializable(v)
                 }
