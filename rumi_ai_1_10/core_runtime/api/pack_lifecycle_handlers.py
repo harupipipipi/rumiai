@@ -1,6 +1,8 @@
 """Pack ライフサイクル ハンドラ Mixin"""
 from __future__ import annotations
 
+from typing import Any
+
 from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
 
 
@@ -8,17 +10,65 @@ class PackLifecycleHandlersMixin:
     """Pack アンインストール / インポート / 適用 のハンドラ"""
 
     def _uninstall_pack(self, pack_id: str) -> dict:
+        # --- バリデーション ---
+        if not isinstance(pack_id, str) or not pack_id.strip():
+            return {
+                "success": False,
+                "pack_id": pack_id if isinstance(pack_id, str) else str(pack_id),
+                "steps": {},
+                "errors": [{"step": "validation", "error": "pack_id must be a non-empty string"}],
+            }
+
+        steps: dict[str, Any] = {
+            "container_stop": None,
+            "container_remove": None,
+            "approval_remove": None,
+            "privilege_revoke": None,
+        }
+        errors: list[dict[str, str]] = []
+
+        # --- container stop ---
         if self.container_orchestrator:
-            self.container_orchestrator.stop_container(pack_id)
-            self.container_orchestrator.remove_container(pack_id)
+            try:
+                self.container_orchestrator.stop_container(pack_id)
+                steps["container_stop"] = True
+            except Exception as e:
+                steps["container_stop"] = False
+                errors.append({"step": "container_stop", "error": str(e)})
+                _log_internal_error("uninstall_pack.container_stop", e)
 
+        # --- container remove ---
+        if self.container_orchestrator:
+            try:
+                self.container_orchestrator.remove_container(pack_id)
+                steps["container_remove"] = True
+            except Exception as e:
+                steps["container_remove"] = False
+                errors.append({"step": "container_remove", "error": str(e)})
+                _log_internal_error("uninstall_pack.container_remove", e)
+
+        # --- approval remove ---
         if self.approval_manager:
-            self.approval_manager.remove_approval(pack_id)
+            try:
+                self.approval_manager.remove_approval(pack_id)
+                steps["approval_remove"] = True
+            except Exception as e:
+                steps["approval_remove"] = False
+                errors.append({"step": "approval_remove", "error": str(e)})
+                _log_internal_error("uninstall_pack.approval_remove", e)
 
+        # --- privilege revoke ---
         if self.host_privilege_manager:
-            self.host_privilege_manager.revoke_all(pack_id)
+            try:
+                self.host_privilege_manager.revoke_all(pack_id)
+                steps["privilege_revoke"] = True
+            except Exception as e:
+                steps["privilege_revoke"] = False
+                errors.append({"step": "privilege_revoke", "error": str(e)})
+                _log_internal_error("uninstall_pack.privilege_revoke", e)
 
-        return {"success": True, "pack_id": pack_id}
+        success = len(errors) == 0
+        return {"success": success, "pack_id": pack_id, "steps": steps, "errors": errors}
 
     def _pack_import(self, source_path: str, notes: str = "") -> dict:
         try:
