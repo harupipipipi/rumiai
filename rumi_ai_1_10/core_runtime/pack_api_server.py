@@ -116,6 +116,19 @@ class PackAPIHandler(
             self.send_header('Vary', 'Origin')
         self.end_headers()
         self.wfile.write(response.to_json().encode('utf-8'))
+
+    def _send_result(self, result, error_status: int = 500) -> None:
+        """ハンドラ戻り値を判定してレスポンスを送信する (T-008)。
+
+        戻り値が dict で ``"error"`` キーを含む場合はエラーレスポンスとして送信し、
+        それ以外は成功レスポンスとして送信する。
+        """
+        if isinstance(result, dict) and "error" in result:
+            self._send_response(
+                APIResponse(False, error=result["error"]), error_status
+            )
+        else:
+            self._send_response(APIResponse(True, data=result))
     
     def _check_auth(self) -> bool:
         auth_header = self.headers.get('Authorization', '')
@@ -252,11 +265,11 @@ class PackAPIHandler(
         try:
             if path == "/api/packs":
                 result = self._get_all_packs()
-                self._send_response(APIResponse(True, result))
+                self._send_result(result)
             
             elif path == "/api/packs/pending":
                 result = self._get_pending_packs()
-                self._send_response(APIResponse(True, result))
+                self._send_result(result)
             
             elif path.startswith("/api/packs/") and path.endswith("/status"):
                 pack_id = path.split("/")[3]
@@ -265,83 +278,83 @@ class PackAPIHandler(
                     return
                 result = self._get_pack_status(pack_id)
                 if result:
-                    self._send_response(APIResponse(True, result))
+                    self._send_result(result)
                 else:
                     self._send_response(APIResponse(False, error="Pack not found"), 404)
             
             elif path == "/api/containers":
                 result = self._get_containers()
-                self._send_response(APIResponse(True, result))
+                self._send_result(result)
             
             elif path == "/api/privileges":
                 result = self._get_privileges()
-                self._send_response(APIResponse(True, result))
+                self._send_result(result)
             
             elif path == "/api/docker/status":
                 result = self._get_docker_status()
-                self._send_response(APIResponse(True, result))
+                self._send_result(result)
 
             elif path == "/api/network/list":
                 result = self._network_list()
-                self._send_response(APIResponse(True, result))
+                self._send_result(result)
 
             elif path == "/api/secrets":
                 result = self._secrets_list()
-                self._send_response(APIResponse(True, result))
+                self._send_result(result)
 
             elif path == "/api/stores":
                 result = self._stores_list()
-                self._send_response(APIResponse(True, result))
+                self._send_result(result)
 
 
             elif path == "/api/stores/shared":
                 result = self._stores_shared_list()
-                self._send_response(APIResponse(True, result))
+                self._send_result(result)
 
             elif path == "/api/units":
                 query = parse_qs(urlparse(self.path).query)
                 store_id = query.get("store_id", [None])[0]
                 result = self._units_list(store_id)
-                self._send_response(APIResponse(True, result))
+                self._send_result(result)
 
             elif path == "/api/capability/blocked":
                 result = self._capability_list_blocked()
-                self._send_response(APIResponse(True, result))
+                self._send_result(result)
 
             elif path == "/api/capability/grants":
                 # GET /api/capability/grants?principal_id=xxx
                 query = parse_qs(urlparse(self.path).query)
                 principal_id = query.get("principal_id", [None])[0]
                 result = self._capability_grants_list(principal_id)
-                self._send_response(APIResponse(True, result))
+                self._send_result(result)
 
             elif path == "/api/capability/requests":
                 # GET /api/capability/requests?status=pending
                 query = parse_qs(urlparse(self.path).query)
                 status_filter = query.get("status", ["all"])[0]
                 result = self._capability_list_requests(status_filter)
-                self._send_response(APIResponse(True, result))
+                self._send_result(result)
 
             elif path == "/api/pip/blocked":
                 result = self._pip_list_blocked()
-                self._send_response(APIResponse(True, result))
+                self._send_result(result)
 
             elif path == "/api/pip/requests":
                 # GET /api/pip/requests?status=pending
                 query = parse_qs(urlparse(self.path).query)
                 status_filter = query.get("status", ["all"])[0]
                 result = self._pip_list_requests(status_filter)
-                self._send_response(APIResponse(True, result))
+                self._send_result(result)
 
             # --- Flow execution API ---
             elif path == "/api/flows":
                 result = self._get_flow_list()
-                self._send_response(APIResponse(True, result))
+                self._send_result(result)
 
             # --- Pack custom routes (GET) ---
             elif path == "/api/routes":
                 result = self._get_registered_routes()
-                self._send_response(APIResponse(True, result))
+                self._send_result(result)
 
             else:
                 match = self._match_pack_route(path, "GET")
@@ -414,7 +427,7 @@ class PackAPIHandler(
 
             elif path == "/api/packs/scan":
                 result = self._scan_packs()
-                self._send_response(APIResponse(True, result))
+                self._send_result(result)
 
             elif path == "/api/packs/import":
                 source_path = body.get("path", "")
@@ -495,7 +508,7 @@ class PackAPIHandler(
             elif path == "/api/pip/candidates/scan":
                 ecosystem_dir = body.get("ecosystem_dir", None)
                 result = self._pip_scan(ecosystem_dir)
-                self._send_response(APIResponse(True, result))
+                self._send_result(result)
 
             elif path.startswith("/api/pip/requests/") and path.endswith("/approve"):
                 candidate_key = self._extract_capability_key(path, "/api/pip/requests/", "/approve")
@@ -537,7 +550,7 @@ class PackAPIHandler(
             elif path == "/api/capability/candidates/scan":
                 ecosystem_dir = body.get("ecosystem_dir", None)
                 result = self._capability_scan(ecosystem_dir)
-                self._send_response(APIResponse(True, result))
+                self._send_result(result)
 
             elif path.startswith("/api/capability/requests/") and path.endswith("/approve"):
                 candidate_key = self._extract_capability_key(path, "/api/capability/requests/", "/approve")
@@ -647,7 +660,7 @@ class PackAPIHandler(
                     return
                 reason = body.get("reason", "User rejected")
                 result = self._reject_pack(pack_id, reason)
-                self._send_response(APIResponse(True, result))
+                self._send_result(result)
             
             elif path.startswith("/api/containers/") and path.endswith("/start"):
                 pack_id = path.split("/")[3]
@@ -666,7 +679,7 @@ class PackAPIHandler(
                     self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
                     return
                 result = self._stop_container(pack_id)
-                self._send_response(APIResponse(True, result))
+                self._send_result(result)
             
             elif path.startswith("/api/privileges/") and "/grant/" in path:
                 parts = path.split("/")
@@ -704,7 +717,7 @@ class PackAPIHandler(
             # --- Route reload ---
             elif path == "/api/routes/reload":
                 result = self._reload_pack_routes()
-                self._send_response(APIResponse(True, result))
+                self._send_result(result)
 
             # --- Flow execution API ---
             elif path.startswith("/api/flows/") and path.endswith("/run"):
@@ -766,7 +779,7 @@ class PackAPIHandler(
                     self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
                     return
                 result = self._remove_container(pack_id)
-                self._send_response(APIResponse(True, result))
+                self._send_result(result)
             
             elif path.startswith("/api/packs/"):
                 parts = path.strip("/").split("/")
@@ -777,7 +790,7 @@ class PackAPIHandler(
                         self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
                     else:
                         result = self._uninstall_pack(pack_id)
-                        self._send_response(APIResponse(True, result))
+                        self._send_result(result)
                 else:
                     # Non-built-in sub-path → try Pack custom routes
                     match = self._match_pack_route(path, "DELETE")
@@ -790,7 +803,15 @@ class PackAPIHandler(
                         self._send_response(APIResponse(False, error="Not found"), 404)
             
             else:
-                self._send_response(APIResponse(False, error="Not found"), 404)
+                # T-009: Pack独自ルートフォールバック追加
+                match = self._match_pack_route(path, "DELETE")
+                if match:
+                    body = self._parse_body()
+                    if body is None:
+                        return  # レスポンス送信済み
+                    self._handle_pack_route_request(path, body, "DELETE", match)
+                else:
+                    self._send_response(APIResponse(False, error="Not found"), 404)
                 
         except Exception as e:
             _log_internal_error("do_DELETE", e)
