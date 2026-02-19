@@ -7,7 +7,7 @@ hmac_key_manager.py - HMAC鍵のローテーション管理 + 署名ユーティ
 グレースピリオド: デフォルト24時間（ローテーション後も旧鍵で検証可能）
 ローテーショントリガー:
   - 環境変数 RUMI_HMAC_ROTATE=true で起動時にローテーション
-  - プログラムから rotate() を呼び出し
+  - プログラムから rotate() / rotate_key() を呼び出し
 
 署名ユーティリティ (#65):
   - generate_or_load_signing_key(key_path) → bytes
@@ -20,8 +20,10 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
+import shutil
 import tempfile
 import threading
 from dataclasses import dataclass, field
@@ -29,6 +31,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+logger = logging.getLogger(__name__)
 
 # デフォルトグレースピリオド（秒）: 24時間
 DEFAULT_GRACE_PERIOD_SECONDS = 86400
@@ -85,8 +88,13 @@ def generate_or_load_signing_key(
     if key_path.exists():
         try:
             key_data = key_path.read_text(encoding="utf-8").strip()
-            if key_data:
+            if key_data and len(key_data) >= 32:
                 return key_data.encode("utf-8")
+            elif key_data:
+                logger.warning(
+                    "鍵ファイルの鍵長が不十分です（%d文字）。再生成します。",
+                    len(key_data),
+                )
         except Exception:
             pass
 
@@ -254,10 +262,18 @@ class HMACKeyManager:
                     if not any(k.is_active for k in self._keys):
                         self._generate_new_key_internal()
                     return
-                except (json.JSONDecodeError, KeyError, IOError) as e:
-                    print(f"[HMACKeyManager] 鍵ファイル読み込みエラー、新規生成します: {e}")
+                except (json.JSONDecodeError, KeyError, IOError, OSError) as e:
+                    logger.warning(
+                        "鍵ファイル読み込みエラー、バックアップ後に新規生成します: %s", e
+                    )
+                    # 破損ファイルをバックアップ
+                    try:
+                        bak_path = self._keys_path.with_suffix(".json.bak")
+                        shutil.copy2(str(self._keys_path), str(bak_path))
+                    except Exception:
+                        pass
 
-            # 初回: 新規生成
+            # 初回 or リカバリー: 新規生成
             self._keys = []
             self._generate_new_key_internal()
 
@@ -327,7 +343,11 @@ class HMACKeyManager:
                 except (ValueError, TypeError):
                     pass
             # グレースピリオド超過または rotated_at なし → 削除
-        self._keys = surviving
+        if len(surviving) != len(self._keys):
+            self._keys = surviving
+            self._save_internal()
+        else:
+            self._keys = surviving
 
     def get_active_key(self) -> str:
         """現在のアクティブ鍵を取得"""
@@ -400,10 +420,16 @@ class HMACKeyManager:
             except Exception:
                 pass
 
-            print(f"[HMACKeyManager] 鍵ローテーション完了。アクティブ鍵数: {sum(1 for k in self._keys if k.is_active)}, "
-                  f"グレースピリオド中の旧鍵数: {sum(1 for k in self._keys if not k.is_active)}")
+            logger.info(
+                "鍵ローテーション完了。アクティブ鍵数: %d, グレースピリオド中の旧鍵数: %d",
+                sum(1 for k in self._keys if k.is_active),
+                sum(1 for k in self._keys if not k.is_active),
+            )
 
             return new_key.key
+
+    # エイリアス（T-018 指示による追加）
+    rotate_key = rotate
 
     def get_key_info(self) -> Dict[str, Any]:
         """鍵の状態情報を取得（デバッグ/管理用、鍵の値は含めない）"""

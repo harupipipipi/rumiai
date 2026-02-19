@@ -158,6 +158,25 @@ def run(input_data, context=None):
 
 JSON 互換の dict を返してください。戻り値は Flow の `output` フィールドで指定したコンテキストキーにそのまま格納されます。Kernel 内部のラッパー（`_kernel_step_status` 等）は自動的に除去され、ブロックが返した値がそのまま `ctx[output_key]` に入ります。
 
+### 出力キー命名規則
+
+Flow ステップの `output` に格納される値のキー名について以下の規則があります。
+
+`_` プレフィックスで始まるキーは Kernel 内部キーとして予約されています。`python_file_call` の `run()` が返す dict に `_` プレフィックスのキー（例: `_kernel_step_status`、`_debug`）が含まれていた場合、Flow の `output` コンテキストに格納される際に自動除外されます。
+
+Pack のブロックが返す出力キーには `_` プレフィックスを使用しないでください。意図せず除外される原因になります。
+
+```python
+# NG: _ プレフィックスは除外される
+def run(input_data, context=None):
+    return {"_internal": "removed", "result": "kept"}
+    # ctx に格納されるのは {"result": "kept"} のみ
+
+# OK: プレフィックスなし
+def run(input_data, context=None):
+    return {"result": "kept", "metadata": {"source": "my_pack"}}
+```
+
 ---
 
 ## 型ヒント・バリデーション
@@ -703,12 +722,14 @@ Pack コードからの全ての外部 HTTP 通信は **UDS（Unix Domain Socket
 ```
 Pack コード (run関数)
   → context["http_request"]()
-    → UDS ソケット (/run/rumi/egress.sock)
+    → UDS ソケット (/run/rumi/egress/packs/{pack_id}.sock)
       → Egress Proxy (Kernel 側)
         → Network Grant Manager でアクセス許可を検証
           → 許可されていれば外部 HTTP リクエストを実行
           → 拒否されていれば grant_denied エラーを返却
 ```
+
+> ソケットパスは `RUMI_EGRESS_SOCK_DIR` 環境変数で変更可能です。デフォルトは `/run/rumi/egress/packs` です。
 
 ### コンテナモードとホストモードの違い
 
@@ -716,7 +737,7 @@ Pack コード (run関数)
 |------|--------------------------|---------------------------|
 | ネットワーク | `--network=none`（完全隔離） | ホストのネットワークを使用 |
 | 通信経路 | UDS ソケット経由のみ | UDS ソケット経由（ヘルパー関数経由） |
-| ソケットパス | `/run/rumi/egress.sock`（コンテナ内マウント） | Kernel が管理する実パス |
+| ソケットパス | `/run/rumi/egress/packs/{pack_id}.sock`（コンテナ内マウント） | `{RUMI_EGRESS_SOCK_DIR}/{pack_id}.sock` |
 | Grant 検証 | Egress Proxy が検証 | Egress Proxy が検証 |
 | セキュリティ | Docker 隔離 + UDS 制限 | 警告付きで実行（本番非推奨） |
 
@@ -806,9 +827,111 @@ curl -X POST http://localhost:8765/api/capability/grants/grant \
 
 Pack が capability handler（例: ファイルシステム読み取り、外部ツール実行等）を使用するには、該当する permission の Grant が Pack に付与されている必要があります。
 
-Grant は Trust（handler のコードを信頼するか）とは独立しています。Trust が登録されていても Grant がなければ使用できません。
+### Trust と Grant の関係
 
-Grant の付与はユーザーまたは運用者が行います。詳細は [operations.md](operations.md) の「Capability Grant 管理」を参照してください。
+Capability の利用には 2 段階の承認が必要です。
+
+1. **Trust 登録**（handler 承認）: handler のコード（sha256）を信頼済みとして登録
+2. **Grant 付与**（権限付与）: 承認済み handler の permission を Pack に付与
+
+```
+handler.py が信頼される（Trust 登録）
+    ↓
+Pack に permission が付与される（Grant 付与）
+    ↓
+Pack が capability を使用可能
+```
+
+Trust が登録されていても Grant がなければ使用できません。逆に、Grant があっても Trust が登録されていない handler は実行できません。
+
+### Capability の呼び出し方
+
+```python
+import rumi_capability
+
+result = rumi_capability.call("fs.read", args={"path": "/data/config.json"})
+if result["success"]:
+    content = result["output"]
+else:
+    error = result.get("error", "Unknown error")
+    error_type = result.get("error_type", "unknown")
+```
+
+### Built-in Capability Handler
+
+以下の Capability Handler はコアランタイムに同梱されており、Trust 登録なしで利用可能です（Grant は別途必要）。
+
+| permission_id | handler_id | 説明 | risk |
+|---------------|-----------|------|------|
+| `secrets.get` | `builtin.secrets.get` | シークレット値の読み取り | high |
+| `store.get` | `builtin.store.get` | Store からの値の読み取り | low |
+| `store.set` | `builtin.store.set` | Store への値の書き込み | medium |
+| `store.delete` | `builtin.store.delete` | Store からの値の削除 | medium |
+| `store.list` | `builtin.store.list` | Store 内のキー一覧取得 | low |
+| `pack.inbox.send` | `builtin.pack.inbox.send` | 他 Pack コンポーネントの inbox へ JSON パッチ/置換を送信 | medium |
+| `pack.update.propose_patch` | `builtin.pack.update.propose_patch` | 他 Pack へのファイル変更を提案（ステージング作成、自動適用なし） | high |
+
+### Grant の付与
+
+Grant の付与はユーザーまたは運用者が API で行います。詳細は [operations.md](operations.md) の「Capability Grant 管理」を参照してください。
+
+```bash
+# 例: store.get の Grant を付与
+curl -X POST http://localhost:8765/api/capability/grants/grant \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"principal_id": "my_pack", "permission_id": "store.get", "config": {"allowed_store_ids": ["my_store"]}}'
+```
+
+### Grant の設定（grant_config）
+
+Grant には `config` で制限を設定できます。設定内容は permission ごとに異なります。
+
+| permission_id | grant_config キー | 説明 |
+|---------------|-------------------|------|
+| `secrets.get` | `allowed_keys` | アクセス可能なキー名のリスト（必須、空なら全拒否） |
+| `store.get/set/delete/list` | `allowed_store_ids` | アクセス可能な store_id のリスト（必須、空なら全拒否） |
+| `store.set` | `max_value_bytes` | 書き込み最大サイズ（バイト、デフォルト 1MB） |
+
+`allowed_keys` / `allowed_store_ids` は fail-closed です。空リストまたは未指定の場合、全てのアクセスが拒否されます。
+
+### エラーハンドリング
+
+Capability 呼び出しが失敗した場合、`success: False` を含む dict が返されます。
+
+```python
+import rumi_capability
+
+result = rumi_capability.call("fs.read", args={"path": "/data/config.json"})
+
+if not result.get("success", False):
+    error_type = result.get("error_type", "unknown")
+
+    if error_type == "grant_denied":
+        # Grant が付与されていない
+        pass
+    elif error_type == "trust_denied":
+        # handler が信頼されていない
+        pass
+    elif error_type == "handler_not_found":
+        # handler が存在しない
+        pass
+    elif error_type == "execution_error":
+        # handler 実行中のエラー
+        pass
+    elif error_type == "timeout":
+        # タイムアウト
+        pass
+```
+
+| error_type | 説明 |
+|------------|------|
+| `grant_denied` | Pack に permission の Grant が付与されていない |
+| `trust_denied` | handler の sha256 が Trust Store に登録されていない |
+| `handler_not_found` | 指定された permission_id に対応する handler が存在しない |
+| `execution_error` | handler の実行中にエラーが発生 |
+| `timeout` | 実行がタイムアウトした |
+| `socket_not_found` | Capability ソケットが見つからない |
 
 ---
 
@@ -868,12 +991,14 @@ result = rumi_capability.call("store.delete", args={
 
 ### Grant 設定
 
-`store.set` の Grant には `grant_config` で制限を設定できます:
+`store.*` の Grant には `grant_config` で制限を設定できます:
 
 | grant_config キー | 説明 | デフォルト |
 |-------------------|------|-----------|
-| `allowed_store_ids` | アクセスを許可する store_id のリスト | `[]`（制限なし） |
+| `allowed_store_ids` | アクセスを許可する store_id のリスト | `[]`（空リストの場合、全 Store へのアクセスが拒否される。アクセスするには明示的に store_id を指定する必要がある） |
 | `max_value_bytes` | `store.set` の最大値サイズ（バイト） | 1MB（1048576） |
+
+`allowed_store_ids` は fail-closed です。Grant 作成時に `allowed_store_ids` を指定しない、または空リスト `[]` を指定した場合、その Grant では全ての Store へのアクセスが拒否されます。Pack が Store にアクセスするには、運用者が明示的に store_id をリストに追加する必要があります。
 
 ### Store の作成
 

@@ -15,6 +15,11 @@ from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# flow_id バリデーション: 英数字・アンダースコア・ドット・ハイフン、1〜128文字
+# ---------------------------------------------------------------------------
+_RE_FLOW_ID = re.compile(r'^[a-zA-Z0-9_.\-]{1,128}$')
+
+# ---------------------------------------------------------------------------
 # パス検出: 3階層以上の Unix/Windows ファイルパスを <path> に置換
 # ---------------------------------------------------------------------------
 _RE_FILE_PATH = re.compile(r'(?:[A-Za-z]:)?(?:[/\\][\w.\-]+){3,}')
@@ -140,8 +145,9 @@ class FlowHandlersMixin:
             return
         flow_id = unquote(parts[3])
 
-        if not flow_id or not flow_id.strip():
-            self._send_response(APIResponse(False, error="Missing flow_id"), 400)
+        # --- T-015: flow_id バリデーション ---
+        if not flow_id or not flow_id.strip() or not _RE_FLOW_ID.match(flow_id):
+            self._send_response(APIResponse(False, error="Invalid flow_id"), 400)
             return
 
         inputs = body.get("inputs", {})
@@ -150,7 +156,7 @@ class FlowHandlersMixin:
             return
 
         timeout = body.get("timeout", 300)
-        if not isinstance(timeout, (int, float)):
+        if not isinstance(timeout, (int, float)) or timeout != timeout:
             timeout = 300
         timeout = min(max(timeout, 1), 600)
 
@@ -167,6 +173,17 @@ class FlowHandlersMixin:
 
         Flow実行API と Pack独自ルートの両方から呼ばれる。
         """
+        # ---- T-015: 防御的バリデーション（Pack独自ルートから直接呼ばれる場合に備える） ----
+        if not isinstance(flow_id, str) or not _RE_FLOW_ID.match(flow_id):
+            return {"success": False, "error": "Invalid flow_id", "status_code": 400}
+
+        if not isinstance(inputs, dict):
+            return {"success": False, "error": "'inputs' must be an object", "status_code": 400}
+
+        if not isinstance(timeout, (int, float)) or timeout != timeout:
+            timeout = 300
+        timeout = min(max(float(timeout), 1), 600)
+
         if self.kernel is None:
             return {"success": False, "error": "Kernel not initialized", "status_code": 503}
 

@@ -20,12 +20,16 @@
 9. [pip 依存ライブラリ管理](#pip-依存ライブラリ管理)
 10. [Secrets 管理](#secrets-管理)
 11. [Pack Import / Apply](#pack-import--apply)
-12. [Docker / コンテナ管理](#docker--コンテナ管理)
-13. [Flow 実行](#flow-実行)
-14. [UDS ソケット設定](#uds-ソケット設定)
-15. [監査ログの読み方](#監査ログの読み方)
-16. [Pending Export](#pending-export)
-17. [トラブルシューティング](#トラブルシューティング)
+12. [共有ストア管理](#共有ストア管理)
+13. [Docker / コンテナ管理](#docker--コンテナ管理)
+14. [Flow 実行](#flow-実行)
+15. [特権管理（Privileges）](#特権管理privileges)
+16. [UDS ソケット設定](#uds-ソケット設定)
+17. [監査ログの読み方](#監査ログの読み方)
+18. [Pending Export](#pending-export)
+19. [認証トークン](#認証トークン)
+20. [環境変数リファレンス](#環境変数リファレンス)
+21. [トラブルシューティング](#トラブルシューティング)
 
 ---
 
@@ -151,6 +155,7 @@ export RUMI_SECURITY_MODE=permissive
 | GET | `/api/capability/grants?principal_id=xxx` | Grant 一覧 |
 | POST | `/api/capability/grants/grant` | Grant を付与 |
 | POST | `/api/capability/grants/revoke` | Grant を取り消し |
+| POST | `/api/capability/grants/batch` | Grant 一括付与（最大 50 件） |
 
 ### pip 依存ライブラリ
 
@@ -184,6 +189,9 @@ export RUMI_SECURITY_MODE=permissive
 |----------|------|------|
 | GET | `/api/stores` | Store 一覧 |
 | POST | `/api/stores/create` | Store を作成 |
+| GET | `/api/stores/shared` | 共有ストア一覧 |
+| POST | `/api/stores/shared/approve` | 共有ストア承認 |
+| POST | `/api/stores/shared/revoke` | 共有ストア取消 |
 
 ### Unit
 
@@ -192,6 +200,14 @@ export RUMI_SECURITY_MODE=permissive
 | GET | `/api/units?store_id=xxx` | Unit 一覧 |
 | POST | `/api/units/publish` | Unit を公開 |
 | POST | `/api/units/execute` | Unit を実行 |
+
+### Privileges
+
+| メソッド | パス | 説明 |
+|----------|------|------|
+| GET | `/api/privileges` | 特権一覧 |
+| POST | `/api/privileges/{pack_id}/grant/{privilege_id}` | 特権付与 |
+| POST | `/api/privileges/{pack_id}/execute/{privilege_id}` | 特権実行 |
 
 ### Pack 独自ルート
 
@@ -292,7 +308,24 @@ curl -X POST http://localhost:8765/api/network/revoke \
 
 ## Capability Handler 承認
 
-Capability handler は scan → pending → approve/reject → blocked の状態遷移を辿ります。
+Capability handler は 2 段階の操作で使用可能になります。
+
+1. **Trust 登録**（handler 承認）: scan で検出された候補を approve し、handler のコード（sha256）を信頼済みとして登録
+2. **Grant 付与**（権限付与）: 承認済み handler の permission を Pack に付与
+
+```
+候補スキャン (scan)
+    ↓
+pending（承認待ち）
+    ↓
+approve → Trust 登録 + コピー + Registry reload
+    ↓
+Grant 付与（principal × permission）
+    ↓
+Pack が capability を使用可能
+```
+
+候補は scan → pending → approve/reject → blocked の状態遷移を辿ります。
 
 ### 候補のスキャン
 
@@ -308,6 +341,35 @@ curl -X POST http://localhost:8765/api/capability/candidates/scan \
 curl "http://localhost:8765/api/capability/requests?status=pending" \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
+
+### scan レスポンス
+
+候補スキャン後のレスポンス例:
+
+```json
+{
+  "success": true,
+  "data": {
+    "scanned": 3,
+    "new_candidates": 2,
+    "candidates": [
+      {
+        "candidate_key": "my_pack:fs_read_v1:fs_read_handler:a1b2c3d4e5f6...",
+        "pack_id": "my_pack",
+        "slug": "fs_read_v1",
+        "handler_id": "fs_read_handler",
+        "permission_id": "fs.read",
+        "sha256": "a1b2c3d4e5f6...",
+        "status": "pending",
+        "description": "ファイルシステム読み取り handler",
+        "risk": "ファイルシステムへの読み取りアクセスを提供"
+      }
+    ]
+  }
+}
+```
+
+`candidate_key` の形式は `{pack_id}:{slug}:{handler_id}:{sha256}` です。sha256 を含めることで handler.py の内容が変わると別の候補として扱われます。
 
 ### 候補の承認
 
@@ -373,6 +435,48 @@ curl -X POST http://localhost:8765/api/capability/grants/revoke \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"principal_id": "my_pack", "permission_id": "fs.read"}'
+```
+
+### Grant の一括付与（バッチ）
+
+最大 50 件の Grant を一括で付与します。処理は best-effort（個別の失敗が他の付与を妨げない）です。
+
+```bash
+curl -X POST http://localhost:8765/api/capability/grants/batch \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "grants": [
+      {"principal_id": "pack_a", "permission_id": "store.get"},
+      {"principal_id": "pack_a", "permission_id": "store.set"},
+      {"principal_id": "pack_b", "permission_id": "secrets.get", "config": {"allowed_keys": ["API_KEY"]}}
+    ]
+  }'
+```
+
+| パラメータ | 必須 | 説明 |
+|-----------|------|------|
+| `grants` | ✅ | Grant オブジェクトの配列（最大 50 件） |
+| `grants[].principal_id` | ✅ | 対象 Pack ID |
+| `grants[].permission_id` | ✅ | 権限 ID |
+| `grants[].config` | 任意 | Grant 設定（`allowed_keys` 等） |
+
+レスポンス例:
+
+```json
+{
+  "success": true,
+  "data": {
+    "total": 3,
+    "succeeded": 3,
+    "failed": 0,
+    "results": [
+      {"principal_id": "pack_a", "permission_id": "store.get", "success": true},
+      {"principal_id": "pack_a", "permission_id": "store.set", "success": true},
+      {"principal_id": "pack_b", "permission_id": "secrets.get", "success": true}
+    ]
+  }
+}
 ```
 
 ### 全体フロー
@@ -481,6 +585,30 @@ curl -X POST http://localhost:8765/api/secrets/delete \
 
 秘密値は `user_data/secrets/` に 1 key = 1 file で格納されます。API で再表示はできません（set と delete のみ）。ログに秘密値は一切出力されません。
 
+### 暗号化
+
+秘密値は Fernet（AES-128-CBC + HMAC-SHA256）で暗号化されて保存されます。暗号化鍵は以下の優先順で取得されます。
+
+1. 環境変数 `RUMI_SECRETS_KEY`（Base64 エンコードされた Fernet 鍵）
+2. `user_data/settings/.secrets_key` ファイル
+3. 上記いずれも存在しない場合、鍵を自動生成して `.secrets_key` に保存
+
+### 鍵のバックアップ
+
+暗号化鍵を紛失すると既存の秘密値は復号できなくなります。`user_data/settings/.secrets_key` を安全な場所にバックアップしてください。環境変数 `RUMI_SECRETS_KEY` で鍵を外部管理する場合も同様にバックアップが必要です。
+
+### 平文モード
+
+`RUMI_SECRETS_ALLOW_PLAINTEXT` で暗号化なしの保存を制御できます。
+
+| 値 | 動作 |
+|-----|------|
+| `auto`（デフォルト） | 暗号化鍵が利用可能なら暗号化、なければ平文で保存 |
+| `true` | 常に平文での保存を許可 |
+| `false` | 暗号化鍵が必須。鍵がない場合は秘密値の保存を拒否 |
+
+本番環境では `RUMI_SECRETS_ALLOW_PLAINTEXT=false` を推奨します。
+
 ---
 
 ## Pack Import / Apply
@@ -506,6 +634,104 @@ curl -X POST http://localhost:8765/api/packs/apply \
 ```
 
 apply 時にバックアップが自動作成されます。`pack_id` と `pack_identity` が既存 Pack と不一致の場合は拒否されます。
+
+---
+
+## 共有ストア管理
+
+Pack 間で Store を共有するための管理 API です。共有リクエストは手動承認が必要です（SharedStoreManager）。
+
+### 共有ストア一覧
+
+```bash
+curl http://localhost:8765/api/stores/shared \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+レスポンス例:
+
+```json
+{
+  "success": true,
+  "data": {
+    "shared_stores": [
+      {
+        "store_id": "shared_data",
+        "owner_pack": "pack_a",
+        "shared_with": ["pack_b", "pack_c"],
+        "status": "approved",
+        "approved_at": "2026-01-15T10:00:00Z"
+      }
+    ]
+  }
+}
+```
+
+### 共有ストア承認
+
+```bash
+curl -X POST http://localhost:8765/api/stores/shared/approve \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "store_id": "shared_data",
+    "owner_pack": "pack_a",
+    "target_pack": "pack_b"
+  }'
+```
+
+| パラメータ | 必須 | 説明 |
+|-----------|------|------|
+| `store_id` | ✅ | 共有対象の Store ID |
+| `owner_pack` | ✅ | Store の所有 Pack ID |
+| `target_pack` | ✅ | 共有先の Pack ID |
+
+レスポンス例:
+
+```json
+{
+  "success": true,
+  "data": {
+    "store_id": "shared_data",
+    "owner_pack": "pack_a",
+    "target_pack": "pack_b",
+    "status": "approved",
+    "approved_at": "2026-01-15T10:00:00Z"
+  }
+}
+```
+
+### 共有ストア取消
+
+```bash
+curl -X POST http://localhost:8765/api/stores/shared/revoke \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "store_id": "shared_data",
+    "owner_pack": "pack_a",
+    "target_pack": "pack_b"
+  }'
+```
+
+| パラメータ | 必須 | 説明 |
+|-----------|------|------|
+| `store_id` | ✅ | 対象の Store ID |
+| `owner_pack` | ✅ | Store の所有 Pack ID |
+| `target_pack` | ✅ | 共有を取り消す Pack ID |
+
+レスポンス例:
+
+```json
+{
+  "success": true,
+  "data": {
+    "store_id": "shared_data",
+    "target_pack": "pack_b",
+    "status": "revoked"
+  }
+}
+```
 
 ---
 
@@ -559,7 +785,137 @@ curl -X POST http://localhost:8765/api/flows/hello/run \
 
 `inputs` は Flow の入力データ（dict）、`timeout` は最大実行時間（秒、デフォルト 300、最大 600）です。
 
-同時実行数は `RUMI_MAX_CONCURRENT_FLOWS` 環境変数で制限されます（デフォルト 10）。
+同時実行数は `RUMI_MAX_CONCURRENT_FLOWS` 環境変数で制限されます（デフォルト 10）。上限に達した場合はステータスコード `429` が返却されます。
+
+### 成功レスポンス
+
+```json
+{
+  "success": true,
+  "flow_id": "hello",
+  "result": {
+    "greeting": {"message": "Hello, World!"}
+  },
+  "execution_time": 1.234
+}
+```
+
+`result` には Flow の outputs が格納されます。ただし `_` プレフィックスで始まるキー（`_kernel_step_status` 等の内部キー）は自動的に除外されます。
+
+### エラーレスポンス
+
+```json
+{
+  "success": false,
+  "error": "Flow not found: nonexistent_flow",
+  "flow_id": "nonexistent_flow",
+  "status_code": 404
+}
+```
+
+| status_code | 説明 |
+|-------------|------|
+| `404` | 指定された `flow_id` が存在しない |
+| `408` | Flow 実行がタイムアウトした |
+| `429` | 同時実行数上限（`RUMI_MAX_CONCURRENT_FLOWS`）に到達 |
+| `500` | Flow 実行中に予期しないエラーが発生 |
+| `503` | システムが一時的に利用不可（起動中等） |
+
+### レスポンスサイズ制限
+
+Flow の実行結果は `RUMI_MAX_RESPONSE_BYTES`（デフォルト 4MB）を超える場合、切り詰められます。切り詰めが発生した場合、レスポンスに `"truncated": true` が付与されます。
+
+---
+
+## 特権管理（Privileges）
+
+Pack に対して特権的操作（例: `pack.update`、`system.restart` 等）を許可・実行するための API です。Capability Grant とは独立した仕組みで、ホスト側の危険な操作を明示的に許可するために使用します。
+
+### 特権一覧
+
+```bash
+curl http://localhost:8765/api/privileges \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+レスポンス例:
+
+```json
+{
+  "success": true,
+  "data": {
+    "privileges": [
+      {
+        "privilege_id": "pack.update",
+        "description": "Pack の更新適用を許可",
+        "granted_packs": ["updater_pack"]
+      },
+      {
+        "privilege_id": "system.diagnostics",
+        "description": "システム診断情報の取得を許可",
+        "granted_packs": []
+      }
+    ]
+  }
+}
+```
+
+### 特権付与
+
+```bash
+curl -X POST http://localhost:8765/api/privileges/{pack_id}/grant/{privilege_id} \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json"
+```
+
+| パラメータ | 必須 | 説明 |
+|-----------|------|------|
+| `pack_id`（パスパラメータ） | ✅ | 対象 Pack ID |
+| `privilege_id`（パスパラメータ） | ✅ | 付与する特権 ID |
+
+レスポンス例:
+
+```json
+{
+  "success": true,
+  "data": {
+    "pack_id": "updater_pack",
+    "privilege_id": "pack.update",
+    "granted_at": "2026-02-15T10:00:00Z"
+  }
+}
+```
+
+### 特権実行
+
+```bash
+curl -X POST http://localhost:8765/api/privileges/{pack_id}/execute/{privilege_id} \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"args": {"target_pack": "my_pack", "staging_id": "abc123"}}'
+```
+
+| パラメータ | 必須 | 説明 |
+|-----------|------|------|
+| `pack_id`（パスパラメータ） | ✅ | 実行元 Pack ID |
+| `privilege_id`（パスパラメータ） | ✅ | 実行する特権 ID |
+| `args`（ボディ） | 任意 | 特権操作に渡す引数 |
+
+レスポンス例:
+
+```json
+{
+  "success": true,
+  "data": {
+    "pack_id": "updater_pack",
+    "privilege_id": "pack.update",
+    "result": {"status": "applied", "target_pack": "my_pack"},
+    "executed_at": "2026-02-15T10:05:00Z"
+  }
+}
+```
+
+特権が付与されていない Pack からの実行リクエストは `403 Forbidden` で拒否されます。
 
 ---
 
@@ -647,6 +1003,59 @@ cat user_data/settings/shared_dict/journal.jsonl | jq 'select(.result == "cycle_
 ```bash
 cat user_data/pending/summary.json | jq .
 ```
+
+---
+
+## 認証トークン
+
+全ての HTTP API エンドポイントは `Authorization: Bearer YOUR_TOKEN` ヘッダーによる認証が必須です。トークンは HMAC 鍵から導出されます。
+
+### トークンの確認
+
+起動時にトークンがコンソールに表示されます。また、HMAC 鍵ファイル（`user_data/settings/.hmac_key`）から導出されるため、同じ鍵ファイルが存在する限りトークンは不変です。
+
+鍵ファイルが存在しない場合は初回起動時に自動生成されます。
+
+### トークンのローテーション
+
+HMAC 鍵をローテーション（再生成）することでトークンが変更されます。
+
+```bash
+# HMAC 鍵ローテーションを有効にして起動
+export RUMI_HMAC_ROTATE=true
+python app.py
+```
+
+`RUMI_HMAC_ROTATE=true` を設定すると、次回起動時に既存の HMAC 鍵が新しい鍵で置き換えられます。ローテーション後は以前のトークンは無効になるため、全ての API クライアントの設定を更新してください。
+
+ローテーションは一度だけ実行されます。ローテーション完了後は `RUMI_HMAC_ROTATE` を `false` に戻すか、環境変数を削除してください。
+
+---
+
+## 環境変数リファレンス
+
+Rumi AI OS の動作を制御する環境変数の一覧です。
+
+| 変数名 | デフォルト | 説明 |
+|--------|-----------|------|
+| `RUMI_SECURITY_MODE` | `strict` | セキュリティモード。`strict`（Docker 必須）または `permissive`（Docker 不要、開発用） |
+| `RUMI_SECRETS_KEY` | なし | Secrets の Fernet 暗号化に使用する鍵（Base64 エンコード）。設定されていない場合は `.secrets_key` ファイルまたは自動生成にフォールバック |
+| `RUMI_SECRETS_ALLOW_PLAINTEXT` | `auto` | 平文シークレットの許可。`auto`（暗号化鍵がなければ平文で保存）、`true`（常に平文を許可）、`false`（暗号化鍵が必須、鍵がなければ保存拒否） |
+| `RUMI_MAX_RESPONSE_BYTES` | `4194304`（4MB） | Flow 実行結果および Egress Proxy レスポンスの最大サイズ（バイト） |
+| `RUMI_MAX_CONCURRENT_FLOWS` | `10` | 同時 Flow 実行数の上限 |
+| `RUMI_MAX_REQUEST_BODY_BYTES` | `1048576`（1MB） | HTTP API が受け付けるリクエストボディの最大サイズ（バイト） |
+| `RUMI_API_BIND_ADDRESS` | `127.0.0.1` | API サーバーのバインドアドレス。外部公開する場合は `0.0.0.0` に変更（非推奨） |
+| `RUMI_CORS_ORIGINS` | なし | CORS 許可オリジンのカンマ区切りリスト（例: `http://localhost:3000,http://localhost:8080`） |
+| `RUMI_HMAC_ROTATE` | `false` | `true` に設定すると次回起動時に HMAC 鍵をローテーション |
+| `RUMI_DIAGNOSTICS_VERBOSE` | `false` | `true` に設定すると診断ログに詳細情報を含める |
+| `RUMI_EGRESS_SOCKET_GID` | なし | Egress UDS ソケットの GID。strict モードでコンテナからソケットにアクセスするために必要 |
+| `RUMI_CAPABILITY_SOCKET_GID` | なし | Capability UDS ソケットの GID。strict モードでコンテナからソケットにアクセスするために必要 |
+| `RUMI_EGRESS_SOCKET_MODE` | `0660` | Egress UDS ソケットのパーミッション |
+| `RUMI_CAPABILITY_SOCKET_MODE` | `0660` | Capability UDS ソケットのパーミッション |
+| `RUMI_EGRESS_SOCK_DIR` | `/run/rumi/egress/packs` | Egress UDS ソケットのベースディレクトリ |
+| `RUMI_CAPABILITY_SOCK_DIR` | `/run/rumi/capability/principals` | Capability UDS ソケットのベースディレクトリ |
+| `RUMI_SECRET_GET_RATE_LIMIT` | `60` | `secrets.get` の rate limit（回/分/Pack、sliding window） |
+| `RUMI_LOCAL_PACK_MODE` | `off` | local_pack 互換モード。`off`（無効）または `require_approval`（承認必須で有効、非推奨） |
 
 ---
 
