@@ -570,8 +570,15 @@ class KernelCore:
                     if callable(hook):
                         try:
                             hook(step, ctx, step_result, meta)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            _logger.debug("after_step hook failed: %s", e)
+                            self.diagnostics.record_step(
+                                phase="flow",
+                                step_id=f"{step_id}.after_hook",
+                                handler="flow.hooks.after_step",
+                                status="failed",
+                                error=e,
+                            )
             except Exception as e:
                 error_handler = self.interface_registry.get("flow.error_handler")
                 if error_handler and callable(error_handler):
