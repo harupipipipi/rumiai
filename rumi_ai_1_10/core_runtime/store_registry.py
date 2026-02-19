@@ -12,6 +12,11 @@ Store（共有領域）を管理する。
 - I-1  audit_store_usage: ストアキーサイズ集計
 - #18 list_keys: ページネーション付きキー列挙
 - #19 batch_get: 複数キー一括取得
+
+T-041 改善:
+- 接続ヘルスチェック (60秒間隔 SELECT 1)
+- store_data.store_id インデックス追加
+- close 時 WAL チェックポイント (PASSIVE)
 """
 
 from __future__ import annotations
@@ -24,6 +29,7 @@ import re
 import shutil
 import sqlite3
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,6 +46,9 @@ STORES_DB_PATH = "user_data/stores/stores.db"
 MAX_STORES_PER_PACK = 10
 MAX_VALUE_BYTES_CAS = 1 * 1024 * 1024  # 1MB
 CAS_LOCK_TIMEOUT = 5  # seconds (互換用に残す)
+
+# 接続ヘルスチェック間隔 (秒)
+_HEALTH_CHECK_INTERVAL = 60.0
 
 # Sentinel: CAS で「キーが存在しないことを期待する」ことを示す。
 # 従来は expected_value=None がこの意味だったが、JSON null を期待する
@@ -190,19 +199,45 @@ class StoreRegistry:
 
         per-thread connection で WAL モードと組み合わせ、
         スレッドセーフな並行アクセスを実現する。
+
+        60 秒に 1 回 ``SELECT 1`` でヘルスチェックし、
+        壊れていれば自動的に再接続する。
         """
         conn: Optional[sqlite3.Connection] = getattr(
             self._local, "conn", None
         )
         if conn is None:
-            conn = sqlite3.connect(
-                str(self._db_path),
-                timeout=10.0,
-                check_same_thread=False,
+            conn = self._create_conn()
+        else:
+            # ヘルスチェック（頻度制限付き）
+            now = time.monotonic()
+            last_check: float = getattr(
+                self._local, "last_health_check", 0.0
             )
-            conn.row_factory = sqlite3.Row
-            self._apply_pragmas(conn)
-            self._local.conn = conn
+            if now - last_check >= _HEALTH_CHECK_INTERVAL:
+                try:
+                    conn.execute("SELECT 1")
+                    self._local.last_health_check = now
+                except Exception:
+                    # 接続が壊れている → クローズして再作成
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    conn = self._create_conn()
+        return conn
+
+    def _create_conn(self) -> sqlite3.Connection:
+        """新しい SQLite connection を作成し threading.local に保存する。"""
+        conn = sqlite3.connect(
+            str(self._db_path),
+            timeout=10.0,
+            check_same_thread=False,
+        )
+        conn.row_factory = sqlite3.Row
+        self._apply_pragmas(conn)
+        self._local.conn = conn
+        self._local.last_health_check = time.monotonic()
         return conn
 
     @staticmethod
@@ -215,7 +250,7 @@ class StoreRegistry:
         conn.execute("PRAGMA cache_size = -8000")
 
     def _init_db(self) -> None:
-        """テーブルを作成し user_version を設定する。"""
+        """テーブル・インデックスを作成し user_version を設定する。"""
         conn = self._get_conn()
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS stores (
@@ -233,6 +268,8 @@ class StoreRegistry:
                 updated_at TEXT NOT NULL,
                 PRIMARY KEY (store_id, key)
             );
+            CREATE INDEX IF NOT EXISTS idx_store_data_store_id
+                ON store_data(store_id);
         """)
         conn.execute("PRAGMA user_version = 1")
         conn.commit()
@@ -243,11 +280,18 @@ class StoreRegistry:
 
         マルチスレッド環境では各スレッドが自身の connection を
         close する必要がある。
+
+        WAL チェックポイント (PASSIVE) を実行してから接続を閉じ、
+        WAL ファイルの肥大化を防止する。
         """
         conn: Optional[sqlite3.Connection] = getattr(
             self._local, "conn", None
         )
         if conn is not None:
+            try:
+                conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+            except Exception:
+                pass
             try:
                 conn.close()
             except Exception:
@@ -723,6 +767,8 @@ class StoreRegistry:
         prefix フィルタ: WHERE key >= :prefix AND key < :prefix_upper
         cursor (keyset pagination): WHERE key > :cursor
         limit/cursor 両方 None なら全件返却（後方互換）。
+
+        idx_store_data_store_id インデックスにより store_id フィルタが高速化。
         """
         # prefix バリデーション（空文字列は許可）
         if prefix:
@@ -819,7 +865,7 @@ class StoreRegistry:
         }
 
     # ------------------------------------------------------------------ #
-    # #19  Batch get
+    # #19  Batch get (single-query optimized)
     # ------------------------------------------------------------------ #
 
     def batch_get(
@@ -829,6 +875,9 @@ class StoreRegistry:
     ) -> Dict[str, Any]:
         """
         複数キーを一度に取得する。最大100キー、累計900KB超で残りはnull。
+
+        単一の ``WHERE store_id = ? AND key IN (...)`` クエリで一括取得し、
+        N+1 問題を回避する。プレースホルダはキー数に応じて動的生成。
         """
         if not keys or not isinstance(keys, list):
             return {
@@ -855,7 +904,7 @@ class StoreRegistry:
 
         conn = self._get_conn()
 
-        # 一括取得: 有効なキーだけ SQL で取得
+        # 一括取得: 有効なキーだけ SQL で取得 (単一クエリ)
         valid_keys = [k for k in keys if k and isinstance(k, str) and _validate_key(k) is None]
         fetched: Dict[str, str] = {}
         if valid_keys:

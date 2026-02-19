@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from urllib.parse import unquote
 
 from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
@@ -21,15 +22,66 @@ def _is_safe_path_param(value: str) -> bool:
     return True
 
 
-class RouteHandlersMixin:
-    """Pack 独自ルート (load / match / handle / reload) のハンドラ"""
+# --------------------------------------------------------------------------
+# テンプレートパス → 正規表現コンパイル
+# --------------------------------------------------------------------------
 
-    _pack_routes: dict = {}  # {(method, path): route_info}
+# {param} プレースホルダの検出パターン
+_TEMPLATE_PLACEHOLDER_RE = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
+
+
+def _compile_template_path(path: str) -> tuple[re.Pattern, list[str]] | None:
+    """テンプレートパスを正規表現にコンパイルする。
+
+    パス中に ``{param}`` プレースホルダが含まれない場合は None を返す。
+
+    変換例::
+
+        /api/packs/{pack_id}/items/{item_id}
+        → ^/api/packs/(?P<pack_id>[^/]+)/items/(?P<item_id>[^/]+)$
+
+    Returns:
+        (compiled_regex, param_names) or None
+    """
+    param_names: list[str] = _TEMPLATE_PLACEHOLDER_RE.findall(path)
+    if not param_names:
+        return None
+
+    # セグメント単位で正規表現を構築
+    regex_str = "^"
+    for segment in path.strip("/").split("/"):
+        regex_str += "/"
+        m = _TEMPLATE_PLACEHOLDER_RE.fullmatch(segment)
+        if m:
+            regex_str += f"(?P<{m.group(1)}>[^/]+)"
+        else:
+            regex_str += re.escape(segment)
+    regex_str += "$"
+
+    return (re.compile(regex_str), param_names)
+
+
+class RouteHandlersMixin:
+    """Pack 独自ルート (load / match / handle / reload) のハンドラ
+
+    ルーティングは 2 段階で実行される:
+
+    1. **完全一致** — ``_exact_routes`` dict で O(1) lookup
+    2. **テンプレート** — ``_template_routes`` のプリコンパイル済み正規表現を走査
+
+    ``_pack_routes`` は後方互換のため維持し、一覧 API で使用する。
+    """
+
+    _pack_routes: dict = {}          # {(method, path): route_info} — 後方互換・一覧用
+    _exact_routes: dict = {}         # {(method, path): route_info} — 完全一致 O(1)
+    _template_routes: list = []      # [(method, compiled_re, param_names, route_info), ...]
 
     @classmethod
     def load_pack_routes(cls, registry) -> int:
         """registryから全Packのルートを読み込み、ルーティングテーブルを構築"""
         cls._pack_routes = {}
+        cls._exact_routes = {}
+        cls._template_routes = []
         if registry is None:
             return 0
 
@@ -56,21 +108,17 @@ class RouteHandlersMixin:
                     "input_mapping": route.get("input_mapping", {}),
                 }
 
-                # テンプレートセグメント解析
-                segments = path.strip("/").split("/")
-                param_indices = {}
-                for i, seg in enumerate(segments):
-                    if seg.startswith("{") and seg.endswith("}"):
-                        param_name = seg[1:-1]
-                        param_indices[i] = param_name
-
-                if param_indices:
-                    route_info["_segments"] = segments
-                    route_info["_param_indices"] = param_indices
+                # テンプレート判定 → 正規表現コンパイル or 完全一致登録
+                compiled = _compile_template_path(path)
+                if compiled is not None:
+                    pattern, param_names = compiled
+                    cls._template_routes.append(
+                        (method, pattern, param_names, route_info)
+                    )
                 else:
-                    route_info["_segments"] = None
-                    route_info["_param_indices"] = {}
+                    cls._exact_routes[(method, path)] = route_info
 
+                # 後方互換: 一覧用の統合 dict も維持
                 cls._pack_routes[(method, path)] = route_info
                 count += 1
                 logger.debug(
@@ -86,41 +134,40 @@ class RouteHandlersMixin:
 
         マッチした場合は (route_info, path_params) のタプルを返す。
         マッチしない場合は None を返す。
-        {param} プレースホルダーによるパスパラメータキャプチャ対応。
+
+        1. 完全一致ルートを dict O(1) lookup
+        2. テンプレートルートをプリコンパイル済み正規表現で走査
         """
         method_upper = method.upper()
 
-        # 1. 完全一致（高速パス）
+        # 1. 完全一致（高速パス — O(1)）
         key = (method_upper, path)
-        if key in self._pack_routes:
-            return (self._pack_routes[key], {})
+        exact = self._exact_routes.get(key)
+        if exact is not None:
+            return (exact, {})
 
-        # 2. テンプレートマッチング
-        request_segments = path.strip("/").split("/")
-        for (m, _template_path), route_info in self._pack_routes.items():
-            if m != method_upper:
+        # 2. テンプレートマッチング（正規表現）
+        # 正規化: 先頭スラッシュ付き、末尾スラッシュなし
+        normalized = path.rstrip("/")
+        if not normalized.startswith("/"):
+            normalized = "/" + normalized
+
+        for tmpl_method, pattern, param_names, route_info in self._template_routes:
+            if tmpl_method != method_upper:
                 continue
-            tmpl_segments = route_info.get("_segments")
-            if tmpl_segments is None:
+            m = pattern.match(normalized)
+            if m is None:
                 continue
-            if len(tmpl_segments) != len(request_segments):
-                continue
-            param_indices = route_info.get("_param_indices", {})
-            if not param_indices:
-                continue
-            path_params = {}
-            matched = True
-            for i, (tmpl_seg, req_seg) in enumerate(zip(tmpl_segments, request_segments)):
-                if i in param_indices:
-                    decoded = unquote(req_seg)
-                    if not _is_safe_path_param(decoded):
-                        matched = False
-                        break
-                    path_params[param_indices[i]] = decoded
-                elif tmpl_seg != req_seg:
-                    matched = False
+            # パスパラメータを抽出し URL デコード + 安全性チェック
+            path_params: dict[str, str] = {}
+            safe = True
+            for name in param_names:
+                decoded = unquote(m.group(name))
+                if not _is_safe_path_param(decoded):
+                    safe = False
                     break
-            if matched:
+                path_params[name] = decoded
+            if safe:
                 return (route_info, path_params)
 
         return None
