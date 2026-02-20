@@ -1,307 +1,560 @@
 """
-test_hmac_key_manager.py - P0: HMAC 鍵管理モジュールのテスト
+HMACKeyManager のユニットテスト (Wave4-B 改善推奨2)
 
-対象: core_runtime/hmac_key_manager.py
+テスト対象:
+  - generate_or_load_signing_key (モジュールレベル関数)
+  - compute_data_hmac / verify_data_hmac (モジュールレベル関数)
+  - HMACKey (データクラス)
+  - HMACKeyManager クラスの主要メソッド
 """
 from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timedelta, timezone
+import sys
+import types
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core_runtime.hmac_key_manager import (
-    HMACKey,
+# ---------------------------------------------------------------------------
+# ダミーモジュール — hmac_key_manager.py 内の相対インポート回避用
+# ---------------------------------------------------------------------------
+_PKG = "rumi_ai_1_10.core_runtime"
+
+# paths ダミー
+_dummy_paths = types.ModuleType(f"{_PKG}.paths")
+_dummy_paths.BASE_DIR = Path("/tmp/dummy_base_dir")
+sys.modules.setdefault(f"{_PKG}.paths", _dummy_paths)
+
+# audit_logger ダミー
+_dummy_audit = types.ModuleType(f"{_PKG}.audit_logger")
+_dummy_audit_instance = MagicMock()
+_dummy_audit.get_audit_logger = MagicMock(return_value=_dummy_audit_instance)
+sys.modules.setdefault(f"{_PKG}.audit_logger", _dummy_audit)
+
+# di_container ダミー
+_dummy_di = types.ModuleType(f"{_PKG}.di_container")
+_dummy_container = MagicMock()
+_dummy_di.get_container = MagicMock(return_value=_dummy_container)
+sys.modules.setdefault(f"{_PKG}.di_container", _dummy_di)
+
+# pack_api_server ダミー (core_runtime __init__ が参照する可能性)
+_dummy_pack_api = types.ModuleType(f"{_PKG}.pack_api_server")
+
+
+class _APIResponse:
+    def __init__(self, success, data=None, error=None):
+        self.success = success
+        self.data = data
+        self.error = error
+
+
+_dummy_pack_api.APIResponse = _APIResponse
+sys.modules.setdefault(f"{_PKG}.pack_api_server", _dummy_pack_api)
+
+# ---------------------------------------------------------------------------
+# テスト対象のインポート
+# ---------------------------------------------------------------------------
+from rumi_ai_1_10.core_runtime.hmac_key_manager import (  # noqa: E402
     HMACKeyManager,
-    compute_data_hmac,
+    HMACKey,
     generate_or_load_signing_key,
+    compute_data_hmac,
     verify_data_hmac,
+    DEFAULT_GRACE_PERIOD_SECONDS,
 )
 
 
-# ===================================================================
-# generate_or_load_signing_key
-# ===================================================================
+# ======================================================================
+# TestGenerateOrLoadSigningKey
+# ======================================================================
 
 class TestGenerateOrLoadSigningKey:
+    """generate_or_load_signing_key のテスト"""
 
-    def test_generates_new_key_when_file_missing(self, tmp_path):
+    def test_new_key_generated_when_no_file(self, tmp_path):
+        """ファイルが存在しない場合、新規生成されること"""
         key_path = tmp_path / "signing.key"
-        key = generate_or_load_signing_key(key_path)
-        assert isinstance(key, bytes)
-        assert len(key) > 0
+        result = generate_or_load_signing_key(key_path)
+        assert isinstance(result, bytes)
+        assert len(result) >= 32
         assert key_path.exists()
 
-    def test_loads_existing_key_from_file(self, tmp_path):
+    def test_existing_key_loaded(self, tmp_path):
+        """既存の鍵ファイルからロードされること"""
         key_path = tmp_path / "signing.key"
-        key_path.write_text("abcdef0123456789" * 4, encoding="utf-8")
-        key = generate_or_load_signing_key(key_path)
-        assert key == ("abcdef0123456789" * 4).encode("utf-8")
+        stored_key = "a" * 64  # 十分な長さ
+        key_path.write_text(stored_key, encoding="utf-8")
+        result = generate_or_load_signing_key(key_path)
+        assert result == stored_key.encode("utf-8")
 
-    def test_prefers_env_var_over_file(self, tmp_path, monkeypatch):
+    def test_short_key_regenerated(self, tmp_path):
+        """鍵長が不十分なファイルからは再生成されること"""
         key_path = tmp_path / "signing.key"
-        key_path.write_text("file_key_value_xxxxxxxxxxxxxxxxxxxx", encoding="utf-8")
-        env_value = "a" * 64
-        monkeypatch.setenv("TEST_SIGNING_KEY", env_value)
-        key = generate_or_load_signing_key(key_path, env_var="TEST_SIGNING_KEY")
-        assert key == env_value.encode("utf-8")
+        key_path.write_text("short", encoding="utf-8")  # 5文字 < 32
+        result = generate_or_load_signing_key(key_path)
+        assert len(result) >= 32
+        # ファイルが上書きされていること
+        new_content = key_path.read_text(encoding="utf-8").strip()
+        assert len(new_content) >= 32
+        assert new_content != "short"
 
-    def test_ignores_short_env_var(self, tmp_path, monkeypatch):
+    def test_env_var_takes_priority(self, tmp_path, monkeypatch):
+        """環境変数が指定されている場合、それが優先されること"""
         key_path = tmp_path / "signing.key"
+        key_path.write_text("file_key_" + "x" * 40, encoding="utf-8")
+        env_key = "env_key_" + "y" * 40
+        monkeypatch.setenv("TEST_SIGNING_KEY", env_key)
+        result = generate_or_load_signing_key(key_path, env_var="TEST_SIGNING_KEY")
+        assert result == env_key.encode("utf-8")
+
+    def test_env_var_too_short_falls_through(self, tmp_path, monkeypatch):
+        """環境変数の鍵長が不十分な場合、ファイルにフォールスルーすること"""
+        key_path = tmp_path / "signing.key"
+        stored_key = "b" * 64
+        key_path.write_text(stored_key, encoding="utf-8")
         monkeypatch.setenv("TEST_SIGNING_KEY", "short")
-        key = generate_or_load_signing_key(key_path, env_var="TEST_SIGNING_KEY")
-        assert isinstance(key, bytes)
-        assert len(key) > 0
-        # A new key was generated and written to file
-        assert key_path.exists()
+        result = generate_or_load_signing_key(key_path, env_var="TEST_SIGNING_KEY")
+        assert result == stored_key.encode("utf-8")
 
-    def test_atomic_write_creates_parent_dirs(self, tmp_path):
-        key_path = tmp_path / "deep" / "nested" / "signing.key"
-        key = generate_or_load_signing_key(key_path)
-        assert key_path.exists()
-        assert isinstance(key, bytes)
+    def test_env_var_not_set_falls_through(self, tmp_path):
+        """環境変数が未設定の場合、ファイルにフォールスルーすること"""
+        key_path = tmp_path / "signing.key"
+        stored_key = "c" * 64
+        key_path.write_text(stored_key, encoding="utf-8")
+        result = generate_or_load_signing_key(key_path, env_var="NONEXISTENT_VAR")
+        assert result == stored_key.encode("utf-8")
 
-    def test_file_permissions(self, tmp_path):
+    def test_new_key_file_permissions(self, tmp_path):
+        """新規生成された鍵ファイルのパーミッションが 0o600 であること (Unix のみ)"""
         key_path = tmp_path / "signing.key"
         generate_or_load_signing_key(key_path)
         if os.name != "nt":
             mode = oct(key_path.stat().st_mode & 0o777)
-            assert mode == "0o600"
+            assert mode == oct(0o600)
+
+    def test_parent_directory_created(self, tmp_path):
+        """親ディレクトリが存在しない場合、自動作成されること"""
+        key_path = tmp_path / "subdir" / "deep" / "signing.key"
+        result = generate_or_load_signing_key(key_path)
+        assert isinstance(result, bytes)
+        assert key_path.exists()
+
+    def test_empty_file_regenerated(self, tmp_path):
+        """空ファイルからは再生成されること"""
+        key_path = tmp_path / "signing.key"
+        key_path.write_text("", encoding="utf-8")
+        result = generate_or_load_signing_key(key_path)
+        assert len(result) >= 32
 
 
-# ===================================================================
-# compute_data_hmac / verify_data_hmac
-# ===================================================================
+# ======================================================================
+# TestComputeDataHmac
+# ======================================================================
 
-class TestHmacSignVerify:
+class TestComputeDataHmac:
+    """compute_data_hmac のテスト"""
 
-    def test_compute_returns_hex_string(self):
-        key = b"test-secret-key"
-        data = {"action": "approve", "pack_id": "test"}
+    def test_basic_signature(self):
+        """基本的な署名計算"""
+        key = b"test_key_for_hmac"
+        data = {"name": "Alice", "score": 100}
         sig = compute_data_hmac(key, data)
         assert isinstance(sig, str)
-        assert len(sig) == 64  # SHA-256 hex digest
-        int(sig, 16)  # valid hex
-
-    def test_verify_correct_signature(self):
-        key = b"test-secret-key"
-        data = {"action": "approve", "pack_id": "test"}
-        sig = compute_data_hmac(key, data)
-        assert verify_data_hmac(key, data, sig) is True
-
-    def test_verify_rejects_wrong_signature(self):
-        key = b"test-secret-key"
-        data = {"action": "approve", "pack_id": "test"}
-        assert verify_data_hmac(key, data, "0" * 64) is False
-
-    def test_verify_rejects_tampered_data(self):
-        key = b"test-secret-key"
-        data = {"action": "approve", "pack_id": "test"}
-        sig = compute_data_hmac(key, data)
-        data["pack_id"] = "evil"
-        assert verify_data_hmac(key, data, sig) is False
-
-    def test_hmac_key_fields_excluded(self):
-        key = b"test-secret-key"
-        data = {"action": "approve", "_hmac_signature": "should_be_excluded"}
-        sig1 = compute_data_hmac(key, data)
-        data2 = {"action": "approve"}
-        sig2 = compute_data_hmac(key, data2)
-        assert sig1 == sig2
-
-    def test_different_keys_produce_different_signatures(self):
-        data = {"value": 42}
-        sig1 = compute_data_hmac(b"key-a", data)
-        sig2 = compute_data_hmac(b"key-b", data)
-        assert sig1 != sig2
+        assert len(sig) == 64  # SHA-256 hex = 64文字
 
     def test_deterministic(self):
-        key = b"deterministic-key"
+        """同じデータ・鍵で同じ署名が生成されること"""
+        key = b"deterministic_key"
         data = {"x": 1, "y": 2}
-        assert compute_data_hmac(key, data) == compute_data_hmac(key, data)
+        sig1 = compute_data_hmac(key, data)
+        sig2 = compute_data_hmac(key, data)
+        assert sig1 == sig2
 
     def test_key_order_independent(self):
-        key = b"order-key"
+        """辞書キーの順序に依存しないこと（sort_keys=True）"""
+        key = b"order_key"
         data1 = {"b": 2, "a": 1}
         data2 = {"a": 1, "b": 2}
         assert compute_data_hmac(key, data1) == compute_data_hmac(key, data2)
 
+    def test_hmac_prefix_keys_excluded(self):
+        """_hmac で始まるキーが除外されること"""
+        key = b"exclude_key"
+        data_without = {"name": "Bob"}
+        data_with = {"name": "Bob", "_hmac_sig": "old_sig", "_hmac_ts": "12345"}
+        assert compute_data_hmac(key, data_without) == compute_data_hmac(key, data_with)
 
-# ===================================================================
-# HMACKeyManager - 初期化と鍵生成
-# ===================================================================
+    def test_different_data_different_sig(self):
+        """異なるデータでは異なる署名になること"""
+        key = b"diff_key"
+        sig1 = compute_data_hmac(key, {"a": 1})
+        sig2 = compute_data_hmac(key, {"a": 2})
+        assert sig1 != sig2
+
+    def test_different_key_different_sig(self):
+        """異なる鍵では異なる署名になること"""
+        data = {"a": 1}
+        sig1 = compute_data_hmac(b"key_one", data)
+        sig2 = compute_data_hmac(b"key_two", data)
+        assert sig1 != sig2
+
+
+# ======================================================================
+# TestVerifyDataHmac
+# ======================================================================
+
+class TestVerifyDataHmac:
+    """verify_data_hmac のテスト"""
+
+    def test_roundtrip(self):
+        """署名→検証のラウンドトリップが成功すること"""
+        key = b"roundtrip_key_for_testing"
+        data = {"user": "Alice", "action": "login"}
+        sig = compute_data_hmac(key, data)
+        assert verify_data_hmac(key, data, sig) is True
+
+    def test_tampered_data_rejected(self):
+        """改ざんされたデータが拒否されること"""
+        key = b"tamper_key_for_testing"
+        data = {"user": "Alice", "action": "login"}
+        sig = compute_data_hmac(key, data)
+        tampered = {"user": "Eve", "action": "login"}
+        assert verify_data_hmac(key, tampered, sig) is False
+
+    def test_wrong_key_rejected(self):
+        """異なる鍵で検証すると拒否されること"""
+        key1 = b"key_one_for_test"
+        key2 = b"key_two_for_test"
+        data = {"msg": "hello"}
+        sig = compute_data_hmac(key1, data)
+        assert verify_data_hmac(key2, data, sig) is False
+
+    def test_wrong_hmac_string_rejected(self):
+        """不正な HMAC 文字列が拒否されること"""
+        key = b"reject_key_for_testing"
+        data = {"msg": "hello"}
+        assert verify_data_hmac(key, data, "0" * 64) is False
+        assert verify_data_hmac(key, data, "") is False
+
+    def test_hmac_keys_ignored_in_verification(self):
+        """_hmac キーが含まれていても検証が成功すること"""
+        key = b"ignore_key_for_testing"
+        data = {"user": "Bob"}
+        sig = compute_data_hmac(key, data)
+        data_with_hmac = {"user": "Bob", "_hmac_sig": sig}
+        assert verify_data_hmac(key, data_with_hmac, sig) is True
+
+
+# ======================================================================
+# TestHMACKey
+# ======================================================================
+
+class TestHMACKey:
+    """HMACKey データクラスのテスト"""
+
+    def test_to_dict_roundtrip(self):
+        """to_dict → from_dict のラウンドトリップ"""
+        key = HMACKey(
+            key="test_key_value",
+            created_at="2025-01-01T00:00:00Z",
+            rotated_at=None,
+            is_active=True,
+        )
+        d = key.to_dict()
+        restored = HMACKey.from_dict(d)
+        assert restored.key == key.key
+        assert restored.created_at == key.created_at
+        assert restored.rotated_at is None
+        assert restored.is_active is True
+
+    def test_from_dict_with_rotated(self):
+        """退役済み鍵の from_dict"""
+        d = {
+            "key": "old_key",
+            "created_at": "2025-01-01T00:00:00Z",
+            "rotated_at": "2025-01-02T00:00:00Z",
+            "is_active": False,
+        }
+        key = HMACKey.from_dict(d)
+        assert key.is_active is False
+        assert key.rotated_at == "2025-01-02T00:00:00Z"
+
+    def test_from_dict_defaults(self):
+        """from_dict でオプションフィールドのデフォルト値"""
+        d = {"key": "k", "created_at": "2025-01-01T00:00:00Z"}
+        key = HMACKey.from_dict(d)
+        assert key.rotated_at is None
+        assert key.is_active is True
+
+
+# ======================================================================
+# TestHMACKeyManagerInit
+# ======================================================================
 
 class TestHMACKeyManagerInit:
+    """HMACKeyManager 初期化のテスト"""
 
-    def test_creates_key_on_first_init(self, tmp_path):
-        keys_path = str(tmp_path / "keys.json")
+    def test_first_boot_generates_key(self, tmp_path):
+        """鍵ファイルが存在しない場合、初回起動で鍵が生成されること"""
+        keys_path = str(tmp_path / "hmac_keys.json")
         mgr = HMACKeyManager(keys_path=keys_path)
-        active = mgr.get_active_key()
-        assert isinstance(active, str)
-        assert len(active) > 0
         assert Path(keys_path).exists()
+        key = mgr.get_active_key()
+        assert isinstance(key, str)
+        assert len(key) > 0
 
-    def test_loads_existing_keys(self, tmp_path):
-        keys_path = str(tmp_path / "keys.json")
+    def test_reload_existing_keys(self, tmp_path):
+        """既存の鍵ファイルからリロードされること"""
+        keys_path = str(tmp_path / "hmac_keys.json")
         mgr1 = HMACKeyManager(keys_path=keys_path)
         key1 = mgr1.get_active_key()
+
+        # 同じパスで再生成 — 同じ鍵がロードされること
         mgr2 = HMACKeyManager(keys_path=keys_path)
         key2 = mgr2.get_active_key()
         assert key1 == key2
 
-    def test_creates_parent_dirs(self, tmp_path):
-        keys_path = str(tmp_path / "deep" / "nested" / "keys.json")
-        mgr = HMACKeyManager(keys_path=keys_path)
-        assert Path(keys_path).exists()
-        assert mgr.get_active_key()
-
-    def test_handles_corrupt_key_file(self, tmp_path):
-        keys_path = tmp_path / "keys.json"
-        keys_path.write_text("NOT VALID JSON", encoding="utf-8")
+    def test_corrupted_file_recovery(self, tmp_path):
+        """壊れた鍵ファイルからリカバリーされること"""
+        keys_path = tmp_path / "hmac_keys.json"
+        keys_path.write_text("{invalid json!!!}", encoding="utf-8")
         mgr = HMACKeyManager(keys_path=str(keys_path))
-        # Should recover by generating a new key
-        assert mgr.get_active_key()
-
-    def test_key_file_atomic_write(self, tmp_path):
-        keys_path = str(tmp_path / "keys.json")
-        mgr = HMACKeyManager(keys_path=keys_path)
-        # Verify the file is valid JSON
-        with open(keys_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        assert "keys" in data
-        assert "version" in data
-        assert len(data["keys"]) == 1
-        assert data["keys"][0]["is_active"] is True
-
-
-# ===================================================================
-# HMACKeyManager - verify_token
-# ===================================================================
-
-class TestHMACKeyManagerVerifyToken:
-
-    def test_verify_active_key(self, tmp_path):
-        mgr = HMACKeyManager(keys_path=str(tmp_path / "keys.json"))
         key = mgr.get_active_key()
-        assert mgr.verify_token(key) is True
+        assert isinstance(key, str)
+        assert len(key) > 0
+        # バックアップファイルが作成されること
+        bak_path = keys_path.with_suffix(".json.bak")
+        assert bak_path.exists()
 
-    def test_reject_invalid_token(self, tmp_path):
-        mgr = HMACKeyManager(keys_path=str(tmp_path / "keys.json"))
-        assert mgr.verify_token("invalid-token-value") is False
+    def test_env_rotate_trigger(self, tmp_path, monkeypatch):
+        """RUMI_HMAC_ROTATE=true で起動時にローテーションされること"""
+        keys_path = str(tmp_path / "hmac_keys.json")
+        mgr1 = HMACKeyManager(keys_path=keys_path)
+        key1 = mgr1.get_active_key()
 
-    def test_reject_empty_token(self, tmp_path):
-        mgr = HMACKeyManager(keys_path=str(tmp_path / "keys.json"))
+        monkeypatch.setenv("RUMI_HMAC_ROTATE", "true")
+        mgr2 = HMACKeyManager(keys_path=keys_path)
+        key2 = mgr2.get_active_key()
+        assert key1 != key2
+        # 環境変数がクリアされること
+        assert os.environ.get("RUMI_HMAC_ROTATE") is None
+
+    def test_grace_period_custom(self, tmp_path):
+        """カスタムグレースピリオドが設定されること"""
+        keys_path = str(tmp_path / "hmac_keys.json")
+        mgr = HMACKeyManager(keys_path=keys_path, grace_period_seconds=3600)
+        info = mgr.get_key_info()
+        assert info["grace_period_seconds"] == 3600
+
+
+# ======================================================================
+# TestGetActiveKey
+# ======================================================================
+
+class TestGetActiveKey:
+    """get_active_key のテスト"""
+
+    def test_returns_string(self, tmp_path):
+        """アクティブ鍵が文字列で返されること"""
+        mgr = HMACKeyManager(keys_path=str(tmp_path / "k.json"))
+        key = mgr.get_active_key()
+        assert isinstance(key, str)
+        assert len(key) > 0
+
+    def test_consistent_on_repeated_calls(self, tmp_path):
+        """連続呼び出しで同じ鍵が返されること"""
+        mgr = HMACKeyManager(keys_path=str(tmp_path / "k.json"))
+        k1 = mgr.get_active_key()
+        k2 = mgr.get_active_key()
+        assert k1 == k2
+
+
+# ======================================================================
+# TestVerifyToken
+# ======================================================================
+
+class TestVerifyToken:
+    """verify_token のテスト"""
+
+    def test_valid_token_accepted(self, tmp_path):
+        """アクティブ鍵と一致するトークンが受理されること"""
+        mgr = HMACKeyManager(keys_path=str(tmp_path / "k.json"))
+        token = mgr.get_active_key()
+        assert mgr.verify_token(token) is True
+
+    def test_invalid_token_rejected(self, tmp_path):
+        """一致しないトークンが拒否されること"""
+        mgr = HMACKeyManager(keys_path=str(tmp_path / "k.json"))
+        assert mgr.verify_token("invalid_token_string") is False
+
+    def test_empty_token_rejected(self, tmp_path):
+        """空トークンが拒否されること"""
+        mgr = HMACKeyManager(keys_path=str(tmp_path / "k.json"))
         assert mgr.verify_token("") is False
 
+    def test_one_char_diff_rejected(self, tmp_path):
+        """1文字違いのトークンが拒否されること"""
+        mgr = HMACKeyManager(keys_path=str(tmp_path / "k.json"))
+        token = mgr.get_active_key()
+        wrong = token[:-1] + ("X" if token[-1] != "X" else "Y")
+        assert mgr.verify_token(wrong) is False
 
-# ===================================================================
-# HMACKeyManager - rotate
-# ===================================================================
 
-class TestHMACKeyManagerRotate:
+# ======================================================================
+# TestRotate
+# ======================================================================
+
+class TestRotate:
+    """rotate / rotate_key のテスト"""
 
     def test_rotate_returns_new_key(self, tmp_path):
-        mgr = HMACKeyManager(keys_path=str(tmp_path / "keys.json"))
+        """ローテーション後に新しい鍵が返されること"""
+        mgr = HMACKeyManager(keys_path=str(tmp_path / "k.json"))
         old_key = mgr.get_active_key()
         new_key = mgr.rotate()
         assert new_key != old_key
         assert mgr.get_active_key() == new_key
 
     def test_old_key_valid_during_grace_period(self, tmp_path):
+        """グレースピリオド内は旧鍵でも verify_token が成功すること"""
         mgr = HMACKeyManager(
-            keys_path=str(tmp_path / "keys.json"),
+            keys_path=str(tmp_path / "k.json"),
             grace_period_seconds=3600,
         )
         old_key = mgr.get_active_key()
         mgr.rotate()
+        # 旧鍵がまだ有効
         assert mgr.verify_token(old_key) is True
 
-    def test_multiple_rotations(self, tmp_path):
+    def test_old_key_rejected_after_grace_period(self, tmp_path):
+        """グレースピリオド超過後は旧鍵が拒否されること"""
         mgr = HMACKeyManager(
-            keys_path=str(tmp_path / "keys.json"),
+            keys_path=str(tmp_path / "k.json"),
+            grace_period_seconds=1,  # 1秒
+        )
+        old_key = mgr.get_active_key()
+
+        # rotate で旧鍵を退役
+        mgr.rotate()
+
+        # 時間を進める: _now_utc をモックして未来にする
+        future_time = datetime.now(timezone.utc) + timedelta(seconds=10)
+        with patch(
+            "rumi_ai_1_10.core_runtime.hmac_key_manager._now_utc",
+            return_value=future_time,
+        ):
+            # cleanup を強制トリガー: 再ロード
+            mgr._load_or_initialize()
+            assert mgr.verify_token(old_key) is False
+
+    def test_rotate_key_alias(self, tmp_path):
+        """rotate_key が rotate のエイリアスであること"""
+        mgr = HMACKeyManager(keys_path=str(tmp_path / "k.json"))
+        assert mgr.rotate_key is mgr.rotate
+
+    def test_multiple_rotations(self, tmp_path):
+        """複数回ローテーションしても正常に動作すること"""
+        mgr = HMACKeyManager(
+            keys_path=str(tmp_path / "k.json"),
             grace_period_seconds=3600,
         )
-        key1 = mgr.get_active_key()
-        key2 = mgr.rotate()
-        key3 = mgr.rotate()
-        assert key1 != key2 != key3
-        assert mgr.get_active_key() == key3
-        # Both old keys still valid during grace period
-        assert mgr.verify_token(key1) is True
-        assert mgr.verify_token(key2) is True
+        keys = [mgr.get_active_key()]
+        for _ in range(5):
+            keys.append(mgr.rotate())
+        # 最新の鍵がアクティブ
+        assert mgr.get_active_key() == keys[-1]
+        # 全ての旧鍵がグレースピリオド内で有効
+        for k in keys:
+            assert mgr.verify_token(k) is True
 
-    def test_key_info_after_rotation(self, tmp_path):
-        mgr = HMACKeyManager(keys_path=str(tmp_path / "keys.json"))
+    def test_rotate_persists_to_file(self, tmp_path):
+        """ローテーション結果がファイルに永続化されること"""
+        keys_path = str(tmp_path / "k.json")
+        mgr = HMACKeyManager(keys_path=keys_path)
+        new_key = mgr.rotate()
+
+        # 別インスタンスで再ロード
+        mgr2 = HMACKeyManager(keys_path=keys_path)
+        assert mgr2.get_active_key() == new_key
+
+
+# ======================================================================
+# TestGetKeyInfo
+# ======================================================================
+
+class TestGetKeyInfo:
+    """get_key_info のテスト"""
+
+    def test_structure(self, tmp_path):
+        """返り値の構造が正しいこと"""
+        mgr = HMACKeyManager(keys_path=str(tmp_path / "k.json"))
+        info = mgr.get_key_info()
+        assert "total_keys" in info
+        assert "active_keys" in info
+        assert "grace_period_keys" in info
+        assert "grace_period_seconds" in info
+        assert "keys_path" in info
+        assert "keys" in info
+        assert isinstance(info["keys"], list)
+
+    def test_key_prefix_exposed(self, tmp_path):
+        """鍵のプレフィックス（先頭8文字 + ...）のみが露出すること"""
+        mgr = HMACKeyManager(keys_path=str(tmp_path / "k.json"))
+        info = mgr.get_key_info()
+        for key_info in info["keys"]:
+            assert key_info["key_prefix"].endswith("...")
+            # フルキーが含まれていないこと (8 + "..." = 11)
+            assert len(key_info["key_prefix"]) == 11
+
+    def test_counts_after_rotation(self, tmp_path):
+        """ローテーション後のカウントが正しいこと"""
+        mgr = HMACKeyManager(keys_path=str(tmp_path / "k.json"))
         mgr.rotate()
         info = mgr.get_key_info()
         assert info["active_keys"] == 1
         assert info["grace_period_keys"] >= 1
         assert info["total_keys"] >= 2
 
-    def test_rotation_persisted(self, tmp_path):
-        keys_path = str(tmp_path / "keys.json")
-        mgr1 = HMACKeyManager(keys_path=keys_path, grace_period_seconds=3600)
-        old_key = mgr1.get_active_key()
-        new_key = mgr1.rotate()
 
-        mgr2 = HMACKeyManager(keys_path=keys_path, grace_period_seconds=3600)
-        assert mgr2.get_active_key() == new_key
-        assert mgr2.verify_token(old_key) is True
+# ======================================================================
+# TestSecurityProperties
+# ======================================================================
 
+class TestSecurityProperties:
+    """セキュリティ特性のテスト"""
 
-# ===================================================================
-# HMACKeyManager - grace period expiration
-# ===================================================================
+    def test_hmac_verify_correctness(self):
+        """verify_data_hmac が正確に動作すること（正誤判定の精度）"""
+        key = b"timing_test_key_for_test"
+        data = {"test": "data"}
+        sig = compute_data_hmac(key, data)
+        # 正しい署名
+        assert verify_data_hmac(key, data, sig) is True
+        # 不正な署名（完全に異なる）
+        assert verify_data_hmac(key, data, "wrong" * 13) is False
+        # 不正な署名（1文字違い）
+        assert verify_data_hmac(key, data, sig[:-1] + "0") is False
 
-class TestHMACKeyManagerGracePeriod:
-
-    def test_expired_key_removed_on_reload(self, tmp_path, monkeypatch):
-        keys_path = str(tmp_path / "keys.json")
-        mgr = HMACKeyManager(keys_path=keys_path, grace_period_seconds=60)
-        old_key = mgr.get_active_key()
+    def test_key_file_atomic_write(self, tmp_path):
+        """鍵ファイルが正常な JSON であること（atomic write の間接確認）"""
+        keys_path = str(tmp_path / "k.json")
+        mgr = HMACKeyManager(keys_path=keys_path)
         mgr.rotate()
-
-        # Simulate time passing beyond grace period
-        future = datetime.now(timezone.utc) + timedelta(seconds=120)
-        monkeypatch.setattr(
-            "core_runtime.hmac_key_manager._now_utc", lambda: future
-        )
-
-        mgr2 = HMACKeyManager(keys_path=keys_path, grace_period_seconds=60)
-        assert mgr2.verify_token(old_key) is False
-
-    def test_key_within_grace_period_survives(self, tmp_path, monkeypatch):
-        keys_path = str(tmp_path / "keys.json")
-        mgr = HMACKeyManager(keys_path=keys_path, grace_period_seconds=300)
-        old_key = mgr.get_active_key()
         mgr.rotate()
+        with open(keys_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        assert "version" in data
+        assert "keys" in data
+        assert isinstance(data["keys"], list)
 
-        # 100 seconds into a 300-second grace period
-        future = datetime.now(timezone.utc) + timedelta(seconds=100)
-        monkeypatch.setattr(
-            "core_runtime.hmac_key_manager._now_utc", lambda: future
-        )
-
-        mgr2 = HMACKeyManager(keys_path=keys_path, grace_period_seconds=300)
-        assert mgr2.verify_token(old_key) is True
-
-
-# ===================================================================
-# HMACKeyManager - env var rotation trigger
-# ===================================================================
-
-class TestHMACKeyManagerEnvTrigger:
-
-    def test_env_rotate_triggers_rotation(self, tmp_path, monkeypatch):
-        keys_path = str(tmp_path / "keys.json")
-        mgr1 = HMACKeyManager(keys_path=keys_path)
-        key1 = mgr1.get_active_key()
-
-        monkeypatch.setenv("RUMI_HMAC_ROTATE", "true")
-        mgr2 = HMACKeyManager(keys_path=keys_path, grace_period_seconds=3600)
-        key2 = mgr2.get_active_key()
-        assert key2 != key1
-        # Old key in grace
-        assert mgr2.verify_token(key1) is True
+    def test_default_grace_period(self, tmp_path):
+        """デフォルトグレースピリオドが 86400 秒であること"""
+        assert DEFAULT_GRACE_PERIOD_SECONDS == 86400
+        keys_path = str(tmp_path / "k.json")
+        mgr = HMACKeyManager(keys_path=keys_path)
+        info = mgr.get_key_info()
+        assert info["grace_period_seconds"] == 86400

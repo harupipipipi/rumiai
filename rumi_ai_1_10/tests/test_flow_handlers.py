@@ -184,6 +184,26 @@ class TestSanitizeError:
         assert "<path>" in result
         assert "admin" not in result
 
+    # --- Wave4-B 追加テスト (改善推奨1) ---
+
+    def test_multiline_non_traceback_returns_last_line(self):
+        """複数行だがトレースバックではないエラー → 最終行が返ること"""
+        msg = "Error occurred\nDetails: something went wrong\nFinal message"
+        result = _sanitize_error(msg)
+        assert "Final message" in result
+
+    def test_all_lines_traceback_prefix_returns_safe(self):
+        """全行がトレースバックプレフィックスで始まる場合 → _SAFE_ERROR_MSG"""
+        msg = (
+            'Traceback (most recent call last):\n'
+            '  File "/home/user/app/main.py", line 42, in run\n'
+            '    do_something()\n'
+            '  File "/home/user/app/utils.py", line 10, in do_something\n'
+            '    raise_error()'
+        )
+        result = _sanitize_error(msg)
+        assert result == _SAFE_ERROR_MSG
+
 
 # ======================================================================
 # TestIsJsonSerializable
