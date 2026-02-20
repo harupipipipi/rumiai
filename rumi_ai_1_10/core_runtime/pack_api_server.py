@@ -51,6 +51,8 @@ PACK_ID_RE = re.compile(r'^[a-zA-Z0-9_-]{1,64}$')
 SAFE_ID_RE = re.compile(r'^[a-zA-Z0-9_.:/-]{1,256}$')
 # --- リクエストボディサイズ上限 (10 MB) ---
 MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024
+# --- スレッド終了待ちタイムアウト (秒) ---
+THREAD_JOIN_TIMEOUT_SECONDS = 5
 # _SAFE_ERROR_MSG: moved to api._helpers
 
 
@@ -122,10 +124,14 @@ class PackAPIHandler(
 
         戻り値が dict で ``"error"`` キーを含む場合はエラーレスポンスとして送信し、
         それ以外は成功レスポンスとして送信する。
+
+        handler が ``status_code`` キーを返した場合、その値を HTTP ステータスに使用する。
+        ``status_code`` が無い場合は *error_status* をデフォルトとする。
         """
         if isinstance(result, dict) and "error" in result:
+            status = result.get("status_code", error_status)
             self._send_response(
-                APIResponse(False, error=result["error"]), error_status
+                APIResponse(False, error=result["error"]), status
             )
         else:
             self._send_response(APIResponse(True, data=result))
@@ -156,12 +162,25 @@ class PackAPIHandler(
         """リクエストボディを読み取り、インスタンスに保持して返す。
 
         サイズ超過時は 413 レスポンスを送信し None を返す。
+        Content-Length が不正な場合は 400 レスポンスを送信し None を返す。
 
         Returns:
             bytes: 読み取ったボディ。
-            None: サイズ超過（レスポンス送信済み）。
+            None: サイズ超過 / ヘッダー不正（レスポンス送信済み）。
         """
-        content_length = int(self.headers.get('Content-Length', 0))
+        raw_cl = self.headers.get('Content-Length', '0')
+        try:
+            content_length = int(raw_cl)
+        except (ValueError, TypeError):
+            self._send_response(
+                APIResponse(False, error="Invalid Content-Length header"), 400
+            )
+            return None
+        if content_length < 0:
+            self._send_response(
+                APIResponse(False, error="Invalid Content-Length header"), 400
+            )
+            return None
         if content_length == 0:
             self._raw_body_bytes = b""
             return b""
@@ -361,6 +380,7 @@ class PackAPIHandler(
                 if match:
                     self._handle_pack_route_request(path, {}, "GET", match)
                 else:
+                    logger.debug("Unmatched GET path: %s", path)
                     self._send_response(APIResponse(False, error="Not found"), 404)
                 
         except Exception as e:
@@ -397,7 +417,7 @@ class PackAPIHandler(
                     if result.get("success"):
                         self._send_response(APIResponse(True, result))
                     else:
-                        self._send_response(APIResponse(False, error=result.get("error", "Grant failed")), 400)
+                        self._send_response(APIResponse(False, error=result.get("error", "Grant failed")), result.get("status_code", 400))
 
             elif path == "/api/network/revoke":
                 pack_id = body.get("pack_id", "")
@@ -410,7 +430,7 @@ class PackAPIHandler(
                     if result.get("success"):
                         self._send_response(APIResponse(True, result))
                     else:
-                        self._send_response(APIResponse(False, error=result.get("error", "Revoke failed")), 400)
+                        self._send_response(APIResponse(False, error=result.get("error", "Revoke failed")), result.get("status_code", 400))
 
             elif path == "/api/network/check":
                 pack_id = body.get("pack_id", "")
@@ -451,7 +471,7 @@ class PackAPIHandler(
                     if result.get("success"):
                         self._send_response(APIResponse(True, result))
                     else:
-                        self._send_response(APIResponse(False, error=result.get("error")), 400)
+                        self._send_response(APIResponse(False, error=result.get("error")), result.get("status_code", 400))
 
             elif path == "/api/packs/apply":
                 staging_id = body.get("staging_id", "")
@@ -465,35 +485,35 @@ class PackAPIHandler(
                     if result.get("success"):
                         self._send_response(APIResponse(True, result))
                     else:
-                        self._send_response(APIResponse(False, error=result.get("error")), 400)
+                        self._send_response(APIResponse(False, error=result.get("error")), result.get("status_code", 400))
 
             elif path == "/api/secrets/set":
                 result = self._secrets_set(body)
                 if result.get("success"):
                     self._send_response(APIResponse(True, result))
                 else:
-                    self._send_response(APIResponse(False, error=result.get("error")), 400)
+                    self._send_response(APIResponse(False, error=result.get("error")), result.get("status_code", 400))
 
             elif path == "/api/secrets/delete":
                 result = self._secrets_delete(body)
                 if result.get("success"):
                     self._send_response(APIResponse(True, result))
                 else:
-                    self._send_response(APIResponse(False, error=result.get("error")), 400)
+                    self._send_response(APIResponse(False, error=result.get("error")), result.get("status_code", 400))
 
             elif path == "/api/stores/create":
                 result = self._stores_create(body)
                 if result.get("success"):
                     self._send_response(APIResponse(True, result))
                 else:
-                    self._send_response(APIResponse(False, error=result.get("error")), 400)
+                    self._send_response(APIResponse(False, error=result.get("error")), result.get("status_code", 400))
 
             elif path == "/api/units/publish":
                 result = self._units_publish(body)
                 if result.get("success"):
                     self._send_response(APIResponse(True, result))
                 else:
-                    self._send_response(APIResponse(False, error=result.get("error")), 400)
+                    self._send_response(APIResponse(False, error=result.get("error")), result.get("status_code", 400))
 
             elif path == "/api/units/execute":
                 result = self._units_execute(body)
@@ -503,7 +523,7 @@ class PackAPIHandler(
                     status_code = 403 if result.get("error_type") in (
                         "approval_denied", "grant_denied", "trust_denied"
                     ) else 400
-                    self._send_response(APIResponse(False, error=result.get("error")), status_code)
+                    self._send_response(APIResponse(False, error=result.get("error")), result.get("status_code", status_code))
 
             elif path == "/api/pip/candidates/scan":
                 ecosystem_dir = body.get("ecosystem_dir", None)
@@ -521,7 +541,7 @@ class PackAPIHandler(
                     if result.get("success"):
                         self._send_response(APIResponse(True, result))
                     else:
-                        self._send_response(APIResponse(False, error=result.get("error", "Approve failed")), 400)
+                        self._send_response(APIResponse(False, error=result.get("error", "Approve failed")), result.get("status_code", 400))
 
             elif path.startswith("/api/pip/requests/") and path.endswith("/reject"):
                 candidate_key = self._extract_capability_key(path, "/api/pip/requests/", "/reject")
@@ -533,7 +553,7 @@ class PackAPIHandler(
                     if result.get("success"):
                         self._send_response(APIResponse(True, result))
                     else:
-                        self._send_response(APIResponse(False, error=result.get("error", "Reject failed")), 400)
+                        self._send_response(APIResponse(False, error=result.get("error", "Reject failed")), result.get("status_code", 400))
 
             elif path.startswith("/api/pip/blocked/") and path.endswith("/unblock"):
                 candidate_key = self._extract_capability_key(path, "/api/pip/blocked/", "/unblock")
@@ -545,7 +565,7 @@ class PackAPIHandler(
                     if result.get("success"):
                         self._send_response(APIResponse(True, result))
                     else:
-                        self._send_response(APIResponse(False, error=result.get("error", "Unblock failed")), 400)
+                        self._send_response(APIResponse(False, error=result.get("error", "Unblock failed")), result.get("status_code", 400))
 
             elif path == "/api/capability/candidates/scan":
                 ecosystem_dir = body.get("ecosystem_dir", None)
@@ -562,7 +582,7 @@ class PackAPIHandler(
                     if result.get("success"):
                         self._send_response(APIResponse(True, result))
                     else:
-                        self._send_response(APIResponse(False, error=result.get("error", "Approve failed")), 400)
+                        self._send_response(APIResponse(False, error=result.get("error", "Approve failed")), result.get("status_code", 400))
 
             elif path.startswith("/api/capability/requests/") and path.endswith("/reject"):
                 candidate_key = self._extract_capability_key(path, "/api/capability/requests/", "/reject")
@@ -574,7 +594,7 @@ class PackAPIHandler(
                     if result.get("success"):
                         self._send_response(APIResponse(True, result))
                     else:
-                        self._send_response(APIResponse(False, error=result.get("error", "Reject failed")), 400)
+                        self._send_response(APIResponse(False, error=result.get("error", "Reject failed")), result.get("status_code", 400))
 
             elif path.startswith("/api/capability/blocked/") and path.endswith("/unblock"):
                 candidate_key = self._extract_capability_key(path, "/api/capability/blocked/", "/unblock")
@@ -586,7 +606,7 @@ class PackAPIHandler(
                     if result.get("success"):
                         self._send_response(APIResponse(True, result))
                     else:
-                        self._send_response(APIResponse(False, error=result.get("error", "Unblock failed")), 400)
+                        self._send_response(APIResponse(False, error=result.get("error", "Unblock failed")), result.get("status_code", 400))
             
 
             elif path == "/api/capability/grants/batch":
@@ -595,7 +615,7 @@ class PackAPIHandler(
                 if result.get("success"):
                     self._send_response(APIResponse(True, result))
                 else:
-                    self._send_response(APIResponse(False, error=result.get("error", "Batch grant failed")), 400)
+                    self._send_response(APIResponse(False, error=result.get("error", "Batch grant failed")), result.get("status_code", 400))
 
             elif path == "/api/stores/shared/approve":
                 provider_pack_id = body.get("provider_pack_id", "")
@@ -605,7 +625,7 @@ class PackAPIHandler(
                 if result.get("success"):
                     self._send_response(APIResponse(True, result))
                 else:
-                    self._send_response(APIResponse(False, error=result.get("error", "Approve failed")), 400)
+                    self._send_response(APIResponse(False, error=result.get("error", "Approve failed")), result.get("status_code", 400))
 
             elif path == "/api/stores/shared/revoke":
                 provider_pack_id = body.get("provider_pack_id", "")
@@ -615,7 +635,7 @@ class PackAPIHandler(
                 if result.get("success"):
                     self._send_response(APIResponse(True, result))
                 else:
-                    self._send_response(APIResponse(False, error=result.get("error", "Revoke failed")), 400)
+                    self._send_response(APIResponse(False, error=result.get("error", "Revoke failed")), result.get("status_code", 400))
 
             elif path == "/api/capability/grants/grant":
                 principal_id = body.get("principal_id", "")
@@ -628,7 +648,7 @@ class PackAPIHandler(
                     if result.get("success"):
                         self._send_response(APIResponse(True, result))
                     else:
-                        self._send_response(APIResponse(False, error=result.get("error", "Grant failed")), 400)
+                        self._send_response(APIResponse(False, error=result.get("error", "Grant failed")), result.get("status_code", 400))
 
             elif path == "/api/capability/grants/revoke":
                 principal_id = body.get("principal_id", "")
@@ -640,7 +660,7 @@ class PackAPIHandler(
                     if result.get("success"):
                         self._send_response(APIResponse(True, result))
                     else:
-                        self._send_response(APIResponse(False, error=result.get("error", "Revoke failed")), 400)
+                        self._send_response(APIResponse(False, error=result.get("error", "Revoke failed")), result.get("status_code", 400))
 
             elif path.startswith("/api/packs/") and path.endswith("/approve"):
                 pack_id = path.split("/")[3]
@@ -651,7 +671,7 @@ class PackAPIHandler(
                 if result.get("success"):
                     self._send_response(APIResponse(True, result))
                 else:
-                    self._send_response(APIResponse(False, error=result.get("error")), 400)
+                    self._send_response(APIResponse(False, error=result.get("error")), result.get("status_code", 400))
             
             elif path.startswith("/api/packs/") and path.endswith("/reject"):
                 pack_id = path.split("/")[3]
@@ -671,7 +691,7 @@ class PackAPIHandler(
                 if result.get("success"):
                     self._send_response(APIResponse(True, result))
                 else:
-                    self._send_response(APIResponse(False, error=result.get("error")), 400)
+                    self._send_response(APIResponse(False, error=result.get("error")), result.get("status_code", 400))
             
             elif path.startswith("/api/containers/") and path.endswith("/stop"):
                 pack_id = path.split("/")[3]
@@ -695,7 +715,7 @@ class PackAPIHandler(
                 if result.get("success"):
                     self._send_response(APIResponse(True, result))
                 else:
-                    self._send_response(APIResponse(False, error=result.get("error")), 400)
+                    self._send_response(APIResponse(False, error=result.get("error")), result.get("status_code", 400))
             
             elif path.startswith("/api/privileges/") and "/execute/" in path:
                 parts = path.split("/")
@@ -712,7 +732,7 @@ class PackAPIHandler(
                 if result.get("success"):
                     self._send_response(APIResponse(True, result))
                 else:
-                    self._send_response(APIResponse(False, error=result.get("error")), 403)
+                    self._send_response(APIResponse(False, error=result.get("error")), result.get("status_code", 403))
 
             # --- Route reload ---
             elif path == "/api/routes/reload":
@@ -736,6 +756,7 @@ class PackAPIHandler(
                 if match:
                     self._handle_pack_route_request(path, body, "POST", match)
                 else:
+                    logger.debug("Unmatched POST path: %s", path)
                     self._send_response(APIResponse(False, error="Not found"), 404)
                 
         except Exception as e:
@@ -759,6 +780,7 @@ class PackAPIHandler(
             if match:
                 self._handle_pack_route_request(path, body, "PUT", match)
             else:
+                logger.debug("Unmatched PUT path: %s", path)
                 self._send_response(APIResponse(False, error="Not found"), 404)
 
         except Exception as e:
@@ -800,6 +822,7 @@ class PackAPIHandler(
                             return  # レスポンス送信済み
                         self._handle_pack_route_request(path, body, "DELETE", match)
                     else:
+                        logger.debug("Unmatched DELETE path: %s", path)
                         self._send_response(APIResponse(False, error="Not found"), 404)
             
             else:
@@ -811,11 +834,15 @@ class PackAPIHandler(
                         return  # レスポンス送信済み
                     self._handle_pack_route_request(path, body, "DELETE", match)
                 else:
+                    logger.debug("Unmatched DELETE path: %s", path)
                     self._send_response(APIResponse(False, error="Not found"), 404)
                 
         except Exception as e:
             _log_internal_error("do_DELETE", e)
             self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
+
+
+class PackAPIServer:
     
     def __init__(
         self,
@@ -891,7 +918,7 @@ class PackAPIHandler(
             self.server.shutdown()
             self.server = None
         if self.thread:
-            self.thread.join(timeout=5)
+            self.thread.join(timeout=THREAD_JOIN_TIMEOUT_SECONDS)
             self.thread = None
         logger.info("Pack API server stopped")
     
