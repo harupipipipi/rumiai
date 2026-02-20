@@ -1,7 +1,8 @@
 """
 kernel.py - Kernel クラス組み立て (Mixin分割版)
 
-KernelCore (エンジン本体) + KernelSystemHandlersMixin (起動系ハンドラ)
+KernelCore (エンジン本体) + KernelFlowExecutionMixin (Flow実行)
++ KernelSystemHandlersMixin (起動系ハンドラ)
 + KernelRuntimeHandlersMixin (運用系ハンドラ) を合成し、
 既存の import 互換を維持する薄いモジュール。
 
@@ -15,6 +16,7 @@ import os
 from typing import Any, Callable, Dict, List, Optional
 
 from .kernel_core import KernelCore, KernelConfig
+from .kernel_flow_execution import KernelFlowExecutionMixin
 from .kernel_handlers_system import KernelSystemHandlersMixin
 from .kernel_handlers_runtime import KernelRuntimeHandlersMixin
 
@@ -59,12 +61,13 @@ _EXPECTED_HANDLER_KEYS = frozenset([
 ])
 
 
-class Kernel(KernelSystemHandlersMixin, KernelRuntimeHandlersMixin, KernelCore):
+class Kernel(KernelSystemHandlersMixin, KernelRuntimeHandlersMixin, KernelFlowExecutionMixin, KernelCore):
     """
     Rumi AI OS カーネル
 
-    Mixin方式で分割された3クラスを合成する:
-    - KernelCore: エンジン本体（Flow実行、ctx構築、shutdown等）
+    Mixin方式で分割された4クラスを合成する:
+    - KernelCore: エンジン本体（Flow読込、ctx構築、shutdown等）
+    - KernelFlowExecutionMixin: Flow実行ロジック（run_startup, execute_flow等）
     - KernelSystemHandlersMixin: 起動/システム系 _h_* ハンドラ
     - KernelRuntimeHandlersMixin: 運用/実行系 _h_* ハンドラ
     """
