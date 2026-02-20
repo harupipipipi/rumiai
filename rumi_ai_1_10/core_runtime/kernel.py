@@ -58,6 +58,8 @@ _EXPECTED_HANDLER_KEYS = frozenset([
     "kernel:uds_proxy.init", "kernel:uds_proxy.ensure_socket", "kernel:uds_proxy.stop",
     "kernel:uds_proxy.stop_all", "kernel:uds_proxy.status",
     "kernel:capability_proxy.init", "kernel:capability_proxy.status", "kernel:capability_proxy.stop_all",
+    "kernel:capability.grant", "kernel:capability.revoke", "kernel:capability.list",
+    "kernel:pending.export",
 ])
 
 

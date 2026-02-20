@@ -136,7 +136,7 @@ class FlowHandlersMixin:
     def _handle_flow_run(self, path: str, body: dict) -> None:
         """POST /api/flows/{flow_id}/run のハンドラ"""
         # APIResponse は pack_api_server で定義されている — self 経由で利用
-        from ..pack_api_server import APIResponse
+        from .api_response import APIResponse
 
         parts = path.split("/")
         # ["", "api", "flows", "{flow_id}", "run"]

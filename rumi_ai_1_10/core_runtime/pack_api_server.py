@@ -23,6 +23,8 @@ from urllib.parse import urlparse, parse_qs, unquote
 
 from .hmac_key_manager import get_hmac_key_manager, HMACKeyManager
 
+from .api.api_response import APIResponse
+
 from .api import (
     PackHandlersMixin,
     ContainerHandlersMixin,
@@ -57,16 +59,6 @@ THREAD_JOIN_TIMEOUT_SECONDS = 5
 
 
 # _log_internal_error: moved to api._helpers
-
-
-@dataclass
-class APIResponse:
-    success: bool
-    data: Any = None
-    error: Optional[str] = None
-    
-    def to_json(self) -> str:
-        return json.dumps(asdict(self), ensure_ascii=False, indent=2)
 
 
 class PackAPIHandler(

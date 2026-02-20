@@ -11,6 +11,7 @@ api パッケージ — PackAPIHandler のハンドラ Mixin 群
     class PackAPIHandler(PackHandlersMixin, ..., BaseHTTPRequestHandler):
         ...
 """
+from .api_response import APIResponse
 from .pack_handlers import PackHandlersMixin
 from .container_handlers import ContainerHandlersMixin
 from .network_handlers import NetworkHandlersMixin
@@ -27,6 +28,7 @@ from .route_handlers import RouteHandlersMixin
 from .pack_lifecycle_handlers import PackLifecycleHandlersMixin
 
 __all__ = [
+    "APIResponse",
     "PackHandlersMixin",
     "ContainerHandlersMixin",
     "NetworkHandlersMixin",
