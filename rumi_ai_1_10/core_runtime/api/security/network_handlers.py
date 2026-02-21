@@ -1,7 +1,7 @@
 """Network Grant ハンドラ Mixin"""
 from __future__ import annotations
 
-from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
+from .._helpers import _log_internal_error, _SAFE_ERROR_MSG
 
 
 class NetworkHandlersMixin:
@@ -10,7 +10,7 @@ class NetworkHandlersMixin:
     def _network_grant(self, pack_id: str, allowed_domains: list, allowed_ports: list,
                        granted_by: str = "api_user", notes: str = "") -> dict:
         try:
-            from ..network_grant_manager import get_network_grant_manager
+            from ...network_grant_manager import get_network_grant_manager
             ngm = get_network_grant_manager()
             grant = ngm.grant_network_access(
                 pack_id=pack_id,
@@ -26,7 +26,7 @@ class NetworkHandlersMixin:
 
     def _network_revoke(self, pack_id: str, reason: str = "") -> dict:
         try:
-            from ..network_grant_manager import get_network_grant_manager
+            from ...network_grant_manager import get_network_grant_manager
             ngm = get_network_grant_manager()
             success = ngm.revoke_network_access(pack_id=pack_id, reason=reason)
             return {"success": success, "pack_id": pack_id, "revoked": success}
@@ -36,7 +36,7 @@ class NetworkHandlersMixin:
 
     def _network_check(self, pack_id: str, domain: str, port: int) -> dict:
         try:
-            from ..network_grant_manager import get_network_grant_manager
+            from ...network_grant_manager import get_network_grant_manager
             ngm = get_network_grant_manager()
             result = ngm.check_access(pack_id, domain, port)
             return {
@@ -52,7 +52,7 @@ class NetworkHandlersMixin:
 
     def _network_list(self) -> dict:
         try:
-            from ..network_grant_manager import get_network_grant_manager
+            from ...network_grant_manager import get_network_grant_manager
             ngm = get_network_grant_manager()
             grants = ngm.get_all_grants()
             disabled = ngm.get_disabled_packs()

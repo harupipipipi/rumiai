@@ -1,7 +1,7 @@
 """Store ハンドラ Mixin"""
 from __future__ import annotations
 
-from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
+from .._helpers import _log_internal_error, _SAFE_ERROR_MSG
 
 
 class StoreHandlersMixin:
@@ -9,7 +9,7 @@ class StoreHandlersMixin:
 
     def _stores_list(self) -> dict:
         try:
-            from ..store_registry import get_store_registry
+            from ...store_registry import get_store_registry
             reg = get_store_registry()
             stores = reg.list_stores()
             return {"stores": stores, "count": len(stores)}
@@ -25,7 +25,7 @@ class StoreHandlersMixin:
         if not root_path:
             return {"success": False, "error": "Missing 'root_path'"}
         try:
-            from ..store_registry import get_store_registry
+            from ...store_registry import get_store_registry
             reg = get_store_registry()
             result = reg.create_store(
                 store_id=store_id,

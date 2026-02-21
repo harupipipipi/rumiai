@@ -16,7 +16,6 @@ import re
 import secrets
 import threading
 from pathlib import Path
-from dataclasses import dataclass, asdict
 from typing import Any, Optional
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, unquote

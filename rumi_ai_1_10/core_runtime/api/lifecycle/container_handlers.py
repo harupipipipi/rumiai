@@ -1,7 +1,7 @@
 """Container / Docker ハンドラ Mixin"""
 from __future__ import annotations
 
-from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
+from .._helpers import _log_internal_error, _SAFE_ERROR_MSG
 
 
 class ContainerHandlersMixin:
@@ -17,7 +17,7 @@ class ContainerHandlersMixin:
             return {"success": False, "error": "ContainerOrchestrator not initialized"}
 
         if self.approval_manager:
-            from ..approval_manager import PackStatus
+            from ...approval_manager import PackStatus
             status = self.approval_manager.get_status(pack_id)
             if status != PackStatus.APPROVED:
                 return {"success": False, "error": f"Pack not approved: {status}", "status_code": 403}

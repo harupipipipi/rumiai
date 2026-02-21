@@ -1,7 +1,7 @@
 """Store Sharing ハンドラ Mixin"""
 from __future__ import annotations
 
-from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
+from .._helpers import _log_internal_error, _SAFE_ERROR_MSG
 
 
 class StoreShareHandlersMixin:
@@ -10,7 +10,7 @@ class StoreShareHandlersMixin:
     def _stores_shared_list(self) -> dict:
         """GET /api/stores/shared"""
         try:
-            from ..store_sharing_manager import get_shared_store_manager
+            from ...store_sharing_manager import get_shared_store_manager
             ssm = get_shared_store_manager()
             entries = ssm.list_shared_stores()
             return {"entries": entries, "count": len(entries)}
@@ -28,7 +28,7 @@ class StoreShareHandlersMixin:
                 "error": "Missing provider_pack_id, consumer_pack_id, or store_id",
             }
         try:
-            from ..store_sharing_manager import get_shared_store_manager
+            from ...store_sharing_manager import get_shared_store_manager
             ssm = get_shared_store_manager()
             return ssm.approve_sharing(provider_pack_id, consumer_pack_id, store_id)
         except Exception as e:
@@ -45,7 +45,7 @@ class StoreShareHandlersMixin:
                 "error": "Missing provider_pack_id, consumer_pack_id, or store_id",
             }
         try:
-            from ..store_sharing_manager import get_shared_store_manager
+            from ...store_sharing_manager import get_shared_store_manager
             ssm = get_shared_store_manager()
             return ssm.revoke_sharing(provider_pack_id, consumer_pack_id, store_id)
         except Exception as e:

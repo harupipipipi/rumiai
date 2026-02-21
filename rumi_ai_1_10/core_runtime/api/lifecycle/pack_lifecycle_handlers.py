@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
+from .._helpers import _log_internal_error, _SAFE_ERROR_MSG
 
 
 class PackLifecycleHandlersMixin:
@@ -72,7 +72,7 @@ class PackLifecycleHandlersMixin:
 
     def _pack_import(self, source_path: str, notes: str = "") -> dict:
         try:
-            from ..pack_importer import get_pack_importer
+            from ...pack_importer import get_pack_importer
             importer = get_pack_importer()
             result = importer.import_pack(source_path, notes=notes)
             return result.to_dict()
@@ -82,13 +82,13 @@ class PackLifecycleHandlersMixin:
 
     def _pack_apply(self, staging_id: str, mode: str = "replace") -> dict:
         try:
-            from ..pack_importer import get_pack_importer
+            from ...pack_importer import get_pack_importer
             importer = get_pack_importer()
             meta = importer.get_staging_meta(staging_id)
             if meta is None:
                 return {"success": False, "error": f"Staging not found: {staging_id}"}
 
-            from ..pack_applier import get_pack_applier
+            from ...pack_applier import get_pack_applier
             applier = get_pack_applier()
             result = applier.apply_staging(staging_id, mode=mode)
             return result.to_dict() if hasattr(result, "to_dict") else result

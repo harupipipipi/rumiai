@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
+from .._helpers import _log_internal_error, _SAFE_ERROR_MSG
 
 
 class UnitHandlersMixin:
@@ -11,8 +11,8 @@ class UnitHandlersMixin:
 
     def _units_list(self, store_id: str = None) -> dict:
         try:
-            from ..store_registry import get_store_registry
-            from ..unit_registry import get_unit_registry
+            from ...store_registry import get_store_registry
+            from ...unit_registry import get_unit_registry
             store_reg = get_store_registry()
             unit_reg = get_unit_registry()
 
@@ -58,9 +58,9 @@ class UnitHandlersMixin:
                 "error": "Missing store_id, source_dir, namespace, name, or version",
             }
         try:
-            from ..store_registry import get_store_registry
-            from ..unit_registry import get_unit_registry
-            from ..paths import is_path_within, ECOSYSTEM_DIR
+            from ...store_registry import get_store_registry
+            from ...unit_registry import get_unit_registry
+            from ...paths import is_path_within, ECOSYSTEM_DIR
 
             if not is_path_within(Path(source_dir), Path(ECOSYSTEM_DIR)):
                 return {
@@ -104,7 +104,7 @@ class UnitHandlersMixin:
             return {"success": False, "error": "Missing or invalid 'unit_ref'"}
 
         try:
-            from ..unit_executor import get_unit_executor
+            from ...unit_executor import get_unit_executor
             executor = get_unit_executor()
             result = executor.execute(
                 principal_id=principal_id,

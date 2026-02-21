@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import unquote
 
-from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
-from ..paths import is_path_within, ECOSYSTEM_DIR
+from .._helpers import _log_internal_error, _SAFE_ERROR_MSG
+from ...paths import is_path_within, ECOSYSTEM_DIR
 
 # Code root（ecosystem ディレクトリの親 = プロジェクトルート）
 _CODE_ROOT: Path = Path(ECOSYSTEM_DIR).parent
@@ -40,7 +40,7 @@ class CapabilityInstallerHandlersMixin:
                     "pending_created": 0,
                 }
         try:
-            from ..capability_installer import get_capability_installer
+            from ...capability_installer import get_capability_installer
             installer = get_capability_installer()
             result = installer.scan_candidates(ecosystem_dir)
             return result.to_dict()
@@ -50,7 +50,7 @@ class CapabilityInstallerHandlersMixin:
 
     def _capability_list_requests(self, status_filter: str = "all") -> dict:
         try:
-            from ..capability_installer import get_capability_installer
+            from ...capability_installer import get_capability_installer
             installer = get_capability_installer()
             items = installer.list_items(status_filter)
             return {"items": items, "count": len(items), "status_filter": status_filter}
@@ -60,7 +60,7 @@ class CapabilityInstallerHandlersMixin:
 
     def _capability_approve(self, candidate_key: str, notes: str = "") -> dict:
         try:
-            from ..capability_installer import get_capability_installer
+            from ...capability_installer import get_capability_installer
             installer = get_capability_installer()
             result = installer.approve_and_install(candidate_key, actor="api_user", notes=notes)
             return result.to_dict()
@@ -70,7 +70,7 @@ class CapabilityInstallerHandlersMixin:
 
     def _capability_reject(self, candidate_key: str, reason: str = "") -> dict:
         try:
-            from ..capability_installer import get_capability_installer
+            from ...capability_installer import get_capability_installer
             installer = get_capability_installer()
             result = installer.reject(candidate_key, actor="api_user", reason=reason)
             return result.to_dict()
@@ -80,7 +80,7 @@ class CapabilityInstallerHandlersMixin:
 
     def _capability_list_blocked(self) -> dict:
         try:
-            from ..capability_installer import get_capability_installer
+            from ...capability_installer import get_capability_installer
             installer = get_capability_installer()
             blocked = installer.list_blocked()
             return {"blocked": blocked, "count": len(blocked)}
@@ -90,7 +90,7 @@ class CapabilityInstallerHandlersMixin:
 
     def _capability_unblock(self, candidate_key: str, reason: str = "") -> dict:
         try:
-            from ..capability_installer import get_capability_installer
+            from ...capability_installer import get_capability_installer
             installer = get_capability_installer()
             result = installer.unblock(candidate_key, actor="api_user", reason=reason)
             return result.to_dict()

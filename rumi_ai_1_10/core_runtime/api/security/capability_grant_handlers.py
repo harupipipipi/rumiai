@@ -1,7 +1,7 @@
 """Capability Grant ハンドラ Mixin"""
 from __future__ import annotations
 
-from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
+from .._helpers import _log_internal_error, _SAFE_ERROR_MSG
 
 
 class CapabilityGrantHandlersMixin:
@@ -9,11 +9,11 @@ class CapabilityGrantHandlersMixin:
 
     def _capability_grants_grant(self, principal_id: str, permission_id: str, config=None) -> dict:
         try:
-            from ..capability_grant_manager import get_capability_grant_manager
+            from ...capability_grant_manager import get_capability_grant_manager
             gm = get_capability_grant_manager()
             gm.grant_permission(principal_id, permission_id, config)
             try:
-                from ..audit_logger import get_audit_logger
+                from ...audit_logger import get_audit_logger
                 audit = get_audit_logger()
                 audit.log_permission_event(
                     pack_id=principal_id,
@@ -36,11 +36,11 @@ class CapabilityGrantHandlersMixin:
 
     def _capability_grants_revoke(self, principal_id: str, permission_id: str) -> dict:
         try:
-            from ..capability_grant_manager import get_capability_grant_manager
+            from ...capability_grant_manager import get_capability_grant_manager
             gm = get_capability_grant_manager()
             gm.revoke_permission(principal_id, permission_id)
             try:
-                from ..audit_logger import get_audit_logger
+                from ...audit_logger import get_audit_logger
                 audit = get_audit_logger()
                 audit.log_permission_event(
                     pack_id=principal_id,
@@ -62,7 +62,7 @@ class CapabilityGrantHandlersMixin:
 
     def _capability_grants_list(self, principal_id: str = None) -> dict:
         try:
-            from ..capability_grant_manager import get_capability_grant_manager
+            from ...capability_grant_manager import get_capability_grant_manager
             gm = get_capability_grant_manager()
             if principal_id:
                 grant = gm.get_grant(principal_id)
@@ -83,11 +83,11 @@ class CapabilityGrantHandlersMixin:
     def _capability_grants_batch(self, grants_list: list) -> dict:
         """POST /api/capability/grants/batch"""
         try:
-            from ..capability_grant_manager import get_capability_grant_manager
+            from ...capability_grant_manager import get_capability_grant_manager
             gm = get_capability_grant_manager()
             result = gm.batch_grant(grants_list)
             try:
-                from ..audit_logger import get_audit_logger
+                from ...audit_logger import get_audit_logger
                 audit = get_audit_logger()
                 audit.log_permission_event(
                     pack_id="batch",

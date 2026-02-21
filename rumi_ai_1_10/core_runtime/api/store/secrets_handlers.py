@@ -8,7 +8,7 @@ _KEY_PATTERN = re.compile(r"^[A-Z0-9_]{1,64}$")
 # value の最大サイズ (1 MB)
 _MAX_VALUE_BYTES = 1_048_576
 
-from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
+from .._helpers import _log_internal_error, _SAFE_ERROR_MSG
 
 
 class SecretsHandlersMixin:
@@ -16,7 +16,7 @@ class SecretsHandlersMixin:
 
     def _secrets_list(self) -> dict:
         try:
-            from ..secrets_store import get_secrets_store
+            from ...secrets_store import get_secrets_store
             store = get_secrets_store()
             keys = store.list_keys()
             return {
@@ -42,7 +42,7 @@ class SecretsHandlersMixin:
         if len(value.encode("utf-8")) > _MAX_VALUE_BYTES:
             return {"success": False, "error": "Value too large (max 1 MB)"}
         try:
-            from ..secrets_store import get_secrets_store
+            from ...secrets_store import get_secrets_store
             store = get_secrets_store()
             result = store.set_secret(key, value)
             return result.to_dict()
@@ -60,7 +60,7 @@ class SecretsHandlersMixin:
                 "error": "Invalid key: must match ^[A-Z0-9_]{1,64}$",
             }
         try:
-            from ..secrets_store import get_secrets_store
+            from ...secrets_store import get_secrets_store
             store = get_secrets_store()
             result = store.delete_secret(key)
             return result.to_dict()

@@ -4,8 +4,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
-from ..paths import is_path_within, ECOSYSTEM_DIR
+from .._helpers import _log_internal_error, _SAFE_ERROR_MSG
+from ...paths import is_path_within, ECOSYSTEM_DIR
 
 # index_url 許可リスト — ここに含まれない URL は拒否する
 _ALLOWED_INDEX_URLS: frozenset[str] = frozenset({
@@ -29,7 +29,7 @@ class PipHandlersMixin:
                     "pending_created": 0,
                 }
         try:
-            from ..pip_installer import get_pip_installer
+            from ...pip_installer import get_pip_installer
             installer = get_pip_installer()
             result = installer.scan_candidates(ecosystem_dir)
             return result.to_dict()
@@ -39,7 +39,7 @@ class PipHandlersMixin:
 
     def _pip_list_requests(self, status_filter: str = "all") -> dict:
         try:
-            from ..pip_installer import get_pip_installer
+            from ...pip_installer import get_pip_installer
             installer = get_pip_installer()
             items = installer.list_items(status_filter)
             return {"items": items, "count": len(items), "status_filter": status_filter}
@@ -54,7 +54,7 @@ class PipHandlersMixin:
                 "error": f"index_url is not in the allowed list. Allowed: {sorted(_ALLOWED_INDEX_URLS)}",
             }
         try:
-            from ..pip_installer import get_pip_installer
+            from ...pip_installer import get_pip_installer
             installer = get_pip_installer()
             result = installer.approve_and_install(
                 candidate_key, actor="api_user",
@@ -67,7 +67,7 @@ class PipHandlersMixin:
 
     def _pip_reject(self, candidate_key: str, reason: str = "") -> dict:
         try:
-            from ..pip_installer import get_pip_installer
+            from ...pip_installer import get_pip_installer
             installer = get_pip_installer()
             result = installer.reject(candidate_key, actor="api_user", reason=reason)
             return result.to_dict()
@@ -77,7 +77,7 @@ class PipHandlersMixin:
 
     def _pip_list_blocked(self) -> dict:
         try:
-            from ..pip_installer import get_pip_installer
+            from ...pip_installer import get_pip_installer
             installer = get_pip_installer()
             blocked = installer.list_blocked()
             return {"blocked": blocked, "count": len(blocked)}
@@ -87,7 +87,7 @@ class PipHandlersMixin:
 
     def _pip_unblock(self, candidate_key: str, reason: str = "") -> dict:
         try:
-            from ..pip_installer import get_pip_installer
+            from ...pip_installer import get_pip_installer
             installer = get_pip_installer()
             result = installer.unblock(candidate_key, actor="api_user", reason=reason)
             return result.to_dict()
