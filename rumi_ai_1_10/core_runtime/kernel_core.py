@@ -59,11 +59,14 @@ class KernelCore:
     def __init__(self, config: Optional[KernelConfig] = None, diagnostics: Optional[Diagnostics] = None,
                  install_journal: Optional[InstallJournal] = None, interface_registry: Optional[InterfaceRegistry] = None,
                  event_bus: Optional[EventBus] = None, lifecycle: Optional[ComponentLifecycleExecutor] = None) -> None:
+        from .di_container import get_container
+        _c = get_container()
+
         self.config = config or KernelConfig()
-        self.diagnostics = diagnostics or Diagnostics()
-        self.install_journal = install_journal or InstallJournal()
-        self.interface_registry = interface_registry or InterfaceRegistry()
-        self.event_bus = event_bus or EventBus()
+        self.diagnostics = diagnostics or _c.get("diagnostics")
+        self.install_journal = install_journal or _c.get("install_journal")
+        self.interface_registry = interface_registry or _c.get("interface_registry")
+        self.event_bus = event_bus or _c.get("event_bus")
         self.lifecycle = lifecycle or ComponentLifecycleExecutor(diagnostics=self.diagnostics, install_journal=self.install_journal)
         self._flow: Optional[Dict[str, Any]] = None
         self._kernel_handlers: Dict[str, Callable[[Dict[str, Any], Dict[str, Any]], Any]] = {}

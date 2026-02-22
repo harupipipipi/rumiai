@@ -220,6 +220,8 @@ def _register_defaults(container: DIContainer) -> None:
     Wave 5:   PackAPIServer, EgressProxyManager,
               PythonFileExecutor, SecureExecutor,
               LibExecutor, UnitExecutor, CapabilityExecutor
+    Wave 8:   Diagnostics, InstallJournal, InterfaceRegistry,
+              EventBus, ComponentLifecycleExecutor
 
     Args:
         container: 登録先の DIContainer
@@ -314,6 +316,31 @@ def _register_defaults(container: DIContainer) -> None:
         from .capability_executor import CapabilityExecutor
         return CapabilityExecutor()
 
+    # --- Wave 8: Kernel core services ---
+    def _diagnostics_factory() -> "Diagnostics":  # noqa: F821
+        from .diagnostics import Diagnostics
+        return Diagnostics()
+
+    def _install_journal_factory() -> "InstallJournal":  # noqa: F821
+        from .install_journal import InstallJournal
+        return InstallJournal()
+
+    def _interface_registry_factory() -> "InterfaceRegistry":  # noqa: F821
+        from .interface_registry import InterfaceRegistry
+        return InterfaceRegistry()
+
+    def _event_bus_factory() -> "EventBus":  # noqa: F821
+        from .event_bus import EventBus
+        return EventBus()
+
+    def _component_lifecycle_factory() -> "ComponentLifecycleExecutor":  # noqa: F821
+        from .component_lifecycle import ComponentLifecycleExecutor
+        c = get_container()
+        return ComponentLifecycleExecutor(
+            diagnostics=c.get("diagnostics"),
+            install_journal=c.get("install_journal"),
+        )
+
     # --- Register all (each name exactly once) ---
     container.register("audit_logger", _audit_logger_factory)
     container.register("hmac_key_manager", _hmac_key_manager_factory)
@@ -336,3 +363,8 @@ def _register_defaults(container: DIContainer) -> None:
     container.register("lib_executor", _lib_executor_factory)
     container.register("unit_executor", _unit_executor_factory)
     container.register("capability_executor", _capability_executor_factory)
+    container.register("diagnostics", _diagnostics_factory)
+    container.register("install_journal", _install_journal_factory)
+    container.register("interface_registry", _interface_registry_factory)
+    container.register("event_bus", _event_bus_factory)
+    container.register("component_lifecycle", _component_lifecycle_factory)

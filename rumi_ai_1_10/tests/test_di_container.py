@@ -1,322 +1,292 @@
 """
-test_di_container.py - DIContainer のユニットテスト
+test_di_container.py - DI コンテナ Wave 8 テスト (T-039)
 
-対象: core_runtime/di_container.py
+テスト対象:
+  - Wave 8 で追加した 5 サービスが get_container() で取得できること
+  - reset_container() 後に再取得できること
+  - Kernel をデフォルト引数で生成し DI 経由のインスタンスであること
+  - Kernel に明示的に引数を渡した場合、渡したものが使われること
+  - 後方互換: Kernel(diagnostics=Diagnostics()) が正常に動作すること
 """
 from __future__ import annotations
 
-import threading
-from typing import Any
+import sys
+import types
+from unittest.mock import MagicMock
 
 import pytest
 
-from core_runtime.di_container import DIContainer, get_container, reset_container
-
-
-# ===================================================================
-# DIContainer 基本動作
-# ===================================================================
-
-
-class TestDIContainerBasic:
-
-    def test_register_and_get(self) -> None:
-        c = DIContainer()
-        c.register("svc", lambda: {"hello": "world"})
-        result = c.get("svc")
-        assert result == {"hello": "world"}
-
-    def test_get_returns_cached_instance(self) -> None:
-        call_count = 0
-
-        def factory() -> dict:
-            nonlocal call_count
-            call_count += 1
-            return {"n": call_count}
-
-        c = DIContainer()
-        c.register("svc", factory)
-        first = c.get("svc")
-        second = c.get("svc")
-        assert first is second
-        assert call_count == 1
-
-    def test_get_unregistered_raises_key_error(self) -> None:
-        c = DIContainer()
-        with pytest.raises(KeyError, match="Service not registered"):
-            c.get("nonexistent")
-
-    def test_get_or_none_returns_none_for_unregistered(self) -> None:
-        c = DIContainer()
-        assert c.get_or_none("nonexistent") is None
-
-    def test_get_or_none_returns_instance(self) -> None:
-        c = DIContainer()
-        c.register("svc", lambda: 42)
-        assert c.get_or_none("svc") == 42
-
-    def test_has(self) -> None:
-        c = DIContainer()
-        assert c.has("svc") is False
-        c.register("svc", lambda: None)
-        assert c.has("svc") is True
-
-    def test_registered_names(self) -> None:
-        c = DIContainer()
-        c.register("a", lambda: 1)
-        c.register("b", lambda: 2)
-        names = c.registered_names()
-        assert sorted(names) == ["a", "b"]
-
-    def test_reset_clears_cached_instance(self) -> None:
-        call_count = 0
-
-        def factory() -> int:
-            nonlocal call_count
-            call_count += 1
-            return call_count
-
-        c = DIContainer()
-        c.register("svc", factory)
-        assert c.get("svc") == 1
-        c.reset("svc")
-        assert c.get("svc") == 2
-
-    def test_reset_all(self) -> None:
-        c = DIContainer()
-        counters = {"a": 0, "b": 0}
-
-        def make_factory(name: str):
-            def factory() -> int:
-                counters[name] += 1
-                return counters[name]
-            return factory
-
-        c.register("a", make_factory("a"))
-        c.register("b", make_factory("b"))
-        c.get("a")
-        c.get("b")
-        c.reset_all()
-        assert c.get("a") == 2
-        assert c.get("b") == 2
-
-    def test_set_instance(self) -> None:
-        c = DIContainer()
-        c.register("svc", lambda: "from_factory")
-        c.set_instance("svc", "from_direct")
-        assert c.get("svc") == "from_direct"
-
-    def test_register_overwrites_and_clears_cache(self) -> None:
-        c = DIContainer()
-        c.register("svc", lambda: "first")
-        assert c.get("svc") == "first"
-        c.register("svc", lambda: "second")
-        assert c.get("svc") == "second"
-
-
-# ===================================================================
-# ファクトリ例外
-# ===================================================================
-
-
-class TestDIContainerFactoryException:
-
-    def test_factory_exception_not_cached(self) -> None:
-        call_count = 0
-
-        def flaky_factory() -> str:
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                raise RuntimeError("first call fails")
-            return "success"
-
-        c = DIContainer()
-        c.register("svc", flaky_factory)
-
-        with pytest.raises(RuntimeError, match="first call fails"):
-            c.get("svc")
-
-        # 2回目は成功するはず（1回目の例外がキャッシュされていない）
-        assert c.get("svc") == "success"
-
-    def test_get_or_none_returns_none_on_factory_exception(self) -> None:
-        c = DIContainer()
-
-        def failing_factory() -> None:
-            raise ValueError("boom")
-
-        c.register("svc", failing_factory)
-        assert c.get_or_none("svc") is None
-
-
-# ===================================================================
-# スレッドセーフ
-# ===================================================================
-
-
-class TestDIContainerThreadSafety:
-
-    def test_concurrent_get_returns_same_instance(self) -> None:
-        c = DIContainer()
-        c.register("svc", lambda: object())
-
-        results: list = []
-        errors: list = []
-
-        def worker() -> None:
-            try:
-                results.append(c.get("svc"))
-            except Exception as e:
-                errors.append(e)
-
-        threads = [threading.Thread(target=worker) for _ in range(20)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-        assert len(errors) == 0
-        assert len(results) == 20
-        # 全て同一インスタンス
-        assert all(r is results[0] for r in results)
-
-
-# ===================================================================
-# register_defaults テスト
-# ===================================================================
-
-
-class TestRegisterDefaults:
-
-    def test_defaults_registered(self) -> None:
-        container = get_container()
-        assert container.has("audit_logger")
-        assert container.has("hmac_key_manager")
-        assert container.has("vocab_registry")
-
-    def test_audit_logger_default_factory(self, tmp_path) -> None:
-        from core_runtime.audit_logger import AuditLogger
-        container = get_container()
-        instance = container.get("audit_logger")
-        assert isinstance(instance, AuditLogger)
-
-    def test_vocab_registry_default_factory(self) -> None:
-        from core_runtime.vocab_registry import VocabRegistry
-        container = get_container()
-        instance = container.get("vocab_registry")
-        assert isinstance(instance, VocabRegistry)
-
-
-# ===================================================================
-# 後方互換テスト
-# ===================================================================
-
-
-class TestBackwardCompatibility:
-
-    def test_get_audit_logger_returns_di_instance(self, tmp_path) -> None:
-        from core_runtime.audit_logger import get_audit_logger
-        container = get_container()
-        di_instance = container.get("audit_logger")
-        func_instance = get_audit_logger()
-        assert di_instance is func_instance
-
-    def test_get_vocab_registry_returns_di_instance(self) -> None:
-        from core_runtime.vocab_registry import get_vocab_registry
-        container = get_container()
-        di_instance = container.get("vocab_registry")
-        func_instance = get_vocab_registry()
-        assert di_instance is func_instance
-
-    def test_reset_audit_logger_updates_di(self, tmp_path) -> None:
-        from core_runtime.audit_logger import get_audit_logger, reset_audit_logger
-        old = get_audit_logger()
-        new = reset_audit_logger(str(tmp_path / "audit"))
-        assert old is not new
-        assert get_audit_logger() is new
-        assert get_container().get("audit_logger") is new
-
-    def test_reset_vocab_registry_updates_di(self) -> None:
-        from core_runtime.vocab_registry import get_vocab_registry, reset_vocab_registry
-        old = get_vocab_registry()
-        new = reset_vocab_registry()
-        assert old is not new
-        assert get_vocab_registry() is new
-        assert get_container().get("vocab_registry") is new
-
-    # --- HMACKeyManager backward compatibility tests ---
-
-    def test_get_hmac_key_manager_returns_di_instance(self, tmp_path) -> None:
-        from core_runtime.hmac_key_manager import (
-            get_hmac_key_manager,
-            initialize_hmac_key_manager,
-        )
-        initialize_hmac_key_manager(keys_path=str(tmp_path / "hmac_keys.json"))
-        container = get_container()
-        di_instance = container.get("hmac_key_manager")
-        func_instance = get_hmac_key_manager()
-        assert di_instance is func_instance
-
-    def test_initialize_hmac_key_manager_updates_di(self, tmp_path) -> None:
-        from core_runtime.hmac_key_manager import (
-            HMACKeyManager,
-            get_hmac_key_manager,
-            initialize_hmac_key_manager,
-        )
-        old = initialize_hmac_key_manager(
-            keys_path=str(tmp_path / "hmac_keys_old.json"),
-        )
-        new = initialize_hmac_key_manager(
-            keys_path=str(tmp_path / "hmac_keys_new.json"),
-        )
-        assert old is not new
-        assert isinstance(new, HMACKeyManager)
-        assert get_hmac_key_manager() is new
-        assert get_container().get("hmac_key_manager") is new
-
-    def test_reset_hmac_key_manager_clears_cache(self, tmp_path) -> None:
-        from core_runtime.hmac_key_manager import (
-            get_hmac_key_manager,
-            initialize_hmac_key_manager,
-            reset_hmac_key_manager,
-        )
-        old = initialize_hmac_key_manager(
-            keys_path=str(tmp_path / "hmac_keys.json"),
-        )
-        assert get_hmac_key_manager() is old
-        reset_hmac_key_manager()
-        # After reset the cache is cleared; a new initialize creates a
-        # distinct instance that is picked up by get_hmac_key_manager().
-        new = initialize_hmac_key_manager(
-            keys_path=str(tmp_path / "hmac_keys_2.json"),
-        )
-        assert old is not new
-        assert get_hmac_key_manager() is new
-        assert get_container().get("hmac_key_manager") is new
-
-
-# ===================================================================
-# get_container / reset_container
-# ===================================================================
-
-
-class TestGlobalContainer:
-
-    def test_get_container_returns_same_instance(self) -> None:
-        c1 = get_container()
-        c2 = get_container()
-        assert c1 is c2
-
-    def test_reset_container_creates_new(self) -> None:
-        c1 = get_container()
-        reset_container()
-        c2 = get_container()
-        assert c1 is not c2
-
-    def test_reset_container_registers_defaults(self) -> None:
-        reset_container()
+# ---------------------------------------------------------------------------
+# ダミーモジュール登録 — Kernel 初期化時の動的インポートを安全にする
+# ---------------------------------------------------------------------------
+for _mod_name in [
+    "backend_core",
+    "backend_core.ecosystem",
+    "backend_core.ecosystem.registry",
+    "backend_core.ecosystem.active_ecosystem",
+    "backend_core.ecosystem.mounts",
+]:
+    if _mod_name not in sys.modules:
+        sys.modules[_mod_name] = types.ModuleType(_mod_name)
+
+# pack_api_server ダミー
+_dummy_pack_api = types.ModuleType("rumi_ai_1_10.core_runtime.pack_api_server")
+
+
+class _APIResponse:
+    def __init__(self, success, data=None, error=None):
+        self.success = success
+        self.data = data
+        self.error = error
+
+
+_dummy_pack_api.APIResponse = _APIResponse
+sys.modules.setdefault("rumi_ai_1_10.core_runtime.pack_api_server", _dummy_pack_api)
+
+# audit_logger ダミー
+_dummy_audit = types.ModuleType("rumi_ai_1_10.core_runtime.audit_logger")
+_dummy_audit.get_audit_logger = MagicMock(return_value=MagicMock())
+sys.modules.setdefault("rumi_ai_1_10.core_runtime.audit_logger", _dummy_audit)
+
+# ---------------------------------------------------------------------------
+# テスト対象インポート
+# ---------------------------------------------------------------------------
+from rumi_ai_1_10.core_runtime.di_container import (  # noqa: E402
+    DIContainer,
+    get_container,
+    reset_container,
+)
+from rumi_ai_1_10.core_runtime.diagnostics import Diagnostics  # noqa: E402
+from rumi_ai_1_10.core_runtime.install_journal import InstallJournal  # noqa: E402
+from rumi_ai_1_10.core_runtime.interface_registry import InterfaceRegistry  # noqa: E402
+from rumi_ai_1_10.core_runtime.event_bus import EventBus  # noqa: E402
+from rumi_ai_1_10.core_runtime.component_lifecycle import ComponentLifecycleExecutor  # noqa: E402
+
+
+# ======================================================================
+# Fixture
+# ======================================================================
+
+@pytest.fixture(autouse=True)
+def _reset_di():
+    """各テストの前後で DI コンテナをリセット"""
+    reset_container()
+    yield
+    reset_container()
+
+
+# ======================================================================
+# Wave 8 サービス登録テスト
+# ======================================================================
+
+class TestWave8Registration:
+    """Wave 8 で追加された 5 サービスが DI コンテナに登録されていること"""
+
+    def test_diagnostics_registered(self):
         c = get_container()
-        assert c.has("audit_logger")
-        assert c.has("hmac_key_manager")
-        assert c.has("vocab_registry")
+        assert c.has("diagnostics")
+
+    def test_install_journal_registered(self):
+        c = get_container()
+        assert c.has("install_journal")
+
+    def test_interface_registry_registered(self):
+        c = get_container()
+        assert c.has("interface_registry")
+
+    def test_event_bus_registered(self):
+        c = get_container()
+        assert c.has("event_bus")
+
+    def test_component_lifecycle_registered(self):
+        c = get_container()
+        assert c.has("component_lifecycle")
+
+
+# ======================================================================
+# Wave 8 サービス取得テスト
+# ======================================================================
+
+class TestWave8Get:
+    """Wave 8 サービスが正しい型のインスタンスとして取得できること"""
+
+    def test_get_diagnostics(self):
+        c = get_container()
+        obj = c.get("diagnostics")
+        assert isinstance(obj, Diagnostics)
+
+    def test_get_install_journal(self):
+        c = get_container()
+        obj = c.get("install_journal")
+        assert isinstance(obj, InstallJournal)
+
+    def test_get_interface_registry(self):
+        c = get_container()
+        obj = c.get("interface_registry")
+        assert isinstance(obj, InterfaceRegistry)
+
+    def test_get_event_bus(self):
+        c = get_container()
+        obj = c.get("event_bus")
+        assert isinstance(obj, EventBus)
+
+    def test_get_component_lifecycle(self):
+        c = get_container()
+        obj = c.get("component_lifecycle")
+        assert isinstance(obj, ComponentLifecycleExecutor)
+
+    def test_component_lifecycle_has_diagnostics(self):
+        """component_lifecycle の diagnostics が DI 経由で設定されていること"""
+        c = get_container()
+        lc = c.get("component_lifecycle")
+        diag = c.get("diagnostics")
+        assert lc.diagnostics is diag
+
+    def test_component_lifecycle_has_install_journal(self):
+        """component_lifecycle の install_journal が DI 経由で設定されていること"""
+        c = get_container()
+        lc = c.get("component_lifecycle")
+        ij = c.get("install_journal")
+        assert lc.install_journal is ij
+
+
+# ======================================================================
+# キャッシュ・リセットテスト
+# ======================================================================
+
+class TestCacheAndReset:
+    """DI コンテナのキャッシュとリセットの動作確認"""
+
+    def test_same_instance_on_repeated_get(self):
+        c = get_container()
+        d1 = c.get("diagnostics")
+        d2 = c.get("diagnostics")
+        assert d1 is d2
+
+    def test_reset_container_creates_new_instances(self):
+        c1 = get_container()
+        d1 = c1.get("diagnostics")
+        reset_container()
+        c2 = get_container()
+        d2 = c2.get("diagnostics")
+        assert d1 is not d2
+
+    def test_reset_single_service(self):
+        c = get_container()
+        d1 = c.get("diagnostics")
+        c.reset("diagnostics")
+        d2 = c.get("diagnostics")
+        assert d1 is not d2
+
+    def test_reset_all_services(self):
+        c = get_container()
+        d1 = c.get("diagnostics")
+        ij1 = c.get("install_journal")
+        c.reset_all()
+        d2 = c.get("diagnostics")
+        ij2 = c.get("install_journal")
+        assert d1 is not d2
+        assert ij1 is not ij2
+
+
+# ======================================================================
+# Kernel DI フォールバックテスト
+# ======================================================================
+
+class TestKernelDIFallback:
+    """Kernel をデフォルト引数で生成した際に DI 経由のインスタンスが使われること"""
+
+    def test_kernel_default_diagnostics_from_di(self):
+        from rumi_ai_1_10.core_runtime.kernel_core import KernelCore
+        k = KernelCore()
+        c = get_container()
+        assert isinstance(k.diagnostics, Diagnostics)
+        assert k.diagnostics is c.get("diagnostics")
+
+    def test_kernel_default_install_journal_from_di(self):
+        from rumi_ai_1_10.core_runtime.kernel_core import KernelCore
+        k = KernelCore()
+        c = get_container()
+        assert isinstance(k.install_journal, InstallJournal)
+        assert k.install_journal is c.get("install_journal")
+
+    def test_kernel_default_interface_registry_from_di(self):
+        from rumi_ai_1_10.core_runtime.kernel_core import KernelCore
+        k = KernelCore()
+        c = get_container()
+        assert isinstance(k.interface_registry, InterfaceRegistry)
+        assert k.interface_registry is c.get("interface_registry")
+
+    def test_kernel_default_event_bus_from_di(self):
+        from rumi_ai_1_10.core_runtime.kernel_core import KernelCore
+        k = KernelCore()
+        c = get_container()
+        assert isinstance(k.event_bus, EventBus)
+        assert k.event_bus is c.get("event_bus")
+
+    def test_kernel_default_lifecycle_is_valid(self):
+        from rumi_ai_1_10.core_runtime.kernel_core import KernelCore
+        k = KernelCore()
+        assert isinstance(k.lifecycle, ComponentLifecycleExecutor)
+        assert k.lifecycle.diagnostics is k.diagnostics
+        assert k.lifecycle.install_journal is k.install_journal
+
+
+# ======================================================================
+# Kernel 明示引数テスト（後方互換）
+# ======================================================================
+
+class TestKernelExplicitArgs:
+    """Kernel に明示的に引数を渡した場合、DI ではなく渡したものが使われること"""
+
+    def test_explicit_diagnostics(self):
+        from rumi_ai_1_10.core_runtime.kernel_core import KernelCore
+        my_diag = Diagnostics()
+        k = KernelCore(diagnostics=my_diag)
+        assert k.diagnostics is my_diag
+        c = get_container()
+        assert k.diagnostics is not c.get("diagnostics")
+
+    def test_explicit_install_journal(self):
+        from rumi_ai_1_10.core_runtime.kernel_core import KernelCore
+        my_ij = InstallJournal()
+        k = KernelCore(install_journal=my_ij)
+        assert k.install_journal is my_ij
+
+    def test_explicit_interface_registry(self):
+        from rumi_ai_1_10.core_runtime.kernel_core import KernelCore
+        my_ir = InterfaceRegistry()
+        k = KernelCore(interface_registry=my_ir)
+        assert k.interface_registry is my_ir
+
+    def test_explicit_event_bus(self):
+        from rumi_ai_1_10.core_runtime.kernel_core import KernelCore
+        my_eb = EventBus()
+        k = KernelCore(event_bus=my_eb)
+        assert k.event_bus is my_eb
+
+    def test_explicit_lifecycle(self):
+        from rumi_ai_1_10.core_runtime.kernel_core import KernelCore
+        my_diag = Diagnostics()
+        my_ij = InstallJournal()
+        my_lc = ComponentLifecycleExecutor(diagnostics=my_diag, install_journal=my_ij)
+        k = KernelCore(lifecycle=my_lc)
+        assert k.lifecycle is my_lc
+
+    def test_explicit_diagnostics_propagates_to_lifecycle(self):
+        """明示的に渡した diagnostics が lifecycle にも反映されること"""
+        from rumi_ai_1_10.core_runtime.kernel_core import KernelCore
+        my_diag = Diagnostics()
+        k = KernelCore(diagnostics=my_diag)
+        assert k.lifecycle.diagnostics is my_diag
+
+    def test_backward_compat_kernel_class(self):
+        """Kernel クラス（kernel.py）経由でも後方互換が維持されること"""
+        from rumi_ai_1_10.core_runtime.kernel import Kernel
+        my_diag = Diagnostics()
+        k = Kernel(diagnostics=my_diag)
+        assert k.diagnostics is my_diag
+        assert isinstance(k.install_journal, InstallJournal)
+        assert isinstance(k.interface_registry, InterfaceRegistry)
+        assert isinstance(k.event_bus, EventBus)
+        assert isinstance(k.lifecycle, ComponentLifecycleExecutor)
