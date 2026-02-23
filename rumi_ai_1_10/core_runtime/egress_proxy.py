@@ -32,22 +32,21 @@ W12-T046変更:
 - PackRateLimiter: Pack別レート制限（60 req/min デフォルト）
 - DomainController: ecosystem.json ベースのドメイン制御
 - 細粒度タイムアウト: connect_timeout / read_timeout 分離
+W13-T047変更:
+- egress_ip.py / egress_protocol.py / egress_rate_limiter.py / egress_domain_controller.py に分割
+- セキュリティチェック順序修正: 内部IP→DNS→ドメイン制御→レート制限→Grant
 """
 
 from __future__ import annotations
 
 import base64
-import collections
-import fnmatch
 import hashlib
 import http.client
-import ipaddress
 import json
 import os
 import socket
 import ssl
 import stat
-import struct
 import threading
 import concurrent.futures
 import time
@@ -58,6 +57,68 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse, urljoin
 
+
+# W13-T047: サブモジュールからの re-import（後方互換維持）
+from .egress_ip import (  # noqa: F401 — re-export
+    BLOCKED_IPV4_NETWORKS,
+    BLOCKED_IPV6_NETWORKS,
+    BLOCKED_IPV4_ADDRESSES,
+    is_internal_ip,
+    _is_ip_literal,
+    resolve_and_check_ip,
+)
+from .egress_protocol import (  # noqa: F401 — re-export
+    read_length_prefixed_json,
+    write_length_prefixed_json,
+    validate_request,
+    read_response_with_limit,
+    _log_network_event,
+    ALLOWED_METHODS,
+    MAX_HEADER_COUNT,
+    MAX_HEADER_NAME_LENGTH,
+    MAX_HEADER_VALUE_LENGTH,
+    MAX_RESPONSE_READ_CHUNK,
+)
+from .egress_rate_limiter import (  # noqa: F401 — re-export
+    PackRateLimiter,
+    DEFAULT_RATE_LIMIT_PER_MIN,
+    RATE_LIMIT_WINDOW_SECONDS,
+)
+from .egress_domain_controller import (  # noqa: F401 — re-export
+    DomainController,
+    _ECOSYSTEM_DIR,
+)
+
+# W13-T047: サブモジュールからの re-import（後方互換維持）
+from .egress_ip import (  # noqa: F401 — re-export
+    BLOCKED_IPV4_NETWORKS,
+    BLOCKED_IPV6_NETWORKS,
+    BLOCKED_IPV4_ADDRESSES,
+    is_internal_ip,
+    _is_ip_literal,
+    resolve_and_check_ip,
+)
+from .egress_protocol import (  # noqa: F401 — re-export
+    read_length_prefixed_json,
+    write_length_prefixed_json,
+    validate_request,
+    read_response_with_limit,
+    _log_network_event,
+    ALLOWED_METHODS,
+    MAX_HEADER_COUNT,
+    MAX_HEADER_NAME_LENGTH,
+    MAX_HEADER_VALUE_LENGTH,
+    MAX_RESPONSE_READ_CHUNK,
+)
+from .egress_rate_limiter import (  # noqa: F401 — re-export
+    PackRateLimiter,
+    DEFAULT_RATE_LIMIT_PER_MIN,
+    RATE_LIMIT_WINDOW_SECONDS,
+)
+from .egress_domain_controller import (  # noqa: F401 — re-export
+    DomainController,
+    _ECOSYSTEM_DIR,
+)
 
 # ============================================================
 # 定数
@@ -75,13 +136,6 @@ MAX_TIMEOUT = 120.0
 # リダイレクト
 MAX_REDIRECTS = 3
 
-# メソッド制限
-ALLOWED_METHODS = {"GET", "HEAD", "POST", "PUT", "DELETE", "PATCH"}
-
-# ヘッダー制限
-MAX_HEADER_COUNT = 100
-MAX_HEADER_NAME_LENGTH = 256
-MAX_HEADER_VALUE_LENGTH = 8192
 
 # セキュリティブロック用の汎用エラーメッセージ（Pack向け）
 GENERIC_SECURITY_BLOCK_MESSAGE = "Request blocked by security policy"
@@ -92,12 +146,6 @@ _EGRESS_DEFAULT_SOCKET_MODE = 0o660
 _EGRESS_DEFAULT_DIR_MODE = 0o750
 _EGRESS_RELAXED_SOCKET_MODE = 0o666
 
-# レート制限 (W12-T046)
-try:
-    DEFAULT_RATE_LIMIT_PER_MIN = int(os.environ.get("RUMI_EGRESS_RATE_LIMIT", "60"))
-except (ValueError, TypeError):
-    DEFAULT_RATE_LIMIT_PER_MIN = 60
-RATE_LIMIT_WINDOW_SECONDS = 60.0
 
 # 細粒度タイムアウト (W12-T046)
 try:
@@ -110,9 +158,6 @@ except (ValueError, TypeError):
     DEFAULT_READ_TIMEOUT = 30.0
 MAX_CONNECT_TIMEOUT = 60.0
 MAX_READ_TIMEOUT = MAX_TIMEOUT  # 120.0
-
-# ドメイン制御 (W12-T046)
-_ECOSYSTEM_DIR = os.environ.get("RUMI_ECOSYSTEM_DIR", "packs")
 
 
 # ============================================================
@@ -217,519 +262,6 @@ def _audit_egress_permission_warning(event_type: str, path: str, message: str) -
 
 
 # ============================================================
-# Pack別レート制限 (W12-T046)
-# ============================================================
-
-class PackRateLimiter:
-    """
-    Pack別のリクエストレート制限（スライディングウィンドウ方式）
-
-    デフォルト: 60 req/min（RUMI_EGRESS_RATE_LIMIT で変更可能）
-    スレッドセーフ。
-    """
-
-    def __init__(self, max_requests_per_min: int = None):
-        self._max_rpm = max_requests_per_min if max_requests_per_min is not None else DEFAULT_RATE_LIMIT_PER_MIN
-        self._windows: Dict[str, collections.deque] = {}
-        self._lock = threading.Lock()
-
-    def check_rate_limit(self, pack_id: str) -> Tuple[bool, str]:
-        """
-        レート制限チェック。許可されれば記録もする。
-
-        Returns:
-            (allowed, reason)
-        """
-        now = time.time()
-        cutoff = now - RATE_LIMIT_WINDOW_SECONDS
-
-        with self._lock:
-            if pack_id not in self._windows:
-                self._windows[pack_id] = collections.deque()
-
-            window = self._windows[pack_id]
-
-            # 期限切れのエントリを削除
-            while window and window[0] < cutoff:
-                window.popleft()
-
-            if len(window) >= self._max_rpm:
-                return False, (
-                    f"Rate limit exceeded: {len(window)}/{self._max_rpm} "
-                    f"requests in {RATE_LIMIT_WINDOW_SECONDS}s window"
-                )
-
-            # 許可 → タイムスタンプを記録
-            window.append(now)
-            return True, ""
-
-    def get_current_count(self, pack_id: str) -> int:
-        """現在のウィンドウ内リクエスト数を取得"""
-        now = time.time()
-        cutoff = now - RATE_LIMIT_WINDOW_SECONDS
-
-        with self._lock:
-            window = self._windows.get(pack_id)
-            if not window:
-                return 0
-            while window and window[0] < cutoff:
-                window.popleft()
-            return len(window)
-
-    def reset(self, pack_id: str = None) -> None:
-        """レート制限カウンターをリセット（テスト用）"""
-        with self._lock:
-            if pack_id:
-                self._windows.pop(pack_id, None)
-            else:
-                self._windows.clear()
-
-
-# ============================================================
-# ドメイン制御（ホワイトリスト/ブラックリスト）(W12-T046)
-# ============================================================
-
-class DomainController:
-    """
-    Pack別のドメインホワイトリスト/ブラックリスト制御。
-
-    ecosystem.json の egress_allow_domains / egress_deny_domains を参照。
-    deny が優先（deny にマッチ → allow に関係なくブロック）。
-    ワイルドカードパターン対応（*.example.com）。
-    初回アクセス時にキャッシュ。
-    """
-
-    def __init__(self, ecosystem_dir: str = None):
-        self._ecosystem_dir = ecosystem_dir or _ECOSYSTEM_DIR
-        self._cache: Dict[str, Dict[str, Any]] = {}
-        self._lock = threading.Lock()
-
-    def _load_pack_config(self, pack_id: str) -> Dict[str, Any]:
-        """Pack の ecosystem.json からドメイン制御設定を読み込む"""
-        try:
-            eco_path = Path(self._ecosystem_dir) / pack_id / "ecosystem.json"
-            if not eco_path.exists():
-                return {"allow": [], "deny": []}
-
-            with open(eco_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-
-            return {
-                "allow": data.get("egress_allow_domains", []),
-                "deny": data.get("egress_deny_domains", []),
-            }
-        except Exception:
-            return {"allow": [], "deny": []}
-
-    def _get_pack_config(self, pack_id: str) -> Dict[str, Any]:
-        """キャッシュ付きで設定を取得"""
-        with self._lock:
-            if pack_id not in self._cache:
-                self._cache[pack_id] = self._load_pack_config(pack_id)
-            return self._cache[pack_id]
-
-    def _match_domain(self, domain: str, patterns: list) -> bool:
-        """ドメインがパターンリストにマッチするか判定"""
-        domain_lower = domain.lower()
-        for pattern in patterns:
-            pattern_lower = pattern.lower()
-            # 完全一致
-            if domain_lower == pattern_lower:
-                return True
-            # ワイルドカード "*" = 全マッチ
-            if pattern_lower == "*":
-                return True
-            # *.example.com 形式
-            if pattern_lower.startswith("*."):
-                base = pattern_lower[2:]
-                if domain_lower == base:
-                    return True
-                if domain_lower.endswith("." + base):
-                    return True
-            # fnmatch によるその他のワイルドカード
-            if fnmatch.fnmatch(domain_lower, pattern_lower):
-                return True
-        return False
-
-    def check_domain(self, pack_id: str, domain: str) -> Tuple[bool, str]:
-        """
-        ドメイン制御チェック。
-
-        Returns:
-            (allowed, reason)
-
-        ルール:
-        - deny リストにマッチ → ブロック（allow に関係なく）
-        - allow リストが空 → 制限なし（ドメイン制御未設定扱い）
-        - allow リストが非空 → allow にマッチしなければブロック
-        """
-        config = self._get_pack_config(pack_id)
-        deny_list = config.get("deny", [])
-        allow_list = config.get("allow", [])
-
-        # deny チェック（最優先）
-        if deny_list and self._match_domain(domain, deny_list):
-            return False, f"Domain '{domain}' is in egress deny list for pack '{pack_id}'"
-
-        # allow リストが空 → ドメイン制御未設定 → 通過
-        if not allow_list:
-            return True, ""
-
-        # allow チェック
-        if self._match_domain(domain, allow_list):
-            return True, ""
-
-        return False, f"Domain '{domain}' is not in egress allow list for pack '{pack_id}'"
-
-    def invalidate_cache(self, pack_id: str = None) -> None:
-        """キャッシュを無効化（設定変更時に呼び出し）"""
-        with self._lock:
-            if pack_id:
-                self._cache.pop(pack_id, None)
-            else:
-                self._cache.clear()
-
-
-# 禁止IPレンジ（IPv4）
-BLOCKED_IPV4_NETWORKS = [
-    ipaddress.IPv4Network("0.0.0.0/8"),       # "this network"
-    ipaddress.IPv4Network("10.0.0.0/8"),      # private
-    ipaddress.IPv4Network("100.64.0.0/10"),   # CGNAT
-    ipaddress.IPv4Network("127.0.0.0/8"),     # loopback
-    ipaddress.IPv4Network("169.254.0.0/16"),  # link-local
-    ipaddress.IPv4Network("172.16.0.0/12"),   # private
-    ipaddress.IPv4Network("192.168.0.0/16"),  # private
-    ipaddress.IPv4Network("224.0.0.0/4"),     # multicast
-    ipaddress.IPv4Network("240.0.0.0/4"),     # reserved
-]
-
-# 禁止IPレンジ（IPv6）
-BLOCKED_IPV6_NETWORKS = [
-    ipaddress.IPv6Network("::/128"),          # unspecified
-    ipaddress.IPv6Network("::1/128"),         # loopback
-    ipaddress.IPv6Network("fc00::/7"),        # ULA
-    ipaddress.IPv6Network("fe80::/10"),       # link-local
-    ipaddress.IPv6Network("ff00::/8"),        # multicast
-]
-
-# ブロードキャストアドレス
-BLOCKED_IPV4_ADDRESSES = {
-    ipaddress.IPv4Address("255.255.255.255"),
-}
-
-
-# ============================================================
-# IP検証ユーティリティ
-# ============================================================
-
-def is_internal_ip(ip_str: str) -> Tuple[bool, str]:
-    """
-    IPが内部/禁止レンジか判定
-
-    Returns:
-        (is_blocked, reason)
-    """
-    try:
-        ip = ipaddress.ip_address(ip_str)
-
-        if isinstance(ip, ipaddress.IPv4Address):
-            # ブロードキャストチェック
-            if ip in BLOCKED_IPV4_ADDRESSES:
-                return True, f"IP {ip} is a broadcast address"
-
-            # ネットワークレンジチェック
-            for net in BLOCKED_IPV4_NETWORKS:
-                if ip in net:
-                    return True, f"IP {ip} is in blocked range {net}"
-        else:
-            # IPv6
-            for net in BLOCKED_IPV6_NETWORKS:
-                if ip in net:
-                    return True, f"IP {ip} is in blocked range {net}"
-
-        return False, ""
-    except ValueError as e:
-        return True, f"Invalid IP address: {e}"
-
-
-def _is_ip_literal(host: str) -> bool:
-    """ホストがIPリテラルかどうか判定"""
-    try:
-        ipaddress.ip_address(host)
-        return True
-    except ValueError:
-        return False
-
-
-def resolve_and_check_ip(hostname: str) -> Tuple[bool, str, List[str]]:
-    """
-    ホスト名をDNS解決し、内部IPが含まれていないかチェック
-
-    Returns:
-        (is_blocked, reason, resolved_ips)
-    """
-    # IPリテラルの場合は直接チェック
-    if _is_ip_literal(hostname):
-        is_blocked, reason = is_internal_ip(hostname)
-        return is_blocked, reason, [hostname] if not is_blocked else []
-
-    try:
-        # getaddrinfo で A/AAAA 両方を取得
-        results = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
-        resolved_ips = list(set(r[4][0] for r in results))
-
-        if not resolved_ips:
-            return True, f"DNS resolution failed: no addresses for {hostname}", []
-
-        # 全IPをチェック（1つでも内部なら拒否）
-        for ip in resolved_ips:
-            is_internal, reason = is_internal_ip(ip)
-            if is_internal:
-                return True, f"DNS rebinding blocked: {reason}", resolved_ips
-
-        return False, "", resolved_ips
-    except socket.gaierror as e:
-        return True, f"DNS resolution failed: {e}", []
-    except Exception as e:
-        return True, f"DNS check error: {e}", []
-
-
-# ============================================================
-# length-prefix JSON プロトコル
-# ============================================================
-
-def read_length_prefixed_json(sock: socket.socket, max_size: int) -> Optional[Dict[str, Any]]:
-    """
-    length-prefix JSON を読み取る（4バイトビッグエンディアン + JSON）
-    """
-    # 4バイトの長さプレフィックスを読む
-    length_data = b""
-    while len(length_data) < 4:
-        chunk = sock.recv(4 - len(length_data))
-        if not chunk:
-            return None
-        length_data += chunk
-
-    length = struct.unpack(">I", length_data)[0]
-
-    if length > max_size:
-        raise ValueError(f"Message too large: {length} > {max_size}")
-
-    if length == 0:
-        return {}
-
-    # JSONペイロードを読む
-    data = b""
-    while len(data) < length:
-        chunk = sock.recv(min(length - len(data), 65536))
-        if not chunk:
-            raise ValueError("Connection closed while reading payload")
-        data += chunk
-
-    return json.loads(data.decode("utf-8"))
-
-
-def write_length_prefixed_json(sock: socket.socket, data: Dict[str, Any]) -> None:
-    """length-prefix JSON を書き込む"""
-    payload = json.dumps(data, ensure_ascii=False, default=str).encode("utf-8")
-    length = struct.pack(">I", len(payload))
-    sock.sendall(length + payload)
-
-
-# ============================================================
-# リクエストバリデーション
-# ============================================================
-
-def validate_request(request: Dict[str, Any]) -> Tuple[bool, str]:
-    """リクエストのバリデーション"""
-    # メソッドチェック
-    method = request.get("method", "").upper()
-    if not method:
-        return False, "Method is required"
-    if method not in ALLOWED_METHODS:
-        return False, f"Method not allowed: {method}. Allowed: {ALLOWED_METHODS}"
-
-    # URLチェック
-    url = request.get("url", "")
-    if not url:
-        return False, "URL is required"
-
-    try:
-        parsed = urlparse(url)
-        if parsed.scheme not in ("http", "https"):
-            return False, f"Unsupported scheme: {parsed.scheme}"
-        if not parsed.hostname:
-            return False, "URL must have a hostname"
-    except Exception as e:
-        return False, f"Invalid URL: {e}"
-
-    # ヘッダーチェック
-    headers = request.get("headers", {})
-    if not isinstance(headers, dict):
-        return False, "Headers must be a dict"
-    if len(headers) > MAX_HEADER_COUNT:
-        return False, f"Too many headers: {len(headers)} > {MAX_HEADER_COUNT}"
-
-    for name, value in headers.items():
-        if len(str(name)) > MAX_HEADER_NAME_LENGTH:
-            return False, f"Header name too long: {len(str(name))} > {MAX_HEADER_NAME_LENGTH}"
-        if len(str(value)) > MAX_HEADER_VALUE_LENGTH:
-            return False, f"Header value too long: {len(str(value))} > {MAX_HEADER_VALUE_LENGTH}"
-
-    # タイムアウトチェック（後方互換: timeout_seconds）
-    timeout = request.get("timeout_seconds")
-    if timeout is not None:
-        try:
-            timeout = float(timeout)
-        except (TypeError, ValueError):
-            return False, f"Invalid timeout: {timeout}"
-        if timeout <= 0:
-            return False, f"Timeout must be positive: {timeout}"
-        if timeout > MAX_TIMEOUT:
-            return False, f"Timeout too large: {timeout} > {MAX_TIMEOUT}"
-
-    # 細粒度タイムアウト検証 (W12-T046)
-    connect_timeout = request.get("connect_timeout_seconds")
-    if connect_timeout is not None:
-        try:
-            connect_timeout = float(connect_timeout)
-        except (TypeError, ValueError):
-            return False, f"Invalid connect_timeout: {connect_timeout}"
-        if connect_timeout <= 0:
-            return False, f"Connect timeout must be positive: {connect_timeout}"
-        if connect_timeout > MAX_CONNECT_TIMEOUT:
-            return False, f"Connect timeout too large: {connect_timeout} > {MAX_CONNECT_TIMEOUT}"
-
-    read_timeout = request.get("read_timeout_seconds")
-    if read_timeout is not None:
-        try:
-            read_timeout = float(read_timeout)
-        except (TypeError, ValueError):
-            return False, f"Invalid read_timeout: {read_timeout}"
-        if read_timeout <= 0:
-            return False, f"Read timeout must be positive: {read_timeout}"
-        if read_timeout > MAX_READ_TIMEOUT:
-            return False, f"Read timeout too large: {read_timeout} > {MAX_READ_TIMEOUT}"
-
-    return True, ""
-
-
-# ============================================================
-# 監査ログヘルパー
-# ============================================================
-
-def _log_network_event(
-    audit_logger,
-    pack_id: str,
-    domain: str,
-    port: int,
-    allowed: bool,
-    reason: str = None,
-    method: str = None,
-    url: str = None,
-    final_url: str = None,
-    latency_ms: float = 0,
-    status_code: int = None,
-    error_type: str = None,
-    redirect_hops: int = 0,
-    bytes_read: int = 0,
-    blocked_reason: str = None,
-    max_response_bytes: int = None,
-    check_type: str = None
-) -> None:
-    """監査ログにネットワークイベントを記録"""
-    if audit_logger is None:
-        return
-
-    try:
-        request_details = {
-            "method": method,
-            "url": url,
-            "final_url": final_url,
-            "latency_ms": latency_ms,
-            "redirect_hops": redirect_hops,
-            "bytes_read": bytes_read,
-        }
-
-        if status_code is not None:
-            request_details["status_code"] = status_code
-        if error_type is not None:
-            request_details["error_type"] = error_type
-        if blocked_reason is not None:
-            request_details["blocked_reason"] = blocked_reason
-        if max_response_bytes is not None:
-            request_details["max_response_bytes"] = max_response_bytes
-        if check_type is not None:
-            request_details["check_type"] = check_type
-
-        audit_logger.log_network_event(
-            pack_id=pack_id,
-            domain=domain,
-            port=port,
-            allowed=allowed,
-            reason=reason,
-            request_details=request_details
-        )
-    except Exception as e:
-        print(f"[EgressProxy] Failed to log network event: {e}")
-
-
-# ============================================================
-# レスポンス読み取りヘルパー（B2対応）
-# ============================================================
-
-def read_response_with_limit(resp, max_size: int) -> Tuple[bytes, bool, int]:
-    """
-    レスポンスボディを上限付きで読み取る
-
-    Returns:
-        (data, exceeded, bytes_read)
-        - data: 読み取ったデータ（超過時は途中まで）
-        - exceeded: 上限を超過したか
-        - bytes_read: 実際に読み取ったバイト数
-    """
-    # Content-Lengthがあれば事前チェック
-    content_length = resp.getheader("Content-Length")
-    if content_length:
-        try:
-            cl = int(content_length)
-            if cl > max_size:
-                # Content-Length超過：読み取らずに即失敗
-                return b"", True, 0
-        except (ValueError, TypeError):
-            pass
-
-    # チャンク読み取りで上限監視
-    data = b""
-    bytes_read = 0
-    exceeded = False
-
-    while True:
-        remaining = max_size - bytes_read + 1  # +1で超過検知
-        chunk_size = min(MAX_RESPONSE_READ_CHUNK, remaining)
-
-        try:
-            chunk = resp.read(chunk_size)
-        except Exception:
-            break
-
-        if not chunk:
-            break
-
-        bytes_read += len(chunk)
-
-        if bytes_read > max_size:
-            # 超過検知
-            exceeded = True
-            data += chunk[:max_size - (bytes_read - len(chunk))]  # 上限までのデータ
-            break
-
-        data += chunk
-
-    return data, exceeded, bytes_read
-
-
-# ============================================================
 # HTTPリクエスト実行
 # ============================================================
 
@@ -753,7 +285,7 @@ def execute_http_request(
 
     W12-T046変更:
     - ドメイン制御チェック（DNS解決後、Grant前）
-    - レート制限チェック（ループ前に1回）
+    - レート制限チェック（ドメイン制御後、Grant前、初回のみ）
     - 細粒度タイムアウト（connect_timeout / read_timeout 分離）
     """
     start_time = time.time()
@@ -805,31 +337,7 @@ def execute_http_request(
     }
 
     try:
-        # ============================================================
-        # レート制限チェック（ループ前に1回のみ）(W12-T046)
-        # ============================================================
-        if rate_limiter:
-            rl_allowed, rl_reason = rate_limiter.check_rate_limit(pack_id)
-            if not rl_allowed:
-                parsed_orig = urlparse(original_url)
-                orig_domain = parsed_orig.hostname or ""
-                orig_port = parsed_orig.port or (443 if parsed_orig.scheme == "https" else 80)
-
-                result["error"] = "Rate limit exceeded"
-                result["error_type"] = "rate_limited"
-                result["latency_ms"] = (time.time() - start_time) * 1000
-                result["final_url"] = original_url
-
-                _log_network_event(
-                    audit_logger, pack_id, orig_domain, orig_port, False,
-                    reason=rl_reason,
-                    method=method, url=original_url, final_url=original_url,
-                    latency_ms=result["latency_ms"],
-                    blocked_reason="rate_limited",
-                    check_type="proxy_request"
-                )
-                return result
-
+        rate_limit_checked = False  # W13-T047: レート制限は初回のみ
         while redirect_hops <= MAX_REDIRECTS:
             parsed = urlparse(current_url)
             domain = parsed.hostname or ""
@@ -910,6 +418,58 @@ def execute_http_request(
                         latency_ms=result["latency_ms"],
                         redirect_hops=redirect_hops,
                         blocked_reason="domain_control_denied",
+                        check_type="proxy_request"
+                    )
+                    return result
+
+
+            # ============================================================
+            # 2.7. レート制限チェック（ドメイン制御後、Grant前、初回のみ）
+            # W13-T047: セキュリティチェック順序修正
+            # ============================================================
+            if rate_limiter and not rate_limit_checked:
+                rate_limit_checked = True
+                rl_allowed, rl_reason = rate_limiter.check_rate_limit(pack_id)
+                if not rl_allowed:
+                    result["error"] = "Rate limit exceeded"
+                    result["error_type"] = "rate_limited"
+                    result["latency_ms"] = (time.time() - start_time) * 1000
+                    result["redirect_hops"] = redirect_hops
+                    result["final_url"] = current_url
+
+                    _log_network_event(
+                        audit_logger, pack_id, domain, port, False,
+                        reason=rl_reason,
+                        method=method, url=original_url, final_url=current_url,
+                        latency_ms=result["latency_ms"],
+                        redirect_hops=redirect_hops,
+                        blocked_reason="rate_limited",
+                        check_type="proxy_request"
+                    )
+                    return result
+
+
+            # ============================================================
+            # 2.7. レート制限チェック（ドメイン制御後、Grant前、初回のみ）
+            # W13-T047: セキュリティチェック順序修正
+            # ============================================================
+            if rate_limiter and not rate_limit_checked:
+                rate_limit_checked = True
+                rl_allowed, rl_reason = rate_limiter.check_rate_limit(pack_id)
+                if not rl_allowed:
+                    result["error"] = "Rate limit exceeded"
+                    result["error_type"] = "rate_limited"
+                    result["latency_ms"] = (time.time() - start_time) * 1000
+                    result["redirect_hops"] = redirect_hops
+                    result["final_url"] = current_url
+
+                    _log_network_event(
+                        audit_logger, pack_id, domain, port, False,
+                        reason=rl_reason,
+                        method=method, url=original_url, final_url=current_url,
+                        latency_ms=result["latency_ms"],
+                        redirect_hops=redirect_hops,
+                        blocked_reason="rate_limited",
                         check_type="proxy_request"
                     )
                     return result
