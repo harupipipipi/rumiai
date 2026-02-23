@@ -28,6 +28,14 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from .validation import (
+    validate_slug as _v_validate_slug,
+    validate_entrypoint as _v_validate_entrypoint,
+    check_no_symlinks as _v_check_no_symlinks,
+    check_path_within as _v_check_path_within,
+    SLUG_PATTERN as _SLUG_PATTERN,
+)
+
 
 # ======================================================================
 # 定数
@@ -45,9 +53,6 @@ HANDLERS_DEST_DIR = "user_data/capabilities/handlers"
 
 DEFAULT_COOLDOWN_SECONDS = 3600
 DEFAULT_REJECT_THRESHOLD = 3
-
-# slug バリデーション: 英数字・アンダースコア・ハイフンのみ許可
-_SLUG_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 # ecosystem 走査時に除外するディレクトリ名
 _EXCLUDED_PACK_DIRS = frozenset({
@@ -464,81 +469,31 @@ class CapabilityInstaller:
         return f"{pack_id}:{slug}:{handler_id}:{sha256}"
 
     # ------------------------------------------------------------------
-    # Slug validation (security)
+    # Slug validation (security) — delegates to validation.py
     # ------------------------------------------------------------------
 
     @staticmethod
     def _validate_slug(slug: str) -> Tuple[bool, Optional[str]]:
-        """
-        slug が安全な文字のみで構成されているか検証する。
-
-        許可パターン: ^[a-zA-Z0-9_-]+$
-
-        Returns:
-            (valid, error_message)
-        """
-        if not slug:
-            return False, "slug is empty"
-        if not _SLUG_PATTERN.match(slug):
-            return False, f"Invalid slug (must match [a-zA-Z0-9_-]+): {slug!r}"
-        return True, None
+        """slug が安全な文字のみで構成されているか検証する。validation.py に委譲。"""
+        return _v_validate_slug(slug)
 
     # ------------------------------------------------------------------
-    # Symlink check (security)
+    # Symlink check (security) — delegates to validation.py
     # ------------------------------------------------------------------
 
     @staticmethod
     def _check_no_symlinks(*paths: Path) -> Tuple[bool, Optional[str]]:
-        """
-        指定されたパスがシンボリックリンクでないことを確認する。
-
-        Returns:
-            (valid, error_message)
-        """
-        for p in paths:
-            if os.path.islink(p):
-                return False, f"Symbolic link detected (security risk): {p}"
-        return True, None
+        """指定パスがシンボリックリンクでないことを確認する。validation.py に委譲。"""
+        return _v_check_no_symlinks(*paths)
 
     # ------------------------------------------------------------------
-    # Entrypoint validation (security)
+    # Entrypoint validation (security) — delegates to validation.py
     # ------------------------------------------------------------------
 
     @staticmethod
     def _validate_entrypoint(entrypoint: str, slug_dir: Path) -> Tuple[bool, Optional[str], Optional[Path]]:
-        """
-        entrypoint を検証する。
-
-        Returns:
-            (valid, error_message, handler_py_path)
-        """
-        if ":" not in entrypoint:
-            return False, f"Invalid entrypoint format (expected 'file:func'): {entrypoint}", None
-
-        ep_file, ep_func = entrypoint.rsplit(":", 1)
-
-        if not ep_file or not ep_func:
-            return False, f"Invalid entrypoint format: {entrypoint}", None
-
-        # パストラバーサル検証 (文字列レベル)
-        parts = ep_file.replace("\\", "/").split("/")
-        if ".." in parts:
-            return False, f"Path traversal detected in entrypoint: {entrypoint}", None
-
-        handler_py_path = slug_dir / ep_file
-
-        # resolve() して slug_dir 配下であることを確認
-        try:
-            resolved_handler = handler_py_path.resolve()
-            resolved_slug = slug_dir.resolve()
-            resolved_handler.relative_to(resolved_slug)
-        except (ValueError, OSError):
-            return False, f"Path traversal detected in entrypoint (resolve): {entrypoint}", None
-
-        if not handler_py_path.exists():
-            return False, f"Entrypoint file not found: {ep_file}", None
-
-        return True, None, handler_py_path
+        """entrypoint を検証する。validation.py に委譲。"""
+        return _v_validate_entrypoint(entrypoint, slug_dir)
 
     # ------------------------------------------------------------------
     # SHA-256 computation
@@ -899,12 +854,9 @@ class CapabilityInstaller:
             # 5. user_data にコピー
             dest_dir = self._handlers_dest_dir / candidate.slug
 
-            # dest_dir 境界チェック: _handlers_dest_dir 配下であることを確認
-            try:
-                resolved_dest = dest_dir.resolve()
-                resolved_base = self._handlers_dest_dir.resolve()
-                resolved_dest.relative_to(resolved_base)
-            except (ValueError, OSError):
+            # dest_dir 境界チェック: _handlers_dest_dir 配下であることを確認 (validation.py に委譲)
+            dest_ok, dest_error = _v_check_path_within(dest_dir, self._handlers_dest_dir)
+            if not dest_ok:
                 self._mark_failed(item, "Path traversal detected in destination path")
                 return ApproveResult(
                     success=False,

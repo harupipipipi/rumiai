@@ -22,6 +22,14 @@ from urllib.parse import urlparse, parse_qs, unquote
 
 from .hmac_key_manager import get_hmac_key_manager, HMACKeyManager
 
+from .validation import (
+    validate_pack_id as _v_validate_pack_id,
+    is_safe_id as _v_is_safe_id,
+    PACK_ID_RE,
+    SAFE_ID_RE,
+    MAX_REQUEST_BODY_BYTES,
+)
+
 from .api.api_response import APIResponse
 
 from .api import (
@@ -46,14 +54,9 @@ from .api._helpers import _log_internal_error, _SAFE_ERROR_MSG
 logger = logging.getLogger(__name__)
 
 
-# --- pack_id validation (Fix #9) ---
-PACK_ID_RE = re.compile(r'^[a-zA-Z0-9_-]{1,64}$')
-# --- 汎用 ID validation ---
-SAFE_ID_RE = re.compile(r'^[a-zA-Z0-9_.:/-]{1,256}$')
-# --- リクエストボディサイズ上限 (10 MB) ---
-MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024
-# --- スレッド終了待ちタイムアウト (秒) ---
+# --- スレッド終了待ちタイムアウト (秒) --- (PACK_ID_RE, SAFE_ID_RE, MAX_REQUEST_BODY_BYTES は validation.py から import)
 THREAD_JOIN_TIMEOUT_SECONDS = 5
+
 # _SAFE_ERROR_MSG: moved to api._helpers
 
 
@@ -92,12 +95,12 @@ class PackAPIHandler(
     @staticmethod
     def _validate_pack_id(pack_id: str) -> bool:
         """pack_id が安全なパターンに合致するか検証する (Fix #9)"""
-        return bool(pack_id and PACK_ID_RE.match(pack_id))
+        return _v_validate_pack_id(pack_id)
 
     @staticmethod
     def _is_safe_id(value: str) -> bool:
         """汎用 ID バリデーション。staging_id, privilege_id, flow_id 等に使用する。"""
-        return bool(value and SAFE_ID_RE.match(value))
+        return _v_is_safe_id(value)
 
     
     def _send_response(self, response: APIResponse, status: int = 200) -> None:
