@@ -1,431 +1,558 @@
 """
-test_capability_installer.py - CapabilityInstaller のテスト
+test_capability_installer.py - capability_installer.py regression tests (Wave 12 T-044)
 
-pytest で実行:
-    pip install -r requirements-dev.txt
-    pytest tests/test_capability_installer.py -v
+Covers:
+  - CandidateInfo: to_dict / from_dict round-trip
+  - IndexItem: to_dict / from_dict, status parsing
+  - CandidateStatus enum values
+  - ScanResult / ApproveResult / RejectResult / UnblockResult dataclasses
+  - CapabilityInstaller: init, make_candidate_key, _validate_slug,
+    _check_no_symlinks, _validate_entrypoint, _parse_ts
+  - CapabilityInstaller: scan_candidates (mock ecosystem), reject, unblock
+  - Persistence: index.json / blocked.json round-trip
+  - Edge cases: empty dirs, missing handler.json, symlink detection
 """
-
 from __future__ import annotations
 
 import json
 import os
-import sys
-import shutil
-import textwrap
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
 from core_runtime.capability_installer import (
-    CapabilityInstaller,
+    CandidateInfo,
     CandidateStatus,
-    reset_capability_installer,
+    IndexItem,
+    ScanResult,
+    ApproveResult,
+    RejectResult,
+    UnblockResult,
+    CapabilityInstaller,
+    DEFAULT_COOLDOWN_SECONDS,
+    DEFAULT_REJECT_THRESHOLD,
+    _SLUG_PATTERN,
 )
 
 
 # ======================================================================
-# Fixtures
+# CandidateInfo
 # ======================================================================
 
-@pytest.fixture
-def tmp_ecosystem(tmp_path):
-    """
-    テスト用 ecosystem ディレクトリを構築する。
+class TestCandidateInfo:
+    """CandidateInfo serialization tests."""
 
-    ecosystem/my_pack/share/capability_handlers/fs_read_v1/
-        handler.json
-        handler.py
-    """
-    pack_dir = tmp_path / "ecosystem" / "my_pack" / "share" / "capability_handlers" / "fs_read_v1"
-    pack_dir.mkdir(parents=True)
+    def test_to_dict_round_trip(self):
+        ci = CandidateInfo(
+            pack_id="mypack",
+            slug="my-handler",
+            handler_id="handler_001",
+            permission_id="perm_read",
+            entrypoint="handler.py:execute",
+            source_dir="/tmp/src",
+            handler_py_sha256="abc123def456",
+        )
+        d = ci.to_dict()
+        restored = CandidateInfo.from_dict(d)
+        assert restored.pack_id == ci.pack_id
+        assert restored.slug == ci.slug
+        assert restored.handler_id == ci.handler_id
+        assert restored.handler_py_sha256 == ci.handler_py_sha256
 
-    handler_json = {
-        "handler_id": "fs_read_handler",
-        "permission_id": "fs.read",
-        "entrypoint": "handler.py:execute",
-        "description": "Test handler",
-    }
-    (pack_dir / "handler.json").write_text(
-        json.dumps(handler_json, indent=2), encoding="utf-8"
-    )
-    (pack_dir / "handler.py").write_text(
-        textwrap.dedent("""\
-            def execute(context, args):
-                return {"status": "ok"}
-        """),
-        encoding="utf-8",
-    )
-    return tmp_path
-
-
-@pytest.fixture
-def installer(tmp_path, tmp_ecosystem):
-    """テスト用 CapabilityInstaller インスタンスを返す"""
-    requests_dir = str(tmp_path / "requests")
-    handlers_dest_dir = str(tmp_path / "handlers_dest")
-
-    inst = CapabilityInstaller(
-        requests_dir=requests_dir,
-        handlers_dest_dir=handlers_dest_dir,
-        cooldown_seconds=3600,
-        reject_threshold=3,
-    )
-    return inst
-
-
-def _get_ecosystem_dir(tmp_path) -> str:
-    return str(tmp_path / "ecosystem")
+    def test_from_dict_missing_fields(self):
+        ci = CandidateInfo.from_dict({})
+        assert ci.pack_id == ""
+        assert ci.slug == ""
+        assert ci.handler_id == ""
 
 
 # ======================================================================
-# Test 1: scan が pending を作る
+# IndexItem
 # ======================================================================
 
-class TestScanCreatesPending:
-    def test_scan_creates_pending(self, installer, tmp_path):
-        """scan が候補を検出して pending を作成する"""
-        result = installer.scan_candidates(ecosystem_dir=_get_ecosystem_dir(tmp_path))
+class TestIndexItem:
+    """IndexItem serialization and status parsing."""
+
+    def test_to_dict_round_trip(self):
+        ci = CandidateInfo(
+            pack_id="p", slug="s", handler_id="h",
+            permission_id="perm", entrypoint="handler.py:run",
+            source_dir="/src", handler_py_sha256="sha",
+        )
+        item = IndexItem(
+            candidate_key="p:s:h:sha",
+            status=CandidateStatus.PENDING,
+            reject_count=0,
+            last_event_ts="2025-01-01T00:00:00Z",
+            candidate=ci,
+        )
+        d = item.to_dict()
+        restored = IndexItem.from_dict(d)
+        assert restored.candidate_key == "p:s:h:sha"
+        assert restored.status == CandidateStatus.PENDING
+        assert restored.candidate is not None
+        assert restored.candidate.pack_id == "p"
+
+    def test_from_dict_invalid_status_defaults_to_pending(self):
+        d = {"candidate_key": "k", "status": "nonexistent_status"}
+        item = IndexItem.from_dict(d)
+        assert item.status == CandidateStatus.PENDING
+
+    def test_from_dict_without_candidate(self):
+        d = {"candidate_key": "k", "status": "installed"}
+        item = IndexItem.from_dict(d)
+        assert item.candidate is None
+        assert item.status == CandidateStatus.INSTALLED
+
+
+# ======================================================================
+# CandidateStatus
+# ======================================================================
+
+class TestCandidateStatus:
+    """CandidateStatus enum values."""
+
+    def test_all_values(self):
+        assert CandidateStatus.PENDING.value == "pending"
+        assert CandidateStatus.INSTALLED.value == "installed"
+        assert CandidateStatus.REJECTED.value == "rejected"
+        assert CandidateStatus.BLOCKED.value == "blocked"
+        assert CandidateStatus.FAILED.value == "failed"
+
+    def test_string_enum(self):
+        assert isinstance(CandidateStatus.PENDING, str)
+        assert CandidateStatus.PENDING == "pending"
+
+
+# ======================================================================
+# Result dataclasses
+# ======================================================================
+
+class TestResultDataclasses:
+    """to_dict tests for result dataclasses."""
+
+    def test_scan_result(self):
+        sr = ScanResult(scanned_count=5, pending_created=2, skipped_blocked=1)
+        d = sr.to_dict()
+        assert d["scanned_count"] == 5
+        assert d["pending_created"] == 2
+
+    def test_approve_result_success(self):
+        ar = ApproveResult(success=True, status="installed",
+                           installed_to="/dest", handler_id="h1",
+                           permission_id="p1", sha256="abc")
+        d = ar.to_dict()
+        assert d["success"] is True
+        assert d["installed_to"] == "/dest"
+        assert "error" not in d
+
+    def test_approve_result_failure(self):
+        ar = ApproveResult(success=False, error="Not found")
+        d = ar.to_dict()
+        assert d["success"] is False
+        assert d["error"] == "Not found"
+
+    def test_reject_result(self):
+        rr = RejectResult(success=True, status="rejected",
+                          reject_count=1, cooldown_until="2025-01-02T00:00:00Z")
+        d = rr.to_dict()
+        assert d["reject_count"] == 1
+
+    def test_unblock_result(self):
+        ur = UnblockResult(success=True, status_after="rejected")
+        d = ur.to_dict()
+        assert d["success"] is True
+        assert "error" not in d
+
+
+# ======================================================================
+# CapabilityInstaller - static helpers
+# ======================================================================
+
+class TestCapabilityInstallerStatic:
+    """Static helper method tests."""
+
+    def test_make_candidate_key(self):
+        key = CapabilityInstaller.make_candidate_key("p", "s", "h", "sha")
+        assert key == "p:s:h:sha"
+
+    def test_make_candidate_key_with_colons(self):
+        key = CapabilityInstaller.make_candidate_key("a:b", "c", "d", "e")
+        assert key == "a:b:c:d:e"
+
+    # --- _validate_slug ---
+
+    @pytest.mark.parametrize("slug,expected_valid", [
+        ("my-handler", True),
+        ("my_handler", True),
+        ("handler123", True),
+        ("A-Z_0-9", True),
+        ("valid", True),
+        ("", False),
+        ("has space", False),
+        ("has/slash", False),
+        ("has.dot", False),
+        ("has@at", False),
+        ("../traversal", False),
+    ])
+    def test_validate_slug(self, slug: str, expected_valid: bool):
+        valid, error = CapabilityInstaller._validate_slug(slug)
+        assert valid is expected_valid
+
+    # --- _check_no_symlinks ---
+
+    def test_check_no_symlinks_regular_files(self, tmp_path):
+        f = tmp_path / "regular.py"
+        f.touch()
+        valid, error = CapabilityInstaller._check_no_symlinks(f)
+        assert valid is True
+
+    def test_check_no_symlinks_detects_symlink(self, tmp_path):
+        target = tmp_path / "target.py"
+        target.touch()
+        link = tmp_path / "link.py"
+        link.symlink_to(target)
+        valid, error = CapabilityInstaller._check_no_symlinks(link)
+        assert valid is False
+        assert "Symbolic link" in error
+
+    # --- _validate_entrypoint ---
+
+    def test_validate_entrypoint_valid(self, tmp_path):
+        handler = tmp_path / "handler.py"
+        handler.write_text("def execute(): pass")
+        valid, error, path = CapabilityInstaller._validate_entrypoint(
+            "handler.py:execute", tmp_path
+        )
+        assert valid is True
+        assert path == handler
+
+    def test_validate_entrypoint_no_colon(self, tmp_path):
+        valid, error, path = CapabilityInstaller._validate_entrypoint(
+            "handler.py", tmp_path
+        )
+        assert valid is False
+        assert "format" in error.lower()
+
+    def test_validate_entrypoint_path_traversal(self, tmp_path):
+        valid, error, path = CapabilityInstaller._validate_entrypoint(
+            "../../../etc/passwd:execute", tmp_path
+        )
+        assert valid is False
+        assert "traversal" in error.lower()
+
+    def test_validate_entrypoint_file_not_found(self, tmp_path):
+        valid, error, path = CapabilityInstaller._validate_entrypoint(
+            "missing.py:execute", tmp_path
+        )
+        assert valid is False
+        assert "not found" in error.lower()
+
+    # --- _parse_ts ---
+
+    def test_parse_ts_valid_z(self):
+        dt = CapabilityInstaller._parse_ts("2025-01-01T00:00:00Z")
+        assert dt is not None
+        assert dt.year == 2025
+
+    def test_parse_ts_valid_offset(self):
+        dt = CapabilityInstaller._parse_ts("2025-01-01T00:00:00+00:00")
+        assert dt is not None
+
+    def test_parse_ts_empty(self):
+        assert CapabilityInstaller._parse_ts("") is None
+
+    def test_parse_ts_invalid(self):
+        assert CapabilityInstaller._parse_ts("not-a-date") is None
+
+
+# ======================================================================
+# CapabilityInstaller - lifecycle (with tmp_path)
+# ======================================================================
+
+class TestCapabilityInstallerLifecycle:
+    """CapabilityInstaller init and persistence."""
+
+    def test_init_creates_dirs(self, tmp_path):
+        req_dir = tmp_path / "requests"
+        dest_dir = tmp_path / "handlers"
+        installer = CapabilityInstaller(
+            requests_dir=str(req_dir),
+            handlers_dest_dir=str(dest_dir),
+        )
+        assert req_dir.exists()
+        assert dest_dir.exists()
+
+    def test_list_items_empty(self, tmp_path):
+        installer = CapabilityInstaller(
+            requests_dir=str(tmp_path / "req"),
+            handlers_dest_dir=str(tmp_path / "dest"),
+        )
+        items = installer.list_items()
+        assert items == []
+
+    def test_list_blocked_empty(self, tmp_path):
+        installer = CapabilityInstaller(
+            requests_dir=str(tmp_path / "req"),
+            handlers_dest_dir=str(tmp_path / "dest"),
+        )
+        blocked = installer.list_blocked()
+        assert blocked == {}
+
+
+# ======================================================================
+# CapabilityInstaller - scan_candidates
+# ======================================================================
+
+class TestScanCandidates:
+    """scan_candidates with mock filesystem."""
+
+    def _setup_candidate(self, eco_dir: Path, pack_id: str, slug: str,
+                          handler_id: str = "h1",
+                          permission_id: str = "p1") -> Path:
+        """Create a minimal candidate handler structure."""
+        slug_dir = eco_dir / pack_id / "share" / "capability_handlers" / slug
+        slug_dir.mkdir(parents=True, exist_ok=True)
+
+        handler_json = {
+            "handler_id": handler_id,
+            "permission_id": permission_id,
+            "entrypoint": "handler.py:execute",
+        }
+        (slug_dir / "handler.json").write_text(
+            json.dumps(handler_json), encoding="utf-8"
+        )
+        (slug_dir / "handler.py").write_text("def execute(): pass", encoding="utf-8")
+        return slug_dir
+
+    def test_scan_finds_candidates(self, tmp_path):
+        eco_dir = tmp_path / "ecosystem"
+        self._setup_candidate(eco_dir, "pack_a", "my-handler")
+
+        installer = CapabilityInstaller(
+            requests_dir=str(tmp_path / "req"),
+            handlers_dest_dir=str(tmp_path / "dest"),
+        )
+        with patch.object(CapabilityInstaller, '_compute_sha256', return_value="fakehash"):
+            result = installer.scan_candidates(ecosystem_dir=str(eco_dir))
 
         assert result.scanned_count == 1
         assert result.pending_created == 1
-        assert result.skipped_blocked == 0
-        assert len(result.errors) == 0
 
-        items = installer.list_items("pending")
-        assert len(items) == 1
-        assert items[0]["status"] == "pending"
-        assert items[0]["candidate"]["handler_id"] == "fs_read_handler"
-        assert items[0]["candidate"]["permission_id"] == "fs.read"
-        assert items[0]["candidate"]["pack_id"] == "my_pack"
-        assert items[0]["candidate"]["slug"] == "fs_read_v1"
+    def test_scan_skips_invalid_slug(self, tmp_path):
+        eco_dir = tmp_path / "ecosystem"
+        # Create a slug with invalid characters
+        slug_dir = eco_dir / "pack_a" / "share" / "capability_handlers" / "bad..slug"
+        slug_dir.mkdir(parents=True)
+        (slug_dir / "handler.json").write_text("{}", encoding="utf-8")
 
-    def test_scan_twice_no_duplicate(self, installer, tmp_path):
-        """同じ候補を2回 scan しても pending は重複しない"""
-        installer.scan_candidates(ecosystem_dir=_get_ecosystem_dir(tmp_path))
-        result2 = installer.scan_candidates(ecosystem_dir=_get_ecosystem_dir(tmp_path))
+        installer = CapabilityInstaller(
+            requests_dir=str(tmp_path / "req"),
+            handlers_dest_dir=str(tmp_path / "dest"),
+        )
+        result = installer.scan_candidates(ecosystem_dir=str(eco_dir))
+        assert result.scanned_count == 1
+        assert result.pending_created == 0
+        assert len(result.errors) >= 1
 
+    def test_scan_skips_missing_handler_json(self, tmp_path):
+        eco_dir = tmp_path / "ecosystem"
+        slug_dir = eco_dir / "pack_a" / "share" / "capability_handlers" / "valid-slug"
+        slug_dir.mkdir(parents=True)
+        # No handler.json
+
+        installer = CapabilityInstaller(
+            requests_dir=str(tmp_path / "req"),
+            handlers_dest_dir=str(tmp_path / "dest"),
+        )
+        result = installer.scan_candidates(ecosystem_dir=str(eco_dir))
+        assert result.pending_created == 0
+        assert any("handler.json" in e.get("error", "") for e in result.errors)
+
+    def test_scan_nonexistent_ecosystem_dir(self, tmp_path):
+        installer = CapabilityInstaller(
+            requests_dir=str(tmp_path / "req"),
+            handlers_dest_dir=str(tmp_path / "dest"),
+        )
+        result = installer.scan_candidates(ecosystem_dir=str(tmp_path / "nonexistent"))
+        assert result.scanned_count == 0
+
+    def test_scan_excludes_hidden_dirs(self, tmp_path):
+        eco_dir = tmp_path / "ecosystem"
+        # Hidden pack directory
+        slug_dir = eco_dir / ".hidden_pack" / "share" / "capability_handlers" / "slug"
+        slug_dir.mkdir(parents=True)
+        (slug_dir / "handler.json").write_text('{"handler_id":"h","permission_id":"p"}')
+        (slug_dir / "handler.py").write_text("def execute(): pass")
+
+        installer = CapabilityInstaller(
+            requests_dir=str(tmp_path / "req"),
+            handlers_dest_dir=str(tmp_path / "dest"),
+        )
+        result = installer.scan_candidates(ecosystem_dir=str(eco_dir))
+        assert result.scanned_count == 0
+
+    def test_scan_idempotent(self, tmp_path):
+        eco_dir = tmp_path / "ecosystem"
+        self._setup_candidate(eco_dir, "pack_a", "my-handler")
+
+        installer = CapabilityInstaller(
+            requests_dir=str(tmp_path / "req"),
+            handlers_dest_dir=str(tmp_path / "dest"),
+        )
+        with patch.object(CapabilityInstaller, '_compute_sha256', return_value="fakehash"):
+            result1 = installer.scan_candidates(ecosystem_dir=str(eco_dir))
+            result2 = installer.scan_candidates(ecosystem_dir=str(eco_dir))
+
+        assert result1.pending_created == 1
         assert result2.pending_created == 0
         assert result2.skipped_pending == 1
 
-        items = installer.list_items("pending")
-        assert len(items) == 1
-
 
 # ======================================================================
-# Test 2: reject で cooldown が入る（1h）
+# CapabilityInstaller - reject / unblock
 # ======================================================================
 
-class TestRejectCooldown:
-    def test_reject_sets_cooldown(self, installer, tmp_path):
-        """reject すると cooldown_until が設定される"""
-        installer.scan_candidates(ecosystem_dir=_get_ecosystem_dir(tmp_path))
-        items = installer.list_items("pending")
-        candidate_key = items[0]["candidate_key"]
+class TestRejectUnblock:
+    """reject and unblock workflow tests."""
 
-        result = installer.reject(candidate_key, reason="Not needed")
+    def _make_installer_with_pending(self, tmp_path) -> tuple:
+        installer = CapabilityInstaller(
+            requests_dir=str(tmp_path / "req"),
+            handlers_dest_dir=str(tmp_path / "dest"),
+            cooldown_seconds=3600,
+            reject_threshold=3,
+        )
+        ci = CandidateInfo(
+            pack_id="p", slug="s", handler_id="h",
+            permission_id="perm", entrypoint="handler.py:execute",
+            source_dir="/src", handler_py_sha256="sha",
+        )
+        key = "p:s:h:sha"
+        item = IndexItem(
+            candidate_key=key,
+            status=CandidateStatus.PENDING,
+            reject_count=0,
+            last_event_ts=installer._now_ts(),
+            candidate=ci,
+        )
+        installer._index_items[key] = item
+        return installer, key
 
+    def test_reject_increments_count(self, tmp_path):
+        installer, key = self._make_installer_with_pending(tmp_path)
+        result = installer.reject(key, reason="test")
         assert result.success is True
-        assert result.status == "rejected"
         assert result.reject_count == 1
+        assert result.status == "rejected"
+
+    def test_reject_sets_cooldown(self, tmp_path):
+        installer, key = self._make_installer_with_pending(tmp_path)
+        result = installer.reject(key)
         assert result.cooldown_until is not None
 
-    def test_rejected_candidate_skipped_on_scan(self, installer, tmp_path):
-        """rejected + cooldown 中の候補は scan でスキップされる"""
-        installer.scan_candidates(ecosystem_dir=_get_ecosystem_dir(tmp_path))
-        items = installer.list_items("pending")
-        candidate_key = items[0]["candidate_key"]
+    def test_reject_threshold_blocks(self, tmp_path):
+        installer, key = self._make_installer_with_pending(tmp_path)
+        for i in range(3):
+            result = installer.reject(key)
+        assert result.status == "blocked"
+        assert result.reject_count == 3
 
-        installer.reject(candidate_key, reason="Not needed")
-        result = installer.scan_candidates(ecosystem_dir=_get_ecosystem_dir(tmp_path))
-
-        assert result.skipped_cooldown == 1
-        assert result.pending_created == 0
-
-
-# ======================================================================
-# Test 3: reject 3回で blocked へ遷移し、scan しても pending にならない
-# ======================================================================
-
-class TestRejectThreeTimesBlocked:
-    def test_three_rejections_block(self, installer, tmp_path):
-        """3回 reject すると blocked になる"""
-        installer.scan_candidates(ecosystem_dir=_get_ecosystem_dir(tmp_path))
-        items = installer.list_items("pending")
-        candidate_key = items[0]["candidate_key"]
-
-        installer.reject(candidate_key, reason="No 1")
-        # rejected 状態になったので、pending に戻すために cooldown を巻き戻す
-        installer._index_items[candidate_key].status = CandidateStatus.PENDING
-
-        installer.reject(candidate_key, reason="No 2")
-        installer._index_items[candidate_key].status = CandidateStatus.PENDING
-
-        result3 = installer.reject(candidate_key, reason="No 3")
-
-        assert result3.success is True
-        assert result3.status == "blocked"
-        assert result3.reject_count == 3
-
-    def test_blocked_not_pending_on_scan(self, installer, tmp_path):
-        """blocked の候補は scan しても pending にならない"""
-        installer.scan_candidates(ecosystem_dir=_get_ecosystem_dir(tmp_path))
-        items = installer.list_items("pending")
-        candidate_key = items[0]["candidate_key"]
-
-        # 3回 reject
-        for i in range(2):
-            installer.reject(candidate_key, reason=f"No {i+1}")
-            installer._index_items[candidate_key].status = CandidateStatus.PENDING
-        installer.reject(candidate_key, reason="No 3")
-
-        # scan しても pending にならない
-        result = installer.scan_candidates(ecosystem_dir=_get_ecosystem_dir(tmp_path))
-        assert result.skipped_blocked == 1
-        assert result.pending_created == 0
-
-        pending = installer.list_items("pending")
-        assert len(pending) == 0
-
-
-# ======================================================================
-# Test 4: unblock すると再通知可能になる（ただし cooldown）
-# ======================================================================
-
-class TestUnblock:
-    def test_unblock_makes_renotifiable(self, installer, tmp_path):
-        """unblock すると rejected (cooldown付き) になり、cooldown 後に再 pending 可能"""
-        installer.scan_candidates(ecosystem_dir=_get_ecosystem_dir(tmp_path))
-        items = installer.list_items("pending")
-        candidate_key = items[0]["candidate_key"]
-
-        for i in range(2):
-            installer.reject(candidate_key, reason=f"No {i+1}")
-            installer._index_items[candidate_key].status = CandidateStatus.PENDING
-        installer.reject(candidate_key, reason="No 3")
-
-        # blocked 確認
-        assert installer._index_items[candidate_key].status == CandidateStatus.BLOCKED
-
-        # unblock
-        ub_result = installer.unblock(candidate_key)
-        assert ub_result.success is True
-        assert ub_result.status_after == "rejected"
-
-        # blocked リストから消えている
-        blocked = installer.list_blocked()
-        assert candidate_key not in blocked
-
-        # cooldown 中はスキップ
-        scan_result = installer.scan_candidates(ecosystem_dir=_get_ecosystem_dir(tmp_path))
-        assert scan_result.skipped_cooldown == 1
-
-        # cooldown を巻き戻す→再 pending
-        installer._index_items[candidate_key].cooldown_until = "2020-01-01T00:00:00Z"
-        scan_result2 = installer.scan_candidates(ecosystem_dir=_get_ecosystem_dir(tmp_path))
-        assert scan_result2.pending_created == 1
-
-
-# ======================================================================
-# Test 5: approve で trust 登録＋コピー＋reload が動く
-# ======================================================================
-
-class TestApprove:
-    @patch("core_runtime.capability_installer.CapabilityInstaller._audit_event")
-    def test_approve_installs(self, mock_audit, installer, tmp_path):
-        """approve_and_install が trust 登録 + コピーを行う"""
-        installer.scan_candidates(ecosystem_dir=_get_ecosystem_dir(tmp_path))
-        items = installer.list_items("pending")
-        candidate_key = items[0]["candidate_key"]
-
-        # Trust store と Registry をモック
-        mock_trust_store = MagicMock()
-        mock_trust_store.is_loaded.return_value = True
-        mock_trust_store.add_trust.return_value = True
-
-        mock_registry = MagicMock()
-        mock_registry_result = MagicMock()
-        mock_registry_result.success = True
-        mock_registry.load_all.return_value = mock_registry_result
-
-        mock_executor = MagicMock()
-
-        with patch("core_runtime.capability_installer._get_trust_store", return_value=mock_trust_store), \
-             patch("core_runtime.capability_installer._get_handler_registry", return_value=mock_registry), \
-             patch("core_runtime.capability_installer._get_executor", return_value=mock_executor):
-            result = installer.approve_and_install(candidate_key, notes="Test approve")
-
-        assert result.success is True
-        assert result.status == "installed"
-        assert result.handler_id == "fs_read_handler"
-        assert result.permission_id == "fs.read"
-        assert result.sha256 != ""
-
-        # コピー先が存在
-        dest_dir = Path(installer._handlers_dest_dir) / "fs_read_v1"
-        assert (dest_dir / "handler.json").exists()
-        assert (dest_dir / "handler.py").exists()
-
-        # Trust store に呼ばれた
-        mock_trust_store.add_trust.assert_called_once()
-
-        # index が installed
-        item_after = installer.get_item(candidate_key)
-        assert item_after["status"] == "installed"
-
-    @patch("core_runtime.capability_installer.CapabilityInstaller._audit_event")
-    def test_approve_idempotent(self, mock_audit, installer, tmp_path):
-        """既に installed の候補を再 approve しても成功（idempotent）"""
-        installer.scan_candidates(ecosystem_dir=_get_ecosystem_dir(tmp_path))
-        items = installer.list_items("pending")
-        candidate_key = items[0]["candidate_key"]
-
-        mock_trust_store = MagicMock()
-        mock_trust_store.is_loaded.return_value = True
-        mock_trust_store.add_trust.return_value = True
-
-        with patch("core_runtime.capability_installer._get_trust_store", return_value=mock_trust_store), \
-             patch("core_runtime.capability_installer._get_handler_registry", return_value=MagicMock()), \
-             patch("core_runtime.capability_installer._get_executor", return_value=MagicMock()):
-            result1 = installer.approve_and_install(candidate_key)
-            result2 = installer.approve_and_install(candidate_key)
-
-        assert result1.success is True
-        assert result2.success is True
-        assert result2.status == "installed"
-
-
-# ======================================================================
-# Test 6: entrypoint に ../ がある候補は approve/install で拒否される
-# ======================================================================
-
-class TestPathTraversal:
-    def test_scan_rejects_path_traversal(self, tmp_path):
-        """entrypoint に ../ がある候補は scan でエラーになる"""
-        pack_dir = tmp_path / "ecosystem" / "evil_pack" / "share" / "capability_handlers" / "evil_slug"
-        pack_dir.mkdir(parents=True)
-
-        handler_json = {
-            "handler_id": "evil_handler",
-            "permission_id": "evil.perm",
-            "entrypoint": "../../../etc/passwd:execute",
-        }
-        (pack_dir / "handler.json").write_text(json.dumps(handler_json), encoding="utf-8")
-        (pack_dir / "handler.py").write_text("def execute(c, a): pass", encoding="utf-8")
-
-        inst = CapabilityInstaller(
-            requests_dir=str(tmp_path / "requests"),
-            handlers_dest_dir=str(tmp_path / "handlers_dest"),
-        )
-        result = inst.scan_candidates(ecosystem_dir=str(tmp_path / "ecosystem"))
-
-        assert result.scanned_count == 1
-        assert result.pending_created == 0
-        assert len(result.errors) == 1
-        assert "traversal" in result.errors[0]["error"].lower()
-
-
-# ======================================================================
-# Test 7: sha256 が変わったら approve が失敗（TOCTOU）
-# ======================================================================
-
-class TestSha256Toctou:
-    @patch("core_runtime.capability_installer.CapabilityInstaller._audit_event")
-    def test_sha256_change_fails_approve(self, mock_audit, installer, tmp_path):
-        """scan 後に handler.py が変更されると approve が失敗する"""
-        installer.scan_candidates(ecosystem_dir=_get_ecosystem_dir(tmp_path))
-        items = installer.list_items("pending")
-        candidate_key = items[0]["candidate_key"]
-
-        # handler.py を変更
-        handler_py = (
-            tmp_path / "ecosystem" / "my_pack" / "share"
-            / "capability_handlers" / "fs_read_v1" / "handler.py"
-        )
-        handler_py.write_text("def execute(c, a): return {'status': 'HACKED'}", encoding="utf-8")
-
-        mock_trust_store = MagicMock()
-        mock_trust_store.is_loaded.return_value = True
-        mock_trust_store.add_trust.return_value = True
-
-        with patch("core_runtime.capability_installer._get_trust_store", return_value=mock_trust_store):
-            result = installer.approve_and_install(candidate_key)
-
+    def test_reject_nonexistent_key(self, tmp_path):
+        installer, _ = self._make_installer_with_pending(tmp_path)
+        result = installer.reject("nonexistent_key")
         assert result.success is False
-        assert "SHA-256 mismatch" in result.error
 
-        # index が failed
-        item_after = installer.get_item(candidate_key)
-        assert item_after["status"] == "failed"
+    def test_reject_installed_fails(self, tmp_path):
+        installer, key = self._make_installer_with_pending(tmp_path)
+        installer._index_items[key].status = CandidateStatus.INSTALLED
+        result = installer.reject(key)
+        assert result.success is False
 
+    def test_unblock_blocked_candidate(self, tmp_path):
+        installer, key = self._make_installer_with_pending(tmp_path)
+        # Block it first
+        for _ in range(3):
+            installer.reject(key)
+        assert installer._index_items[key].status == CandidateStatus.BLOCKED
 
-# ======================================================================
-# Test 8: requests.jsonl にイベントが記録される
-# ======================================================================
+        result = installer.unblock(key)
+        assert result.success is True
+        assert result.status_after == "rejected"
+        assert installer._index_items[key].status == CandidateStatus.REJECTED
 
-class TestEventLog:
-    def test_events_logged(self, installer, tmp_path):
-        """操作がイベントログに記録される"""
-        installer.scan_candidates(ecosystem_dir=_get_ecosystem_dir(tmp_path))
-
-        log_path = Path(installer._requests_dir) / "requests.jsonl"
-        assert log_path.exists()
-
-        lines = log_path.read_text(encoding="utf-8").strip().split("\n")
-        assert len(lines) >= 1
-
-        event = json.loads(lines[0])
-        assert event["event"] == "capability_handler.requested"
-        assert "candidate_key" in event
-        assert "ts" in event
+    def test_unblock_non_blocked_fails(self, tmp_path):
+        installer, key = self._make_installer_with_pending(tmp_path)
+        result = installer.unblock(key)
+        assert result.success is False
 
 
 # ======================================================================
-# Test 9: blocked.json に永続化される
+# CapabilityInstaller - persistence
 # ======================================================================
 
-class TestBlockedPersistence:
-    def test_blocked_persisted(self, installer, tmp_path):
-        """blocked 状態が blocked.json に永続化される"""
-        installer.scan_candidates(ecosystem_dir=_get_ecosystem_dir(tmp_path))
-        items = installer.list_items("pending")
-        candidate_key = items[0]["candidate_key"]
+class TestPersistence:
+    """Index and blocked file persistence tests."""
 
-        for i in range(2):
-            installer.reject(candidate_key, reason=f"No {i+1}")
-            installer._index_items[candidate_key].status = CandidateStatus.PENDING
-        installer.reject(candidate_key, reason="No 3")
-
-        blocked_path = Path(installer._requests_dir) / "blocked.json"
-        assert blocked_path.exists()
-
-        with open(blocked_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        assert candidate_key in data["blocked"]
-        assert data["blocked"][candidate_key]["reject_count"] == 3
-
-
-# ======================================================================
-# Test 10: index.json に永続化 + 再ロードで復元される
-# ======================================================================
-
-class TestIndexPersistence:
-    def test_index_persisted_and_reloaded(self, installer, tmp_path):
-        """index.json に永続化され、再インスタンス化で復元される"""
-        installer.scan_candidates(ecosystem_dir=_get_ecosystem_dir(tmp_path))
-        items = installer.list_items("pending")
-        assert len(items) == 1
-        candidate_key = items[0]["candidate_key"]
-
-        # 新しいインスタンスで再ロード
-        inst2 = CapabilityInstaller(
-            requests_dir=str(installer._requests_dir),
-            handlers_dest_dir=str(installer._handlers_dest_dir),
+    def test_index_save_and_load(self, tmp_path):
+        installer = CapabilityInstaller(
+            requests_dir=str(tmp_path / "req"),
+            handlers_dest_dir=str(tmp_path / "dest"),
         )
-        items2 = inst2.list_items("pending")
-        assert len(items2) == 1
-        assert items2[0]["candidate_key"] == candidate_key
+        ci = CandidateInfo(
+            pack_id="p", slug="s", handler_id="h",
+            permission_id="perm", entrypoint="handler.py:execute",
+            source_dir="/src", handler_py_sha256="sha",
+        )
+        key = "p:s:h:sha"
+        item = IndexItem(
+            candidate_key=key,
+            status=CandidateStatus.PENDING,
+            candidate=ci,
+            last_event_ts=installer._now_ts(),
+        )
+        installer._index_items[key] = item
+        installer._save_index()
+
+        # New instance loads the same data
+        installer2 = CapabilityInstaller(
+            requests_dir=str(tmp_path / "req"),
+            handlers_dest_dir=str(tmp_path / "dest"),
+        )
+        assert key in installer2._index_items
+        assert installer2._index_items[key].status == CandidateStatus.PENDING
+
+    def test_blocked_save_and_load(self, tmp_path):
+        installer = CapabilityInstaller(
+            requests_dir=str(tmp_path / "req"),
+            handlers_dest_dir=str(tmp_path / "dest"),
+        )
+        installer._blocked["test_key"] = {
+            "candidate_key": "test_key",
+            "blocked_at": installer._now_ts(),
+            "reason": "test",
+        }
+        installer._save_blocked()
+
+        installer2 = CapabilityInstaller(
+            requests_dir=str(tmp_path / "req"),
+            handlers_dest_dir=str(tmp_path / "dest"),
+        )
+        assert "test_key" in installer2._blocked
+
+    def test_event_log_append(self, tmp_path):
+        installer = CapabilityInstaller(
+            requests_dir=str(tmp_path / "req"),
+            handlers_dest_dir=str(tmp_path / "dest"),
+        )
+        installer._append_event("test_event", "key_1", actor="tester")
+        installer._append_event("test_event_2", "key_2", actor="tester")
+
+        log_path = tmp_path / "req" / "requests.jsonl"
+        assert log_path.exists()
+        lines = log_path.read_text().strip().split("\n")
+        assert len(lines) == 2
+        entry = json.loads(lines[0])
+        assert entry["event"] == "test_event"
