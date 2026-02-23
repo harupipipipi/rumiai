@@ -410,6 +410,47 @@ class FlowModifierLoader:
                     "ts": self._now_ts()
                 })
 
+    # ------------------------------------------------------------------
+    # Wave 10-B: YAML safety checks
+    # ------------------------------------------------------------------
+
+    MAX_YAML_DEPTH = 20
+    MAX_YAML_NODES = 10000
+
+    @staticmethod
+    def _check_yaml_complexity(data, max_depth=20, max_nodes=10000):
+        """
+        Validate depth and node count of parsed YAML data.
+
+        Returns:
+            (ok, error_message) -- ok=True means data is within limits
+        """
+        node_count = 0
+
+        def _walk(obj, depth):
+            nonlocal node_count
+            node_count += 1
+            if node_count > max_nodes:
+                return f"YAML node count exceeds limit ({max_nodes})"
+            if depth > max_depth:
+                return f"YAML depth exceeds limit ({max_depth})"
+            if isinstance(obj, dict):
+                for v in obj.values():
+                    err = _walk(v, depth + 1)
+                    if err:
+                        return err
+            elif isinstance(obj, list):
+                for item in obj:
+                    err = _walk(item, depth + 1)
+                    if err:
+                        return err
+            return None
+
+        err = _walk(data, 0)
+        if err:
+            return False, err
+        return True, None
+
     def load_modifier_file(self, file_path: Path, pack_id: Optional[str] = None) -> ModifierLoadResult:
         """
         単一のmodifierファイルをロード
@@ -424,6 +465,20 @@ class FlowModifierLoader:
             result.errors.append("PyYAML is not installed")
             return result
 
+        # Wave 10-B: file size limit
+        _max_bytes = int(os.environ.get("RUMI_MAX_MODIFIER_FILE_BYTES", 1 * 1024 * 1024))
+        try:
+            _file_size = file_path.stat().st_size
+        except OSError as e:
+            result.errors.append(f"Cannot stat file: {e}")
+            return result
+        if _file_size > _max_bytes:
+            result.errors.append(
+                f"Modifier file too large: {_file_size} bytes "
+                f"(limit: {_max_bytes} bytes)"
+            )
+            return result
+
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 raw_data = yaml.safe_load(f)
@@ -434,20 +489,50 @@ class FlowModifierLoader:
             result.errors.append(f"File read error: {e}")
             return result
 
+        # Wave 10-B: parsed data complexity check
+        _complexity_ok, _complexity_err = self._check_yaml_complexity(
+            raw_data,
+            max_depth=self.MAX_YAML_DEPTH,
+            max_nodes=self.MAX_YAML_NODES,
+        )
+        if not _complexity_ok:
+            result.errors.append(f"YAML complexity check failed: {_complexity_err}")
+            return result
+
         if not isinstance(raw_data, dict):
             result.errors.append("Modifier file must be a YAML object")
             return result
 
         # 必須フィールドチェック
         modifier_id = raw_data.get("modifier_id")
-        if not modifier_id or not isinstance(modifier_id, str):
+        if modifier_id is None:
+            result.errors.append("Missing or invalid 'modifier_id'")
+            return result
+        # Wave 10-B: YAML 1.1 implicit type conversion guard
+        if not isinstance(modifier_id, str):
+            result.warnings.append(
+                f"modifier_id has type {type(modifier_id).__name__} "
+                f"(value: {modifier_id!r}), converting to str"
+            )
+            modifier_id = str(modifier_id)
+        if not modifier_id:
             result.errors.append("Missing or invalid 'modifier_id'")
             return result
 
         result.modifier_id = modifier_id
 
         target_flow_id = raw_data.get("target_flow_id")
-        if not target_flow_id or not isinstance(target_flow_id, str):
+        if target_flow_id is None:
+            result.errors.append("Missing or invalid 'target_flow_id'")
+            return result
+        # Wave 10-B: YAML 1.1 implicit type conversion guard
+        if not isinstance(target_flow_id, str):
+            result.warnings.append(
+                f"target_flow_id has type {type(target_flow_id).__name__} "
+                f"(value: {target_flow_id!r}), converting to str"
+            )
+            target_flow_id = str(target_flow_id)
+        if not target_flow_id:
             result.errors.append("Missing or invalid 'target_flow_id'")
             return result
 
