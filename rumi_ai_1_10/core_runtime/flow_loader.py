@@ -32,6 +32,11 @@ PR-C追加:
 
 Wave 9追加:
 - Pack提供 Flow で {pack_id}. プレフィックスを持たない場合に警告
+
+Wave 10-A追加:
+- FlowStep に depends_on を追加（同一phase内トポロジカルソート）
+- YAML ファイルサイズ上限 + パース後データ構造サイズチェック
+- YAML 1.1 型変換警告（bool/int/float 検出、クォート推奨）
 """
 
 from __future__ import annotations
@@ -39,6 +44,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -64,6 +70,67 @@ from .paths import (
 logger = logging.getLogger(__name__)
 
 
+# ======================================================================
+# YAML 安全性: データ構造サイズ上限
+# ======================================================================
+
+MAX_YAML_DEPTH = 20
+MAX_YAML_NODES = 10000
+
+
+def _check_yaml_complexity(
+    data: Any,
+    max_depth: int = MAX_YAML_DEPTH,
+    max_nodes: int = MAX_YAML_NODES,
+) -> None:
+    """
+    パース済み YAML データの深さとノード数を検証する。
+
+    スタックベースの反復走査で実装（再帰深さ制限を回避）。
+    上限超過時は ValueError を送出する。
+
+    flow_modifier.py など他モジュールからも利用可能。
+
+    Args:
+        data: yaml.safe_load() の戻り値
+        max_depth: 許容する最大ネスト深さ
+        max_nodes: 許容する最大ノード数
+
+    Raises:
+        ValueError: 深さまたはノード数が上限を超えた場合
+    """
+    node_count = 0
+    # stack items: (node, current_depth)
+    stack: list = [(data, 0)]
+
+    while stack:
+        node, depth = stack.pop()
+        node_count += 1
+
+        if node_count > max_nodes:
+            raise ValueError(
+                f"YAML data exceeds maximum node count ({max_nodes})"
+            )
+
+        if depth > max_depth:
+            raise ValueError(
+                f"YAML data exceeds maximum depth ({max_depth})"
+            )
+
+        if isinstance(node, dict):
+            for key, value in node.items():
+                # key もノードとして数える
+                node_count += 1
+                if node_count > max_nodes:
+                    raise ValueError(
+                        f"YAML data exceeds maximum node count ({max_nodes})"
+                    )
+                stack.append((value, depth + 1))
+        elif isinstance(node, list):
+            for item in node:
+                stack.append((item, depth + 1))
+
+
 @dataclass
 class FlowStep:
     """Flowステップの正規化表現"""
@@ -81,6 +148,9 @@ class FlowStep:
     file: Optional[str] = None
     timeout_seconds: float = 60.0
     principal_id: Optional[str] = None
+
+    # Wave 10-A: ステップ間依存
+    depends_on: Optional[List[str]] = None
 
 
 @dataclass
@@ -136,6 +206,8 @@ class FlowDefinition:
             d["timeout_seconds"] = step.timeout_seconds
         if step.principal_id:
             d["principal_id"] = step.principal_id
+        if step.depends_on is not None:
+            d["depends_on"] = step.depends_on
         return d
 
 
@@ -557,6 +629,20 @@ class FlowLoader:
             result.errors.append("PyYAML is not installed")
             return result
 
+        # Wave 10-A: ファイルサイズ上限チェック
+        max_bytes = int(os.environ.get("RUMI_MAX_FLOW_FILE_BYTES", 1 * 1024 * 1024))
+        try:
+            file_size = file_path.stat().st_size
+        except OSError as e:
+            result.errors.append(f"Cannot stat file: {e}")
+            return result
+
+        if file_size > max_bytes:
+            result.errors.append(
+                f"Flow file exceeds size limit: {file_size} bytes > {max_bytes} bytes"
+            )
+            return result
+
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 raw_data = yaml.safe_load(f)
@@ -571,8 +657,29 @@ class FlowLoader:
             result.errors.append("Flow file must be a YAML object")
             return result
 
+        # Wave 10-A: パース後データ構造サイズチェック
+        try:
+            _check_yaml_complexity(raw_data)
+        except ValueError as e:
+            result.errors.append(f"YAML complexity check failed: {e}")
+            return result
+
         # 必須フィールドチェック
         flow_id = raw_data.get("flow_id")
+
+        # Wave 10-A: flow_id の型変換警告
+        if flow_id is not None and isinstance(flow_id, (bool, int, float)):
+            logger.warning(
+                "[FlowLoader] flow_id '%s' (type %s) was auto-converted to string. "
+                "Quote the value in your YAML file. (file: %s)",
+                flow_id, type(flow_id).__name__, file_path,
+            )
+            result.warnings.append(
+                f"flow_id '{flow_id}' (type {type(flow_id).__name__}) was auto-converted "
+                f"to string. Quote the value in your YAML file."
+            )
+            flow_id = str(flow_id)
+
         if not flow_id or not isinstance(flow_id, str):
             result.errors.append("Missing or invalid 'flow_id'")
             return result
@@ -623,7 +730,7 @@ class FlowLoader:
         if result.errors:
             return result
 
-        # ステップをソート(phase順 → priority順 → id順)
+        # ステップをソート(phase順 → priority順 → id順、同一phase内depends_onトポロジカルソート)
         sorted_steps = self._sort_steps(steps, phases)
 
         # FlowDefinitionを作成
@@ -669,6 +776,15 @@ class FlowLoader:
 
             # id(必須)
             step_id = raw_step.get("id")
+
+            # Wave 10-A: step_id の型変換警告（bool チェックは int/str より先）
+            if step_id is not None and isinstance(step_id, bool):
+                warnings.append(
+                    f"step id '{step_id}' was interpreted as boolean by YAML 1.1. "
+                    f"Quote the value in your YAML file."
+                )
+                step_id = str(step_id)
+
             if not step_id or not isinstance(step_id, str):
                 errors.append(f"steps[{i}]: missing or invalid 'id'")
                 continue
@@ -680,6 +796,15 @@ class FlowLoader:
 
             # phase(必須)
             phase = raw_step.get("phase")
+
+            # Wave 10-A: phase の型変換警告
+            if phase is not None and isinstance(phase, bool):
+                warnings.append(
+                    f"step id '{step_id}': phase '{phase}' was interpreted as boolean "
+                    f"by YAML 1.1. Quote the value in your YAML file."
+                )
+                phase = str(phase)
+
             if not phase or not isinstance(phase, str):
                 errors.append(f"steps[{i}] ({step_id}): missing or invalid 'phase'")
                 continue
@@ -703,6 +828,15 @@ class FlowLoader:
 
             # when(任意)
             when = raw_step.get("when")
+
+            # Wave 10-A: when の型変換警告
+            if when is not None and isinstance(when, bool):
+                warnings.append(
+                    f"step id '{step_id}': when '{when}' was interpreted as boolean "
+                    f"by YAML 1.1. Quote the value in your YAML file."
+                )
+                when = str(when)
+
             if when is not None and not isinstance(when, str):
                 warnings.append(f"steps[{i}] ({step_id}): 'when' must be a string")
                 when = None
@@ -712,9 +846,39 @@ class FlowLoader:
 
             # output(任意)
             output = raw_step.get("output")
+
+            # Wave 10-A: output の型変換警告
+            if output is not None and isinstance(output, bool):
+                warnings.append(
+                    f"step id '{step_id}': output '{output}' was interpreted as boolean "
+                    f"by YAML 1.1. Quote the value in your YAML file."
+                )
+                output = str(output)
+
             if output is not None and not isinstance(output, str):
                 warnings.append(f"steps[{i}] ({step_id}): 'output' must be a string")
                 output = None
+
+            # Wave 10-A: depends_on(任意)
+            depends_on_raw = raw_step.get("depends_on")
+            depends_on: Optional[List[str]] = None
+            if depends_on_raw is not None:
+                if not isinstance(depends_on_raw, list):
+                    warnings.append(
+                        f"steps[{i}] ({step_id}): 'depends_on' must be a list, ignoring"
+                    )
+                else:
+                    valid = True
+                    for dep_idx, dep in enumerate(depends_on_raw):
+                        if not isinstance(dep, str):
+                            warnings.append(
+                                f"steps[{i}] ({step_id}): depends_on[{dep_idx}] must be "
+                                f"a string, ignoring entire depends_on"
+                            )
+                            valid = False
+                            break
+                    if valid:
+                        depends_on = depends_on_raw
 
             # FlowStepを作成
             step = FlowStep(
@@ -725,7 +889,8 @@ class FlowLoader:
                 when=when,
                 input=step_input,
                 output=output,
-                raw=raw_step
+                raw=raw_step,
+                depends_on=depends_on,
             )
 
             # python_file_call固有のフィールド
@@ -751,13 +916,112 @@ class FlowLoader:
         1. phase(phasesリストでの順序)
         2. priority(昇順、小さいほど先)
         3. id(アルファベット順、タイブレーク)
+
+        Wave 10-A追加:
+        既存ソート後、同一phase内で depends_on に基づくトポロジカルソートを実施。
+        循環依存時は既存ソート結果を維持し warning を出力。
         """
         phase_order = {phase: i for i, phase in enumerate(phases)}
 
-        return sorted(
+        # 既存ソート
+        sorted_steps = sorted(
             steps,
             key=lambda s: (phase_order.get(s.phase, 999), s.priority, s.id)
         )
+
+        # 全ステップの id -> phase マッピングを構築（cross-phase 検出用）
+        step_id_to_phase: Dict[str, str] = {s.id: s.phase for s in sorted_steps}
+        all_step_ids: Set[str] = set(step_id_to_phase.keys())
+
+        # depends_on の事前検証: 存在しない step_id / cross-phase 参照を警告
+        for s in sorted_steps:
+            if s.depends_on is None:
+                continue
+            for dep_id in s.depends_on:
+                if dep_id not in all_step_ids:
+                    logger.warning(
+                        "[FlowLoader] Step '%s' depends_on '%s' which does not exist",
+                        s.id, dep_id,
+                    )
+                elif step_id_to_phase[dep_id] != s.phase:
+                    logger.warning(
+                        "[FlowLoader] Step '%s' (phase '%s') depends_on '%s' "
+                        "(phase '%s'): cross-phase dependency; phase order takes precedence",
+                        s.id, s.phase, dep_id, step_id_to_phase[dep_id],
+                    )
+
+        # 同一phase内ステップ群をグループ化（順序保持）
+        phase_groups: Dict[str, List[FlowStep]] = {}
+        for s in sorted_steps:
+            phase_groups.setdefault(s.phase, []).append(s)
+
+        # 各phaseグループ内でトポロジカルソート
+        result: List[FlowStep] = []
+        for phase in phases:
+            group = phase_groups.get(phase, [])
+            if not group:
+                continue
+
+            # このグループ内の step_id 集合
+            group_ids = {s.id for s in group}
+
+            # depends_on があるステップが1つもなければソート不要
+            has_deps = any(s.depends_on for s in group)
+            if not has_deps:
+                result.extend(group)
+                continue
+
+            # Kahn's algorithm
+            # group 内の index マップ（既存ソート順の位置を保持）
+            id_to_step: Dict[str, FlowStep] = {s.id: s for s in group}
+            id_to_order: Dict[str, int] = {s.id: idx for idx, s in enumerate(group)}
+
+            # 入次数を計算（group 内の依存のみ考慮）
+            in_degree: Dict[str, int] = {s.id: 0 for s in group}
+            # 隣接リスト: dep_id -> [step_ids that depend on dep_id]
+            adjacency: Dict[str, List[str]] = {s.id: [] for s in group}
+
+            for s in group:
+                if s.depends_on is None:
+                    continue
+                for dep_id in s.depends_on:
+                    # group 内の依存のみ（cross-phase / 存在しない依存は無視）
+                    if dep_id in group_ids:
+                        in_degree[s.id] += 1
+                        adjacency[dep_id].append(s.id)
+
+            # 入次数0のノードを既存ソート順でキューに入れる
+            queue: deque = deque()
+            for s in group:
+                if in_degree[s.id] == 0:
+                    queue.append(s.id)
+
+            topo_order: List[str] = []
+            while queue:
+                # 複数候補がある場合、既存ソート順（id_to_order）で最小のものを選ぶ
+                # deque から全取り出しして既存順でソートし直す
+                candidates = sorted(queue, key=lambda sid: id_to_order[sid])
+                queue.clear()
+                for sid in candidates:
+                    topo_order.append(sid)
+                    for neighbor in adjacency[sid]:
+                        in_degree[neighbor] -= 1
+                        if in_degree[neighbor] == 0:
+                            queue.append(neighbor)
+
+            if len(topo_order) != len(group):
+                # 循環検出: 既存ソート結果を維持
+                cycle_ids = [s.id for s in group if s.id not in set(topo_order)]
+                logger.warning(
+                    "[FlowLoader] Circular dependency detected in phase '%s' "
+                    "involving steps: %s. Using default sort order.",
+                    phase, cycle_ids,
+                )
+                result.extend(group)
+            else:
+                result.extend(id_to_step[sid] for sid in topo_order)
+
+        return result
 
     def get_loaded_flows(self) -> Dict[str, FlowDefinition]:
         """ロード済みFlowを取得"""
