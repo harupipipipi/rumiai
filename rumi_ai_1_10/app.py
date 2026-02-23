@@ -28,7 +28,13 @@ def main():
     parser = argparse.ArgumentParser(description="Rumi AI OS")
     parser.add_argument("--headless", action="store_true", help="Run without HTTP server")
     parser.add_argument("--permissive", action="store_true", help="Run in permissive security mode (development only)")
+    parser.add_argument("--validate", action="store_true", help="Validate all Pack ecosystem.json files and exit")
     args = parser.parse_args()
+    
+    # --- Pack validation mode (early exit) ---
+    if args.validate:
+        _run_validation()
+        return
     
     # セキュリティモード設定 — デフォルトは strict（secure）
     import os
@@ -119,6 +125,24 @@ def _wait_for_signal():
         import time
         while True:
             time.sleep(1)
+
+
+def _run_validation():
+    """Pack ecosystem.json を検証し結果を出力する。"""
+    from core_runtime.pack_validator import validate_packs
+
+    report = validate_packs()
+
+    for err in report.errors:
+        print(f"ERROR: {err}")
+    for warn in report.warnings:
+        print(f"WARNING: {warn}")
+
+    summary = (
+        f"{report.pack_count} packs scanned, {report.valid_count} valid, "
+        f"{len(report.warnings)} warnings, {len(report.errors)} errors"
+    )
+    print(summary)
 
 
 if __name__ == '__main__':
