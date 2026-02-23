@@ -32,6 +32,10 @@ PR-B追加:
 
 PR-C追加:
 - _step_from_dict で principal_id を FlowStep に引き継ぎ（Capability Proxy連携）
+
+Wave 9追加:
+- FlowModifierDef に conflicts_with / compatible_with フィールド追加
+- apply_modifiers() に Modifier 衝突検出を追加（警告のみ、動作変更なし）
 """
 
 from __future__ import annotations
@@ -91,7 +95,9 @@ class FlowModifierDef:
     source_pack_id: Optional[str] = None  # 提供元pack_id
     resolve_target: bool = False  # target_flow_idを共有辞書で解決するか
     resolve_namespace: str = "flow_id"  # 解決に使用するnamespace
-    
+    conflicts_with: Optional[List[str]] = None  # Wave 9: 衝突宣言
+    compatible_with: Optional[List[str]] = None  # Wave 9: 互換性宣言
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "modifier_id": self.modifier_id,
@@ -109,6 +115,8 @@ class FlowModifierDef:
             "_source_pack_id": self.source_pack_id,
             "resolve_target": self.resolve_target,
             "resolve_namespace": self.resolve_namespace,
+            "conflicts_with": self.conflicts_with,
+            "compatible_with": self.compatible_with,
         }
 
 
@@ -147,25 +155,25 @@ class ModifierSkipRecord:
 class FlowModifierLoader:
     """
     Flow modifierローダー
-    
+
     探索優先順:
       1. user_data/shared/flows/modifiers/ — 承認不要
       2. pack提供 modifiers — 承認+ハッシュ一致のpackのみ
       3. local_pack互換 ecosystem/flows/modifiers/ — deprecated
-    
+
     承認済み+ハッシュ一致のpackのみ対象。
     """
-    
+
     def __init__(self, approval_manager=None):
         self._lock = threading.RLock()
         self._loaded_modifiers: Dict[str, FlowModifierDef] = {}
         self._load_errors: List[Dict[str, Any]] = []
         self._skipped_modifiers: List[ModifierSkipRecord] = []
         self._approval_manager = approval_manager
-    
+
     def _now_ts(self) -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    
+
     def _get_approval_manager(self):
         """ApprovalManagerを取得（遅延初期化）"""
         if self._approval_manager is None:
@@ -175,18 +183,18 @@ class FlowModifierLoader:
             except Exception:
                 pass
         return self._approval_manager
-    
+
     def _is_local_pack_mode_enabled(self) -> bool:
         """local_packモードが有効かチェック"""
         mode = os.environ.get("RUMI_LOCAL_PACK_MODE", "off").lower()
         return mode == "require_approval"
-    
+
     def _check_pack_approval(self, pack_id: str) -> Tuple[bool, Optional[str]]:
         """
         packの承認状態をチェック
-        
+
         PR-B追加: hash_mismatch検知時にMODIFIED昇格 + network権限無効化
-        
+
         Returns:
             (is_approved: bool, skip_reason: Optional[str])
         """
@@ -194,22 +202,22 @@ class FlowModifierLoader:
         if am is None:
             # ApprovalManagerがない場合は承認済みとみなす（後方互換）
             return True, None
-        
+
         try:
             is_valid, reason = am.is_pack_approved_and_verified(pack_id)
-            
+
             # B3: hash_mismatch検知時の処理
             if not is_valid and reason == "hash_mismatch":
                 self._handle_hash_mismatch(pack_id, am)
-            
+
             return is_valid, reason
         except Exception as e:
             return False, f"approval_check_error: {e}"
-    
+
     def _handle_hash_mismatch(self, pack_id: str, am) -> None:
         """
         hash_mismatch検知時の処理（B3）
-        
+
         - ApprovalManager.mark_modified() を呼ぶ（必須）
         - NetworkGrantManager.disable_for_modified() も呼ぶ（best-effort）
         """
@@ -219,7 +227,7 @@ class FlowModifierLoader:
         except Exception as e:
             # 失敗してもログに記録して継続
             self._log_hash_mismatch_error(pack_id, "mark_modified", e)
-        
+
         # 2. ネットワーク権限無効化（best-effort）
         try:
             from .network_grant_manager import get_network_grant_manager
@@ -228,7 +236,7 @@ class FlowModifierLoader:
         except Exception as e:
             # 失敗してもログに記録して継続（best-effort）
             self._log_hash_mismatch_error(pack_id, "disable_network", e)
-    
+
     def _log_hash_mismatch_error(self, pack_id: str, operation: str, error: Exception) -> None:
         """hash_mismatch処理のエラーをログに記録"""
         try:
@@ -245,7 +253,7 @@ class FlowModifierLoader:
             )
         except Exception:
             pass  # 監査ログのエラーで処理を止めない
-    
+
     def _record_skip(self, file_path: Path, pack_id: Optional[str], reason: str) -> None:
         """スキップを記録"""
         record = ModifierSkipRecord(
@@ -255,7 +263,7 @@ class FlowModifierLoader:
             ts=self._now_ts()
         )
         self._skipped_modifiers.append(record)
-        
+
         # 監査ログにも記録
         try:
             from .audit_logger import get_audit_logger
@@ -271,16 +279,16 @@ class FlowModifierLoader:
             )
         except Exception:
             pass
-    
+
     def load_all_modifiers(self) -> Dict[str, FlowModifierDef]:
         """
         全modifierファイルをロード
-        
+
         探索優先順:
           1. shared modifiers (user_data/shared/flows/modifiers/) — 承認不要
           2. pack提供 modifiers — 承認必須
           3. local_pack互換 — deprecated
-        
+
         Returns:
             modifier_id -> FlowModifierDef のマップ
         """
@@ -288,19 +296,19 @@ class FlowModifierLoader:
             self._loaded_modifiers.clear()
             self._load_errors.clear()
             self._skipped_modifiers.clear()
-            
+
             # 1. shared modifierをロード（承認不要）
             self._load_shared_modifiers()
-            
+
             # 2. pack提供modifierをロード（承認必須）
             self._load_pack_modifiers_via_discovery()
-            
+
             # 3. local_pack互換（環境変数で制御、deprecated）
             if self._is_local_pack_mode_enabled():
                 self._load_local_pack_modifiers()
-            
+
             return dict(self._loaded_modifiers)
-    
+
     def _load_shared_modifiers(self) -> None:
         """
         shared modifierをロード（承認不要）
@@ -310,19 +318,19 @@ class FlowModifierLoader:
         if not shared_dir.exists():
             return
         self._load_directory_modifiers(shared_dir, None)
-    
+
     def _load_pack_modifiers_via_discovery(self) -> None:
         """
         pack提供modifierをロード（承認必須）
-        
+
         discover_pack_locations() で検出された全packについて、
         pack_subdir 基準で modifiers ディレクトリを探索する。
         """
         locations = discover_pack_locations(str(ECOSYSTEM_DIR))
-        
+
         for loc in locations:
             pack_id = loc.pack_id
-            
+
             # 承認チェック
             is_approved, reason = self._check_pack_approval(pack_id)
             if not is_approved:
@@ -330,11 +338,11 @@ class FlowModifierLoader:
                     for yaml_file in sorted(mod_dir.glob("**/*.modifier.yaml")):
                         self._record_skip(yaml_file, pack_id, reason or "not_approved")
                 continue
-            
+
             # pack_subdir 基準で候補ディレクトリを探索
             for mod_dir in get_pack_modifier_dirs(loc.pack_subdir):
                 self._load_directory_modifiers(mod_dir, pack_id)
-    
+
     def _load_local_pack_modifiers(self) -> None:
         """local_pack互換: ecosystem/flows/modifiers/ をロード（deprecated）"""
         is_approved, reason = self._check_pack_approval(LOCAL_PACK_ID)
@@ -344,7 +352,7 @@ class FlowModifierLoader:
                 for yaml_file in local_modifiers_dir.glob("**/*.modifier.yaml"):
                     self._record_skip(yaml_file, LOCAL_PACK_ID, reason or "not_approved")
             return
-        
+
         # deprecated 警告
         import sys
         print(
@@ -353,16 +361,16 @@ class FlowModifierLoader:
             "Use user_data/shared/flows/modifiers/ instead.",
             file=sys.stderr,
         )
-        
+
         local_modifiers_dir = Path(LOCAL_PACK_MODIFIERS_DIR)
         if local_modifiers_dir.exists():
             self._load_directory_modifiers(local_modifiers_dir, LOCAL_PACK_ID)
-    
+
     def _load_directory_modifiers(self, directory: Path, pack_id: str) -> None:
         """ディレクトリ内のmodifierファイルをロード"""
         for yaml_file in sorted(directory.glob("**/*.modifier.yaml")):
             result = self.load_modifier_file(yaml_file, pack_id)
-            
+
             if result.success and result.modifier_def:
                 if result.modifier_id in self._loaded_modifiers:
                     self._load_errors.append({
@@ -371,7 +379,7 @@ class FlowModifierLoader:
                         "ts": self._now_ts()
                     })
                     continue
-                
+
                 self._loaded_modifiers[result.modifier_id] = result.modifier_def
 
                 # #61: ワイルドカード Modifier 警告
@@ -401,21 +409,21 @@ class FlowModifierLoader:
                     "errors": result.errors,
                     "ts": self._now_ts()
                 })
-    
+
     def load_modifier_file(self, file_path: Path, pack_id: Optional[str] = None) -> ModifierLoadResult:
         """
         単一のmodifierファイルをロード
         """
         result = ModifierLoadResult(success=False)
-        
+
         if not file_path.exists():
             result.errors.append(f"File not found: {file_path}")
             return result
-        
+
         if not HAS_YAML:
             result.errors.append("PyYAML is not installed")
             return result
-        
+
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 raw_data = yaml.safe_load(f)
@@ -425,49 +433,49 @@ class FlowModifierLoader:
         except Exception as e:
             result.errors.append(f"File read error: {e}")
             return result
-        
+
         if not isinstance(raw_data, dict):
             result.errors.append("Modifier file must be a YAML object")
             return result
-        
+
         # 必須フィールドチェック
         modifier_id = raw_data.get("modifier_id")
         if not modifier_id or not isinstance(modifier_id, str):
             result.errors.append("Missing or invalid 'modifier_id'")
             return result
-        
+
         result.modifier_id = modifier_id
-        
+
         target_flow_id = raw_data.get("target_flow_id")
         if not target_flow_id or not isinstance(target_flow_id, str):
             result.errors.append("Missing or invalid 'target_flow_id'")
             return result
-        
+
         phase = raw_data.get("phase")
         if not phase or not isinstance(phase, str):
             result.errors.append("Missing or invalid 'phase'")
             return result
-        
+
         action = raw_data.get("action")
         valid_actions = {"inject_before", "inject_after", "append", "replace", "remove"}
         if not action or action not in valid_actions:
             result.errors.append(f"Invalid 'action': must be one of {valid_actions}")
             return result
-        
+
         # target_step_id(actionによって必須)
         target_step_id = raw_data.get("target_step_id")
         if action in {"inject_before", "inject_after", "replace", "remove"}:
             if not target_step_id or not isinstance(target_step_id, str):
                 result.errors.append(f"'target_step_id' is required for action '{action}'")
                 return result
-        
+
         # step(inject/append/replaceでは必須)
         step = raw_data.get("step")
         if action in {"inject_before", "inject_after", "append", "replace"}:
             if not step or not isinstance(step, dict):
                 result.errors.append(f"'step' is required for action '{action}'")
                 return result
-            
+
             # stepの最低限の検証
             if "id" not in step:
                 result.errors.append("'step.id' is required")
@@ -475,25 +483,36 @@ class FlowModifierLoader:
             if "type" not in step:
                 result.errors.append("'step.type' is required")
                 return result
-        
+
         # priority(任意、デフォルト100)
         priority = raw_data.get("priority", 100)
         if not isinstance(priority, (int, float)):
             result.warnings.append("Invalid priority, using 100")
             priority = 100
         priority = int(priority)
-        
+
         # requires(任意)
         requires_raw = raw_data.get("requires", {})
         requires = ModifierRequires(
             interfaces=requires_raw.get("interfaces", []) if isinstance(requires_raw, dict) else [],
             capabilities=requires_raw.get("capabilities", []) if isinstance(requires_raw, dict) else []
         )
-        
+
         # resolve_target（任意）
         resolve_target = raw_data.get("resolve_target", False)
         resolve_namespace = raw_data.get("resolve_namespace", "flow_id")
-        
+
+        # Wave 9: conflicts_with / compatible_with（任意）
+        conflicts_with_raw = raw_data.get("conflicts_with")
+        conflicts_with = None
+        if isinstance(conflicts_with_raw, list):
+            conflicts_with = [str(x) for x in conflicts_with_raw if x]
+
+        compatible_with_raw = raw_data.get("compatible_with")
+        compatible_with = None
+        if isinstance(compatible_with_raw, list):
+            compatible_with = [str(x) for x in compatible_with_raw if x]
+
         modifier_def = FlowModifierDef(
             modifier_id=modifier_id,
             target_flow_id=target_flow_id,
@@ -507,44 +526,46 @@ class FlowModifierLoader:
             source_pack_id=pack_id,
             resolve_target=resolve_target,
             resolve_namespace=resolve_namespace,
+            conflicts_with=conflicts_with,
+            compatible_with=compatible_with,
         )
-        
+
         result.success = True
         result.modifier_def = modifier_def
         return result
-    
+
     def get_loaded_modifiers(self) -> Dict[str, FlowModifierDef]:
         """ロード済みmodifierを取得"""
         with self._lock:
             return dict(self._loaded_modifiers)
-    
+
     def get_load_errors(self) -> List[Dict[str, Any]]:
         """ロードエラーを取得"""
         with self._lock:
             return list(self._load_errors)
-    
+
     def get_skipped_modifiers(self) -> List[ModifierSkipRecord]:
         """スキップされたmodifierを取得"""
         with self._lock:
             return list(self._skipped_modifiers)
-    
+
     def get_modifiers_for_flow(self, flow_id: str, resolve: bool = False) -> List[FlowModifierDef]:
         """
         特定Flowに対するmodifierを取得(ソート済み)
-        
+
         Args:
             flow_id: Flow ID
             resolve: 共有辞書で target_flow_id を解決するか
-        
+
         Returns:
             マッチするmodifierのリスト
         """
         with self._lock:
             modifiers = []
-            
+
             for m in self._loaded_modifiers.values():
                 target = m.target_flow_id
-                
+
                 # resolve_target が True の場合、共有辞書で解決
                 if m.resolve_target or resolve:
                     try:
@@ -553,11 +574,11 @@ class FlowModifierLoader:
                         target = resolver.resolve(m.resolve_namespace, target)
                     except Exception:
                         pass  # 解決失敗時は元の値を使用
-                
+
                 # C6: fnmatch pattern matching for wildcard target_flow_id
                 if fnmatch.fnmatch(flow_id, target):
                     modifiers.append(m)
-            
+
             # phase → priority → modifier_id でソート
             return sorted(modifiers, key=lambda m: (m.phase, m.priority, m.modifier_id))
 
@@ -565,34 +586,34 @@ class FlowModifierLoader:
 class FlowModifierApplier:
     """
     Flow modifier適用エンジン
-    
+
     modifierをFlowDefinitionに適用する。
-    
+
     Phase3: 適用決定性の強化
     - 同一注入点での順序: priority → step.id → modifier_id
     - inject相対位置を保持（再ソートしない）
     """
-    
+
     def __init__(self, interface_registry=None, dry_run: bool = False):
         self._interface_registry = interface_registry
         self._available_interfaces: Set[str] = set()
         self._available_capabilities: Set[str] = set()
         self._dry_run = dry_run
-    
+
     def set_interface_registry(self, ir) -> None:
         """InterfaceRegistryを設定"""
         self._interface_registry = ir
         self._refresh_available()
-    
+
     def _refresh_available(self) -> None:
         """利用可能なinterfaces/capabilitiesを更新"""
         if not self._interface_registry:
             return
-        
+
         # interfacesはIRに登録されているキー
         ir_list = self._interface_registry.list() or {}
         self._available_interfaces = set(ir_list.keys())
-        
+
         # capabilitiesはcomponent.capabilitiesから収集
         all_caps = self._interface_registry.get("component.capabilities", strategy="all") or []
         self._available_capabilities = set()
@@ -601,11 +622,11 @@ class FlowModifierApplier:
                 for k, v in cap_dict.items():
                     if v:
                         self._available_capabilities.add(k)
-    
+
     def check_requires(self, requires: ModifierRequires) -> Tuple[bool, Optional[str]]:
         """
         requires条件をチェック
-        
+
         Returns:
             (満たされているか, 満たされていない理由)
         """
@@ -613,14 +634,136 @@ class FlowModifierApplier:
         for iface in requires.interfaces:
             if iface not in self._available_interfaces:
                 return False, f"interface '{iface}' not available"
-        
+
         # capabilities チェック
         for cap in requires.capabilities:
             if cap not in self._available_capabilities:
                 return False, f"capability '{cap}' not available"
-        
+
         return True, None
-    
+
+    # ------------------------------------------------------------------
+    # Wave 9: Modifier 衝突検出
+    # ------------------------------------------------------------------
+
+    def _detect_conflicts(
+        self,
+        modifiers: List[FlowModifierDef],
+        results: List[ModifierApplyResult],
+    ) -> None:
+        """
+        同一 target_step_id に対して複数の Modifier が作用する場合の衝突を検出し、
+        診断ログ（logger.warning）と監査ログ（audit_logger）に警告を出す。
+
+        - remove + replace/inject_* が同一 target_step_id に作用する場合は強い警告
+        - conflicts_with / compatible_with フィールドによる矛盾チェック
+
+        この関数は警告を出すだけで、既存動作を変更しない。
+        """
+        # results に含まれるスキップ済み modifier_id を除外
+        skipped_ids = {r.modifier_id for r in results if r.skipped_reason}
+
+        # 有効な modifier のみ対象
+        active_modifiers = [m for m in modifiers if m.modifier_id not in skipped_ids]
+
+        # target_step_id ごとにグループ化
+        by_target: Dict[str, List[FlowModifierDef]] = {}
+        for m in active_modifiers:
+            tsid = m.target_step_id
+            if tsid:
+                if tsid not in by_target:
+                    by_target[tsid] = []
+                by_target[tsid].append(m)
+
+        # 1. 同一 target_step_id に複数 Modifier が作用する場合の警告
+        for tsid, group in by_target.items():
+            if len(group) < 2:
+                continue
+
+            actions = {m.action for m in group}
+            modifier_ids = [m.modifier_id for m in group]
+
+            has_remove = "remove" in actions
+            has_mutating = actions & {"replace", "inject_before", "inject_after"}
+
+            if has_remove and has_mutating:
+                # 強い警告: remove と inject/replace が同一 target に作用
+                msg = (
+                    "[FlowModifier] CONFLICT (severe): target_step_id '%s' "
+                    "has both 'remove' and %s actions from "
+                    "modifiers %s. Injecting/replacing a removed step "
+                    "is likely unintended."
+                )
+                logger.warning(msg, tsid, sorted(has_mutating), modifier_ids)
+                self._audit_conflict(tsid, modifier_ids, sorted(actions), severity="severe")
+            else:
+                # 通常の警告: 複数 Modifier が同一 target に作用
+                msg = (
+                    "[FlowModifier] CONFLICT (info): target_step_id '%s' "
+                    "is targeted by multiple modifiers %s "
+                    "with actions %s."
+                )
+                logger.warning(msg, tsid, modifier_ids, sorted(actions))
+                self._audit_conflict(tsid, modifier_ids, sorted(actions), severity="info")
+
+        # 2. conflicts_with / compatible_with による矛盾チェック
+        active_ids = {m.modifier_id for m in active_modifiers}
+        for m in active_modifiers:
+            if m.conflicts_with:
+                for cid in m.conflicts_with:
+                    if cid in active_ids:
+                        msg = (
+                            "[FlowModifier] CONFLICT (declared): modifier '%s' "
+                            "declares conflicts_with '%s', but both are active."
+                        )
+                        logger.warning(msg, m.modifier_id, cid)
+                        self._audit_conflict(
+                            m.target_step_id or "(global)",
+                            [m.modifier_id, cid],
+                            ["conflicts_with"],
+                            severity="declared",
+                        )
+            if m.compatible_with:
+                for cid in m.compatible_with:
+                    if cid not in active_ids and cid != m.modifier_id:
+                        msg = (
+                            "[FlowModifier] CONFLICT (compatibility): modifier '%s' "
+                            "declares compatible_with '%s', but '%s' is not active."
+                        )
+                        logger.warning(msg, m.modifier_id, cid, cid)
+                        self._audit_conflict(
+                            m.target_step_id or "(global)",
+                            [m.modifier_id, cid],
+                            ["compatible_with_missing"],
+                            severity="compatibility",
+                        )
+
+    def _audit_conflict(
+        self,
+        target_step_id: str,
+        modifier_ids: List[str],
+        actions: List[str],
+        severity: str = "info",
+    ) -> None:
+        """衝突を監査ログに記録（best-effort）"""
+        try:
+            from .audit_logger import get_audit_logger
+            audit = get_audit_logger()
+            audit.log_system_event(
+                event_type="modifier_conflict_detected",
+                success=True,
+                details={
+                    "target_step_id": target_step_id,
+                    "modifier_ids": modifier_ids,
+                    "actions": actions,
+                    "severity": severity,
+                },
+            )
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------
+
     def apply_modifiers(
         self,
         flow_def: FlowDefinition,
@@ -628,29 +771,29 @@ class FlowModifierApplier:
     ) -> Tuple[FlowDefinition, List[ModifierApplyResult]]:
         """
         modifierをFlowに適用
-        
+
         Phase3: 決定的な適用順序
         - 同一注入点(target_step_id + action)でバッファリング
         - バッファ内を priority → step.id → modifier_id でソート
         - 同一注入点のステップは一括挿入してインデックスずれを防ぐ
-        
+
         Args:
             flow_def: 元のFlowDefinition
             modifiers: 適用するmodifierリスト(ソート済み)
-        
+
         Returns:
             (変更後のFlowDefinition, 適用結果リスト)
         """
         # FlowDefinitionをディープコピー(元を変更しない)
         new_steps = copy.deepcopy(flow_def.steps)
         results = []
-        
+
         # Phase3: 注入点ごとにmodifierをグループ化
         inject_before_groups: Dict[str, List[FlowModifierDef]] = {}
         inject_after_groups: Dict[str, List[FlowModifierDef]] = {}
         append_groups: Dict[str, List[FlowModifierDef]] = {}
         other_modifiers: List[FlowModifierDef] = []
-        
+
         for modifier in modifiers:
             # requires チェックを先に行う
             satisfied, reason = self.check_requires(modifier.requires)
@@ -666,7 +809,7 @@ class FlowModifierApplier:
                 self._log_modifier_skip(modifier, result.skipped_reason)
                 results.append(result)
                 continue
-            
+
             # phaseチェック
             if modifier.phase not in flow_def.phases:
                 # #8: append で phase 未存在の場合、最後の phase にフォールバック
@@ -690,7 +833,7 @@ class FlowModifierApplier:
                     self._log_modifier_skip(modifier, result.skipped_reason)
                     results.append(result)
                     continue
-            
+
             if modifier.action == "inject_before":
                 target = modifier.target_step_id or ""
                 if target not in inject_before_groups:
@@ -709,7 +852,7 @@ class FlowModifierApplier:
             else:
                 # replace, remove は個別処理
                 other_modifiers.append(modifier)
-        
+
         # 各グループ内でソート: priority → step.id → modifier_id
         for key in inject_before_groups:
             inject_before_groups[key] = sorted(
@@ -726,12 +869,15 @@ class FlowModifierApplier:
                 append_groups[key],
                 key=lambda m: (m.priority, m.step.get("id", "") if m.step else "", m.modifier_id)
             )
-        
+
+        # Wave 9: 衝突検出（警告のみ、動作は変更しない）
+        self._detect_conflicts(modifiers, results)
+
         # 1. replace, removeを先に適用
         for modifier in other_modifiers:
             result = self._apply_single_modifier(new_steps, modifier, flow_def.phases)
             results.append(result)
-        
+
         # 2. inject_before を一括適用（同一注入点ごと）
         for target_step_id, group in inject_before_groups.items():
             # #7: 特殊 target_step_id 値の解決
@@ -755,7 +901,7 @@ class FlowModifierApplier:
                     self._log_modifier_skip(modifier, result.skipped_reason)
                     results.append(result)
                 continue
-            
+
             # 同一注入点のステップを順番に作成し、一括挿入
             for i, modifier in enumerate(group):
                 new_step = self._step_from_dict(modifier.step, modifier.phase, modifier.modifier_id)
@@ -769,7 +915,7 @@ class FlowModifierApplier:
                 )
                 results.append(result)
                 self._log_modifier_success(modifier)
-        
+
         # 3. inject_after を一括適用（同一注入点ごと）
         for target_step_id, group in inject_after_groups.items():
             # #7: 特殊 target_step_id 値の解決
@@ -792,7 +938,7 @@ class FlowModifierApplier:
                     self._log_modifier_skip(modifier, result.skipped_reason)
                     results.append(result)
                 continue
-            
+
             # target_index + 1 の位置から一括挿入
             insert_pos = target_index + 1
             for i, modifier in enumerate(group):
@@ -807,7 +953,7 @@ class FlowModifierApplier:
                 )
                 results.append(result)
                 self._log_modifier_success(modifier)
-        
+
         # 4. append を適用
         for phase, group in append_groups.items():
             for modifier in group:
@@ -821,7 +967,7 @@ class FlowModifierApplier:
                 )
                 results.append(result)
                 self._log_modifier_success(modifier)
-        
+
         # 新しいFlowDefinitionを作成（再ソートしない）
         new_flow_def = FlowDefinition(
             flow_id=flow_def.flow_id,
@@ -834,13 +980,13 @@ class FlowModifierApplier:
             source_type=flow_def.source_type,
             source_pack_id=flow_def.source_pack_id
         )
-        
+
         # #40: dry_run モードでは元の FlowDefinition を返す
         if self._dry_run:
             return flow_def, results
 
         return new_flow_def, results
-    
+
     def _apply_single_modifier(
         self,
         steps: List[FlowStep],
@@ -855,7 +1001,7 @@ class FlowModifierApplier:
             target_flow_id=modifier.target_flow_id,
             target_step_id=modifier.target_step_id
         )
-        
+
         try:
             if modifier.action == "replace":
                 success = self._action_replace(steps, modifier, phases)
@@ -872,14 +1018,14 @@ class FlowModifierApplier:
             else:
                 result.errors.append(f"Unknown action: {modifier.action}")
                 return result
-            
+
             result.success = True
             self._log_modifier_success(modifier)
         except Exception as e:
             result.errors.append(str(e))
-        
+
         return result
-    
+
     def _log_modifier_skip(self, modifier: FlowModifierDef, reason: str) -> None:
         """modifierスキップをログに記録"""
         try:
@@ -896,7 +1042,7 @@ class FlowModifierApplier:
             )
         except Exception:
             pass
-    
+
     def _log_modifier_success(self, modifier: FlowModifierDef) -> None:
         """modifier成功をログに記録（警告付き）"""
         # 明示的な警告ログ出力
@@ -937,7 +1083,7 @@ class FlowModifierApplier:
             )
         except Exception:
             pass
-    
+
     def _step_from_dict(self, step_dict: Dict[str, Any], phase: str, modifier_id: str) -> FlowStep:
         """辞書からFlowStepを作成"""
         return FlowStep(
@@ -954,14 +1100,14 @@ class FlowModifierApplier:
             timeout_seconds=step_dict.get("timeout_seconds", 60.0),
             principal_id=step_dict.get("principal_id"),
         )
-    
+
     def _find_step_index(self, steps: List[FlowStep], step_id: str) -> int:
         """step_idでステップのインデックスを検索"""
         for i, step in enumerate(steps):
             if step.id == step_id:
                 return i
         return -1
-    
+
     def _action_append(
         self,
         steps: List[FlowStep],
@@ -970,20 +1116,20 @@ class FlowModifierApplier:
     ) -> None:
         """append: 指定phaseの最後(次のphaseの直前)にステップを追加"""
         new_step = self._step_from_dict(modifier.step, modifier.phase, modifier.modifier_id)
-        
+
         # 次のphaseの直前(=このphaseの末尾)を探す
         insert_index = len(steps)
         phase_order = {p: i for i, p in enumerate(phases)}
         target_phase_order = phase_order.get(modifier.phase, 999)
-        
+
         for i, step in enumerate(steps):
             step_phase_order = phase_order.get(step.phase, 999)
             if step_phase_order > target_phase_order:
                 insert_index = i
                 break
-        
+
         steps.insert(insert_index, new_step)
-    
+
     def _action_replace(
         self,
         steps: List[FlowStep],
@@ -994,11 +1140,11 @@ class FlowModifierApplier:
         target_index = self._find_step_index(steps, modifier.target_step_id)
         if target_index < 0:
             return False
-        
+
         new_step = self._step_from_dict(modifier.step, modifier.phase, modifier.modifier_id)
         steps[target_index] = new_step
         return True
-    
+
     def _action_remove(
         self,
         steps: List[FlowStep],
@@ -1008,7 +1154,7 @@ class FlowModifierApplier:
         target_index = self._find_step_index(steps, modifier.target_step_id)
         if target_index < 0:
             return False
-        
+
         steps.pop(target_index)
         return True
 
