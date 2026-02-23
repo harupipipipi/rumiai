@@ -11,6 +11,7 @@ Mixin方式で Kernel クラスに合成される。
 - _execute_handler_step_async / _execute_sub_flow_step (ステップ実行)
 - _eval_condition (条件式評価)
 - _execute_flow_step (同期 pipeline 用ステップ実行)
+- _check_depends_on (Wave 10-C: depends_on 実行時チェック)
 
 依存する self 属性 (KernelCore.__init__ で初期化済み前提):
     self.config             : KernelConfig
@@ -31,6 +32,12 @@ Mixin方式で Kernel クラスに合成される。
     self.load_user_flows(path=None)
     self._load_single_flow(flow_path)
     self._vocab_normalize_output(unwrapped, step, ctx)
+
+Wave 10-C: depends_on 実行時チェック追加
+- ステップ実行ループに depends_on 依存チェック追加
+- 実行済みステップID集合で追跡
+- fail_soft: 未実行依存をスキップ+警告
+- depends_on なし/空はゼロコスト
 """
 
 from __future__ import annotations
@@ -39,7 +46,7 @@ import asyncio
 import copy
 import re
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .paths import BASE_DIR
 
@@ -63,6 +70,45 @@ class KernelFlowExecutionMixin:
     """
 
     # ------------------------------------------------------------------
+    # Wave 10-C: depends_on チェック
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _get_step_depends_on(step: Any) -> Optional[List[str]]:
+        """ステップから depends_on を安全に取得する。
+
+        dict の場合は .get()、オブジェクトの場合は getattr() で取得。
+        depends_on 属性が存在しない旧形式にも対応する。
+        """
+        if isinstance(step, dict):
+            return step.get("depends_on")
+        return getattr(step, "depends_on", None)
+
+    def _check_depends_on(
+        self, step: Any, executed_ids: Set[str]
+    ) -> Tuple[bool, List[str]]:
+        """ステップの depends_on をチェックする。
+
+        Args:
+            step: ステップ (dict or FlowStep or any object)
+            executed_ids: 実行済みステップIDの集合
+
+        Returns:
+            (should_execute, missing_deps):
+            - depends_on が None or 空 → (True, [])  ゼロコスト
+            - 全ID が executed_ids に含まれる → (True, [])
+            - 含まれないIDがある → (False, [missing_ids])
+        """
+        deps = self._get_step_depends_on(step)
+        if not deps:
+            # None or 空リスト → チェックスキップ（ゼロコスト）
+            return True, []
+        missing = [d for d in deps if d not in executed_ids]
+        if missing:
+            return False, missing
+        return True, []
+
+    # ------------------------------------------------------------------
     # Startup / Pipeline 実行 (同期)
     # ------------------------------------------------------------------
 
@@ -80,11 +126,42 @@ class KernelFlowExecutionMixin:
         self.diagnostics.record_step(phase="startup", step_id="startup.pipeline.start", handler="kernel:startup.run",
                                       status="success", meta={"step_count": len(startup_steps)})
         aborted = False
+        executed_ids: Set[str] = set()
         for step in startup_steps:
             if aborted:
                 break
+            # --- Wave 10-C: depends_on check ---
+            step_id_for_dep = step.get("id") if isinstance(step, dict) else getattr(step, "id", None)
+            dep_ok, dep_missing = self._check_depends_on(step, executed_ids)
+            if not dep_ok:
+                if fail_soft_default:
+                    _logger.warning(
+                        "Step '%s' skipped: depends_on not satisfied (missing: %s)",
+                        step_id_for_dep, dep_missing,
+                    )
+                    self.diagnostics.record_step(
+                        phase="startup",
+                        step_id=f"{step_id_for_dep or 'unknown'}.depends_on.skipped",
+                        handler="kernel:depends_on_check",
+                        status="skipped",
+                        meta={"missing_deps": dep_missing},
+                    )
+                    continue
+                else:
+                    self.diagnostics.record_step(
+                        phase="startup",
+                        step_id=f"{step_id_for_dep or 'unknown'}.depends_on.abort",
+                        handler="kernel:depends_on_check",
+                        status="failed",
+                        meta={"missing_deps": dep_missing},
+                    )
+                    aborted = True
+                    break
+            # --- end depends_on check ---
             try:
                 aborted = self._execute_flow_step(step, phase="startup", ctx=ctx)
+                if not aborted and step_id_for_dep:
+                    executed_ids.add(step_id_for_dep)
             except Exception as e:
                 self.diagnostics.record_step(phase="startup", step_id="startup.pipeline.internal_error",
                                               handler="kernel:startup.run", status="failed", error=e)
@@ -119,11 +196,42 @@ class KernelFlowExecutionMixin:
         )
 
         aborted = False
+        executed_ids: Set[str] = set()
         for step in steps:
             if aborted:
                 break
+            # --- Wave 10-C: depends_on check ---
+            step_id_for_dep = step.get("id") if isinstance(step, dict) else getattr(step, "id", None)
+            dep_ok, dep_missing = self._check_depends_on(step, executed_ids)
+            if not dep_ok:
+                if fail_soft_default:
+                    _logger.warning(
+                        "Step '%s' skipped: depends_on not satisfied (missing: %s)",
+                        step_id_for_dep, dep_missing,
+                    )
+                    self.diagnostics.record_step(
+                        phase=pipeline_name,
+                        step_id=f"{step_id_for_dep or 'unknown'}.depends_on.skipped",
+                        handler="kernel:depends_on_check",
+                        status="skipped",
+                        meta={"missing_deps": dep_missing},
+                    )
+                    continue
+                else:
+                    self.diagnostics.record_step(
+                        phase=pipeline_name,
+                        step_id=f"{step_id_for_dep or 'unknown'}.depends_on.abort",
+                        handler="kernel:depends_on_check",
+                        status="failed",
+                        meta={"missing_deps": dep_missing},
+                    )
+                    aborted = True
+                    break
+            # --- end depends_on check ---
             try:
                 aborted = self._execute_flow_step(step, phase=pipeline_name, ctx=ctx)
+                if not aborted and step_id_for_dep:
+                    executed_ids.add(step_id_for_dep)
             except Exception as e:
                 self.diagnostics.record_step(
                     phase=pipeline_name,
@@ -232,6 +340,7 @@ class KernelFlowExecutionMixin:
             call_stack.pop()
 
     async def _execute_steps_async(self, steps: List[Dict[str, Any]], ctx: Dict[str, Any]) -> Dict[str, Any]:
+        executed_ids: Set[str] = set()
         for i, step in enumerate(steps):
             if not isinstance(step, dict) or ctx.get("_flow_timeout"):
                 continue
@@ -240,6 +349,39 @@ class KernelFlowExecutionMixin:
             step_type = step.get("type", "handler")
             if step.get("when") and not self._eval_condition(step["when"], ctx):
                 continue
+            # --- Wave 10-C: depends_on check ---
+            dep_ok, dep_missing = self._check_depends_on(step, executed_ids)
+            if not dep_ok:
+                fail_soft = ctx.get("_flow_defaults", {}).get("fail_soft", True)
+                if fail_soft:
+                    _logger.warning(
+                        "Step '%s' skipped: depends_on not satisfied (missing: %s)",
+                        step_id, dep_missing,
+                    )
+                    self.diagnostics.record_step(
+                        phase="flow",
+                        step_id=f"{step_id}.depends_on.skipped",
+                        handler="kernel:depends_on_check",
+                        status="skipped",
+                        meta={
+                            "missing_deps": dep_missing,
+                            "flow_id": ctx.get("_flow_id"),
+                        },
+                    )
+                    continue
+                else:
+                    self.diagnostics.record_step(
+                        phase="flow",
+                        step_id=f"{step_id}.depends_on.abort",
+                        handler="kernel:depends_on_check",
+                        status="failed",
+                        meta={
+                            "missing_deps": dep_missing,
+                            "flow_id": ctx.get("_flow_id"),
+                        },
+                    )
+                    return ctx
+            # --- end depends_on check ---
             meta = {"flow_id": ctx.get("_flow_id"), "execution_id": ctx.get("_flow_execution_id"),
                     "step_index": i, "total_steps": ctx.get("_total_steps", len(steps)),
                     "parent_execution_id": ctx.get("_parent_flow_execution_id")}
@@ -288,6 +430,8 @@ class KernelFlowExecutionMixin:
                                 status="failed",
                                 error=e,
                             )
+                # --- Wave 10-C: mark step as executed on success ---
+                executed_ids.add(step_id)
             except Exception as e:
                 error_handler = self.interface_registry.get("flow.error_handler")
                 if error_handler and callable(error_handler):
