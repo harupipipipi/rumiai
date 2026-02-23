@@ -284,56 +284,56 @@ class FlowModifierLoader:
             pass
 
 
-def _is_wildcard_modifier_allowed(self, pack_id: Optional[str]) -> bool:
-    """
-    Check whether wildcard Modifier (target_flow_id='*') loading is permitted.
+    def _is_wildcard_modifier_allowed(self, pack_id: Optional[str]) -> bool:
+        """
+        Check whether wildcard Modifier (target_flow_id='*') loading is permitted.
 
-    Wave 11: Approval control for wildcard modifiers.
-    - shared modifier (pack_id is None) -> always allowed
-    - env RUMI_ALLOW_WILDCARD_MODIFIERS=true -> allowed
-    - ecosystem.json "allow_wildcard_modifiers": true -> allowed
-    - otherwise -> denied
-    """
-    # 1. shared modifier is always trusted
-    if pack_id is None:
-        return True
+        Wave 11: Approval control for wildcard modifiers.
+        - shared modifier (pack_id is None) -> always allowed
+        - env RUMI_ALLOW_WILDCARD_MODIFIERS=true -> allowed
+        - ecosystem.json "allow_wildcard_modifiers": true -> allowed
+        - otherwise -> denied
+        """
+        # 1. shared modifier is always trusted
+        if pack_id is None:
+            return True
 
-    # 2. Global env var override
-    if os.environ.get("RUMI_ALLOW_WILDCARD_MODIFIERS", "").lower() == "true":
-        return True
+        # 2. Global env var override
+        if os.environ.get("RUMI_ALLOW_WILDCARD_MODIFIERS", "").lower() == "true":
+            return True
 
-    # 3. Cache check
-    cached = self._wildcard_flags.get(pack_id)
-    if cached is not None:
-        return cached
+        # 3. Cache check
+        cached = self._wildcard_flags.get(pack_id)
+        if cached is not None:
+            return cached
 
-    # 4. Discover from ecosystem.json
-    allowed = False
-    try:
-        locations = discover_pack_locations(str(ECOSYSTEM_DIR))
-        for loc in locations:
-            if loc.pack_id == pack_id:
-                allowed = self._read_wildcard_flag_from_ecosystem(loc.ecosystem_json_path)
-                break
-    except Exception:
+        # 4. Discover from ecosystem.json
         allowed = False
+        try:
+            locations = discover_pack_locations(str(ECOSYSTEM_DIR))
+            for loc in locations:
+                if loc.pack_id == pack_id:
+                    allowed = self._read_wildcard_flag_from_ecosystem(loc.ecosystem_json_path)
+                    break
+        except Exception:
+            allowed = False
 
-    self._wildcard_flags[pack_id] = allowed
-    return allowed
+        self._wildcard_flags[pack_id] = allowed
+        return allowed
 
-@staticmethod
-def _read_wildcard_flag_from_ecosystem(ecosystem_json_path: Path) -> bool:
-    """
-    Read allow_wildcard_modifiers flag from ecosystem.json.
+    @staticmethod
+    def _read_wildcard_flag_from_ecosystem(ecosystem_json_path: Path) -> bool:
+        """
+        Read allow_wildcard_modifiers flag from ecosystem.json.
 
-    Returns False if the file is missing, unreadable, or the flag is absent.
-    """
-    try:
-        with open(ecosystem_json_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return bool(data.get("allow_wildcard_modifiers", False))
-    except Exception:
-        return False
+        Returns False if the file is missing, unreadable, or the flag is absent.
+        """
+        try:
+            with open(ecosystem_json_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return bool(data.get("allow_wildcard_modifiers", False))
+        except Exception:
+            return False
 
     def load_all_modifiers(self) -> Dict[str, FlowModifierDef]:
         """
@@ -387,11 +387,11 @@ def _read_wildcard_flag_from_ecosystem(ecosystem_json_path: Path) -> bool:
         for loc in locations:
             pack_id = loc.pack_id
 
-# Wave 11: Pre-cache wildcard modifier flag from ecosystem.json
-if pack_id not in self._wildcard_flags:
-    self._wildcard_flags[pack_id] = self._read_wildcard_flag_from_ecosystem(
-        loc.ecosystem_json_path
-    )
+            # Wave 11: Pre-cache wildcard modifier flag from ecosystem.json
+            if pack_id not in self._wildcard_flags:
+                self._wildcard_flags[pack_id] = self._read_wildcard_flag_from_ecosystem(
+                    loc.ecosystem_json_path
+                )
 
             # 承認チェック
             is_approved, reason = self._check_pack_approval(pack_id)
