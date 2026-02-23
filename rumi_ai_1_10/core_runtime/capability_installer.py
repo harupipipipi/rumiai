@@ -1,6 +1,9 @@
 """
 capability_installer.py - Capability Handler 候補導入フロー
 
+Wave 13 T-048: データクラス・定数は capability_models.py に分離。
+後方互換のため全シンボルを re-export する。
+
 ecosystem に Pack が同梱した候補 capability handler を検出し、
 承認ワークフロー（pending → approve/reject/block）を経て
 user_data/capabilities/handlers/ へコピー（実働化）する。
@@ -19,12 +22,9 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
 import threading
-from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
-from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -33,32 +33,29 @@ from .validation import (
     validate_entrypoint as _v_validate_entrypoint,
     check_no_symlinks as _v_check_no_symlinks,
     check_path_within as _v_check_path_within,
-    SLUG_PATTERN as _SLUG_PATTERN,
 )
 
-
-# ======================================================================
-# 定数
-# ======================================================================
-
-DEFAULT_ECOSYSTEM_DIR = "ecosystem"
-CANDIDATE_SUBPATH = "share/capability_handlers"
-
-REQUESTS_DIR = "user_data/capabilities/requests"
-INDEX_FILE = "index.json"
-BLOCKED_FILE = "blocked.json"
-REQUESTS_LOG_FILE = "requests.jsonl"
-
-HANDLERS_DEST_DIR = "user_data/capabilities/handlers"
-
-DEFAULT_COOLDOWN_SECONDS = 3600
-DEFAULT_REJECT_THRESHOLD = 3
-
-# ecosystem 走査時に除外するディレクトリ名
-_EXCLUDED_PACK_DIRS = frozenset({
-    ".git", "__pycache__", "node_modules", ".venv", ".tox",
-    ".mypy_cache", ".pytest_cache", ".eggs", "flows",
-})
+# --- Wave 13 T-048: import from capability_models (+ re-export) ---
+from .capability_models import (          # noqa: F401 — re-export
+    CandidateStatus,
+    CandidateInfo,
+    IndexItem,
+    ScanResult,
+    ApproveResult,
+    RejectResult,
+    UnblockResult,
+    DEFAULT_ECOSYSTEM_DIR,
+    CANDIDATE_SUBPATH,
+    REQUESTS_DIR,
+    INDEX_FILE,
+    BLOCKED_FILE,
+    REQUESTS_LOG_FILE,
+    HANDLERS_DEST_DIR,
+    DEFAULT_COOLDOWN_SECONDS,
+    DEFAULT_REJECT_THRESHOLD,
+    _EXCLUDED_PACK_DIRS,
+    SLUG_PATTERN as _SLUG_PATTERN,
+)
 
 
 # ======================================================================
@@ -81,192 +78,6 @@ def _get_executor():
     """遅延 import: CapabilityExecutor"""
     from .capability_executor import get_capability_executor
     return get_capability_executor()
-
-
-# ======================================================================
-# Status enum
-# ======================================================================
-
-class CandidateStatus(str, Enum):
-    PENDING = "pending"
-    INSTALLED = "installed"
-    REJECTED = "rejected"
-    BLOCKED = "blocked"
-    FAILED = "failed"
-
-
-# ======================================================================
-# Data classes
-# ======================================================================
-
-@dataclass
-class CandidateInfo:
-    """候補 handler の情報"""
-    pack_id: str
-    slug: str
-    handler_id: str
-    permission_id: str
-    entrypoint: str
-    source_dir: str
-    handler_py_sha256: str
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "pack_id": self.pack_id,
-            "slug": self.slug,
-            "handler_id": self.handler_id,
-            "permission_id": self.permission_id,
-            "entrypoint": self.entrypoint,
-            "source_dir": self.source_dir,
-            "handler_py_sha256": self.handler_py_sha256,
-        }
-
-    @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "CandidateInfo":
-        return cls(
-            pack_id=d.get("pack_id", ""),
-            slug=d.get("slug", ""),
-            handler_id=d.get("handler_id", ""),
-            permission_id=d.get("permission_id", ""),
-            entrypoint=d.get("entrypoint", ""),
-            source_dir=d.get("source_dir", ""),
-            handler_py_sha256=d.get("handler_py_sha256", ""),
-        )
-
-
-@dataclass
-class IndexItem:
-    """index.json の各アイテム"""
-    candidate_key: str
-    status: CandidateStatus
-    reject_count: int = 0
-    cooldown_until: Optional[str] = None
-    last_event_ts: str = ""
-    candidate: Optional[CandidateInfo] = None
-    installed_to: Optional[str] = None
-    last_error: Optional[str] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        d: Dict[str, Any] = {
-            "candidate_key": self.candidate_key,
-            "status": self.status.value,
-            "reject_count": self.reject_count,
-            "cooldown_until": self.cooldown_until,
-            "last_event_ts": self.last_event_ts,
-            "candidate": self.candidate.to_dict() if self.candidate else None,
-            "installed_to": self.installed_to,
-            "last_error": self.last_error,
-        }
-        return d
-
-    @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "IndexItem":
-        candidate_data = d.get("candidate")
-        candidate = CandidateInfo.from_dict(candidate_data) if isinstance(candidate_data, dict) else None
-        status_raw = d.get("status", "pending")
-        try:
-            status = CandidateStatus(status_raw)
-        except ValueError:
-            status = CandidateStatus.PENDING
-        return cls(
-            candidate_key=d.get("candidate_key", ""),
-            status=status,
-            reject_count=d.get("reject_count", 0),
-            cooldown_until=d.get("cooldown_until"),
-            last_event_ts=d.get("last_event_ts", ""),
-            candidate=candidate,
-            installed_to=d.get("installed_to"),
-            last_error=d.get("last_error"),
-        )
-
-
-@dataclass
-class ScanResult:
-    """スキャン結果"""
-    scanned_count: int = 0
-    pending_created: int = 0
-    skipped_blocked: int = 0
-    skipped_cooldown: int = 0
-    skipped_installed: int = 0
-    skipped_pending: int = 0
-    skipped_failed: int = 0
-    errors: List[Dict[str, Any]] = field(default_factory=list)
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "scanned_count": self.scanned_count,
-            "pending_created": self.pending_created,
-            "skipped_blocked": self.skipped_blocked,
-            "skipped_cooldown": self.skipped_cooldown,
-            "skipped_installed": self.skipped_installed,
-            "skipped_pending": self.skipped_pending,
-            "skipped_failed": self.skipped_failed,
-            "errors": self.errors,
-        }
-
-
-@dataclass
-class ApproveResult:
-    """approve 結果"""
-    success: bool
-    status: str = ""
-    installed_to: str = ""
-    handler_id: str = ""
-    permission_id: str = ""
-    sha256: str = ""
-    error: Optional[str] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        d: Dict[str, Any] = {
-            "success": self.success,
-            "status": self.status,
-        }
-        if self.success:
-            d["installed_to"] = self.installed_to
-            d["handler_id"] = self.handler_id
-            d["permission_id"] = self.permission_id
-            d["sha256"] = self.sha256
-        if self.error:
-            d["error"] = self.error
-        return d
-
-
-@dataclass
-class RejectResult:
-    """reject 結果"""
-    success: bool
-    status: str = ""
-    reject_count: int = 0
-    cooldown_until: Optional[str] = None
-    error: Optional[str] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        d: Dict[str, Any] = {
-            "success": self.success,
-            "status": self.status,
-            "reject_count": self.reject_count,
-            "cooldown_until": self.cooldown_until,
-        }
-        if self.error:
-            d["error"] = self.error
-        return d
-
-
-@dataclass
-class UnblockResult:
-    """unblock 結果"""
-    success: bool
-    status_after: str = ""
-    error: Optional[str] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        d: Dict[str, Any] = {
-            "success": self.success,
-            "status_after": self.status_after,
-        }
-        if self.error:
-            d["error"] = self.error
-        return d
 
 
 # ======================================================================
@@ -474,7 +285,6 @@ class CapabilityInstaller:
 
     @staticmethod
     def _validate_slug(slug: str) -> Tuple[bool, Optional[str]]:
-        """slug が安全な文字のみで構成されているか検証する。validation.py に委譲。"""
         return _v_validate_slug(slug)
 
     # ------------------------------------------------------------------
@@ -483,7 +293,6 @@ class CapabilityInstaller:
 
     @staticmethod
     def _check_no_symlinks(*paths: Path) -> Tuple[bool, Optional[str]]:
-        """指定パスがシンボリックリンクでないことを確認する。validation.py に委譲。"""
         return _v_check_no_symlinks(*paths)
 
     # ------------------------------------------------------------------
@@ -492,7 +301,6 @@ class CapabilityInstaller:
 
     @staticmethod
     def _validate_entrypoint(entrypoint: str, slug_dir: Path) -> Tuple[bool, Optional[str], Optional[Path]]:
-        """entrypoint を検証する。validation.py に委譲。"""
         return _v_validate_entrypoint(entrypoint, slug_dir)
 
     # ------------------------------------------------------------------
@@ -511,15 +319,6 @@ class CapabilityInstaller:
     def scan_candidates(self, ecosystem_dir: Optional[str] = None) -> ScanResult:
         """
         ecosystem を走査して候補を検出し、pending を作成する。
-
-        挙動:
-        - ecosystem/<pack_id>/share/capability_handlers/<slug>/ を走査
-        - blocked → スキップ
-        - installed → スキップ
-        - pending → スキップ
-        - rejected + cooldown中 → スキップ
-        - failed → スキップ
-        - それ以外 → pending 作成
         """
         with self._lock:
             eco_root = Path(ecosystem_dir or DEFAULT_ECOSYSTEM_DIR)
@@ -529,7 +328,6 @@ class CapabilityInstaller:
             if not eco_root.is_dir():
                 return result
 
-            # ecosystem/<pack_id>/ を列挙
             try:
                 pack_dirs = sorted(
                     (d for d in eco_root.iterdir()
@@ -541,7 +339,6 @@ class CapabilityInstaller:
             except OSError:
                 return result
 
-            # ecosystem/packs/<pack_id>/ も列挙 (互換)
             legacy_packs_root = eco_root / "packs"
             if legacy_packs_root.is_dir():
                 try:
@@ -580,7 +377,6 @@ class CapabilityInstaller:
                     result.scanned_count += 1
                     slug = slug_dir.name
 
-                    # slug バリデーション
                     slug_valid, slug_error = self._validate_slug(slug)
                     if not slug_valid:
                         result.errors.append({
@@ -590,7 +386,6 @@ class CapabilityInstaller:
                         })
                         continue
 
-                    # handler.json を読む
                     handler_json_path = slug_dir / "handler.json"
                     if not handler_json_path.exists():
                         result.errors.append({
@@ -639,7 +434,6 @@ class CapabilityInstaller:
                         })
                         continue
 
-                    # entrypoint 検証
                     valid, ep_error, handler_py_path = self._validate_entrypoint(entrypoint, slug_dir)
                     if not valid:
                         result.errors.append({
@@ -649,7 +443,6 @@ class CapabilityInstaller:
                         })
                         continue
 
-                    # sha256 計算
                     try:
                         sha256 = self._compute_sha256(handler_py_path)
                     except Exception as e:
@@ -662,12 +455,10 @@ class CapabilityInstaller:
 
                     candidate_key = self.make_candidate_key(pack_id, slug, handler_id, sha256)
 
-                    # blocked チェック（最優先）
                     if candidate_key in self._blocked:
                         result.skipped_blocked += 1
                         continue
 
-                    # index チェック
                     existing = self._index_items.get(candidate_key)
                     if existing is not None:
                         if existing.status == CandidateStatus.INSTALLED:
@@ -677,13 +468,11 @@ class CapabilityInstaller:
                             result.skipped_pending += 1
                             continue
                         elif existing.status == CandidateStatus.REJECTED:
-                            # cooldown チェック
                             if existing.cooldown_until:
                                 cooldown_dt = self._parse_ts(existing.cooldown_until)
                                 if cooldown_dt and cooldown_dt > now:
                                     result.skipped_cooldown += 1
                                     continue
-                            # cooldown 切れ → pending に戻す
                             existing.status = CandidateStatus.PENDING
                             existing.last_event_ts = self._now_ts()
                             existing.cooldown_until = None
@@ -703,7 +492,6 @@ class CapabilityInstaller:
                             result.skipped_blocked += 1
                             continue
 
-                    # 新規 pending 作成
                     candidate_info = CandidateInfo(
                         pack_id=pack_id,
                         slug=slug,
@@ -751,21 +539,8 @@ class CapabilityInstaller:
     ) -> ApproveResult:
         """
         候補を承認し、同時に install する。
-
-        手順:
-        1. index から候補を取得
-        2. slug バリデーション
-        3. TOCTOU対策: source_dir を再検証 + sha256 再計算
-        4. Trust に登録
-        5. dest_dir 境界チェック
-        6. TOCTOU最終防御: コピー直前に symlink チェック + sha256 再計算
-        7. user_data にコピー
-        8. Registry/Executor を再ロード
-        9. index を更新
-        10. イベントログ + 監査ログに記録
         """
         with self._lock:
-            # 1. index から取得
             item = self._index_items.get(candidate_key)
             if item is None:
                 return ApproveResult(success=False, error="Candidate not found")
@@ -789,13 +564,11 @@ class CapabilityInstaller:
             candidate = item.candidate
             source_dir = Path(candidate.source_dir)
 
-            # 2. slug バリデーション
             slug_valid, slug_error = self._validate_slug(candidate.slug)
             if not slug_valid:
                 self._mark_failed(item, f"Invalid slug: {slug_error}")
                 return ApproveResult(success=False, error=f"Invalid slug: {slug_error}")
 
-            # 3. TOCTOU対策: 再検証
             handler_json_path = source_dir / "handler.json"
             if not handler_json_path.exists():
                 self._mark_failed(item, "Source handler.json not found during approve")
@@ -834,7 +607,6 @@ class CapabilityInstaller:
                     error="SHA-256 mismatch: handler.py content changed since scan (TOCTOU)",
                 )
 
-            # 4. Trust に登録
             try:
                 trust_store = _get_trust_store()
                 if not trust_store.is_loaded():
@@ -851,10 +623,8 @@ class CapabilityInstaller:
                 self._mark_failed(item, f"Trust registration error: {e}")
                 return ApproveResult(success=False, error=f"Trust registration error: {e}")
 
-            # 5. user_data にコピー
             dest_dir = self._handlers_dest_dir / candidate.slug
 
-            # dest_dir 境界チェック: _handlers_dest_dir 配下であることを確認 (validation.py に委譲)
             dest_ok, dest_error = _v_check_path_within(dest_dir, self._handlers_dest_dir)
             if not dest_ok:
                 self._mark_failed(item, "Path traversal detected in destination path")
@@ -863,7 +633,6 @@ class CapabilityInstaller:
                     error="Path traversal detected in destination path",
                 )
 
-            # TOCTOU最終防御: コピー直前にシンボリックリンクチェック + SHA256再計算
             ep_file_for_check = entrypoint.rsplit(":", 1)[0] if ":" in entrypoint else "handler.py"
             source_json_path = source_dir / "handler.json"
             source_py_path = source_dir / ep_file_for_check
@@ -897,21 +666,19 @@ class CapabilityInstaller:
                 self._mark_failed(item, f"Copy error: {e}")
                 return ApproveResult(success=False, error=f"Copy error: {e}")
 
-            # 6. Registry/Executor を再ロード
             try:
                 registry = _get_handler_registry()
                 registry.load_all()
             except Exception:
-                pass  # reload 失敗は warning レベル、install 自体は成功
+                pass
 
             try:
                 executor = _get_executor()
-                executor._initialized = False  # force re-init
+                executor._initialized = False
                 executor.initialize()
             except Exception:
                 pass
 
-            # 7. index 更新
             item.status = CandidateStatus.INSTALLED
             item.installed_to = str(dest_dir)
             item.cooldown_until = None
@@ -919,7 +686,6 @@ class CapabilityInstaller:
             item.last_error = None
             self._save_index()
 
-            # 8. イベントログ
             self._append_event(
                 event="capability_handler.approved_and_installed",
                 candidate_key=candidate_key,
@@ -965,17 +731,6 @@ class CapabilityInstaller:
         dest_dir: Path,
         candidate: CandidateInfo,
     ) -> Tuple[bool, str]:
-        """
-        handler.json と handler.py を dest_dir にコピーする。
-
-        上書きルール:
-        - dest_dir が無い → 作ってコピー
-        - dest_dir がある & handler_id同一 & sha256同一 → idempotent (OK)
-        - それ以外 → エラー（自動上書き禁止）
-
-        Returns:
-            (success, error_message)
-        """
         ep_file = candidate.entrypoint.rsplit(":", 1)[0] if ":" in candidate.entrypoint else "handler.py"
 
         source_json = source_dir / "handler.json"
@@ -986,7 +741,6 @@ class CapabilityInstaller:
         if not source_py.exists():
             return False, f"Source {ep_file} not found"
 
-        # シンボリックリンクチェック（多層防御）
         if os.path.islink(source_json) or os.path.islink(source_py):
             return False, "Symbolic link detected in source files (security risk)"
 
@@ -1014,7 +768,6 @@ class CapabilityInstaller:
             elif existing_json_path.exists() or existing_py_path.exists():
                 return False, "Destination directory exists in inconsistent state"
 
-        # コピー実行
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest_py = dest_dir / ep_file
         dest_py.parent.mkdir(parents=True, exist_ok=True)
@@ -1024,7 +777,6 @@ class CapabilityInstaller:
         return True, ""
 
     def _mark_failed(self, item: IndexItem, error: str) -> None:
-        """アイテムを failed に遷移させる"""
         item.status = CandidateStatus.FAILED
         item.last_error = error
         item.last_event_ts = self._now_ts()
@@ -1058,13 +810,6 @@ class CapabilityInstaller:
         actor: str = "user",
         reason: str = "",
     ) -> RejectResult:
-        """
-        候補を reject する。
-
-        - reject_count += 1
-        - cooldown_until = now + cooldown_seconds
-        - reject_count >= reject_threshold → blocked
-        """
         with self._lock:
             item = self._index_items.get(candidate_key)
             if item is None:
@@ -1160,9 +905,6 @@ class CapabilityInstaller:
         actor: str = "user",
         reason: str = "user_unblocked",
     ) -> UnblockResult:
-        """
-        blocked を解除し、rejected (cooldown付き) に戻す。
-        """
         with self._lock:
             if candidate_key not in self._blocked:
                 item = self._index_items.get(candidate_key)
@@ -1214,7 +956,6 @@ class CapabilityInstaller:
     # ------------------------------------------------------------------
 
     def list_items(self, status_filter: Optional[str] = None) -> List[Dict[str, Any]]:
-        """index アイテムを一覧する"""
         with self._lock:
             items = []
             for item in self._index_items.values():
@@ -1225,12 +966,10 @@ class CapabilityInstaller:
             return items
 
     def list_blocked(self) -> Dict[str, Any]:
-        """blocked 一覧を返す"""
         with self._lock:
             return dict(self._blocked)
 
     def get_item(self, candidate_key: str) -> Optional[Dict[str, Any]]:
-        """単一アイテムを取得"""
         with self._lock:
             item = self._index_items.get(candidate_key)
             if item is None:
@@ -1247,7 +986,6 @@ _installer_lock = threading.Lock()
 
 
 def get_capability_installer() -> CapabilityInstaller:
-    """グローバルな CapabilityInstaller を取得"""
     global _global_installer
     if _global_installer is None:
         with _installer_lock:
@@ -1262,7 +1000,6 @@ def reset_capability_installer(
     cooldown_seconds: int = DEFAULT_COOLDOWN_SECONDS,
     reject_threshold: int = DEFAULT_REJECT_THRESHOLD,
 ) -> CapabilityInstaller:
-    """リセット（テスト用）"""
     global _global_installer
     with _installer_lock:
         _global_installer = CapabilityInstaller(
