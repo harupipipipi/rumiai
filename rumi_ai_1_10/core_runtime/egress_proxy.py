@@ -89,36 +89,6 @@ from .egress_domain_controller import (  # noqa: F401 — re-export
     _ECOSYSTEM_DIR,
 )
 
-# W13-T047: サブモジュールからの re-import（後方互換維持）
-from .egress_ip import (  # noqa: F401 — re-export
-    BLOCKED_IPV4_NETWORKS,
-    BLOCKED_IPV6_NETWORKS,
-    BLOCKED_IPV4_ADDRESSES,
-    is_internal_ip,
-    _is_ip_literal,
-    resolve_and_check_ip,
-)
-from .egress_protocol import (  # noqa: F401 — re-export
-    read_length_prefixed_json,
-    write_length_prefixed_json,
-    validate_request,
-    read_response_with_limit,
-    _log_network_event,
-    ALLOWED_METHODS,
-    MAX_HEADER_COUNT,
-    MAX_HEADER_NAME_LENGTH,
-    MAX_HEADER_VALUE_LENGTH,
-    MAX_RESPONSE_READ_CHUNK,
-)
-from .egress_rate_limiter import (  # noqa: F401 — re-export
-    PackRateLimiter,
-    DEFAULT_RATE_LIMIT_PER_MIN,
-    RATE_LIMIT_WINDOW_SECONDS,
-)
-from .egress_domain_controller import (  # noqa: F401 — re-export
-    DomainController,
-    _ECOSYSTEM_DIR,
-)
 
 # ============================================================
 # 定数
@@ -127,7 +97,6 @@ from .egress_domain_controller import (  # noqa: F401 — re-export
 # サイズ制限
 MAX_REQUEST_SIZE = 1 * 1024 * 1024   # 1MB
 MAX_RESPONSE_SIZE = 4 * 1024 * 1024  # 4MB
-MAX_RESPONSE_READ_CHUNK = 65536      # 64KB per chunk
 
 # タイムアウト
 DEFAULT_TIMEOUT = 30.0
@@ -418,32 +387,6 @@ def execute_http_request(
                         latency_ms=result["latency_ms"],
                         redirect_hops=redirect_hops,
                         blocked_reason="domain_control_denied",
-                        check_type="proxy_request"
-                    )
-                    return result
-
-
-            # ============================================================
-            # 2.7. レート制限チェック（ドメイン制御後、Grant前、初回のみ）
-            # W13-T047: セキュリティチェック順序修正
-            # ============================================================
-            if rate_limiter and not rate_limit_checked:
-                rate_limit_checked = True
-                rl_allowed, rl_reason = rate_limiter.check_rate_limit(pack_id)
-                if not rl_allowed:
-                    result["error"] = "Rate limit exceeded"
-                    result["error_type"] = "rate_limited"
-                    result["latency_ms"] = (time.time() - start_time) * 1000
-                    result["redirect_hops"] = redirect_hops
-                    result["final_url"] = current_url
-
-                    _log_network_event(
-                        audit_logger, pack_id, domain, port, False,
-                        reason=rl_reason,
-                        method=method, url=original_url, final_url=current_url,
-                        latency_ms=result["latency_ms"],
-                        redirect_hops=redirect_hops,
-                        blocked_reason="rate_limited",
                         check_type="proxy_request"
                     )
                     return result

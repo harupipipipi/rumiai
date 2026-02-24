@@ -151,7 +151,7 @@ class TestResolveAndCheckIp:
         fake_results = [
             (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.2.3.4", 0)),
         ]
-        with patch("core_runtime.egress_proxy.socket.getaddrinfo", return_value=fake_results):
+        with patch("core_runtime.egress_ip.socket.getaddrinfo", return_value=fake_results):
             blocked, reason, ips = resolve_and_check_ip("example.com")
         assert blocked is False
         assert "1.2.3.4" in ips
@@ -161,14 +161,14 @@ class TestResolveAndCheckIp:
         fake_results = [
             (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.1", 0)),
         ]
-        with patch("core_runtime.egress_proxy.socket.getaddrinfo", return_value=fake_results):
+        with patch("core_runtime.egress_ip.socket.getaddrinfo", return_value=fake_results):
             blocked, reason, ips = resolve_and_check_ip("evil.example.com")
         assert blocked is True
         assert "rebinding" in reason.lower() or "blocked" in reason.lower()
 
     def test_hostname_dns_failure(self):
         """DNS resolution failure -> blocked."""
-        with patch("core_runtime.egress_proxy.socket.getaddrinfo",
+        with patch("core_runtime.egress_ip.socket.getaddrinfo",
                     side_effect=socket.gaierror("Name resolution failed")):
             blocked, reason, ips = resolve_and_check_ip("nonexistent.example.invalid")
         assert blocked is True
@@ -181,7 +181,7 @@ class TestResolveAndCheckIp:
             (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.2.3.4", 0)),
             (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.1", 0)),
         ]
-        with patch("core_runtime.egress_proxy.socket.getaddrinfo", return_value=fake_results):
+        with patch("core_runtime.egress_ip.socket.getaddrinfo", return_value=fake_results):
             blocked, reason, ips = resolve_and_check_ip("mixed.example.com")
         assert blocked is True
 
