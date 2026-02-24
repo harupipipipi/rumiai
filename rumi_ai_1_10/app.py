@@ -24,20 +24,40 @@ def L(key, **kwargs):
 
 def main():
     global _kernel
-    
+
     parser = argparse.ArgumentParser(description="Rumi AI OS")
     parser.add_argument("--headless", action="store_true", help="Run without HTTP server")
     parser.add_argument("--permissive", action="store_true", help="Run in permissive security mode (development only)")
     parser.add_argument("--validate", action="store_true", help="Validate all Pack ecosystem.json files and exit")
+    parser.add_argument("--health", action="store_true", help="Run health check and exit with status")
     args = parser.parse_args()
-    
+
+    # --- ログ設定 ---
+    import os
+    from core_runtime.logging_utils import configure_logging
+    _log_level = os.environ.get("RUMI_LOG_LEVEL", "INFO")
+    _log_format = os.environ.get("RUMI_LOG_FORMAT", "json")
+    configure_logging(level=_log_level, fmt=_log_format)
+
+    # --- Health check mode (early exit) ---
+    if args.health:
+        from core_runtime.health import (
+            get_health_checker, probe_disk_space, probe_file_writable,
+        )
+        import json
+        checker = get_health_checker()
+        checker.register_probe("disk", lambda: probe_disk_space("/"))
+        checker.register_probe("writable_tmp", lambda: probe_file_writable("/tmp"))
+        result = checker.aggregate_health()
+        print(json.dumps(result, indent=2))
+        sys.exit(0 if result["status"] == "UP" else 1)
+
     # --- Pack validation mode (early exit) ---
     if args.validate:
         _run_validation()
         return
-    
+
     # セキュリティモード設定 — デフォルトは strict（secure）
-    import os
     if args.permissive:
         os.environ["RUMI_SECURITY_MODE"] = "permissive"
         print("=" * 60)
@@ -48,7 +68,7 @@ def main():
     else:
         # 明示的に strict を設定（外部環境変数による意図しない permissive 化を防止）
         os.environ.setdefault("RUMI_SECURITY_MODE", "strict")
-    
+
     try:
         from core_runtime import Kernel
         try:
@@ -60,26 +80,26 @@ def main():
 
         # Langシステム初期化
         load_system_lang()
-        
+
         _kernel = Kernel()
-        
+
         print(f"[Rumi] {L('startup.starting')}")
         _kernel.run_startup()
-        
+
         atexit.register(lambda: _kernel.shutdown() if _kernel else None)
-        
+
         try:
             from backend_core.ecosystem.compat import mark_ecosystem_initialized
             mark_ecosystem_initialized()
         except Exception:
             pass
-        
+
         print(f"[Rumi] {L('startup.success')}")
-        
+
         if args.headless:
             print(f"[Rumi] {L('startup.headless')}")
             return
-        
+
         # HTTPサーバーがPackから提供されている場合は起動
         http_server = None
 
@@ -106,7 +126,7 @@ def main():
             print(f"[Rumi] {L('startup.install_http_pack')}")
             print(f"[Rumi] {L('startup.press_ctrl_c')}")
             _wait_for_signal()
-        
+
     except KeyboardInterrupt:
         print(f"\n[Rumi] {L('shutdown.starting')}")
     except Exception as e:
