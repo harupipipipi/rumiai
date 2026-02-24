@@ -222,6 +222,7 @@ def _register_defaults(container: DIContainer) -> None:
               LibExecutor, UnitExecutor, CapabilityExecutor
     Wave 8:   Diagnostics, InstallJournal, InterfaceRegistry,
               EventBus, ComponentLifecycleExecutor
+    Wave 15:  HealthChecker, MetricsCollector, Profiler
 
     Args:
         container: 登録先の DIContainer
@@ -341,6 +342,19 @@ def _register_defaults(container: DIContainer) -> None:
             install_journal=c.get("install_journal"),
         )
 
+    # --- Wave 15: Foundation services ---
+    def _health_checker_factory() -> "HealthChecker":  # noqa: F821
+        from .health import HealthChecker
+        return HealthChecker()
+
+    def _metrics_collector_factory() -> "MetricsCollector":  # noqa: F821
+        from .metrics import MetricsCollector
+        return MetricsCollector()
+
+    def _profiler_factory() -> "Profiler":  # noqa: F821
+        from .profiling import Profiler
+        return Profiler()
+
     # --- Register all (each name exactly once) ---
     container.register("audit_logger", _audit_logger_factory)
     container.register("hmac_key_manager", _hmac_key_manager_factory)
@@ -368,3 +382,6 @@ def _register_defaults(container: DIContainer) -> None:
     container.register("interface_registry", _interface_registry_factory)
     container.register("event_bus", _event_bus_factory)
     container.register("component_lifecycle", _component_lifecycle_factory)
+    container.register("health_checker", _health_checker_factory)
+    container.register("metrics_collector", _metrics_collector_factory)
+    container.register("profiler", _profiler_factory)
