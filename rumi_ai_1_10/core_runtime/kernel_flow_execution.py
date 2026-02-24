@@ -38,6 +38,12 @@ Wave 10-C: depends_on 実行時チェック追加
 - 実行済みステップID集合で追跡
 - fail_soft: 未実行依存をスキップ+警告
 - depends_on なし/空はゼロコスト
+
+Wave 15-B: 基盤モジュール統合
+- logging → get_structured_logger 移行
+- Profiler でFlow/ステップ実行計測
+- MetricsCollector でステップ成功/失敗/Flow完了カウント
+- 計測エラーでFlow実行が失敗しないよう try-except で防護
 """
 
 from __future__ import annotations
@@ -45,13 +51,17 @@ from __future__ import annotations
 import asyncio
 import copy
 import re
+import time
 import uuid
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .paths import BASE_DIR
 
-import logging
-_logger = logging.getLogger("rumi.kernel.flow_execution")
+from .logging_utils import get_structured_logger
+from .profiling import get_profiler
+from .metrics import get_metrics_collector
+
+_logger = get_structured_logger("rumi.kernel.flow_execution")
 
 
 # --- Flow chain / resolve depth limits (Fix #58, #70) ---
@@ -136,8 +146,7 @@ class KernelFlowExecutionMixin:
             if not dep_ok:
                 if fail_soft_default:
                     _logger.warning(
-                        "Step '%s' skipped: depends_on not satisfied (missing: %s)",
-                        step_id_for_dep, dep_missing,
+                        f"Step '{step_id_for_dep}' skipped: depends_on not satisfied (missing: {dep_missing})",
                     )
                     self.diagnostics.record_step(
                         phase="startup",
@@ -206,8 +215,7 @@ class KernelFlowExecutionMixin:
             if not dep_ok:
                 if fail_soft_default:
                     _logger.warning(
-                        "Step '%s' skipped: depends_on not satisfied (missing: %s)",
-                        step_id_for_dep, dep_missing,
+                        f"Step '{step_id_for_dep}' skipped: depends_on not satisfied (missing: {dep_missing})",
                     )
                     self.diagnostics.record_step(
                         phase=pipeline_name,
@@ -295,6 +303,7 @@ class KernelFlowExecutionMixin:
             return asyncio.run(coro)
 
     async def _execute_flow_internal(self, flow_id: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        _prof_start = time.monotonic()
         ctx = self._build_kernel_context()
         ctx.update(context or {})
         execution_id = str(uuid.uuid4())
@@ -335,9 +344,19 @@ class KernelFlowExecutionMixin:
             ctx = await self._execute_steps_async(steps, ctx)
             self.diagnostics.record_step(phase="flow", step_id=f"flow.{flow_id}.end", handler="kernel:execute_flow",
                                           status="success", meta={"flow_id": flow_id, "execution_id": execution_id})
+            # --- Wave 15-B: metrics ---
+            try:
+                get_metrics_collector().increment("flow.execution.complete", labels={"flow_id": flow_id})
+            except Exception:
+                pass
             return ctx
         finally:
             call_stack.pop()
+            # --- Wave 15-B: profiler ---
+            try:
+                get_profiler()._record(f"flow.{flow_id}", time.monotonic() - _prof_start)
+            except Exception:
+                pass
 
     async def _execute_steps_async(self, steps: List[Dict[str, Any]], ctx: Dict[str, Any]) -> Dict[str, Any]:
         executed_ids: Set[str] = set()
@@ -355,8 +374,7 @@ class KernelFlowExecutionMixin:
                 fail_soft = ctx.get("_flow_defaults", {}).get("fail_soft", True)
                 if fail_soft:
                     _logger.warning(
-                        "Step '%s' skipped: depends_on not satisfied (missing: %s)",
-                        step_id, dep_missing,
+                        f"Step '{step_id}' skipped: depends_on not satisfied (missing: {dep_missing})",
                     )
                     self.diagnostics.record_step(
                         phase="flow",
@@ -422,7 +440,7 @@ class KernelFlowExecutionMixin:
                         try:
                             hook(step, ctx, step_result, meta)
                         except Exception as e:
-                            _logger.debug("after_step hook failed: %s", e)
+                            _logger.debug(f"after_step hook failed: {e}")
                             self.diagnostics.record_step(
                                 phase="flow",
                                 step_id=f"{step_id}.after_hook",
@@ -465,6 +483,7 @@ class KernelFlowExecutionMixin:
 
         if handler is None or not callable(handler):
             return ctx, None
+        _step_prof_start = time.monotonic()
         try:
             if asyncio.iscoroutinefunction(handler):
                 result = await handler(resolved_args, ctx)
@@ -495,9 +514,25 @@ class KernelFlowExecutionMixin:
                 if isinstance(unwrapped, dict) and step.get("vocab_normalize", True):
                     unwrapped = self._vocab_normalize_output(unwrapped, step, ctx)
                 ctx[step["output"]] = unwrapped
+            # --- Wave 15-B: metrics (success) ---
+            try:
+                get_metrics_collector().increment("flow.step.success", labels={"handler": handler_key})
+            except Exception:
+                pass
             return ctx, unwrapped
         except Exception:
+            # --- Wave 15-B: metrics (error) ---
+            try:
+                get_metrics_collector().increment("flow.step.error", labels={"handler": handler_key})
+            except Exception:
+                pass
             raise
+        finally:
+            # --- Wave 15-B: profiler ---
+            try:
+                get_profiler()._record(f"step.{handler_key}", time.monotonic() - _step_prof_start)
+            except Exception:
+                pass
 
     async def _execute_sub_flow_step(self, step: Dict[str, Any], ctx: Dict[str, Any]) -> Tuple[Dict[str, Any], Any]:
         flow_name = step.get("flow")
