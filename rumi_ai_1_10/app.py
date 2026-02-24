@@ -120,7 +120,9 @@ def main():
             http_server = _kernel.interface_registry.get("io.http.server")
         if http_server and callable(http_server):
             print(f"[Rumi] {L('startup.http_starting')}")
-            http_server(_kernel)
+            # Wave 17-A: KernelFacade でラップし、Pack コードへの Kernel 直接参照を遮断
+            from core_runtime.kernel_facade import KernelFacade
+            http_server(KernelFacade(_kernel))
         else:
             print(f"[Rumi] {L('startup.no_http')}")
             print(f"[Rumi] {L('startup.install_http_pack')}")

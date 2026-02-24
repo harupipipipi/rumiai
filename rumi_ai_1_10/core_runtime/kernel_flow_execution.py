@@ -60,6 +60,7 @@ from .paths import BASE_DIR
 from .logging_utils import get_structured_logger
 from .profiling import get_profiler
 from .metrics import get_metrics_collector
+from .kernel_facade import KernelFacade
 
 _logger = get_structured_logger("rumi.kernel.flow_execution")
 
@@ -431,7 +432,9 @@ class KernelFlowExecutionMixin:
                 else:
                     construct = self.interface_registry.get(f"flow.construct.{step_type}")
                     if construct and callable(construct):
-                        ctx = await construct(self, step, ctx) if asyncio.iscoroutinefunction(construct) else construct(self, step, ctx)
+                        # Wave 17-A: Pack の construct に Kernel 直接参照を渡さず KernelFacade でラップ
+                        _facade = KernelFacade(self)
+                        ctx = await construct(_facade, step, ctx) if asyncio.iscoroutinefunction(construct) else construct(_facade, step, ctx)
                 # C5: check flow control abort after step execution
                 if ctx.get("_flow_control_abort"):
                     return ctx

@@ -12,6 +12,8 @@ M-7: Null 下流防御
 from __future__ import annotations
 
 import logging
+import os
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger("rumi.kernel.context")
@@ -132,6 +134,31 @@ class KernelContextBuilder:
             "unit_registry", self._import_unit_registry,
         )
 
+        return ctx
+
+
+    def build_safe(self, flow_id=None, step_id=None):
+        """Pack 提供ハンドラ向けのサニタイズ済みコンテキストを構築する。
+
+        RUMI_SAFE_CONTEXT=1 環境変数ガード付き。
+        デフォルトは OFF（従来の build() と同じ ctx を返す）。
+        ON の場合のみ、内部サービス参照を除去したサニタイズ版を返す。
+
+        Wave 17-A: カーネルオブジェクト漏洩の封じ込め
+        """
+        if os.environ.get("RUMI_SAFE_CONTEXT", "0") != "1":
+            return self.build()
+
+        ctx = {}
+        ctx["diagnostics"] = _ReadOnlyDiagnostics(self._diagnostics)
+        ctx["ts"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+        if flow_id is not None:
+            ctx["_flow_id"] = flow_id
+        if step_id is not None:
+            ctx["_step_id"] = step_id
+
+        ctx.setdefault("_disabled_targets", {"packs": set(), "components": set()})
         return ctx
 
     # ------------------------------------------------------------------

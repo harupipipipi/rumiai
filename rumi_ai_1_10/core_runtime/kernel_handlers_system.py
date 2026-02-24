@@ -26,6 +26,23 @@ from .metrics import get_metrics_collector
 
 _logger = get_structured_logger("rumi.kernel.handlers.system")
 
+# ------------------------------------------------------------------
+# Wave 17-A: inject ブロックリスト — 内部サービス参照の注入を禁止
+# ------------------------------------------------------------------
+_INJECT_BLOCKED_KEYS = frozenset({
+    "interface_registry",
+    "event_bus",
+    "diagnostics",
+    "install_journal",
+    "permission_manager",
+    "approval_manager",
+    "lifecycle",
+    "active_ecosystem",
+    "registry",
+})
+
+
+
 
 class KernelSystemHandlersMixin:
     """
@@ -217,13 +234,25 @@ class KernelSystemHandlersMixin:
             return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "missing 'file' argument"}}
         base_path = args.get("base_path") or ctx.get("_foreach_current_path", ".")
         full_path = Path(base_path) / file_arg if base_path and base_path != "." else Path(file_arg)
+
+        # Wave 17-A: パストラバーサル防止
+        full_path = full_path.resolve()
+        try:
+            full_path.relative_to(Path(base_path).resolve() if base_path and base_path != "." else Path(".").resolve())
+        except ValueError:
+            _logger.warning("Path traversal detected: %s (base: %s)", file_arg, base_path)
+            return {"error": "Path traversal detected", "status": "blocked"}
         if not full_path.exists():
             return {"_kernel_step_status": "skipped", "_kernel_step_meta": {"reason": "file_not_found", "path": str(full_path)}}
         phase = args.get("phase", "exec")
         exec_ctx = {"phase": phase, "ts": self._now_ts(), "paths": {"file": str(full_path), "dir": str(full_path.parent), "component_runtime_dir": str(full_path.parent)},
                     "ids": ctx.get("_foreach_ids", {}), "interface_registry": self.interface_registry, "event_bus": self.event_bus,
                     "diagnostics": self.diagnostics, "install_journal": self.install_journal}
+        # Wave 17-A: inject ブロックリストで内部サービス参照の注入を制限
         for k, v in args.get("inject", {}).items():
+            if k in _INJECT_BLOCKED_KEYS:
+                _logger.warning("inject blocked for protected key: %s", k)
+                continue
             exec_ctx[k] = self._resolve_value(v, ctx)
         try:
             self.lifecycle._exec_python_file(full_path, exec_ctx)
