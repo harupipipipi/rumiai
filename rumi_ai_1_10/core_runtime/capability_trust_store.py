@@ -8,16 +8,26 @@ handler_id + sha256 の allowlist による信頼判定を行う。
 - Trust は handler.py の sha256 一致で判定（必須）
 - sha256 不一致は無条件で拒否
 - 信頼リストに無い handler_id も拒否
+
+Wave 17-B 変更:
+- HMAC 署名の生成・検証を追加
+- 後方互換: 署名なし旧ファイルは WARNING のみ（RUMI_REQUIRE_HMAC=1 で拒否）
 """
 
 from __future__ import annotations
 
 import json
+import logging
+import os
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+from .hmac_key_manager import generate_or_load_signing_key, compute_data_hmac, verify_data_hmac
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -56,6 +66,12 @@ class CapabilityTrustStore:
         self._trusted: Dict[str, TrustedHandler] = {}  # handler_id -> TrustedHandler
         self._loaded: bool = False
         self._load_error: Optional[str] = None
+
+        # HMAC 署名用の秘密鍵をロード
+        self._secret_key = generate_or_load_signing_key(
+            Path(self._trust_file).parent / ".secret_key",
+            env_var="RUMI_HMAC_SECRET",
+        )
     
     def _now_ts(self) -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -82,7 +98,29 @@ class CapabilityTrustStore:
             if not isinstance(data, dict):
                 self._load_error = "Trust file must be a JSON object"
                 return False
-            
+
+            # --- HMAC 署名検証 ---
+            stored_sig = data.pop("_hmac_signature", None)
+            if stored_sig:
+                if not verify_data_hmac(self._secret_key, data, stored_sig):
+                    logger.critical("Trust store HMAC verification failed — possible tampering")
+                    self._trusted = {}
+                    self._load_error = "HMAC verification failed"
+                    return False
+            else:
+                # 署名なし（旧バージョンファイル）
+                require_hmac = os.environ.get("RUMI_REQUIRE_HMAC", "0") == "1"
+                if require_hmac:
+                    logger.critical("Trust store has no HMAC signature and RUMI_REQUIRE_HMAC=1")
+                    self._trusted = {}
+                    self._load_error = "HMAC signature missing (required by RUMI_REQUIRE_HMAC)"
+                    return False
+                else:
+                    logger.warning(
+                        "Trust store has no HMAC signature (legacy file). "
+                        "Signature will be added on next save."
+                    )
+
             trusted_list = data.get("trusted", [])
             if not isinstance(trusted_list, list):
                 self._load_error = "'trusted' must be an array"
@@ -244,6 +282,9 @@ class CapabilityTrustStore:
                     for t in self._trusted.values()
                 ],
             }
+
+            # HMAC 署名を追加
+            data["_hmac_signature"] = compute_data_hmac(self._secret_key, data)
             
             with open(self._trust_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)

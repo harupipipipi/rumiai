@@ -12,6 +12,12 @@ Agent 7-F 変更:
   M-12: scan_packsのI/Oをロック外に移動
   G-2:  apply_update capability
   G-3:  version history / rollback
+
+Wave 17-B 変更:
+  rollback_to_version: 現在のファイルハッシュと target_hashes の一致を検証
+  verify_hash: use_cache パラメータ追加
+  _compute_pack_hashes_nocache: キャッシュなしハッシュ計算
+  is_pack_approved_and_verified: use_cache=False で検証
 """
 
 from __future__ import annotations
@@ -391,8 +397,8 @@ class ApprovalManager:
             if approval.status != PackStatus.APPROVED:
                 return False, "not_approved"
         
-        # ハッシュ検証（ロック外でファイルI/O）
-        if not self.verify_hash(pack_id):
+        # ハッシュ検証（ロック外でファイルI/O）— キャッシュなしで検証（TOCTOU 緩和）
+        if not self.verify_hash(pack_id, use_cache=False):
             return False, "hash_mismatch"
         
         return True, None
@@ -462,7 +468,7 @@ class ApprovalManager:
                 self._approvals[pack_id].status = PackStatus.MODIFIED
                 self._save_grant(self._approvals[pack_id])
     
-    def verify_hash(self, pack_id: str) -> bool:
+    def verify_hash(self, pack_id: str, use_cache: bool = True) -> bool:
         """Packのファイルハッシュを検証"""
         # ロック内でapprovalを取得
         with self._lock:
@@ -478,7 +484,10 @@ class ApprovalManager:
             pack_dir = self._resolve_pack_dir(pack_id)
             if pack_dir is None or not pack_dir.exists():
                 return False
-            current_hashes = self._compute_pack_hashes(pack_dir)
+            if use_cache:
+                current_hashes = self._compute_pack_hashes(pack_dir)
+            else:
+                current_hashes = self._compute_pack_hashes_nocache(pack_dir)
         
         # 比較
         if set(current_hashes.keys()) != set(stored_hashes.keys()):
@@ -517,6 +526,21 @@ class ApprovalManager:
         # キャッシュ保存
         self._hash_cache[cache_key] = (hashes, now)
         
+        return hashes
+
+    def _compute_pack_hashes_nocache(self, pack_dir: Path) -> Dict[str, str]:
+        """Packの全ファイルのハッシュを計算（キャッシュを参照・更新しない）"""
+        hashes = {}
+
+        for file_path in pack_dir.rglob("*"):
+            if file_path.is_file():
+                if any(p in str(file_path) for p in ["__pycache__", ".pyc", ".git"]):
+                    continue
+
+                relative_path = str(file_path.relative_to(pack_dir))
+                hash_value = self._compute_file_hash(file_path)
+                hashes[relative_path] = hash_value
+
         return hashes
     
     def _compute_file_hash(self, path: Path) -> str:
@@ -643,6 +667,9 @@ class ApprovalManager:
         """
         指定バージョンのハッシュで再承認する。
 
+        現在のファイルハッシュが target_hashes と一致する場合のみ APPROVED に変更。
+        不一致の場合は失敗を返す（ファイルを先に復元する必要がある）。
+
         Args:
             pack_id: Pack ID
             version_index: version_history 内のインデックス（0始まり）
@@ -650,6 +677,7 @@ class ApprovalManager:
         Returns:
             ApprovalResult
         """
+        # Phase 1: ロック内で approval と target_hashes を取得
         with self._lock:
             approval = self._approvals.get(pack_id)
             if not approval:
@@ -665,6 +693,32 @@ class ApprovalManager:
 
             target_version = approval.version_history[version_index]
             target_hashes = target_version.get("file_hashes", {})
+
+        # Phase 2: ロック外で現在のファイルハッシュを計算し検証
+        if pack_id == LOCAL_PACK_ID:
+            current_hashes = self._compute_local_pack_hashes()
+        else:
+            pack_dir = self._resolve_pack_dir(pack_id)
+            if pack_dir is None or not pack_dir.exists():
+                return ApprovalResult(
+                    success=False, pack_id=pack_id, error="Pack directory not found",
+                )
+            current_hashes = self._compute_pack_hashes_nocache(pack_dir)
+
+        if current_hashes != target_hashes:
+            return ApprovalResult(
+                success=False, pack_id=pack_id,
+                error="Current files do not match target version hashes. Restore files first.",
+            )
+
+        # Phase 3: ロック再取得して APPROVED に更新
+        with self._lock:
+            # ロック再取得後に approval が存在するか再確認
+            approval = self._approvals.get(pack_id)
+            if not approval:
+                return ApprovalResult(
+                    success=False, pack_id=pack_id, error="Pack not found",
+                )
 
             approval.status = PackStatus.APPROVED
             approval.approved_at = self._now_ts()

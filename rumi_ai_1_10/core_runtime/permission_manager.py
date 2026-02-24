@@ -14,6 +14,10 @@ Dockerモードではsandbox_bridgeに委譲。
 
 Agent 7-F 変更:
   G-1: pack.update パーミッション標準化 (check_permission)
+
+Wave 17-B 変更:
+  デフォルトモードを環境変数 RUMI_PERMISSION_MODE から取得
+  permissive モード時に WARNING ログを出力
 """
 
 
@@ -21,6 +25,7 @@ from __future__ import annotations
 
 
 import json
+import logging
 import os
 import re
 import sys
@@ -31,6 +36,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 
 
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -76,11 +82,20 @@ class PermissionManager:
             pass
     """
     
-    def __init__(self, mode: str = "permissive"):
+    def __init__(self, mode: str = None):
         """
         Args:
-            mode: "permissive" (自動許可) or "secure" (明示的許可必要)
+            mode: "permissive" (自動許可) or "secure" (明示的許可必要).
+                  None の場合は環境変数 RUMI_PERMISSION_MODE から取得（デフォルト: permissive）
         """
+        if mode is None:
+            mode = os.environ.get("RUMI_PERMISSION_MODE", "permissive")
+        if mode == "permissive":
+            logger.warning(
+                "PermissionManager running in PERMISSIVE mode. "
+                "All permission checks return True. "
+                "Set RUMI_PERMISSION_MODE=secure for production use."
+            )
         self._mode = mode
         self._pending_requests: List[PermissionRequest] = []
         self._granted: Dict[str, Dict[str, Any]] = {}  # component_id -> {permission -> config}

@@ -16,17 +16,24 @@ user_data/capabilities/handlers/ へコピー（実働化）する。
 - cooldown 1時間で再通知抑制
 - 全操作を requests.jsonl + AuditLogger に記録
 - スレッドセーフ（RLock）
+
+Wave 17-B 変更:
+- index.json / blocked.json に HMAC 署名の生成・検証を追加
+- 後方互換: 署名なし旧ファイルは WARNING のみ（RUMI_REQUIRE_HMAC=1 で拒否）
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import threading
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+from .hmac_key_manager import generate_or_load_signing_key, compute_data_hmac, verify_data_hmac
 
 from .validation import (
     validate_slug as _v_validate_slug,
@@ -56,6 +63,8 @@ from .capability_models import (          # noqa: F401 — re-export
     _EXCLUDED_PACK_DIRS,
     SLUG_PATTERN as _SLUG_PATTERN,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ======================================================================
@@ -110,6 +119,12 @@ class CapabilityInstaller:
         # In-memory state
         self._index_items: Dict[str, IndexItem] = {}
         self._blocked: Dict[str, Dict[str, Any]] = {}
+
+        # HMAC 署名用の秘密鍵をロード
+        self._secret_key = generate_or_load_signing_key(
+            self._requests_dir / ".secret_key",
+            env_var="RUMI_HMAC_SECRET",
+        )
 
         # Load persisted state
         self._ensure_dirs()
@@ -169,6 +184,26 @@ class CapabilityInstaller:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
+
+            # --- HMAC 署名検証 ---
+            stored_sig = data.pop("_hmac_signature", None)
+            if stored_sig:
+                if not verify_data_hmac(self._secret_key, data, stored_sig):
+                    logger.critical("Capability index HMAC verification failed — possible tampering")
+                    self._index_items = {}
+                    return
+            else:
+                require_hmac = os.environ.get("RUMI_REQUIRE_HMAC", "0") == "1"
+                if require_hmac:
+                    logger.critical("Capability index has no HMAC signature and RUMI_REQUIRE_HMAC=1")
+                    self._index_items = {}
+                    return
+                else:
+                    logger.warning(
+                        "Capability index has no HMAC signature (legacy file). "
+                        "Signature will be added on next save."
+                    )
+
             items_raw = data.get("items", {})
             self._index_items = {}
             for key, item_data in items_raw.items():
@@ -188,6 +223,10 @@ class CapabilityInstaller:
                 for key, item in self._index_items.items()
             },
         }
+
+        # HMAC 署名を追加
+        data["_hmac_signature"] = compute_data_hmac(self._secret_key, data)
+
         path = self._index_path()
         tmp_path = path.with_suffix(".tmp")
         with open(tmp_path, "w", encoding="utf-8") as f:
@@ -206,6 +245,26 @@ class CapabilityInstaller:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
+
+            # --- HMAC 署名検証 ---
+            stored_sig = data.pop("_hmac_signature", None)
+            if stored_sig:
+                if not verify_data_hmac(self._secret_key, data, stored_sig):
+                    logger.critical("Capability blocked list HMAC verification failed — possible tampering")
+                    self._blocked = {}
+                    return
+            else:
+                require_hmac = os.environ.get("RUMI_REQUIRE_HMAC", "0") == "1"
+                if require_hmac:
+                    logger.critical("Capability blocked list has no HMAC signature and RUMI_REQUIRE_HMAC=1")
+                    self._blocked = {}
+                    return
+                else:
+                    logger.warning(
+                        "Capability blocked list has no HMAC signature (legacy file). "
+                        "Signature will be added on next save."
+                    )
+
             self._blocked = data.get("blocked", {})
         except (json.JSONDecodeError, OSError):
             self._blocked = {}
@@ -216,6 +275,10 @@ class CapabilityInstaller:
             "updated_at": self._now_ts(),
             "blocked": self._blocked,
         }
+
+        # HMAC 署名を追加
+        data["_hmac_signature"] = compute_data_hmac(self._secret_key, data)
+
         path = self._blocked_path()
         tmp_path = path.with_suffix(".tmp")
         with open(tmp_path, "w", encoding="utf-8") as f:
@@ -938,7 +1001,7 @@ class CapabilityInstaller:
             self._audit_event(
                 event_type="capability_handler_unblocked",
                 severity="warning",
-                description=f"Capability handler unblocked",
+                description="Capability handler unblocked",
                 details={
                     "candidate_key": candidate_key,
                     "actor": actor,

@@ -7,6 +7,9 @@ Wave 13 T-048: flow_modifier.py から分割。
   1. user_data/shared/flows/modifiers/ — 承認不要
   2. pack提供 modifiers — 承認+ハッシュ一致のpackのみ
   3. local_pack互換 ecosystem/flows/modifiers/ — deprecated
+
+Wave 17-B 変更:
+  step 内の principal_id が source pack_id と一致しない場合は上書き
 """
 
 from __future__ import annotations
@@ -432,6 +435,21 @@ class FlowModifierLoader:
             if "type" not in step:
                 result.errors.append("'step.type' is required")
                 return result
+
+            # --- Wave 17-B: principal_id 偽装防止 ---
+            # step 内の principal_id が modifier の source pack_id と一致するか検証
+            step_principal_id = step.get("principal_id")
+            if step_principal_id is not None and pack_id is not None:
+                if step_principal_id != pack_id:
+                    logger.warning(
+                        "Modifier '%s' attempts to set principal_id='%s' "
+                        "but source pack is '%s'. Overriding principal_id.",
+                        modifier_id,
+                        step_principal_id,
+                        pack_id,
+                    )
+                    step = dict(step)  # 元データを変更しないようコピー
+                    step["principal_id"] = pack_id
 
         priority = raw_data.get("priority", 100)
         if not isinstance(priority, (int, float)):

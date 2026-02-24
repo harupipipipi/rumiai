@@ -9,17 +9,26 @@ Packが自分のStoreを他のPackに共有する仕組みを管理する。
 - provider_pack_id が所有する store_id を consumer_pack_id に共有
 - 承認(approve) / 取消(revoke) の明示的な操作が必要
 - スレッドセーフ
+
+Wave 17-B 変更:
+- HMAC 署名の生成・検証を追加
+- 後方互換: 署名なし旧ファイルは WARNING のみ（RUMI_REQUIRE_HMAC=1 で拒否）
 """
 
 from __future__ import annotations
 
 import json
+import logging
+import os
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from .hmac_key_manager import generate_or_load_signing_key, compute_data_hmac, verify_data_hmac
+
+logger = logging.getLogger(__name__)
 
 SHARING_INDEX_PATH = "user_data/stores/sharing.json"
 
@@ -76,6 +85,13 @@ class SharedStoreManager:
         self._index_path = Path(index_path or SHARING_INDEX_PATH)
         self._lock = threading.RLock()
         self._entries: Dict[str, SharingEntry] = {}
+
+        # HMAC 署名用の秘密鍵をロード
+        self._secret_key = generate_or_load_signing_key(
+            self._index_path.parent / ".secret_key",
+            env_var="RUMI_HMAC_SECRET",
+        )
+
         self._load()
 
     @staticmethod
@@ -92,6 +108,26 @@ class SharedStoreManager:
         try:
             with open(self._index_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
+
+            # --- HMAC 署名検証 ---
+            stored_sig = data.pop("_hmac_signature", None)
+            if stored_sig:
+                if not verify_data_hmac(self._secret_key, data, stored_sig):
+                    logger.critical("Sharing store HMAC verification failed — possible tampering")
+                    self._entries = {}
+                    return
+            else:
+                require_hmac = os.environ.get("RUMI_REQUIRE_HMAC", "0") == "1"
+                if require_hmac:
+                    logger.critical("Sharing store has no HMAC signature and RUMI_REQUIRE_HMAC=1")
+                    self._entries = {}
+                    return
+                else:
+                    logger.warning(
+                        "Sharing store has no HMAC signature (legacy file). "
+                        "Signature will be added on next save."
+                    )
+
             for key, edata in data.get("entries", {}).items():
                 self._entries[key] = SharingEntry.from_dict(edata)
         except Exception:
@@ -104,6 +140,10 @@ class SharedStoreManager:
             "updated_at": self._now_ts(),
             "entries": {k: e.to_dict() for k, e in self._entries.items()},
         }
+
+        # HMAC 署名を追加
+        data["_hmac_signature"] = compute_data_hmac(self._secret_key, data)
+
         tmp = self._index_path.with_suffix(".tmp")
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
