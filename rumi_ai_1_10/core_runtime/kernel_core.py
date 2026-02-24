@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional, List, Tuple, Callable
 from concurrent.futures import ThreadPoolExecutor
 
+from .types import FlowId
 from .diagnostics import Diagnostics
 from .install_journal import InstallJournal
 from .interface_registry import InterfaceRegistry
@@ -36,8 +37,9 @@ from .kernel_context_builder import KernelContextBuilder
 from .kernel_flow_converter import FlowConverter
 from .kernel_flow_execution import MAX_FLOW_CHAIN_DEPTH  # re-export for backward compat
 
-import logging
-_logger = logging.getLogger("rumi.kernel.core")
+from .deprecation import deprecated
+from .logging_utils import get_structured_logger
+_logger = get_structured_logger("rumi.kernel.core")
 
 @dataclass
 class KernelConfig:
@@ -238,6 +240,7 @@ class KernelCore:
         except Exception:
             pass
 
+    @deprecated(since="1.0", removed_in="2.0", alternative="kernel:flow.load_all")
     def _load_legacy_flow(self) -> Dict[str, Any]:
         """旧形式のflowを読み込む（fallback用）"""
         merged = {
@@ -357,7 +360,7 @@ class KernelCore:
     # Flow 保存 / ユーザーFlow読み込み
     # ------------------------------------------------------------------
 
-    def save_flow_to_file(self, flow_id: str, flow_def: Dict[str, Any], path: str = None) -> str:
+    def save_flow_to_file(self, flow_id: FlowId, flow_def: Dict[str, Any], path: str = None) -> str:
         if path is None:
             path = str(BASE_DIR / "user_data" / "flows")
         flow_dir = Path(path)
