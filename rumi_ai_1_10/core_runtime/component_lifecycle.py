@@ -7,6 +7,8 @@ component_lifecycle.py - Component Lifecycle Executor
 from __future__ import annotations
 
 import importlib.util
+import logging
+import os
 import sys
 import traceback
 from dataclasses import dataclass, field
@@ -17,6 +19,32 @@ from threading import RLock
 
 from .diagnostics import Diagnostics
 from .install_journal import InstallJournal
+
+logger = logging.getLogger(__name__)
+
+# --- sys.path shadow protection (W17-C) ---
+_DANGEROUS_MODULE_NAMES = frozenset({
+    "os", "sys", "json", "logging", "subprocess", "importlib",
+    "pathlib", "threading", "socket", "http", "hashlib", "hmac",
+    "secrets", "ssl", "sqlite3", "shutil", "tempfile", "signal",
+    "re", "io", "abc", "typing", "collections", "functools",
+    "dataclasses", "enum", "copy", "pickle", "base64", "uuid",
+    "contextlib", "inspect", "traceback", "struct", "array",
+    "math", "random", "time", "datetime", "csv", "xml",
+    "email", "html", "urllib", "asyncio", "multiprocessing",
+    "ctypes", "configparser", "argparse", "getpass", "platform",
+})
+
+
+def _has_shadow_module(directory: Path) -> str | None:
+    """Return the first dangerous module name found in *directory*, or None."""
+    if not directory.is_dir():
+        return None
+    for item in directory.iterdir():
+        name = item.stem if item.is_file() else item.name
+        if name in _DANGEROUS_MODULE_NAMES:
+            return name
+    return None
 
 
 @dataclass
@@ -30,6 +58,43 @@ class ComponentLifecycleExecutor:
     _disabled_components_runtime: Set[str] = field(default_factory=set)
     _usage_counters: Dict[str, int] = field(default_factory=dict)
     _usage_lock: RLock = field(default_factory=RLock)
+
+    # --- environment variable freezing keys (W17-C) ---
+    _FROZEN_ENV_KEYS = ("RUMI_SECURITY_MODE",)
+
+    @staticmethod
+    def _snapshot_env() -> dict[str, str | None]:
+        """Capture the current values of security-critical env vars."""
+        return {k: os.environ.get(k) for k in ComponentLifecycleExecutor._FROZEN_ENV_KEYS}
+
+    @staticmethod
+    def _restore_env(snapshot: dict[str, str | None]) -> None:
+        """Restore security-critical env vars from *snapshot*.
+
+        If a value was tampered with, log a warning before restoring.
+        """
+        for key, original in snapshot.items():
+            current = os.environ.get(key)
+            if current != original:
+                logger.warning(
+                    "SECURITY: env var %s was modified during pack execution "
+                    "(was %r, now %r). Restoring original value.",
+                    key, original, current,
+                )
+                try:
+                    from .audit_logger import get_audit_logger
+                    get_audit_logger().log_security_event(
+                        event_type="env_var_tamper_detected",
+                        severity="critical",
+                        description=f"Env var {key} tampered: {original!r} -> {current!r}",
+                        details={"key": key, "original": original, "tampered": current},
+                    )
+                except Exception:
+                    pass
+                if original is not None:
+                    os.environ[key] = original
+                elif key in os.environ:
+                    del os.environ[key]
 
     def _now_ts(self) -> str:
         from datetime import datetime, timezone
@@ -150,7 +215,26 @@ class ComponentLifecycleExecutor:
             for comp in components:
                 p = str(Path(getattr(comp, "path", ".")).resolve())
                 if p and p not in sys.path:
-                    sys.path.insert(0, p)
+                    shadow = _has_shadow_module(Path(p))
+                    if shadow is not None:
+                        logger.critical(
+                            "SECURITY: Pack component at %s contains module '%s' "
+                            "which shadows a standard library module. "
+                            "Skipping sys.path addition.",
+                            p, shadow,
+                        )
+                        try:
+                            from .audit_logger import get_audit_logger
+                            get_audit_logger().log_security_event(
+                                event_type="syspath_shadow_blocked",
+                                severity="critical",
+                                description=f"Module shadow attempt: {shadow}",
+                                details={"path": p, "module": shadow},
+                            )
+                        except Exception:
+                            pass
+                    else:
+                        sys.path.insert(0, p)
         except Exception:
             pass
 
@@ -161,8 +245,27 @@ class ComponentLifecycleExecutor:
             for comp in components:
                 p = str(Path(getattr(comp, "path", ".")).resolve())
                 if p and p not in sys.path:
-                    sys.path.insert(0, p)
-                    added.append(p)
+                    shadow = _has_shadow_module(Path(p))
+                    if shadow is not None:
+                        logger.critical(
+                            "SECURITY: Pack component at %s contains module '%s' "
+                            "which shadows a standard library module. "
+                            "Skipping sys.path addition.",
+                            p, shadow,
+                        )
+                        try:
+                            from .audit_logger import get_audit_logger
+                            get_audit_logger().log_security_event(
+                                event_type="syspath_shadow_blocked",
+                                severity="critical",
+                                description=f"Module shadow attempt: {shadow}",
+                                details={"path": p, "module": shadow},
+                            )
+                        except Exception:
+                            pass
+                    else:
+                        sys.path.insert(0, p)
+                        added.append(p)
             yield
         finally:
             for p in reversed(added):
@@ -274,14 +377,19 @@ class ComponentLifecycleExecutor:
             from .secure_executor import get_secure_executor
             executor = get_secure_executor()
             
-            exec_result = executor.execute_component_phase(
-                pack_id=pack_id,
-                component_id=comp_id,
-                phase=phase,
-                file_path=file_path,
-                context=ctx,
-                component_dir=Path(getattr(component, "path", file_path.parent))
-            )
+            # W17-C: freeze env vars around pack execution
+            env_snapshot = self._snapshot_env()
+            try:
+                exec_result = executor.execute_component_phase(
+                    pack_id=pack_id,
+                    component_id=comp_id,
+                    phase=phase,
+                    file_path=file_path,
+                    context=ctx,
+                    component_dir=Path(getattr(component, "path", file_path.parent))
+                )
+            finally:
+                self._restore_env(env_snapshot)
             
             if not exec_result.success:
                 raise RuntimeError(exec_result.error or "Secure execution failed")
@@ -350,21 +458,26 @@ class ComponentLifecycleExecutor:
         return ctx
 
     def _exec_python_file(self, file_path: Path, context: Dict[str, Any]) -> None:
-        module_name = f"core_runtime_dyn_{file_path.stem}_{abs(hash(str(file_path)))}"
-        spec = importlib.util.spec_from_file_location(module_name, str(file_path))
-        if spec is None or spec.loader is None:
-            raise ImportError(f"Cannot load spec for {file_path}")
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
-        spec.loader.exec_module(module)
-        fn = getattr(module, "run", None) or getattr(module, "main", None)
-        if fn is None:
-            return
+        # W17-C: freeze env vars around direct execution
+        env_snapshot = self._snapshot_env()
         try:
-            import inspect
-            if len(inspect.signature(fn).parameters) >= 1:
-                fn(context)
-            else:
-                fn()
-        except Exception:
-            raise
+            module_name = f"core_runtime_dyn_{file_path.stem}_{abs(hash(str(file_path)))}"
+            spec = importlib.util.spec_from_file_location(module_name, str(file_path))
+            if spec is None or spec.loader is None:
+                raise ImportError(f"Cannot load spec for {file_path}")
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = module
+            spec.loader.exec_module(module)
+            fn = getattr(module, "run", None) or getattr(module, "main", None)
+            if fn is None:
+                return
+            try:
+                import inspect
+                if len(inspect.signature(fn).parameters) >= 1:
+                    fn(context)
+                else:
+                    fn()
+            except Exception:
+                raise
+        finally:
+            self._restore_env(env_snapshot)

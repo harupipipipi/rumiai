@@ -6,6 +6,8 @@ interface_registry.py - 提供物登録箱(用途名固定しない)
 
 from __future__ import annotations
 
+import logging
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Literal, Callable, Iterable, Tuple
@@ -16,6 +18,81 @@ import uuid
 
 
 GetStrategy = Literal["first", "last", "all"]
+
+logger = logging.getLogger(__name__)
+
+# --- Protected key patterns (W17-C: Phase 1 warn only, block behind env flag) ---
+_PROTECTED_KEY_PATTERNS: frozenset[str] = frozenset({
+    "io.http.server",
+    "flow.hooks.before_step",
+    "flow.hooks.after_step",
+    "flow.error_handler",
+})
+_PROTECTED_KEY_PREFIXES: tuple[str, ...] = (
+    "flow.construct.",
+    "kernel:",
+)
+
+
+def _is_protected_key(key: str) -> bool:
+    """Return True if *key* matches a protected pattern."""
+    if key in _PROTECTED_KEY_PATTERNS:
+        return True
+    return any(key.startswith(p) for p in _PROTECTED_KEY_PREFIXES)
+
+
+def _check_protected_key(key: str, meta_dict: Dict[str, Any]) -> bool:
+    """Check protected key and handle block/warn.
+
+    Returns True if registration should proceed, raises PermissionError if blocked.
+    Sets ``_should_warn`` flag for post-registration warning (returned as side-effect).
+    """
+    if not _is_protected_key(key) or meta_dict.get("_system"):
+        return False  # not protected or system — no warning needed
+
+    _source = meta_dict.get("_source_pack_id", "unknown")
+
+    if os.environ.get("RUMI_BLOCK_PROTECTED_KEYS") == "1":
+        logger.error(
+            "BLOCKED: Registration to protected key '%s' without _system flag. "
+            "source_pack_id=%s",
+            key, _source,
+        )
+        try:
+            from .audit_logger import get_audit_logger
+            get_audit_logger().log_security_event(
+                event_type="protected_key_registration_blocked",
+                severity="error",
+                description=f"Blocked registration to '{key}'",
+                details={"key": key, "source_pack_id": _source},
+            )
+        except Exception:
+            pass
+        raise PermissionError(
+            f"Registration to protected key '{key}' requires _system=True in meta"
+        )
+
+    return True  # warn after registration
+
+
+def _emit_protected_key_warning(key: str, meta_dict: Dict[str, Any]) -> None:
+    """Emit warning + audit log for unprotected registration (outside lock)."""
+    _source = meta_dict.get("_source_pack_id", "unknown")
+    logger.warning(
+        "Registration to protected key '%s' without _system flag. "
+        "source_pack_id=%s. This will be blocked in a future version.",
+        key, _source,
+    )
+    try:
+        from .audit_logger import get_audit_logger
+        get_audit_logger().log_security_event(
+            event_type="protected_key_registration",
+            severity="warning",
+            description=f"Unprotected registration to '{key}'",
+            details={"key": key, "source_pack_id": _source},
+        )
+    except Exception:
+        pass
 
 
 @dataclass
@@ -50,6 +127,9 @@ class InterfaceRegistry:
         else:
             meta_dict = {"_raw_meta": meta}
 
+        # W17-C: protected key check (before lock — audit_logger safe)
+        _should_warn = _check_protected_key(key, meta_dict)
+
         entry = {
             "key": key,
             "value": value,
@@ -65,6 +145,10 @@ class InterfaceRegistry:
             self._store.setdefault(key, []).append(entry)
         
         self._notify_observers(key, old_value, value)
+
+        # W17-C: emit warning outside lock
+        if _should_warn:
+            _emit_protected_key_warning(key, meta_dict)
 
     def register_if_absent(
         self, 
@@ -87,6 +171,10 @@ class InterfaceRegistry:
             True: 登録成功（キーが存在しなかった、または期限切れだった）
             False: 登録失敗（キーが既に存在し、有効）
         """
+        # W17-C: prepare meta and check protected keys before lock
+        meta_dict = dict(meta) if isinstance(meta, dict) else ({"_raw_meta": meta} if meta else {})
+        _should_warn = _check_protected_key(key, meta_dict)
+
         with self._lock:
             existing = self._store.get(key, [])
             
@@ -112,13 +200,10 @@ class InterfaceRegistry:
             if has_valid:
                 return False
             
-            # メタデータ準備
-            meta_dict = dict(meta) if isinstance(meta, dict) else ({"_raw_meta": meta} if meta else {})
-            
             # TTLが指定されていれば有効期限を設定
             if ttl is not None and ttl > 0:
-                expires_at = (now + timedelta(seconds=ttl)).isoformat().replace("+00:00", "Z")
-                meta_dict["_expires_at"] = expires_at
+                expires_at_str = (now + timedelta(seconds=ttl)).isoformat().replace("+00:00", "Z")
+                meta_dict["_expires_at"] = expires_at_str
                 meta_dict["_ttl"] = ttl
             
             entry = {
@@ -130,6 +215,11 @@ class InterfaceRegistry:
             self._store.setdefault(key, []).append(entry)
         
         self._notify_observers(key, None, value)
+
+        # W17-C: emit warning outside lock
+        if _should_warn:
+            _emit_protected_key_warning(key, meta_dict)
+
         return True
 
     def register_handler(
