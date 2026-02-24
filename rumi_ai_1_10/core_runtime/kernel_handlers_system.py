@@ -21,6 +21,11 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict
 
+from .logging_utils import get_structured_logger
+from .metrics import get_metrics_collector
+
+_logger = get_structured_logger("rumi.kernel.handlers.system")
+
 
 class KernelSystemHandlersMixin:
     """
@@ -88,6 +93,7 @@ class KernelSystemHandlersMixin:
         except Exception as e:
             self.diagnostics.record_step(phase="startup", step_id="startup.mounts.internal", handler="kernel:mounts.init",
                                           status="failed", error=e, meta={"mounts_file": mounts_file})
+            _logger.error("Mounts init failed", exc_info=e, mounts_file=mounts_file)
             return None
 
     def _h_registry_load(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
@@ -105,6 +111,7 @@ class KernelSystemHandlersMixin:
         except Exception as e:
             self.diagnostics.record_step(phase="startup", step_id="startup.registry.internal", handler="kernel:registry.load",
                                           status="failed", error=e, meta={"ecosystem_dir": ecosystem_dir})
+            _logger.error("Registry load failed", exc_info=e, ecosystem_dir=ecosystem_dir)
             return None
 
     def _h_active_ecosystem_load(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
@@ -121,6 +128,7 @@ class KernelSystemHandlersMixin:
         except Exception as e:
             self.diagnostics.record_step(phase="startup", step_id="startup.active_ecosystem.internal", handler="kernel:active_ecosystem.load",
                                           status="failed", error=e, meta={"config_file": config_file})
+            _logger.error("Active ecosystem load failed", exc_info=e, config_file=config_file)
             return None
 
     def _h_interfaces_publish(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
@@ -327,8 +335,10 @@ class KernelSystemHandlersMixin:
                 status="success",
                 meta={"strict_mode": ctx["_strict_mode"]}
             )
+            _logger.info("Security initialized", strict_mode=ctx["_strict_mode"])
             return {"_kernel_step_status": "success"}
         except Exception as e:
+            _logger.error("Security init failed", exc_info=e, error=str(e))
             return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
 
     def _h_docker_check(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
@@ -347,6 +357,11 @@ class KernelSystemHandlersMixin:
 
         ctx["_docker_available"] = available
 
+        try:
+            get_metrics_collector().set_gauge("docker.available", 1.0 if available else 0.0)
+        except Exception:
+            pass
+
         if required and not available:
             self.diagnostics.record_step(
                 phase="startup",
@@ -356,6 +371,8 @@ class KernelSystemHandlersMixin:
                 error={"type": "DockerNotAvailable", "message": "Docker is required but not available"},
                 meta={"required": required}
             )
+            _logger.error("Docker check failed: Docker is required but not available",
+                          required=required)
             return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "Docker not available"}}
 
         self.diagnostics.record_step(
@@ -365,6 +382,7 @@ class KernelSystemHandlersMixin:
             status="success",
             meta={"available": available, "required": required}
         )
+        _logger.info("Docker check completed", available=available, required=required)
         return {"_kernel_step_status": "success", "_kernel_step_meta": {"docker_available": available}}
 
     def _h_approval_init(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
@@ -380,6 +398,7 @@ class KernelSystemHandlersMixin:
                 handler="kernel:approval.init",
                 status="success"
             )
+            _logger.info("Approval manager initialized")
             return {"_kernel_step_status": "success"}
         except Exception as e:
             self.diagnostics.record_step(
@@ -389,6 +408,7 @@ class KernelSystemHandlersMixin:
                 status="failed",
                 error=e
             )
+            _logger.error("Approval manager init failed", exc_info=e, error=str(e))
             return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
 
     def _h_approval_scan(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
@@ -455,6 +475,7 @@ class KernelSystemHandlersMixin:
             )
             return {"_kernel_step_status": "success"}
         except Exception as e:
+            _logger.error("Container orchestrator init failed", exc_info=e, error=str(e))
             return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
 
     def _h_privilege_init(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
@@ -472,6 +493,7 @@ class KernelSystemHandlersMixin:
             )
             return {"_kernel_step_status": "success"}
         except Exception as e:
+            _logger.error("Host privilege manager init failed", exc_info=e, error=str(e))
             return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
 
     def _h_api_init(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
@@ -500,6 +522,7 @@ class KernelSystemHandlersMixin:
             )
             return {"_kernel_step_status": "success"}
         except Exception as e:
+            _logger.error("Pack API server init failed", exc_info=e, error=str(e))
             return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
 
     def _h_container_start_approved(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
@@ -527,6 +550,13 @@ class KernelSystemHandlersMixin:
 
         ctx["_containers_started"] = started
 
+        try:
+            mc = get_metrics_collector()
+            mc.increment("container.start.success", value=len(started))
+            mc.increment("container.start.failure", value=len(failed))
+        except Exception:
+            pass
+
         self.diagnostics.record_step(
             phase="startup",
             step_id="container.start_approved",
@@ -534,6 +564,11 @@ class KernelSystemHandlersMixin:
             status="success",
             meta={"started": len(started), "failed_count": len(failed), "failed": failed}
         )
+        _logger.info("Container start completed",
+                      started_count=len(started), failed_count=len(failed))
+        if failed:
+            _logger.warning("Some containers failed to start",
+                            failed_packs=[f["pack_id"] for f in failed])
         return {"_kernel_step_status": "success", "_kernel_step_meta": {"started": started, "failed": failed}}
 
     # ------------------------------------------------------------------
@@ -590,6 +625,11 @@ class KernelSystemHandlersMixin:
 
             ctx["_discovered_components"] = components
 
+            try:
+                get_metrics_collector().set_gauge("component.discovered.count", float(len(components)))
+            except Exception:
+                pass
+
             self.diagnostics.record_step(
                 phase="startup",
                 step_id="component.discover",
@@ -597,8 +637,11 @@ class KernelSystemHandlersMixin:
                 status="success",
                 meta={"count": len(components), "approved_only": approved_only}
             )
+            _logger.info("Component discovery completed",
+                          count=len(components), approved_only=approved_only)
             return {"_kernel_step_status": "success", "_kernel_step_meta": {"count": len(components)}}
         except Exception as e:
+            _logger.error("Component discovery failed", exc_info=e, error=str(e))
             return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
 
     def _h_component_load(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
