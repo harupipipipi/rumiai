@@ -31,8 +31,14 @@ from .flow_loader import FlowDefinition, FlowStep
 from .paths import ECOSYSTEM_DIR
 from .kernel_flow_converter import FlowConverter
 
+from .logging_utils import get_structured_logger
+from .metrics import get_metrics_collector
+
 # M-10: 共通 FlowConverter インスタンス
 _flow_converter = FlowConverter()
+
+# Wave 15-D: structured logger
+_logger = get_structured_logger("rumi.kernel.handlers.runtime")
 
 
 # B4: 環境変数でverboseモード判定
@@ -245,6 +251,23 @@ class KernelRuntimeHandlersMixin:
             skipped_flows = loader.get_skipped_flows()
             skipped_modifiers = modifier_loader.get_skipped_modifiers()
 
+            # Wave 15-D: structured logging
+            _logger.info(
+                "Flow load completed",
+                flows_registered=len(registered),
+                flow_errors=len(flow_errors),
+                modifiers_applied=modifier_success,
+                modifiers_skipped=modifier_skipped,
+                modifiers_failed=modifier_failed,
+            )
+
+            # Wave 15-D: metrics
+            try:
+                _mc = get_metrics_collector()
+                _mc.set_gauge("flows.registered", len(registered))
+            except Exception:
+                pass
+
             self.diagnostics.record_step(
                 phase="startup",
                 step_id="flow.load_all.complete",
@@ -292,6 +315,7 @@ class KernelRuntimeHandlersMixin:
             }
 
         except Exception as e:
+            _logger.error("Flow load failed", error=str(e), exc_info=True)
             self.diagnostics.record_step(
                 phase="startup",
                 step_id="flow.load_all.failed",
@@ -631,6 +655,12 @@ class KernelRuntimeHandlersMixin:
             )
         )
 
+        # Wave 15-D: log execution start
+        _logger.info(
+            "python_file_call start",
+            file=file_path, owner_pack=owner_pack, step_id=step_id,
+        )
+
         # 実行
         executor = get_python_file_executor()
 
@@ -665,11 +695,24 @@ class KernelRuntimeHandlersMixin:
             }
         )
 
+        # Wave 15-D: metrics
+        try:
+            _mc = get_metrics_collector()
+            if result.execution_time_ms is not None:
+                _mc.observe("python_file_call.duration_ms", result.execution_time_ms)
+        except Exception:
+            pass
+
         # 警告をログ出力
         for warning in result.warnings:
             print(f"[python_file_call] WARNING: {warning}", file=sys.stderr)
 
         if result.success:
+            _logger.info(
+                "python_file_call completed",
+                file=file_path, execution_time_ms=result.execution_time_ms,
+                execution_mode=result.execution_mode,
+            )
             return {
                 "_kernel_step_status": "success",
                 "_kernel_step_meta": {
@@ -679,6 +722,11 @@ class KernelRuntimeHandlersMixin:
                 "output": result.output
             }
         else:
+            _logger.error(
+                "python_file_call failed",
+                file=file_path, error=result.error,
+                error_type=result.error_type,
+            )
             return {
                 "_kernel_step_status": "failed",
                 "_kernel_step_meta": {
@@ -823,12 +871,24 @@ class KernelRuntimeHandlersMixin:
                 notes=args.get("notes", "")
             )
 
+            # Wave 15-D: log + metrics
+            _logger.info(
+                "Network access granted",
+                pack_id=pack_id, allowed_domains=allowed_domains,
+                allowed_ports=allowed_ports,
+            )
+            try:
+                get_metrics_collector().increment("network.grant.count")
+            except Exception:
+                pass
+
             return {
                 "_kernel_step_status": "success",
                 "_kernel_step_meta": {"pack_id": pack_id},
                 "grant": grant.to_dict()
             }
         except Exception as e:
+            _logger.error("Network grant failed", pack_id=pack_id, error=str(e))
             return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
 
     def _h_network_revoke(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
@@ -841,11 +901,20 @@ class KernelRuntimeHandlersMixin:
             from .network_grant_manager import get_network_grant_manager
             ngm = get_network_grant_manager()
             success = ngm.revoke_network_access(pack_id=pack_id, reason=args.get("reason", ""))
+
+            # Wave 15-D: log + metrics
+            _logger.info("Network access revoked", pack_id=pack_id, revoked=success)
+            try:
+                get_metrics_collector().increment("network.revoke.count")
+            except Exception:
+                pass
+
             return {
                 "_kernel_step_status": "success" if success else "failed",
                 "_kernel_step_meta": {"pack_id": pack_id, "revoked": success}
             }
         except Exception as e:
+            _logger.error("Network revoke failed", pack_id=pack_id, error=str(e))
             return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e)}}
 
     def _h_network_check(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
