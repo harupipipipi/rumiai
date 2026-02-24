@@ -1,8 +1,6 @@
-
-```markdown
 # Rumi AI OS — Roadmap
 
-最終更新: 2026-02-15
+最終更新: 2026-02-24
 
 設計思想・過去案を含む完全版ロードマップです。設計の全体像は [architecture.md](architecture.md) を参照してください。
 
@@ -182,6 +180,34 @@ Pack の通常実行は Docker 隔離で成立するので、ホストに Python
 - ✅ ワイルドカード Modifier 監査ログ — #61
 - ✅ No Favoritism: dead code 削除（initializer.py）、docstring 中性化 — NF1-3
 
+### 5.10 内部品質・開発基盤（Wave 12〜14）
+
+- ✅ テスト充実: test_egress_proxy(91+), test_capability_installer(44+), test_flow_modifier_regression(32+), test_pack_api_server(53+), test_store_registry(49+) — Wave 12
+- ✅ egress_proxy 強化（レート制限・ドメイン制御・細粒度タイムアウト）— Wave 12
+- ✅ validation.py（共通バリデーション基盤）— Wave 12
+- ✅ logging_utils.py（構造化ログ: StructuredFormatter, StructuredLogger, CorrelationContext, get_structured_logger, configure_logging）— Wave 12
+- ✅ egress モジュール分割: egress_ip.py, egress_protocol.py, egress_rate_limiter.py, egress_domain_controller.py — Wave 13
+- ✅ capability/modifier モジュール分割: capability_models.py, flow_modifier_models.py, flow_modifier_loader.py — Wave 13
+- ✅ health.py（HealthChecker: disk_space / memory / file_writable プローブ）— Wave 13
+- ✅ metrics.py（MetricsCollector: カウンター / ゲージ / ヒストグラム / タイマー）— Wave 13
+- ✅ error_messages.py（ErrorCode, RumiError, エラーコード体系 RUMI-{CAT}-{NNN}）— Wave 13
+- ✅ egress_proxy.py 重複除去 + テスト patch 修正 — Wave 14
+- ✅ profiling.py（Profiler: コンテキストマネージャ / デコレータ, p50/p95/p99, メモリ制限）— Wave 14
+- ✅ types.py + py.typed（NewType: PackId / FlowId / CapabilityName / HandlerKey / StoreKey, Result Generic, Severity enum, PEP 561）— Wave 14
+- ✅ pack_scaffold.py（PackScaffold CLI: 4テンプレート minimal/capability/flow/full, validation.py 連携）— Wave 14
+- ✅ deprecation.py（deprecated デコレータ, DeprecationRegistry, deprecated_class, RUMI_DEPRECATION_LEVEL 環境変数）— Wave 14
+
+### 5.11 Kernel 統合・DI 拡張（Wave 15）
+
+- ✅ kernel_core.py: logging→get_structured_logger, deprecated 適用, types.py 適用
+- ✅ kernel_flow_execution.py: logging→get_structured_logger, Profiler で Flow 計測, MetricsCollector でステップ計測
+- ✅ kernel_handlers_system.py: logging→get_structured_logger, MetricsCollector 計測追加
+- ✅ kernel_handlers_runtime.py: logging→get_structured_logger, MetricsCollector 計測追加
+- ✅ di_container.py: health_checker / metrics_collector / profiler のファクトリ登録（計28サービス）
+- ✅ app.py: configure_logging() 呼び出し, --health フラグ追加
+
+> 新環境変数: RUMI_LOG_LEVEL, RUMI_LOG_FORMAT, RUMI_DEPRECATION_LEVEL。新 CLI フラグ: --health, --validate。
+
 ---
 
 ## 6. v1.5〜v2（中期）: 拡張しても壊れないための発展
@@ -243,7 +269,7 @@ vocab_registry はこの問題を解決する仕組みを既に持つが、「Fl
 
 ### 6.6 内部リファクタリング（P3 保留）
 
-- 🧩 グローバルシングルトン → DI コンテナ移行（テスタビリティ向上）
+- 🟡 グローバルシングルトン → DI コンテナ移行（kernel 統合・28サービス登録済み）— Wave 15
 - 🧩 Store バックエンド SQLite 化（ファイルベースからの移行オプション）
 - 🧩 pack_api_server.py の大規模ハンドラ分割（現在 ~80KB）
 - 🧩 Docker 実行ロジック共通化（python_file_executor / secure_executor の統合）
@@ -294,6 +320,9 @@ vocab_registry はこの問題を解決する仕組みを既に持つが、「Fl
 - vocab synonym の衝突解決（Pack A が content = 本文、Pack B が content = HTML全体 の場合）
 - converter の実行セキュリティ（任意 Python が走るため Trust が必要か）
 - provides パターンの統一（schema は ^[a-z][a-z0-9_]*$ だが pack-development.md の例は ai.client とドット区切り — どちらを正とするか）
+- defaults_pack 統合（別チームが進行中）
+- コンパイル→アプリ化（単一実行ファイル配布）
+- ドキュメント整備（Wave 16 で進行中）
 
 ---
 
@@ -303,4 +332,3 @@ vocab_registry はこの問題を解決する仕組みを既に持つが、「Fl
 - 公式が tool / chat 等を固定概念として持つ（No Favoritism 違反）
 - auto update（ユーザーの明示操作無しに ecosystem を書き換える）
 - 監査ログに秘密値や復号可能情報を出す
-```

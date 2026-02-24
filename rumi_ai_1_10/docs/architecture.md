@@ -1,4 +1,3 @@
-
 ```markdown
 # Rumi AI OS — Architecture
 
@@ -27,7 +26,12 @@
 17. [vocab / converter](#vocab--converter)
 18. [監査ログ](#監査ログ)
 19. [Pending Export](#pending-export)
-20. [Deprecated 機能](#deprecated-機能)
+20. [DI コンテナとサービス一覧](#di-コンテナとサービス一覧)
+21. [Kernel Mixin 構成](#kernel-mixin-構成)
+22. [可観測性（Observability）](#可観測性observability)
+23. [共通基盤モジュール](#共通基盤モジュール)
+24. [Pack 開発ツール](#pack-開発ツール)
+25. [Deprecated 機能](#deprecated-機能)
 
 ---
 
@@ -395,6 +399,35 @@ Pack 別に UDS ソケットが作成され、ソケットパスから `pack_id`
 
 内部 IP 禁止（localhost / private / link-local / CGNAT / multicast 等）、DNS rebinding 対策（解決結果が内部 IP なら拒否）、リダイレクト上限（3 ホップ、各ホップで grant 再チェック）、リクエスト / レスポンスサイズ制限（1MB / 4MB）、タイムアウト制限（最大 120 秒）、ヘッダー数 / サイズ制限、メソッド制限（GET, HEAD, POST, PUT, DELETE, PATCH）。
 
+### Wave 12–14 拡張
+
+#### レート制限（egress_rate_limiter.py）
+
+Wave 12 で追加。Pack 単位のトークンバケットによるリクエストレート制限を提供します。Egress Proxy がリクエストを受け付ける前にバケットを検査し、枯渇時は `429` を返却します。
+
+#### ドメイン制御（egress_domain_controller.py）
+
+Wave 12 で追加。allowlist に加えて、ドメイン単位のきめ細かい制御（ブロックリスト、ワイルドカードパターン）を提供します。
+
+#### 細粒度タイムアウト
+
+Wave 12 で追加。接続タイムアウト・読み取りタイムアウトをドメイン単位で設定可能にしました。従来のグローバル上限（120 秒）はフォールバックとして維持されます。
+
+#### モジュール分割（Wave 13）
+
+Wave 13 で Egress Proxy の実装を以下のモジュールに分割しました。セキュリティチェックの実行順序も整理され、IP 検査 → プロトコル検査 → ドメイン検査 → レート制限の順で評価されます。
+
+| モジュール | 責務 |
+|-----------|------|
+| `egress_ip.py` | 内部 IP 検査、DNS rebinding 対策 |
+| `egress_protocol.py` | プロトコル・メソッド・ヘッダー検査 |
+| `egress_rate_limiter.py` | Pack 単位レート制限 |
+| `egress_domain_controller.py` | ドメイン allowlist / blocklist 制御 |
+
+#### 重複コード除去（W14-FIX）
+
+Wave 14 で分割後のモジュール間に残存していた重複コード（IP 検査ロジック等）を除去し、単一責任を徹底しました。
+
 ---
 
 ## Capability システム（Trust + Grant）
@@ -451,6 +484,16 @@ approve 時に handler.py の sha256 を再計算し、scan 時の値と比較�
 ### コピーと上書き
 
 approve 時に `ecosystem/` 側の候補が `user_data/capabilities/handlers/<slug>/` にコピーされます。ecosystem 側は配布物として残り、移動されません。コピー先に既に handler が存在し、handler_id または sha256 が異なる場合はエラーになります（自動上書き禁止）。
+
+### モジュール分割（Wave 13）
+
+Wave 13 で Capability 関連のモデルとローダーを以下のモジュールに分割しました。
+
+| モジュール | 責務 |
+|-----------|------|
+| `capability_models.py` | Capability 関連のデータモデル定義 |
+| `flow_modifier_models.py` | Flow Modifier 関連のデータモデル定義 |
+| `flow_modifier_loader.py` | Modifier ファイルの読み込み・パース |
 
 ---
 
@@ -788,6 +831,219 @@ def check_converter_with_locals(
 
 ---
 
+## DI コンテナとサービス一覧
+
+### 概要
+
+`backend_core/di_container.py` は Rumi AI OS 全体で使用される軽量な DI（Dependency Injection）コンテナです。全てのサービスはコンテナに登録され、名前ベースで取得されます。グローバルシングルトンとして `get_container()` 経由でアクセスします。
+
+### DIContainer クラス
+
+| メソッド | 説明 |
+|---------|------|
+| `register(name, factory)` | ファクトリ関数を名前で登録。初回 `get` 時にインスタンス化（遅延生成） |
+| `get(name)` | インスタンスを取得。未登録なら `KeyError` |
+| `get_or_none(name)` | インスタンスを取得。未登録なら `None` |
+| `has(name)` | 登録済みか判定 |
+| `reset()` | 全登録をクリア |
+| `set_instance(name, instance)` | 既存インスタンスを直接登録（テスト用） |
+
+### グローバルアクセス
+
+| 関数 | 説明 |
+|------|------|
+| `get_container()` | グローバルコンテナを取得（シングルトン） |
+| `reset_container()` | グローバルコンテナをリセット（テスト用） |
+
+### 登録済みサービス一覧（28 サービス）
+
+| Wave | サービス名 |
+|------|-----------|
+| Wave 1 | `audit_logger`, `hmac_key_manager` |
+| Wave 2 | `vocab_registry`, `network_grant_manager`, `store_registry` |
+| Wave 3 | `approval_manager`, `permission_manager` |
+| Wave 4 | `container_orchestrator`, `host_privilege_manager`, `flow_composer`, `function_alias_registry`, `secrets_store`, `modifier_loader`, `modifier_applier` |
+| Wave 5 | `pack_api_server`, `egress_proxy_manager`, `python_file_executor`, `secure_executor`, `lib_executor`, `unit_executor`, `capability_executor` |
+| Wave 8 | `diagnostics`, `install_journal`, `interface_registry`, `event_bus`, `component_lifecycle` |
+| Wave 15 | `health_checker`, `metrics_collector`, `profiler` |
+
+---
+
+## Kernel Mixin 構成
+
+### 概要
+
+`backend_core/kernel.py` は 4 つの Mixin クラスを合成して Kernel を構築します。単一ファイルの肥大化を避けつつ、関心ごとに実装を分離しています。
+
+### Mixin 一覧
+
+| Mixin クラス | ファイル | 責務 |
+|-------------|---------|------|
+| `KernelCore` | `kernel_core.py` | エンジン本体。Flow 読み込み、コンテキスト構築、shutdown |
+| `KernelFlowExecutionMixin` | `kernel_flow_execution.py` | Flow 実行、`depends_on` 解決、条件評価 |
+| `KernelSystemHandlersMixin` | `kernel_handlers_system.py` | 起動・システム系ハンドラ（init, scan, approve 等） |
+| `KernelRuntimeHandlersMixin` | `kernel_handlers_runtime.py` | 運用・実行系ハンドラ（flow 実行、capability 呼び出し等） |
+
+### 合成
+
+```python
+# kernel.py
+class Kernel(
+    KernelRuntimeHandlersMixin,
+    KernelSystemHandlersMixin,
+    KernelFlowExecutionMixin,
+    KernelCore,
+):
+    pass
+```
+
+MRO（Method Resolution Order）により、Runtime → System → FlowExecution → Core の順で解決されます。各 Mixin は `KernelCore` の属性（`self.container`, `self.context` 等）に依存します。
+
+---
+
+## 可観測性（Observability）
+
+### 概要
+
+Wave 15 で追加された 4 つのモジュールにより、構造化ログ・ヘルスチェック・メトリクス・プロファイリングを提供します。
+
+### 構造化ログ（logging_utils.py）
+
+`backend_core/logging_utils.py` は標準 `logging` をラップし、構造化出力とコンテキスト伝搬を提供します。
+
+| クラス / 関数 | 説明 |
+|--------------|------|
+| `StructuredFormatter` | JSON 形式またはテキスト形式でログを整形 |
+| `StructuredLogger` | `logging.Logger` ラッパー。`bind()` でキー・バリューのコンテキストを付与 |
+| `CorrelationContext` | スレッドセーフな `correlation_id` 管理。リクエスト単位のトレースに使用 |
+| `get_structured_logger(name)` | キャッシュ付きファクトリ。同一名で呼び出すと同じインスタンスを返す |
+| `configure_logging()` | グローバルログ設定（レベル、フォーマット）を一括適用 |
+
+環境変数 `RUMI_LOG_LEVEL`（デフォルト `INFO`）と `RUMI_LOG_FORMAT`（`json` または `text`、デフォルト `text`）で動作を制御します。
+
+### ヘルスチェック（health.py）
+
+`backend_core/health.py` はプローブベースのヘルスチェック機構を提供します。`app.py --health` から利用されます。
+
+| クラス / 関数 | 説明 |
+|--------------|------|
+| `HealthChecker` | プローブを登録し、タイムアウト付きで並行実行、結果を集約 |
+| `HealthStatus` | `UP` / `DOWN` / `DEGRADED` / `UNKNOWN` の 4 状態 |
+| `probe_disk_space` | ディスク空き容量の検査（組み込みプローブ） |
+| `probe_memory` | メモリ使用量の検査（組み込みプローブ） |
+| `probe_file_writable` | ファイル書き込み可否の検査（組み込みプローブ） |
+
+全プローブが `UP` なら全体も `UP`、いずれかが `DOWN` なら `DEGRADED`、全て `DOWN` なら `DOWN` と判定されます。
+
+### メトリクス（metrics.py）
+
+`backend_core/metrics.py` はアプリケーションメトリクスの収集基盤を提供します。
+
+| メソッド | 説明 |
+|---------|------|
+| `increment(name, labels, value)` | カウンターをインクリメント |
+| `set_gauge(name, labels, value)` | ゲージを設定 |
+| `observe(name, labels, value)` | ヒストグラムに値を記録 |
+| `timer(name, labels)` | コンテキストマネージャ。ブロックの実行時間を自動記録 |
+| `snapshot()` | 全メトリクスの現在値をディクショナリで返却 |
+
+ラベル（ディクショナリ）によりメトリクスを多次元に分類できます。Wave 15 で `kernel_flow_execution.py`（ステップ実行時間）、`kernel_handlers_system.py` / `kernel_handlers_runtime.py`（ハンドラ呼び出し回数・時間）に統合済みです。
+
+### プロファイリング（profiling.py）
+
+`backend_core/profiling.py` は関数・ブロック単位の実行時間プロファイリングを提供します。
+
+| メソッド / デコレータ | 説明 |
+|--------------------|------|
+| `profile(name)` | コンテキストマネージャ。ブロックの実行時間を記録 |
+| `profile_func(name)` | 同期関数用デコレータ |
+| `profile_async(name)` | 非同期関数用デコレータ |
+| `summary()` | p50 / p95 / p99 パーセンタイルを含むサマリーを返却 |
+
+メモリ制限として `max_samples` を設定でき、上限を超えると古いサンプルが破棄されます。Wave 15 で `kernel_flow_execution.py`（Flow 実行時間、ステップ実行時間）に統合済みです。
+
+---
+
+## 共通基盤モジュール
+
+### 概要
+
+Wave 12–15 で追加された、パッケージ全体で共有されるユーティリティ群です。
+
+### 共通バリデーション（validation.py）
+
+`backend_core/validation.py` は Pack / Flow / Modifier のバリデーションユーティリティを提供します（Wave 12 追加）。スキーマ検証、必須フィールド検査、値範囲検査などの共通ロジックを集約し、各モジュールでの重複を排除します。
+
+### 統一エラー体系（error_messages.py）
+
+`backend_core/error_messages.py` は Rumi AI OS 全体で統一されたエラーコード体系を定義します。
+
+| 要素 | 説明 |
+|------|------|
+| `ErrorCode` | frozen dataclass。`RUMI-{CAT}-{NNN}` 形式（例: `RUMI-AUTH-001`） |
+| カテゴリ | `AUTH`（認証）, `NET`（ネットワーク）, `FLOW`（Flow）, `PACK`（Pack）, `CAP`（Capability）, `VAL`（バリデーション）, `SYS`（システム） |
+| `RumiError` | 統一例外クラス。`code`, `message`, `details`, `suggestion` を保持 |
+| `format_error()` | テンプレート展開ヘルパー。メッセージ内のプレースホルダを動的に埋める |
+
+エラーコードは自動収集レジストリで管理され、モジュールロード時にレジストリへ自動登録されます。
+
+### 型定義（types.py + py.typed）
+
+`backend_core/types.py` はパッケージ全体で使用される型定義を集約します。
+
+| 種別 | 定義 |
+|------|------|
+| NewType | `PackId`, `FlowId`, `CapabilityName`, `HandlerKey`, `StoreKey` |
+| 型エイリアス | `JsonValue`, `JsonDict` |
+| Generic | `Result[T]`（成功値またはエラーを保持） |
+| Enum | `Severity`（`info`, `warn`, `error`, `critical`） |
+
+`py.typed` マーカーファイル（PEP 561）を同梱し、外部ツール（mypy 等）での型チェックを有効化しています。
+
+### 非推奨管理（deprecation.py）
+
+`backend_core/deprecation.py` は非推奨 API の管理と警告を提供します。
+
+| 要素 | 説明 |
+|------|------|
+| `DeprecationInfo` | frozen dataclass。非推奨の対象、バージョン、代替手段を保持 |
+| `DeprecationRegistry` | シングルトン。スレッドセーフに非推奨情報を管理 |
+| `deprecated()` | 関数 / メソッド用デコレータ（async 対応）。呼び出し時に警告を出力 |
+| `deprecated_class()` | クラス用デコレータ。インスタンス生成時に警告を出力 |
+
+環境変数 `RUMI_DEPRECATION_LEVEL` で動作を制御します: `warn`（デフォルト、警告出力）、`error`（例外送出）、`silent`（無視）、`log`（ログ記録のみ）。
+
+---
+
+## Pack 開発ツール
+
+### 概要
+
+`backend_core/pack_scaffold.py` は Pack のひな形を生成する CLI ツールです。
+
+### PackScaffold クラス
+
+4 種類のテンプレートから Pack のディレクトリ構造とファイルを自動生成します。
+
+| テンプレート | 説明 |
+|------------|------|
+| `minimal` | 最小構成。`ecosystem.json` + 空の `backend/` のみ |
+| `capability` | Capability handler 付き。`share/capability_handlers/` を含む |
+| `flow` | Flow 付き。`backend/flows/` と `backend/blocks/` を含む |
+| `full` | 全要素を含むフルセット。`lib/`, `converters/`, `modifiers/` 等を含む |
+
+生成されたファイルは `validation.py` で検証され、不正な構造になることを防止します。
+
+### CLI エントリポイント
+
+```bash
+python -m backend_core.pack_scaffold --template full --pack-id my_pack --output ecosystem/my_pack
+```
+
+`--template`（テンプレート名）、`--pack-id`（Pack ID）、`--output`（出力先パス）を指定します。
+
+---
+
 ## Deprecated 機能
 
 ### ecosystem/flows/（local_pack）
@@ -806,3 +1062,4 @@ def check_converter_with_locals(
 
 旧 `flow/` ディレクトリは非推奨です。`flows/`、`user_data/shared/flows/`、または Pack 内 `flows/` に移行してください。
 ```
+

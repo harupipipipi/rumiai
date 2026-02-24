@@ -1,5 +1,4 @@
 
-
 ```markdown
 # Rumi AI OS — Operations Guide
 
@@ -28,8 +27,14 @@
 17. [監査ログの読み方](#監査ログの読み方)
 18. [Pending Export](#pending-export)
 19. [認証トークン](#認証トークン)
-20. [環境変数リファレンス](#環境変数リファレンス)
-21. [トラブルシューティング](#トラブルシューティング)
+20. [構造化ログ設定](#構造化ログ設定)
+21. [非推奨警告レベル制御](#非推奨警告レベル制御)
+22. [ヘルスチェック運用](#ヘルスチェック運用)
+23. [メトリクス確認](#メトリクス確認)
+24. [Pack テンプレート生成 (scaffold)](#pack-テンプレート生成-scaffold)
+25. [エラーコードリファレンス](#エラーコードリファレンス)
+26. [環境変数リファレンス](#環境変数リファレンス)
+27. [トラブルシューティング](#トラブルシューティング)
 
 ---
 
@@ -87,7 +92,17 @@ python app.py --permissive
 
 # ヘッドレスモード
 python app.py --headless
+
+# ヘルスチェック実行
+python app.py --health
+
+# Pack バリデーション実行
+python app.py --validate
 ```
+
+`--health` はヘルスチェックを実行し、結果を JSON で stdout に出力して終了します。status が `"UP"` なら exit code 0、それ以外は exit code 1 です。組み込みプローブとして disk（ディスク空き容量）と writable_tmp（`/tmp` 書き込み可能性）が含まれます。CI/CD やコンテナオーケストレーションのヘルスチェックに利用できます。
+
+`--validate` は Pack のバリデーションを実行し、結果を出力して終了します。
 
 ---
 
@@ -1032,6 +1047,168 @@ python app.py
 
 ---
 
+## 構造化ログ設定
+
+### 環境変数
+
+| 環境変数 | 説明 | デフォルト |
+|----------|------|-----------|
+| `RUMI_LOG_LEVEL` | ログレベル。DEBUG / INFO / WARNING / ERROR / CRITICAL | `INFO` |
+| `RUMI_LOG_FORMAT` | 出力形式。json / text | `json` |
+
+### 設定方法
+
+```bash
+export RUMI_LOG_LEVEL=DEBUG
+export RUMI_LOG_FORMAT=text
+python app.py --headless
+```
+
+app.py 起動時に `configure_logging()` が自動的に呼ばれ、`rumi.*` 名前空間のロガーに適用されます。
+
+### JSON 形式の出力例
+
+```json
+{"timestamp": "2026-02-24T12:00:00.000000Z", "level": "INFO", "module": "rumi.kernel.core", "message": "Flow loaded", "correlation_id": "req-123"}
+```
+
+### テキスト形式の出力例
+
+```
+2026-02-24T12:00:00.000000Z [INFO] rumi.kernel.core - Flow loaded (correlation_id=req-123)
+```
+
+---
+
+## 非推奨警告レベル制御
+
+### 環境変数
+
+| 環境変数 | 説明 | デフォルト |
+|----------|------|-----------|
+| `RUMI_DEPRECATION_LEVEL` | 非推奨 API 呼び出し時の動作 | `warn` |
+
+| 値 | 動作 |
+|-----|------|
+| `warn` | `DeprecationWarning` を `warnings.warn` で発行 |
+| `error` | `DeprecationWarning` 例外を送出 |
+| `silent` | 何もしない |
+| `log` | `logging` で WARNING レベル出力 |
+
+### 設定例
+
+```bash
+export RUMI_DEPRECATION_LEVEL=error
+python app.py --headless
+```
+
+---
+
+## ヘルスチェック運用
+
+### CLI でのチェック
+
+```bash
+python app.py --health
+```
+
+status が `"UP"` なら exit code 0、それ以外は exit code 1 を返します。
+
+### プログラムからの利用
+
+```python
+from core_runtime.health import get_health_checker, probe_disk_space
+checker = get_health_checker()
+checker.register_probe("disk", lambda: probe_disk_space("/"))
+result = checker.aggregate_health()
+# result["status"]: "UP" / "DOWN" / "DEGRADED" / "UNKNOWN"
+```
+
+### カスタムプローブの追加
+
+```python
+from core_runtime.health import HealthStatus
+def my_probe() -> HealthStatus:
+    # カスタムチェックロジック
+    return HealthStatus.UP
+checker.register_probe("my_service", my_probe)
+```
+
+---
+
+## メトリクス確認
+
+### スナップショットの取得
+
+```python
+from core_runtime.metrics import get_metrics_collector
+collector = get_metrics_collector()
+snapshot = collector.snapshot()
+# snapshot["counters"], snapshot["gauges"], snapshot["histograms"]
+```
+
+### 自動収集メトリクス
+
+Wave 15 で以下のメトリクスが自動的に収集されます。
+
+| メトリクス名 | 種別 | 説明 | labels |
+|-------------|------|------|--------|
+| `flow.step.success` | counter | ステップ実行成功カウント | handler |
+| `flow.step.error` | counter | ステップ実行失敗カウント | handler |
+| `flow.execution.complete` | counter | Flow 実行完了カウント | flow_id |
+| `docker.available` | gauge | Docker 利用可否 | — |
+| `container.start.success` | counter | コンテナ起動成功カウント | — |
+| `container.start.failed` | counter | コンテナ起動失敗カウント | — |
+| `flows.registered` | gauge | 登録済み Flow 数 | — |
+| `python_file_call.duration_ms` | histogram | Python ファイル実行時間（ミリ秒） | — |
+
+---
+
+## Pack テンプレート生成 (scaffold)
+
+新規 Pack のひな形を生成するコマンドラインツールです。
+
+### 使い方
+
+```bash
+python -m core_runtime.pack_scaffold <pack_id> [--template TEMPLATE] [--output-dir DIR]
+```
+
+### テンプレート一覧
+
+| テンプレート | 説明 |
+|-------------|------|
+| `minimal`（デフォルト） | 最小構成（ecosystem.json + run.py） |
+| `capability` | Capability Handler 付き |
+| `flow` | Flow 定義付き |
+| `full` | 全部入り |
+
+### 実行例
+
+```bash
+python -m core_runtime.pack_scaffold my-pack --template full --output-dir ecosystem/
+```
+
+---
+
+## エラーコードリファレンス
+
+エラーコードは `RUMI-{カテゴリ}-{3桁番号}` の形式で体系化されています。各エラーには suggestion（解決策提案）が付属します。
+
+### カテゴリ一覧
+
+| カテゴリ | 説明 | 例 |
+|---------|------|-----|
+| `AUTH` | 認証・認可 | `RUMI-AUTH-001`（トークン無効） |
+| `NET` | ネットワーク | `RUMI-NET-001`（接続失敗） |
+| `FLOW` | フロー実行 | `RUMI-FLOW-001`（Flow 未発見） |
+| `PACK` | Pack 管理 | `RUMI-PACK-001`（pack_id 無効） |
+| `CAP` | Capability | `RUMI-CAP-001`（Capability 未発見） |
+| `VAL` | バリデーション | `RUMI-VAL-001`（空値） |
+| `SYS` | システム全般 | `RUMI-SYS-001`（内部エラー） |
+
+---
+
 ## 環境変数リファレンス
 
 Rumi AI OS の動作を制御する環境変数の一覧です。
@@ -1039,6 +1216,9 @@ Rumi AI OS の動作を制御する環境変数の一覧です。
 | 変数名 | デフォルト | 説明 |
 |--------|-----------|------|
 | `RUMI_SECURITY_MODE` | `strict` | セキュリティモード。`strict`（Docker 必須）または `permissive`（Docker 不要、開発用） |
+| `RUMI_LOG_LEVEL` | `INFO` | ログレベル。`DEBUG` / `INFO` / `WARNING` / `ERROR` / `CRITICAL` |
+| `RUMI_LOG_FORMAT` | `json` | ログ出力形式。`json`（構造化 JSON）または `text`（人間向けテキスト） |
+| `RUMI_DEPRECATION_LEVEL` | `warn` | 非推奨 API 呼び出し時の動作。`warn` / `error` / `silent` / `log` |
 | `RUMI_SECRETS_KEY` | なし | Secrets の Fernet 暗号化に使用する鍵（Base64 エンコード）。設定されていない場合は `.secrets_key` ファイルまたは自動生成にフォールバック |
 | `RUMI_SECRETS_ALLOW_PLAINTEXT` | `auto` | 平文シークレットの許可。`auto`（暗号化鍵がなければ平文で保存）、`true`（常に平文を許可）、`false`（暗号化鍵が必須、鍵がなければ保存拒否） |
 | `RUMI_MAX_RESPONSE_BYTES` | `4194304`（4MB） | Flow 実行結果および Egress Proxy レスポンスの最大サイズ（バイト） |
@@ -1167,3 +1347,4 @@ WARNING: Using legacy flow path. This is DEPRECATED and will be removed.
 
 `flow/` や `ecosystem/flows/` から `flows/`、`user_data/shared/flows/`、または Pack 内 `flows/` へ移行してください。
 ```
+
