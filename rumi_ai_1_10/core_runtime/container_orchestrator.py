@@ -1,12 +1,15 @@
 """
 container_orchestrator.py - Dockerコンテナオーケストレーション
 
+W18-C: DockerRunBuilder に移行し、セキュリティベースラインを統一。
+
 Packごとのコンテナ管理を行う。
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 import threading
 from dataclasses import dataclass
@@ -15,6 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
+from .docker_run_builder import DockerRunBuilder
 from .paths import ECOSYSTEM_DIR
 
 
@@ -24,6 +28,9 @@ class ContainerResult:
     success: bool
     container_id: Optional[str] = None
     error: Optional[str] = None
+
+
+logger = logging.getLogger(__name__)
 
 
 class ContainerOrchestrator:
@@ -84,26 +91,45 @@ class ContainerOrchestrator:
                 )
                 container_id = check.stdout.strip()
             else:
+                # --- DockerRunBuilder でコマンドを構築 ---
+                builder = DockerRunBuilder(name=container_name)
+                builder.pids_limit(50)
+                builder.ulimit("nproc=50:50")
+                builder.ulimit("nofile=100:100")
+                builder.label("rumi.pack_id", pack_id)
+                builder.label("rumi.managed", "true")
+
+                # Egress UDS ソケットマウント
+                try:
+                    from .egress_proxy import get_uds_egress_proxy_manager
+                    _egress_mgr = get_uds_egress_proxy_manager()
+                    _ok, _err, _egress_sock = _egress_mgr.ensure_pack_socket(pack_id)
+                    if _ok and _egress_sock:
+                        builder.volume(f"{_egress_sock}:/run/rumi/egress.sock:rw")
+                        builder.env("RUMI_EGRESS_SOCKET", "/run/rumi/egress.sock")
+                except Exception as e:
+                    logger.warning("Failed to mount egress socket for %s: %s", pack_id, e)
+
+                # Capability UDS ソケットマウント
+                try:
+                    from .capability_proxy import get_capability_proxy
+                    _cap_proxy = get_capability_proxy()
+                    _cap_ok, _cap_err, _cap_sock = _cap_proxy.ensure_principal_socket(pack_id)
+                    if _cap_ok and _cap_sock:
+                        builder.volume(f"{_cap_sock}:/run/rumi/capability.sock:rw")
+                        builder.env("RUMI_CAPABILITY_SOCKET", "/run/rumi/capability.sock")
+                except Exception as e:
+                    logger.warning("Failed to mount capability socket for %s: %s", pack_id, e)
+
+                builder.image(f"rumi-pack-{pack_id}:latest")
+
+                docker_cmd = builder.build()
+                # --rm を除去し -d を挿入（長寿命コンテナ用）
+                docker_cmd = [c for c in docker_cmd if c != "--rm"]
+                docker_cmd.insert(2, "-d")
+
                 result = subprocess.run(
-                    [
-                        "docker", "run", "-d",
-                        "--name", container_name,
-                        "--network=none",
-                        "--cap-drop=ALL",
-                        "--security-opt=no-new-privileges:true",
-                        "--read-only",
-                        "--tmpfs=/tmp:size=64m,noexec,nosuid",
-                        "--memory=128m",
-                        "--memory-swap=128m",
-                        "--cpus=0.5",
-                        "--pids-limit=100",
-                        "--user=65534:65534",
-                        "--ulimit=nproc=50:50",
-                        "--ulimit=nofile=100:100",
-                        "--label", f"rumi.pack_id={pack_id}",
-                        "--label", "rumi.managed=true",
-                        f"rumi-pack-{pack_id}:latest"
-                    ],
+                    docker_cmd,
                     capture_output=True,
                     text=True,
                     timeout=timeout
