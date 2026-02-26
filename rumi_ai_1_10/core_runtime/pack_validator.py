@@ -5,6 +5,7 @@ standalone 実行用のバリデーション。
 - connectivity フィールドの存在・空チェック
 - pack_id とディレクトリ名の不一致チェック
 - ${ctx.*} 変数参照が connectivity 先に含まれるか簡易チェック
+- W18-B: required_secrets, required_network, host_execution バリデーション
 """
 
 from __future__ import annotations
@@ -23,6 +24,9 @@ from .paths import (
 )
 
 logger = logging.getLogger(__name__)
+
+# W18-B: Secret key pattern for required_secrets validation
+_SECRET_KEY_PATTERN = re.compile(r"^[A-Z0-9_]{1,64}$")
 
 # ${ctx.PACK_ID.anything} パターン — PACK_ID 部分を抽出
 _CTX_REF_PATTERN = re.compile(r"\$\{ctx\.([^.}]+)")
@@ -189,6 +193,53 @@ def _validate_single_pack(
     for w in ctx_warnings:
         logger.warning(w)
     warnings.extend(ctx_warnings)
+
+    # --- W18-B (4) required_secrets バリデーション ---
+    if "required_secrets" in eco_data:
+        rs = eco_data["required_secrets"]
+        if not isinstance(rs, list):
+            msg = f"[{pid}] required_secrets must be a list"
+            logger.error(msg)
+            errors.append(msg)
+        else:
+            for key in rs:
+                if not isinstance(key, str) or not _SECRET_KEY_PATTERN.match(key):
+                    msg = f"[{pid}] invalid secret key '{key}'"
+                    logger.error(msg)
+                    errors.append(msg)
+
+    # --- W18-B (5) required_network バリデーション ---
+    if "required_network" in eco_data:
+        rn = eco_data["required_network"]
+        if not isinstance(rn, dict):
+            msg = f"[{pid}] required_network must be a dict"
+            logger.error(msg)
+            errors.append(msg)
+        else:
+            ad = rn.get("allowed_domains", [])
+            ap = rn.get("allowed_ports", [])
+            if not isinstance(ad, list):
+                msg = f"[{pid}] allowed_domains must be a list"
+                logger.error(msg)
+                errors.append(msg)
+            if not isinstance(ap, list):
+                msg = f"[{pid}] allowed_ports must be a list of integers"
+                logger.error(msg)
+                errors.append(msg)
+            else:
+                for p in ap:
+                    if not isinstance(p, int) or p < 0 or p > 65535:
+                        msg = f"[{pid}] invalid port {p}"
+                        logger.error(msg)
+                        errors.append(msg)
+
+    # --- W18-B (6) host_execution バリデーション ---
+    if "host_execution" in eco_data:
+        he = eco_data["host_execution"]
+        if not isinstance(he, bool):
+            msg = f"[{pid}] host_execution must be a boolean"
+            logger.error(msg)
+            errors.append(msg)
 
     return warnings, errors
 

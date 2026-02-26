@@ -279,6 +279,10 @@ def _register_defaults(container: DIContainer) -> None:
         from .secrets_store import SecretsStore
         return SecretsStore()
 
+    def _secrets_grant_manager_factory() -> "SecretsGrantManager":  # noqa: F821
+        from .secrets_grant_manager import SecretsGrantManager
+        return SecretsGrantManager()
+
     def _modifier_loader_factory() -> "FlowModifierLoader":  # noqa: F821
         from .flow_modifier import FlowModifierLoader
         return FlowModifierLoader()
@@ -368,6 +372,7 @@ def _register_defaults(container: DIContainer) -> None:
     container.register("flow_composer", _flow_composer_factory)
     container.register("function_alias_registry", _function_alias_registry_factory)
     container.register("secrets_store", _secrets_store_factory)
+    container.register("secrets_grant_manager", _secrets_grant_manager_factory)
     container.register("modifier_loader", _modifier_loader_factory)
     container.register("modifier_applier", _modifier_applier_factory)
     container.register("pack_api_server", _pack_api_server_factory)

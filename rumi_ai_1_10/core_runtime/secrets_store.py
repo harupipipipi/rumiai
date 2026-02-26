@@ -553,6 +553,24 @@ class SecretsStore:
             except Exception:
                 return None
 
+    def _internal_read_value(self, key: str, caller_id: str = "") -> Optional[str]:
+        """内部サービス専用の値読み取り。
+
+        SecretsGrantManager からのみ呼ばれる。
+        呼び出し元を監査ログに記録する。
+
+        Args:
+            key: Secret キー名
+            caller_id: 呼び出し元の識別子（監査ログ用）
+
+        Returns:
+            復号済みの Secret 値、または None
+        """
+        self._audit("secret_internal_read", True, {
+            "key": key, "caller": caller_id,
+        })
+        return self._read_value(key)
+
     def _migrate_to_encrypted(
         self, key: str, data: Dict[str, Any], plaintext: str
     ) -> None:

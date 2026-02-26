@@ -23,6 +23,7 @@ Wave 17-B 変更:
 from __future__ import annotations
 
 import hashlib
+import logging
 import json
 import os
 import sys
@@ -44,6 +45,9 @@ from .paths import (
     check_pack_id_mismatch,
     PackLocation,
 )
+
+logger = logging.getLogger(__name__)
+
 
 from .hmac_key_manager import (
     generate_or_load_signing_key,
@@ -438,6 +442,25 @@ class ApprovalManager:
 
             # #62: 宣言的Store作成
             self._create_declared_stores(pack_id)
+
+            # W18-B: host_execution 警告ログ
+            eco_data = self._read_ecosystem_data(pack_id)
+            if eco_data.get("host_execution", False) is True:
+                logger.warning(
+                    "SECURITY: Pack '%s' declares host_execution=true. "
+                    "This pack will run directly on the host without Docker isolation.",
+                    pack_id,
+                )
+                try:
+                    from .audit_logger import get_audit_logger
+                    get_audit_logger().log_security_event(
+                        event_type="approve_host_execution_warning",
+                        severity="warning",
+                        description=f"Pack '{pack_id}' runs on host without Docker isolation",
+                        pack_id=pack_id,
+                    )
+                except Exception:
+                    pass
 
             # キャッシュ無効化
             self._invalidate_hash_cache(pack_id)
