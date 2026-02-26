@@ -14,7 +14,6 @@ W18-A: UDS ソケットマウント（Egress + Capability）+ Secret ファイ�
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
@@ -248,14 +247,13 @@ class SecureExecutor:
             try:
                 from .capability_proxy import get_capability_proxy
                 _cap_proxy = get_capability_proxy()
-                if _cap_proxy and _cap_proxy._initialized:
-                    _cap_proxy.ensure_principal_socket(pack_id)
-                    _cap_base = _cap_proxy._base_dir
-                    _cap_hash = hashlib.sha256(pack_id.encode()).hexdigest()[:32]
-                    _cap_sock = Path(_cap_base) / f"{_cap_hash}.sock"
-                    if _cap_sock.exists():
+                if _cap_proxy:
+                    _cap_ok, _cap_err, _cap_sock = _cap_proxy.ensure_principal_socket(pack_id)
+                    if _cap_ok and _cap_sock and _cap_sock.exists():
                         builder.volume(f"{_cap_sock}:/run/rumi/capability.sock:rw")
                         builder.env("RUMI_CAPABILITY_SOCKET", "/run/rumi/capability.sock")
+                    elif _cap_err:
+                        logger.warning("Capability socket not available for %s: %s", pack_id, _cap_err)
             except Exception as e:
                 logger.warning("Failed to mount capability socket for %s: %s", pack_id, e)
 
@@ -591,14 +589,13 @@ else:
             try:
                 from .capability_proxy import get_capability_proxy
                 _cap_proxy = get_capability_proxy()
-                if _cap_proxy and _cap_proxy._initialized:
-                    _cap_proxy.ensure_principal_socket(pack_id)
-                    _cap_base = _cap_proxy._base_dir
-                    _cap_hash = hashlib.sha256(pack_id.encode()).hexdigest()[:32]
-                    _cap_sock = Path(_cap_base) / f"{_cap_hash}.sock"
-                    if _cap_sock.exists():
+                if _cap_proxy:
+                    _cap_ok, _cap_err, _cap_sock = _cap_proxy.ensure_principal_socket(pack_id)
+                    if _cap_ok and _cap_sock and _cap_sock.exists():
                         builder.volume(f"{_cap_sock}:/run/rumi/capability.sock:rw")
                         builder.env("RUMI_CAPABILITY_SOCKET", "/run/rumi/capability.sock")
+                    elif _cap_err:
+                        logger.warning("Capability socket not available for lib %s: %s", pack_id, _cap_err)
             except Exception as e:
                 logger.warning("Failed to mount capability socket for lib %s: %s", pack_id, e)
 

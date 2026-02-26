@@ -41,8 +41,6 @@ def mock_capability_proxy(tmp_path):
     base_dir = tmp_path / "capability" / "principals"
     base_dir.mkdir(parents=True)
     proxy = mock.MagicMock()
-    proxy._initialized = True
-    proxy._base_dir = base_dir
     proxy.ensure_principal_socket.return_value = (True, None, None)
     return proxy, base_dir
 
@@ -127,7 +125,8 @@ class TestExecuteInContainerUDS:
         comp_dir, setup_py = tmp_component
         proxy, base_dir = mock_capability_proxy
         pack_id = "test-pack"
-        _create_fake_sock(base_dir, pack_id)
+        fake_sock = _create_fake_sock(base_dir, pack_id)
+        proxy.ensure_principal_socket.return_value = (True, None, fake_sock)
         mock_get_cap.return_value = proxy
         mock_subproc.return_value = mock.MagicMock(returncode=0, stdout='{"ok":true}', stderr="")
 
@@ -173,7 +172,7 @@ class TestExecuteInContainerUDS:
         """Test 6"""
         comp_dir, setup_py = tmp_component
         proxy = mock.MagicMock()
-        proxy._initialized = False
+        proxy.ensure_principal_socket.return_value = (False, "Capability proxy failed to initialize", None)
         mock_get_cap.return_value = proxy
         mock_subproc.return_value = mock.MagicMock(returncode=0, stdout='{"ok":true}', stderr="")
 
@@ -218,7 +217,8 @@ class TestExecuteInContainerUDS:
         comp_dir, setup_py = tmp_component
         proxy, base_dir = mock_capability_proxy
         pack_id = "test-pack"
-        _create_fake_sock(base_dir, pack_id)
+        fake_sock = _create_fake_sock(base_dir, pack_id)
+        proxy.ensure_principal_socket.return_value = (True, None, fake_sock)
         mock_get_cap.return_value = proxy
         mock_subproc.return_value = mock.MagicMock(returncode=0, stdout='{"ok":true}', stderr="")
 
