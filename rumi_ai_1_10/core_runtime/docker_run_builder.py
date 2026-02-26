@@ -101,6 +101,15 @@ class DockerRunBuilder:
         self._volumes.append(mount_spec)
         return self
 
+    def secret_file(self, host_path: str, container_path: str) -> "DockerRunBuilder":
+        """Secret ファイルを読み取り専用でマウントする。
+
+        ホスト側は一時ファイル（0o600）、コンテナ側は /run/secrets/<name>:ro を想定。
+        環境変数ではなくファイルマウントを使う（docker inspect / /proc 経由の漏洩防止）。
+        """
+        self._volumes.append(f"{host_path}:{container_path}:ro")
+        return self
+
     def env(self, key: str, value: str) -> "DockerRunBuilder":
         """-e 環境変数を追加"""
         self._envs.append([key, value])

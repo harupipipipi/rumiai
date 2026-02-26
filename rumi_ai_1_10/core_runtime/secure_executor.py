@@ -8,10 +8,13 @@ Docker利用可能時はコンテナ内で実行。
 セキュリティモード（環境変数 RUMI_SECURITY_MODE）:
 - strict: Docker必須。利用不可なら実行拒否（デフォルト、本番推奨）
 - permissive: Docker利用不可でも警告付きで実行（開発用）
+
+W18-A: UDS ソケットマウント（Egress + Capability）+ Secret ファイル注入
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -89,52 +92,27 @@ class SecureExecutor:
             print("=" * 60, file=sys.stderr)
     
     def _sanitize_pack_id(self, pack_id: str) -> tuple:
-        """
-        pack_id をサニタイズし、安全性を検証
-        
-        Returns:
-            (is_valid: bool, sanitized_or_error: str)
-        """
         if not pack_id:
             return False, "pack_id is empty"
-        
-        # 長さ制限
         if len(pack_id) > 64:
             return False, "pack_id too long (max 64 chars)"
-        
-        # 許可パターンチェック
         if not PACK_ID_PATTERN.match(pack_id):
             return False, f"pack_id contains invalid characters: {pack_id}"
-        
-        # 危険なパターン
         if pack_id in ('.', '..') or pack_id.startswith('.'):
             return False, f"pack_id cannot start with dot: {pack_id}"
-        
         return True, pack_id
     
     def _ensure_pack_data_dir(self, pack_id: str) -> tuple:
-        """
-        user_data/packs/{pack_id}/ ディレクトリを作成
-        
-        Returns:
-            (success: bool, path_or_error: Path|str)
-        """
-        # サニタイズ
         is_valid, result = self._sanitize_pack_id(pack_id)
         if not is_valid:
             return False, result
-        
         base_dir = Path(PACK_DATA_BASE_DIR).resolve()
         pack_data_dir = base_dir / pack_id
-        
-        # パストラバーサル防止
         try:
             pack_data_dir = pack_data_dir.resolve()
             pack_data_dir.relative_to(base_dir)
         except ValueError:
             return False, f"Path traversal detected: {pack_id}"
-        
-        # ディレクトリ作成
         try:
             pack_data_dir.mkdir(parents=True, exist_ok=True)
             return True, pack_data_dir
@@ -145,14 +123,11 @@ class SecureExecutor:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     
     def is_docker_available(self) -> bool:
-        """Docker利用可能性チェック（キャッシュ付き）"""
         if self._docker_available is not None:
             return self._docker_available
-        
         with self._lock:
             if self._docker_available is not None:
                 return self._docker_available
-            
             try:
                 result = subprocess.run(
                     ["docker", "info"],
@@ -162,11 +137,9 @@ class SecureExecutor:
                 self._docker_available = result.returncode == 0
             except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
                 self._docker_available = False
-        
         return self._docker_available
     
     def get_security_mode(self) -> str:
-        """現在のセキュリティモードを取得"""
         return self._security_mode
     
     def execute_component_phase(
@@ -179,9 +152,6 @@ class SecureExecutor:
         component_dir: Path = None,
         timeout: int = 60
     ) -> ExecutionResult:
-        """
-        コンポーネントフェーズをセキュアに実行
-        """
         if not file_path.exists():
             return ExecutionResult(
                 success=False,
@@ -189,10 +159,8 @@ class SecureExecutor:
                 error_type="file_not_found",
                 execution_mode="rejected"
             )
-        
         if component_dir is None:
             component_dir = file_path.parent
-        
         if self.is_docker_available():
             return self._execute_in_container(
                 pack_id=pack_id,
@@ -203,7 +171,6 @@ class SecureExecutor:
                 context=context,
                 timeout=timeout
             )
-        
         if self._security_mode == self.MODE_STRICT:
             return ExecutionResult(
                 success=False,
@@ -211,7 +178,6 @@ class SecureExecutor:
                 error_type="docker_required",
                 execution_mode="rejected"
             )
-        
         return self._execute_on_host_with_warning(
             pack_id=pack_id,
             component_id=component_id,
@@ -235,23 +201,22 @@ class SecureExecutor:
         start_time = time.time()
         
         container_name = f"rumi-exec-{pack_id}-{phase}-{uuid.uuid4().hex[:12]}"
-        
         safe_context = self._sanitize_context(context)
         
-        # pip site-packages 確認
         pip_site_packages = None
         _sp = Path(PACK_DATA_BASE_DIR) / pack_id / "python" / "site-packages"
         if _sp.is_dir():
             pip_site_packages = _sp
-
         pythonpath_value = "/component" + (":/pip-packages" if pip_site_packages else "")
         
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
             json.dump(safe_context, f, ensure_ascii=False, default=str)
             context_file = f.name
         
+        # W18-A: Secret 一時ファイルのトラッキング（finally で削除）
+        _secret_tmpfiles = []
+        
         try:
-            # Docker実行コマンドを構築 (DockerRunBuilder)
             builder = DockerRunBuilder(name=container_name)
             builder.ulimit("nproc=50:50")
             builder.ulimit("nofile=100:100")
@@ -265,9 +230,68 @@ class SecureExecutor:
             builder.label("rumi.pack_id", pack_id)
             builder.label("rumi.type", "executor")
 
-            # pip site-packages マウント
             if pip_site_packages:
                 builder.volume(f"{pip_site_packages.resolve()}:/pip-packages:ro")
+
+            # --- W18-A: Egress Proxy UDS ソケットマウント ---
+            try:
+                from .egress_proxy import get_uds_egress_proxy_manager
+                _egress_mgr = get_uds_egress_proxy_manager()
+                _ok, _err, _egress_sock_path = _egress_mgr.ensure_pack_socket(pack_id)
+                if _ok and _egress_sock_path:
+                    builder.volume(f"{_egress_sock_path}:/run/rumi/egress.sock:rw")
+                    builder.env("RUMI_EGRESS_SOCKET", "/run/rumi/egress.sock")
+            except Exception as e:
+                logger.warning("Failed to mount egress socket for %s: %s", pack_id, e)
+
+            # --- W18-A: Capability Proxy UDS ソケットマウント ---
+            try:
+                from .capability_proxy import get_capability_proxy
+                _cap_proxy = get_capability_proxy()
+                if _cap_proxy and _cap_proxy._initialized:
+                    _cap_proxy.ensure_principal_socket(pack_id)
+                    _cap_base = _cap_proxy._base_dir
+                    _cap_hash = hashlib.sha256(pack_id.encode()).hexdigest()[:32]
+                    _cap_sock = Path(_cap_base) / f"{_cap_hash}.sock"
+                    if _cap_sock.exists():
+                        builder.volume(f"{_cap_sock}:/run/rumi/capability.sock:rw")
+                        builder.env("RUMI_CAPABILITY_SOCKET", "/run/rumi/capability.sock")
+            except Exception as e:
+                logger.warning("Failed to mount capability socket for %s: %s", pack_id, e)
+
+            # --- W18-A: Secret ファイル注入 ---
+            try:
+                from .secrets_grant_manager import get_secrets_grant_manager
+                _sgm = get_secrets_grant_manager()
+                if _sgm:
+                    _granted_secrets = _sgm.get_granted_secrets(pack_id)
+                    for _sk, _sv in _granted_secrets.items():
+                        _sf_fd = -1
+                        _sf_path = None
+                        try:
+                            _sf_fd, _sf_path = tempfile.mkstemp(prefix=f".secret_{_sk}_", suffix=".txt")
+                            os.write(_sf_fd, _sv.encode("utf-8"))
+                            os.close(_sf_fd)
+                            _sf_fd = -1
+                            os.chmod(_sf_path, 0o600)
+                            builder.secret_file(_sf_path, f"/run/secrets/{_sk}")
+                            builder.env(f"RUMI_SECRET_{_sk}", f"/run/secrets/{_sk}")
+                            _secret_tmpfiles.append(_sf_path)
+                        except Exception:
+                            if _sf_fd >= 0:
+                                try:
+                                    os.close(_sf_fd)
+                                except Exception:
+                                    pass
+                            if _sf_path:
+                                try:
+                                    os.unlink(_sf_path)
+                                except Exception:
+                                    pass
+            except ImportError:
+                pass  # SecretsGrantManager 未実装（PIPE-2 未マージ）→ スキップ
+            except Exception as e:
+                logger.warning("Failed to inject secrets for %s: %s", pack_id, e)
 
             builder.image("python:3.11-slim")
             builder.command(["python", "-c", self._get_executor_script(file_path.name)])
@@ -290,7 +314,6 @@ class SecureExecutor:
                         output = json.loads(result.stdout.strip())
                     except json.JSONDecodeError:
                         output = result.stdout.strip()
-                
                 return ExecutionResult(
                     success=True,
                     output=output,
@@ -315,7 +338,6 @@ class SecureExecutor:
                 execution_mode="container",
                 execution_time_ms=(time.time() - start_time) * 1000
             )
-        
         except Exception as e:
             return ExecutionResult(
                 success=False,
@@ -324,16 +346,19 @@ class SecureExecutor:
                 execution_mode="container",
                 execution_time_ms=(time.time() - start_time) * 1000
             )
-        
         finally:
             try:
                 os.unlink(context_file)
             except Exception:
                 pass
+            # W18-A: Secret 一時ファイルの削除
+            for _sf in _secret_tmpfiles:
+                try:
+                    os.unlink(_sf)
+                except Exception:
+                    pass
     
     def _get_executor_script(self, filename: str) -> str:
-        """コンテナ内で実行するPythonスクリプト"""
-        # #57: ファイル名バリデーション
         if not SAFE_FILENAME_PATTERN.match(filename):
             raise ValueError(
                 f"Unsafe filename rejected: {filename!r}. "
@@ -368,8 +393,6 @@ else:
 '''
     
     def _get_lib_executor_script(self, filename: str) -> str:
-        """lib実行用のPythonスクリプト"""
-        # #57: ファイル名バリデーション
         if not SAFE_FILENAME_PATTERN.match(filename):
             raise ValueError(
                 f"Unsafe filename rejected: {filename!r}. "
@@ -420,23 +443,9 @@ else:
         context: Dict[str, Any] = None,
         timeout: int = 120
     ) -> ExecutionResult:
-        """
-        lib（install/update）をセキュアに実行
-        
-        Args:
-            pack_id: Pack ID
-            lib_type: "install" または "update"
-            lib_file: lib ファイルのパス
-            context: 実行コンテキスト
-            timeout: タイムアウト秒数
-        
-        Returns:
-            ExecutionResult（pack_id, lib_type フィールド付き）
-        """
         import time
         start_time = time.time()
         
-        # local_pack はスキップ
         if pack_id == LOCAL_PACK_ID:
             return ExecutionResult(
                 success=False,
@@ -446,8 +455,6 @@ else:
                 pack_id=pack_id,
                 lib_type=lib_type
             )
-        
-        # pack_id サニタイズ
         is_valid, sanitize_result = self._sanitize_pack_id(pack_id)
         if not is_valid:
             return ExecutionResult(
@@ -458,8 +465,6 @@ else:
                 pack_id=pack_id,
                 lib_type=lib_type
             )
-        
-        # ファイル存在確認
         if not lib_file.exists():
             return ExecutionResult(
                 success=False,
@@ -469,8 +474,6 @@ else:
                 pack_id=pack_id,
                 lib_type=lib_type
             )
-        
-        # lib_type 検証
         if lib_type not in (LIB_INSTALL, LIB_UPDATE):
             return ExecutionResult(
                 success=False,
@@ -480,8 +483,6 @@ else:
                 pack_id=pack_id,
                 lib_type=lib_type
             )
-        
-        # Pack データディレクトリ作成
         dir_ok, dir_result = self._ensure_pack_data_dir(pack_id)
         if not dir_ok:
             return ExecutionResult(
@@ -504,8 +505,6 @@ else:
                 timeout=timeout,
                 start_time=start_time
             )
-        
-        # Docker 不可
         if self._security_mode == self.MODE_STRICT:
             return ExecutionResult(
                 success=False,
@@ -516,8 +515,6 @@ else:
                 pack_id=pack_id,
                 lib_type=lib_type
             )
-        
-        # permissive: 警告付きホスト実行
         return self._execute_lib_on_host_with_warning(
             pack_id=pack_id,
             lib_type=lib_type,
@@ -543,21 +540,18 @@ else:
         container_name = f"rumi-lib-{pack_id}-{lib_type}-{uuid.uuid4().hex[:12]}"
         lib_dir = lib_file.parent
         
-        # pip site-packages 確認
         pip_site_packages = None
         _sp = Path(PACK_DATA_BASE_DIR) / pack_id / "python" / "site-packages"
         if _sp.is_dir():
             pip_site_packages = _sp
-
         pythonpath_value = "/lib" + (":/pip-packages" if pip_site_packages else "")
         
-        # コンテキスト準備
         exec_context = {
             "pack_id": pack_id,
             "lib_type": lib_type,
             "ts": self._now_ts(),
             "lib_dir": str(lib_dir),
-            "data_dir": "/data",  # コンテナ内パス
+            "data_dir": "/data",
             **(context or {})
         }
         
@@ -566,28 +560,47 @@ else:
             context_file = f.name
         
         try:
-            # Docker実行コマンドを構築 (DockerRunBuilder)
             builder = DockerRunBuilder(name=container_name)
             builder.ulimit("nproc=50:50")
             builder.ulimit("nofile=100:100")
-            # lib ディレクトリ（読み取り専用）
             builder.volume(f"{lib_dir.resolve()}:/lib:ro")
-            # Pack データディレクトリ（読み書き可能）
             builder.volume(f"{pack_data_dir.resolve()}:/data:rw")
-            # コンテキストファイル
             builder.volume(f"{context_file}:/context.json:ro")
-            # 環境変数
             builder.env("RUMI_PACK_ID", pack_id)
             builder.env("RUMI_LIB_TYPE", lib_type)
             builder.env("PYTHONPATH", pythonpath_value)
-            # ラベル
             builder.label("rumi.managed", "true")
             builder.label("rumi.pack_id", pack_id)
             builder.label("rumi.type", "lib_executor")
 
-            # pip site-packages マウント
             if pip_site_packages:
                 builder.volume(f"{pip_site_packages.resolve()}:/pip-packages:ro")
+
+            # --- W18-A: Egress Proxy UDS ソケットマウント（lib 実行用） ---
+            try:
+                from .egress_proxy import get_uds_egress_proxy_manager
+                _egress_mgr = get_uds_egress_proxy_manager()
+                _ok, _err, _egress_sock_path = _egress_mgr.ensure_pack_socket(pack_id)
+                if _ok and _egress_sock_path:
+                    builder.volume(f"{_egress_sock_path}:/run/rumi/egress.sock:rw")
+                    builder.env("RUMI_EGRESS_SOCKET", "/run/rumi/egress.sock")
+            except Exception as e:
+                logger.warning("Failed to mount egress socket for lib %s: %s", pack_id, e)
+
+            # --- W18-A: Capability Proxy UDS ソケットマウント（lib 実行用） ---
+            try:
+                from .capability_proxy import get_capability_proxy
+                _cap_proxy = get_capability_proxy()
+                if _cap_proxy and _cap_proxy._initialized:
+                    _cap_proxy.ensure_principal_socket(pack_id)
+                    _cap_base = _cap_proxy._base_dir
+                    _cap_hash = hashlib.sha256(pack_id.encode()).hexdigest()[:32]
+                    _cap_sock = Path(_cap_base) / f"{_cap_hash}.sock"
+                    if _cap_sock.exists():
+                        builder.volume(f"{_cap_sock}:/run/rumi/capability.sock:rw")
+                        builder.env("RUMI_CAPABILITY_SOCKET", "/run/rumi/capability.sock")
+            except Exception as e:
+                logger.warning("Failed to mount capability socket for lib %s: %s", pack_id, e)
 
             builder.image("python:3.11-slim")
             builder.command(["python", "-c", self._get_lib_executor_script(lib_file.name)])
@@ -610,7 +623,6 @@ else:
                         output = json.loads(proc_result.stdout.strip())
                     except json.JSONDecodeError:
                         output = proc_result.stdout.strip()
-                
                 return ExecutionResult(
                     success=True,
                     output=output,
@@ -629,7 +641,6 @@ else:
                     pack_id=pack_id,
                     lib_type=lib_type
                 )
-        
         except subprocess.TimeoutExpired:
             subprocess.run(["docker", "kill", container_name], capture_output=True)
             return ExecutionResult(
@@ -641,7 +652,6 @@ else:
                 pack_id=pack_id,
                 lib_type=lib_type
             )
-        
         except Exception as e:
             return ExecutionResult(
                 success=False,
@@ -652,7 +662,6 @@ else:
                 pack_id=pack_id,
                 lib_type=lib_type
             )
-        
         finally:
             try:
                 os.unlink(context_file)
@@ -668,18 +677,13 @@ else:
         context: Dict[str, Any],
         start_time: float
     ) -> ExecutionResult:
-        """ホスト上でlib実行（permissiveモード、警告付き）"""
         import time
-        
         warnings = [f"Executing lib on host without Docker: Pack={pack_id}, LibType={lib_type}"]
         logger.debug("Permissive host execution: pack=%s lib_type=%s", pack_id, lib_type)
-        
         module_name = f"rumi_lib_{pack_id}_{lib_type}_{abs(hash(str(lib_file)))}"
-        
         try:
             import importlib.util
             spec = importlib.util.spec_from_file_location(module_name, str(lib_file))
-            
             if spec is None or spec.loader is None:
                 return ExecutionResult(
                     success=False,
@@ -691,21 +695,16 @@ else:
                     pack_id=pack_id,
                     lib_type=lib_type
                 )
-            
             module = importlib.util.module_from_spec(spec)
             sys.modules[module_name] = module
-            
-            # lib ディレクトリを一時的にパスに追加
             lib_dir = str(lib_file.parent)
             if lib_dir not in sys.path:
                 sys.path.append(lib_dir)
-            
             try:
                 spec.loader.exec_module(module)
             finally:
                 if lib_dir in sys.path:
                     sys.path.remove(lib_dir)
-            
             fn = getattr(module, "run", None)
             if fn is None:
                 return ExecutionResult(
@@ -718,8 +717,6 @@ else:
                     pack_id=pack_id,
                     lib_type=lib_type
                 )
-            
-            # コンテキスト準備
             exec_context = {
                 "pack_id": pack_id,
                 "lib_type": lib_type,
@@ -728,15 +725,12 @@ else:
                 "data_dir": str(pack_data_dir),
                 **(context or {})
             }
-            
             import inspect
             sig = inspect.signature(fn)
-            
             if len(sig.parameters) >= 1:
                 output = fn(exec_context)
             else:
                 output = fn()
-            
             return ExecutionResult(
                 success=True,
                 output=output,
@@ -746,7 +740,6 @@ else:
                 pack_id=pack_id,
                 lib_type=lib_type
             )
-            
         except Exception as e:
             return ExecutionResult(
                 success=False,
@@ -758,7 +751,6 @@ else:
                 pack_id=pack_id,
                 lib_type=lib_type
             )
-        
         finally:
             if module_name in sys.modules:
                 del sys.modules[module_name]
@@ -771,10 +763,8 @@ else:
         file_path: Path,
         context: Dict[str, Any]
     ) -> ExecutionResult:
-        """ホスト上で実行（開発用、警告付き）"""
         import time
         start_time = time.time()
-        
         warnings = [
             f"SECURITY WARNING: Executing on host without Docker isolation: "
             f"Pack={pack_id}, Component={component_id}, Phase={phase}",
@@ -787,13 +777,10 @@ else:
             "Use RUMI_SECURITY_MODE=strict with Docker for production.",
             pack_id, component_id, phase
         )
-        
         module_name = f"rumi_exec_{pack_id}_{phase}_{abs(hash(str(file_path)))}"
-        
         try:
             import importlib.util
             spec = importlib.util.spec_from_file_location(module_name, str(file_path))
-            
             if spec is None or spec.loader is None:
                 return ExecutionResult(
                     success=False,
@@ -803,11 +790,9 @@ else:
                     execution_time_ms=(time.time() - start_time) * 1000,
                     warnings=warnings
                 )
-            
             module = importlib.util.module_from_spec(spec)
             sys.modules[module_name] = module
             spec.loader.exec_module(module)
-            
             fn = getattr(module, "run", None) or getattr(module, "main", None)
             if fn is None:
                 return ExecutionResult(
@@ -817,9 +802,7 @@ else:
                     execution_time_ms=(time.time() - start_time) * 1000,
                     warnings=warnings
                 )
-            
             result = fn(context)
-            
             return ExecutionResult(
                 success=True,
                 output=result,
@@ -827,7 +810,6 @@ else:
                 execution_time_ms=(time.time() - start_time) * 1000,
                 warnings=warnings
             )
-        
         except Exception as e:
             return ExecutionResult(
                 success=False,
@@ -837,18 +819,15 @@ else:
                 execution_time_ms=(time.time() - start_time) * 1000,
                 warnings=warnings
             )
-        
         finally:
             if module_name in sys.modules:
                 del sys.modules[module_name]
     
     def _sanitize_context(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        """コンテキストから安全なフィールドのみ抽出"""
         safe_keys = {
             "phase", "ts", "ids", "paths",
             "_source_component", "chat_id", "payload"
         }
-        
         safe_context = {}
         for key in safe_keys:
             if key in context:
@@ -858,7 +837,6 @@ else:
                     safe_context[key] = value
                 except (TypeError, ValueError):
                     pass
-        
         return safe_context
 
 
