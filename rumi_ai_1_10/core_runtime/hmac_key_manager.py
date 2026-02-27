@@ -17,6 +17,7 @@ hmac_key_manager.py - HMAC鍵のローテーション管理 + 署名ユーティ
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -32,6 +33,17 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# Fernet 暗号化の可用性 (W21-B)
+_FERNET_AVAILABLE = False
+try:
+    from cryptography.fernet import Fernet as _Fernet
+    _FERNET_AVAILABLE = True
+except ImportError:
+    _Fernet = None
+
+# 暗号化鍵ファイル名 (W21-B)
+_ENC_KEY_FILENAME = "hmac_keys.key"
 
 # デフォルトグレースピリオド（秒）: 24時間
 DEFAULT_GRACE_PERIOD_SECONDS = 86400
@@ -248,14 +260,183 @@ class HMACKeyManager:
             # 一度ローテーションしたらフラグをクリア（同一プロセス内での再トリガー防止）
             os.environ.pop("RUMI_HMAC_ROTATE", None)
 
+
+    # ==================================================================
+    # 暗号化関連メソッド (W21-B)
+    # ==================================================================
+
+    def _get_enc_key_path(self) -> Path:
+        """暗号化鍵ファイルのパスを返す"""
+        return self._keys_path.with_suffix(".key")
+
+    @staticmethod
+    def _is_encrypted_format(data: dict) -> bool:
+        """ファイル内容が暗号化形式かどうかを判定する"""
+        return (
+            isinstance(data, dict)
+            and data.get("encryption") == "fernet"
+            and "payload" in data
+        )
+
+    def _check_security_mode(self) -> str:
+        """RUMI_SECURITY_MODE を返す。デフォルトは strict。"""
+        return os.environ.get("RUMI_SECURITY_MODE", "strict").lower()
+
+    def _get_encryption_key(self) -> bytes:
+        """
+        暗号化鍵をロードまたは新規生成する。
+
+        Returns:
+            Fernet 鍵 (bytes, URL-safe base64)
+
+        Raises:
+            RuntimeError: cryptography が利用不可の場合
+        """
+        if not _FERNET_AVAILABLE:
+            raise RuntimeError(
+                "cryptography パッケージが必要です。"
+                " pip install cryptography でインストールしてください。"
+            )
+        enc_key_path = self._get_enc_key_path()
+        if enc_key_path.exists():
+            try:
+                key_data = enc_key_path.read_bytes().strip()
+                # 有効な Fernet 鍵か検証
+                _Fernet(key_data)
+                return key_data
+            except Exception:
+                pass
+        # 新規生成
+        new_key = _Fernet.generate_key()
+        enc_key_path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(
+            dir=str(enc_key_path.parent),
+            prefix=".hmac_enc_key_tmp_",
+        )
+        try:
+            os.write(fd, new_key)
+            os.close(fd)
+            fd = -1
+            os.replace(tmp_path, str(enc_key_path))
+            try:
+                os.chmod(str(enc_key_path), 0o600)
+            except (OSError, AttributeError):
+                pass
+        except Exception:
+            if fd >= 0:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+        # 監査ログ (best-effort)
+        try:
+            from .audit_logger import get_audit_logger
+            audit = get_audit_logger()
+            audit.log_security_event(
+                event_type="hmac_encryption_key_generated",
+                severity="info",
+                description="HMAC暗号化鍵を新規生成しました",
+            )
+        except Exception:
+            pass
+        logger.info("HMAC暗号化鍵を新規生成しました: %s", enc_key_path)
+        return new_key
+
+    def _encrypt_data(self, data_str: str) -> str:
+        """
+        Fernet で文字列を暗号化し、base64 トークンを返す。
+
+        Args:
+            data_str: 暗号化する JSON 文字列
+
+        Returns:
+            Base64 エンコードされた Fernet トークン文字列
+        """
+        enc_key = self._get_encryption_key()
+        f = _Fernet(enc_key)
+        token = f.encrypt(data_str.encode("utf-8"))
+        return token.decode("ascii")
+
+    def _decrypt_data(self, payload: str) -> str:
+        """
+        Fernet トークンを復号して元の文字列を返す。
+
+        Args:
+            payload: Base64 エンコードされた Fernet トークン
+
+        Returns:
+            復号された JSON 文字列
+
+        Raises:
+            Exception: 復号に失敗した場合
+        """
+        enc_key = self._get_encryption_key()
+        f = _Fernet(enc_key)
+        return f.decrypt(payload.encode("ascii")).decode("utf-8")
+
     def _load_or_initialize(self) -> None:
-        """鍵ファイルをロード。存在しなければ新規生成。"""
+        """鍵ファイルをロード。存在しなければ新規生成。(W21-B: 暗号化対応)"""
         with self._lock:
             if self._keys_path.exists():
                 try:
                     with open(self._keys_path, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    self._keys = [HMACKey.from_dict(k) for k in data.get("keys", [])]
+                        raw_data = json.load(f)
+
+                    # --- W21-B: 暗号化ファイル判定 ---
+                    keys_data = None
+                    if self._is_encrypted_format(raw_data):
+                        # Fernet 暗号化ファイル → 復号を試みる
+                        try:
+                            decrypted_str = self._decrypt_data(raw_data["payload"])
+                            keys_data = json.loads(decrypted_str)
+                        except Exception as dec_err:
+                            logger.warning(
+                                "暗号化鍵ファイルの復号に失敗しました。"
+                                "バックアップ後に新規生成します: %s", dec_err
+                            )
+                            try:
+                                from .audit_logger import get_audit_logger
+                                get_audit_logger().log_security_event(
+                                    event_type="hmac_key_decryption_failed",
+                                    severity="warning",
+                                    description="HMAC鍵ファイルの復号に失敗しました",
+                                    details={"error": str(dec_err)},
+                                )
+                            except Exception:
+                                pass
+                            try:
+                                bak_path = self._keys_path.with_suffix(".json.bak")
+                                shutil.copy2(str(self._keys_path), str(bak_path))
+                            except Exception:
+                                pass
+                            self._keys = []
+                            self._generate_new_key_internal()
+                            return
+                    else:
+                        # 平文 JSON (レガシー or permissive フォールバック)
+                        keys_data = raw_data
+                        if keys_data.get("keys"):
+                            # レガシーファイルからの読み込み → 次回保存で暗号化
+                            try:
+                                from .audit_logger import get_audit_logger
+                                get_audit_logger().log_security_event(
+                                    event_type="hmac_key_legacy_migration",
+                                    severity="info",
+                                    description="レガシー平文鍵ファイルを読み込みました。次回保存時に暗号化されます。",
+                                )
+                            except Exception:
+                                pass
+                            logger.info(
+                                "レガシー平文鍵ファイルを読み込みました。"
+                                "次回保存時に暗号化形式にマイグレーションされます。"
+                            )
+
+                    self._keys = [HMACKey.from_dict(k) for k in keys_data.get("keys", [])]
                     # 期限切れの旧鍵を削除
                     self._cleanup_expired_keys_internal()
                     # アクティブ鍵がなければ新規生成
@@ -289,15 +470,60 @@ class HMACKeyManager:
         return new_key
 
     def _save_internal(self) -> None:
-        """鍵ファイルを atomic write で保存（ロック保持状態で呼び出す内部用）"""
+        """鍵ファイルを atomic write で保存（ロック保持状態で呼び出す内部用）(W21-B: 暗号化対応)"""
         self._keys_path.parent.mkdir(parents=True, exist_ok=True)
-        data = {
+        inner_data = {
             "version": "1.0",
             "updated_at": _now_ts(),
             "grace_period_seconds": int(self._grace_period.total_seconds()),
             "keys": [k.to_dict() for k in self._keys],
         }
-        content = json.dumps(data, ensure_ascii=False, indent=2)
+        inner_json = json.dumps(inner_data, ensure_ascii=False, indent=2)
+
+        # --- W21-B: 暗号化ラッパー ---
+        security_mode = self._check_security_mode()
+        use_encryption = False
+
+        if _FERNET_AVAILABLE:
+            use_encryption = True
+        elif security_mode == "strict":
+            raise RuntimeError(
+                "RUMI_SECURITY_MODE=strict ですが cryptography パッケージが"
+                "インストールされていません。暗号化保存ができないため中断します。"
+                " pip install cryptography でインストールしてください。"
+            )
+        else:
+            # permissive: 平文フォールバック
+            logger.warning(
+                "cryptography パッケージが利用不可のため、平文で保存します。"
+                "セキュリティ向上のために pip install cryptography を推奨します。"
+            )
+            try:
+                from .audit_logger import get_audit_logger
+                get_audit_logger().log_security_event(
+                    event_type="hmac_key_plaintext_fallback",
+                    severity="warning",
+                    description="cryptography未インストールのため平文保存にフォールバックしました",
+                )
+            except Exception:
+                pass
+
+        if use_encryption:
+            try:
+                encrypted_payload = self._encrypt_data(inner_json)
+                outer_data = {
+                    "version": "1.0",
+                    "encryption": "fernet",
+                    "payload": encrypted_payload,
+                }
+                content = json.dumps(outer_data, ensure_ascii=False, indent=2)
+            except Exception as enc_err:
+                if security_mode == "strict":
+                    raise
+                logger.warning("暗号化に失敗しました。平文で保存します: %s", enc_err)
+                content = inner_json
+        else:
+            content = inner_json
 
         fd, tmp_path = tempfile.mkstemp(
             dir=str(self._keys_path.parent),
