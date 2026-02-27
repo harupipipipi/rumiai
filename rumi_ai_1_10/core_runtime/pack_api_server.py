@@ -15,6 +15,8 @@ import base64
 import re
 import secrets
 import threading
+import time
+import collections
 from pathlib import Path
 from typing import Any, Optional
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -56,6 +58,79 @@ logger = logging.getLogger(__name__)
 
 # --- スレッド終了待ちタイムアウト (秒) --- (PACK_ID_RE, SAFE_ID_RE, MAX_REQUEST_BODY_BYTES は validation.py から import)
 THREAD_JOIN_TIMEOUT_SECONDS = 5
+
+# --- W20-D: IP-based sliding window rate limiter ---
+class _RateLimiter:
+    """IP アドレスベースのスライディングウィンドウレートリミッター。
+
+    メモリ上の dict で管理し、外部依存なし。threading.Lock でスレッドセーフ。
+    """
+
+    def __init__(
+        self,
+        max_requests: int = 120,
+        window_seconds: float = 60.0,
+        max_ips: int = 10000,
+    ) -> None:
+        self._max_requests = max_requests
+        self._window = float(window_seconds)
+        self._max_ips = max_ips
+        self._lock = threading.Lock()
+        # ip -> deque of monotonic timestamps
+        self._requests: dict[str, collections.deque] = {}
+
+    # -- public API --
+
+    def is_allowed(self, ip: str) -> bool:
+        """ip からのリクエストが許可されるなら True を返す。"""
+        now = time.monotonic()
+        with self._lock:
+            return self._is_allowed_locked(ip, now)
+
+    # -- internal --
+
+    def _is_allowed_locked(self, ip: str, now: float) -> bool:
+        # 既存エントリのクリーンアップ
+        if ip in self._requests:
+            dq = self._requests[ip]
+            cutoff = now - self._window
+            while dq and dq[0] <= cutoff:
+                dq.popleft()
+            if not dq:
+                del self._requests[ip]
+
+        # 新規 IP のスロット確保
+        if ip not in self._requests:
+            if len(self._requests) >= self._max_ips:
+                self._evict_oldest()
+            self._requests[ip] = collections.deque()
+
+        dq = self._requests[ip]
+        if len(dq) >= self._max_requests:
+            return False
+        dq.append(now)
+        return True
+
+    def _evict_oldest(self) -> None:
+        """最もリクエストが古い IP を 1 件除去する。"""
+        oldest_ip = None
+        oldest_time = float("inf")
+        for ip, dq in self._requests.items():
+            if not dq:
+                oldest_ip = ip
+                break
+            if dq[0] < oldest_time:
+                oldest_time = dq[0]
+                oldest_ip = ip
+        if oldest_ip is not None:
+            del self._requests[oldest_ip]
+
+
+_rate_limiter = _RateLimiter(
+    max_requests=int(os.environ.get("RUMI_API_RATE_LIMIT", "120")),
+    window_seconds=float(os.environ.get("RUMI_API_RATE_WINDOW", "60")),
+)
+
 
 # _SAFE_ERROR_MSG: moved to api._helpers
 
@@ -130,6 +205,14 @@ class PackAPIHandler(
         else:
             self._send_response(APIResponse(True, data=result))
     
+    def _check_rate_limit(self) -> bool:
+        """レート制限チェック。制限超過なら 429 を返して False。"""
+        ip = self.client_address[0]
+        if not _rate_limiter.is_allowed(ip):
+            self.send_error(429, "Too Many Requests")
+            return False
+        return True
+
     def _check_auth(self) -> bool:
         auth_header = self.headers.get('Authorization', '')
         
@@ -268,6 +351,8 @@ class PackAPIHandler(
 
     
     def do_GET(self) -> None:
+        if not self._check_rate_limit():
+            return
         if not self._check_auth():
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return
@@ -402,6 +487,8 @@ class PackAPIHandler(
             self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
     
     def do_POST(self) -> None:
+        if not self._check_rate_limit():
+            return
         if not self._check_auth():
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return
@@ -801,6 +888,8 @@ class PackAPIHandler(
 
     def do_PUT(self) -> None:
         """PUT メソッド — Pack独自ルート専用"""
+        if not self._check_rate_limit():
+            return
         if not self._check_auth():
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return
@@ -823,6 +912,8 @@ class PackAPIHandler(
             self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
 
     def do_DELETE(self) -> None:
+        if not self._check_rate_limit():
+            return
         if not self._check_auth():
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return
