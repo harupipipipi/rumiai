@@ -1,26 +1,22 @@
 """
-W19-F  VULN-M05 — JSON file-size limit guard
-=============================================
-Tests for ``_check_json_file_size`` and the ``RUMI_MAX_JSON_FILE_BYTES``
-environment-variable mechanism added to ``backend_core.ecosystem.registry``.
+W19-F  VULN-M05 -- JSON file-size limit guard
+===============================================
+Tests for ``_check_json_file_size`` and ``RUMI_MAX_JSON_FILE_BYTES``
+in ``backend_core.ecosystem.registry``.
 """
 from __future__ import annotations
 
-import importlib
-import json
+import importlib.util
 import logging
 import os
 import sys
-import tempfile
 from pathlib import Path
-from types import ModuleType
 from unittest.mock import MagicMock
 
 import pytest
 
 # ---------------------------------------------------------------------------
-# Bootstrap: stub every relative-import dependency so that registry.py
-# can be loaded in isolation.
+# Bootstrap: stub every relative-import dependency so registry.py can load
 # ---------------------------------------------------------------------------
 _STUBS = [
     "backend_core",
@@ -33,151 +29,125 @@ _STUBS = [
     "core_runtime",
     "core_runtime.paths",
 ]
-
-# Keep a reference so we can restore later if needed
-_saved: dict = {}
 for _m in _STUBS:
-    _saved[_m] = sys.modules.get(_m)
     if _m not in sys.modules:
         sys.modules[_m] = MagicMock()
 
-# Make the ecosystem stub look like a real package for relative imports
-_eco_stub = sys.modules["backend_core.ecosystem"]
-_eco_stub.__path__ = []
-_eco_stub.__package__ = "backend_core.ecosystem"
+_eco = sys.modules["backend_core.ecosystem"]
+_eco.__path__ = []
+_eco.__package__ = "backend_core.ecosystem"
 
-# SchemaValidationError must be an actual exception class for `except` clauses
-class _StubSchemaValidationError(Exception):
+class _SVE(Exception):
     pass
 
-_validator_stub = sys.modules["backend_core.ecosystem.spec.schema.validator"]
-_validator_stub.SchemaValidationError = _StubSchemaValidationError
-_validator_stub.validate_ecosystem = MagicMock()
-_validator_stub.validate_component_manifest = MagicMock()
-_validator_stub.validate_addon = MagicMock()
+_val = sys.modules["backend_core.ecosystem.spec.schema.validator"]
+_val.SchemaValidationError = _SVE
+_val.validate_ecosystem = MagicMock()
+_val.validate_component_manifest = MagicMock()
+_val.validate_addon = MagicMock()
 
-# Ensure the project root is on sys.path
-_project_root = str(Path(__file__).resolve().parent.parent)
-if _project_root not in sys.path:
-    sys.path.insert(0, _project_root)
-
-# Now import the real module
-import importlib.util as _ilu
-
-_spec = _ilu.spec_from_file_location(
-    "backend_core.ecosystem.registry",
-    str(Path(__file__).resolve().parent.parent / "backend_core" / "ecosystem" / "registry.py"),
-    submodule_search_locations=[],
+_REG_PY = (
+    Path(__file__).resolve().parent.parent
+    / "backend_core" / "ecosystem" / "registry.py"
 )
-registry_mod = _ilu.module_from_spec(_spec)
-sys.modules[_spec.name] = registry_mod
-_spec.loader.exec_module(registry_mod)
 
-_check_json_file_size = registry_mod._check_json_file_size
-RUMI_MAX_JSON_FILE_BYTES = registry_mod.RUMI_MAX_JSON_FILE_BYTES
+
+def _load_registry():
+    """(Re-)load registry.py from disk."""
+    spec = importlib.util.spec_from_file_location(
+        "backend_core.ecosystem.registry",
+        str(_REG_PY),
+        submodule_search_locations=[],
+    )
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_reg = _load_registry()
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Helper
 # ---------------------------------------------------------------------------
 
-def _make_json_file(tmp_path: Path, size_bytes: int, *, content: str | None = None) -> Path:
-    """Create a temporary JSON file of *exactly* ``size_bytes``."""
+def _make_file(tmp_path: Path, size: int) -> Path:
+    """Create a file of exactly *size* bytes."""
     fp = tmp_path / "test.json"
-    if content is not None:
-        fp.write_text(content, encoding="utf-8")
-        return fp
-    # Build a JSON payload that is exactly size_bytes long.
-    # Strategy: '{"k": "<padding>"}' — adjust padding to hit target size.
-    if size_bytes == 0:
+    if size == 0:
         fp.write_bytes(b"")
-        return fp
-    shell = '{"k": ""}'  # 10 bytes
-    if size_bytes < len(shell):
-        # Too small for valid JSON — just write raw bytes
-        fp.write_bytes(b"x" * size_bytes)
-        return fp
-    padding_len = size_bytes - len(shell)
-    payload = '{"k": "' + ("a" * padding_len) + '"}'
-    fp.write_text(payload, encoding="utf-8")
-    assert fp.stat().st_size == size_bytes, f"expected {size_bytes}, got {fp.stat().st_size}"
+    else:
+        base = '{"k": ""}'          # 10 bytes
+        if size < len(base):
+            fp.write_bytes(b"x" * size)
+        else:
+            fp.write_text(
+                '{"k": "' + "a" * (size - len(base)) + '"}',
+                encoding="utf-8",
+            )
+    assert fp.stat().st_size == size
     return fp
 
 
 # ---------------------------------------------------------------------------
-# Tests
+# Test cases  (8 >= required 5)
 # ---------------------------------------------------------------------------
 
 class TestCheckJsonFileSize:
-    """Unit tests for _check_json_file_size."""
 
-    def test_normal_size_returns_false(self, tmp_path: Path):
-        """正常サイズの JSON → skip=False (読み込み許可)"""
-        fp = _make_json_file(tmp_path, 1024)
-        assert _check_json_file_size(fp) is False
+    def test_normal_size_allows_load(self, tmp_path):
+        """TC-1: Normal-size file -> skip=False (load OK)."""
+        fp = _make_file(tmp_path, 1024)
+        assert _reg._check_json_file_size(fp) is False
 
-    def test_oversized_returns_true_with_warning(self, tmp_path: Path, caplog):
-        """上限超過の JSON → WARNING + skip=True"""
-        limit = 512
-        fp = _make_json_file(tmp_path, limit + 1)
+    def test_oversized_warns_and_skips(self, tmp_path, caplog):
+        """TC-2: Oversized file -> WARNING + skip=True."""
+        fp = _make_file(tmp_path, 600)
         with caplog.at_level(logging.WARNING):
-            result = _check_json_file_size(fp, max_bytes=limit)
+            result = _reg._check_json_file_size(fp, max_bytes=500)
         assert result is True
         assert "exceeds limit" in caplog.text
 
-    def test_custom_env_var(self, tmp_path: Path, monkeypatch):
-        """RUMI_MAX_JSON_FILE_BYTES カスタム値 → 動作"""
-        custom_limit = 256
-        monkeypatch.setenv("RUMI_MAX_JSON_FILE_BYTES", str(custom_limit))
-        # Re-evaluate the module-level constant by reloading
-        importlib.reload(registry_mod)
-        reloaded_check = registry_mod._check_json_file_size
-        reloaded_limit = registry_mod.RUMI_MAX_JSON_FILE_BYTES
+    def test_custom_env_var(self, tmp_path, monkeypatch):
+        """TC-3: Custom RUMI_MAX_JSON_FILE_BYTES env var is respected."""
+        monkeypatch.setenv("RUMI_MAX_JSON_FILE_BYTES", "256")
+        mod = _load_registry()
+        assert mod.RUMI_MAX_JSON_FILE_BYTES == 256
 
-        assert reloaded_limit == custom_limit
+        fp_ok = _make_file(tmp_path, 256)
+        assert mod._check_json_file_size(fp_ok) is False
 
-        fp_ok = _make_json_file(tmp_path, custom_limit)
-        assert reloaded_check(fp_ok) is False
+        sub = tmp_path / "over"
+        sub.mkdir()
+        fp_ng = _make_file(sub, 257)
+        assert mod._check_json_file_size(fp_ng) is True
 
-        fp_over = _make_json_file(tmp_path / "sub", 0)
-        (tmp_path / "sub").mkdir(exist_ok=True)
-        fp_over = _make_json_file(tmp_path / "sub", custom_limit + 1)
-        assert reloaded_check(fp_over) is True
-
-        # Restore default
-        monkeypatch.delenv("RUMI_MAX_JSON_FILE_BYTES", raising=False)
-        importlib.reload(registry_mod)
-
-    def test_zero_byte_file(self, tmp_path: Path, caplog):
-        """0 バイトの JSON → サイズチェック通過 (skip=False) — JSONパースは別責務"""
-        fp = _make_json_file(tmp_path, 0)
-        assert fp.stat().st_size == 0
+    def test_zero_byte_file(self, tmp_path, caplog):
+        """TC-4: 0-byte file -> size check passes (skip=False)."""
+        fp = _make_file(tmp_path, 0)
         with caplog.at_level(logging.WARNING):
-            result = _check_json_file_size(fp)
+            result = _reg._check_json_file_size(fp)
         assert result is False
-        # No size-related warning should be emitted
         assert "exceeds limit" not in caplog.text
 
-    def test_exact_limit_returns_false(self, tmp_path: Path):
-        """上限ちょうどの JSON → skip=False (正常読み込み)"""
-        limit = 2048
-        fp = _make_json_file(tmp_path, limit)
-        assert fp.stat().st_size == limit
-        assert _check_json_file_size(fp, max_bytes=limit) is False
+    def test_exact_limit_allows_load(self, tmp_path):
+        """TC-5: File size == limit -> skip=False (boundary OK)."""
+        fp = _make_file(tmp_path, 2048)
+        assert _reg._check_json_file_size(fp, max_bytes=2048) is False
 
-    def test_nonexistent_file_returns_true_with_warning(self, tmp_path: Path, caplog):
-        """存在しないファイル → skip=True + WARNING"""
-        fp = tmp_path / "does_not_exist.json"
+    def test_nonexistent_file_skips(self, tmp_path, caplog):
+        """TC-6: Non-existent file -> skip=True + WARNING."""
+        fp = tmp_path / "ghost.json"
         with caplog.at_level(logging.WARNING):
-            result = _check_json_file_size(fp)
+            result = _reg._check_json_file_size(fp)
         assert result is True
         assert "Cannot stat" in caplog.text
 
-    def test_one_byte_over_limit(self, tmp_path: Path):
-        """上限+1バイト → skip=True"""
-        limit = 1000
-        fp = _make_json_file(tmp_path, limit + 1)
-        assert _check_json_file_size(fp, max_bytes=limit) is True
+    def test_one_byte_over(self, tmp_path):
+        """TC-7: limit + 1 byte -> skip=True."""
+        fp = _make_file(tmp_path, 1001)
+        assert _reg._check_json_file_size(fp, max_bytes=1000) is True
 
     def test_default_limit_is_2mb(self):
-        """デフォルト上限が 2097152 (2 MB) であること"""
-        assert RUMI_MAX_JSON_FILE_BYTES == 2097152
+        """TC-8: Default limit = 2 097 152 (2 MB)."""
+        assert _reg.RUMI_MAX_JSON_FILE_BYTES == 2097152

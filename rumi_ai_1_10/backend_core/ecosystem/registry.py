@@ -6,12 +6,11 @@ Pack/Component/Addon のレジストリ
 
 パス刷新: ecosystem/ 直下を走査（ecosystem/packs/ 互換あり）、ecosystem.json 直下優先
 
-W19-B: VULN-M05 — JSON ファイルサイズ上限チェック追加
+W19-F: VULN-M05 — JSON ファイルサイズ上限チェック追加
 """
 
 import json
 import logging
-import os
 import os
 from collections import deque
 from pathlib import Path
@@ -43,7 +42,7 @@ RUMI_MAX_JSON_FILE_BYTES: int = int(
 )
 
 
-def _check_json_file_size(filepath, max_bytes: int | None = None) -> bool:
+def _check_json_file_size(filepath, max_bytes=None) -> bool:
     """Return *True* (= caller should skip) when *filepath* exceeds the limit."""
     if max_bytes is None:
         max_bytes = RUMI_MAX_JSON_FILE_BYTES
@@ -53,7 +52,7 @@ def _check_json_file_size(filepath, max_bytes: int | None = None) -> bool:
         logger.warning(
             "[Registry] Cannot stat JSON file, skipping: %s (%s)", filepath, exc
         )
-        return True  # unreadable → skip
+        return True
     if file_size > max_bytes:
         logger.warning(
             "[Registry] JSON file size %d bytes exceeds limit %d bytes, skipping: %s",
@@ -63,53 +62,6 @@ def _check_json_file_size(filepath, max_bytes: int | None = None) -> bool:
         )
         return True
     return False
-
-
-# --- W19-B: VULN-M05 JSON ファイルサイズ上限 ---
-# デフォルト 2MB (2 * 1024 * 1024 = 2097152)
-_DEFAULT_MAX_JSON_FILE_BYTES = 2 * 1024 * 1024
-
-
-def _get_max_json_file_bytes() -> int:
-    """環境変数 RUMI_MAX_JSON_FILE_BYTES からサイズ上限を取得する。"""
-    raw = os.environ.get("RUMI_MAX_JSON_FILE_BYTES", "")
-    if raw.strip():
-        try:
-            val = int(raw.strip())
-            if val > 0:
-                return val
-        except (ValueError, TypeError):
-            logger.warning(
-                "Invalid RUMI_MAX_JSON_FILE_BYTES value: %r, using default %d",
-                raw, _DEFAULT_MAX_JSON_FILE_BYTES,
-            )
-    return _DEFAULT_MAX_JSON_FILE_BYTES
-
-
-def _check_json_file_size(file_path: Path) -> bool:
-    """JSON ファイルサイズが上限以内か確認する。
-
-    Args:
-        file_path: チェック対象のファイルパス
-
-    Returns:
-        True: サイズ上限以内（読み込み可）
-        False: サイズ超過（読み込みスキップ）
-    """
-    max_bytes = _get_max_json_file_bytes()
-    try:
-        file_size = os.path.getsize(file_path)
-    except OSError as e:
-        logger.warning("Cannot stat file %s: %s", file_path, e)
-        return False
-    if file_size > max_bytes:
-        logger.warning(
-            "VULN-M05: JSON file too large, skipping: %s (%d bytes > %d bytes limit)",
-            file_path, file_size, max_bytes,
-        )
-        return False
-    return True
-
 
 @dataclass
 class ComponentInfo:
@@ -288,10 +240,6 @@ class Registry:
             print(f"    ecosystem.jsonが見つかりません: {pack_dir}")
             return None
         
-        # W19-B: VULN-M05 — JSON ファイルサイズチェック
-        if not _check_json_file_size(ecosystem_file):
-            return None
-        
         # ecosystem.jsonを読み込み
         if _check_json_file_size(ecosystem_file):
             return None
@@ -350,11 +298,6 @@ class Registry:
                     print(f"      manifest.jsonが見つかりません: {component_dir}")
                     continue
                 
-                # W19-B: VULN-M05 — JSON ファイルサイズチェック
-                if not _check_json_file_size(manifest_file):
-                    print(f"      ✗ manifest.json サイズ超過、スキップ: {manifest_file}")
-                    continue
-                
                 try:
                     if _check_json_file_size(manifest_file):
                         continue
@@ -410,11 +353,6 @@ class Registry:
         Packのすべてのアドオンを読み込む
         """
         for addon_file in addons_dir.glob("*.addon.json"):
-            # W19-B: VULN-M05 — JSON ファイルサイズチェック
-            if not _check_json_file_size(addon_file):
-                print(f"      ✗ Addon サイズ超過、スキップ: {addon_file}")
-                continue
-            
             try:
                 if _check_json_file_size(addon_file):
                     continue
@@ -444,11 +382,6 @@ class Registry:
             ]
         }
         """
-        # W19-B: VULN-M05 — JSON ファイルサイズチェック
-        if not _check_json_file_size(routes_file):
-            print(f"      ✗ routes.json サイズ超過、スキップ: {routes_file}")
-            return
-        
         try:
             if _check_json_file_size(routes_file):
                 return
