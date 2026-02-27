@@ -215,3 +215,100 @@ class SecretsHandlersMixin:
         except Exception as e:
             _log_internal_error("secrets_grants_delete_key", e)
             return {"success": False, "error": _SAFE_ERROR_MSG}
+
+
+# ------------------------------------------------------------------ #
+# W19-E: Secret Grant routing handlers
+# ------------------------------------------------------------------ #
+
+def _w19e_get_secrets_grant_manager():
+    """SecretsGrantManager を DI コンテナから取得 (W19-E)"""
+    from ...secrets_grant_manager import get_secrets_grant_manager as _get
+    return _get()
+
+
+def _secrets_grants_list(self) -> dict:
+    """GET /api/secrets/grants — 全 Grant 一覧"""
+    try:
+        mgr = _w19e_get_secrets_grant_manager()
+        grants = mgr.list_all_grants()
+        return {
+            "grants": {pid: g.to_dict() for pid, g in grants.items()},
+            "count": len(grants),
+        }
+    except Exception as e:
+        _log_internal_error("secrets_grants_list", e)
+        return {"grants": {}, "error": _SAFE_ERROR_MSG}
+
+
+def _secrets_grants_get(self, pack_id: str) -> dict:
+    """GET /api/secrets/grants/{pack_id} — 特定 Pack の Grant 取得"""
+    try:
+        mgr = _w19e_get_secrets_grant_manager()
+        keys = mgr.get_granted_keys(pack_id)
+        return {"pack_id": pack_id, "granted_keys": keys}
+    except Exception as e:
+        _log_internal_error("secrets_grants_get", e)
+        return {"pack_id": pack_id, "granted_keys": [], "error": _SAFE_ERROR_MSG}
+
+
+def _secrets_grants_grant(self, pack_id: str, body: dict) -> dict:
+    """POST /api/secrets/grants/{pack_id} — Grant 付与"""
+    secret_keys = body.get("secret_keys", [])
+    if not isinstance(secret_keys, list) or not secret_keys:
+        return {
+            "success": False,
+            "error": "'secret_keys' must be a non-empty list",
+            "status_code": 400,
+        }
+    for key in secret_keys:
+        if not isinstance(key, str) or not _KEY_PATTERN.match(key):
+            return {
+                "success": False,
+                "error": f"Invalid secret key '{key}': must match ^[A-Z0-9_]{{1,64}}$",
+                "status_code": 400,
+            }
+    try:
+        mgr = _w19e_get_secrets_grant_manager()
+        grant = mgr.grant_secret_access(pack_id, secret_keys)
+        return {
+            "success": True,
+            "pack_id": grant.pack_id,
+            "granted_keys": grant.granted_keys,
+        }
+    except Exception as e:
+        _log_internal_error("secrets_grants_grant", e)
+        return {"success": False, "error": _SAFE_ERROR_MSG}
+
+
+def _secrets_grants_delete(self, pack_id: str) -> dict:
+    """DELETE /api/secrets/grants/{pack_id} — 全 Grant 削除"""
+    try:
+        mgr = _w19e_get_secrets_grant_manager()
+        result = mgr.delete_grant(pack_id)
+        if result:
+            return {"success": True, "pack_id": pack_id}
+        else:
+            return {"success": False, "error": "Grant not found", "status_code": 404}
+    except Exception as e:
+        _log_internal_error("secrets_grants_delete", e)
+        return {"success": False, "error": _SAFE_ERROR_MSG}
+
+
+def _secrets_grants_delete_key(self, pack_id: str, secret_key: str) -> dict:
+    """DELETE /api/secrets/grants/{pack_id}/{secret_key} — 特定キー削除"""
+    try:
+        mgr = _w19e_get_secrets_grant_manager()
+        mgr.revoke_secret_access(pack_id, [secret_key])
+        return {"success": True, "pack_id": pack_id, "revoked_key": secret_key}
+    except Exception as e:
+        _log_internal_error("secrets_grants_delete_key", e)
+        return {"success": False, "error": _SAFE_ERROR_MSG}
+
+
+# Attach to SecretsHandlersMixin so PackAPIHandler inherits them
+SecretsHandlersMixin._secrets_grants_list = _secrets_grants_list
+SecretsHandlersMixin._secrets_grants_get = _secrets_grants_get
+SecretsHandlersMixin._secrets_grants_grant = _secrets_grants_grant
+SecretsHandlersMixin._secrets_grants_delete = _secrets_grants_delete
+SecretsHandlersMixin._secrets_grants_delete_key = _secrets_grants_delete_key

@@ -18,7 +18,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .paths import (
     PackLocation,
@@ -367,3 +367,36 @@ def _check_ctx_references(
                     warnings.append(msg)
 
     return warnings
+
+
+# ======================================================================
+# W19-D: host_execution ガード
+# ======================================================================
+
+def validate_host_execution(pack_config: dict) -> Tuple[bool, str]:
+    """
+    Pack の host_execution フィールドを検証する。
+
+    host_execution が true の場合、環境変数 RUMI_ALLOW_HOST_EXECUTION が
+    "true" でなければ起動を拒否する。
+
+    Args:
+        pack_config: ecosystem.json をパースした dict
+
+    Returns:
+        (ok, message)
+        - ok=False の場合は起動拒否。message にエラー理由。
+        - ok=True かつ message が空文字列なら問題なし。
+        - ok=True かつ message が非空なら WARNING。
+    """
+    host_exec = pack_config.get("host_execution", False)
+    if not host_exec:
+        return (True, "")
+
+    env_val = os.environ.get("RUMI_ALLOW_HOST_EXECUTION")
+    if env_val == "true":
+        logger.warning("host_execution enabled for pack")
+        return (True, "WARNING: host_execution enabled")
+
+    return (False, "host_execution requires RUMI_ALLOW_HOST_EXECUTION=true")
+

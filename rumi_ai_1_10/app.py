@@ -127,6 +127,29 @@ def main():
         print(f"[Rumi] {L('startup.starting')}")
         _kernel.run_startup()
 
+        # --- W19-D: host_execution guard ---
+        from core_runtime.pack_validator import validate_host_execution
+        from core_runtime.paths import discover_pack_locations
+        import json as _w19d_json
+        _w19d_blocked = []
+        for _w19d_loc in discover_pack_locations():
+            try:
+                with open(_w19d_loc.ecosystem_json_path, "r", encoding="utf-8") as _w19d_f:
+                    _w19d_eco = _w19d_json.load(_w19d_f)
+                _w19d_ok, _w19d_msg = validate_host_execution(_w19d_eco)
+                if not _w19d_ok:
+                    _w19d_blocked.append((_w19d_loc.pack_id, _w19d_msg))
+                elif _w19d_msg:
+                    print(f'[Rumi] [{_w19d_loc.pack_id}] {_w19d_msg}')
+            except Exception:
+                pass
+        if _w19d_blocked:
+            for _w19d_pid, _w19d_msg in _w19d_blocked:
+                print(f'[Rumi] BLOCKED [{_w19d_pid}]: {_w19d_msg}')
+            print('[Rumi] Startup aborted: host_execution packs require RUMI_ALLOW_HOST_EXECUTION=true')
+            sys.exit(1)
+
+
         atexit.register(lambda: _kernel.shutdown() if _kernel else None)
 
         try:

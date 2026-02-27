@@ -110,7 +110,6 @@ def test_permissive_mode_allows_all():
 # ===========================================================================
 def test_init_self_contained():
     pm = _make_pm({})
-    # __init__ 完了時点でモードが確定している
     assert pm.get_mode() in ("secure", "permissive")
     assert pm.get_mode() == "secure"
 
