@@ -128,7 +128,7 @@ def main():
         _kernel.run_startup()
 
         # --- W19-D: host_execution guard ---
-        from core_runtime.pack_validator import validate_host_execution
+        from core_runtime.pack_validator import validate_host_execution_single
         from core_runtime.paths import discover_pack_locations
         import json as _w19d_json
         _w19d_blocked = []
@@ -136,7 +136,7 @@ def main():
             try:
                 with open(_w19d_loc.ecosystem_json_path, "r", encoding="utf-8") as _w19d_f:
                     _w19d_eco = _w19d_json.load(_w19d_f)
-                _w19d_ok, _w19d_msg = validate_host_execution(_w19d_eco)
+                _w19d_ok, _w19d_msg = validate_host_execution_single(_w19d_eco)
                 if not _w19d_ok:
                     _w19d_blocked.append((_w19d_loc.pack_id, _w19d_msg))
                 elif _w19d_msg:

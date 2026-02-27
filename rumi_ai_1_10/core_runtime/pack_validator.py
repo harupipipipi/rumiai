@@ -373,7 +373,7 @@ def _check_ctx_references(
 # W19-D: host_execution ガード
 # ======================================================================
 
-def validate_host_execution(pack_config: dict) -> Tuple[bool, str]:
+def validate_host_execution_single(pack_config: dict) -> Tuple[bool, str]:
     """
     Pack の host_execution フィールドを検証する。
 

@@ -23,7 +23,7 @@ if _cr_key not in sys.modules:
 if _paths_key not in sys.modules:
     sys.modules[_paths_key] = MagicMock()
 
-from core_runtime.pack_validator import validate_host_execution  # noqa: E402
+from core_runtime.pack_validator import validate_host_execution_single as validate_host_execution  # noqa: E402
 
 import os
 import pytest
