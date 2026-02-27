@@ -12,6 +12,14 @@ from typing import Dict, Optional, Any, List
 from dataclasses import dataclass, field, asdict
 
 from .mounts import get_mount_path
+import logging
+from core_runtime.hmac_key_manager import (
+    generate_or_load_signing_key,
+    compute_data_hmac,
+    verify_data_hmac,
+)
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -54,10 +62,13 @@ class ActiveEcosystemManager:
     現在使用中のPack/Componentを管理する。
     """
     
-    def __init__(self, config_path: str = None):
+    SECRET_KEY_FILE = "user_data/permissions/.secret_key"
+
+    def __init__(self, config_path: str = None, secret_key: str = None):
         """
         Args:
             config_path: 設定ファイルのパス（省略時はuser_data/active_ecosystem.json）
+            secret_key: HMAC署名鍵（省略時はファイルから読み込み）
         """
         if config_path:
             self.config_path = Path(config_path)
@@ -68,19 +79,43 @@ class ActiveEcosystemManager:
         self._config: Optional[ActiveEcosystemConfig] = None
         self._lock = threading.Lock()
         
+        # HMAC 署名鍵の読み込み
+        if secret_key:
+            self._secret_key: bytes = secret_key.encode("utf-8")
+        else:
+            self._secret_key = generate_or_load_signing_key(
+                Path(self.SECRET_KEY_FILE),
+            )
+        
         # 設定を読み込み
         self._load_config()
     
     def _load_config(self):
-        """設定ファイルを読み込む"""
+        """設定ファイルを読み込む（HMAC 検証付き）"""
         with self._lock:
             if self.config_path.exists():
                 try:
                     with open(self.config_path, 'r', encoding='utf-8') as f:
                         data = json.load(f)
-                    self._config = ActiveEcosystemConfig.from_dict(data)
+                    stored_sig = data.pop("_hmac_signature", None)
+                    if not stored_sig:
+                        logger.warning(
+                            "Unsigned active_ecosystem config detected at %s, "
+                            "re-signing on next save",
+                            self.config_path,
+                        )
+                        self._config = ActiveEcosystemConfig.from_dict(data)
+                    elif not verify_data_hmac(self._secret_key, data, stored_sig):
+                        logger.warning(
+                            "HMAC verification failed for active_ecosystem "
+                            "config at %s, falling back to defaults",
+                            self.config_path,
+                        )
+                        self._config = self._create_default_config()
+                    else:
+                        self._config = ActiveEcosystemConfig.from_dict(data)
                 except (json.JSONDecodeError, IOError) as e:
-                    print(f"[ActiveEcosystem] 設定読み込みエラー: {e}")
+                    logger.warning("[ActiveEcosystem] 設定読み込みエラー: %s", e)
                     self._config = self._create_default_config()
             else:
                 self._config = self._create_default_config()
@@ -97,13 +132,15 @@ class ActiveEcosystemManager:
         )
     
     def _save_config_internal(self):
-        """設定を保存（ロック内で呼び出す）"""
+        """設定を保存（ロック内で呼び出す、HMAC 署名付き）"""
         try:
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
+            data = self._config.to_dict()
+            data["_hmac_signature"] = compute_data_hmac(self._secret_key, data)
             with open(self.config_path, 'w', encoding='utf-8') as f:
-                json.dump(self._config.to_dict(), f, ensure_ascii=False, indent=2)
+                json.dump(data, f, ensure_ascii=False, indent=2)
         except IOError as e:
-            print(f"[ActiveEcosystem] 設定保存エラー: {e}")
+            logger.error("[ActiveEcosystem] 設定保存エラー: %s", e)
     
     def _save_config(self):
         """設定を保存"""
