@@ -671,6 +671,18 @@ class UDSSocketManager:
             try:
                 sock_path = self.get_socket_path(pack_id)
 
+                # symlink 検出（TOCTOU 完全対策ではないが、攻撃痕跡の検出に有効）
+                if sock_path.is_symlink():
+                    _audit_egress_permission_warning(
+                        "symlink_detected",
+                        str(sock_path),
+                        f"Symlink detected at socket path, possible attack: {sock_path}"
+                    )
+                    try:
+                        sock_path.unlink()
+                    except Exception as e:
+                        return False, f"Failed to remove symlink at socket path: {e}", None
+
                 # 既存ソケットを削除
                 if sock_path.exists():
                     try:
@@ -683,6 +695,9 @@ class UDSSocketManager:
                     sock_path.parent.mkdir(parents=True, exist_ok=True)
                 except Exception as e:
                     return False, f"Failed to create socket directory: {e}", None
+
+                # ディレクトリパーミッション強化
+                _apply_egress_dir_permissions(sock_path.parent)
 
                 self._active_sockets[pack_id] = sock_path
                 return True, "", sock_path
