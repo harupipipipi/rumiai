@@ -32,7 +32,7 @@ def _check_permissive_production_guard():
     自動化を妨げないため確認プロンプトは入れない。
     """
     import os
-    if os.environ.get("RUMI_ENVIRONMENT") == "production":
+    if os.environ.get("RUMI_ENVIRONMENT", "").lower() == "production":
         print(
             "FATAL: --permissive flag is not allowed when "
             "RUMI_ENVIRONMENT=production.",
@@ -86,10 +86,6 @@ def main():
         # VULN-C01: production 環境では --permissive を拒否
         _check_permissive_production_guard()
 
-        # W19-B: production 環境では --permissive を拒否
-        if os.environ.get("RUMI_ENVIRONMENT", "").lower() == "production":
-            print("FATAL: --permissive cannot be used in production environment.", file=sys.stderr)
-            sys.exit(1)
         os.environ["RUMI_SECURITY_MODE"] = "permissive"
         print("=" * 60)
         print("WARNING: Running in permissive mode. Sandbox is disabled.")
