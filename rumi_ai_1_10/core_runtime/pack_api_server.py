@@ -315,6 +315,25 @@ class PackAPIHandler(
                 result = self._secrets_list()
                 self._send_result(result)
 
+            # --- W19-B: Secret Grant GET endpoints ---
+            elif path == "/api/secrets/grants":
+                result = self._secrets_grants_list()
+                self._send_result(result)
+
+            elif path.startswith("/api/secrets/grants/"):
+                # GET /api/secrets/grants/{pack_id}
+                parts = path.strip("/").split("/")
+                # parts: ["api", "secrets", "grants", "{pack_id}"]
+                if len(parts) == 4:
+                    pack_id = unquote(parts[3])
+                    if not self._validate_pack_id(pack_id):
+                        self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
+                        return
+                    result = self._secrets_grants_get_pack(pack_id)
+                    self._send_result(result)
+                else:
+                    self._send_response(APIResponse(False, error="Not found"), 404)
+
             elif path == "/api/stores":
                 result = self._stores_list()
                 self._send_result(result)
@@ -494,6 +513,26 @@ class PackAPIHandler(
                     self._send_response(APIResponse(True, result))
                 else:
                     self._send_response(APIResponse(False, error=result.get("error")), result.get("status_code", 400))
+
+            # --- W19-B: Secret Grant POST endpoint ---
+            elif path.startswith("/api/secrets/grants/"):
+                # POST /api/secrets/grants/{pack_id}
+                parts = path.strip("/").split("/")
+                # parts: ["api", "secrets", "grants", "{pack_id}"]
+                if len(parts) == 4:
+                    pack_id = unquote(parts[3])
+                    if not self._validate_pack_id(pack_id):
+                        self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
+                        return
+                    # pack_id を body に注入して既存ハンドラを呼び出す
+                    body["pack_id"] = pack_id
+                    result = self._secrets_grant(body)
+                    if result.get("success"):
+                        self._send_response(APIResponse(True, result))
+                    else:
+                        self._send_response(APIResponse(False, error=result.get("error")), result.get("status_code", 400))
+                else:
+                    self._send_response(APIResponse(False, error="Not found"), 404)
 
             elif path == "/api/stores/create":
                 result = self._stores_create(body)
@@ -789,7 +828,30 @@ class PackAPIHandler(
         path = urlparse(self.path).path
         
         try:
-            if path.startswith("/api/containers/"):
+            # --- W19-B: Secret Grant DELETE endpoints ---
+            if path.startswith("/api/secrets/grants/"):
+                parts = path.strip("/").split("/")
+                # DELETE /api/secrets/grants/{pack_id}/{secret_key} (5 parts)
+                if len(parts) == 5:
+                    pack_id = unquote(parts[3])
+                    secret_key = unquote(parts[4])
+                    if not self._validate_pack_id(pack_id):
+                        self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
+                        return
+                    result = self._secrets_grants_delete_key(pack_id, secret_key)
+                    self._send_result(result)
+                # DELETE /api/secrets/grants/{pack_id} (4 parts)
+                elif len(parts) == 4:
+                    pack_id = unquote(parts[3])
+                    if not self._validate_pack_id(pack_id):
+                        self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
+                        return
+                    result = self._secrets_grants_delete_pack(pack_id)
+                    self._send_result(result)
+                else:
+                    self._send_response(APIResponse(False, error="Not found"), 404)
+
+            elif path.startswith("/api/containers/"):
                 pack_id = path.split("/")[3]
                 if not self._validate_pack_id(pack_id):
                     self._send_response(APIResponse(False, error="Invalid pack_id"), 400)

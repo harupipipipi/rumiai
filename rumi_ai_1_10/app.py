@@ -7,6 +7,10 @@ Flask/dotenv等の特定フレームワークには依存しない。
 
 HTTPサーバーが必要な場合:
   Packが io.http.server をInterfaceRegistryに登録する。
+
+Wave 19-A 変更:
+  VULN-C01: production 環境での --permissive 起動を拒否
+  host_execution ガード: 未承認 Pack の起動時拒否
 """
 
 import sys
@@ -20,6 +24,26 @@ _kernel = None
 # Fallback L() — overwritten if core_runtime.lang loads successfully
 def L(key, **kwargs):
     return key
+
+
+def _check_permissive_production_guard():
+    """
+    VULN-C01: production 環境で --permissive フラグが使用された場合に起動を拒否する。
+    自動化を妨げないため確認プロンプトは入れない。
+    """
+    import os
+    if os.environ.get("RUMI_ENVIRONMENT") == "production":
+        print(
+            "FATAL: --permissive flag is not allowed when "
+            "RUMI_ENVIRONMENT=production.",
+            file=sys.stderr,
+        )
+        print(
+            "Remove --permissive or set RUMI_ENVIRONMENT to a "
+            "non-production value.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 def main():
@@ -59,6 +83,13 @@ def main():
 
     # セキュリティモード設定 — デフォルトは strict（secure）
     if args.permissive:
+        # VULN-C01: production 環境では --permissive を拒否
+        _check_permissive_production_guard()
+
+        # W19-B: production 環境では --permissive を拒否
+        if os.environ.get("RUMI_ENVIRONMENT", "").lower() == "production":
+            print("FATAL: --permissive cannot be used in production environment.", file=sys.stderr)
+            sys.exit(1)
         os.environ["RUMI_SECURITY_MODE"] = "permissive"
         print("=" * 60)
         print("WARNING: Running in permissive mode. Sandbox is disabled.")
@@ -68,6 +99,16 @@ def main():
     else:
         # 明示的に strict を設定（外部環境変数による意図しない permissive 化を防止）
         os.environ.setdefault("RUMI_SECURITY_MODE", "strict")
+
+    # --- host_execution ガード (W19-A) ---
+    try:
+        from core_runtime.pack_validator import validate_host_execution
+        validate_host_execution()
+    except SystemExit:
+        raise
+    except Exception:
+        # Pack 探索に失敗してもメイン起動は妨げない（ecosystem 未構築時など）
+        pass
 
     try:
         from core_runtime import Kernel

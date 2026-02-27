@@ -18,6 +18,10 @@ Agent 7-F 変更:
 Wave 17-B 変更:
   デフォルトモードを環境変数 RUMI_PERMISSION_MODE から取得
   permissive モード時に WARNING ログを出力
+
+Wave 19-A 変更:
+  VULN-C05: RUMI_SECURITY_MODE=strict 時に RUMI_PERMISSION_MODE のデフォルトを secure に連動
+  明示的 RUMI_PERMISSION_MODE=permissive + RUMI_SECURITY_MODE=strict で WARNING ログ出力
 """
 
 
@@ -86,10 +90,29 @@ class PermissionManager:
         """
         Args:
             mode: "permissive" (自動許可) or "secure" (明示的許可必要).
-                  None の場合は環境変数 RUMI_PERMISSION_MODE から取得（デフォルト: permissive）
+                  None の場合は RUMI_SECURITY_MODE と RUMI_PERMISSION_MODE から決定。
+                  RUMI_SECURITY_MODE=strict (デフォルト) かつ RUMI_PERMISSION_MODE 未設定
+                  → secure。RUMI_SECURITY_MODE=permissive → permissive。
+                  RUMI_PERMISSION_MODE が明示設定されていればそちらを優先するが、
+                  strict + permissive の組み合わせでは WARNING を出力する。
+
+        Wave 19-A 変更:
+          RUMI_SECURITY_MODE との連動デフォルトを導入
         """
         if mode is None:
-            mode = os.environ.get("RUMI_PERMISSION_MODE", "permissive")
+            security_mode = os.environ.get("RUMI_SECURITY_MODE", "strict")
+            explicit_perm = os.environ.get("RUMI_PERMISSION_MODE")
+            if explicit_perm is not None:
+                mode = explicit_perm
+                if security_mode == "strict" and mode == "permissive":
+                    logger.warning(
+                        "RUMI_SECURITY_MODE=strict but RUMI_PERMISSION_MODE=permissive "
+                        "is explicitly set. Respecting explicit setting, but this "
+                        "combination is not recommended for production use."
+                    )
+            else:
+                # 連動デフォルト: strict → secure, それ以外 → permissive
+                mode = "secure" if security_mode == "strict" else "permissive"
         if mode == "permissive":
             logger.warning(
                 "PermissionManager running in PERMISSIVE mode. "

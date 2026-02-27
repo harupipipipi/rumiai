@@ -6,13 +6,16 @@ standalone 実行用のバリデーション。
 - pack_id とディレクトリ名の不一致チェック
 - ${ctx.*} 変数参照が connectivity 先に含まれるか簡易チェック
 - W18-B: required_secrets, required_network, host_execution バリデーション
+- W19-A: validate_host_execution() — host_execution: true Pack の起動時拒否ガード
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
@@ -94,6 +97,73 @@ def validate_packs(ecosystem_dir: Optional[str] = None) -> ValidationReport:
     )
 
     return report
+
+
+def validate_host_execution(ecosystem_dir: Optional[str] = None) -> List[str]:
+    """
+    W19-A: host_execution: true の Pack を検出し、未承認なら起動を拒否する。
+
+    - host_execution: true の Pack が1つ以上ある場合、WARNING を出力
+    - RUMI_ALLOW_HOST_EXECUTION 環境変数が "true" でなければ sys.exit(1) で終了
+    - RUMI_ALLOW_HOST_EXECUTION=true の場合は WARNING を出力して続行
+
+    Args:
+        ecosystem_dir: エコシステムルート。None なら paths.ECOSYSTEM_DIR を使用。
+
+    Returns:
+        host_execution: true の Pack ID リスト
+
+    Raises:
+        SystemExit: RUMI_ALLOW_HOST_EXECUTION 未設定/非 "true" で
+                    host_execution: true の Pack が存在する場合
+    """
+    # --- Pack 一覧を取得 ---
+    try:
+        locations = discover_pack_locations(ecosystem_dir)
+    except Exception as exc:
+        logger.warning("Failed to discover packs for host_execution check: %s", exc)
+        return []
+
+    host_exec_packs: List[str] = []
+
+    for loc in locations:
+        try:
+            with open(loc.ecosystem_json_path, "r", encoding="utf-8") as f:
+                eco_data = json.load(f)
+        except Exception:
+            continue
+
+        if not isinstance(eco_data, dict):
+            continue
+
+        if eco_data.get("host_execution") is True:
+            host_exec_packs.append(loc.pack_id)
+
+    if not host_exec_packs:
+        return []
+
+    # host_execution: true の Pack が検出された
+    pack_list_str = ", ".join(sorted(host_exec_packs))
+    print(
+        f"WARNING: The following Packs request host_execution: {pack_list_str}",
+        file=sys.stderr,
+    )
+
+    allow_flag = os.environ.get("RUMI_ALLOW_HOST_EXECUTION", "").lower()
+    if allow_flag == "true":
+        print(
+            "WARNING: RUMI_ALLOW_HOST_EXECUTION=true is set. "
+            "Allowing host_execution Packs to run.",
+            file=sys.stderr,
+        )
+        return host_exec_packs
+
+    print(
+        "FATAL: Packs with host_execution: true require explicit approval. "
+        "Set RUMI_ALLOW_HOST_EXECUTION=true to allow.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 
 
 # ======================================================================

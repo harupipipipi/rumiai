@@ -9,6 +9,10 @@ Flow実行、modifier適用、python_file_call、権限操作などの
 - 拒否理由を明確に記録
 - JSON Lines形式で永続化
 - ローテーション対応
+
+Wave 19-A 変更:
+  VULN-H05: to_json() で ensure_ascii=True を設定し、
+  非ASCII文字によるログインジェクション・文字化けを防止
 """
 
 from __future__ import annotations
@@ -68,8 +72,8 @@ class AuditEntry:
         return {k: v for k, v in d.items() if v is not None}
     
     def to_json(self) -> str:
-        """JSON文字列に変換"""
-        return json.dumps(self.to_dict(), ensure_ascii=False)
+        """JSON文字列に変換 (VULN-H05: ensure_ascii=True)"""
+        return json.dumps(self.to_dict(), ensure_ascii=True)
 
 
 class AuditLogger:
