@@ -21,6 +21,12 @@ journal: user_data/secrets/journal.jsonl (値/長さ/ハッシュは入れない
   - "true": 常に平文を許可（マイグレーション中の一時使用）
   - "false": 常に平文を禁止
 - マイグレーション完了マーカー: user_data/secrets/.migration_complete
+
+セキュリティモード:
+- 環境変数 RUMI_SECURITY_MODE (デフォルト "strict")
+  - "strict": auto モードでもマーカーに関係なく平文フォールバックを禁止
+  - "permissive": 従来のマーカーベースの判定を使用
+- 平文フォールバック発生時に severity=critical の監査ログを記録
 """
 
 from __future__ import annotations
@@ -391,6 +397,10 @@ class SecretsStore:
             return False
 
         # policy == "auto"
+        security_mode = os.environ.get("RUMI_SECURITY_MODE", "strict").lower()
+        if security_mode == "strict":
+            return False  # strict モードでは auto でも平文禁止
+        # permissive: マーカーベースの従来判定
         # マーカーが存在する → 全暗号化済み → 平文禁止
         # マーカーが存在しない → まだ未暗号化シークレットあり → 平文許可
         return not self._has_migration_marker()
@@ -547,6 +557,12 @@ class SecretsStore:
 
                 # 平文データの自動マイグレーション
                 if not _crypto.is_encrypted(raw_value):
+                    # CRITICAL 監査ログ: 平文フォールバックが発生
+                    self._audit("plaintext_fallback", True, {
+                        "key": key,
+                        "severity": "critical",
+                        "message": "Plaintext fallback used for secret read. Migration required.",
+                    })
                     self._migrate_to_encrypted(key, data, plaintext)
 
                 return plaintext
