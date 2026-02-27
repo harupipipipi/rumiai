@@ -121,3 +121,36 @@ class TestStopContainerAutoCleanup:
         assert calls[0][1]["timeout"] == 30
         # docker rm: timeout=10
         assert calls[1][1]["timeout"] == 10
+
+
+    @patch("core_runtime.container_orchestrator.subprocess.run")
+    def test_stop_success_rm_timeout_expired(self, mock_run):
+        """docker stop 成功 + docker rm が TimeoutExpired → success=True + _containers.pop"""
+        def side_effect(*args, **kwargs):
+            if args[0][1] == "stop":
+                return MagicMock(returncode=0)
+            raise subprocess.TimeoutExpired(cmd=["docker", "rm"], timeout=10)
+        mock_run.side_effect = side_effect
+
+        orch = ContainerOrchestrator()
+        orch._containers["abc123"] = "container_id_xyz"
+        result = orch.stop_container("abc123")
+
+        assert result.success is True
+        assert "abc123" not in orch._containers
+
+    @patch("core_runtime.container_orchestrator.subprocess.run")
+    def test_stop_success_rm_generic_exception(self, mock_run):
+        """docker stop 成功 + docker rm が Exception → success=True + _containers.pop"""
+        def side_effect(*args, **kwargs):
+            if args[0][1] == "stop":
+                return MagicMock(returncode=0)
+            raise OSError("docker rm failed unexpectedly")
+        mock_run.side_effect = side_effect
+
+        orch = ContainerOrchestrator()
+        orch._containers["abc123"] = "container_id_xyz"
+        result = orch.stop_container("abc123")
+
+        assert result.success is True
+        assert "abc123" not in orch._containers

@@ -161,11 +161,14 @@ class ContainerOrchestrator:
                 timeout=30
             )
             # 停止後にコンテナを削除（データ残存防止）
-            subprocess.run(
-                ["docker", "rm", container_name],
-                capture_output=True,
-                timeout=10
-            )
+            try:
+                subprocess.run(
+                    ["docker", "rm", container_name],
+                    capture_output=True,
+                    timeout=10
+                )
+            except Exception:
+                logger.warning("docker rm failed for %s, ignoring", container_name)
             
             with self._lock:
                 self._containers.pop(pack_id, None)
