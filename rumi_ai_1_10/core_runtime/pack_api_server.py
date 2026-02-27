@@ -366,6 +366,22 @@ class PackAPIHandler(
                 result = self._secrets_grants_get(pack_id)
                 self._send_result(result)
 
+            elif path == "/api/secrets/grants":
+                result = self._secrets_grants_list()
+                self._send_result(result)
+
+            elif path.startswith("/api/secrets/grants/"):
+                parts = path.strip("/").split("/")
+                if len(parts) != 4:
+                    self._send_response(APIResponse(False, error="Not found"), 404)
+                    return
+                pack_id = parts[3]
+                if not self._validate_pack_id(pack_id):
+                    self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
+                    return
+                result = self._secrets_grants_get(pack_id)
+                self._send_result(result)
+
             elif path == "/api/stores":
                 result = self._stores_list()
                 self._send_result(result)
@@ -565,6 +581,21 @@ class PackAPIHandler(
                         self._send_response(APIResponse(False, error=result.get("error")), result.get("status_code", 400))
                 else:
                     self._send_response(APIResponse(False, error="Not found"), 404)
+
+            elif path.startswith("/api/secrets/grants/"):
+                parts = path.strip("/").split("/")
+                if len(parts) != 4:
+                    self._send_response(APIResponse(False, error="Not found"), 404)
+                    return
+                pack_id = parts[3]
+                if not self._validate_pack_id(pack_id):
+                    self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
+                    return
+                result = self._secrets_grants_grant(pack_id, body)
+                if result.get("success"):
+                    self._send_response(APIResponse(True, result))
+                else:
+                    self._send_response(APIResponse(False, error=result.get("error")), result.get("status_code", 400))
 
             elif path.startswith("/api/secrets/grants/"):
                 parts = path.strip("/").split("/")
@@ -921,6 +952,26 @@ class PackAPIHandler(
                 result = self._remove_container(pack_id)
                 self._send_result(result)
             
+            elif path.startswith("/api/secrets/grants/"):
+                parts = path.strip("/").split("/")
+                if len(parts) == 4:
+                    pack_id = parts[3]
+                    if not self._validate_pack_id(pack_id):
+                        self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
+                        return
+                    result = self._secrets_grants_delete(pack_id)
+                    self._send_result(result)
+                elif len(parts) == 5:
+                    pack_id = parts[3]
+                    secret_key = parts[4]
+                    if not self._validate_pack_id(pack_id):
+                        self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
+                        return
+                    result = self._secrets_grants_delete_key(pack_id, secret_key)
+                    self._send_result(result)
+                else:
+                    self._send_response(APIResponse(False, error="Not found"), 404)
+
             elif path.startswith("/api/secrets/grants/"):
                 parts = path.strip("/").split("/")
                 if len(parts) == 4:

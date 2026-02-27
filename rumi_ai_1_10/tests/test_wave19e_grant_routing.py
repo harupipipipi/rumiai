@@ -1,49 +1,89 @@
 """
 W19-E: Secret Grant ルーティング接続テスト
 
-Part A — pack_api_server.py のソースコードを読み、
-         do_GET / do_POST / do_DELETE に Grant ルーティングが
-         正しく挿入されていることを静的に検証する。
-Part B — SecretsHandlersMixin の新メソッドを StubHandler 経由で
-         直接呼び出し、MockGrantManager で結果を検証する。
+Part A — pack_api_server.py のソースを静的解析し、
+         do_GET / do_POST / do_DELETE に Grant ルーティングが存在することを検証。
+Part B — SecretsHandlersMixin の新メソッドを StubHandler 経由で呼び出し、
+         MockGrantManager で結果を検証。
+
+Note: core_runtime.paths に BASE_DIR が未定義のため、paths.py を
+      経由するインポートチェーンを事前にダミー登録で迂回する。
 """
 from __future__ import annotations
 
 import re
-import textwrap
+import sys
+import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-# ---------------------------------------------------------------------------
-# pack_api_server.py のソースを読み込む (静的検証用)
-# ---------------------------------------------------------------------------
-_SERVER_PY = (
-    Path(__file__).resolve().parent.parent
-    / "core_runtime"
-    / "pack_api_server.py"
+# ======================================================================
+# paths.py / security 系インポートチェーンの迂回
+#
+# core_runtime.api.__init__ → .security → capability_installer_handlers
+# → ...paths (BASE_DIR 未定義で NameError)
+# この問題を回避するため paths をダミーモジュールで先行登録する。
+# ======================================================================
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent  # rumi_ai_1_10/
+_CR_DIR = str(_PROJECT_ROOT / "core_runtime")
+
+# --- core_runtime.paths ダミー ---
+_dummy_paths = types.ModuleType("core_runtime.paths")
+_dummy_paths.__file__ = _CR_DIR + "/paths.py"
+_dummy_paths.BASE_DIR = _PROJECT_ROOT
+_dummy_paths.ECOSYSTEM_DIR = str(_PROJECT_ROOT / "ecosystem")
+_dummy_paths.OFFICIAL_FLOWS_DIR = str(_PROJECT_ROOT / "flows")
+_dummy_paths.USER_SHARED_DIR = str(_PROJECT_ROOT / "user_data" / "shared")
+_dummy_paths.USER_SHARED_FLOWS_DIR = str(_PROJECT_ROOT / "user_data" / "shared" / "flows")
+_dummy_paths.USER_SHARED_MODIFIERS_DIR = str(
+    _PROJECT_ROOT / "user_data" / "shared" / "flows" / "modifiers"
 )
+_dummy_paths.LOCAL_PACK_ID = "local_pack"
+_dummy_paths.LOCAL_PACK_DIR = str(_PROJECT_ROOT / "ecosystem" / "flows")
+_dummy_paths.LOCAL_PACK_MODIFIERS_DIR = str(
+    _PROJECT_ROOT / "ecosystem" / "flows" / "modifiers"
+)
+_dummy_paths.GRANTS_DIR = str(_PROJECT_ROOT / "user_data" / "permissions")
+_dummy_paths.PACK_DATA_BASE_DIR = str(_PROJECT_ROOT / "user_data" / "packs")
+_dummy_paths.EXCLUDED_DIRS = frozenset()
+_dummy_paths.LEGACY_PACKS_SUBDIR = "packs"
+_dummy_paths.is_path_within = lambda target, boundary: True
+_dummy_paths.discover_pack_locations = lambda *a, **kw: []
+_dummy_paths.find_ecosystem_json = lambda *a, **kw: (None, None)
+_dummy_paths.get_pack_flow_dirs = lambda *a, **kw: []
+_dummy_paths.get_pack_modifier_dirs = lambda *a, **kw: []
+_dummy_paths.get_pack_block_dirs = lambda *a, **kw: []
+_dummy_paths.get_pack_lib_dirs = lambda *a, **kw: []
+_dummy_paths.get_shared_flow_dir = lambda: Path(".")
+_dummy_paths.get_shared_modifier_dir = lambda: Path(".")
+_dummy_paths.check_pack_id_mismatch = lambda *a, **kw: None
+sys.modules["core_runtime.paths"] = _dummy_paths
+
+# ======================================================================
+# pack_api_server.py のソースを読み込む (静的検証用)
+# ======================================================================
+_SERVER_PY = _PROJECT_ROOT / "core_runtime" / "pack_api_server.py"
 _SERVER_SRC = _SERVER_PY.read_text(encoding="utf-8")
 
 
-# ---------------------------------------------------------------------------
+# ======================================================================
 # validation.py から validate_pack_id を直接インポート
-# (paths.py を経由しないので安全)
-# ---------------------------------------------------------------------------
+# ======================================================================
 from core_runtime.validation import validate_pack_id
 
 
-# ---------------------------------------------------------------------------
-# SecretsHandlersMixin を直接インポート
-# (store パッケージは paths.py に依存しない)
-# ---------------------------------------------------------------------------
+# ======================================================================
+# SecretsHandlersMixin をインポート
+# (paths.py はダミー登録済みなので api/__init__.py が通る)
+# ======================================================================
 from core_runtime.api.store.secrets_handlers import SecretsHandlersMixin
 
 
-# ---------------------------------------------------------------------------
-# Mock SecretGrant
-# ---------------------------------------------------------------------------
+# ======================================================================
+# Mock SecretGrant / MockGrantManager
+# ======================================================================
 class MockSecretGrant:
     def __init__(self, pack_id, granted_keys):
         self.pack_id = pack_id
@@ -59,9 +99,6 @@ class MockSecretGrant:
         }
 
 
-# ---------------------------------------------------------------------------
-# Mock SecretsGrantManager
-# ---------------------------------------------------------------------------
 class MockGrantManager:
     def __init__(self):
         self._grants: dict[str, MockSecretGrant] = {}
@@ -95,169 +132,128 @@ class MockGrantManager:
 _mock_mgr = MockGrantManager()
 
 
-# ---------------------------------------------------------------------------
-# StubHandler (test_flow_handlers.py と同じパターン)
-# ---------------------------------------------------------------------------
+# ======================================================================
+# StubHandler
+# ======================================================================
 class StubHandler(SecretsHandlersMixin):
-    """SecretsHandlersMixin を利用するための最小スタブ"""
     pass
 
 
-_PATCH_TARGET = (
-    "core_runtime.api.store.secrets_handlers._w19e_get_secrets_grant_manager"
-)
+_PATCH = "core_runtime.api.store.secrets_handlers._w19e_get_secrets_grant_manager"
 
 
 # ======================================================================
 # Part A: ルーティング静的検証 (5 件)
 # ======================================================================
-
 class TestRoutingPatterns:
-    """pack_api_server.py に正しいルーティングが挿入されていることを確認"""
+    """pack_api_server.py に正しいルーティングが存在する"""
 
-    def _in_method(self, method_name: str) -> str:
-        """do_GET / do_POST / do_DELETE のメソッド本文を抽出"""
-        pattern = rf"(    def {method_name}\(self\).*?)(?=\n    def |\nclass |\Z)"
-        m = re.search(pattern, _SERVER_SRC, re.DOTALL)
-        assert m, f"{method_name} not found in pack_api_server.py"
+    def _method_body(self, name: str) -> str:
+        pat = rf"(    def {name}\(self\).*?)(?=\n    def |\nclass |\Z)"
+        m = re.search(pat, _SERVER_SRC, re.DOTALL)
+        assert m, f"{name} not found"
         return m.group(1)
 
-    def test_do_get_has_grants_list_route(self):
-        """do_GET に /api/secrets/grants 完全一致ルートがある"""
-        body = self._in_method("do_GET")
+    def test_get_grants_list_route(self):
+        body = self._method_body("do_GET")
         assert 'path == "/api/secrets/grants"' in body
 
-    def test_do_get_has_grants_pack_route(self):
-        """do_GET に /api/secrets/grants/ prefix ルートがある"""
-        body = self._in_method("do_GET")
+    def test_get_grants_pack_route(self):
+        body = self._method_body("do_GET")
         assert 'path.startswith("/api/secrets/grants/")' in body
 
-    def test_do_post_has_grants_route(self):
-        """do_POST に /api/secrets/grants/ prefix ルートがある"""
-        body = self._in_method("do_POST")
+    def test_post_grants_route(self):
+        body = self._method_body("do_POST")
         assert 'path.startswith("/api/secrets/grants/")' in body
 
-    def test_do_delete_has_grants_route(self):
-        """do_DELETE に /api/secrets/grants/ prefix ルートがある"""
-        body = self._in_method("do_DELETE")
+    def test_delete_grants_route(self):
+        body = self._method_body("do_DELETE")
         assert 'path.startswith("/api/secrets/grants/")' in body
 
-    def test_do_delete_handles_key_deletion(self):
-        """do_DELETE に parts==5 (キー個別削除) ブランチがある"""
-        body = self._in_method("do_DELETE")
+    def test_delete_key_branch(self):
+        body = self._method_body("do_DELETE")
         assert "_secrets_grants_delete_key" in body
 
 
 # ======================================================================
 # Part B: ハンドラメソッド動的テスト (11 件)
 # ======================================================================
-
-class TestSecretsGrantsList:
-    """_secrets_grants_list"""
-
-    @patch(_PATCH_TARGET, return_value=_mock_mgr)
-    def test_list_returns_grants(self, _m):
+class TestGrantsList:
+    @patch(_PATCH, return_value=_mock_mgr)
+    def test_returns_grants(self, _m):
         _mock_mgr._grants["p1"] = MockSecretGrant("p1", ["K1"])
-        handler = StubHandler()
-        result = handler._secrets_grants_list()
-        assert "grants" in result
-        assert result["count"] >= 1
+        r = StubHandler()._secrets_grants_list()
+        assert "grants" in r and r["count"] >= 1
         _mock_mgr._grants.clear()
 
 
-class TestSecretsGrantsGet:
-    """_secrets_grants_get"""
-
-    @patch(_PATCH_TARGET, return_value=_mock_mgr)
-    def test_existing_pack(self, _m):
+class TestGrantsGet:
+    @patch(_PATCH, return_value=_mock_mgr)
+    def test_existing(self, _m):
         _mock_mgr._grants["tp"] = MockSecretGrant("tp", ["K1", "K2"])
-        handler = StubHandler()
-        result = handler._secrets_grants_get("tp")
-        assert result["pack_id"] == "tp"
-        assert "K1" in result["granted_keys"]
+        r = StubHandler()._secrets_grants_get("tp")
+        assert r["pack_id"] == "tp" and "K1" in r["granted_keys"]
         _mock_mgr._grants.clear()
 
-    @patch(_PATCH_TARGET, return_value=_mock_mgr)
-    def test_nonexistent_pack_returns_empty(self, _m):
+    @patch(_PATCH, return_value=_mock_mgr)
+    def test_nonexistent_empty(self, _m):
         _mock_mgr._grants.clear()
-        handler = StubHandler()
-        result = handler._secrets_grants_get("ghost")
-        assert result["granted_keys"] == []
+        r = StubHandler()._secrets_grants_get("ghost")
+        assert r["granted_keys"] == []
 
 
-class TestSecretsGrantsGrant:
-    """_secrets_grants_grant"""
-
-    @patch(_PATCH_TARGET, return_value=_mock_mgr)
-    def test_normal_grant(self, _m):
-        handler = StubHandler()
-        result = handler._secrets_grants_grant("mp", {"secret_keys": ["API_KEY"]})
-        assert result["success"] is True
-        assert "API_KEY" in result["granted_keys"]
+class TestGrantsGrant:
+    @patch(_PATCH, return_value=_mock_mgr)
+    def test_normal(self, _m):
+        r = StubHandler()._secrets_grants_grant("mp", {"secret_keys": ["API_KEY"]})
+        assert r["success"] and "API_KEY" in r["granted_keys"]
         _mock_mgr._grants.clear()
 
-    @patch(_PATCH_TARGET, return_value=_mock_mgr)
-    def test_empty_keys_returns_400(self, _m):
-        handler = StubHandler()
-        result = handler._secrets_grants_grant("mp", {"secret_keys": []})
-        assert result["success"] is False
-        assert result["status_code"] == 400
+    @patch(_PATCH, return_value=_mock_mgr)
+    def test_empty_keys_400(self, _m):
+        r = StubHandler()._secrets_grants_grant("mp", {"secret_keys": []})
+        assert not r["success"] and r["status_code"] == 400
 
-    @patch(_PATCH_TARGET, return_value=_mock_mgr)
-    def test_missing_keys_returns_400(self, _m):
-        handler = StubHandler()
-        result = handler._secrets_grants_grant("mp", {})
-        assert result["success"] is False
-        assert result["status_code"] == 400
+    @patch(_PATCH, return_value=_mock_mgr)
+    def test_missing_keys_400(self, _m):
+        r = StubHandler()._secrets_grants_grant("mp", {})
+        assert not r["success"] and r["status_code"] == 400
 
-    @patch(_PATCH_TARGET, return_value=_mock_mgr)
-    def test_invalid_key_format_returns_400(self, _m):
-        handler = StubHandler()
-        result = handler._secrets_grants_grant("mp", {"secret_keys": ["bad-key!"]})
-        assert result["success"] is False
-        assert result["status_code"] == 400
+    @patch(_PATCH, return_value=_mock_mgr)
+    def test_invalid_format_400(self, _m):
+        r = StubHandler()._secrets_grants_grant("mp", {"secret_keys": ["bad-key!"]})
+        assert not r["success"] and r["status_code"] == 400
 
 
-class TestSecretsGrantsDelete:
-    """_secrets_grants_delete"""
+class TestGrantsDelete:
+    @patch(_PATCH, return_value=_mock_mgr)
+    def test_existing(self, _m):
+        _mock_mgr._grants["d1"] = MockSecretGrant("d1", ["K"])
+        r = StubHandler()._secrets_grants_delete("d1")
+        assert r["success"]
 
-    @patch(_PATCH_TARGET, return_value=_mock_mgr)
-    def test_delete_existing(self, _m):
-        _mock_mgr._grants["del1"] = MockSecretGrant("del1", ["K"])
-        handler = StubHandler()
-        result = handler._secrets_grants_delete("del1")
-        assert result["success"] is True
-
-    @patch(_PATCH_TARGET, return_value=_mock_mgr)
-    def test_delete_nonexistent_returns_404(self, _m):
+    @patch(_PATCH, return_value=_mock_mgr)
+    def test_nonexistent_404(self, _m):
         _mock_mgr._grants.clear()
-        handler = StubHandler()
-        result = handler._secrets_grants_delete("nope")
-        assert result["success"] is False
-        assert result["status_code"] == 404
+        r = StubHandler()._secrets_grants_delete("nope")
+        assert not r["success"] and r["status_code"] == 404
 
 
-class TestSecretsGrantsDeleteKey:
-    """_secrets_grants_delete_key"""
-
-    @patch(_PATCH_TARGET, return_value=_mock_mgr)
-    def test_delete_specific_key(self, _m):
+class TestGrantsDeleteKey:
+    @patch(_PATCH, return_value=_mock_mgr)
+    def test_specific_key(self, _m):
         _mock_mgr._grants["kp"] = MockSecretGrant("kp", ["K1", "K2"])
-        handler = StubHandler()
-        result = handler._secrets_grants_delete_key("kp", "K1")
-        assert result["success"] is True
-        assert result["revoked_key"] == "K1"
+        r = StubHandler()._secrets_grants_delete_key("kp", "K1")
+        assert r["success"] and r["revoked_key"] == "K1"
         _mock_mgr._grants.clear()
 
 
 class TestPathTraversal:
-    """pack_id に ../ が含まれる場合 validate_pack_id が False"""
-
-    def test_traversal_rejected(self):
+    def test_dotdot_rejected(self):
         assert validate_pack_id("../etc") is False
 
-    def test_dot_dot_slash_rejected(self):
+    def test_encoded_rejected(self):
         assert validate_pack_id("..%2Ffoo") is False
 
-    def test_valid_id_accepted(self):
+    def test_valid_accepted(self):
         assert validate_pack_id("my-pack_01") is True
