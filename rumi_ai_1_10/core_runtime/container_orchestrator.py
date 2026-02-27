@@ -160,6 +160,12 @@ class ContainerOrchestrator:
                 capture_output=True,
                 timeout=30
             )
+            # 停止後にコンテナを削除（データ残存防止）
+            subprocess.run(
+                ["docker", "rm", container_name],
+                capture_output=True,
+                timeout=10
+            )
             
             with self._lock:
                 self._containers.pop(pack_id, None)
