@@ -13,6 +13,7 @@ permission_id → handler 定義のインデックスを構築する。
 from __future__ import annotations
 
 import hashlib
+import logging
 import json
 import threading
 from dataclasses import dataclass, field
@@ -63,6 +64,9 @@ class RegistryLoadResult:
     duplicates: List[Dict[str, Any]] = field(default_factory=list)
 
 
+logger = logging.getLogger(__name__)
+
+
 class CapabilityHandlerRegistry:
     """
     Capability ハンドラーレジストリ
@@ -84,6 +88,7 @@ class CapabilityHandlerRegistry:
         self._duplicates: List[Dict[str, Any]] = []
         self._loaded: bool = False
         self._builtin_handlers_dir: Optional[Path] = self._detect_builtin_dir()
+        self._core_pack_handler_dirs: list = self._detect_core_pack_handler_dirs()
     
     @staticmethod
     def _detect_builtin_dir() -> Optional[Path]:
@@ -96,6 +101,40 @@ class CapabilityHandlerRegistry:
         except Exception:
             pass
         return None
+
+    @staticmethod
+    def _detect_core_pack_handler_dirs() -> list:
+        """core_pack 内の capability_handlers ディレクトリを検出"""
+        try:
+            from core_runtime.paths import CORE_PACK_DIR
+        except ImportError:
+            logger.warning(
+                "core_runtime.paths.CORE_PACK_DIR not available; "
+                "skipping core_pack handler scan"
+            )
+            return []
+
+        core_pack_dir = Path(CORE_PACK_DIR)
+        if not core_pack_dir.is_dir():
+            logger.warning(
+                "CORE_PACK_DIR does not exist: %s; "
+                "skipping core_pack handler scan",
+                core_pack_dir,
+            )
+            return []
+
+        handler_dirs = []
+        try:
+            for pack_dir in sorted(core_pack_dir.iterdir()):
+                if not pack_dir.is_dir() or pack_dir.name.startswith("."):
+                    continue
+                cap_handlers_dir = pack_dir / "share" / "capability_handlers"
+                if cap_handlers_dir.is_dir():
+                    handler_dirs.append(cap_handlers_dir)
+        except OSError as e:
+            logger.warning("Error scanning CORE_PACK_DIR %s: %s", core_pack_dir, e)
+
+        return handler_dirs
 
     def _now_ts(self) -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -113,15 +152,19 @@ class CapabilityHandlerRegistry:
             self._duplicates.clear()
             self._loaded = False
             
-            if not self._handlers_dir.exists():
-                self._loaded = True
-                return RegistryLoadResult(success=True, handlers_loaded=0)
-            
             permission_candidates: Dict[str, List[HandlerDefinition]] = {}
 
             # built-in handlers
             if self._builtin_handlers_dir and self._builtin_handlers_dir.exists():
                 self._scan_directory(self._builtin_handlers_dir, permission_candidates, is_builtin=True)
+
+
+            # core_pack handlers
+            for cp_handler_dir in self._core_pack_handler_dirs:
+                try:
+                    self._scan_directory(cp_handler_dir, permission_candidates, is_builtin=True)
+                except Exception as e:
+                    logger.warning("Error scanning core_pack handler dir %s: %s", cp_handler_dir, e)
 
             # user handlers
             if self._handlers_dir.exists():
