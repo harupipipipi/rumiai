@@ -1,0 +1,55 @@
+{
+  "handler_id": "core.docker.exec",
+  "permission_id": "docker.exec",
+  "entrypoint": "handler.py:execute",
+  "description": "Execute a command inside a running Docker container. Packs request docker.exec via UDS; Rumi validates permissions and runs the command.",
+  "risk": "high",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "container_name": {
+        "type": "string",
+        "description": "Name or ID of the running container"
+      },
+      "command": {
+        "type": "string",
+        "description": "Command to execute inside the container"
+      },
+      "timeout": {
+        "type": "number",
+        "description": "Execution timeout in seconds. Optional.",
+        "default": 30
+      },
+      "working_dir": {
+        "type": "string",
+        "description": "Working directory inside the container. Optional."
+      }
+    },
+    "required": [
+      "container_name",
+      "command"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "required": [
+      "exit_code",
+      "stdout",
+      "stderr"
+    ],
+    "properties": {
+      "exit_code": {
+        "type": "integer",
+        "description": "Process exit code"
+      },
+      "stdout": {
+        "type": "string",
+        "description": "Standard output from the command"
+      },
+      "stderr": {
+        "type": "string",
+        "description": "Standard error from the command"
+      }
+    }
+  }
+}

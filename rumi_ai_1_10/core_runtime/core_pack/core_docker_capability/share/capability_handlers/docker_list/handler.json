@@ -1,0 +1,40 @@
+{
+  "handler_id": "core.docker.list",
+  "permission_id": "docker.list",
+  "entrypoint": "handler.py:execute",
+  "description": "List Docker containers. Packs request docker.list via UDS; Rumi validates permissions and returns the container list.",
+  "risk": "low",
+  "input_schema": {
+    "type": "object",
+    "properties": {}
+  },
+  "output_schema": {
+    "type": "object",
+    "required": [
+      "containers"
+    ],
+    "properties": {
+      "containers": {
+        "type": "array",
+        "description": "List of containers with their status information",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Container name"
+            },
+            "status": {
+              "type": "string",
+              "description": "Container status"
+            },
+            "image": {
+              "type": "string",
+              "description": "Image used by the container"
+            }
+          }
+        }
+      }
+    }
+  }
+}

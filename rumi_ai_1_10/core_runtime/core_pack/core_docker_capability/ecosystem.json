@@ -16,6 +16,26 @@
         "handler_id": "core.docker.run",
         "permission_id": "docker.run",
         "path": "share/capability_handlers/docker_run"
+      },
+      "docker_exec": {
+        "handler_id": "core.docker.exec",
+        "permission_id": "docker.exec",
+        "path": "share/capability_handlers/docker_exec"
+      },
+      "docker_stop": {
+        "handler_id": "core.docker.stop",
+        "permission_id": "docker.stop",
+        "path": "share/capability_handlers/docker_stop"
+      },
+      "docker_logs": {
+        "handler_id": "core.docker.logs",
+        "permission_id": "docker.logs",
+        "path": "share/capability_handlers/docker_logs"
+      },
+      "docker_list": {
+        "handler_id": "core.docker.list",
+        "permission_id": "docker.list",
+        "path": "share/capability_handlers/docker_list"
       }
     }
   },

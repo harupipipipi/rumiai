@@ -1,0 +1,41 @@
+{
+  "handler_id": "core.docker.stop",
+  "permission_id": "docker.stop",
+  "entrypoint": "handler.py:execute",
+  "description": "Stop a running Docker container. Packs request docker.stop via UDS; Rumi validates permissions and stops the container.",
+  "risk": "medium",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "container_name": {
+        "type": "string",
+        "description": "Name or ID of the container to stop"
+      },
+      "timeout": {
+        "type": "number",
+        "description": "Seconds to wait before forcefully killing the container. Optional.",
+        "default": 10
+      }
+    },
+    "required": [
+      "container_name"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "required": [
+      "stopped",
+      "container_name"
+    ],
+    "properties": {
+      "stopped": {
+        "type": "boolean",
+        "description": "Whether the container was successfully stopped"
+      },
+      "container_name": {
+        "type": "string",
+        "description": "Name of the stopped container"
+      }
+    }
+  }
+}

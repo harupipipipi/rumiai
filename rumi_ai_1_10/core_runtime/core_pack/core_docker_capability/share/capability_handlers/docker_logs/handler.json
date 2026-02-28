@@ -1,0 +1,45 @@
+{
+  "handler_id": "core.docker.logs",
+  "permission_id": "docker.logs",
+  "entrypoint": "handler.py:execute",
+  "description": "Retrieve logs from a Docker container. Packs request docker.logs via UDS; Rumi validates permissions and fetches the logs.",
+  "risk": "low",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "container_name": {
+        "type": "string",
+        "description": "Name or ID of the container to fetch logs from"
+      },
+      "tail": {
+        "type": "integer",
+        "description": "Number of lines from the end of the logs to return. Optional.",
+        "default": 100
+      },
+      "since": {
+        "type": "string",
+        "description": "Return logs since this timestamp (e.g. 2024-01-01T00:00:00). Optional."
+      }
+    },
+    "required": [
+      "container_name"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "required": [
+      "stdout",
+      "stderr"
+    ],
+    "properties": {
+      "stdout": {
+        "type": "string",
+        "description": "Standard output logs from the container"
+      },
+      "stderr": {
+        "type": "string",
+        "description": "Standard error logs from the container"
+      }
+    }
+  }
+}
