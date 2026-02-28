@@ -11,20 +11,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-
-# ---------------------------------------------------------------------------
-# テスト対象モジュールのインポートヘルパー
-# ---------------------------------------------------------------------------
-
-def _ensure_project_root_on_path():
-    """rumi_ai_1_10 をsys.pathに追加してインポート可能にする"""
-    project_root = Path(__file__).resolve().parent.parent
-    root_str = str(project_root)
-    if root_str not in sys.path:
-        sys.path.insert(0, root_str)
-
-
-_ensure_project_root_on_path()
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 # ---------------------------------------------------------------------------
@@ -74,7 +61,7 @@ class TestRegistryCorePack:
     """registry.py の core_pack 走査テスト"""
 
     def _make_registry(self, ecosystem_dir: Path):
-        """テスト用 Registry を生成（スキーマ検証等をモックで回避）"""
+        """テスト用 Registry を生成"""
         from backend_core.ecosystem.registry import Registry
         reg = Registry(ecosystem_dir=str(ecosystem_dir))
         return reg
@@ -123,8 +110,9 @@ class TestRegistryCorePack:
                         reg.load_all_packs()
 
         # core_alpha が normal_pack より前にロードされる
-        if "core_alpha" in load_order and "normal_pack" in load_order:
-            assert load_order.index("core_alpha") < load_order.index("normal_pack")
+        assert "core_alpha" in load_order
+        assert "normal_pack" in load_order
+        assert load_order.index("core_alpha") < load_order.index("normal_pack")
 
     def test_core_pack_dir_missing_no_error(self, tmp_path):
         """core_pack ディレクトリが存在しない場合エラーにならない"""
@@ -175,7 +163,7 @@ class TestRegistryCorePack:
                 with patch("backend_core.ecosystem.registry.generate_pack_uuid", return_value="fake-uuid"):
                     reg = self._make_registry(eco_dir)
                     reg.load_all_packs()
-                    # core_pack ディレクトリ由来が優先される
+                    # core_pack ディレクトリ由来が優先される（先にロード）
                     assert reg.packs["core_conflict"].path == core_pack
 
 
@@ -205,6 +193,11 @@ class TestApprovalManagerCorePack:
         """_is_core_pack() が core_ プレフィックスで True を返す"""
         mgr = self._make_manager(tmp_path)
         assert mgr._is_core_pack("core_alpha") is True
+
+    def test_is_core_pack_true_for_exact_prefix(self, tmp_path):
+        """_is_core_pack() が 'core_' ちょうどでも True を返す"""
+        mgr = self._make_manager(tmp_path)
+        assert mgr._is_core_pack("core_") is True
 
     def test_is_core_pack_false_for_normal(self, tmp_path):
         """_is_core_pack() が通常 pack_id で False を返す"""
@@ -252,3 +245,9 @@ class TestApprovalManagerCorePack:
         assert "core_magic" not in mgr._approvals
         # それでも承認済み
         assert mgr.is_pack_approved_and_verified("core_magic") == (True, None)
+
+    def test_core_pack_verify_hash_no_approval_record(self, tmp_path):
+        """core_pack は _approvals に登録しなくてもハッシュ検証 True"""
+        mgr = self._make_manager(tmp_path)
+        assert "core_data" not in mgr._approvals
+        assert mgr.verify_hash("core_data") is True
