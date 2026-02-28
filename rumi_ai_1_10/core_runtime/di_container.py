@@ -359,6 +359,11 @@ def _register_defaults(container: DIContainer) -> None:
         from .profiling import Profiler
         return Profiler()
 
+    # --- Wave 22: Docker capability ---
+    def _docker_capability_handler_factory() -> "DockerCapabilityHandler":  # noqa: F821
+        from .docker_capability import DockerCapabilityHandler
+        return DockerCapabilityHandler()
+
     # --- Register all (each name exactly once) ---
     container.register("audit_logger", _audit_logger_factory)
     container.register("hmac_key_manager", _hmac_key_manager_factory)
@@ -390,3 +395,4 @@ def _register_defaults(container: DIContainer) -> None:
     container.register("health_checker", _health_checker_factory)
     container.register("metrics_collector", _metrics_collector_factory)
     container.register("profiler", _profiler_factory)
+    container.register("docker_capability_handler", _docker_capability_handler_factory)
