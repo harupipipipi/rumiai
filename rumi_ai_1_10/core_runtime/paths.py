@@ -23,6 +23,8 @@ from typing import Dict, List, Optional, Tuple
 # 定数
 # ======================================================================
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+
 # Pack供給元のルートディレクトリ
 ECOSYSTEM_DIR = str(BASE_DIR / "ecosystem")
 
