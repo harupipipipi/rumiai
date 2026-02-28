@@ -41,6 +41,7 @@ from .paths import (
     LOCAL_PACK_DIR,
     ECOSYSTEM_DIR,
     GRANTS_DIR,
+    CORE_PACK_ID_PREFIX,
     discover_pack_locations,
     check_pack_id_mismatch,
     PackLocation,
@@ -133,6 +134,10 @@ class ApprovalManager:
     
     def _now_ts(self) -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    def _is_core_pack(self, pack_id: str) -> bool:
+        """core_pack かどうかを判定する（pack_id が CORE_PACK_ID_PREFIX で始まるか）"""
+        return pack_id.startswith(CORE_PACK_ID_PREFIX)
     
     def _invalidate_hash_cache(self, pack_id: str) -> None:
         """指定 pack のハッシュキャッシュを無効化する"""
@@ -360,6 +365,10 @@ class ApprovalManager:
     
     def get_status(self, pack_id: str) -> Optional[PackStatus]:
         """Pack状態を取得"""
+        # W22-A: core_pack は常時 APPROVED
+        if self._is_core_pack(pack_id):
+            return PackStatus.APPROVED
+
         with self._lock:
             approval = self._approvals.get(pack_id)
             return approval.status if approval else None
@@ -386,6 +395,10 @@ class ApprovalManager:
             - is_valid: True = 承認済み+ハッシュ一致
             - reason: 不合格の場合の理由
         """
+        # W22-A: core_pack は常時承認済み
+        if self._is_core_pack(pack_id):
+            return True, None
+
         with self._lock:
             approval = self._approvals.get(pack_id)
             
@@ -493,6 +506,10 @@ class ApprovalManager:
     
     def verify_hash(self, pack_id: str, use_cache: bool = True) -> bool:
         """Packのファイルハッシュを検証"""
+        # W22-A: core_pack はハッシュ検証不要
+        if self._is_core_pack(pack_id):
+            return True
+
         # ロック内でapprovalを取得
         with self._lock:
             approval = self._approvals.get(pack_id)

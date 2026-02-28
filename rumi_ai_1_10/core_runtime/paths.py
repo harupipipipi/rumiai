@@ -26,6 +26,13 @@ from typing import Dict, List, Optional, Tuple
 # Pack供給元のルートディレクトリ
 ECOSYSTEM_DIR = str(BASE_DIR / "ecosystem")
 
+# core_pack 配置ディレクトリ（Layer 1: OS カーネルモジュール相当）
+CORE_PACK_DIR = str(BASE_DIR / "core_runtime" / "core_pack")
+
+# core_pack の pack_id プレフィックス
+CORE_PACK_ID_PREFIX = "core_"
+
+
 # 互換: 旧 packs サブディレクトリ
 LEGACY_PACKS_SUBDIR = "packs"
 

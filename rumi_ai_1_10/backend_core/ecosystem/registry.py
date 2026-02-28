@@ -29,11 +29,16 @@ from .spec.schema.validator import (
 
 # paths.py を参照（core_runtime パッケージとして import できない場合のフォールバック付き）
 try:
-    from core_runtime.paths import ECOSYSTEM_DIR as _ECOSYSTEM_DIR, find_ecosystem_json as _find_ecosystem_json_paths
+    from core_runtime.paths import (
+        ECOSYSTEM_DIR as _ECOSYSTEM_DIR,
+        find_ecosystem_json as _find_ecosystem_json_paths,
+        CORE_PACK_DIR as _CORE_PACK_DIR_PATHS,
+    )
 except ImportError:
     from pathlib import Path as _FallbackPath
     _ECOSYSTEM_DIR = str(_FallbackPath(__file__).resolve().parent.parent.parent / "ecosystem")
     _find_ecosystem_json_paths = None
+    _CORE_PACK_DIR_PATHS = str(_FallbackPath(__file__).resolve().parent.parent.parent / "core_runtime" / "core_pack")
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +136,17 @@ class Registry:
         _excluded = {".git", "__pycache__", "node_modules", ".venv", "packs", "flows"}
         
         candidates = []
+        # --- W22-A: core_pack ディレクトリを先頭に走査 ---
+        _core_pack_dir = Path(_CORE_PACK_DIR_PATHS)
+        if _core_pack_dir.is_dir():
+            try:
+                for d in sorted(_core_pack_dir.iterdir()):
+                    if d.is_dir() and d.name not in _excluded and not d.name.startswith("."):
+                        candidates.append(d)
+            except OSError:
+                logger.warning("[Registry] Failed to scan core_pack directory: %s", _core_pack_dir)
+        # --- END W22-A ---
+
         if self.ecosystem_dir.exists():
             candidates.extend(
                 d for d in sorted(self.ecosystem_dir.iterdir())
