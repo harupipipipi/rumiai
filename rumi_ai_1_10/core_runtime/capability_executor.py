@@ -50,6 +50,14 @@ DOCKER_PERMISSION_IDS: frozenset = frozenset({
 })
 DOCKER_RUN_PERMISSION_ID = "docker.run"
 
+DOCKER_METHOD_MAP = {
+    "docker.run": "handle_run",
+    "docker.exec": "handle_exec",
+    "docker.stop": "handle_stop",
+    "docker.logs": "handle_logs",
+    "docker.list": "handle_list",
+}
+
 # Thread-local storage for flow.run call stack
 _flow_call_stack_local = threading.local()
 
@@ -507,39 +515,42 @@ class CapabilityExecutor:
         """
         docker.* 系 permission_id をインプロセスで実行する。
 
-        Phase 1 では docker.run のみ実装。
-        それ以外の docker.* は「未実装」エラーを返す。
+        DOCKER_METHOD_MAP を使って DockerCapabilityHandler の対応メソッドに dispatch する。
         """
-        if permission_id == DOCKER_RUN_PERMISSION_ID:
-            return self._execute_docker_run(
-                principal_id=principal_id,
-                grant_config=grant_config,
-                args=args,
-                request_id=request_id,
-                start_time=start_time,
+        method_name = DOCKER_METHOD_MAP.get(permission_id)
+        if method_name is None:
+            return CapabilityResponse(
+                success=False,
+                error=f"Docker capability '{permission_id}' has no method mapping",
+                error_type="not_implemented",
+                latency_ms=(time.time() - start_time) * 1000,
             )
 
-        # 未実装の docker.* permission_id
-        return CapabilityResponse(
-            success=False,
-            error=f"Docker capability '{permission_id}' is not yet implemented",
-            error_type="not_implemented",
-            latency_ms=(time.time() - start_time) * 1000,
+        return self._execute_docker_action(
+            principal_id=principal_id,
+            permission_id=permission_id,
+            grant_config=grant_config,
+            args=args,
+            request_id=request_id,
+            start_time=start_time,
+            method_name=method_name,
         )
 
-    def _execute_docker_run(
+    def _execute_docker_action(
         self,
         principal_id: str,
+        permission_id: str,
         grant_config: Dict[str, Any],
         args: Dict[str, Any],
         request_id: str,
         start_time: float,
+        method_name: str,
     ) -> CapabilityResponse:
         """
-        docker.run をインプロセスで実行する。
+        docker.* をインプロセスで実行する。
 
         DI コンテナから DockerCapabilityHandler を取得し、
-        handle_run() を呼び出して結果を CapabilityResponse に変換する。
+        DOCKER_METHOD_MAP に基づくメソッドを呼び出して結果を CapabilityResponse に変換する。
         """
         # --- DockerCapabilityHandler 取得 ---
         try:
@@ -556,17 +567,25 @@ class CapabilityExecutor:
                 latency_ms=(time.time() - start_time) * 1000,
             )
 
-        # --- handle_run 呼び出し ---
+        # --- handler メソッド呼び出し ---
         try:
-            result = handler.handle_run(
+            method_fn = getattr(handler, method_name)
+            result = method_fn(
                 principal_id=principal_id,
                 args=args,
                 grant_config=grant_config,
             )
+        except AttributeError:
+            return CapabilityResponse(
+                success=False,
+                error=f"DockerCapabilityHandler has no method '{method_name}'",
+                error_type="not_implemented",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
         except Exception as e:
             return CapabilityResponse(
                 success=False,
-                error=f"docker.run execution failed: {e}",
+                error=f"{permission_id} execution failed: {e}",
                 error_type="docker_execution_error",
                 latency_ms=(time.time() - start_time) * 1000,
             )
@@ -579,7 +598,7 @@ class CapabilityExecutor:
                 success=False,
                 output=result,
                 error=result["error"],
-                error_type="docker_run_error",
+                error_type=f"{permission_id.replace('.', '_')}_error",
                 latency_ms=latency_ms,
             )
 

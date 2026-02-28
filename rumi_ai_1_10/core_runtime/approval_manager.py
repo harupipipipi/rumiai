@@ -399,10 +399,6 @@ class ApprovalManager:
         if self._is_core_pack(pack_id):
             return True, None
 
-        # W22-A: core_pack は常時承認済み
-        if self._is_core_pack(pack_id):
-            return True, None
-
         with self._lock:
             approval = self._approvals.get(pack_id)
             
