@@ -1,0 +1,24 @@
+{
+  "pack_id": "core_docker_capability",
+  "pack_identity": "core:rumi/docker-capability",
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": []
+  },
+  "metadata": {
+    "name": "Core Docker Capability",
+    "description": "Rumi AI OS core pack that provides Docker container execution capability. Packs request docker.run via UDS and Rumi applies security constraints before executing the container.",
+    "author": "Rumi AI Team",
+    "license": "MIT",
+    "is_core_pack": true,
+    "capability_handlers": {
+      "docker_run": {
+        "handler_id": "core.docker.run",
+        "permission_id": "docker.run",
+        "path": "share/capability_handlers/docker_run"
+      }
+    }
+  },
+  "dependencies": {},
+  "components": {}
+}

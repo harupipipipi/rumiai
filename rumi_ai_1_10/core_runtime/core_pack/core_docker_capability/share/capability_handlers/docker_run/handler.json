@@ -1,0 +1,66 @@
+{
+  "handler_id": "core.docker.run",
+  "permission_id": "docker.run",
+  "entrypoint": "handler.py:execute",
+  "description": "Execute a Docker container with security constraints and return the result. Packs request docker.run via UDS; Rumi validates permissions, applies resource limits, and runs the container.",
+  "risk": "high",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "image": {
+        "type": "string",
+        "description": "Docker image to run (e.g. python:3.11-slim)"
+      },
+      "command": {
+        "type": "string",
+        "description": "Command to execute inside the container"
+      },
+      "memory": {
+        "type": "string",
+        "description": "Memory limit (e.g. 256m, 1g). Optional.",
+        "default": "256m"
+      },
+      "timeout": {
+        "type": "number",
+        "description": "Execution timeout in seconds. Optional.",
+        "default": 30
+      },
+      "env": {
+        "type": "object",
+        "description": "Environment variables to set inside the container. Optional.",
+        "additionalProperties": {
+          "type": "string"
+        }
+      },
+      "working_dir": {
+        "type": "string",
+        "description": "Working directory inside the container. Optional."
+      }
+    },
+    "required": [
+      "image",
+      "command"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "exit_code": {
+        "type": "integer",
+        "description": "Container process exit code"
+      },
+      "stdout": {
+        "type": "string",
+        "description": "Standard output from the container"
+      },
+      "stderr": {
+        "type": "string",
+        "description": "Standard error from the container"
+      },
+      "container_name": {
+        "type": "string",
+        "description": "Name of the executed container"
+      }
+    }
+  }
+}
