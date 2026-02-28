@@ -57,6 +57,20 @@ class DockerCapabilityHandler:
     ]
     HARDCODED_ENV_EXACT_BLOCK: set = {"HOME", "PATH"}
 
+    # ------------------------------------------------------------------ #
+    # Post-build assertion 禁止パターン (W23-A)
+    # ------------------------------------------------------------------ #
+    FORBIDDEN_CMD_PATTERNS: List[str] = [
+        "--privileged",
+        "--cap-add",
+        "/var/run/docker.sock",
+        "--pid=host",
+        "--ipc=host",
+        "--net=host",
+        "--network=host",
+    ]
+
+
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._active_containers: Dict[str, str] = {}  # name -> principal_id
@@ -198,6 +212,53 @@ class DockerCapabilityHandler:
         return sum(
             1 for pid in self._active_containers.values() if pid == principal_id
         )
+
+    def _verify_ownership(
+        self, principal_id: str, container_name: str
+    ) -> Optional[str]:
+        """コンテナの所有権を検証する。
+
+        Returns:
+            None: 検証成功
+            str: エラーメッセージ（検証失敗）
+        """
+        with self._lock:
+            owner = self._active_containers.get(container_name)
+        if owner is None:
+            return f"Container not found: {container_name}"
+        if owner != principal_id:
+            return f"Access denied: container {container_name} is not owned by {principal_id}"
+        return None
+
+    def _check_post_build_assertions(
+        self, cmd: List[str], principal_id: str, container_name: str
+    ) -> Optional[dict]:
+        """build() 結果に禁止パターンが含まれていないか検証する。
+
+        多重防御: DockerRunBuilder がこれらを生成しないことは
+        分かっているが、将来の変更に対する安全策。
+        """
+        for token in cmd:
+            for pattern in self.FORBIDDEN_CMD_PATTERNS:
+                if pattern in token:
+                    self._audit_log(
+                        "critical",
+                        "docker.run.post_build_assertion_failed",
+                        False,
+                        principal_id,
+                        {
+                            "forbidden_pattern": pattern,
+                            "token": token,
+                            "container_name": container_name,
+                        },
+                    )
+                    return {
+                        "error": (
+                            "Post-build assertion failed: "
+                            f"forbidden pattern '{pattern}' detected"
+                        )
+                    }
+        return None
 
     def _audit_log(
         self,
@@ -358,6 +419,16 @@ class DockerCapabilityHandler:
             cmd = builder.build()
 
             # -------------------------------------------------------- #
+            # 6.5 Post-build assertion (W23-A)
+            # -------------------------------------------------------- #
+            assertion_error = self._check_post_build_assertions(
+                cmd, principal_id, container_name
+            )
+            if assertion_error:
+                return assertion_error
+
+
+            # -------------------------------------------------------- #
             # 7. 監査ログ（実行前）
             # -------------------------------------------------------- #
             self._audit_log(
@@ -408,3 +479,296 @@ class DockerCapabilityHandler:
         finally:
             with self._lock:
                 self._active_containers.pop(container_name, None)
+
+    # ================================================================== #
+    # handle_exec (W23-A)
+    # ================================================================== #
+
+    def handle_exec(
+        self, principal_id: str, args: dict, grant_config: dict
+    ) -> dict:
+        """実行中コンテナ内でコマンドを実行する。
+
+        Args:
+            principal_id: リクエスト元の識別子
+            args:
+                - container_name (str): 必須
+                - command (list[str]): 必須
+                - timeout (int): オプション (デフォルト 30)
+                - working_dir (str): オプション
+            grant_config: Grant config
+
+        Returns:
+            dict: exit_code, stdout, stderr (, error)
+        """
+        container_name = args.get("container_name")
+        command = args.get("command")
+        if not container_name or not command:
+            self._audit_log(
+                "warning",
+                "docker.exec.validation_failed",
+                False,
+                principal_id,
+                {"reason": "container_name and command are required"},
+            )
+            return {"error": "container_name and command are required"}
+
+        ownership_error = self._verify_ownership(principal_id, container_name)
+        if ownership_error:
+            self._audit_log(
+                "warning",
+                "docker.exec.ownership_denied",
+                False,
+                principal_id,
+                {"container_name": container_name, "reason": ownership_error},
+            )
+            return {"error": ownership_error}
+
+        try:
+            timeout = int(args.get("timeout", 30))
+            cmd = ["docker", "exec"]
+            working_dir = args.get("working_dir")
+            if working_dir:
+                cmd.extend(["-w", working_dir])
+            cmd.append(container_name)
+            cmd.extend(list(command))
+
+            self._audit_log(
+                "info",
+                "docker.exec",
+                True,
+                principal_id,
+                {
+                    "container_name": container_name,
+                    "command": command,
+                },
+            )
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+
+            return {
+                "exit_code": result.returncode,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+            }
+
+        except subprocess.TimeoutExpired:
+            return {
+                "exit_code": -1,
+                "stdout": "",
+                "stderr": "Execution timed out",
+                "error": "timeout",
+            }
+        except Exception as e:
+            return {
+                "exit_code": -1,
+                "stdout": "",
+                "stderr": str(e),
+                "error": str(e),
+            }
+
+    # ================================================================== #
+    # handle_stop (W23-A)
+    # ================================================================== #
+
+    def handle_stop(
+        self, principal_id: str, args: dict, grant_config: dict
+    ) -> dict:
+        """コンテナを停止する。
+
+        Args:
+            principal_id: リクエスト元の識別子
+            args:
+                - container_name (str): 必須
+                - timeout (int): オプション (デフォルト 10)
+            grant_config: Grant config
+
+        Returns:
+            dict: stopped, container_name (, error)
+        """
+        container_name = args.get("container_name")
+        if not container_name:
+            self._audit_log(
+                "warning",
+                "docker.stop.validation_failed",
+                False,
+                principal_id,
+                {"reason": "container_name is required"},
+            )
+            return {"error": "container_name is required"}
+
+        ownership_error = self._verify_ownership(principal_id, container_name)
+        if ownership_error:
+            self._audit_log(
+                "warning",
+                "docker.stop.ownership_denied",
+                False,
+                principal_id,
+                {"container_name": container_name, "reason": ownership_error},
+            )
+            return {"error": ownership_error}
+
+        try:
+            timeout = int(args.get("timeout", 10))
+            cmd = ["docker", "stop", f"--time={timeout}", container_name]
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout + 30,
+            )
+
+            with self._lock:
+                self._active_containers.pop(container_name, None)
+
+            self._audit_log(
+                "info",
+                "docker.stop",
+                True,
+                principal_id,
+                {"container_name": container_name},
+            )
+
+            return {
+                "stopped": True,
+                "container_name": container_name,
+            }
+
+        except subprocess.TimeoutExpired:
+            return {
+                "stopped": False,
+                "container_name": container_name,
+                "error": "timeout",
+            }
+        except Exception as e:
+            return {
+                "stopped": False,
+                "container_name": container_name,
+                "error": str(e),
+            }
+
+    # ================================================================== #
+    # handle_logs (W23-A)
+    # ================================================================== #
+
+    def handle_logs(
+        self, principal_id: str, args: dict, grant_config: dict
+    ) -> dict:
+        """コンテナのログを取得する。
+
+        Args:
+            principal_id: リクエスト元の識別子
+            args:
+                - container_name (str): 必須
+                - tail (int): オプション (デフォルト 100)
+                - since (str): オプション (Docker --since 形式)
+            grant_config: Grant config
+
+        Returns:
+            dict: stdout, stderr (, error)
+        """
+        container_name = args.get("container_name")
+        if not container_name:
+            self._audit_log(
+                "warning",
+                "docker.logs.validation_failed",
+                False,
+                principal_id,
+                {"reason": "container_name is required"},
+            )
+            return {"error": "container_name is required"}
+
+        ownership_error = self._verify_ownership(principal_id, container_name)
+        if ownership_error:
+            self._audit_log(
+                "warning",
+                "docker.logs.ownership_denied",
+                False,
+                principal_id,
+                {"container_name": container_name, "reason": ownership_error},
+            )
+            return {"error": ownership_error}
+
+        try:
+            tail = int(args.get("tail", 100))
+            cmd = ["docker", "logs", f"--tail={tail}"]
+
+            since = args.get("since")
+            if since:
+                cmd.append(f"--since={since}")
+
+            cmd.append(container_name)
+
+            self._audit_log(
+                "info",
+                "docker.logs",
+                True,
+                principal_id,
+                {"container_name": container_name, "tail": tail},
+            )
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+
+            return {
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+            }
+
+        except subprocess.TimeoutExpired:
+            return {
+                "stdout": "",
+                "stderr": "Log retrieval timed out",
+                "error": "timeout",
+            }
+        except Exception as e:
+            return {
+                "stdout": "",
+                "stderr": str(e),
+                "error": str(e),
+            }
+
+    # ================================================================== #
+    # handle_list (W23-A)
+    # ================================================================== #
+
+    def handle_list(
+        self, principal_id: str, args: dict, grant_config: dict
+    ) -> dict:
+        """principal が所有するコンテナ一覧を返す。
+
+        Args:
+            principal_id: リクエスト元の識別子
+            args: 不要（空 dict で OK）
+            grant_config: Grant config
+
+        Returns:
+            dict: containers (list of {name, status})
+        """
+        with self._lock:
+            containers = [
+                {"name": name, "status": "running"}
+                for name, owner in self._active_containers.items()
+                if owner == principal_id
+            ]
+
+        self._audit_log(
+            "info",
+            "docker.list",
+            True,
+            principal_id,
+            {"count": len(containers)},
+        )
+
+        return {"containers": containers}
+
