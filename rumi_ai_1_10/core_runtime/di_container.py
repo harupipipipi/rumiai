@@ -223,6 +223,7 @@ def _register_defaults(container: DIContainer) -> None:
     Wave 8:   Diagnostics, InstallJournal, InterfaceRegistry,
               EventBus, ComponentLifecycleExecutor
     Wave 15:  HealthChecker, MetricsCollector, Profiler
+    Wave 24:  FunctionRegistry
 
     Args:
         container: 登録先の DIContainer
@@ -364,6 +365,12 @@ def _register_defaults(container: DIContainer) -> None:
         from .docker_capability import DockerCapabilityHandler
         return DockerCapabilityHandler()
 
+
+    # --- Wave 24: FunctionRegistry ---
+    def _function_registry_factory() -> "FunctionRegistry":  # noqa: F821
+        from .function_registry import FunctionRegistry
+        return FunctionRegistry()
+
     # --- Register all (each name exactly once) ---
     container.register("audit_logger", _audit_logger_factory)
     container.register("hmac_key_manager", _hmac_key_manager_factory)
@@ -396,3 +403,4 @@ def _register_defaults(container: DIContainer) -> None:
     container.register("metrics_collector", _metrics_collector_factory)
     container.register("profiler", _profiler_factory)
     container.register("docker_capability_handler", _docker_capability_handler_factory)
+    container.register("function_registry", _function_registry_factory)
