@@ -31,6 +31,9 @@ logger = logging.getLogger(__name__)
 # W18-B: Secret key pattern for required_secrets validation
 _SECRET_KEY_PATTERN = re.compile(r"^[A-Z0-9_]{1,64}$")
 
+# W24-C: function_id pattern — lowercase alphanumeric + underscore, starts with letter
+_FUNCTION_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+
 # ${ctx.PACK_ID.anything} パターン — PACK_ID 部分を抽出
 _CTX_REF_PATTERN = re.compile(r"\$\{ctx\.([^.}]+)")
 
@@ -311,6 +314,12 @@ def _validate_single_pack(
             logger.error(msg)
             errors.append(msg)
 
+
+    # --- W24-C (7) functions/ manifest.json バリデーション ---
+    func_warnings, func_errors = _validate_functions(loc.pack_subdir, pid)
+    warnings.extend(func_warnings)
+    errors.extend(func_errors)
+
     return warnings, errors
 
 
@@ -367,6 +376,172 @@ def _check_ctx_references(
                     warnings.append(msg)
 
     return warnings
+
+
+
+def _validate_functions(
+    pack_subdir: Path,
+    pid: str,
+) -> tuple[List[str], List[str]]:
+    """
+    W24-C: Pack 内 functions/ ディレクトリの manifest.json を検証する。
+
+    functions/ が存在しなければ何もしない（後方互換）。
+
+    Returns:
+        (warnings, errors)
+    """
+    warnings: List[str] = []
+    errors: List[str] = []
+
+    functions_dir = pack_subdir / "functions"
+    if not functions_dir.is_dir():
+        return warnings, errors
+
+    try:
+        func_dirs = sorted(
+            (d for d in functions_dir.iterdir()
+             if d.is_dir() and not d.name.startswith(".")),
+            key=lambda d: d.name,
+        )
+    except OSError:
+        return warnings, errors
+
+    for func_dir in func_dirs:
+        func_name = func_dir.name
+        prefix = f"[{pid}] functions/{func_name}"
+
+        # --- manifest.json 存在チェック ---
+        manifest_path = func_dir / "manifest.json"
+        if not manifest_path.is_file():
+            msg = f"{prefix}: manifest.json not found"
+            logger.error(msg)
+            errors.append(msg)
+            continue
+
+        # --- JSON パース ---
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                manifest = json.load(f)
+        except json.JSONDecodeError as exc:
+            msg = f"{prefix}: manifest.json is invalid JSON: {exc}"
+            logger.error(msg)
+            errors.append(msg)
+            continue
+
+        if not isinstance(manifest, dict):
+            msg = f"{prefix}: manifest.json root is not an object"
+            logger.error(msg)
+            errors.append(msg)
+            continue
+
+        # --- function_id ---
+        fid = manifest.get("function_id")
+        if fid is None or not isinstance(fid, str):
+            msg = f"{prefix}: function_id is missing or not a string"
+            logger.error(msg)
+            errors.append(msg)
+        else:
+            if fid != func_name:
+                msg = (
+                    f"{prefix}: function_id '{fid}' does not match "
+                    f"directory name '{func_name}'"
+                )
+                logger.error(msg)
+                errors.append(msg)
+            if not _FUNCTION_ID_PATTERN.match(fid):
+                msg = (
+                    f"{prefix}: function_id '{fid}' does not match "
+                    f"required pattern ^[a-z][a-z0-9_]*$"
+                )
+                logger.error(msg)
+                errors.append(msg)
+
+        # --- requires ---
+        requires = manifest.get("requires")
+        if requires is None:
+            msg = f"{prefix}: requires field is missing"
+            logger.error(msg)
+            errors.append(msg)
+        elif not isinstance(requires, list) or not all(
+            isinstance(r, str) for r in requires
+        ):
+            msg = f"{prefix}: requires must be a list of strings"
+            logger.error(msg)
+            errors.append(msg)
+
+        # --- caller_requires (optional) ---
+        if "caller_requires" in manifest:
+            cr = manifest["caller_requires"]
+            if not isinstance(cr, list) or not all(
+                isinstance(c, str) for c in cr
+            ):
+                msg = f"{prefix}: caller_requires must be a list of strings"
+                logger.error(msg)
+                errors.append(msg)
+
+        # --- host_execution (optional) ---
+        if "host_execution" in manifest:
+            he = manifest["host_execution"]
+            if not isinstance(he, bool):
+                msg = f"{prefix}: host_execution must be a boolean"
+                logger.error(msg)
+                errors.append(msg)
+            elif he is True:
+                msg = (
+                    f"{prefix}: host_execution is true — "
+                    f"this function runs in host environment. "
+                    f"Approval is required."
+                )
+                logger.warning(msg)
+                warnings.append(msg)
+
+        # --- tags (optional) ---
+        if "tags" in manifest:
+            tags = manifest["tags"]
+            if not isinstance(tags, list) or not all(
+                isinstance(t, str) for t in tags
+            ):
+                msg = f"{prefix}: tags must be a list of strings"
+                logger.error(msg)
+                errors.append(msg)
+        else:
+            msg = (
+                f"{prefix}: tags field is not set — "
+                f"discoverability may be reduced"
+            )
+            logger.warning(msg)
+            warnings.append(msg)
+
+        # --- input_schema (optional) ---
+        if "input_schema" in manifest:
+            if not isinstance(manifest["input_schema"], dict):
+                msg = f"{prefix}: input_schema must be a dict"
+                logger.error(msg)
+                errors.append(msg)
+
+        # --- output_schema (optional) ---
+        if "output_schema" in manifest:
+            if not isinstance(manifest["output_schema"], dict):
+                msg = f"{prefix}: output_schema must be a dict"
+                logger.error(msg)
+                errors.append(msg)
+
+        # --- main.py 存在チェック ---
+        main_py = func_dir / "main.py"
+        if not main_py.is_file():
+            msg = f"{prefix}: main.py not found"
+            logger.error(msg)
+            errors.append(msg)
+
+        # --- description (warning) ---
+        desc = manifest.get("description")
+        if desc is None or (isinstance(desc, str) and desc.strip() == ""):
+            msg = f"{prefix}: description is missing or empty"
+            logger.warning(msg)
+            warnings.append(msg)
+
+    return warnings, errors
 
 
 # ======================================================================
