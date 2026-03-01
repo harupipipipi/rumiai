@@ -298,6 +298,9 @@ class Registry:
         if routes_file.exists():
             self._load_routes(pack_info, routes_file)
         
+        # Functions を読み込む (W24-B)
+        self._load_functions(pack_info, pack_subdir)
+        
         return pack_info
     
     def _load_components(self, pack_info: PackInfo, components_dir: Path):
@@ -456,6 +459,96 @@ class Registry:
         except Exception as e:
             print(f"      ✗ routes.json 読み込みエラー ({routes_file}): {e}")
     
+    def _load_functions(self, pack_info: "PackInfo", pack_subdir: Path):
+        """
+        Pack の functions/ ディレクトリをスキャンし FunctionRegistry に登録する。
+
+        W24-B: functions/ 内の各サブディレクトリから manifest.json を読み込み、
+        DI コンテナ経由で取得した FunctionRegistry に登録する。
+        FunctionRegistry が利用不可の場合や functions/ が存在しない場合はスキップ。
+        manifest.json のパースエラーは warning として記録し Pack ロード全体を失敗させない。
+        """
+        functions_dir = pack_subdir / "functions"
+        if not functions_dir.is_dir():
+            return
+
+        # --- FunctionRegistry を DI コンテナから取得 (ImportError セーフ) ---
+        func_registry = None
+        try:
+            from core_runtime.di_container import get_container
+            func_registry = get_container().get_or_none("function_registry")
+        except Exception:
+            pass
+
+        if func_registry is None:
+            logger.info(
+                "[Registry] FunctionRegistry not available, skipping functions/ scan for pack '%s'",
+                pack_info.pack_id,
+            )
+            return
+
+        # --- functions/ 配下のサブディレクトリを走査 ---
+        functions_dir_resolved = functions_dir.resolve()
+
+        try:
+            subdirs = sorted(functions_dir.iterdir())
+        except OSError as exc:
+            logger.warning(
+                "[Registry] Cannot scan functions/ directory for pack '%s': %s",
+                pack_info.pack_id, exc,
+            )
+            return
+
+        for func_subdir in subdirs:
+            if not func_subdir.is_dir() or func_subdir.name.startswith("."):
+                continue
+
+            # --- パストラバーサル防御 ---
+            try:
+                resolved = func_subdir.resolve()
+                resolved.relative_to(functions_dir_resolved)
+            except (ValueError, OSError):
+                logger.warning(
+                    "[Registry] Path traversal detected, skipping function dir: %s",
+                    func_subdir,
+                )
+                continue
+
+            manifest_file = func_subdir / "manifest.json"
+            if not manifest_file.exists():
+                continue
+
+            # --- JSON ファイルサイズチェック ---
+            if _check_json_file_size(manifest_file):
+                continue
+
+            # --- manifest.json パース ---
+            try:
+                with open(manifest_file, "r", encoding="utf-8") as f:
+                    manifest = json.load(f)
+            except (json.JSONDecodeError, OSError) as exc:
+                logger.warning(
+                    "[Registry] Failed to parse functions manifest, skipping: %s (%s)",
+                    manifest_file, exc,
+                )
+                continue
+
+            # --- FunctionRegistry に登録 ---
+            function_id = manifest.get("function_id", func_subdir.name)
+            try:
+                func_registry.register(
+                    pack_id=pack_info.pack_id,
+                    function_id=function_id,
+                    manifest=manifest,
+                    function_dir=func_subdir,
+                )
+                print(f"      \u2713 Function: {function_id}")
+            except Exception as exc:
+                logger.warning(
+                    "[Registry] Failed to register function '%s' for pack '%s': %s",
+                    function_id, pack_info.pack_id, exc,
+                )
+
     def get_all_routes(self) -> Dict[str, List[Dict[str, Any]]]:
         """全Packのルート定義を取得"""
         return dict(self._pack_routes)
