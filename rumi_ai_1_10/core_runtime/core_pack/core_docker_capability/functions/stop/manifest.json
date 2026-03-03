@@ -1,0 +1,48 @@
+{
+  "function_id": "stop",
+  "description": "コンテナを停止する",
+  "requires": [
+    "docker.stop"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "tags": [
+    "docker",
+    "container"
+  ],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "container_id": {
+        "type": "string",
+        "description": "Name or ID of the container to stop"
+      },
+      "timeout": {
+        "type": "number",
+        "description": "Seconds to wait before forcefully killing the container",
+        "default": 10
+      }
+    },
+    "required": [
+      "container_id"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "stopped": {
+        "type": "boolean",
+        "description": "Whether the container was successfully stopped"
+      },
+      "container_id": {
+        "type": "string",
+        "description": "ID of the stopped container"
+      }
+    },
+    "required": [
+      "stopped",
+      "container_id"
+    ]
+  },
+  "grant_config": {}
+}

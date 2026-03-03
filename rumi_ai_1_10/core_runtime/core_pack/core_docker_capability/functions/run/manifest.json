@@ -1,0 +1,86 @@
+{
+  "function_id": "run",
+  "description": "Docker コンテナを実行する",
+  "requires": [
+    "docker.run"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "tags": [
+    "docker",
+    "container"
+  ],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "image": {
+        "type": "string",
+        "description": "Docker image to run (e.g. python:3.11-slim)"
+      },
+      "command": {
+        "type": "string",
+        "description": "Command to execute inside the container"
+      },
+      "memory": {
+        "type": "string",
+        "description": "Memory limit (e.g. 256m, 1g)",
+        "default": "256m"
+      },
+      "timeout": {
+        "type": "number",
+        "description": "Execution timeout in seconds",
+        "default": 30
+      },
+      "env": {
+        "type": "object",
+        "description": "Environment variables to set inside the container",
+        "additionalProperties": {
+          "type": "string"
+        }
+      },
+      "working_dir": {
+        "type": "string",
+        "description": "Working directory inside the container"
+      }
+    },
+    "required": [
+      "image",
+      "command"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "exit_code": {
+        "type": "integer",
+        "description": "Container process exit code"
+      },
+      "stdout": {
+        "type": "string",
+        "description": "Standard output from the container"
+      },
+      "stderr": {
+        "type": "string",
+        "description": "Standard error from the container"
+      },
+      "container_name": {
+        "type": "string",
+        "description": "Name of the executed container"
+      }
+    },
+    "required": [
+      "exit_code",
+      "stdout",
+      "stderr"
+    ]
+  },
+  "grant_config": {
+    "allowed_images": [],
+    "max_memory": "512m",
+    "max_cpus": "1",
+    "max_pids": 100,
+    "network_allowed": false,
+    "max_containers": 5,
+    "max_execution_time": 300
+  }
+}

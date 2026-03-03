@@ -1,0 +1,57 @@
+{
+  "function_id": "list",
+  "description": "コンテナ一覧を取得する",
+  "requires": [
+    "docker.list"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "tags": [
+    "docker",
+    "container"
+  ],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "all": {
+        "type": "boolean",
+        "description": "If true, show all containers (default shows just running)",
+        "default": false
+      },
+      "filters": {
+        "type": "object",
+        "description": "Filters to apply to the container list"
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "containers": {
+        "type": "array",
+        "description": "List of containers with their status information",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Container name"
+            },
+            "status": {
+              "type": "string",
+              "description": "Container status"
+            },
+            "image": {
+              "type": "string",
+              "description": "Image used by the container"
+            }
+          }
+        }
+      }
+    },
+    "required": [
+      "containers"
+    ]
+  },
+  "grant_config": {}
+}

@@ -1,0 +1,52 @@
+{
+  "function_id": "logs",
+  "description": "コンテナのログを取得する",
+  "requires": [
+    "docker.logs"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "tags": [
+    "docker",
+    "container"
+  ],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "container_id": {
+        "type": "string",
+        "description": "Name or ID of the container to fetch logs from"
+      },
+      "tail": {
+        "type": "number",
+        "description": "Number of lines from the end of the logs to return",
+        "default": 100
+      },
+      "since": {
+        "type": "string",
+        "description": "Return logs since this timestamp (e.g. 2024-01-01T00:00:00)"
+      }
+    },
+    "required": [
+      "container_id"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "stdout": {
+        "type": "string",
+        "description": "Standard output logs from the container"
+      },
+      "stderr": {
+        "type": "string",
+        "description": "Standard error logs from the container"
+      }
+    },
+    "required": [
+      "stdout",
+      "stderr"
+    ]
+  },
+  "grant_config": {}
+}
