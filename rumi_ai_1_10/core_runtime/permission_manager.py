@@ -181,6 +181,40 @@ class PermissionManager:
 
         return self.has_permission(principal_id, permission_type)
 
+    def check_caller_requires(
+        self,
+        caller_principal_id: str,
+        caller_requires: "List[str] | None" = None,
+    ) -> bool:
+        """
+        caller_requires に列挙された権限を caller が全て保有しているか検証する。
+
+        Args:
+            caller_principal_id: 呼び出し元の principal ID
+            caller_requires: 必要な権限名のリスト
+
+        Returns:
+            True  - 全権限を保有 / caller_requires が空 or None
+            False - 1 つでも欠如 / caller_principal_id が無効
+
+        W25-B 追加
+        """
+        # --- 入力バリデーション ---
+        if caller_principal_id is None or caller_principal_id == "":
+            return False
+        if caller_requires is None:
+            return True
+        if not isinstance(caller_requires, list):
+            return False
+        if len(caller_requires) == 0:
+            return True
+
+        # --- 全権限チェック ---
+        return all(
+            self.has_permission(caller_principal_id, perm)
+            for perm in caller_requires
+        )
+
     def _check_pack_update_permission(
         self,
         principal_id: str,
