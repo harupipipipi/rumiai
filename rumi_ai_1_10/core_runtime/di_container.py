@@ -369,7 +369,9 @@ def _register_defaults(container: DIContainer) -> None:
     # --- Wave 24: FunctionRegistry ---
     def _function_registry_factory() -> "FunctionRegistry":  # noqa: F821
         from .function_registry import FunctionRegistry
-        return FunctionRegistry()
+        c = get_container()
+        vr = c.get_or_none("vocab_registry")
+        return FunctionRegistry(vocab_registry=vr)
 
     # --- Register all (each name exactly once) ---
     container.register("audit_logger", _audit_logger_factory)

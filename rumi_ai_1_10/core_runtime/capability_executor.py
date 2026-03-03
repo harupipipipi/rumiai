@@ -24,6 +24,12 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+
+# function.call: core_pack 判定用
+try:
+    from .paths import CORE_PACK_ID_PREFIX as _CORE_PACK_ID_PREFIX
+except ImportError:
+    _CORE_PACK_ID_PREFIX = "core_"
 from typing import Any, Dict, Optional
 
 # レスポンスサイズ上限（1MB）
@@ -121,6 +127,10 @@ class CapabilityExecutor:
             os.environ.get("RUMI_SECRET_GET_RATE_LIMIT",
                            str(DEFAULT_SECRET_GET_RATE_LIMIT)))
         self._kernel = None  # KernelCore reference for flow.run
+        # function.call dispatch 用
+        self._function_registry = None
+        self._approval_manager = None
+        self._permission_manager = None
 
     def set_kernel(self, kernel) -> None:
         """
@@ -162,6 +172,16 @@ class CapabilityExecutor:
             # Trust store をロード
             self._trust_store.load()
 
+            # function.call dispatch 用サービスを DI コンテナから取得
+            try:
+                from .di_container import get_container as _get_di_container
+                _c = _get_di_container()
+                self._function_registry = _c.get_or_none("function_registry")
+                self._approval_manager = _c.get_or_none("approval_manager")
+                self._permission_manager = _c.get_or_none("permission_manager")
+            except Exception:
+                pass  # function.call 以外の機能に影響させない
+
             self._initialized = True
             return True
 
@@ -185,6 +205,11 @@ class CapabilityExecutor:
             CapabilityResponse
         """
         start_time = time.time()
+
+        # function.call 早期分岐
+        if request.get("type") == "function.call":
+            return self._execute_function_call(principal_id, request, start_time)
+
 
         permission_id = request.get("permission_id")
         args = request.get("args", {})
@@ -362,6 +387,283 @@ class CapabilityExecutor:
         return resp
 
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # function.call dispatch
+    # ------------------------------------------------------------------
+
+    def _execute_function_call(
+        self,
+        principal_id: str,
+        request: Dict[str, Any],
+        start_time: float,
+    ) -> CapabilityResponse:
+        """
+        function.call リクエストを処理する。
+
+        フロー:
+        1. qualified_name と args を取得
+        2. FunctionRegistry から FunctionEntry を取得
+        3. ApprovalManager で pack 承認確認
+        4. requires 権限チェック（core_pack はスキップ）
+        5. function.call 権限チェック
+        6. caller_requires チェック
+        7. 実行方式判定・実行
+        """
+        qualified_name = request.get("qualified_name")
+        args = request.get("args", {})
+        request_id = request.get("request_id", "")
+
+        # 1. qualified_name バリデーション
+        if not qualified_name or not isinstance(qualified_name, str):
+            resp = CapabilityResponse(
+                success=False,
+                error="Missing or invalid qualified_name",
+                error_type="invalid_request",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+            self._audit(
+                principal_id, "function.call", None, resp, args, request_id,
+                detail_reason="Missing or invalid qualified_name",
+            )
+            return resp
+
+        # initialize (DI コンテナからサービス取得)
+        if not self._initialized:
+            self.initialize()
+
+        # function_registry 可用性チェック
+        if self._function_registry is None:
+            resp = CapabilityResponse(
+                success=False,
+                error="FunctionRegistry is not available",
+                error_type="function_registry_unavailable",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+            self._audit(
+                principal_id, "function.call", None, resp, args, request_id,
+                detail_reason="FunctionRegistry not available in DI container",
+            )
+            return resp
+
+        # 2. FunctionEntry 取得
+        entry = self._function_registry.get(qualified_name)
+        if entry is None:
+            resp = CapabilityResponse(
+                success=False,
+                error=f"Function not found: {qualified_name}",
+                error_type="function_not_found",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+            self._audit(
+                principal_id, "function.call", None, resp, args, request_id,
+                detail_reason=f"Function '{qualified_name}' not found in FunctionRegistry",
+            )
+            return resp
+
+        pack_id = entry.pack_id
+        is_core = pack_id.startswith(_CORE_PACK_ID_PREFIX)
+
+        # 3. Pack 承認確認
+        if self._approval_manager is not None:
+            try:
+                approved_result = self._approval_manager.is_pack_approved_and_verified(pack_id)
+                if isinstance(approved_result, tuple):
+                    is_approved, reason = approved_result
+                else:
+                    is_approved = bool(approved_result)
+                    reason = None
+                if not is_approved:
+                    resp = CapabilityResponse(
+                        success=False,
+                        error=f"Pack not approved: {pack_id}",
+                        error_type="pack_not_approved",
+                        latency_ms=(time.time() - start_time) * 1000,
+                    )
+                    self._audit(
+                        principal_id, "function.call", None, resp, args, request_id,
+                        detail_reason=f"Pack '{pack_id}' not approved: {reason}",
+                    )
+                    return resp
+            except Exception:
+                pass  # approval_manager エラー時はスキップ（core_pack は常に True）
+
+        # 4. requires チェック（core_pack はスキップ）
+        if not is_core and entry.requires and self._permission_manager is not None:
+            for req_perm in entry.requires:
+                if not self._permission_manager.has_permission(pack_id, req_perm):
+                    resp = CapabilityResponse(
+                        success=False,
+                        error=f"Function requires permission '{req_perm}' not granted to pack '{pack_id}'",
+                        error_type="requires_denied",
+                        latency_ms=(time.time() - start_time) * 1000,
+                    )
+                    self._audit(
+                        principal_id, "function.call", None, resp, args, request_id,
+                        detail_reason=f"Pack '{pack_id}' lacks required permission '{req_perm}'",
+                    )
+                    return resp
+
+        # 5. function.call 権限チェック
+        if self._permission_manager is not None:
+            if not self._permission_manager.has_permission(principal_id, "function.call"):
+                resp = CapabilityResponse(
+                    success=False,
+                    error="Permission denied: function.call",
+                    error_type="permission_denied",
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+                self._audit(
+                    principal_id, "function.call", None, resp, args, request_id,
+                    detail_reason=f"Principal '{principal_id}' lacks 'function.call' permission",
+                )
+                return resp
+
+        # 6. caller_requires チェック
+        if entry.caller_requires:
+            caller_ok = False
+            if self._permission_manager is not None:
+                if hasattr(self._permission_manager, "check_caller_requires"):
+                    caller_ok = self._permission_manager.check_caller_requires(
+                        principal_id, entry.caller_requires
+                    )
+                else:
+                    # check_caller_requires 未実装: 安全側にフォールバック
+                    caller_ok = False
+            else:
+                caller_ok = False
+
+            if not caller_ok:
+                resp = CapabilityResponse(
+                    success=False,
+                    error="Caller does not meet caller_requires",
+                    error_type="caller_requires_denied",
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+                self._audit(
+                    principal_id, "function.call", None, resp, args, request_id,
+                    detail_reason=f"Principal '{principal_id}' does not meet caller_requires: {entry.caller_requires}",
+                )
+                return resp
+
+        # 7. 実行方式判定
+        if is_core:
+            resp = self._dispatch_core_function(
+                principal_id=principal_id,
+                entry=entry,
+                args=args,
+                request_id=request_id,
+                start_time=start_time,
+            )
+        elif entry.host_execution:
+            resp = CapabilityResponse(
+                success=False,
+                error="host_execution functions are not yet supported",
+                error_type="not_implemented",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+        else:
+            resp = CapabilityResponse(
+                success=False,
+                error="User function execution is not yet supported",
+                error_type="not_implemented",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        # 監査ログ
+        self._audit(
+            principal_id, "function.call", None, resp, args, request_id,
+            extra_details={
+                "qualified_name": qualified_name,
+                "pack_id": pack_id,
+                "is_core": is_core,
+            },
+        )
+
+        return resp
+
+    def _dispatch_core_function(
+        self,
+        principal_id: str,
+        entry: "FunctionEntry",
+        args: Dict[str, Any],
+        request_id: str,
+        start_time: float,
+    ) -> CapabilityResponse:
+        """
+        core function をインプロセスで実行する。
+
+        core_docker_capability の場合:
+            DI コンテナから docker_capability_handler を取得し、
+            handle_{function_id}(principal_id, args, grant_config) を呼ぶ。
+        """
+        pack_id = entry.pack_id
+        function_id = entry.function_id
+        grant_config = entry.manifest.get("grant_config", {})
+
+        if pack_id == "core_docker_capability":
+            # Docker handler dispatch
+            method_name = f"handle_{function_id}"
+            try:
+                from .di_container import get_container as _get_di
+                handler = _get_di().get_or_none("docker_capability_handler")
+            except Exception:
+                handler = None
+
+            if handler is None:
+                return CapabilityResponse(
+                    success=False,
+                    error="DockerCapabilityHandler is not available",
+                    error_type="initialization_error",
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+
+            try:
+                method_fn = getattr(handler, method_name)
+                result = method_fn(
+                    principal_id=principal_id,
+                    args=args,
+                    grant_config=grant_config,
+                )
+            except AttributeError:
+                return CapabilityResponse(
+                    success=False,
+                    error=f"DockerCapabilityHandler has no method '{method_name}'",
+                    error_type="function_execution_error",
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+            except Exception as e:
+                return CapabilityResponse(
+                    success=False,
+                    error=f"Core function execution failed: {e}",
+                    error_type="function_execution_error",
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+
+            latency_ms = (time.time() - start_time) * 1000
+
+            if isinstance(result, dict) and "error" in result:
+                return CapabilityResponse(
+                    success=False,
+                    output=result,
+                    error=result["error"],
+                    error_type="function_execution_error",
+                    latency_ms=latency_ms,
+                )
+
+            return CapabilityResponse(
+                success=True,
+                output=result,
+                latency_ms=latency_ms,
+            )
+
+        # 未知の core_pack
+        return CapabilityResponse(
+            success=False,
+            error=f"Unknown core function pack: {pack_id}",
+            error_type="unknown_core_function",
+            latency_ms=(time.time() - start_time) * 1000,
+        )
+
     # flow.run インプロセス実行
     # ------------------------------------------------------------------
 
