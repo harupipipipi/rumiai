@@ -21,6 +21,9 @@ import sys
 import tempfile
 import time
 import threading
+import shutil
+import uuid
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -30,6 +33,12 @@ try:
     from .paths import CORE_PACK_ID_PREFIX as _CORE_PACK_ID_PREFIX
 except ImportError:
     _CORE_PACK_ID_PREFIX = "core_"
+
+# W25.5: DockerRunBuilder (optional, for user function container execution)
+try:
+    from .docker_run_builder import DockerRunBuilder as _DockerRunBuilder
+except ImportError:
+    _DockerRunBuilder = None
 from typing import Any, Dict, Optional
 
 # レスポンスサイズ上限（1MB）
@@ -38,10 +47,16 @@ MAX_RESPONSE_SIZE = 1 * 1024 * 1024
 # args 要約の最大長（監査ログ用）
 MAX_ARGS_SUMMARY_LENGTH = 500
 
+logger = logging.getLogger(__name__)
+
 # デフォルトタイムアウト
 DEFAULT_TIMEOUT = 30.0
 MAX_TIMEOUT = 120.0
 
+
+# W25.5: user function execution
+DEFAULT_FUNCTION_TIMEOUT = 30.0
+FUNCTION_BASE_IMAGE = "python:3.11-slim"
 # flow.run in-process dispatch
 FLOW_RUN_PERMISSION_ID = "flow.run"
 MAX_FLOW_CALL_DEPTH = 10
@@ -555,18 +570,20 @@ class CapabilityExecutor:
                 start_time=start_time,
             )
         elif entry.host_execution:
-            resp = CapabilityResponse(
-                success=False,
-                error="host_execution functions are not yet supported",
-                error_type="not_implemented",
-                latency_ms=(time.time() - start_time) * 1000,
+            resp = self._execute_host_function(
+                principal_id=principal_id,
+                entry=entry,
+                args=args,
+                request_id=request_id,
+                start_time=start_time,
             )
         else:
-            resp = CapabilityResponse(
-                success=False,
-                error="User function execution is not yet supported",
-                error_type="not_implemented",
-                latency_ms=(time.time() - start_time) * 1000,
+            resp = self._execute_user_function(
+                principal_id=principal_id,
+                entry=entry,
+                args=args,
+                request_id=request_id,
+                start_time=start_time,
             )
 
         # 監査ログ
@@ -580,6 +597,566 @@ class CapabilityExecutor:
         )
 
         return resp
+
+
+    # ------------------------------------------------------------------
+    # W25.5: user function execution (Docker container)
+    # ------------------------------------------------------------------
+
+    def _is_docker_available(self) -> bool:
+        """Check if docker CLI is available (shutil.which based, like SecureExecutor)."""
+        return shutil.which("docker") is not None
+
+    def _generate_function_runner_script(self) -> str:
+        """
+        Generate a runner script for user function execution.
+
+        Protocol: stdin JSON -> run(context, args) -> stdout JSON
+        Works for both Docker container and host subprocess execution.
+        """
+        return """
+import sys
+import json
+import importlib.util
+import os
+
+def main():
+    input_text = sys.stdin.read()
+    try:
+        input_data = json.loads(input_text)
+    except json.JSONDecodeError as e:
+        print(json.dumps({"error": "Invalid input JSON: " + str(e), "error_type": "json_error"}))
+        sys.exit(1)
+
+    context = input_data.get("context", {})
+    args = input_data.get("args", {})
+    main_py = input_data.get("main_py_path", "")
+
+    if not main_py:
+        print(json.dumps({"error": "No main_py_path specified", "error_type": "config_error"}))
+        sys.exit(1)
+
+    if not os.path.isfile(main_py):
+        print(json.dumps({"error": "main.py not found: " + main_py, "error_type": "file_not_found"}))
+        sys.exit(1)
+
+    # Add function dir to sys.path
+    func_dir = os.path.dirname(main_py)
+    if func_dir and func_dir not in sys.path:
+        sys.path.insert(0, func_dir)
+
+    try:
+        spec = importlib.util.spec_from_file_location("function_module", main_py)
+        if spec is None or spec.loader is None:
+            print(json.dumps({"error": "Cannot load module: " + main_py, "error_type": "load_error"}))
+            sys.exit(1)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["function_module"] = module
+        spec.loader.exec_module(module)
+    except Exception as e:
+        print(json.dumps({"error": "Module load failed: " + str(e), "error_type": "load_error"}))
+        sys.exit(1)
+
+    fn = getattr(module, "run", None)
+    if fn is None:
+        print(json.dumps({"error": "No 'run' function in main.py", "error_type": "func_not_found"}))
+        sys.exit(1)
+
+    try:
+        result = fn(context, args)
+    except Exception as e:
+        print(json.dumps({"error": str(e), "error_type": type(e).__name__}))
+        sys.exit(1)
+
+    if result is not None:
+        try:
+            print(json.dumps(result, ensure_ascii=False, default=str))
+        except Exception:
+            print(json.dumps({"error": "Result is not JSON serializable", "error_type": "serialize_error"}))
+            sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+"""
+
+    def _get_function_timeout(self, entry) -> float:
+        """Get timeout from manifest grant_config, or default."""
+        grant_config = entry.manifest.get("grant_config", {}) if entry.manifest else {}
+        t = grant_config.get("timeout", DEFAULT_FUNCTION_TIMEOUT)
+        try:
+            t = float(t)
+        except (TypeError, ValueError):
+            t = DEFAULT_FUNCTION_TIMEOUT
+        return min(max(t, 1.0), MAX_TIMEOUT)
+
+    def _execute_user_function(
+        self,
+        principal_id: str,
+        entry: "FunctionEntry",
+        args: Dict[str, Any],
+        request_id: str,
+        start_time: float,
+    ) -> CapabilityResponse:
+        """
+        User function を実行する。
+
+        Docker 利用可能時: 使い捨てコンテナ内で実行（SecureExecutor パターン）。
+        Docker 利用不可時: ホスト subprocess にフォールバック（警告ログ）。
+        """
+        pack_id = entry.pack_id
+        function_id = entry.function_id
+        function_dir = entry.function_dir
+        main_py_path = entry.main_py_path
+        timeout = self._get_function_timeout(entry)
+
+        # Validate function_dir exists
+        if function_dir is None or not Path(function_dir).is_dir():
+            return CapabilityResponse(
+                success=False,
+                error=f"function_dir not found: {function_dir}",
+                error_type="function_dir_not_found",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        # Validate main_py_path exists
+        if main_py_path is None or not Path(main_py_path).is_file():
+            return CapabilityResponse(
+                success=False,
+                error=f"main.py not found: {main_py_path}",
+                error_type="main_py_not_found",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        # Docker available? Use container. Otherwise fallback to host subprocess.
+        if self._is_docker_available() and _DockerRunBuilder is not None:
+            return self._execute_user_function_docker(
+                principal_id=principal_id,
+                entry=entry,
+                args=args,
+                request_id=request_id,
+                start_time=start_time,
+                timeout=timeout,
+            )
+        else:
+            logger.warning(
+                "Docker not available, falling back to host subprocess for "
+                "user function %s:%s. This is less secure.",
+                pack_id, function_id,
+            )
+            return self._execute_user_function_host(
+                principal_id=principal_id,
+                entry=entry,
+                args=args,
+                request_id=request_id,
+                start_time=start_time,
+                timeout=timeout,
+            )
+
+    def _execute_user_function_docker(
+        self,
+        principal_id: str,
+        entry: "FunctionEntry",
+        args: Dict[str, Any],
+        request_id: str,
+        start_time: float,
+        timeout: float,
+    ) -> CapabilityResponse:
+        """Execute user function in a disposable Docker container."""
+        pack_id = entry.pack_id
+        function_id = entry.function_id
+        function_dir = Path(entry.function_dir)
+        container_name = f"rumi-func-{pack_id}-{function_id}-{uuid.uuid4().hex[:8]}"
+
+        context = {
+            "principal_id": principal_id,
+            "pack_id": pack_id,
+            "function_id": function_id,
+            "request_id": request_id,
+            "ts": self._now_ts(),
+        }
+        subprocess_input = {
+            "context": context,
+            "args": args,
+            "main_py_path": "/function/main.py",
+        }
+        input_json = json.dumps(subprocess_input, ensure_ascii=False, default=str)
+
+        runner_script = self._generate_function_runner_script()
+
+        # Write input to a temp file for mounting
+        input_file = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".json", delete=False, encoding="utf-8"
+            ) as f:
+                f.write(input_json)
+                input_file = f.name
+
+            builder = _DockerRunBuilder(name=container_name)
+            builder.volume(f"{function_dir.resolve()}:/function:ro")
+            builder.volume(f"{input_file}:/input.json:ro")
+            builder.env("RUMI_PACK_ID", pack_id)
+            builder.env("RUMI_FUNCTION_ID", function_id)
+            builder.label("rumi.managed", "true")
+            builder.label("rumi.type", "function")
+            builder.label("rumi.pack_id", pack_id)
+            builder.image(FUNCTION_BASE_IMAGE)
+            # Use stdin protocol: cat /input.json | python -c <script>
+            builder.command([
+                "sh", "-c",
+                f"cat /input.json | python -c {json.dumps(runner_script)}",
+            ])
+            docker_cmd = builder.build()
+
+            proc = subprocess.run(
+                docker_cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+
+            latency_ms = (time.time() - start_time) * 1000
+
+            if proc.returncode != 0:
+                stderr_msg = (proc.stderr or "").strip()
+                return CapabilityResponse(
+                    success=False,
+                    error=f"Function execution failed (exit {proc.returncode}): {stderr_msg}"[:1000],
+                    error_type="function_execution_error",
+                    latency_ms=latency_ms,
+                )
+
+            stdout = proc.stdout or ""
+
+            # Response size check
+            if len(stdout.encode("utf-8")) > MAX_RESPONSE_SIZE:
+                return CapabilityResponse(
+                    success=False,
+                    error="Response too large",
+                    error_type="response_too_large",
+                    latency_ms=latency_ms,
+                )
+
+            stdout_stripped = stdout.strip()
+            if not stdout_stripped:
+                return CapabilityResponse(
+                    success=True,
+                    output=None,
+                    latency_ms=latency_ms,
+                )
+
+            try:
+                output = json.loads(stdout_stripped)
+            except json.JSONDecodeError:
+                return CapabilityResponse(
+                    success=False,
+                    error="Function output is not valid JSON",
+                    error_type="invalid_json_output",
+                    latency_ms=latency_ms,
+                )
+
+            return CapabilityResponse(
+                success=True,
+                output=output,
+                latency_ms=latency_ms,
+            )
+
+        except subprocess.TimeoutExpired:
+            # Kill the container on timeout
+            try:
+                subprocess.run(
+                    ["docker", "kill", container_name],
+                    capture_output=True,
+                    timeout=5,
+                )
+            except Exception:
+                pass
+            return CapabilityResponse(
+                success=False,
+                error=f"Function execution timed out after {timeout}s",
+                error_type="timeout",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        except Exception as e:
+            return CapabilityResponse(
+                success=False,
+                error=f"Function execution error: {e}",
+                error_type="internal_error",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        finally:
+            if input_file:
+                try:
+                    os.unlink(input_file)
+                except Exception:
+                    pass
+
+    def _execute_user_function_host(
+        self,
+        principal_id: str,
+        entry: "FunctionEntry",
+        args: Dict[str, Any],
+        request_id: str,
+        start_time: float,
+        timeout: float,
+    ) -> CapabilityResponse:
+        """Execute user function as host subprocess (Docker fallback)."""
+        pack_id = entry.pack_id
+        function_id = entry.function_id
+        main_py_path = str(entry.main_py_path)
+
+        context = {
+            "principal_id": principal_id,
+            "pack_id": pack_id,
+            "function_id": function_id,
+            "request_id": request_id,
+            "ts": self._now_ts(),
+        }
+        subprocess_input = {
+            "context": context,
+            "args": args,
+            "main_py_path": main_py_path,
+        }
+        input_json = json.dumps(subprocess_input, ensure_ascii=False, default=str)
+
+        runner_script = self._generate_function_runner_script()
+        runner_file = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".py", delete=False, encoding="utf-8"
+            ) as f:
+                f.write(runner_script)
+                runner_file = f.name
+
+            proc = subprocess.run(
+                [sys.executable, runner_file],
+                input=input_json,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd=str(Path(entry.function_dir)),
+            )
+
+            latency_ms = (time.time() - start_time) * 1000
+
+            if proc.returncode != 0:
+                stderr_msg = (proc.stderr or "").strip()
+                return CapabilityResponse(
+                    success=False,
+                    error=f"Function execution failed (exit {proc.returncode}): {stderr_msg}"[:1000],
+                    error_type="function_execution_error",
+                    latency_ms=latency_ms,
+                )
+
+            stdout = proc.stdout or ""
+
+            if len(stdout.encode("utf-8")) > MAX_RESPONSE_SIZE:
+                return CapabilityResponse(
+                    success=False,
+                    error="Response too large",
+                    error_type="response_too_large",
+                    latency_ms=latency_ms,
+                )
+
+            stdout_stripped = stdout.strip()
+            if not stdout_stripped:
+                return CapabilityResponse(
+                    success=True,
+                    output=None,
+                    latency_ms=latency_ms,
+                )
+
+            try:
+                output = json.loads(stdout_stripped)
+            except json.JSONDecodeError:
+                return CapabilityResponse(
+                    success=False,
+                    error="Function output is not valid JSON",
+                    error_type="invalid_json_output",
+                    latency_ms=latency_ms,
+                )
+
+            return CapabilityResponse(
+                success=True,
+                output=output,
+                latency_ms=latency_ms,
+            )
+
+        except subprocess.TimeoutExpired:
+            return CapabilityResponse(
+                success=False,
+                error=f"Function execution timed out after {timeout}s",
+                error_type="timeout",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        except Exception as e:
+            return CapabilityResponse(
+                success=False,
+                error=f"Function execution error: {e}",
+                error_type="internal_error",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        finally:
+            if runner_file:
+                try:
+                    os.unlink(runner_file)
+                except Exception:
+                    pass
+
+    # ------------------------------------------------------------------
+    # W25.5: host_execution function (host subprocess)
+    # ------------------------------------------------------------------
+
+    def _execute_host_function(
+        self,
+        principal_id: str,
+        entry: "FunctionEntry",
+        args: Dict[str, Any],
+        request_id: str,
+        start_time: float,
+    ) -> CapabilityResponse:
+        """
+        host_execution function をホスト上の subprocess で実行する。
+
+        RUMI_ALLOW_HOST_EXECUTION 環境変数が "1" or "true" でなければ拒否する。
+        """
+        # Environment variable guard
+        allow_host = os.environ.get("RUMI_ALLOW_HOST_EXECUTION", "").lower()
+        if allow_host not in ("1", "true"):
+            return CapabilityResponse(
+                success=False,
+                error="Host execution is disabled. Set RUMI_ALLOW_HOST_EXECUTION=1 to enable.",
+                error_type="host_execution_disabled",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        pack_id = entry.pack_id
+        function_id = entry.function_id
+        function_dir = entry.function_dir
+        main_py_path = entry.main_py_path
+        timeout = self._get_function_timeout(entry)
+
+        # Validate function_dir exists
+        if function_dir is None or not Path(function_dir).is_dir():
+            return CapabilityResponse(
+                success=False,
+                error=f"function_dir not found: {function_dir}",
+                error_type="function_dir_not_found",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        # Validate main_py_path exists
+        if main_py_path is None or not Path(main_py_path).is_file():
+            return CapabilityResponse(
+                success=False,
+                error=f"main.py not found: {main_py_path}",
+                error_type="main_py_not_found",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        context = {
+            "principal_id": principal_id,
+            "pack_id": pack_id,
+            "function_id": function_id,
+            "request_id": request_id,
+            "ts": self._now_ts(),
+        }
+        subprocess_input = {
+            "context": context,
+            "args": args,
+            "main_py_path": str(main_py_path),
+        }
+        input_json = json.dumps(subprocess_input, ensure_ascii=False, default=str)
+
+        runner_script = self._generate_function_runner_script()
+        runner_file = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".py", delete=False, encoding="utf-8"
+            ) as f:
+                f.write(runner_script)
+                runner_file = f.name
+
+            proc = subprocess.run(
+                [sys.executable, runner_file],
+                input=input_json,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd=str(Path(function_dir)),
+            )
+
+            latency_ms = (time.time() - start_time) * 1000
+
+            if proc.returncode != 0:
+                stderr_msg = (proc.stderr or "").strip()
+                return CapabilityResponse(
+                    success=False,
+                    error=f"Function execution failed (exit {proc.returncode}): {stderr_msg}"[:1000],
+                    error_type="function_execution_error",
+                    latency_ms=latency_ms,
+                )
+
+            stdout = proc.stdout or ""
+
+            if len(stdout.encode("utf-8")) > MAX_RESPONSE_SIZE:
+                return CapabilityResponse(
+                    success=False,
+                    error="Response too large",
+                    error_type="response_too_large",
+                    latency_ms=latency_ms,
+                )
+
+            stdout_stripped = stdout.strip()
+            if not stdout_stripped:
+                return CapabilityResponse(
+                    success=True,
+                    output=None,
+                    latency_ms=latency_ms,
+                )
+
+            try:
+                output = json.loads(stdout_stripped)
+            except json.JSONDecodeError:
+                return CapabilityResponse(
+                    success=False,
+                    error="Function output is not valid JSON",
+                    error_type="invalid_json_output",
+                    latency_ms=latency_ms,
+                )
+
+            return CapabilityResponse(
+                success=True,
+                output=output,
+                latency_ms=latency_ms,
+            )
+
+        except subprocess.TimeoutExpired:
+            return CapabilityResponse(
+                success=False,
+                error=f"Function execution timed out after {timeout}s",
+                error_type="timeout",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        except Exception as e:
+            return CapabilityResponse(
+                success=False,
+                error=f"Function execution error: {e}",
+                error_type="internal_error",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        finally:
+            if runner_file:
+                try:
+                    os.unlink(runner_file)
+                except Exception:
+                    pass
 
     def _dispatch_core_function(
         self,
