@@ -285,6 +285,11 @@ class ComponentLifecycleExecutor:
             if am._initialized:
                 status = am.get_status(pack_id)
                 if status != PackStatus.APPROVED:
+                    logger.warning(
+                        "Component '%s' skipped: pack '%s' status is '%s'. "
+                        "Approve the pack to enable execution.",
+                        comp_id, pack_id, status.value if status else "unknown",
+                    )
                     self.diagnostics.record_step(
                         phase=phase,
                         step_id=f"{phase}.{comp_id}.not_approved",
@@ -301,6 +306,11 @@ class ComponentLifecycleExecutor:
                 
                 if not am.verify_hash(pack_id):
                     am.mark_modified(pack_id)
+                    logger.warning(
+                        "Component '%s' skipped: pack '%s' files changed after approval. "
+                        "Re-approve to fix.",
+                        comp_id, pack_id,
+                    )
                     self.diagnostics.record_step(
                         phase=phase,
                         step_id=f"{phase}.{comp_id}.hash_mismatch",

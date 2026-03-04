@@ -471,6 +471,26 @@ class KernelSystemHandlersMixin:
             ctx["_packs_pending"] = pending
             ctx["_packs_modified"] = modified
 
+            if modified:
+                import sys as _sys
+                for _pid in modified:
+                    print(
+                        f"[Rumi] WARNING: Pack '{_pid}' has been modified since approval. "
+                        f"Component setup will be skipped. Re-approve to fix: "
+                        f"POST /api/packs/{_pid}/approve",
+                        file=_sys.stderr,
+                    )
+
+            if pending:
+                import sys as _sys
+                for _pid in pending:
+                    print(
+                        f"[Rumi] WARNING: Pack '{_pid}' is awaiting approval. "
+                        f"Component setup will be skipped.",
+                        file=_sys.stderr,
+                    )
+
+
             self.diagnostics.record_step(
                 phase="startup",
                 step_id="approval.scan",
