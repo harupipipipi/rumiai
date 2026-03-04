@@ -253,7 +253,9 @@ def _register_defaults(container: DIContainer) -> None:
     # --- Wave 3: approval / permission ---
     def _approval_manager_factory() -> "ApprovalManager":  # noqa: F821
         from .approval_manager import ApprovalManager
-        return ApprovalManager()
+        instance = ApprovalManager()
+        instance.initialize()
+        return instance
 
     def _permission_manager_factory() -> "PermissionManager":  # noqa: F821
         from .permission_manager import PermissionManager

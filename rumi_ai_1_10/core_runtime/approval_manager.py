@@ -456,24 +456,27 @@ class ApprovalManager:
             # #62: 宣言的Store作成
             self._create_declared_stores(pack_id)
 
-            # W18-B: host_execution 警告ログ
-            eco_data = self._read_ecosystem_data(pack_id)
-            if eco_data.get("host_execution", False) is True:
-                logger.warning(
-                    "SECURITY: Pack '%s' declares host_execution=true. "
-                    "This pack will run directly on the host without Docker isolation.",
-                    pack_id,
-                )
-                try:
-                    from .audit_logger import get_audit_logger
-                    get_audit_logger().log_security_event(
-                        event_type="approve_host_execution_warning",
-                        severity="warning",
-                        description=f"Pack '{pack_id}' runs on host without Docker isolation",
-                        pack_id=pack_id,
+            # W18-B: host_execution 警告ログ (W26-HOTFIX: try/except保護)
+            try:
+                eco_data = self._read_ecosystem_data(pack_id)
+                if eco_data.get("host_execution", False) is True:
+                    logger.warning(
+                        "SECURITY: Pack '%s' declares host_execution=true. "
+                        "This pack will run directly on the host without Docker isolation.",
+                        pack_id,
                     )
-                except Exception:
-                    pass
+                    try:
+                        from .audit_logger import get_audit_logger
+                        get_audit_logger().log_security_event(
+                            event_type="approve_host_execution_warning",
+                            severity="warning",
+                            description=f"Pack '{pack_id}' runs on host without Docker isolation",
+                            pack_id=pack_id,
+                        )
+                    except Exception:
+                        pass
+            except Exception:
+                pass  # host_execution check failure must not block approval
 
             # キャッシュ無効化
             self._invalidate_hash_cache(pack_id)
@@ -824,6 +827,23 @@ class ApprovalManager:
                     self._audit_store_creation(pack_id, r.store_id, True, None)
         except Exception:
             pass
+
+
+    def _read_ecosystem_data(self, pack_id: str) -> Dict[str, Any]:
+        """
+        Pack の ecosystem.json を読み取って返す。
+
+        W26-HOTFIX: approve() 内の host_execution 警告で使用。
+        見つからない場合やパースエラー時は空 dict を返す。
+        """
+        loc = self._pack_locations.get(pack_id)
+        if loc is None:
+            return {}
+        try:
+            with open(loc.ecosystem_json_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
 
     def _read_stores_declaration(self, pack_id: str) -> List[Dict[str, Any]]:
         """ecosystem.json から stores フィールドを読み取る"""
