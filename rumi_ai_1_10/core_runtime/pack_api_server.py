@@ -1034,8 +1034,11 @@ class PackAPIServer:
         if internal_token is None:
             # HMACKeyManager からアクティブ鍵を取得
             internal_token = self._hmac_key_manager.get_active_key()
-            logger.info("Using HMAC-managed API token: [REDACTED]")
-            logger.warning("Set this token in client requests: Authorization: Bearer <token>")
+            token_prefix = internal_token[:8] + "..." if internal_token and len(internal_token) >= 8 else internal_token or "(empty)"
+            logger.info(f"Using HMAC-managed API token (prefix): {token_prefix}")
+            logger.warning("To retrieve the full token, inspect: user_data/hmac_keys.json")
+            logger.warning('  Or run: python3 -c "from core_runtime.hmac_key_manager import HMACKeyManager; m=HMACKeyManager(); print(m.get_active_key())"')
+            logger.warning("Set this token in client requests: Authorization: Bearer <your-token>")
             logger.warning("Token rotation: set RUMI_HMAC_ROTATE=true and restart")
         
         self.internal_token = internal_token
