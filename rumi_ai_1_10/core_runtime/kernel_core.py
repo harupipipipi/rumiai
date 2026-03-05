@@ -71,6 +71,7 @@ class KernelCore:
         self.event_bus = event_bus or _c.get("event_bus")
         self.lifecycle = lifecycle or ComponentLifecycleExecutor(diagnostics=self.diagnostics, install_journal=self.install_journal)
         self._flow: Optional[Dict[str, Any]] = None
+        self._flow_degraded: bool = False
         self._kernel_handlers: Dict[str, Callable[[Dict[str, Any], Dict[str, Any]], Any]] = {}
         self._shutdown_handlers: List[Callable[[], None]] = []
         self._capability_proxy = None
@@ -202,9 +203,28 @@ class KernelCore:
                     error=e,
                     meta={"file": str(new_flow_path)}
                 )
+                # Emit human-readable error to stderr
+                import sys as _sys
+                _cause = e
+                _has_import_error = False
+                while _cause is not None:
+                    if isinstance(_cause, ImportError):
+                        _has_import_error = True
+                        break
+                    _cause = getattr(_cause, '__cause__', None)
+                if _has_import_error:
+                    print(f"[Rumi] ERROR: Failed to load flow: {e}", file=_sys.stderr)
+                    print("[Rumi] ERROR: PyYAML is not installed. Run: pip install -r requirements.txt", file=_sys.stderr)
+                elif isinstance(e, ValueError):
+                    print(f"[Rumi] ERROR: Failed to load flow: {e}", file=_sys.stderr)
+                    print("[Rumi] ERROR: Check YAML syntax in your flow file.", file=_sys.stderr)
+                else:
+                    print(f"[Rumi] ERROR: Failed to load flow: {e}", file=_sys.stderr)
+                    print("[Rumi] ERROR: An unexpected error occurred while loading the flow file.", file=_sys.stderr)
                 # new flow の読み込みに失敗した場合、fallback へ
 
         # 2. Fallback (deprecated): 旧 flow/ ディレクトリ
+        self._flow_degraded = True
         self._log_fallback_warning()
         return self._load_legacy_flow()
 
@@ -216,7 +236,6 @@ class KernelCore:
             "Legacy flow/ is fallback only and will be removed in a future version. "
             "Startup must use kernel:flow.load_all to load the new flow system."
         )
-        print(f"[Rumi] WARNING: {warning_msg}")
         import sys as _sys
         print(f"[Rumi] WARNING: {warning_msg}", file=_sys.stderr)
 
@@ -336,6 +355,7 @@ class KernelCore:
 
     def _parse_flow_text(self, raw: str) -> Tuple[Dict[str, Any], str, Dict[str, Any]]:
         attempts: List[Dict[str, Any]] = []
+        _import_error: Optional[ImportError] = None
         try:
             import yaml
             try:
@@ -347,6 +367,8 @@ class KernelCore:
                 attempts.append({"name": "yaml_pyyaml", "status": "failed", "reason": str(e)})
         except Exception as e:
             attempts.append({"name": "yaml_pyyaml", "status": "unavailable", "reason": str(e)})
+            if isinstance(e, ImportError):
+                _import_error = e
         try:
             parsed_any = json.loads(raw)
             if isinstance(parsed_any, dict):
@@ -354,6 +376,8 @@ class KernelCore:
             attempts.append({"name": "json", "status": "failed", "reason": f"returned {type(parsed_any).__name__}"})
         except Exception as e:
             attempts.append({"name": "json", "status": "failed", "reason": str(e)})
+        if _import_error is not None:
+            raise ValueError("Unable to parse Flow as YAML or JSON: PyYAML is not installed") from _import_error
         raise ValueError("Unable to parse Flow as YAML or JSON")
 
     # ------------------------------------------------------------------

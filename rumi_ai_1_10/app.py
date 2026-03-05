@@ -46,6 +46,30 @@ def _check_permissive_production_guard():
         sys.exit(1)
 
 
+
+def _check_critical_dependencies():
+    """
+    Check that critical dependencies are importable before proceeding.
+    If missing, print a helpful message and exit.
+    """
+    missing = []
+    for mod_name in ("yaml", "cryptography"):
+        try:
+            __import__(mod_name)
+        except ImportError:
+            missing.append(mod_name)
+    if missing:
+        print(
+            "FATAL: Missing critical dependencies: " + ", ".join(missing),
+            file=sys.stderr,
+        )
+        print(
+            "Install them with: pip install -r requirements.txt",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
 def main():
     global _kernel
 
@@ -55,6 +79,8 @@ def main():
     parser.add_argument("--validate", action="store_true", help="Validate all Pack ecosystem.json files and exit")
     parser.add_argument("--health", action="store_true", help="Run health check and exit with status")
     args = parser.parse_args()
+
+    _check_critical_dependencies()
 
     # --- ログ設定 ---
     import os
