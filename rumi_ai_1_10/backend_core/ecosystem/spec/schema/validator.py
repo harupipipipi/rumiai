@@ -6,6 +6,7 @@ JSON Schema 検証ユーティリティ
 """
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -114,6 +115,33 @@ def _validate_basic(data: dict, schema: dict) -> List[str]:
                     errors.append(
                         f"フィールド '{field}' の型が不正です: "
                         f"期待={type_names}, 実際={type(value).__name__}"
+                    )
+
+            # PC-6 fix: pattern チェック（jsonschema 未インストール時の補完）
+            pattern = prop_schema.get("pattern")
+            if pattern and isinstance(value, str):
+                try:
+                    if not re.match(pattern, value):
+                        errors.append(
+                            f"フィールド '{field}' の値 '{value}' がパターン '{pattern}' に一致しません"
+                        )
+                except re.error:
+                    pass  # 不正な正規表現は無視
+
+            # PC-6 fix: minLength チェック
+            min_length = prop_schema.get("minLength")
+            if min_length is not None and isinstance(value, str):
+                if len(value) < min_length:
+                    errors.append(
+                        f"フィールド '{field}' の長さが最小長 {min_length} 未満です"
+                    )
+
+            # PC-6 fix: maxLength チェック
+            max_length = prop_schema.get("maxLength")
+            if max_length is not None and isinstance(value, str):
+                if len(value) > max_length:
+                    errors.append(
+                        f"フィールド '{field}' の長さが最大長 {max_length} を超えています"
                     )
     
     # additionalPropertiesのチェック

@@ -217,15 +217,48 @@ class ApprovalManager:
             self._approvals[pack_id] = PackApproval.from_dict(data)
     
     def _save_grant(self, approval: PackApproval) -> None:
-        """grants.jsonを保存（HMAC署名付き）"""
+        """grants.jsonを保存（HMAC署名付き、アトミック書き込み）"""
         self.grants_dir.mkdir(parents=True, exist_ok=True)
         
         data = approval.to_dict()
         data["_hmac_signature"] = compute_data_hmac(self._secret_key, data)
         
         path = self.grants_dir / f"{approval.pack_id}.grants.json"
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        # PC-9 fix: パストラバーサル防御 — grants_dir 配下であることを検証
+        grants_dir_resolved = self.grants_dir.resolve()
+        path_resolved = path.resolve()
+        try:
+            path_resolved.relative_to(grants_dir_resolved)
+        except ValueError:
+            logger.error(
+                "Path traversal detected in pack_id '%s': resolved path '%s' "
+                "is outside grants_dir '%s'",
+                approval.pack_id, path_resolved, grants_dir_resolved,
+            )
+            return  # 書き込みを拒否
+        # PC-2 fix: アトミック書き込み — tmp ファイルに書いてから rename
+        import tempfile
+        try:
+            fd, tmp_path_str = tempfile.mkstemp(
+                dir=str(self.grants_dir), suffix=".tmp", prefix=".grant_"
+            )
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                Path(tmp_path_str).replace(path)
+            except BaseException:
+                try:
+                    os.unlink(tmp_path_str)
+                except OSError:
+                    pass
+                raise
+        except Exception as e:
+            logger.error("Failed to save grant file atomically for '%s': %s", approval.pack_id, e)
+            # フォールバック: 直接書き込み（データ消失よりはマシ）
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
     
     def _is_local_pack_mode_enabled(self) -> bool:
         """local_packモードが有効かチェック"""

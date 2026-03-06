@@ -89,6 +89,15 @@ steps:
     input:
       handler: "kernel:flow.load_all"
 
+  - id: component_discover
+    phase: ecosystem
+    priority: 40
+    type: handler
+    input:
+      handler: "kernel:component.discover"
+      args:
+        approved_only: true
+
   - id: component_setup
     phase: ecosystem
     priority: 50

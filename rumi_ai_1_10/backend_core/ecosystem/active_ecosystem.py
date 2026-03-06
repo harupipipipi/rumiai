@@ -132,13 +132,37 @@ class ActiveEcosystemManager:
         )
     
     def _save_config_internal(self):
-        """設定を保存（ロック内で呼び出す、HMAC 署名付き）"""
+        """設定を保存（ロック内で呼び出す、HMAC 署名付き、アトミック書き込み）"""
+        import tempfile, os as _os
         try:
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
             data = self._config.to_dict()
             data["_hmac_signature"] = compute_data_hmac(self._secret_key, data)
-            with open(self.config_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            # PC-2 fix: アトミック書き込み — tmp ファイルに書いてから rename
+            try:
+                fd, tmp_path_str = tempfile.mkstemp(
+                    dir=str(self.config_path.parent), suffix=".tmp", prefix=".active_eco_"
+                )
+                try:
+                    with _os.fdopen(fd, "w", encoding="utf-8") as f:
+                        json.dump(data, f, ensure_ascii=False, indent=2)
+                        f.flush()
+                        _os.fsync(f.fileno())
+                    Path(tmp_path_str).replace(self.config_path)
+                except BaseException:
+                    try:
+                        _os.unlink(tmp_path_str)
+                    except OSError:
+                        pass
+                    raise
+            except Exception as _fallback_exc:
+                # フォールバック: 直接書き込み
+                logger.error(
+                    "[ActiveEcosystem] Atomic write failed, falling back to direct write: %s",
+                    _fallback_exc,
+                )
+                with open(self.config_path, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
         except IOError as e:
             logger.error("[ActiveEcosystem] 設定保存エラー: %s", e)
     

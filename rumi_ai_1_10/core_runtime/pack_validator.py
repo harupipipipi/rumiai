@@ -243,6 +243,15 @@ def _validate_single_pack(
             connectivity_list = [
                 str(c) for c in connectivity if isinstance(c, str)
             ]
+            # PC-8 fix: 非文字列要素に警告を出す（タイポ検知）
+            non_str_items = [c for c in connectivity if not isinstance(c, str)]
+            if non_str_items:
+                msg = (
+                    f"[{pid}] 'connectivity' contains non-string elements "
+                    f"that were ignored: {non_str_items}"
+                )
+                logger.warning(msg)
+                warnings.append(msg)
     else:
         msg = (
             f"[{pid}] 'connectivity' field is not a list: "

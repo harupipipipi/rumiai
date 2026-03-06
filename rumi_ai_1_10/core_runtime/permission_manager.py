@@ -580,8 +580,13 @@ class PermissionManager:
             
             with open(audit_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
-        except Exception:
-            pass  # 監査ログのエラーで処理を止めない
+        except Exception as exc:
+            # SV-11 fix: 監査ログの例外を握り潰さずログに記録する
+            # セキュリティ監査証跡に検知不能な欠落が生じることを防止
+            logger.warning(
+                "Failed to write permission audit log for component=%s permission=%s action=%s: %s",
+                component_id, permission, action, exc,
+            )
     
     # ===== 状態取得 =====
     

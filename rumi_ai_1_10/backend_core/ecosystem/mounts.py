@@ -7,9 +7,13 @@ user_data/mounts.json でマウントポイントを設定可能。
 
 import os
 import json
+import logging
 import threading
 from pathlib import Path
 from typing import Dict, Optional, Any
+
+# W-2 fix: print() を logger に統一
+logger = logging.getLogger(__name__)
 
 
 # モジュール基準ベースディレクトリ
@@ -77,7 +81,7 @@ class MountManager:
                         data = json.load(f)
                     self._mounts = data.get("mounts", {})
                 except (json.JSONDecodeError, IOError) as e:
-                    print(f"[MountManager] 設定ファイル読み込みエラー: {e}")
+                    logger.warning("[MountManager] 設定ファイル読み込みエラー: %s", e)
                     self._mounts = {}
             
             # デフォルト値で補完
@@ -98,7 +102,7 @@ class MountManager:
             with open(self.config_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except IOError as e:
-            print(f"[MountManager] 設定ファイル保存エラー: {e}")
+            logger.error("[MountManager] 設定ファイル保存エラー: %s", e)
     
     def _save_config(self):
         """設定ファイルを保存"""
@@ -118,6 +122,7 @@ class MountManager:
         
         Raises:
             KeyError: 未定義のマウントポイントの場合
+            ValueError: パストラバーサルが検出された場合
         """
         with self._lock:
             if mount_point not in self._mounts:
@@ -131,6 +136,16 @@ class MountManager:
             path = self.base_dir / path
         
         path = path.resolve()
+        
+        # PC-3 fix: パストラバーサル防御 — base_dir 配下であることを検証
+        base_resolved = self.base_dir.resolve()
+        try:
+            path.relative_to(base_resolved)
+        except ValueError:
+            raise ValueError(
+                f"パストラバーサルが検出されました: マウントポイント '{mount_point}' の "
+                f"パス '{raw_path}' が base_dir '{base_resolved}' の外を参照しています"
+            )
         
         # ディレクトリを作成
         if ensure_exists:

@@ -269,6 +269,11 @@ def get_pack_block_dirs(pack_subdir: Path) -> List[Path]:
     """
     Pack 内の Block（実行ファイル）探索候補ディレクトリを返す。
 
+    blocks/ は Flow 内の ``python_file_call`` ハンドラが参照する実行ファイルを
+    格納するためのディレクトリであり、Registry の components/ スキャン対象ではない。
+    blocks/ を使用する Pack は components/ ディレクトリ内にコンポーネントを配置し、
+    blocks/ は python_file_call 用のスクリプトのみを格納すべきである。
+
     候補順:
       1. pack_subdir/blocks/
       2. pack_subdir/backend/blocks/

@@ -1035,7 +1035,7 @@ class PackAPIServer:
             # HMACKeyManager からアクティブ鍵を取得
             internal_token = self._hmac_key_manager.get_active_key()
             token_prefix = internal_token[:8] + "..." if internal_token and len(internal_token) >= 8 else internal_token or "(empty)"
-            logger.info(f"Using HMAC-managed API token (prefix): {token_prefix}")
+            logger.info("Using HMAC-managed API token (prefix): %s", token_prefix)
             logger.warning("To retrieve the full token, inspect: user_data/hmac_keys.json")
             logger.warning('  Or run: python3 -c "from core_runtime.hmac_key_manager import HMACKeyManager; m=HMACKeyManager(); print(m.get_active_key())"')
             logger.warning("Set this token in client requests: Authorization: Bearer <your-token>")
@@ -1044,6 +1044,7 @@ class PackAPIServer:
         self.internal_token = internal_token
         self.server: Optional[HTTPServer] = None
         self.thread: Optional[threading.Thread] = None
+        self._routes_load_lock = threading.Lock()
     
     def start(self) -> None:
         PackAPIHandler.approval_manager = self.approval_manager
@@ -1053,18 +1054,41 @@ class PackAPIServer:
         PackAPIHandler._hmac_key_manager = self._hmac_key_manager
         PackAPIHandler.kernel = self.kernel
 
-        # Packルートをregistryから読み込み
+        # BUG-20260306-02 fix: Pack ルートの読み込みを system.ready イベント後に遅延実行する。
+        # API サーバー自体は security phase で初期化し、Pack ルートは
+        # component setup 完了後にロードされる。
+        # event_bus が利用可能ならイベント駆動、なければ即時ロード。
+        self._routes_loaded = False
         try:
-            from backend_core.ecosystem.registry import get_registry
-            reg = get_registry()
-            PackAPIHandler.load_pack_routes(reg)
+            if self.kernel and hasattr(self.kernel, 'event_bus') and self.kernel.event_bus:
+                def _deferred_load_routes(event_data=None):
+                    with self._routes_load_lock:
+                        if not self._routes_loaded:
+                            self._routes_loaded = True
+                            try:
+                                from backend_core.ecosystem.registry import get_registry
+                                reg = get_registry()
+                                PackAPIHandler.load_pack_routes(reg)
+                                logger.info("Pack routes loaded (deferred after system.ready)")
+                            except Exception as e:
+                                logger.warning("Failed to load pack routes (deferred): %s", e)
+                self.kernel.event_bus.subscribe("system.ready", _deferred_load_routes)
+            else:
+                # Fallback: event_bus なしの場合は即時ロード
+                try:
+                    from backend_core.ecosystem.registry import get_registry
+                    reg = get_registry()
+                    PackAPIHandler.load_pack_routes(reg)
+                    self._routes_loaded = True
+                except Exception as e:
+                    logger.warning("Failed to load pack routes: %s", e)
         except Exception as e:
-            logger.warning(f"Failed to load pack routes: {e}")
+            logger.warning("Failed to set up deferred route loading: %s", e)
         
         self.server = HTTPServer((self.host, self.port), PackAPIHandler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
-        logger.info(f"Pack API server started on http://{self.host}:{self.port}")
+        logger.info("Pack API server started on http://%s:%s", self.host, self.port)
     
     def stop(self) -> None:
         if self.server:
