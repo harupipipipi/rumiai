@@ -12,6 +12,7 @@ W19-F: VULN-M05 — JSON ファイルサイズ上限チェック追加
 import json
 import logging
 import os
+import re
 from collections import deque
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
@@ -41,6 +42,9 @@ except ImportError:
     _CORE_PACK_DIR_PATHS = str(_FallbackPath(__file__).resolve().parent.parent.parent / "core_runtime" / "core_pack")
 
 logger = logging.getLogger(__name__)
+
+# PC-4: function_id validation regex (compiled once at module level)
+_FUNC_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 RUMI_MAX_JSON_FILE_BYTES: int = int(
     os.environ.get("RUMI_MAX_JSON_FILE_BYTES", 2097152)
@@ -533,8 +537,25 @@ class Registry:
                 )
                 continue
 
-            # --- FunctionRegistry に登録 ---
+            # --- PC-4 fix: function_id パターンチェック ---
             function_id = manifest.get("function_id", func_subdir.name)
+            if not _FUNC_ID_RE.match(function_id):
+                logger.warning(
+                    "[Registry] Invalid function_id '%s' for pack '%s', skipping",
+                    function_id, pack_info.pack_id,
+                )
+                continue
+
+            # --- PC-4 fix: main.py 存在チェック ---
+            main_py = func_subdir / "main.py"
+            if not main_py.is_file():
+                logger.warning(
+                    "[Registry] main.py not found in function dir '%s' for pack '%s', skipping",
+                    func_subdir, pack_info.pack_id,
+                )
+                continue
+
+            # --- FunctionRegistry に登録 ---
             try:
                 func_registry.register(
                     pack_id=pack_info.pack_id,

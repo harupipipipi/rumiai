@@ -111,7 +111,7 @@ class KernelSystemHandlersMixin:
             self.diagnostics.record_step(phase="startup", step_id="startup.mounts.internal", handler="kernel:mounts.init",
                                           status="failed", error=e, meta={"mounts_file": mounts_file})
             _logger.error("Mounts init failed", exc_info=e, mounts_file=mounts_file)
-            return None
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e), "handler": "kernel:mounts.init"}}
 
     def _h_registry_load(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
         ecosystem_dir = str(args.get("ecosystem_dir", "ecosystem"))
@@ -129,7 +129,7 @@ class KernelSystemHandlersMixin:
             self.diagnostics.record_step(phase="startup", step_id="startup.registry.internal", handler="kernel:registry.load",
                                           status="failed", error=e, meta={"ecosystem_dir": ecosystem_dir})
             _logger.error("Registry load failed", exc_info=e, ecosystem_dir=ecosystem_dir)
-            return None
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e), "handler": "kernel:registry.load"}}
 
     def _h_active_ecosystem_load(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
         config_file = str(args.get("config_file", "user_data/active_ecosystem.json"))
@@ -146,7 +146,7 @@ class KernelSystemHandlersMixin:
             self.diagnostics.record_step(phase="startup", step_id="startup.active_ecosystem.internal", handler="kernel:active_ecosystem.load",
                                           status="failed", error=e, meta={"config_file": config_file})
             _logger.error("Active ecosystem load failed", exc_info=e, config_file=config_file)
-            return None
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e), "handler": "kernel:active_ecosystem.load"}}
 
     def _h_interfaces_publish(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
         self.interface_registry.register("kernel.state", {"services_ready": True, "ts": self._now_ts()}, meta={"source": "kernel"})
@@ -164,7 +164,10 @@ class KernelSystemHandlersMixin:
         value = self.interface_registry.get(key, strategy=strategy)
         if args.get("store_as"):
             ctx[args["store_as"]] = value
-        return {"_kernel_step_status": "success", "_kernel_step_meta": {"key": key, "strategy": strategy, "found": value is not None}, "value": value}
+        # BUG-20260306-03 fix: strategy-aware な found 判定
+        # strategy="all" の場合 [] を返すことがあるため bool(value) で判定
+        found = bool(value) if strategy == "all" else value is not None
+        return {"_kernel_step_status": "success", "_kernel_step_meta": {"key": key, "strategy": strategy, "found": found}, "value": value}
 
     def _h_ir_call(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
         key = args.get("key")
@@ -454,6 +457,10 @@ class KernelSystemHandlersMixin:
 
             for pack_id in packs:
                 status = am.get_status(pack_id)
+                # SV-10 fix: get_status() が None を返す場合（未登録 Pack）をハンドリング
+                if status is None:
+                    pending.append(pack_id)
+                    continue
                 if status:
                     status_str = status.value if hasattr(status, 'value') else str(status)
                     if status_str == "approved":

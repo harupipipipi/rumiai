@@ -244,6 +244,12 @@ class EcosystemInitializer:
         
         # アクティブなPackが存在するか確認
         active_identity = self.active_ecosystem.active_pack_identity
+        # CR-4 fix: active_pack_identity が None の場合は早期リターン
+        if active_identity is None:
+            result["warnings"].append(
+                "アクティブな Pack Identity が設定されていません（active_pack_identity is None）"
+            )
+            return result
         pack = self.registry.get_pack_by_identity(active_identity)
         
         if not pack:

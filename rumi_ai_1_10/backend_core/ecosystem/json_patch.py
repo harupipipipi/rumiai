@@ -15,6 +15,7 @@ RFC 6902 JSON Patch 実装
 
 import copy
 import json
+import re
 from typing import Any, Dict, List, Union
 
 
@@ -55,10 +56,12 @@ def _parse_pointer(pointer: str) -> List[str]:
     # 先頭のスラッシュを除去して分割
     parts = pointer[1:].split('/')
     
-    # エスケープ解除: ~1 -> /, ~0 -> ~
+    # エスケープ解除: ~1 -> /, ~0 -> ~ (RFC 6901)
+    # CR-5 fix: シングルパス正規表現置換で ~01 → ~1 のような
+    # 多段エスケープを正しく処理する
     result = []
     for part in parts:
-        part = part.replace('~1', '/').replace('~0', '~')
+        part = re.sub(r'~([01])', lambda m: '/' if m.group(1) == '1' else '~', part)
         result.append(part)
     
     return result

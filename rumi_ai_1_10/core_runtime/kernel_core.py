@@ -78,6 +78,9 @@ class KernelCore:
         self._executor: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=4)
         self._flow_scheduler = None  # FlowScheduler instance (lazy)
         self._uds_proxy_manager = None  # UDS Egress Proxy Manager
+        # SV-3 fix: circuit breaker flags for lazy init proxies
+        self._uds_proxy_init_failed: bool = False
+        self._capability_proxy_init_failed: bool = False
 
 
         # K-1: 委譲オブジェクト
@@ -101,45 +104,55 @@ class KernelCore:
     # ------------------------------------------------------------------
 
     def _get_uds_proxy_manager(self):
-        """UDSEgressProxyManagerを取得（遅延初期化）"""
-        if self._uds_proxy_manager is None:
-            try:
-                from .egress_proxy import initialize_uds_egress_proxy
-                from .network_grant_manager import get_network_grant_manager
-                from .audit_logger import get_audit_logger
+        """UDSEgressProxyManagerを取得（遅延初期化、サーキットブレーカー付き）"""
+        if self._uds_proxy_manager is not None:
+            return self._uds_proxy_manager
+        # SV-3 fix: 一度失敗したら再試行しない
+        if self._uds_proxy_init_failed:
+            return None
+        try:
+            from .egress_proxy import initialize_uds_egress_proxy
+            from .network_grant_manager import get_network_grant_manager
+            from .audit_logger import get_audit_logger
 
-                ngm = get_network_grant_manager()
-                audit = get_audit_logger()
+            ngm = get_network_grant_manager()
+            audit = get_audit_logger()
 
-                self._uds_proxy_manager = initialize_uds_egress_proxy(
-                    network_grant_manager=ngm,
-                    audit_logger=audit
-                )
-            except Exception as e:
-                self.diagnostics.record_step(
-                    phase="startup",
-                    step_id="uds_proxy.init.auto",
-                    handler="kernel:uds_proxy.init",
-                    status="failed",
-                    error=e
-                )
+            self._uds_proxy_manager = initialize_uds_egress_proxy(
+                network_grant_manager=ngm,
+                audit_logger=audit
+            )
+        except Exception as e:
+            self._uds_proxy_init_failed = True
+            self.diagnostics.record_step(
+                phase="startup",
+                step_id="uds_proxy.init.auto",
+                handler="kernel:uds_proxy.init",
+                status="failed",
+                error=e
+            )
         return self._uds_proxy_manager
 
     def _get_capability_proxy(self):
-        """HostCapabilityProxyServerを取得（遅延初期化）"""
-        if self._capability_proxy is None:
-            try:
-                self._capability_proxy = get_capability_proxy()
-                self._capability_proxy.initialize()
+        """HostCapabilityProxyServerを取得（遅延初期化、サーキットブレーカー付き）"""
+        if self._capability_proxy is not None:
+            return self._capability_proxy
+        # SV-3 fix: 一度失敗したら再試行しない
+        if self._capability_proxy_init_failed:
+            return None
+        try:
+            self._capability_proxy = get_capability_proxy()
+            self._capability_proxy.initialize()
 
-                # flow.run 用に Kernel 参照を executor に注入
-                from .capability_executor import get_capability_executor
-                get_capability_executor().set_kernel(self)
-            except Exception as e:
-                self.diagnostics.record_step(
-                    phase="startup", step_id="capability_proxy.init.auto",
-                    handler="kernel:capability_proxy.init", status="failed", error=e,
-                )
+            # flow.run 用に Kernel 参照を executor に注入
+            from .capability_executor import get_capability_executor
+            get_capability_executor().set_kernel(self)
+        except Exception as e:
+            self._capability_proxy_init_failed = True
+            self.diagnostics.record_step(
+                phase="startup", step_id="capability_proxy.init.auto",
+                handler="kernel:capability_proxy.init", status="failed", error=e,
+            )
         return self._capability_proxy
 
     # ------------------------------------------------------------------
@@ -513,7 +526,12 @@ class KernelCore:
         except Exception:
             pass
         try:
-            self._executor.shutdown(wait=False)
+            # SV-4 fix: wait=True で実行中タスクの完了を待つ（データ破損防止）
+            # cancel_futures=True で待機中タスクはキャンセル
+            self._executor.shutdown(wait=True, cancel_futures=True)
+        except TypeError:
+            # Python 3.8 以前は cancel_futures 非対応
+            self._executor.shutdown(wait=True)
         except Exception:
             pass
         self.diagnostics.record_step(phase="shutdown", step_id="kernel.shutdown", handler="kernel:shutdown",

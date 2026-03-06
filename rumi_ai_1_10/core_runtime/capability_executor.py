@@ -173,32 +173,38 @@ class CapabilityExecutor:
             from .capability_trust_store import get_capability_trust_store
             from .capability_grant_manager import get_capability_grant_manager
 
-            self._handler_registry = get_capability_handler_registry()
-            self._trust_store = get_capability_trust_store()
-            self._grant_manager = get_capability_grant_manager()
-
-            # ハンドラーレジストリをロード
-            result = self._handler_registry.load_all()
-            if not result.success:
-                # 重複 permission_id → 起動失敗
-                self._initialized = True  # 再初期化を防ぐ
-                return False
-
-            # Trust store をロード
-            self._trust_store.load()
-
-            # function.call dispatch 用サービスを DI コンテナから取得
             try:
-                from .di_container import get_container as _get_di_container
-                _c = _get_di_container()
-                self._function_registry = _c.get_or_none("function_registry")
-                self._approval_manager = _c.get_or_none("approval_manager")
-                self._permission_manager = _c.get_or_none("permission_manager")
-            except Exception:
-                pass  # function.call 以外の機能に影響させない
+                self._handler_registry = get_capability_handler_registry()
+                self._trust_store = get_capability_trust_store()
+                self._grant_manager = get_capability_grant_manager()
 
-            self._initialized = True
-            return True
+                # ハンドラーレジストリをロード
+                result = self._handler_registry.load_all()
+                if not result.success:
+                    # 重複 permission_id → 起動失敗
+                    # SV-5 fix: 失敗時は _initialized を False のままにし、再初期化を許可
+                    return False
+
+                # Trust store をロード
+                self._trust_store.load()
+
+                # function.call dispatch 用サービスを DI コンテナから取得
+                try:
+                    from .di_container import get_container as _get_di_container
+                    _c = _get_di_container()
+                    self._function_registry = _c.get_or_none("function_registry")
+                    self._approval_manager = _c.get_or_none("approval_manager")
+                    self._permission_manager = _c.get_or_none("permission_manager")
+                except Exception:
+                    pass  # function.call 以外の機能に影響させない
+
+                # SV-5 fix: 全ステップ成功時のみ _initialized = True
+                self._initialized = True
+                return True
+            except Exception as exc:
+                # SV-5 fix: 例外発生時は _initialized を False のままにする
+                logger.error("CapabilityExecutor initialization failed: %s", exc)
+                return False
 
     def execute(
         self,
@@ -478,7 +484,7 @@ class CapabilityExecutor:
         pack_id = entry.pack_id
         is_core = pack_id.startswith(_CORE_PACK_ID_PREFIX)
 
-        # 3. Pack 承認確認
+        # 3. Pack 承認確認（フェイルクローズ: エラー時は拒否）
         if self._approval_manager is not None:
             try:
                 approved_result = self._approval_manager.is_pack_approved_and_verified(pack_id)
@@ -499,8 +505,32 @@ class CapabilityExecutor:
                         detail_reason=f"Pack '{pack_id}' not approved: {reason}",
                     )
                     return resp
-            except Exception:
-                pass  # approval_manager エラー時はスキップ（core_pack は常に True）
+            except Exception as exc:
+                # SV-15 fix: フェイルクローズ — approval_manager のエラー時の処理
+                # core_pack の場合は警告ログを出して実行を許可する
+                # 非 core_pack の場合は承認チェックをスキップせず拒否する（セキュリティ原則）
+                if is_core:
+                    logger.warning(
+                        "approval_manager error during function.call for core pack '%s': %s "
+                        "(allowing execution for core pack)",
+                        pack_id, exc,
+                    )
+                else:
+                    logger.error(
+                        "approval_manager error during function.call for pack '%s': %s",
+                        pack_id, exc,
+                    )
+                    resp = CapabilityResponse(
+                        success=False,
+                        error="Approval verification failed",
+                        error_type="approval_check_error",
+                        latency_ms=(time.time() - start_time) * 1000,
+                    )
+                    self._audit(
+                        principal_id, "function.call", None, resp, args, request_id,
+                        detail_reason=f"approval_manager error for pack '{pack_id}': {exc}",
+                    )
+                    return resp
 
         # 4. requires チェック（core_pack はスキップ）
         if not is_core and entry.requires and self._permission_manager is not None:

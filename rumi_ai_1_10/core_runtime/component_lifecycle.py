@@ -198,15 +198,17 @@ class ComponentLifecycleExecutor:
             return {"_kernel_step_status": "skipped", "_kernel_step_meta": {"reason": "empty_phase_name"}}
         filename = kwargs.get("filename") or f"{phase}.py"
         components = self.iter_active_components(phase=phase)
-        self._ensure_components_on_syspath(components)
-        self.diagnostics.record_step(phase="startup", step_id=f"component_phase.{phase}.start", handler=f"component_phase:{phase}",
-                                      status="success", meta={"count": len(components), "filename": filename})
-        before_disabled = set(self._disabled_components_runtime)
-        for comp in components:
-            self._run_phase_for_component(phase, comp, filename=filename)
-        newly_disabled = sorted(list(set(self._disabled_components_runtime) - before_disabled))
-        self.diagnostics.record_step(phase="startup", step_id=f"component_phase.{phase}.end", handler=f"component_phase:{phase}",
-                                      status="success", meta={"disabled_runtime_count": len(self._disabled_components_runtime)})
+        # SV-14 fix: _scoped_syspath を使い、実行後に sys.path を除去する
+        # （_ensure_components_on_syspath は永続汚染するため非推奨）
+        with self._scoped_syspath(components):
+            self.diagnostics.record_step(phase="startup", step_id=f"component_phase.{phase}.start", handler=f"component_phase:{phase}",
+                                          status="success", meta={"count": len(components), "filename": filename})
+            before_disabled = set(self._disabled_components_runtime)
+            for comp in components:
+                self._run_phase_for_component(phase, comp, filename=filename)
+            newly_disabled = sorted(list(set(self._disabled_components_runtime) - before_disabled))
+            self.diagnostics.record_step(phase="startup", step_id=f"component_phase.{phase}.end", handler=f"component_phase:{phase}",
+                                          status="success", meta={"disabled_runtime_count": len(self._disabled_components_runtime)})
         return {"_kernel_step_status": "success", "_kernel_step_meta": {"phase": phase, "count": len(components), "newly_disabled": newly_disabled, "filename": filename},
                 "_kernel_disable_targets": [{"kind": "component", "id": cid} for cid in newly_disabled]}
 

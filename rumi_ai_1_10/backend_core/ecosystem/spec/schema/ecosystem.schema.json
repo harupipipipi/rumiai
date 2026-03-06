@@ -183,6 +183,52 @@
         "type": "string",
         "description": "Component識別子（type:id 形式）"
       }
+    },
+    "connectivity": {
+      "type": "object",
+      "description": "Pack レベルの接続性定義（provides/requires）",
+      "properties": {
+        "provides": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "requires": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "required_secrets": {
+      "type": "array",
+      "description": "Pack が必要とするシークレットキーのリスト",
+      "items": {
+        "type": "string"
+      }
+    },
+    "required_network": {
+      "type": "array",
+      "description": "Pack が必要とするネットワークアクセス先のリスト",
+      "items": {
+        "type": "string"
+      }
+    },
+    "host_execution": {
+      "type": "boolean",
+      "description": "true の場合、Docker 隔離なしでホスト上で直接実行される",
+      "default": false
+    },
+    "stores": {
+      "type": "array",
+      "description": "Pack が宣言する Store 定義のリスト",
+      "items": {
+        "type": "object"
+      }
+    },
+    "functions": {
+      "type": "object",
+      "description": "Pack が公開する関数定義",
+      "additionalProperties": true
     }
   },
   "additionalProperties": false
