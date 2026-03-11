@@ -68,8 +68,8 @@ _logger = get_structured_logger("rumi.kernel.flow_execution")
 # --- Flow chain / resolve depth limits (Fix #58, #70) ---
 MAX_FLOW_CHAIN_DEPTH = 10
 
-# --- Condition parser pattern (Fix #16) ---
-_CONDITION_OP_RE = re.compile(r'\s+(==|!=)\s+')
+# --- Condition parser pattern (Fix #16, Wave 27-A: comparison operators) ---
+_CONDITION_OP_RE = re.compile(r'\s+(==|!=|>=|<=|>|<)\s+')
 
 
 class KernelFlowExecutionMixin:
@@ -429,6 +429,8 @@ class KernelFlowExecutionMixin:
                     ctx, step_result = await self._execute_handler_step_async(step, ctx)
                 elif step_type == "flow":
                     ctx, step_result = await self._execute_sub_flow_step(step, ctx)
+                elif step_type == "function":
+                    ctx, step_result = await self._execute_function_step_async(step, ctx)
                 else:
                     construct = self.interface_registry.get(f"flow.construct.{step_type}")
                     if construct and callable(construct):
@@ -512,11 +514,22 @@ class KernelFlowExecutionMixin:
                 )
                 return ctx, unwrapped
 
-            if step.get("output"):
-                # vocab normalization: dict キーを優先語に正規化
-                if isinstance(unwrapped, dict) and step.get("vocab_normalize", True):
-                    unwrapped = self._vocab_normalize_output(unwrapped, step, ctx)
-                ctx[step["output"]] = unwrapped
+            # --- Wave 27-B: output storage ---
+            output_key_explicit = step.get("output")
+            output_key_auto = step.get("id") if not output_key_explicit else None
+
+            if output_key_explicit:
+                # 明示指定: None でも格納（後方互換維持）
+                val = unwrapped
+                if isinstance(val, dict) and step.get("vocab_normalize", True):
+                    val = self._vocab_normalize_output(val, step, ctx)
+                ctx[output_key_explicit] = val
+            elif output_key_auto and unwrapped is not None:
+                # 自動格納: namespace 付きで ctx 汚染を防止、None は格納しない
+                val = unwrapped
+                if isinstance(val, dict) and step.get("vocab_normalize", True):
+                    val = self._vocab_normalize_output(val, step, ctx)
+                ctx[f"_step_out.{output_key_auto}"] = val
             # --- Wave 15-B: metrics (success) ---
             try:
                 get_metrics_collector().increment("flow.step.success", labels={"handler": handler_key})
@@ -633,46 +646,145 @@ class KernelFlowExecutionMixin:
             return ctx, {"_error": str(e)}
 
     # ------------------------------------------------------------------
+    # Wave 27-C: function.call ステップ
+    # ------------------------------------------------------------------
+
+    async def _execute_function_step_async(
+        self, step: Dict[str, Any], ctx: Dict[str, Any]
+    ) -> Tuple[Dict[str, Any], Any]:
+        """function.call ステップを実行する。
+
+        capability_executor 経由で function.call を呼ぶ。
+        principal_id は ctx から取得し、フォールバックは使わない（フェイルクローズ）。
+        """
+        qualified_name = step.get("function")
+        if not qualified_name:
+            _logger.warning("function step '%s': missing 'function' field", step.get("id"))
+            return ctx, None
+
+        # フェイルクローズ: principal_id が ctx に無い場合は実行拒否
+        principal_id = ctx.get("_principal_id")
+        if not principal_id:
+            error_result = {"_error": "no _principal_id in ctx", "_step_id": step.get("id")}
+            _logger.error(
+                "function step '%s': no _principal_id in ctx, refusing execution",
+                step.get("id"),
+            )
+            output_key = step.get("output") or step.get("id")
+            if output_key:
+                ctx[f"_step_out.{output_key}"] = error_result
+            return ctx, error_result
+
+        resolved_args = self._resolve_value(step.get("args", {}), ctx)
+
+        # DI コンテナ経由で capability_executor を取得（循環インポート回避）
+        try:
+            from .di_container import get_container as _get_di
+            executor = _get_di().get_or_none("capability_executor")
+        except Exception:
+            executor = None
+
+        if executor is None:
+            error_result = {"_error": "capability_executor not available"}
+            _logger.error("function step '%s': capability_executor not available", step.get("id"))
+            output_key = step.get("output") or step.get("id")
+            if output_key:
+                ctx[f"_step_out.{output_key}"] = error_result
+            return ctx, error_result
+
+        request = {
+            "type": "function.call",
+            "qualified_name": qualified_name,
+            "args": resolved_args,
+            "request_id": f"flow-{ctx.get('_flow_execution_id', '')}-{step.get('id', '')}",
+        }
+
+        loop = asyncio.get_running_loop()
+        resp = await loop.run_in_executor(
+            self._executor,
+            lambda: executor.execute(principal_id, request)
+        )
+
+        result = resp.output if resp.success else {"_error": resp.error}
+
+        # 出力格納: 明示 output があればそちら、なければ _step_out.{id}
+        output_key_explicit = step.get("output")
+        output_key_auto = step.get("id") if not output_key_explicit else None
+
+        if output_key_explicit:
+            ctx[output_key_explicit] = result
+        elif output_key_auto and result is not None:
+            ctx[f"_step_out.{output_key_auto}"] = result
+
+        if not resp.success:
+            _logger.warning(
+                "function.call step '%s' failed: %s", step.get("id"), resp.error
+            )
+
+        return ctx, result
+
+    # ------------------------------------------------------------------
     # 条件評価
     # ------------------------------------------------------------------
 
-    def _eval_condition(self, condition: str, ctx: Dict[str, Any]) -> bool:
-        """条件式を評価する。
-
-        Fix #16: 正規表現で最初の演算子を検出し分割する。
-        左辺は変数参照（スペース付き演算子を含まない）前提。
-        値側に " == " や " != " が含まれていても誤動作しない。
-        """
+    def _eval_condition(self, condition: str, ctx: Dict[str, Any]) -> bool:  # noqa: C901
+        """条件式を評価する。Wave 27-A: 比較演算子拡張（>, <, >=, <=, None）。"""
         condition = condition.strip()
-
-        # 最初の == or != 演算子を検出（左辺は変数参照なので演算子を含まない前提）
         m = _CONDITION_OP_RE.search(condition)
         if m:
-            op = m.group(1)  # "==" or "!="
+            op = m.group(1)
             left = condition[:m.start()].strip()
             right = condition[m.end():].strip()
 
             left_val = self._resolve_value(left, ctx)
             right_val = right.strip('"\'')
 
+            # 型変換
             if right_val.lower() == "true":
                 target = True
             elif right_val.lower() == "false":
                 target = False
+            elif right_val.lower() == "none":
+                target = None
             else:
                 try:
-                    target = int(right_val)
+                    target = float(right_val) if '.' in right_val else int(right_val)
                 except ValueError:
                     target = right_val
 
+            # None 比較
+            if target is None:
+                if op == "==":
+                    return left_val is None
+                elif op == "!=":
+                    return left_val is not None
+                else:
+                    return False  # None に対する > < >= <= は常に False
+
+            # 数値変換ヘルパー
+            def _to_num(v):
+                if isinstance(v, (int, float)):
+                    return v
+                if not isinstance(v, str):
+                    return None
+                try:
+                    return float(v) if '.' in v else int(v)
+                except ValueError:
+                    return None
+
             if op == "==":
-                if isinstance(target, (bool, int)):
+                if isinstance(target, (bool, int, float)):
                     return left_val == target
                 return str(left_val) == target
-            else:  # "!="
-                if isinstance(target, (bool, int)):
+            elif op == "!=":
+                if isinstance(target, (bool, int, float)):
                     return left_val != target
                 return str(left_val) != target
+            elif op in (">", "<", ">=", "<="):
+                ln, rn = _to_num(left_val), _to_num(target)
+                if ln is None or rn is None:
+                    return False  # 数値比較不能 → false（安全側）
+                return {">": ln > rn, "<": ln < rn, ">=": ln >= rn, "<=": ln <= rn}[op]
 
         return bool(self._resolve_value(condition, ctx))
 
