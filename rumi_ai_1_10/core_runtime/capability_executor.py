@@ -146,6 +146,8 @@ class CapabilityExecutor:
         self._function_registry = None
         self._approval_manager = None
         self._permission_manager = None
+        # Wave 29: core function handler table
+        self._core_function_handlers: Dict[str, str] = {}
 
     def set_kernel(self, kernel) -> None:
         """
@@ -198,6 +200,10 @@ class CapabilityExecutor:
                 except Exception:
                     pass  # function.call 以外の機能に影響させない
 
+                # Wave 29: core function handler table initialization
+                self._core_function_handlers = {
+                    "core_docker_capability": "docker_capability_handler",
+                }
                 # SV-5 fix: 全ステップ成功時のみ _initialized = True
                 self._initialized = True
                 return True
@@ -205,6 +211,10 @@ class CapabilityExecutor:
                 # SV-5 fix: 例外発生時は _initialized を False のままにする
                 logger.error("CapabilityExecutor initialization failed: %s", exc)
                 return False
+
+    def register_core_handler(self, pack_id: str, di_service_name: str) -> None:
+        """core function handler を動的に登録する。"""
+        self._core_function_handlers[pack_id] = di_service_name
 
     def execute(
         self,
@@ -733,6 +743,30 @@ if __name__ == "__main__":
         Docker 利用可能時: 使い捨てコンテナ内で実行（SecureExecutor パターン）。
         Docker 利用不可時: ホスト subprocess にフォールバック（警告ログ）。
         """
+        # --- Wave 28-B: runtime dispatch ---
+        runtime = getattr(entry, 'runtime', 'python')
+
+        # セキュリティ: host_execution=True のとき binary/command は拒否（Docker 強制）
+        if entry.host_execution and runtime != "python":
+            return CapabilityResponse(
+                success=False,
+                error=f"runtime='{runtime}' requires Docker execution (host_execution must be false)",
+                error_type="security_violation",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        if runtime == "binary":
+            return self._execute_binary_function(
+                principal_id=principal_id, entry=entry, args=args,
+                request_id=request_id, start_time=start_time,
+            )
+        elif runtime == "command":
+            return self._execute_command_function(
+                principal_id=principal_id, entry=entry, args=args,
+                request_id=request_id, start_time=start_time,
+            )
+
+        # runtime == "python" (default): 既存ロジックをそのまま続行
         pack_id = entry.pack_id
         function_id = entry.function_id
         function_dir = entry.function_dir
@@ -830,7 +864,8 @@ if __name__ == "__main__":
             builder.label("rumi.managed", "true")
             builder.label("rumi.type", "function")
             builder.label("rumi.pack_id", pack_id)
-            builder.image(FUNCTION_BASE_IMAGE)
+            image = getattr(entry, 'docker_image', '') or FUNCTION_BASE_IMAGE
+            builder.image(image)
             # Use stdin protocol: cat /input.json | python -c <script>
             builder.command([
                 "sh", "-c",
@@ -1199,77 +1234,204 @@ if __name__ == "__main__":
         """
         core function をインプロセスで実行する。
 
-        core_docker_capability の場合:
-            DI コンテナから docker_capability_handler を取得し、
-            handle_{function_id}(principal_id, args, grant_config) を呼ぶ。
+        Wave 29: テーブル駆動。_core_function_handlers[pack_id] → DI サービス名。
+        handle_{function_id}(principal_id, args, grant_config) を呼ぶ。
         """
         pack_id = entry.pack_id
         function_id = entry.function_id
         grant_config = entry.manifest.get("grant_config", {})
 
-        if pack_id == "core_docker_capability":
-            # Docker handler dispatch
-            method_name = f"handle_{function_id}"
-            try:
-                from .di_container import get_container as _get_di
-                handler = _get_di().get_or_none("docker_capability_handler")
-            except Exception:
-                handler = None
-
-            if handler is None:
-                return CapabilityResponse(
-                    success=False,
-                    error="DockerCapabilityHandler is not available",
-                    error_type="initialization_error",
-                    latency_ms=(time.time() - start_time) * 1000,
-                )
-
-            try:
-                method_fn = getattr(handler, method_name)
-                result = method_fn(
-                    principal_id=principal_id,
-                    args=args,
-                    grant_config=grant_config,
-                )
-            except AttributeError:
-                return CapabilityResponse(
-                    success=False,
-                    error=f"DockerCapabilityHandler has no method '{method_name}'",
-                    error_type="function_execution_error",
-                    latency_ms=(time.time() - start_time) * 1000,
-                )
-            except Exception as e:
-                return CapabilityResponse(
-                    success=False,
-                    error=f"Core function execution failed: {e}",
-                    error_type="function_execution_error",
-                    latency_ms=(time.time() - start_time) * 1000,
-                )
-
-            latency_ms = (time.time() - start_time) * 1000
-
-            if isinstance(result, dict) and "error" in result:
-                return CapabilityResponse(
-                    success=False,
-                    output=result,
-                    error=result["error"],
-                    error_type="function_execution_error",
-                    latency_ms=latency_ms,
-                )
-
+        # Wave 29: テーブル参照
+        di_service_name = self._core_function_handlers.get(pack_id)
+        if di_service_name is None:
             return CapabilityResponse(
-                success=True,
-                output=result,
-                latency_ms=latency_ms,
+                success=False,
+                error=f"No handler registered for core pack: {pack_id}",
+                error_type="unknown_core_function",
+                latency_ms=(time.time() - start_time) * 1000,
             )
 
-        # 未知の core_pack
-        return CapabilityResponse(
-            success=False,
-            error=f"Unknown core function pack: {pack_id}",
-            error_type="unknown_core_function",
-            latency_ms=(time.time() - start_time) * 1000,
-        )
+        method_name = f"handle_{function_id}"
+        try:
+            from .di_container import get_container as _get_di
+            handler = _get_di().get_or_none(di_service_name)
+        except Exception:
+            handler = None
+
+        if handler is None:
+            return CapabilityResponse(
+                success=False,
+                error=f"{di_service_name} is not available",
+                error_type="initialization_error",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        try:
+            method_fn = getattr(handler, method_name)
+            result = method_fn(principal_id=principal_id, args=args, grant_config=grant_config)
+        except AttributeError:
+            return CapabilityResponse(
+                success=False,
+                error=f"{di_service_name} has no method '{method_name}'",
+                error_type="function_execution_error",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+        except Exception as e:
+            return CapabilityResponse(
+                success=False, error=f"Core function failed: {e}",
+                error_type="function_execution_error",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        latency_ms = (time.time() - start_time) * 1000
+        if isinstance(result, dict) and "error" in result:
+            return CapabilityResponse(
+                success=False, output=result, error=result["error"],
+                error_type="function_execution_error", latency_ms=latency_ms,
+            )
+        return CapabilityResponse(success=True, output=result, latency_ms=latency_ms)
+
+    # ------------------------------------------------------------------
+    # Wave 28-B: binary / command runtime execution
+    # ------------------------------------------------------------------
+
+    def _execute_binary_function(self, principal_id, entry, args, request_id, start_time):
+        """コンパイル済みバイナリを subprocess で実行。stdin JSON → stdout JSON。"""
+        binary_path = entry.main_binary_path
+        if binary_path is None or not Path(binary_path).is_file():
+            return CapabilityResponse(
+                success=False, error=f"Binary not found: {binary_path}",
+                error_type="binary_not_found",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        # パストラバーサル最終検証
+        func_dir = Path(entry.function_dir).resolve()
+        if not Path(binary_path).resolve().is_relative_to(func_dir):
+            return CapabilityResponse(
+                success=False, error="Binary path escapes function directory",
+                error_type="security_violation",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        timeout = self._get_function_timeout(entry)
+        context = {
+            "principal_id": principal_id, "pack_id": entry.pack_id,
+            "function_id": entry.function_id, "request_id": request_id,
+            "ts": self._now_ts(),
+        }
+        input_json = json.dumps({"context": context, "args": args},
+                                ensure_ascii=False, default=str)
+
+        try:
+            proc = subprocess.run(
+                [str(binary_path)],
+                input=input_json, capture_output=True, text=True,
+                timeout=timeout, cwd=str(func_dir),
+            )
+            latency_ms = (time.time() - start_time) * 1000
+
+            if proc.returncode != 0:
+                return CapabilityResponse(
+                    success=False,
+                    error=f"Binary exited {proc.returncode}: {(proc.stderr or '').strip()[:500]}",
+                    error_type="function_execution_error", latency_ms=latency_ms,
+                )
+
+            stdout = (proc.stdout or "").strip()
+            if not stdout:
+                return CapabilityResponse(success=True, output=None, latency_ms=latency_ms)
+            if len(stdout.encode("utf-8")) > MAX_RESPONSE_SIZE:
+                return CapabilityResponse(
+                    success=False, error="Response too large",
+                    error_type="response_too_large", latency_ms=latency_ms,
+                )
+            output = json.loads(stdout)
+            return CapabilityResponse(success=True, output=output, latency_ms=latency_ms)
+
+        except subprocess.TimeoutExpired:
+            return CapabilityResponse(
+                success=False, error=f"Timed out after {timeout}s",
+                error_type="timeout", latency_ms=(time.time() - start_time) * 1000,
+            )
+        except json.JSONDecodeError:
+            return CapabilityResponse(
+                success=False, error="Output is not valid JSON",
+                error_type="invalid_json_output",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+        except Exception as e:
+            return CapabilityResponse(
+                success=False, error=f"Execution error: {e}",
+                error_type="internal_error",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+    def _execute_command_function(self, principal_id, entry, args, request_id, start_time):
+        """command リスト (e.g. ["node", "index.js"]) を subprocess で実行。"""
+        command = getattr(entry, 'command', [])
+        if not command or not isinstance(command, list):
+            return CapabilityResponse(
+                success=False, error="No command defined for runtime=command",
+                error_type="invalid_config",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        timeout = self._get_function_timeout(entry)
+        context = {
+            "principal_id": principal_id, "pack_id": entry.pack_id,
+            "function_id": entry.function_id, "request_id": request_id,
+            "ts": self._now_ts(),
+        }
+        input_json = json.dumps({"context": context, "args": args},
+                                ensure_ascii=False, default=str)
+
+        func_dir = Path(entry.function_dir).resolve() if entry.function_dir else None
+
+        try:
+            proc = subprocess.run(
+                command,
+                input=input_json, capture_output=True, text=True,
+                timeout=timeout,
+                cwd=str(func_dir) if func_dir else None,
+            )
+            latency_ms = (time.time() - start_time) * 1000
+
+            if proc.returncode != 0:
+                return CapabilityResponse(
+                    success=False,
+                    error=f"Command exited {proc.returncode}: {(proc.stderr or '').strip()[:500]}",
+                    error_type="function_execution_error", latency_ms=latency_ms,
+                )
+
+            stdout = (proc.stdout or "").strip()
+            if not stdout:
+                return CapabilityResponse(success=True, output=None, latency_ms=latency_ms)
+            if len(stdout.encode("utf-8")) > MAX_RESPONSE_SIZE:
+                return CapabilityResponse(
+                    success=False, error="Response too large",
+                    error_type="response_too_large", latency_ms=latency_ms,
+                )
+            output = json.loads(stdout)
+            return CapabilityResponse(success=True, output=output, latency_ms=latency_ms)
+
+        except subprocess.TimeoutExpired:
+            return CapabilityResponse(
+                success=False, error=f"Timed out after {timeout}s",
+                error_type="timeout", latency_ms=(time.time() - start_time) * 1000,
+            )
+        except json.JSONDecodeError:
+            return CapabilityResponse(
+                success=False, error="Output is not valid JSON",
+                error_type="invalid_json_output",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+        except Exception as e:
+            return CapabilityResponse(
+                success=False, error=f"Execution error: {e}",
+                error_type="internal_error",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
 
     # flow.run インプロセス実行
     # ------------------------------------------------------------------

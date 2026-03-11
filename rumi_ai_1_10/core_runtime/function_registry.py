@@ -5,6 +5,7 @@ Pack 内の functions/ ディレクトリに格納された Function を
 登録・検索・管理する中央レジストリ。
 
 W24-FIX: Agent A テスト互換 + registry.py _load_functions() 互換
+W28-30: multi-runtime support, extensions mechanism
 
 Usage:
     from core_runtime.function_registry import FunctionRegistry, FunctionEntry
@@ -46,6 +47,13 @@ class FunctionEntry:
     function_dir: Any = None  # Path or str
     main_py_path: Any = None  # Path or str
     manifest: Dict[str, Any] = field(default_factory=dict)
+    # --- Wave 28: multi-runtime support ---
+    runtime: str = "python"          # "python" | "binary" | "command"
+    main_binary_path: Any = None     # runtime=binary 用
+    command: List[str] = field(default_factory=list)  # runtime=command 用
+    docker_image: str = ""           # 空 = デフォルト (python:3.11-slim)
+    # --- Wave 30: extensions ---
+    extensions: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def qualified_name(self) -> str:
@@ -65,6 +73,9 @@ class FunctionEntry:
             "output_schema": dict(self.output_schema),
             "function_dir": str(self.function_dir) if self.function_dir else None,
             "main_py_path": str(self.main_py_path) if self.main_py_path else None,
+            "runtime": self.runtime,
+            "docker_image": self.docker_image,
+            "has_extensions": bool(self.extensions),
         }
 
 
@@ -132,11 +143,29 @@ class FunctionRegistry:
     ) -> FunctionEntry:
         """registry.py の _load_functions() が渡すキーワード引数から FunctionEntry を構築する。"""
         m = manifest or {}
+        runtime = m.get("runtime", "python")
         main_py = None
+        main_binary = None
+
         if function_dir is not None:
-            candidate = Path(function_dir) / "main.py"
-            if candidate.exists():
-                main_py = candidate
+            fd = Path(function_dir)
+            if runtime == "python":
+                candidate = fd / "main.py"
+                if candidate.exists():
+                    main_py = candidate
+            elif runtime == "binary":
+                main_path = m.get("main", "")
+                if main_path:
+                    candidate = (fd / main_path).resolve()
+                    # パストラバーサル防止: function_dir 内に収まっているか検証
+                    if candidate.is_relative_to(fd.resolve()) and candidate.exists():
+                        main_binary = candidate
+                    else:
+                        logger.warning(
+                            "Binary path escapes function_dir or not found: %s (pack=%s, func=%s)",
+                            main_path, pack_id, function_id,
+                        )
+            # runtime=command の場合は main_py/main_binary は不要
 
         return FunctionEntry(
             function_id=function_id,
@@ -151,6 +180,11 @@ class FunctionRegistry:
             function_dir=function_dir,
             main_py_path=main_py,
             manifest=m,
+            runtime=runtime,
+            main_binary_path=main_binary,
+            command=m.get("command", []),
+            docker_image=m.get("docker_image", ""),
+            extensions=m.get("extensions", {}),
         )
 
     # -----------------------------------------------------------------
@@ -383,4 +417,23 @@ class FunctionRegistry:
                 if best >= threshold:
                     results.append((best, entry))
             results.sort(key=lambda x: x[0], reverse=True)
+            return results
+
+    # -----------------------------------------------------------------
+    # 検索: extensions (Wave 30)
+    # -----------------------------------------------------------------
+
+    def search_by_extension(self, namespace: str, key: str = None, value: Any = None) -> List[FunctionEntry]:
+        """extensions の namespace でフィルタする。"""
+        with self._lock:
+            results = []
+            for entry in self._entries.values():
+                ext = entry.extensions.get(namespace)
+                if ext is None:
+                    continue
+                if key is None:
+                    results.append(entry)
+                elif isinstance(ext, dict) and key in ext:
+                    if value is None or ext[key] == value:
+                        results.append(entry)
             return results
