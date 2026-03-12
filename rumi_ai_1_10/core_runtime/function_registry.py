@@ -30,6 +30,13 @@ logger = logging.getLogger(__name__)
 
 
 # =====================================================================
+# 定数
+# =====================================================================
+
+_PROTECTED_VOCAB_PREFIXES: frozenset = frozenset({"system.", "kernel.", "core."})
+
+
+# =====================================================================
 # データクラス
 # =====================================================================
 
@@ -115,6 +122,7 @@ class FunctionRegistry:
         self._entries: Dict[str, FunctionEntry] = {}  # qualified_name -> entry
         self._tag_index: Dict[str, set] = {}  # tag -> {qualified_name, ...}
         self._vocab_registry = vocab_registry
+        self._vocab_alias_map: Dict[str, str] = {}  # alias -> qualified_name
 
     # -----------------------------------------------------------------
     # 内部ヘルパー
@@ -143,6 +151,39 @@ class FunctionRegistry:
                 self._tag_index[tag].discard(entry.qualified_name)
                 if not self._tag_index[tag]:
                     del self._tag_index[tag]
+
+    def _register_vocab_aliases(self, entry: FunctionEntry) -> None:
+        """vocab_aliases を _vocab_alias_map に登録する。保護・重複チェック付き。"""
+        if not entry.vocab_aliases:
+            return
+        qname = entry.qualified_name
+        for alias in entry.vocab_aliases:
+            # 保護プレフィックスチェック
+            is_protected = any(alias.startswith(p) for p in _PROTECTED_VOCAB_PREFIXES)
+            if is_protected and not entry.pack_id.startswith("core."):
+                logger.warning(
+                    "[FunctionRegistry] Protected vocab alias rejected: %s (pack=%s)",
+                    alias, entry.pack_id,
+                )
+                continue
+            # 重複チェック
+            if alias in self._vocab_alias_map and self._vocab_alias_map[alias] != qname:
+                logger.warning(
+                    "[FunctionRegistry] Duplicate vocab alias rejected: %s "
+                    "(existing=%s, new=%s)",
+                    alias, self._vocab_alias_map[alias], qname,
+                )
+                continue
+            self._vocab_alias_map[alias] = qname
+
+    def _unregister_vocab_aliases(self, entry: FunctionEntry) -> None:
+        """entry の vocab_aliases を _vocab_alias_map から削除する。"""
+        if not entry.vocab_aliases:
+            return
+        qname = entry.qualified_name
+        for alias in entry.vocab_aliases:
+            if alias in self._vocab_alias_map and self._vocab_alias_map[alias] == qname:
+                del self._vocab_alias_map[alias]
 
     @staticmethod
     def _entry_from_kwargs(
@@ -263,6 +304,7 @@ class FunctionRegistry:
                 return False
             self._entries[qname] = resolved_entry
             self._add_to_tag_index(resolved_entry)
+            self._register_vocab_aliases(resolved_entry)
             return True
 
     def register_pack(
@@ -345,12 +387,14 @@ class FunctionRegistry:
             for qname in to_remove:
                 entry = self._entries.pop(qname)
                 self._remove_from_tag_index(entry)
+                self._unregister_vocab_aliases(entry)
             return len(to_remove)
 
     def clear(self) -> None:
         with self._lock:
             self._entries.clear()
             self._tag_index.clear()
+            self._vocab_alias_map.clear()
 
     # -----------------------------------------------------------------
     # 検索: タグ
@@ -451,3 +495,59 @@ class FunctionRegistry:
                     if value is None or ext[key] == value:
                         results.append(entry)
             return results
+
+    # -----------------------------------------------------------------
+    # 検索: vocab alias 解決
+    # -----------------------------------------------------------------
+
+    def resolve_by_alias(self, alias: str) -> Optional[FunctionEntry]:
+        """_vocab_alias_map から alias を解決して FunctionEntry を返す。"""
+        with self._lock:
+            qname = self._vocab_alias_map.get(alias)
+            if qname is None:
+                return None
+            return self._entries.get(qname)
+
+    # -----------------------------------------------------------------
+    # 検索: 統合検索
+    # -----------------------------------------------------------------
+
+    def search_unified(self, query: str, limit: int = 20) -> List[FunctionEntry]:
+        """
+        alias → tag → vocab → fuzzy の順で検索し、
+        重複排除して結果をマージする統合検索。
+        """
+        if not query:
+            return []
+        with self._lock:
+            seen: set = set()
+            results: List[FunctionEntry] = []
+
+            # 1. resolve_by_alias (完全一致)
+            alias_entry = self.resolve_by_alias(query)
+            if alias_entry is not None:
+                seen.add(alias_entry.qualified_name)
+                results.append(alias_entry)
+
+            # 2. search_by_tag
+            tag_entries = self.search_by_tag([query])
+            for e in tag_entries:
+                if e.qualified_name not in seen:
+                    seen.add(e.qualified_name)
+                    results.append(e)
+
+            # 3. search_by_vocab
+            vocab_entries = self.search_by_vocab(query)
+            for e in vocab_entries:
+                if e.qualified_name not in seen:
+                    seen.add(e.qualified_name)
+                    results.append(e)
+
+            # 4. search_fuzzy
+            fuzzy_entries = self.search_fuzzy(query)
+            for _, e in fuzzy_entries:
+                if e.qualified_name not in seen:
+                    seen.add(e.qualified_name)
+                    results.append(e)
+
+            return results[:limit]
