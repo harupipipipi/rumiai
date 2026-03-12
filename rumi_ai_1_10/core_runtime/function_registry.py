@@ -6,6 +6,7 @@ Pack 内の functions/ ディレクトリに格納された Function を
 
 W24-FIX: Agent A テスト互換 + registry.py _load_functions() 互換
 W28-30: multi-runtime support, extensions mechanism
+Phase-A: Function unification — FunctionEntry extension
 
 Usage:
     from core_runtime.function_registry import FunctionRegistry, FunctionEntry
@@ -54,6 +55,11 @@ class FunctionEntry:
     docker_image: str = ""           # 空 = デフォルト (python:3.11-slim)
     # --- Wave 30: extensions ---
     extensions: Dict[str, Any] = field(default_factory=dict)
+    # --- Phase A: Function unification fields ---
+    entrypoint: Optional[str] = None
+    risk: Optional[str] = None
+    grant_config: Optional[Dict[str, Any]] = None
+    vocab_aliases: Optional[List[str]] = None
 
     @property
     def qualified_name(self) -> str:
@@ -76,6 +82,10 @@ class FunctionEntry:
             "runtime": self.runtime,
             "docker_image": self.docker_image,
             "has_extensions": bool(self.extensions),
+            "entrypoint": self.entrypoint,
+            "risk": self.risk,
+            "grant_config": self.grant_config,
+            "vocab_aliases": self.vocab_aliases,
         }
 
 
@@ -185,6 +195,10 @@ class FunctionRegistry:
             command=m.get("command", []),
             docker_image=m.get("docker_image", ""),
             extensions=m.get("extensions", {}),
+            entrypoint=m.get("entrypoint"),
+            risk=m.get("risk"),
+            grant_config=m.get("grant_config"),
+            vocab_aliases=m.get("vocab_aliases"),
         )
 
     # -----------------------------------------------------------------
