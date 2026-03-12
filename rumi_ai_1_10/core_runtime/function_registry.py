@@ -551,3 +551,73 @@ class FunctionRegistry:
                     results.append(e)
 
             return results[:limit]
+
+
+# =====================================================================
+# handler_to_manifest_adapter (Phase A: 一時的な互換アダプタ)
+# =====================================================================
+
+def handler_to_manifest_adapter(
+    handler_json: dict,
+    handler_dir: str,
+    pack_id: str,
+    function_id: str,
+) -> dict:
+    """
+    handler.json 形式のデータを FunctionRegistry.register() に渡せる
+    kwargs dict に変換するアダプタ関数。
+
+    Phase D で削除される一時的なコード。
+
+    Args:
+        handler_json: handler.json の内容を dict で渡す
+        handler_dir: handler ディレクトリのパス文字列
+        pack_id: パック ID
+        function_id: ファンクション ID
+
+    Returns:
+        FunctionRegistry.register(**result) で登録可能な kwargs dict
+    """
+    entrypoint = handler_json.get("entrypoint", "handler.py")
+    handler_dir_path = Path(handler_dir)
+    main_py_path = handler_dir_path / entrypoint
+
+    if not main_py_path.exists():
+        logger.warning(
+            "[handler_to_manifest_adapter] Entrypoint file not found: %s "
+            "(pack=%s, func=%s)",
+            main_py_path, pack_id, function_id,
+        )
+
+    vocab_aliases = None
+    permission_id = handler_json.get("permission_id")
+    if permission_id:
+        vocab_aliases = [permission_id]
+
+    manifest = {
+        "description": handler_json.get("description", ""),
+        "input_schema": handler_json.get("input_schema", {}),
+        "output_schema": handler_json.get("output_schema", {}),
+        "runtime": "python",
+        "host_execution": True,
+        "tags": handler_json.get("tags", []),
+        "requires": handler_json.get("requires", []),
+        "entrypoint": entrypoint,
+        "risk": handler_json.get("risk"),
+        "grant_config": handler_json.get("grant_config_schema"),
+        "vocab_aliases": vocab_aliases,
+    }
+
+    return {
+        "pack_id": pack_id,
+        "function_id": function_id,
+        "manifest": manifest,
+        "function_dir": handler_dir,
+    }
+
+
+# =====================================================================
+# ManifestRegistry alias (設計決定 D-6)
+# =====================================================================
+
+ManifestRegistry = FunctionRegistry
