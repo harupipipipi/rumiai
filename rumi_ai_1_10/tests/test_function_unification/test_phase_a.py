@@ -328,3 +328,216 @@ class TestManifestRegistryAlias:
     def test_manifest_registry_is_function_registry(self):
         """ManifestRegistry is FunctionRegistry が True である"""
         assert ManifestRegistry is FunctionRegistry
+
+
+# ===================================================================
+# Phase A Spec Tests (12 required tests)
+# ===================================================================
+
+
+class TestPhaseASpec:
+    """仕様書で要求されている 12 個のテスト"""
+
+    # 1. FunctionEntry に新フィールドが存在し、デフォルト値が正しいことを確認
+    def test_new_fields_exist_with_defaults(self):
+        entry = FunctionEntry(function_id="fn1", pack_id="pk1")
+        assert entry.permission_id is None
+        assert entry.handler_py_sha256 is None
+        assert entry.is_builtin is False
+        assert entry.grant_config_schema is None
+        assert entry.calling_convention is None
+        # 既存 Phase A フィールドもデフォルト確認
+        assert entry.entrypoint is None
+        assert entry.risk is None
+
+    # 2. 新フィールドを指定して register() -> get() で取得 -> 全フィールドが保持されていることを確認
+    def test_register_with_new_fields_preserved(self):
+        reg = FunctionRegistry()
+        entry = FunctionEntry(
+            function_id="fn1",
+            pack_id="pk1",
+            description="test function",
+            permission_id="perm.test",
+            handler_py_sha256="abc123hash",
+            is_builtin=True,
+            grant_config_schema={"network": True},
+            calling_convention="kernel",
+            entrypoint="handler.py",
+            risk="high",
+        )
+        reg.register(entry)
+        got = reg.get("pk1:fn1")
+        assert got is not None
+        assert got.permission_id == "perm.test"
+        assert got.handler_py_sha256 == "abc123hash"
+        assert got.is_builtin is True
+        assert got.grant_config_schema == {"network": True}
+        assert got.calling_convention == "kernel"
+        assert got.entrypoint == "handler.py"
+        assert got.risk == "high"
+
+    # 3. 新フィールドを指定せずに register() -> 既存の動作が壊れていないことを確認
+    def test_register_without_new_fields_backward_compat(self):
+        reg = FunctionRegistry()
+        entry = FunctionEntry(
+            function_id="fn1",
+            pack_id="pk1",
+            description="basic function",
+            tags=["basic"],
+        )
+        assert reg.register(entry) is True
+        got = reg.get("pk1:fn1")
+        assert got is not None
+        assert got.function_id == "fn1"
+        assert got.pack_id == "pk1"
+        assert got.description == "basic function"
+        assert got.tags == ["basic"]
+        # 新フィールドはデフォルト
+        assert got.permission_id is None
+        assert got.is_builtin is False
+        assert got.calling_convention is None
+
+    # 4. register_kernel_function() で登録 -> get() で取得 -> pack_id="kernel", calling_convention="kernel", is_builtin=True
+    def test_register_kernel_function(self):
+        reg = FunctionRegistry()
+        manifest = {
+            "description": "kernel func",
+            "permission_id": "kernel.test",
+            "input_schema": {"type": "object"},
+        }
+        reg.register_kernel_function("kfn1", manifest)
+        got = reg.get("kernel:kfn1")
+        assert got is not None
+        assert got.pack_id == "kernel"
+        assert got.function_id == "kfn1"
+        assert got.calling_convention == "kernel"
+        assert got.is_builtin is True
+        assert got.description == "kernel func"
+        assert got.permission_id == "kernel.test"
+        assert got.input_schema == {"type": "object"}
+
+    # 5. permission_id 付きで register() -> get_by_permission_id() で取得できること
+    def test_get_by_permission_id_found(self):
+        reg = FunctionRegistry()
+        entry = FunctionEntry(
+            function_id="fn1",
+            pack_id="pk1",
+            permission_id="perm.read",
+        )
+        reg.register(entry)
+        got = reg.get_by_permission_id("perm.read")
+        assert got is not None
+        assert got.qualified_name == "pk1:fn1"
+        assert got.permission_id == "perm.read"
+
+    # 6. permission_id なしで register() -> get_by_permission_id() で None が返ること
+    def test_get_by_permission_id_none(self):
+        reg = FunctionRegistry()
+        entry = FunctionEntry(
+            function_id="fn1",
+            pack_id="pk1",
+        )
+        reg.register(entry)
+        got = reg.get_by_permission_id("perm.read")
+        assert got is None
+
+    # 7. unregister_pack() -> get_by_permission_id() で None が返ること（インデックス削除の確認）
+    def test_unregister_pack_clears_permission_id_index(self):
+        reg = FunctionRegistry()
+        entry = FunctionEntry(
+            function_id="fn1",
+            pack_id="pk1",
+            permission_id="perm.write",
+        )
+        reg.register(entry)
+        assert reg.get_by_permission_id("perm.write") is not None
+        reg.unregister_pack("pk1")
+        assert reg.get_by_permission_id("perm.write") is None
+
+    # 8. search_unified() テキスト検索: description にマッチする entry が返ること
+    def test_search_unified_text_match(self):
+        reg = FunctionRegistry()
+        entry1 = FunctionEntry(
+            function_id="fn1",
+            pack_id="pk1",
+            description="file storage manager",
+        )
+        entry2 = FunctionEntry(
+            function_id="fn2",
+            pack_id="pk1",
+            description="network handler",
+        )
+        reg.register(entry1)
+        reg.register(entry2)
+        results = reg.search_unified("file storage")
+        qnames = [e.qualified_name for e in results]
+        assert "pk1:fn1" in qnames
+
+    # 9. search_unified() フィルタ: calling_convention="kernel" で kernel function のみ返ること
+    def test_search_unified_filter_calling_convention(self):
+        reg = FunctionRegistry()
+        reg.register_kernel_function("kfn1", {"description": "kernel func"})
+        entry2 = FunctionEntry(
+            function_id="fn2",
+            pack_id="pk2",
+            description="normal func",
+            calling_convention="subprocess",
+        )
+        reg.register(entry2)
+        results = reg.search_unified(
+            filters={"calling_convention": "kernel"},
+        )
+        assert len(results) >= 1
+        for e in results:
+            assert e.calling_convention == "kernel"
+
+    # 10. search_unified() フィルタ: is_builtin=True でビルトインのみ返ること
+    def test_search_unified_filter_is_builtin(self):
+        reg = FunctionRegistry()
+        reg.register_kernel_function("kfn1", {"description": "builtin"})
+        entry2 = FunctionEntry(
+            function_id="fn2",
+            pack_id="pk2",
+            description="not builtin",
+            is_builtin=False,
+        )
+        reg.register(entry2)
+        results = reg.search_unified(
+            filters={"is_builtin": True},
+        )
+        assert len(results) >= 1
+        for e in results:
+            assert e.is_builtin is True
+
+    # 11. search_unified() 複合: query + filters の組み合わせ
+    def test_search_unified_combined_query_and_filters(self):
+        reg = FunctionRegistry()
+        reg.register_kernel_function("kfn1", {"description": "kernel data processor"})
+        entry2 = FunctionEntry(
+            function_id="fn2",
+            pack_id="pk2",
+            description="data processor non-kernel",
+            calling_convention="subprocess",
+        )
+        reg.register(entry2)
+        # query で "data processor" にマッチするもの + calling_convention="kernel" でフィルタ
+        results = reg.search_unified(
+            query="data processor",
+            filters={"calling_convention": "kernel"},
+        )
+        for e in results:
+            assert e.calling_convention == "kernel"
+
+    # 12. clear() 後に _permission_id_index も空であること
+    def test_clear_clears_permission_id_index(self):
+        reg = FunctionRegistry()
+        entry = FunctionEntry(
+            function_id="fn1",
+            pack_id="pk1",
+            permission_id="perm.admin",
+        )
+        reg.register(entry)
+        assert reg.get_by_permission_id("perm.admin") is not None
+        reg.clear()
+        assert reg.get_by_permission_id("perm.admin") is None
+        assert len(reg._permission_id_index) == 0
