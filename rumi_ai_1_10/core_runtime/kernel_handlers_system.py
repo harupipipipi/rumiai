@@ -88,6 +88,7 @@ class KernelSystemHandlersMixin:
             "kernel:startup.failed": self._h_startup_failed,
             "kernel:vocab.load": self._h_vocab_load,
             "kernel:noop": self._h_noop,
+            "kernel:register_kernel_functions": self._h_register_kernel_functions,
         }
 
     # ------------------------------------------------------------------
@@ -765,3 +766,70 @@ class KernelSystemHandlersMixin:
     def _h_noop(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
         """何もしないハンドラ(プレースホルダー)"""
         return {"_kernel_step_status": "success", "_kernel_step_meta": {"handler": "noop"}}
+
+    # ------------------------------------------------------------------
+    # Phase B-1: kernel function registration handler
+    # ------------------------------------------------------------------
+
+    def _h_register_kernel_functions(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """
+        Register all kernel handler manifests into FunctionRegistry.
+
+        Called during ecosystem phase of startup flow.
+        Retrieves FunctionRegistry from InterfaceRegistry and invokes
+        _register_kernel_functions() from kernel.py.
+
+        Manifest metadata source: kernel.py _KERNEL_HANDLER_MANIFESTS (原則 D)
+        """
+        try:
+            from . import kernel as _kernel_module
+
+            # Retrieve FunctionRegistry from InterfaceRegistry
+            fr = self.interface_registry.get("function_registry", strategy="last")
+            if fr is None:
+                # Fallback: create a FunctionRegistry and register it
+                try:
+                    from .function_registry import FunctionRegistry
+                    fr = FunctionRegistry()
+                    self.interface_registry.register(
+                        "function_registry", fr,
+                        meta={"source": "kernel:register_kernel_functions", "auto_created": True},
+                    )
+                    _logger.info("FunctionRegistry auto-created and registered to IR")
+                except Exception as e_fr:
+                    _logger.error("FunctionRegistry not available: %s", e_fr)
+                    return {
+                        "_kernel_step_status": "failed",
+                        "_kernel_step_meta": {
+                            "error": f"FunctionRegistry not available: {e_fr}",
+                        },
+                    }
+
+            registered = _kernel_module._register_kernel_functions(fr)
+
+            self.diagnostics.record_step(
+                phase="startup",
+                step_id="register_kernel_functions",
+                handler="kernel:register_kernel_functions",
+                status="success",
+                meta={"registered_count": registered},
+            )
+
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_step_meta": {"registered_count": registered},
+            }
+
+        except Exception as e:
+            self.diagnostics.record_step(
+                phase="startup",
+                step_id="register_kernel_functions",
+                handler="kernel:register_kernel_functions",
+                status="failed",
+                error=e,
+            )
+            _logger.error("Failed to register kernel functions: %s", e, exc_info=True)
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {"error": str(e)},
+            }
