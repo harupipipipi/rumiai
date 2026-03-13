@@ -8,6 +8,11 @@ KernelCore (エンジン本体) + KernelFlowExecutionMixin (Flow実行)
 
 使い方（既存互換）:
     from core_runtime.kernel import Kernel, KernelConfig
+
+Phase B-1: _KERNEL_HANDLER_MANIFESTS が唯一の権威ソース。
+           _EXPECTED_HANDLER_KEYS は _KERNEL_HANDLER_MANIFESTS.keys() から導出。
+Phase B-2a: description + tags
+Phase B-2b: input_schema + output_schema (JSON Schema draft-07 互換)
 """
 
 from __future__ import annotations
@@ -37,15 +42,10 @@ def _is_diagnostics_verbose() -> bool:
     return os.environ.get("RUMI_DIAGNOSTICS_VERBOSE", "0") == "1"
 
 
-# 既存のハンドラキー一覧（登録漏れ検知用）
-# Phase B1-1: _KERNEL_HANDLER_MANIFESTS から導出（単一権威ソース原則 D）
-# 後方互換のため frozenset として公開。直接定義はしない。
-# _EXPECTED_HANDLER_KEYS は _KERNEL_HANDLER_MANIFESTS 定義後に設定される（ファイル末尾付近）
-
-
 # =====================================================================
-# Phase B-2a/B-2b: Kernel Handler Manifests (設計決定 D-2)
+# Phase B-1 / B-2a / B-2b: Kernel Handler Manifests (設計決定 D-2)
 # 全 kernel ハンドラの最小メタデータ。唯一の権威ソース。
+# Phase B-1: permission_id + risk + requires (Function Unification)
 # Phase B-2a: description + tags
 # Phase B-2b: input_schema + output_schema (JSON Schema draft-07 互換)
 # =====================================================================
@@ -74,10 +74,10 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
 
     # --- mounts / registry / active_ecosystem / interfaces ---
     "kernel:mounts.init": {
-        "permission_id": "mounts.init",
-        "risk": "low",
-        "requires": [],
         "description": "Initialize mount points from mounts.json configuration",
+        "permission_id": "kernel:mounts.init",
+        "risk": "medium",
+        "requires": [],
         "tags": ["kernel", "system", "init", "mounts"],
         "input_schema": {
             "type": "object",
@@ -95,10 +95,10 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:registry.load": {
-        "permission_id": "registry.load",
+        "description": "Load the ecosystem pack registry from the ecosystem directory",
+        "permission_id": "kernel:registry.load",
         "risk": "low",
         "requires": [],
-        "description": "Load the ecosystem pack registry from the ecosystem directory",
         "tags": ["kernel", "system", "init", "registry"],
         "input_schema": {
             "type": "object",
@@ -116,10 +116,10 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:active_ecosystem.load": {
-        "permission_id": "active_ecosystem.load",
+        "description": "Load active ecosystem configuration from JSON file",
+        "permission_id": "kernel:active_ecosystem.load",
         "risk": "low",
         "requires": [],
-        "description": "Load active ecosystem configuration from JSON file",
         "tags": ["kernel", "system", "init", "ecosystem"],
         "input_schema": {
             "type": "object",
@@ -137,22 +137,16 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:interfaces.publish": {
-        "permission_id": "interfaces.publish",
+        "description": "Publish kernel ready state to InterfaceRegistry",
+        "permission_id": "kernel:interfaces.publish",
         "risk": "low",
         "requires": [],
-        "description": "Publish kernel ready state to InterfaceRegistry",
         "tags": ["kernel", "system", "ir"],
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-        },
+        "input_schema": {"type": "object", "properties": {}},
         "output_schema": {
             "type": "object",
             "properties": {
-                "services_ready": {
-                    "type": "boolean",
-                    "description": "Whether kernel services are ready",
-                },
+                "services_ready": {"type": "boolean", "description": "Whether kernel services are ready"},
             },
             "required": ["services_ready"],
         },
@@ -160,152 +154,78 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
 
     # --- IR (InterfaceRegistry) handlers ---
     "kernel:ir.get": {
-        "permission_id": "ir.get",
+        "description": "Get a value from InterfaceRegistry by key",
+        "permission_id": "kernel:ir.get",
         "risk": "low",
         "requires": [],
-        "description": "Get a value from InterfaceRegistry by key",
         "tags": ["kernel", "system", "ir"],
         "input_schema": {
             "type": "object",
             "properties": {
-                "key": {
-                    "type": "string",
-                    "description": "InterfaceRegistry key to retrieve",
-                },
-                "strategy": {
-                    "type": "string",
-                    "description": "Retrieval strategy",
-                    "default": "last",
-                    "enum": ["last", "first", "all"],
-                },
-                "store_as": {
-                    "type": "string",
-                    "description": "If set, store the retrieved value in ctx under this key",
-                },
+                "key": {"type": "string", "description": "InterfaceRegistry key to retrieve"},
+                "strategy": {"type": "string", "description": "Retrieval strategy", "default": "last", "enum": ["last", "first", "all"]},
+                "store_as": {"type": "string", "description": "If set, store the retrieved value in ctx under this key"},
             },
             "required": ["key"],
         },
         "output_schema": {
             "type": "object",
             "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "key": {"type": "string"},
-                        "strategy": {"type": "string"},
-                        "found": {"type": "boolean"},
-                    },
-                },
-                "value": {
-                    "description": "The retrieved value (any type)",
-                },
+                "_kernel_step_status": {"type": "string", "enum": ["success", "failed"]},
+                "_kernel_step_meta": {"type": "object"},
+                "value": {"description": "The retrieved value (any type)"},
             },
             "required": ["_kernel_step_status"],
         },
     },
     "kernel:ir.call": {
-        "permission_id": "ir.call",
+        "description": "Call a callable registered in InterfaceRegistry by key",
+        "permission_id": "kernel:ir.call",
         "risk": "medium",
         "requires": [],
-        "description": "Call a callable registered in InterfaceRegistry by key",
         "tags": ["kernel", "system", "ir"],
         "input_schema": {
             "type": "object",
             "properties": {
-                "key": {
-                    "type": "string",
-                    "description": "InterfaceRegistry key of the callable to invoke",
-                },
-                "strategy": {
-                    "type": "string",
-                    "description": "Retrieval strategy for the callable",
-                    "default": "last",
-                },
-                "call_args": {
-                    "type": "object",
-                    "description": "Keyword arguments to pass to the callable",
-                    "default": {},
-                },
-                "pass_ctx": {
-                    "type": "boolean",
-                    "description": "If true, pass ctx as the sole argument instead of call_args",
-                    "default": False,
-                },
-                "store_as": {
-                    "type": "string",
-                    "description": "If set, store the call result in ctx under this key",
-                },
+                "key": {"type": "string", "description": "InterfaceRegistry key of the callable to invoke"},
+                "strategy": {"type": "string", "description": "Retrieval strategy for the callable", "default": "last"},
+                "call_args": {"type": "object", "description": "Keyword arguments to pass to the callable", "default": {}},
+                "pass_ctx": {"type": "boolean", "description": "If true, pass ctx as the sole argument", "default": False},
+                "store_as": {"type": "string", "description": "If set, store the call result in ctx under this key"},
             },
             "required": ["key"],
         },
         "output_schema": {
             "type": "object",
             "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed", "skipped"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "key": {"type": "string"},
-                        "has_result": {"type": "boolean"},
-                        "reason": {"type": "string"},
-                    },
-                },
-                "result": {
-                    "description": "The return value of the called function (any type)",
-                },
+                "_kernel_step_status": {"type": "string", "enum": ["success", "failed", "skipped"]},
+                "_kernel_step_meta": {"type": "object"},
+                "result": {"description": "The return value of the called function (any type)"},
             },
             "required": ["_kernel_step_status"],
         },
     },
     "kernel:ir.register": {
-        "permission_id": "ir.register",
+        "description": "Register a value into InterfaceRegistry",
+        "permission_id": "kernel:ir.register",
         "risk": "medium",
         "requires": [],
-        "description": "Register a value into InterfaceRegistry",
         "tags": ["kernel", "system", "ir"],
         "input_schema": {
             "type": "object",
             "properties": {
-                "key": {
-                    "type": "string",
-                    "description": "InterfaceRegistry key to register under",
-                },
-                "value": {
-                    "description": "Value to register (any type, resolved via _resolve_value)",
-                },
-                "value_from_ctx": {
-                    "type": "string",
-                    "description": "If set, retrieve value from ctx[value_from_ctx] instead of 'value'",
-                },
-                "meta": {
-                    "type": "object",
-                    "description": "Optional metadata dict to attach to the registration",
-                    "default": {},
-                },
+                "key": {"type": "string", "description": "InterfaceRegistry key to register under"},
+                "value": {"description": "Value to register (any type, resolved via _resolve_value)"},
+                "value_from_ctx": {"type": "string", "description": "If set, retrieve value from ctx[value_from_ctx]"},
+                "meta": {"type": "object", "description": "Optional metadata dict", "default": {}},
             },
             "required": ["key"],
         },
         "output_schema": {
             "type": "object",
             "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "key": {"type": "string"},
-                        "has_value": {"type": "boolean"},
-                    },
-                },
+                "_kernel_step_status": {"type": "string", "enum": ["success", "failed"]},
+                "_kernel_step_meta": {"type": "object"},
             },
             "required": ["_kernel_step_status"],
         },
@@ -313,50 +233,26 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
 
     # --- exec_python ---
     "kernel:exec_python": {
-        "permission_id": "exec_python",
+        "description": "Execute a Python file with sandboxed context and inject support",
+        "permission_id": "kernel:exec_python",
         "risk": "high",
         "requires": [],
-        "description": "Execute a Python file with sandboxed context and inject support",
         "tags": ["kernel", "system", "exec"],
         "input_schema": {
             "type": "object",
             "properties": {
-                "file": {
-                    "type": "string",
-                    "description": "Relative path to the Python file to execute",
-                },
-                "base_path": {
-                    "type": "string",
-                    "description": "Base directory for resolving file path",
-                },
-                "phase": {
-                    "type": "string",
-                    "description": "Execution phase name",
-                    "default": "exec",
-                },
-                "inject": {
-                    "type": "object",
-                    "description": "Key-value pairs to inject into the execution context (blocked keys are filtered)",
-                },
+                "file": {"type": "string", "description": "Relative path to the Python file to execute"},
+                "base_path": {"type": "string", "description": "Base directory for resolving file path"},
+                "phase": {"type": "string", "description": "Execution phase name", "default": "exec"},
+                "inject": {"type": "object", "description": "Key-value pairs to inject (blocked keys are filtered)"},
             },
             "required": ["file"],
         },
         "output_schema": {
             "type": "object",
             "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed", "skipped"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "file": {"type": "string"},
-                        "phase": {"type": "string"},
-                        "reason": {"type": "string"},
-                        "error": {"type": "string"},
-                    },
-                },
+                "_kernel_step_status": {"type": "string", "enum": ["success", "failed", "skipped"]},
+                "_kernel_step_meta": {"type": "object"},
             },
             "required": ["_kernel_step_status"],
         },
@@ -364,730 +260,218 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
 
     # --- ctx handlers ---
     "kernel:ctx.set": {
-        "permission_id": "ctx.set",
+        "description": "Set a value in the flow execution context",
+        "permission_id": "kernel:ctx.set",
         "risk": "low",
         "requires": [],
-        "description": "Set a value in the flow execution context",
         "tags": ["kernel", "system", "ctx"],
         "input_schema": {
             "type": "object",
             "properties": {
-                "key": {
-                    "type": "string",
-                    "description": "Context key to set",
-                },
-                "value": {
-                    "description": "Value to set (any type, resolved via _resolve_value)",
-                },
+                "key": {"type": "string", "description": "Context key to set"},
+                "value": {"description": "Value to set (any type)"},
             },
             "required": ["key"],
         },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "key": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:ctx.get": {
-        "permission_id": "ctx.get",
+        "description": "Get a value from the flow execution context",
+        "permission_id": "kernel:ctx.get",
         "risk": "low",
         "requires": [],
-        "description": "Get a value from the flow execution context",
         "tags": ["kernel", "system", "ctx"],
         "input_schema": {
             "type": "object",
             "properties": {
-                "key": {
-                    "type": "string",
-                    "description": "Context key to retrieve",
-                },
-                "default": {
-                    "description": "Default value if key is not found (any type)",
-                },
-                "store_as": {
-                    "type": "string",
-                    "description": "If set, store the retrieved value in ctx under this key",
-                },
+                "key": {"type": "string", "description": "Context key to retrieve"},
+                "default": {"description": "Default value if key is not found"},
+                "store_as": {"type": "string", "description": "If set, store value in ctx under this key"},
             },
             "required": ["key"],
         },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "key": {"type": "string"},
-                        "found": {"type": "boolean"},
-                    },
-                },
-                "value": {
-                    "description": "The retrieved value (any type)",
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}, "value": {"description": "Retrieved value"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:ctx.copy": {
-        "permission_id": "ctx.copy",
+        "description": "Copy a value between keys in the flow execution context",
+        "permission_id": "kernel:ctx.copy",
         "risk": "low",
         "requires": [],
-        "description": "Copy a value between keys in the flow execution context",
         "tags": ["kernel", "system", "ctx"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "from_key": {
-                    "type": "string",
-                    "description": "Source context key to copy from",
-                },
-                "to_key": {
-                    "type": "string",
-                    "description": "Destination context key to copy to",
-                },
-            },
-            "required": ["from_key", "to_key"],
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "from_key": {"type": "string"},
-                        "to_key": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {"from_key": {"type": "string"}, "to_key": {"type": "string"}}, "required": ["from_key", "to_key"]},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
 
     # --- flow execution ---
     "kernel:execute_flow": {
-        "permission_id": "execute_flow",
+        "description": "Execute a sub-flow by flow_id with optional context and timeout",
+        "permission_id": "kernel:execute_flow",
         "risk": "medium",
         "requires": [],
-        "description": "Execute a sub-flow by flow_id with optional context and timeout",
         "tags": ["kernel", "system", "flow"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "flow_id": {
-                    "type": "string",
-                    "description": "ID of the flow to execute",
-                },
-                "context": {
-                    "type": "object",
-                    "description": "Context dict to pass to the sub-flow",
-                    "default": {},
-                },
-                "timeout": {
-                    "type": "number",
-                    "description": "Timeout in seconds for the flow execution",
-                },
-            },
-            "required": ["flow_id"],
-        },
-        "output_schema": {
-            "type": "object",
-            "description": "Flow execution result dict; contains _error key on failure",
-        },
+        "input_schema": {"type": "object", "properties": {"flow_id": {"type": "string"}, "context": {"type": "object", "default": {}}, "timeout": {"type": "number"}}, "required": ["flow_id"]},
+        "output_schema": {"type": "object", "description": "Flow execution result dict; contains _error key on failure"},
     },
     "kernel:save_flow": {
-        "permission_id": "save_flow",
+        "description": "Save a flow definition to a YAML file",
+        "permission_id": "kernel:save_flow",
         "risk": "medium",
         "requires": [],
-        "description": "Save a flow definition to a YAML file",
         "tags": ["kernel", "system", "flow"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "flow_id": {
-                    "type": "string",
-                    "description": "ID for the flow to save",
-                },
-                "flow_def": {
-                    "type": "object",
-                    "description": "Flow definition dict to save",
-                },
-                "path": {
-                    "type": "string",
-                    "description": "Directory path to save the flow file",
-                    "default": "user_data/flows",
-                },
-            },
-            "required": ["flow_id", "flow_def"],
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "File path where the flow was saved",
-                },
-            },
-        },
+        "input_schema": {"type": "object", "properties": {"flow_id": {"type": "string"}, "flow_def": {"type": "object"}, "path": {"type": "string", "default": "user_data/flows"}}, "required": ["flow_id", "flow_def"]},
+        "output_schema": {"type": "object", "properties": {"path": {"type": "string"}}},
     },
     "kernel:load_flows": {
-        "permission_id": "load_flows",
+        "description": "Load user-defined flows from a directory",
+        "permission_id": "kernel:load_flows",
         "risk": "low",
         "requires": [],
-        "description": "Load user-defined flows from a directory",
         "tags": ["kernel", "system", "flow"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "Directory path to load flows from",
-                    "default": "user_data/flows",
-                },
-            },
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "loaded": {
-                    "type": "array",
-                    "description": "List of loaded flow IDs",
-                    "items": {"type": "string"},
-                },
-            },
-        },
+        "input_schema": {"type": "object", "properties": {"path": {"type": "string", "default": "user_data/flows"}}},
+        "output_schema": {"type": "object", "properties": {"loaded": {"type": "array", "items": {"type": "string"}}}},
     },
     "kernel:flow.compose": {
-        "permission_id": "flow.compose",
+        "description": "Collect and apply flow modifiers via FlowComposer",
+        "permission_id": "kernel:flow.compose",
         "risk": "medium",
         "requires": [],
-        "description": "Collect and apply flow modifiers via FlowComposer",
         "tags": ["kernel", "system", "flow", "modifier"],
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed", "skipped"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "modifiers_collected": {"type": "integer"},
-                        "modifiers_applied": {"type": "integer"},
-                        "reason": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed", "skipped"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
 
     # --- security / docker / approval ---
     "kernel:security.init": {
-        "permission_id": "security.init",
+        "description": "Initialize security subsystem with strict mode configuration",
+        "permission_id": "kernel:security.init",
         "risk": "high",
         "requires": [],
-        "description": "Initialize security subsystem with strict mode configuration",
         "tags": ["kernel", "system", "security", "init"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "strict_mode": {
-                    "type": "boolean",
-                    "description": "Whether to enable strict security mode",
-                    "default": True,
-                },
-            },
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "error": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {"strict_mode": {"type": "boolean", "default": True}}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:docker.check": {
-        "permission_id": "docker.check",
+        "description": "Check Docker daemon availability",
+        "permission_id": "kernel:docker.check",
         "risk": "low",
         "requires": [],
-        "description": "Check Docker daemon availability",
         "tags": ["kernel", "system", "security", "docker"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "required": {
-                    "type": "boolean",
-                    "description": "Whether Docker is required (fail if not available)",
-                    "default": True,
-                },
-                "timeout_seconds": {
-                    "type": "number",
-                    "description": "Timeout in seconds for docker info check",
-                    "default": 10,
-                },
-            },
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "docker_available": {"type": "boolean"},
-                        "error": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {"required": {"type": "boolean", "default": True}, "timeout_seconds": {"type": "number", "default": 10}}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:approval.init": {
-        "permission_id": "approval.init",
-        "risk": "medium",
-        "requires": [],
         "description": "Initialize the approval manager for pack approval workflow",
+        "permission_id": "kernel:approval.init",
+        "risk": "high",
+        "requires": [],
         "tags": ["kernel", "system", "security", "approval"],
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "error": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:approval.scan": {
-        "permission_id": "approval.scan",
+        "description": "Scan all packs and classify by approval status",
+        "permission_id": "kernel:approval.scan",
         "risk": "medium",
         "requires": [],
-        "description": "Scan all packs and classify by approval status",
         "tags": ["kernel", "system", "security", "approval"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "check_hash": {
-                    "type": "boolean",
-                    "description": "Whether to verify pack hashes for approved packs",
-                    "default": True,
-                },
-            },
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "approved": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "List of approved pack IDs",
-                        },
-                        "pending": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "List of pending pack IDs",
-                        },
-                        "modified": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "List of modified pack IDs",
-                        },
-                        "error": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {"check_hash": {"type": "boolean", "default": True}}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
 
     # --- container / privilege / api ---
     "kernel:container.init": {
-        "permission_id": "container.init",
-        "risk": "medium",
-        "requires": [],
         "description": "Initialize the container orchestrator",
+        "permission_id": "kernel:container.init",
+        "risk": "high",
+        "requires": [],
         "tags": ["kernel", "system", "component", "container"],
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "error": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:privilege.init": {
-        "permission_id": "privilege.init",
+        "description": "Initialize the host privilege manager",
+        "permission_id": "kernel:privilege.init",
         "risk": "high",
         "requires": [],
-        "description": "Initialize the host privilege manager",
         "tags": ["kernel", "system", "security", "privilege"],
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "error": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:api.init": {
-        "permission_id": "api.init",
-        "risk": "medium",
-        "requires": [],
         "description": "Initialize the Pack API server on specified host and port",
-        "tags": ["kernel", "system", "init", "api"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "host": {
-                    "type": "string",
-                    "description": "Host address to bind the API server",
-                    "default": "127.0.0.1",
-                },
-                "port": {
-                    "type": "integer",
-                    "description": "Port number for the API server",
-                    "default": 8765,
-                },
-            },
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "error": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
-    },
-    "kernel:container.start_approved": {
-        "permission_id": "container.start_approved",
+        "permission_id": "kernel:api.init",
         "risk": "high",
         "requires": [],
+        "tags": ["kernel", "system", "init", "api"],
+        "input_schema": {"type": "object", "properties": {"host": {"type": "string", "default": "127.0.0.1"}, "port": {"type": "integer", "default": 8765}}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
+    },
+    "kernel:container.start_approved": {
         "description": "Start containers for all approved packs",
+        "permission_id": "kernel:container.start_approved",
+        "risk": "high",
+        "requires": [],
         "tags": ["kernel", "system", "component", "container"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "timeout_per_pack": {
-                    "type": "number",
-                    "description": "Timeout in seconds for starting each pack container",
-                    "default": 30,
-                },
-            },
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "skipped"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "started": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Pack IDs whose containers were started",
-                        },
-                        "failed": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "pack_id": {"type": "string"},
-                                    "error": {"type": "string"},
-                                },
-                            },
-                            "description": "Packs that failed to start",
-                        },
-                        "reason": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {"timeout_per_pack": {"type": "number", "default": 30}}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "skipped"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
 
     # --- component discover / load ---
     "kernel:component.discover": {
-        "permission_id": "component.discover",
+        "description": "Discover components from approved packs with override and disable filtering",
+        "permission_id": "kernel:component.discover",
         "risk": "low",
         "requires": [],
-        "description": "Discover components from approved packs with override and disable filtering",
         "tags": ["kernel", "system", "component"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "approved_only": {
-                    "type": "boolean",
-                    "description": "Whether to filter components to approved packs only",
-                    "default": True,
-                },
-            },
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "count": {
-                            "type": "integer",
-                            "description": "Number of components discovered",
-                        },
-                        "error": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {"approved_only": {"type": "boolean", "default": True}}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:component.load": {
-        "permission_id": "component.load",
-        "risk": "medium",
-        "requires": [],
         "description": "Load discovered components and run setup phase",
+        "permission_id": "kernel:component.load",
+        "risk": "high",
+        "requires": [],
         "tags": ["kernel", "system", "component"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "container_execution": {
-                    "type": "boolean",
-                    "description": "Whether to use container-based execution for components",
-                    "default": True,
-                },
-            },
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "loaded": {"type": "integer"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {"container_execution": {"type": "boolean", "default": True}}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
 
     # --- emit / startup.failed / vocab.load / noop ---
     "kernel:emit": {
-        "permission_id": "emit",
+        "description": "Emit an event via EventBus",
+        "permission_id": "kernel:emit",
         "risk": "low",
         "requires": [],
-        "description": "Emit an event via EventBus",
         "tags": ["kernel", "system", "event"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "event": {
-                    "type": "string",
-                    "description": "Event name to emit",
-                    "default": "",
-                },
-            },
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success"],
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {"event": {"type": "string", "default": ""}}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success"]}}, "required": ["_kernel_step_status"]},
     },
     "kernel:startup.failed": {
-        "permission_id": "startup.failed",
+        "description": "Record startup failure with pending approval and modified pack details",
+        "permission_id": "kernel:startup.failed",
         "risk": "low",
         "requires": [],
-        "description": "Record startup failure with pending approval and modified pack details",
         "tags": ["kernel", "system", "init", "error"],
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success"],
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success"]}}, "required": ["_kernel_step_status"]},
     },
     "kernel:vocab.load": {
-        "permission_id": "vocab.load",
+        "description": "Load vocabulary definitions from a file into VocabRegistry",
+        "permission_id": "kernel:vocab.load",
         "risk": "low",
         "requires": [],
-        "description": "Load vocabulary definitions from a file into VocabRegistry",
         "tags": ["kernel", "system", "vocab"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "file": {
-                    "type": "string",
-                    "description": "Path to the vocabulary definition file",
-                },
-                "pack_id": {
-                    "type": "string",
-                    "description": "Pack ID that owns this vocabulary file",
-                },
-            },
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed", "skipped"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "groups_loaded": {
-                            "type": "integer",
-                            "description": "Number of vocabulary groups loaded",
-                        },
-                        "reason": {"type": "string"},
-                        "error": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {"file": {"type": "string"}, "pack_id": {"type": "string"}}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed", "skipped"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:noop": {
-        "permission_id": "noop",
+        "description": "No-operation placeholder handler",
+        "permission_id": "kernel:noop",
         "risk": "low",
         "requires": [],
-        "description": "No-operation placeholder handler",
         "tags": ["kernel", "system", "noop"],
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "handler": {
-                            "type": "string",
-                            "enum": ["noop"],
-                        },
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
 
     # ------------------------------------------------------------------
@@ -1096,1887 +480,417 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
 
     # --- flow ---
     "kernel:flow.load_all": {
-        "permission_id": "flow.load_all",
+        "description": "Load all flow files, apply modifiers, and register to InterfaceRegistry",
+        "permission_id": "kernel:flow.load_all",
         "risk": "medium",
         "requires": [],
-        "description": "Load all flow files, apply modifiers, and register to InterfaceRegistry",
         "tags": ["kernel", "runtime", "flow"],
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "flows_registered": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "List of registered flow IDs",
-                        },
-                        "flow_error_count": {"type": "integer"},
-                        "modifiers_loaded": {"type": "integer"},
-                        "modifiers_applied": {"type": "integer"},
-                        "modifiers_skipped": {"type": "integer"},
-                        "flows_skipped_count": {"type": "integer"},
-                        "modifiers_skipped_by_approval": {"type": "integer"},
-                        "error": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:flow.execute_by_id": {
-        "permission_id": "flow.execute_by_id",
+        "description": "Execute a flow by ID with optional shared dict resolution",
+        "permission_id": "kernel:flow.execute_by_id",
         "risk": "medium",
         "requires": [],
-        "description": "Execute a flow by ID with optional shared dict resolution",
         "tags": ["kernel", "runtime", "flow"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "flow_id": {
-                    "type": "string",
-                    "description": "ID of the flow to execute",
-                },
-                "inputs": {
-                    "type": "object",
-                    "description": "Input values to merge into the flow execution context",
-                    "default": {},
-                },
-                "timeout": {
-                    "type": "number",
-                    "description": "Timeout in seconds for the flow execution",
-                },
-                "resolve": {
-                    "type": "boolean",
-                    "description": "Whether to resolve flow_id via shared dictionary",
-                    "default": False,
-                },
-                "resolve_namespace": {
-                    "type": "string",
-                    "description": "Namespace to use for shared dict resolution",
-                    "default": "flow_id",
-                },
-            },
-            "required": ["flow_id"],
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "flow_id": {"type": "string"},
-                        "original_flow_id": {"type": ["string", "null"]},
-                        "resolved": {"type": "boolean"},
-                    },
-                },
-                "result": {
-                    "type": "object",
-                    "description": "Flow execution result",
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {"flow_id": {"type": "string"}, "inputs": {"type": "object", "default": {}}, "timeout": {"type": "number"}, "resolve": {"type": "boolean", "default": False}, "resolve_namespace": {"type": "string", "default": "flow_id"}}, "required": ["flow_id"]},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}, "result": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
 
     # --- python_file_call ---
     "kernel:python_file_call": {
-        "permission_id": "python_file_call",
+        "description": "Execute a Python file via container with UDS egress proxy support",
+        "permission_id": "kernel:python_file_call",
         "risk": "high",
         "requires": [],
-        "description": "Execute a Python file via container with UDS egress proxy support",
         "tags": ["kernel", "runtime", "exec"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "file": {
-                    "type": "string",
-                    "description": "Path to the Python file to execute",
-                },
-                "owner_pack": {
-                    "type": "string",
-                    "description": "Pack ID that owns this file (for UDS proxy and security)",
-                },
-                "principal_id": {
-                    "type": "string",
-                    "description": "Principal ID for capability-based access control",
-                },
-                "input": {
-                    "type": "object",
-                    "description": "Input data to pass to the Python file",
-                    "default": {},
-                },
-                "timeout_seconds": {
-                    "type": "number",
-                    "description": "Execution timeout in seconds",
-                    "default": 60.0,
-                },
-                "_step_id": {
-                    "type": "string",
-                    "description": "Internal step ID for diagnostics",
-                    "default": "unknown",
-                },
-                "_phase": {
-                    "type": "string",
-                    "description": "Internal phase name for diagnostics",
-                    "default": "flow",
-                },
-            },
-            "required": ["file"],
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "execution_mode": {"type": "string"},
-                        "execution_time_ms": {"type": "number"},
-                        "error": {"type": "string"},
-                        "error_type": {"type": "string"},
-                    },
-                },
-                "output": {
-                    "description": "Output data from the executed Python file (any type)",
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {"file": {"type": "string"}, "owner_pack": {"type": "string"}, "principal_id": {"type": "string"}, "input": {"type": "object", "default": {}}, "timeout_seconds": {"type": "number", "default": 60.0}, "_step_id": {"type": "string", "default": "unknown"}, "_phase": {"type": "string", "default": "flow"}}, "required": ["file"]},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}, "output": {}}, "required": ["_kernel_step_status"]},
     },
 
     # --- modifier ---
     "kernel:modifier.load_all": {
-        "permission_id": "modifier.load_all",
+        "description": "Load all modifier files for flow modification",
+        "permission_id": "kernel:modifier.load_all",
         "risk": "low",
         "requires": [],
-        "description": "Load all modifier files for flow modification",
         "tags": ["kernel", "runtime", "modifier", "flow"],
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "loaded": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "List of loaded modifier IDs",
-                        },
-                        "error_count": {"type": "integer"},
-                        "error": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:modifier.apply": {
-        "permission_id": "modifier.apply",
+        "description": "Apply modifiers to a specific flow and update InterfaceRegistry",
+        "permission_id": "kernel:modifier.apply",
         "risk": "medium",
         "requires": [],
-        "description": "Apply modifiers to a specific flow and update InterfaceRegistry",
         "tags": ["kernel", "runtime", "modifier", "flow"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "flow_id": {
-                    "type": "string",
-                    "description": "Target flow ID to apply modifiers to (if omitted, applies to all flows)",
-                },
-            },
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "success_count": {"type": "integer"},
-                        "skip_count": {"type": "integer"},
-                        "fail_count": {"type": "integer"},
-                        "error": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {"flow_id": {"type": "string"}}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
 
     # --- network ---
     "kernel:network.grant": {
-        "permission_id": "network.grant",
+        "description": "Grant network access to a pack with allowed domains and ports",
+        "permission_id": "kernel:network.grant",
         "risk": "high",
         "requires": [],
-        "description": "Grant network access to a pack with allowed domains and ports",
         "tags": ["kernel", "runtime", "network", "egress"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "pack_id": {
-                    "type": "string",
-                    "description": "Pack ID to grant network access to",
-                },
-                "allowed_domains": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "List of allowed domain names",
-                    "default": [],
-                },
-                "allowed_ports": {
-                    "type": "array",
-                    "items": {"type": "integer"},
-                    "description": "List of allowed port numbers",
-                    "default": [],
-                },
-                "granted_by": {
-                    "type": "string",
-                    "description": "Identity of the granter",
-                    "default": "kernel",
-                },
-                "notes": {
-                    "type": "string",
-                    "description": "Optional notes for the grant",
-                    "default": "",
-                },
-            },
-            "required": ["pack_id"],
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "pack_id": {"type": "string"},
-                        "error": {"type": "string"},
-                    },
-                },
-                "grant": {
-                    "type": "object",
-                    "description": "Network grant details",
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {"pack_id": {"type": "string"}, "allowed_domains": {"type": "array", "items": {"type": "string"}, "default": []}, "allowed_ports": {"type": "array", "items": {"type": "integer"}, "default": []}, "granted_by": {"type": "string", "default": "kernel"}, "notes": {"type": "string", "default": ""}}, "required": ["pack_id"]},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}, "grant": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:network.revoke": {
-        "permission_id": "network.revoke",
+        "description": "Revoke network access for a pack",
+        "permission_id": "kernel:network.revoke",
         "risk": "high",
         "requires": [],
-        "description": "Revoke network access for a pack",
         "tags": ["kernel", "runtime", "network", "egress"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "pack_id": {
-                    "type": "string",
-                    "description": "Pack ID to revoke network access from",
-                },
-                "reason": {
-                    "type": "string",
-                    "description": "Reason for revoking network access",
-                    "default": "",
-                },
-            },
-            "required": ["pack_id"],
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "pack_id": {"type": "string"},
-                        "revoked": {"type": "boolean"},
-                        "error": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {"pack_id": {"type": "string"}, "reason": {"type": "string", "default": ""}}, "required": ["pack_id"]},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:network.check": {
-        "permission_id": "network.check",
+        "description": "Check if a pack has network access to a specific domain and port",
+        "permission_id": "kernel:network.check",
         "risk": "low",
         "requires": [],
-        "description": "Check if a pack has network access to a specific domain and port",
         "tags": ["kernel", "runtime", "network", "egress"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "pack_id": {
-                    "type": "string",
-                    "description": "Pack ID to check network access for",
-                },
-                "domain": {
-                    "type": "string",
-                    "description": "Domain name to check access to",
-                },
-                "port": {
-                    "type": "integer",
-                    "description": "Port number to check access to",
-                },
-            },
-            "required": ["pack_id", "domain", "port"],
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "allowed": {"type": "boolean"},
-                        "reason": {"type": "string"},
-                        "error": {"type": "string"},
-                    },
-                },
-                "result": {
-                    "type": "object",
-                    "properties": {
-                        "allowed": {"type": "boolean"},
-                        "reason": {"type": "string"},
-                        "pack_id": {"type": "string"},
-                        "domain": {"type": "string"},
-                        "port": {"type": "integer"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {"pack_id": {"type": "string"}, "domain": {"type": "string"}, "port": {"type": "integer"}}, "required": ["pack_id", "domain", "port"]},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}, "result": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:network.list": {
-        "permission_id": "network.list",
+        "description": "List all network grants and disabled packs",
+        "permission_id": "kernel:network.list",
         "risk": "low",
         "requires": [],
-        "description": "List all network grants and disabled packs",
         "tags": ["kernel", "runtime", "network", "egress"],
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "grant_count": {"type": "integer"},
-                        "disabled_count": {"type": "integer"},
-                        "error": {"type": "string"},
-                    },
-                },
-                "grants": {
-                    "type": "object",
-                    "description": "Map of pack_id to grant details",
-                },
-                "disabled_packs": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "List of disabled pack IDs",
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}, "grants": {"type": "object"}, "disabled_packs": {"type": "array"}}, "required": ["_kernel_step_status"]},
     },
 
     # --- egress_proxy ---
     "kernel:egress_proxy.start": {
-        "permission_id": "egress_proxy.start",
+        "description": "Start the HTTP egress proxy server",
+        "permission_id": "kernel:egress_proxy.start",
         "risk": "high",
         "requires": [],
-        "description": "Start the HTTP egress proxy server",
-        "tags": ["kernel", "runtime", "network", "egress"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "host": {
-                    "type": "string",
-                    "description": "Host address to bind the egress proxy",
-                },
-                "port": {
-                    "type": "integer",
-                    "description": "Port number for the egress proxy",
-                },
-            },
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "endpoint": {"type": "string"},
-                        "running": {"type": "boolean"},
-                        "error": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "tags": ["kernel", "runtime", "network", "egress", "proxy"],
+        "input_schema": {"type": "object", "properties": {"host": {"type": "string"}, "port": {"type": "integer"}}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:egress_proxy.stop": {
-        "permission_id": "egress_proxy.stop",
-        "risk": "high",
-        "requires": [],
         "description": "Stop the HTTP egress proxy server",
-        "tags": ["kernel", "runtime", "network", "egress"],
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "error": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "permission_id": "kernel:egress_proxy.stop",
+        "risk": "medium",
+        "requires": [],
+        "tags": ["kernel", "runtime", "network", "egress", "proxy"],
+        "input_schema": {"type": "object", "properties": {}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:egress_proxy.status": {
-        "permission_id": "egress_proxy.status",
+        "description": "Get the HTTP egress proxy server status",
+        "permission_id": "kernel:egress_proxy.status",
         "risk": "low",
         "requires": [],
-        "description": "Get the HTTP egress proxy running status and endpoint",
-        "tags": ["kernel", "runtime", "network", "egress"],
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "running": {"type": "boolean"},
-                        "endpoint": {"type": ["string", "null"]},
-                        "error": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "tags": ["kernel", "runtime", "network", "egress", "proxy"],
+        "input_schema": {"type": "object", "properties": {}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
 
     # --- lib ---
     "kernel:lib.process_all": {
-        "permission_id": "lib.process_all",
-        "risk": "medium",
+        "description": "Process all pack lib scripts (install/update)",
+        "permission_id": "kernel:lib.process_all",
+        "risk": "high",
         "requires": [],
-        "description": "Process lib install/update scripts for all packs",
         "tags": ["kernel", "runtime", "lib"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "packs_dir": {
-                    "type": "string",
-                    "description": "Directory containing pack directories",
-                    "default": "ecosystem",
-                },
-            },
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "installed": {"type": "integer"},
-                        "updated": {"type": "integer"},
-                        "failed_count": {"type": "integer"},
-                        "error": {"type": "string"},
-                    },
-                },
-                "results": {
-                    "type": "object",
-                    "description": "Detailed processing results per pack",
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {"packs_dir": {"type": "string", "default": "ecosystem"}}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}, "results": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:lib.check": {
-        "permission_id": "lib.check",
+        "description": "Check if a pack needs lib install or update",
+        "permission_id": "kernel:lib.check",
         "risk": "low",
         "requires": [],
-        "description": "Check if a pack needs lib install or update",
         "tags": ["kernel", "runtime", "lib"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "pack_id": {
-                    "type": "string",
-                    "description": "Pack ID to check",
-                },
-                "pack_dir": {
-                    "type": "string",
-                    "description": "Directory of the pack (defaults to ecosystem/<pack_id>)",
-                },
-            },
-            "required": ["pack_id"],
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "needs_install": {"type": "boolean"},
-                        "needs_update": {"type": "boolean"},
-                        "reason": {"type": "string"},
-                        "error": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {"pack_id": {"type": "string"}, "pack_dir": {"type": "string"}}, "required": ["pack_id"]},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:lib.execute": {
-        "permission_id": "lib.execute",
-        "risk": "medium",
+        "description": "Manually execute a pack lib script (install or update)",
+        "permission_id": "kernel:lib.execute",
+        "risk": "high",
         "requires": [],
-        "description": "Manually execute a pack lib install or update script",
         "tags": ["kernel", "runtime", "lib"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "pack_id": {
-                    "type": "string",
-                    "description": "Pack ID to execute lib script for",
-                },
-                "lib_type": {
-                    "type": "string",
-                    "description": "Type of lib script to execute",
-                    "enum": ["install", "update"],
-                },
-                "pack_dir": {
-                    "type": "string",
-                    "description": "Directory of the pack (defaults to ecosystem/<pack_id>)",
-                },
-            },
-            "required": ["pack_id", "lib_type"],
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "pack_id": {"type": "string"},
-                        "lib_type": {"type": "string"},
-                        "success": {"type": "boolean"},
-                        "error": {"type": "string"},
-                    },
-                },
-                "output": {
-                    "description": "Output from the lib script execution",
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {"pack_id": {"type": "string"}, "lib_type": {"type": "string", "enum": ["install", "update"]}, "pack_dir": {"type": "string"}}, "required": ["pack_id", "lib_type"]},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}, "output": {}}, "required": ["_kernel_step_status"]},
     },
     "kernel:lib.clear_record": {
-        "permission_id": "lib.clear_record",
+        "description": "Clear lib execution record for a pack or all packs",
+        "permission_id": "kernel:lib.clear_record",
         "risk": "medium",
         "requires": [],
-        "description": "Clear lib execution record for a pack or all packs",
         "tags": ["kernel", "runtime", "lib"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "pack_id": {
-                    "type": "string",
-                    "description": "Pack ID to clear record for (if omitted, clears all records)",
-                },
-            },
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "pack_id": {"type": "string"},
-                        "cleared": {"type": "boolean"},
-                        "cleared_count": {"type": "integer"},
-                        "error": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {"pack_id": {"type": "string"}}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:lib.list_records": {
-        "permission_id": "lib.list_records",
+        "description": "List lib execution records for all packs",
+        "permission_id": "kernel:lib.list_records",
         "risk": "low",
         "requires": [],
-        "description": "List all lib execution records",
         "tags": ["kernel", "runtime", "lib"],
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "count": {"type": "integer"},
-                        "error": {"type": "string"},
-                    },
-                },
-                "records": {
-                    "type": "object",
-                    "description": "Map of pack_id to execution record",
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}, "records": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
 
     # --- audit ---
     "kernel:audit.query": {
-        "permission_id": "audit.query",
+        "description": "Query audit logs with filters",
+        "permission_id": "kernel:audit.query",
         "risk": "low",
         "requires": [],
-        "description": "Query audit logs with optional filters",
         "tags": ["kernel", "runtime", "audit"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "category": {
-                    "type": "string",
-                    "description": "Filter by audit log category",
-                },
-                "start_date": {
-                    "type": "string",
-                    "description": "Filter by start date (ISO 8601)",
-                },
-                "end_date": {
-                    "type": "string",
-                    "description": "Filter by end date (ISO 8601)",
-                },
-                "pack_id": {
-                    "type": "string",
-                    "description": "Filter by pack ID",
-                },
-                "flow_id": {
-                    "type": "string",
-                    "description": "Filter by flow ID",
-                },
-                "success_only": {
-                    "type": "boolean",
-                    "description": "If true, return only successful entries",
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum number of results to return",
-                    "default": 100,
-                },
-            },
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "count": {"type": "integer"},
-                        "error": {"type": "string"},
-                    },
-                },
-                "results": {
-                    "type": "array",
-                    "description": "List of audit log entries",
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {"category": {"type": "string"}, "start_date": {"type": "string"}, "end_date": {"type": "string"}, "pack_id": {"type": "string"}, "flow_id": {"type": "string"}, "success_only": {"type": "boolean"}, "limit": {"type": "integer", "default": 100}}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}, "results": {"type": "array"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:audit.summary": {
-        "permission_id": "audit.summary",
+        "description": "Get audit log summary",
+        "permission_id": "kernel:audit.summary",
         "risk": "low",
         "requires": [],
-        "description": "Get audit log summary by category or date",
         "tags": ["kernel", "runtime", "audit"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "category": {
-                    "type": "string",
-                    "description": "Filter summary by category",
-                },
-                "date": {
-                    "type": "string",
-                    "description": "Filter summary by date (ISO 8601 date)",
-                },
-            },
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "description": "Summary statistics",
-                },
-                "summary": {
-                    "type": "object",
-                    "description": "Audit log summary data",
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {"category": {"type": "string"}, "date": {"type": "string"}}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}, "summary": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:audit.flush": {
-        "permission_id": "audit.flush",
+        "description": "Flush audit log buffers to persistent storage",
+        "permission_id": "kernel:audit.flush",
         "risk": "low",
         "requires": [],
-        "description": "Flush pending audit log entries to storage",
         "tags": ["kernel", "runtime", "audit"],
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "error": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
 
-    # --- vocab (runtime) ---
+    # --- vocab ---
     "kernel:vocab.list_groups": {
-        "permission_id": "vocab.list_groups",
+        "description": "List all vocabulary groups",
+        "permission_id": "kernel:vocab.list_groups",
         "risk": "low",
         "requires": [],
-        "description": "List all vocabulary groups in VocabRegistry",
         "tags": ["kernel", "runtime", "vocab"],
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "count": {"type": "integer"},
-                        "error": {"type": "string"},
-                    },
-                },
-                "groups": {
-                    "type": "array",
-                    "description": "List of vocabulary groups",
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}, "groups": {"type": "array"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:vocab.list_converters": {
-        "permission_id": "vocab.list_converters",
+        "description": "List all vocabulary converters",
+        "permission_id": "kernel:vocab.list_converters",
         "risk": "low",
         "requires": [],
-        "description": "List all vocabulary converters in VocabRegistry",
         "tags": ["kernel", "runtime", "vocab"],
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "count": {"type": "integer"},
-                        "error": {"type": "string"},
-                    },
-                },
-                "converters": {
-                    "type": "array",
-                    "description": "List of vocabulary converters",
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}, "converters": {"type": "array"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:vocab.summary": {
-        "permission_id": "vocab.summary",
+        "description": "Get vocabulary registry summary",
+        "permission_id": "kernel:vocab.summary",
         "risk": "low",
         "requires": [],
-        "description": "Get vocabulary registry summary statistics",
         "tags": ["kernel", "runtime", "vocab"],
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "description": "Summary totals",
-                },
-                "summary": {
-                    "type": "object",
-                    "description": "Detailed vocabulary registry summary",
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}, "summary": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:vocab.convert": {
-        "permission_id": "vocab.convert",
+        "description": "Convert a value using vocabulary converter",
+        "permission_id": "kernel:vocab.convert",
         "risk": "low",
         "requires": [],
-        "description": "Convert a term using VocabRegistry converters",
         "tags": ["kernel", "runtime", "vocab"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "from_term": {
-                    "type": "string",
-                    "description": "Source term for conversion",
-                },
-                "to_term": {
-                    "type": "string",
-                    "description": "Target term for conversion",
-                },
-                "data": {
-                    "description": "Data to convert (any type)",
-                },
-                "log_success": {
-                    "type": "boolean",
-                    "description": "Whether to log successful conversions",
-                    "default": False,
-                },
-            },
-            "required": ["from_term", "to_term"],
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "converted": {"type": "boolean"},
-                        "from": {"type": "string"},
-                        "to": {"type": "string"},
-                        "error": {"type": "string"},
-                    },
-                },
-                "result": {
-                    "description": "Conversion result (any type)",
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {"term": {"type": "string"}, "from_format": {"type": "string"}, "to_format": {"type": "string"}}, "required": ["term"]},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}, "result": {}}, "required": ["_kernel_step_status"]},
     },
 
     # --- shared_dict ---
     "kernel:shared_dict.resolve": {
-        "permission_id": "shared_dict.resolve",
+        "description": "Resolve a key via shared dictionary chain",
+        "permission_id": "kernel:shared_dict.resolve",
         "risk": "low",
         "requires": [],
-        "description": "Resolve a key through the shared dictionary chain",
         "tags": ["kernel", "runtime", "shared_dict"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "namespace": {
-                    "type": "string",
-                    "description": "Shared dictionary namespace",
-                },
-                "token": {
-                    "type": "string",
-                    "description": "Token to resolve",
-                },
-            },
-            "required": ["namespace", "token"],
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "original": {"type": "string"},
-                        "resolved": {"type": "string"},
-                        "hop_count": {"type": "integer"},
-                        "cycle_detected": {"type": "boolean"},
-                        "max_hops_reached": {"type": "boolean"},
-                        "error": {"type": "string"},
-                    },
-                },
-                "resolved": {
-                    "type": "string",
-                    "description": "The resolved value",
-                },
-                "hops": {
-                    "type": "array",
-                    "description": "Resolution hop chain",
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {"namespace": {"type": "string"}, "key": {"type": "string"}}, "required": ["namespace", "key"]},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}, "result": {}}, "required": ["_kernel_step_status"]},
     },
     "kernel:shared_dict.propose": {
-        "permission_id": "shared_dict.propose",
+        "description": "Propose a new shared dictionary entry",
+        "permission_id": "kernel:shared_dict.propose",
         "risk": "medium",
         "requires": [],
-        "description": "Propose a new entry to the shared dictionary",
         "tags": ["kernel", "runtime", "shared_dict"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "namespace": {
-                    "type": "string",
-                    "description": "Shared dictionary namespace",
-                },
-                "token": {
-                    "type": "string",
-                    "description": "Token to propose",
-                },
-                "value": {
-                    "description": "Value to associate with the token (any type)",
-                },
-                "provenance": {
-                    "type": "object",
-                    "description": "Provenance metadata for the proposal",
-                    "default": {},
-                },
-            },
-            "required": ["namespace", "token", "value"],
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "status": {"type": "string"},
-                        "accepted": {"type": "boolean"},
-                        "reason": {"type": "string"},
-                        "error": {"type": "string"},
-                    },
-                },
-                "result": {
-                    "type": "object",
-                    "properties": {
-                        "status": {"type": "string"},
-                        "namespace": {"type": "string"},
-                        "token": {"type": "string"},
-                        "value": {},
-                        "reason": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {"namespace": {"type": "string"}, "key": {"type": "string"}, "value": {"type": "string"}, "pack_id": {"type": "string"}}, "required": ["namespace", "key", "value"]},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:shared_dict.explain": {
-        "permission_id": "shared_dict.explain",
+        "description": "Explain the resolution chain for a shared dictionary key",
+        "permission_id": "kernel:shared_dict.explain",
         "risk": "low",
         "requires": [],
-        "description": "Explain resolution chain for a shared dictionary key",
         "tags": ["kernel", "runtime", "shared_dict"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "namespace": {
-                    "type": "string",
-                    "description": "Shared dictionary namespace",
-                },
-                "token": {
-                    "type": "string",
-                    "description": "Token to explain resolution for",
-                },
-            },
-            "required": ["namespace", "token"],
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "original": {"type": "string"},
-                        "resolved": {"type": "string"},
-                        "hop_count": {"type": "integer"},
-                        "error": {"type": "string"},
-                    },
-                },
-                "explanation": {
-                    "type": "object",
-                    "properties": {
-                        "original": {"type": "string"},
-                        "resolved": {"type": "string"},
-                        "hops": {"type": "array"},
-                        "cycle_detected": {"type": "boolean"},
-                        "max_hops_reached": {"type": "boolean"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {"namespace": {"type": "string"}, "key": {"type": "string"}}, "required": ["namespace", "key"]},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}, "explanation": {}}, "required": ["_kernel_step_status"]},
     },
     "kernel:shared_dict.list": {
-        "permission_id": "shared_dict.list",
+        "description": "List all shared dictionary entries",
+        "permission_id": "kernel:shared_dict.list",
         "risk": "low",
         "requires": [],
-        "description": "List all entries in a shared dictionary namespace",
         "tags": ["kernel", "runtime", "shared_dict"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "namespace": {
-                    "type": "string",
-                    "description": "Namespace to list rules for (if omitted, lists all namespaces)",
-                },
-            },
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "namespace": {"type": "string"},
-                        "rule_count": {"type": "integer"},
-                        "namespace_count": {"type": "integer"},
-                        "error": {"type": "string"},
-                    },
-                },
-                "rules": {
-                    "type": "array",
-                    "description": "List of rules in the namespace (when namespace specified)",
-                },
-                "namespaces": {
-                    "type": "array",
-                    "description": "List of all namespaces (when namespace not specified)",
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {"namespace": {"type": "string"}}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}, "entries": {"type": "array"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:shared_dict.remove": {
-        "permission_id": "shared_dict.remove",
+        "description": "Remove a shared dictionary entry",
+        "permission_id": "kernel:shared_dict.remove",
         "risk": "medium",
         "requires": [],
-        "description": "Remove an entry from the shared dictionary",
         "tags": ["kernel", "runtime", "shared_dict"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "namespace": {
-                    "type": "string",
-                    "description": "Shared dictionary namespace",
-                },
-                "token": {
-                    "type": "string",
-                    "description": "Token to remove",
-                },
-                "provenance": {
-                    "type": "object",
-                    "description": "Provenance metadata for the removal",
-                    "default": {},
-                },
-            },
-            "required": ["namespace", "token"],
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "removed": {"type": "boolean"},
-                        "namespace": {"type": "string"},
-                        "token": {"type": "string"},
-                        "error": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "input_schema": {"type": "object", "properties": {"namespace": {"type": "string"}, "key": {"type": "string"}}, "required": ["namespace", "key"]},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
 
     # --- uds_proxy ---
     "kernel:uds_proxy.init": {
-        "permission_id": "uds_proxy.init",
+        "description": "Initialize the UDS egress proxy manager",
+        "permission_id": "kernel:uds_proxy.init",
         "risk": "high",
         "requires": [],
-        "description": "Initialize the UDS egress proxy manager",
-        "tags": ["kernel", "runtime", "network", "uds"],
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "base_dir": {"type": "string"},
-                        "error": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "tags": ["kernel", "runtime", "network", "uds", "proxy"],
+        "input_schema": {"type": "object", "properties": {}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:uds_proxy.ensure_socket": {
-        "permission_id": "uds_proxy.ensure_socket",
+        "description": "Ensure a UDS socket exists for a pack",
+        "permission_id": "kernel:uds_proxy.ensure_socket",
         "risk": "medium",
         "requires": [],
-        "description": "Ensure a UDS socket exists for a pack",
-        "tags": ["kernel", "runtime", "network", "uds"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "pack_id": {
-                    "type": "string",
-                    "description": "Pack ID to ensure socket for",
-                },
-            },
-            "required": ["pack_id"],
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "pack_id": {"type": "string"},
-                        "socket_path": {"type": "string"},
-                        "error": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "tags": ["kernel", "runtime", "network", "uds", "proxy"],
+        "input_schema": {"type": "object", "properties": {"pack_id": {"type": "string"}}, "required": ["pack_id"]},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:uds_proxy.stop": {
-        "permission_id": "uds_proxy.stop",
+        "description": "Stop a specific UDS proxy for a pack",
+        "permission_id": "kernel:uds_proxy.stop",
         "risk": "medium",
         "requires": [],
-        "description": "Stop a UDS proxy for a specific pack",
-        "tags": ["kernel", "runtime", "network", "uds"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "pack_id": {
-                    "type": "string",
-                    "description": "Pack ID whose UDS proxy to stop",
-                },
-            },
-            "required": ["pack_id"],
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "pack_id": {"type": "string"},
-                        "stopped": {"type": "boolean"},
-                        "error": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "tags": ["kernel", "runtime", "network", "uds", "proxy"],
+        "input_schema": {"type": "object", "properties": {"pack_id": {"type": "string"}}, "required": ["pack_id"]},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:uds_proxy.stop_all": {
-        "permission_id": "uds_proxy.stop_all",
-        "risk": "high",
-        "requires": [],
         "description": "Stop all UDS proxies",
-        "tags": ["kernel", "runtime", "network", "uds"],
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "stopped": {"type": "integer"},
-                        "packs": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                        },
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "permission_id": "kernel:uds_proxy.stop_all",
+        "risk": "medium",
+        "requires": [],
+        "tags": ["kernel", "runtime", "network", "uds", "proxy"],
+        "input_schema": {"type": "object", "properties": {}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:uds_proxy.status": {
-        "permission_id": "uds_proxy.status",
+        "description": "Get UDS proxy status for all packs",
+        "permission_id": "kernel:uds_proxy.status",
         "risk": "low",
         "requires": [],
-        "description": "Get UDS proxy status for a pack or all packs",
-        "tags": ["kernel", "runtime", "network", "uds"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "pack_id": {
-                    "type": "string",
-                    "description": "Pack ID to check status for (if omitted, returns status for all)",
-                },
-            },
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "initialized": {"type": "boolean"},
-                        "active_packs": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                        },
-                        "base_dir": {"type": "string"},
-                        "pack_id": {"type": "string"},
-                        "is_running": {"type": "boolean"},
-                        "socket_path": {"type": ["string", "null"]},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "tags": ["kernel", "runtime", "network", "uds", "proxy"],
+        "input_schema": {"type": "object", "properties": {}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
 
     # --- capability_proxy ---
     "kernel:capability_proxy.init": {
-        "permission_id": "capability_proxy.init",
+        "description": "Initialize the capability proxy server",
+        "permission_id": "kernel:capability_proxy.init",
         "risk": "high",
         "requires": [],
-        "description": "Initialize the capability proxy for principal-based access control",
-        "tags": ["kernel", "runtime", "capability"],
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "base_dir": {"type": "string"},
-                        "error": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "tags": ["kernel", "runtime", "capability", "proxy"],
+        "input_schema": {"type": "object", "properties": {}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:capability_proxy.status": {
-        "permission_id": "capability_proxy.status",
+        "description": "Get capability proxy server status",
+        "permission_id": "kernel:capability_proxy.status",
         "risk": "low",
         "requires": [],
-        "description": "Get capability proxy status",
-        "tags": ["kernel", "runtime", "capability"],
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "description": "Capability proxy status details (initialized, active principals, etc.)",
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "tags": ["kernel", "runtime", "capability", "proxy"],
+        "input_schema": {"type": "object", "properties": {}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:capability_proxy.stop_all": {
-        "permission_id": "capability_proxy.stop_all",
-        "risk": "high",
+        "description": "Stop all capability proxy servers",
+        "permission_id": "kernel:capability_proxy.stop_all",
+        "risk": "medium",
         "requires": [],
-        "description": "Stop all capability proxy instances",
-        "tags": ["kernel", "runtime", "capability"],
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "stopped": {"type": "integer"},
-                        "principals": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                        },
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "tags": ["kernel", "runtime", "capability", "proxy"],
+        "input_schema": {"type": "object", "properties": {}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
 
-    # --- capability grant ---
+    # --- capability grant (G-1) ---
     "kernel:capability.grant": {
-        "permission_id": "capability.grant",
+        "description": "Grant a capability permission to a principal",
+        "permission_id": "kernel:capability.grant",
         "risk": "high",
         "requires": [],
-        "description": "Grant a capability to a principal",
-        "tags": ["kernel", "runtime", "capability"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "principal_id": {
-                    "type": "string",
-                    "description": "Principal ID to grant capability to",
-                },
-                "permission_id": {
-                    "type": "string",
-                    "description": "Permission ID to grant",
-                },
-                "config": {
-                    "type": "object",
-                    "description": "Optional configuration for the granted capability",
-                },
-            },
-            "required": ["principal_id", "permission_id"],
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "principal_id": {"type": "string"},
-                        "permission_id": {"type": "string"},
-                        "granted": {"type": "boolean"},
-                        "error": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "tags": ["kernel", "runtime", "capability", "security"],
+        "input_schema": {"type": "object", "properties": {"principal_id": {"type": "string"}, "permission_id": {"type": "string"}, "config": {"type": "object", "default": {}}}, "required": ["principal_id", "permission_id"]},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:capability.revoke": {
-        "permission_id": "capability.revoke",
+        "description": "Revoke a capability permission from a principal",
+        "permission_id": "kernel:capability.revoke",
         "risk": "high",
         "requires": [],
-        "description": "Revoke a capability from a principal",
-        "tags": ["kernel", "runtime", "capability"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "principal_id": {
-                    "type": "string",
-                    "description": "Principal ID to revoke capability from",
-                },
-                "permission_id": {
-                    "type": "string",
-                    "description": "Permission ID to revoke",
-                },
-            },
-            "required": ["principal_id", "permission_id"],
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "principal_id": {"type": "string"},
-                        "permission_id": {"type": "string"},
-                        "revoked": {"type": "boolean"},
-                        "error": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "tags": ["kernel", "runtime", "capability", "security"],
+        "input_schema": {"type": "object", "properties": {"principal_id": {"type": "string"}, "permission_id": {"type": "string"}}, "required": ["principal_id", "permission_id"]},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
     "kernel:capability.list": {
-        "permission_id": "capability.list",
+        "description": "List capability grants for a principal or all principals",
+        "permission_id": "kernel:capability.list",
         "risk": "low",
         "requires": [],
-        "description": "List capabilities for a principal",
-        "tags": ["kernel", "runtime", "capability"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "principal_id": {
-                    "type": "string",
-                    "description": "Principal ID to list capabilities for (if omitted, lists all grants)",
-                },
-            },
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "principal_id": {"type": "string"},
-                        "found": {"type": "boolean"},
-                        "grant_count": {"type": "integer"},
-                        "error": {"type": "string"},
-                    },
-                },
-                "grant": {
-                    "type": ["object", "null"],
-                    "description": "Grant details for a specific principal",
-                },
-                "grants": {
-                    "type": "object",
-                    "description": "Map of principal_id to grant details (when listing all)",
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "tags": ["kernel", "runtime", "capability", "security"],
+        "input_schema": {"type": "object", "properties": {"principal_id": {"type": "string"}}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}, "grants": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
 
-    # --- pending export ---
+    # --- pending export (G-2) ---
     "kernel:pending.export": {
-        "permission_id": "pending.export",
+        "description": "Export pending approval information to output directory",
+        "permission_id": "kernel:pending.export",
         "risk": "low",
         "requires": [],
-        "description": "Export pending pack approval data to output directory",
-        "tags": ["kernel", "runtime", "approval"],
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "output_dir": {
-                    "type": "string",
-                    "description": "Directory to write the pending summary file",
-                    "default": "user_data/pending",
-                },
-            },
-        },
-        "output_schema": {
-            "type": "object",
-            "properties": {
-                "_kernel_step_status": {
-                    "type": "string",
-                    "enum": ["success", "failed"],
-                },
-                "_kernel_step_meta": {
-                    "type": "object",
-                    "properties": {
-                        "output_file": {"type": "string"},
-                        "packs_pending": {"type": "integer"},
-                        "error": {"type": "string"},
-                    },
-                },
-            },
-            "required": ["_kernel_step_status"],
-        },
+        "tags": ["kernel", "runtime", "approval", "export"],
+        "input_schema": {"type": "object", "properties": {"output_dir": {"type": "string", "default": "user_data/pending"}}},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
 }
 
-
-class Kernel(KernelSystemHandlersMixin, KernelRuntimeHandlersMixin, KernelFlowExecutionMixin, KernelCore):
-    """
-    Rumi AI OS カーネル
-
-    Mixin方式で分割された4クラスを合成する:
-    - KernelCore: エンジン本体（Flow読込、ctx構築、shutdown等）
-    - KernelFlowExecutionMixin: Flow実行ロジック（run_startup, execute_flow等）
-    - KernelSystemHandlersMixin: 起動/システム系 _h_* ハンドラ
-    - KernelRuntimeHandlersMixin: 運用/実行系 _h_* ハンドラ
-    """
-
-    def __init__(self, config: Optional[KernelConfig] = None,
-                 diagnostics: Optional[Diagnostics] = None,
-                 install_journal: Optional[InstallJournal] = None,
-                 interface_registry: Optional[InterfaceRegistry] = None,
-                 event_bus: Optional[EventBus] = None,
-                 lifecycle: Optional[ComponentLifecycleExecutor] = None) -> None:
-        KernelCore.__init__(
-            self,
-            config=config,
-            diagnostics=diagnostics,
-            install_journal=install_journal,
-            interface_registry=interface_registry,
-            event_bus=event_bus,
-            lifecycle=lifecycle,
-        )
-        self._init_kernel_handlers()
-
-    def _init_kernel_handlers(self) -> None:
-        """
-        全ハンドラを登録する。
-
-        system/runtime の Mixin が提供する _register_*_handlers() を呼び、
-        統合辞書を構築する。
-        Phase B-2a: 登録後に FunctionRegistry へ最小メタデータを登録する。
-        """
-        self._kernel_handlers = {}
-        self._kernel_handlers.update(self._register_system_handlers())
-        self._kernel_handlers.update(self._register_runtime_handlers())
-
-        # 登録漏れ検知（diagnostics warning のみ、起動は止めない）
-        registered_keys = set(self._kernel_handlers.keys())
-        missing = _EXPECTED_HANDLER_KEYS - registered_keys
-        if missing:
-            self.diagnostics.record_step(
-                phase="startup",
-                step_id="kernel.handlers.missing_check",
-                handler="kernel:init",
-                status="failed",
-                error={"type": "MissingHandlers", "message": f"Missing handler keys: {sorted(missing)}"},
-                meta={"missing_keys": sorted(missing), "registered_count": len(registered_keys)}
-            )
-
-        # Phase B-2a: Register kernel handlers to FunctionRegistry
-        self._register_handlers_to_function_registry()
-
-
-    def register_kernel_functions_to_registry(self, function_registry=None) -> int:
-        """
-        Phase B1-2: kernel function を FunctionRegistry に登録する。
-        startup flow から呼ばれる。
-
-        Args:
-            function_registry: FunctionRegistry インスタンス。
-                None の場合は InterfaceRegistry から取得を試みる。
-
-        Returns:
-            登録された function の数
-        """
-        if function_registry is None:
-            # InterfaceRegistry から FunctionRegistry を取得
-            function_registry = self.interface_registry.get(
-                "kernel.function_registry", strategy="last"
-            )
-            if function_registry is None:
-                try:
-                    from .function_registry import FunctionRegistry
-                    function_registry = FunctionRegistry()
-                    self.interface_registry.register(
-                        "kernel.function_registry",
-                        function_registry,
-                        meta={"source": "kernel", "phase": "b1"}
-                    )
-                except Exception as e:
-                    _logger.warning("Failed to create FunctionRegistry: %s", e)
-                    return 0
-
-        count = _register_kernel_functions(function_registry)
-
-        self.diagnostics.record_step(
-            phase="startup",
-            step_id="kernel_functions.register",
-            handler="kernel:kernel_functions.register",
-            status="success",
-            meta={"registered_count": count, "total_manifests": len(_KERNEL_HANDLER_MANIFESTS)}
-        )
-
-        return count
-
-    def _register_handlers_to_function_registry(self) -> None:
-        """
-        Phase B-2a: _KERNEL_HANDLER_MANIFESTS の各エントリを
-        FunctionRegistry に登録する。
-
-        FunctionRegistry インスタンスを InterfaceRegistry から取得するか、
-        なければ新規作成して "function_registry" キーで登録する。
-        登録失敗時は警告ログのみ（起動を止めない）。
-        """
-        try:
-            from .function_registry import FunctionRegistry, FunctionEntry
-
-            # InterfaceRegistry から既存の FunctionRegistry を取得、なければ新規作成
-            existing = self.interface_registry.get("function_registry", strategy="last")
-            if existing is not None and isinstance(existing, FunctionRegistry):
-                func_registry = existing
-            else:
-                func_registry = FunctionRegistry()
-                self.interface_registry.register(
-                    "function_registry",
-                    func_registry,
-                    meta={"source": "kernel", "phase": "b2a"},
-                )
-
-            registered_count = 0
-            skipped_count = 0
-            error_count = 0
-
-            for handler_key, manifest in _KERNEL_HANDLER_MANIFESTS.items():
-                try:
-                    # function_id: "kernel:" prefix を除去
-                    function_id = handler_key
-                    if function_id.startswith("kernel:"):
-                        function_id = function_id[len("kernel:"):]
-
-                    entry = FunctionEntry(
-                        function_id=function_id,
-                        pack_id="kernel",
-                        description=manifest["description"],
-                        tags=list(manifest["tags"]),
-                        host_execution=True,
-                        vocab_aliases=[handler_key],
-                    )
-
-                    if func_registry.register(entry):
-                        registered_count += 1
-                    else:
-                        skipped_count += 1
-
-                except Exception as exc:
-                    error_count += 1
-                    _logger.warning(
-                        "Failed to register kernel handler to FunctionRegistry: %s (%s)",
-                        handler_key, exc,
-                    )
-
-            self.diagnostics.record_step(
-                phase="startup",
-                step_id="kernel.handlers.function_registry",
-                handler="kernel:init",
-                status="success",
-                meta={
-                    "registered": registered_count,
-                    "skipped": skipped_count,
-                    "errors": error_count,
-                    "total_manifests": len(_KERNEL_HANDLER_MANIFESTS),
-                },
-            )
-
-            _logger.info(
-                "Kernel handlers registered to FunctionRegistry: "
-                "%d registered, %d skipped, %d errors",
-                registered_count, skipped_count, error_count,
-            )
-
-        except Exception as exc:
-            _logger.warning(
-                "Failed to register kernel handlers to FunctionRegistry: %s", exc
-            )
-            self.diagnostics.record_step(
-                phase="startup",
-                step_id="kernel.handlers.function_registry",
-                handler="kernel:init",
-                status="failed",
-                error={"type": type(exc).__name__, "message": str(exc)},
-            )
-
-
-__all__ = ["Kernel", "KernelConfig"]
+# =====================================================================
+# Phase B-1: _EXPECTED_HANDLER_KEYS — 後方互換（_KERNEL_HANDLER_MANIFESTS から導出）
+# =====================================================================
+_EXPECTED_HANDLER_KEYS: frozenset = frozenset(_KERNEL_HANDLER_MANIFESTS.keys())
 
 
 # =====================================================================
-# Phase B1-1: _EXPECTED_HANDLER_KEYS を _KERNEL_HANDLER_MANIFESTS から導出
-# 単一権威ソース原則 (D): _KERNEL_HANDLER_MANIFESTS.keys() が唯一のソース
-# =====================================================================
-_EXPECTED_HANDLER_KEYS = frozenset(_KERNEL_HANDLER_MANIFESTS.keys())
-
-
-# =====================================================================
-# Phase B1-2: _register_kernel_functions
-# FunctionRegistry に全 kernel ハンドラを kernel function として登録する
+# Phase B-1: _register_kernel_functions
+# FunctionRegistry にカーネルハンドラを一括登録する。
 # =====================================================================
 
 def _register_kernel_functions(function_registry) -> int:
     """
-    _KERNEL_HANDLER_MANIFESTS の各エントリを FunctionRegistry に
-    kernel function として登録する。
+    _KERNEL_HANDLER_MANIFESTS の全エントリを FunctionRegistry に登録する。
 
     Phase A で追加される register_kernel_function() を使用する。
-    register_kernel_function() は以下を固定設定する:
-      - pack_id="kernel"
-      - calling_convention="kernel"
-      - is_builtin=True
+    pack_id="kernel", calling_convention="kernel", is_builtin=True が固定設定される。
 
     Args:
         function_registry: FunctionRegistry インスタンス
@@ -2984,33 +898,133 @@ def _register_kernel_functions(function_registry) -> int:
     Returns:
         登録された function の数
     """
+    if function_registry is None:
+        _logger.warning("_register_kernel_functions: function_registry is None, skipping")
+        return 0
+
+    # Phase A の register_kernel_function() が存在するか確認
+    register_fn = getattr(function_registry, "register_kernel_function", None)
+
     registered = 0
     for key, manifest in _KERNEL_HANDLER_MANIFESTS.items():
         try:
-            # Phase A で追加される register_kernel_function() を呼ぶ
-            # まだ存在しない場合は AttributeError → fallback
-            if hasattr(function_registry, 'register_kernel_function'):
-                function_registry.register_kernel_function(key, manifest)
-                registered += 1
+            if register_fn is not None:
+                # Phase A パス: register_kernel_function() を使用
+                register_fn(key, manifest)
             else:
-                # Phase A 未適用時の fallback: 通常の register() を使用
+                # フォールバック: 汎用 register() を直接使用
+                # handler_key "kernel:xxx.yyy" → function_id = "xxx.yyy"
+                parts = key.split(":", 1)
+                function_id = parts[1] if len(parts) == 2 else key
+
                 from .function_registry import FunctionEntry
                 entry = FunctionEntry(
-                    function_id=key,
+                    function_id=function_id,
                     pack_id="kernel",
                     description=manifest.get("description", ""),
+                    requires=manifest.get("requires", []),
                     tags=manifest.get("tags", []),
                     input_schema=manifest.get("input_schema", {}),
                     output_schema=manifest.get("output_schema", {}),
-                    requires=manifest.get("requires", []),
-                    manifest=manifest,
                     risk=manifest.get("risk"),
+                    entrypoint=None,
+                    vocab_aliases=[manifest["permission_id"]] if manifest.get("permission_id") else None,
                 )
+                entry.host_execution = False
                 function_registry.register(entry)
-                registered += 1
-        except Exception as e:
+
+            registered += 1
+        except Exception as exc:
             _logger.warning(
-                "Failed to register kernel function: %s: %s",
-                key, e
+                "_register_kernel_functions: failed to register '%s': %s",
+                key, exc,
             )
+
+    _logger.info(
+        "Kernel functions registered: %d / %d",
+        registered, len(_KERNEL_HANDLER_MANIFESTS),
+    )
     return registered
+
+
+# =====================================================================
+# Kernel クラス（Mixin 合成）
+# =====================================================================
+
+class Kernel(
+    KernelRuntimeHandlersMixin,
+    KernelSystemHandlersMixin,
+    KernelFlowExecutionMixin,
+    KernelCore,
+):
+    """
+    合成 Kernel クラス
+
+    MRO: Kernel → RuntimeHandlers → SystemHandlers → FlowExecution → KernelCore
+    """
+
+    def _init_kernel_handlers(self) -> None:
+        """
+        カーネルハンドラを初期化し、_kernel_handlers に登録する。
+
+        _KERNEL_HANDLER_MANIFESTS を権威ソースとし、
+        実際のハンドラ関数は Mixin の _register_*_handlers() から取得する。
+        """
+        system = self._register_system_handlers()
+        runtime = self._register_runtime_handlers()
+
+        self._kernel_handlers.update(system)
+        self._kernel_handlers.update(runtime)
+
+        # 登録漏れ検知
+        registered_keys = frozenset(self._kernel_handlers.keys())
+        expected_keys = frozenset(_KERNEL_HANDLER_MANIFESTS.keys())
+
+        missing = expected_keys - registered_keys
+        if missing:
+            _logger.error(
+                "Kernel handler registration incomplete! Missing handlers: %s",
+                sorted(missing),
+            )
+
+        extra = registered_keys - expected_keys
+        if extra:
+            _logger.warning(
+                "Kernel handlers registered but not in manifests: %s",
+                sorted(extra),
+            )
+
+        # Phase B-1: _register_kernel_functions の callable を IR に登録
+        # startup flow の kernel_function_register ステップから kernel:ir.call で呼ばれる
+        try:
+            from .di_container import get_container
+            _c = get_container()
+            _fr = _c.get_or_none("function_registry")
+            if _fr is not None:
+                self.interface_registry.register(
+                    "kernel.register_kernel_functions",
+                    lambda: _register_kernel_functions(_fr),
+                    meta={"source": "kernel", "phase": "b1"},
+                )
+        except Exception as exc:
+            _logger.warning(
+                "Failed to register kernel.register_kernel_functions callable: %s", exc,
+            )
+
+    def _vocab_normalize_output(self, output: dict, step: dict, ctx: dict) -> dict:
+        """vocab_normalize の実装。VocabRegistry 経由でキー正規化。"""
+        try:
+            from .vocab_registry import get_vocab_registry
+            vr = get_vocab_registry()
+            if vr is None:
+                return output
+            normalized = {}
+            for k, v in output.items():
+                try:
+                    new_key = vr.resolve(k, to_preferred=True)
+                    normalized[new_key] = v
+                except Exception:
+                    normalized[k] = v
+            return normalized
+        except Exception:
+            return output
