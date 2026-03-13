@@ -664,6 +664,8 @@ class KernelFlowExecutionMixin:
 
         capability_executor 経由で function.call を呼ぶ。
         principal_id は ctx から取得し、フォールバックは使わない（フェイルクローズ）。
+
+        Wave 27-D2: vocab_normalize (opt-in) を結果格納前に適用。
         """
         qualified_name = step.get("function")
         if not qualified_name:
@@ -714,6 +716,10 @@ class KernelFlowExecutionMixin:
         )
 
         result = resp.output if resp.success else {"_error": resp.error}
+
+        # --- Wave 27-D2: vocab_normalize (opt-in for function steps) ---
+        if resp.success and step.get("vocab_normalize") and isinstance(result, dict):
+            result = self._vocab_normalize_output(result, step, ctx)
 
         # 出力格納: 明示 output があればそちら、なければ _step_out.{id}
         output_key_explicit = step.get("output")
