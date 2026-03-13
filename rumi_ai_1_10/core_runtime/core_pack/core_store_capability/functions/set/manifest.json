@@ -1,0 +1,35 @@
+{
+  "function_id": "set",
+  "description": "Write a JSON value to a Store by key. Creates or overwrites <store_root>/<key>.json.",
+  "requires": [
+    "store.set"
+  ],
+  "caller_requires": [],
+  "host_execution": true,
+  "tags": [
+    "store",
+    "write"
+  ],
+  "risk": "medium",
+  "vocab_aliases": [
+    "store.set"
+  ],
+  "input_schema": {
+    "type": "object",
+    "required": ["store_id", "key", "value"],
+    "properties": {
+      "store_id": {"type": "string"},
+      "key": {"type": "string"},
+      "value": {"description": "JSON-serializable value to store"}
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "success": {"type": "boolean"},
+      "path": {"type": "string"},
+      "error": {"type": "string"},
+      "error_type": {"type": "string"}
+    }
+  }
+}

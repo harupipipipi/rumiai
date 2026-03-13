@@ -1,0 +1,34 @@
+{
+  "function_id": "get",
+  "description": "Read a value from a Store by key. Returns JSON data stored at <store_root>/<key>.json.",
+  "requires": [
+    "store.get"
+  ],
+  "caller_requires": [],
+  "host_execution": true,
+  "tags": [
+    "store",
+    "read"
+  ],
+  "risk": "low",
+  "vocab_aliases": [
+    "store.get"
+  ],
+  "input_schema": {
+    "type": "object",
+    "required": ["store_id", "key"],
+    "properties": {
+      "store_id": {"type": "string", "description": "Target store ID"},
+      "key": {"type": "string", "description": "Data key (may contain '/' for nested paths)"}
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "success": {"type": "boolean"},
+      "value": {"description": "The stored JSON value"},
+      "error": {"type": "string"},
+      "error_type": {"type": "string"}
+    }
+  }
+}

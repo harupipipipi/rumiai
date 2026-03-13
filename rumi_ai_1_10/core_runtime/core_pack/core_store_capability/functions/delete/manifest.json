@@ -1,0 +1,33 @@
+{
+  "function_id": "delete",
+  "description": "Delete a value from a Store by key. Removes <store_root>/<key>.json.",
+  "requires": [
+    "store.delete"
+  ],
+  "caller_requires": [],
+  "host_execution": true,
+  "tags": [
+    "store",
+    "write"
+  ],
+  "risk": "medium",
+  "vocab_aliases": [
+    "store.delete"
+  ],
+  "input_schema": {
+    "type": "object",
+    "required": ["store_id", "key"],
+    "properties": {
+      "store_id": {"type": "string"},
+      "key": {"type": "string"}
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "success": {"type": "boolean"},
+      "error": {"type": "string"},
+      "error_type": {"type": "string"}
+    }
+  }
+}
