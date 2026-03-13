@@ -101,6 +101,15 @@ steps:
         key: "kernel.register_kernel_functions"
         strategy: "last"
 
+  # Phase B1-3: kernel function 登録ステップ
+  # _KERNEL_HANDLER_MANIFESTS の全エントリを FunctionRegistry に登録する
+  - id: kernel_functions_register
+    phase: ecosystem
+    priority: 15
+    type: handler
+    input:
+      handler: "kernel:register_kernel_functions"
+
   - id: component_discover
     phase: ecosystem
     priority: 40
