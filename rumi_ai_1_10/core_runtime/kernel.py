@@ -12,6 +12,7 @@ KernelCore (エンジン本体) + KernelFlowExecutionMixin (Flow実行)
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any, Callable, Dict, List, Optional
 
@@ -26,6 +27,8 @@ from .install_journal import InstallJournal
 from .interface_registry import InterfaceRegistry
 from .event_bus import EventBus
 from .component_lifecycle import ComponentLifecycleExecutor
+
+_logger = logging.getLogger("rumi.kernel")
 
 
 # B4: 環境変数でverboseモード判定（後方互換: kernel.py から参照される可能性に備える）
@@ -438,6 +441,7 @@ class Kernel(KernelSystemHandlersMixin, KernelRuntimeHandlersMixin, KernelFlowEx
 
         system/runtime の Mixin が提供する _register_*_handlers() を呼び、
         統合辞書を構築する。
+        Phase B-2a: 登録後に FunctionRegistry へ最小メタデータを登録する。
         """
         self._kernel_handlers = {}
         self._kernel_handlers.update(self._register_system_handlers())
@@ -454,6 +458,96 @@ class Kernel(KernelSystemHandlersMixin, KernelRuntimeHandlersMixin, KernelFlowEx
                 status="failed",
                 error={"type": "MissingHandlers", "message": f"Missing handler keys: {sorted(missing)}"},
                 meta={"missing_keys": sorted(missing), "registered_count": len(registered_keys)}
+            )
+
+        # Phase B-2a: Register kernel handlers to FunctionRegistry
+        self._register_handlers_to_function_registry()
+
+    def _register_handlers_to_function_registry(self) -> None:
+        """
+        Phase B-2a: _KERNEL_HANDLER_MANIFESTS の各エントリを
+        FunctionRegistry に登録する。
+
+        FunctionRegistry インスタンスを InterfaceRegistry から取得するか、
+        なければ新規作成して "function_registry" キーで登録する。
+        登録失敗時は警告ログのみ（起動を止めない）。
+        """
+        try:
+            from .function_registry import FunctionRegistry, FunctionEntry
+
+            # InterfaceRegistry から既存の FunctionRegistry を取得、なければ新規作成
+            existing = self.interface_registry.get("function_registry", strategy="last")
+            if existing is not None and isinstance(existing, FunctionRegistry):
+                func_registry = existing
+            else:
+                func_registry = FunctionRegistry()
+                self.interface_registry.register(
+                    "function_registry",
+                    func_registry,
+                    meta={"source": "kernel", "phase": "b2a"},
+                )
+
+            registered_count = 0
+            skipped_count = 0
+            error_count = 0
+
+            for handler_key, manifest in _KERNEL_HANDLER_MANIFESTS.items():
+                try:
+                    # function_id: "kernel:" prefix を除去
+                    function_id = handler_key
+                    if function_id.startswith("kernel:"):
+                        function_id = function_id[len("kernel:"):]
+
+                    entry = FunctionEntry(
+                        function_id=function_id,
+                        pack_id="kernel",
+                        description=manifest["description"],
+                        tags=list(manifest["tags"]),
+                        host_execution=True,
+                        vocab_aliases=[handler_key],
+                    )
+
+                    if func_registry.register(entry):
+                        registered_count += 1
+                    else:
+                        skipped_count += 1
+
+                except Exception as exc:
+                    error_count += 1
+                    _logger.warning(
+                        "Failed to register kernel handler to FunctionRegistry: %s (%s)",
+                        handler_key, exc,
+                    )
+
+            self.diagnostics.record_step(
+                phase="startup",
+                step_id="kernel.handlers.function_registry",
+                handler="kernel:init",
+                status="success",
+                meta={
+                    "registered": registered_count,
+                    "skipped": skipped_count,
+                    "errors": error_count,
+                    "total_manifests": len(_KERNEL_HANDLER_MANIFESTS),
+                },
+            )
+
+            _logger.info(
+                "Kernel handlers registered to FunctionRegistry: "
+                "%d registered, %d skipped, %d errors",
+                registered_count, skipped_count, error_count,
+            )
+
+        except Exception as exc:
+            _logger.warning(
+                "Failed to register kernel handlers to FunctionRegistry: %s", exc
+            )
+            self.diagnostics.record_step(
+                phase="startup",
+                step_id="kernel.handlers.function_registry",
+                handler="kernel:init",
+                status="failed",
+                error={"type": type(exc).__name__, "message": str(exc)},
             )
 
 
