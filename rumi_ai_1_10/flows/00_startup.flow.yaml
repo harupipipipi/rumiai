@@ -89,6 +89,13 @@ steps:
     input:
       handler: "kernel:flow.load_all"
 
+  - id: function_registry_load
+    phase: ecosystem
+    priority: 15
+    type: handler
+    input:
+      handler: "kernel:noop"
+
   - id: component_discover
     phase: ecosystem
     priority: 40
