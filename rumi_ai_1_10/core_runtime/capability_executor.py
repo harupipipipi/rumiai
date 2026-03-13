@@ -9,6 +9,9 @@ Trust / Grant を検証し、ハンドラーをサブプロセスで実行する
 - ハンドラーはサブプロセスで実行（timeout で kill 可能）
 - 全操作を監査ログに記録
 - Pack への返却は汎用エラー（詳細は監査へ）
+
+Phase B-3: FunctionRegistry 経由の統一パス (_unified_execute) を追加。
+           旧パスは _legacy_execute にラップ。
 """
 
 from __future__ import annotations
@@ -39,6 +42,14 @@ try:
     from .docker_run_builder import DockerRunBuilder as _DockerRunBuilder
 except ImportError:
     _DockerRunBuilder = None
+
+# Phase B-3: FunctionRegistry / FunctionEntry import
+try:
+    from .function_registry import FunctionRegistry, FunctionEntry
+except ImportError:
+    FunctionRegistry = None
+    FunctionEntry = None
+
 from typing import Any, Dict, Optional
 
 # レスポンスサイズ上限（1MB）
@@ -104,6 +115,22 @@ class CapabilityResponse:
             "error_type": self.error_type,
             "latency_ms": self.latency_ms,
         }
+
+
+@dataclass
+class _HandlerDefAdapter:
+    """
+    Phase B-3: FunctionEntry → HandlerDefinition 互換アダプタ。
+
+    _execute_handler_subprocess() が要求する HandlerDefinition のフィールドを
+    FunctionEntry から構築する。
+    """
+    handler_id: str
+    permission_id: str
+    entrypoint: str
+    handler_dir: Path
+    handler_py_path: Path
+    is_builtin: bool = False
 
 
 def _summarize_args(args: Any, max_length: int = MAX_ARGS_SUMMARY_LENGTH) -> str:
@@ -241,14 +268,299 @@ class CapabilityExecutor:
         if request.get("type") == "function.call":
             return self._execute_function_call(principal_id, request, start_time)
 
-
+        # Phase B-3: 新パス — FunctionRegistry で解決を試みる
         permission_id = request.get("permission_id")
+        if permission_id and isinstance(permission_id, str):
+            entry = self._resolve_entry(permission_id)
+            if entry is not None:
+                return self._unified_execute(entry, principal_id, request, start_time)
+
+        # Phase B-3: 旧パス — フォールバック
+        return self._legacy_execute(principal_id, request, start_time)
+
+    # ------------------------------------------------------------------
+    # Phase B-3: _resolve_entry
+    # ------------------------------------------------------------------
+
+    def _resolve_entry(self, permission_id: str):
+        """
+        FunctionRegistry の resolve_by_alias() で permission_id から
+        FunctionEntry を検索する。
+
+        FunctionRegistry が利用不可の場合は None を返す。
+
+        Args:
+            permission_id: 検索対象の permission_id
+
+        Returns:
+            FunctionEntry or None
+        """
+        fr = self._function_registry
+        if fr is None:
+            return None
+        try:
+            return fr.resolve_by_alias(permission_id)
+        except Exception:
+            return None
+
+    # ------------------------------------------------------------------
+    # Phase B-3: _unified_execute
+    # ------------------------------------------------------------------
+
+    def _unified_execute(
+        self,
+        entry,
+        principal_id: str,
+        request: Dict[str, Any],
+        start_time: float,
+    ) -> CapabilityResponse:
+        """
+        FunctionEntry ベースで統一された実行パス。
+
+        既存の permission_id パスと同等のセキュリティチェックと実行を行う:
+        1. rate limit チェック
+        2. Trust チェック (builtin バイパス or sha256 検証)
+        3. Grant チェック (opt-in: grant_config が非 None のときのみ)
+        4. 実行分岐 (flow.run / docker.* / subprocess)
+
+        Args:
+            entry: FunctionEntry
+            principal_id: 主体ID
+            request: リクエスト辞書
+            start_time: 開始時刻
+
+        Returns:
+            CapabilityResponse
+        """
+        # vocab_aliases から effective_permission_id を取得
+        effective_permission_id = None
+        if entry.vocab_aliases:
+            effective_permission_id = entry.vocab_aliases[0]
+        if not effective_permission_id:
+            effective_permission_id = entry.qualified_name
+
         args = request.get("args", {})
         timeout_seconds = min(
             float(request.get("timeout_seconds", DEFAULT_TIMEOUT)),
             MAX_TIMEOUT,
         )
         request_id = request.get("request_id", "")
+        handler_id = entry.qualified_name
+
+        # 1. rate limit チェック（secrets.get のみ）
+        if effective_permission_id == SECRET_GET_PERMISSION_ID:
+            if not self._check_rate_limit(principal_id):
+                resp = CapabilityResponse(
+                    success=False,
+                    error="Rate limited",
+                    error_type="rate_limited",
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+                self._audit(
+                    principal_id, effective_permission_id, handler_id, resp, args, request_id,
+                    detail_reason=f"Rate limit exceeded ({self._secret_get_rate_limit}/min)",
+                )
+                return resp
+
+        # 初期化チェック
+        if not self._initialized:
+            if not self.initialize():
+                resp = CapabilityResponse(
+                    success=False,
+                    error="Capability system failed to initialize",
+                    error_type="initialization_error",
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+                self._audit(principal_id, effective_permission_id, handler_id, resp, args, request_id)
+                return resp
+
+        # 2. Trust チェック
+        is_builtin = entry.pack_id.startswith(_CORE_PACK_ID_PREFIX)
+        builtin_sha256 = None
+
+        if is_builtin:
+            # built-in: trust bypass（コア同梱のため信頼済み）
+            if entry.main_py_path and Path(entry.main_py_path).is_file():
+                try:
+                    from .capability_handler_registry import compute_file_sha256
+                    builtin_sha256 = compute_file_sha256(Path(entry.main_py_path))
+                except Exception:
+                    builtin_sha256 = "compute_failed"
+        else:
+            # 非 built-in: 実行時に sha256 を再計算して Trust 検証
+            if not entry.main_py_path or not Path(entry.main_py_path).is_file():
+                resp = CapabilityResponse(
+                    success=False,
+                    error="Permission denied",
+                    error_type="trust_denied",
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+                self._audit(
+                    principal_id, effective_permission_id, handler_id, resp, args, request_id,
+                    trusted=False,
+                    detail_reason="main_py_path not found for trust verification",
+                )
+                return resp
+
+            try:
+                from .capability_handler_registry import compute_file_sha256
+                actual_sha256 = compute_file_sha256(Path(entry.main_py_path))
+            except Exception:
+                resp = CapabilityResponse(
+                    success=False,
+                    error="Permission denied",
+                    error_type="trust_denied",
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+                self._audit(
+                    principal_id, effective_permission_id, handler_id, resp, args, request_id,
+                    trusted=False,
+                    detail_reason="Failed to compute handler sha256 at execution time",
+                )
+                return resp
+
+            trust_result = self._trust_store.is_trusted(handler_id, actual_sha256)
+            if not trust_result.trusted:
+                resp = CapabilityResponse(
+                    success=False,
+                    error="Permission denied",
+                    error_type="trust_denied",
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+                self._audit(
+                    principal_id, effective_permission_id, handler_id, resp, args, request_id,
+                    trusted=False,
+                    detail_reason=trust_result.reason,
+                )
+                return resp
+
+        # 3. Grant チェック（D-7 opt-in: grant_config が非 None のときのみ）
+        grant_config = {}
+        if entry.grant_config is not None:
+            grant_result = self._grant_manager.check(principal_id, effective_permission_id)
+            if not grant_result.allowed:
+                resp = CapabilityResponse(
+                    success=False,
+                    error="Permission denied",
+                    error_type="grant_denied",
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+                self._audit(
+                    principal_id, effective_permission_id, handler_id, resp, args, request_id,
+                    trusted=True,
+                    grant_allowed=False,
+                    grant_reason=grant_result.reason,
+                )
+                return resp
+            grant_config = grant_result.config or {}
+
+        # 4. 実行分岐
+        if effective_permission_id == FLOW_RUN_PERMISSION_ID:
+            resp = self._execute_flow_run(
+                principal_id=principal_id,
+                permission_id=effective_permission_id,
+                grant_config=grant_config,
+                args=args,
+                timeout_seconds=timeout_seconds,
+                request_id=request_id,
+                start_time=start_time,
+            )
+        elif effective_permission_id in DOCKER_PERMISSION_IDS:
+            resp = self._execute_docker_dispatch(
+                principal_id=principal_id,
+                permission_id=effective_permission_id,
+                grant_config=grant_config,
+                args=args,
+                request_id=request_id,
+                start_time=start_time,
+            )
+        else:
+            # subprocess 実行: FunctionEntry → HandlerDefAdapter に変換
+            entrypoint = entry.entrypoint or "main.py:run"
+            function_dir = Path(entry.function_dir) if entry.function_dir else Path(".")
+            ep_file = entrypoint.rsplit(":", 1)[0] if ":" in entrypoint else entrypoint
+            handler_py_path = function_dir / ep_file
+
+            adapter = _HandlerDefAdapter(
+                handler_id=handler_id,
+                permission_id=effective_permission_id,
+                entrypoint=entrypoint,
+                handler_dir=function_dir,
+                handler_py_path=handler_py_path,
+                is_builtin=is_builtin,
+            )
+            resp = self._execute_handler_subprocess(
+                handler_def=adapter,
+                principal_id=principal_id,
+                permission_id=effective_permission_id,
+                grant_config=grant_config,
+                args=args,
+                timeout_seconds=timeout_seconds,
+                request_id=request_id,
+                start_time=start_time,
+            )
+
+        # 5. 監査
+        extra = {"unified_path": True}
+        if is_builtin:
+            extra["builtin_sha256"] = builtin_sha256
+
+        self._audit(
+            principal_id, effective_permission_id, handler_id, resp, args, request_id,
+            trusted=True,
+            grant_allowed=True,
+            grant_reason="Granted",
+            extra_details=extra,
+        )
+
+        return resp
+
+    # ------------------------------------------------------------------
+    # Phase B-3: _legacy_execute
+    # ------------------------------------------------------------------
+
+    def _legacy_execute(
+        self,
+        principal_id: str,
+        request: Dict[str, Any],
+        start_time: float,
+    ) -> CapabilityResponse:
+        """
+        旧 permission_id パスの実行ロジック。
+
+        execute() の else 分岐をそのまま移動したもの。
+        警告ログを出力し、RUMI_STRICT_LEGACY=1 の場合はエラーを返す。
+        """
+        permission_id = request.get("permission_id")
+        args = request.get("args", {})
+        request_id = request.get("request_id", "")
+
+        # 警告ログ
+        logger.warning(
+            "Legacy handler path used for permission_id=%s. Migrate to manifest.",
+            permission_id,
+        )
+
+        # STRICT モード: 旧パス無効化
+        if os.environ.get("RUMI_STRICT_LEGACY", "0") == "1":
+            resp = CapabilityResponse(
+                success=False,
+                error="Legacy execution path is disabled (RUMI_STRICT_LEGACY=1)",
+                error_type="legacy_path_disabled",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+            self._audit(
+                principal_id, permission_id or "", None, resp, args, request_id,
+                detail_reason="Legacy path disabled by RUMI_STRICT_LEGACY=1",
+            )
+            return resp
+
+        # --- 以下、既存の execute() else 分岐のコードをそのまま移動 ---
+
+        timeout_seconds = min(
+            float(request.get("timeout_seconds", DEFAULT_TIMEOUT)),
+            MAX_TIMEOUT,
+        )
 
         # バリデーション
         if not permission_id or not isinstance(permission_id, str):
