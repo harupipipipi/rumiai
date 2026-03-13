@@ -89,12 +89,17 @@ steps:
     input:
       handler: "kernel:flow.load_all"
 
-  - id: function_registry_load
+  # Phase B1-3: kernel function 登録ステップ
+  # _KERNEL_HANDLER_MANIFESTS の全エントリを FunctionRegistry に登録する
+  - id: kernel_functions_register
     phase: ecosystem
     priority: 15
     type: handler
     input:
-      handler: "kernel:noop"
+      handler: "kernel:ir.call"
+      args:
+        key: "kernel.register_kernel_functions"
+        pass_ctx: false
 
   - id: component_discover
     phase: ecosystem
