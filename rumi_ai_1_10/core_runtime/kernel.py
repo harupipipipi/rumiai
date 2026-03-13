@@ -38,32 +38,9 @@ def _is_diagnostics_verbose() -> bool:
 
 
 # 既存のハンドラキー一覧（登録漏れ検知用）
-_EXPECTED_HANDLER_KEYS = frozenset([
-    "kernel:mounts.init", "kernel:registry.load", "kernel:active_ecosystem.load",
-    "kernel:interfaces.publish", "kernel:ir.get", "kernel:ir.call", "kernel:ir.register",
-    "kernel:exec_python", "kernel:ctx.set", "kernel:ctx.get", "kernel:ctx.copy",
-    "kernel:execute_flow", "kernel:save_flow", "kernel:load_flows", "kernel:flow.compose",
-    "kernel:security.init", "kernel:docker.check", "kernel:approval.init", "kernel:approval.scan",
-    "kernel:container.init", "kernel:privilege.init", "kernel:api.init",
-    "kernel:container.start_approved", "kernel:component.discover", "kernel:component.load",
-    "kernel:emit", "kernel:startup.failed", "kernel:vocab.load", "kernel:noop",
-    "kernel:flow.load_all", "kernel:flow.execute_by_id",
-    "kernel:python_file_call",
-    "kernel:modifier.load_all", "kernel:modifier.apply",
-    "kernel:network.grant", "kernel:network.revoke", "kernel:network.check", "kernel:network.list",
-    "kernel:egress_proxy.start", "kernel:egress_proxy.stop", "kernel:egress_proxy.status",
-    "kernel:lib.process_all", "kernel:lib.check", "kernel:lib.execute",
-    "kernel:lib.clear_record", "kernel:lib.list_records",
-    "kernel:audit.query", "kernel:audit.summary", "kernel:audit.flush",
-    "kernel:vocab.list_groups", "kernel:vocab.list_converters", "kernel:vocab.summary", "kernel:vocab.convert",
-    "kernel:shared_dict.resolve", "kernel:shared_dict.propose", "kernel:shared_dict.explain",
-    "kernel:shared_dict.list", "kernel:shared_dict.remove",
-    "kernel:uds_proxy.init", "kernel:uds_proxy.ensure_socket", "kernel:uds_proxy.stop",
-    "kernel:uds_proxy.stop_all", "kernel:uds_proxy.status",
-    "kernel:capability_proxy.init", "kernel:capability_proxy.status", "kernel:capability_proxy.stop_all",
-    "kernel:capability.grant", "kernel:capability.revoke", "kernel:capability.list",
-    "kernel:pending.export",
-])
+# Phase B1-1: _KERNEL_HANDLER_MANIFESTS から導出（単一権威ソース原則 D）
+# 後方互換のため frozenset として公開。直接定義はしない。
+# _EXPECTED_HANDLER_KEYS は _KERNEL_HANDLER_MANIFESTS 定義後に設定される（ファイル末尾付近）
 
 
 # =====================================================================
@@ -97,6 +74,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
 
     # --- mounts / registry / active_ecosystem / interfaces ---
     "kernel:mounts.init": {
+        "permission_id": "mounts.init",
+        "risk": "low",
+        "requires": [],
         "description": "Initialize mount points from mounts.json configuration",
         "tags": ["kernel", "system", "init", "mounts"],
         "input_schema": {
@@ -115,6 +95,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:registry.load": {
+        "permission_id": "registry.load",
+        "risk": "low",
+        "requires": [],
         "description": "Load the ecosystem pack registry from the ecosystem directory",
         "tags": ["kernel", "system", "init", "registry"],
         "input_schema": {
@@ -133,6 +116,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:active_ecosystem.load": {
+        "permission_id": "active_ecosystem.load",
+        "risk": "low",
+        "requires": [],
         "description": "Load active ecosystem configuration from JSON file",
         "tags": ["kernel", "system", "init", "ecosystem"],
         "input_schema": {
@@ -151,6 +137,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:interfaces.publish": {
+        "permission_id": "interfaces.publish",
+        "risk": "low",
+        "requires": [],
         "description": "Publish kernel ready state to InterfaceRegistry",
         "tags": ["kernel", "system", "ir"],
         "input_schema": {
@@ -171,6 +160,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
 
     # --- IR (InterfaceRegistry) handlers ---
     "kernel:ir.get": {
+        "permission_id": "ir.get",
+        "risk": "low",
+        "requires": [],
         "description": "Get a value from InterfaceRegistry by key",
         "tags": ["kernel", "system", "ir"],
         "input_schema": {
@@ -216,6 +208,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:ir.call": {
+        "permission_id": "ir.call",
+        "risk": "medium",
+        "requires": [],
         "description": "Call a callable registered in InterfaceRegistry by key",
         "tags": ["kernel", "system", "ir"],
         "input_schema": {
@@ -270,6 +265,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:ir.register": {
+        "permission_id": "ir.register",
+        "risk": "medium",
+        "requires": [],
         "description": "Register a value into InterfaceRegistry",
         "tags": ["kernel", "system", "ir"],
         "input_schema": {
@@ -315,6 +313,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
 
     # --- exec_python ---
     "kernel:exec_python": {
+        "permission_id": "exec_python",
+        "risk": "high",
+        "requires": [],
         "description": "Execute a Python file with sandboxed context and inject support",
         "tags": ["kernel", "system", "exec"],
         "input_schema": {
@@ -363,6 +364,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
 
     # --- ctx handlers ---
     "kernel:ctx.set": {
+        "permission_id": "ctx.set",
+        "risk": "low",
+        "requires": [],
         "description": "Set a value in the flow execution context",
         "tags": ["kernel", "system", "ctx"],
         "input_schema": {
@@ -396,6 +400,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:ctx.get": {
+        "permission_id": "ctx.get",
+        "risk": "low",
+        "requires": [],
         "description": "Get a value from the flow execution context",
         "tags": ["kernel", "system", "ctx"],
         "input_schema": {
@@ -437,6 +444,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:ctx.copy": {
+        "permission_id": "ctx.copy",
+        "risk": "low",
+        "requires": [],
         "description": "Copy a value between keys in the flow execution context",
         "tags": ["kernel", "system", "ctx"],
         "input_schema": {
@@ -474,6 +484,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
 
     # --- flow execution ---
     "kernel:execute_flow": {
+        "permission_id": "execute_flow",
+        "risk": "medium",
+        "requires": [],
         "description": "Execute a sub-flow by flow_id with optional context and timeout",
         "tags": ["kernel", "system", "flow"],
         "input_schema": {
@@ -501,6 +514,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:save_flow": {
+        "permission_id": "save_flow",
+        "risk": "medium",
+        "requires": [],
         "description": "Save a flow definition to a YAML file",
         "tags": ["kernel", "system", "flow"],
         "input_schema": {
@@ -533,6 +549,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:load_flows": {
+        "permission_id": "load_flows",
+        "risk": "low",
+        "requires": [],
         "description": "Load user-defined flows from a directory",
         "tags": ["kernel", "system", "flow"],
         "input_schema": {
@@ -557,6 +576,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:flow.compose": {
+        "permission_id": "flow.compose",
+        "risk": "medium",
+        "requires": [],
         "description": "Collect and apply flow modifiers via FlowComposer",
         "tags": ["kernel", "system", "flow", "modifier"],
         "input_schema": {
@@ -585,6 +607,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
 
     # --- security / docker / approval ---
     "kernel:security.init": {
+        "permission_id": "security.init",
+        "risk": "high",
+        "requires": [],
         "description": "Initialize security subsystem with strict mode configuration",
         "tags": ["kernel", "system", "security", "init"],
         "input_schema": {
@@ -615,6 +640,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:docker.check": {
+        "permission_id": "docker.check",
+        "risk": "low",
+        "requires": [],
         "description": "Check Docker daemon availability",
         "tags": ["kernel", "system", "security", "docker"],
         "input_schema": {
@@ -651,6 +679,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:approval.init": {
+        "permission_id": "approval.init",
+        "risk": "medium",
+        "requires": [],
         "description": "Initialize the approval manager for pack approval workflow",
         "tags": ["kernel", "system", "security", "approval"],
         "input_schema": {
@@ -675,6 +706,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:approval.scan": {
+        "permission_id": "approval.scan",
+        "risk": "medium",
+        "requires": [],
         "description": "Scan all packs and classify by approval status",
         "tags": ["kernel", "system", "security", "approval"],
         "input_schema": {
@@ -722,6 +756,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
 
     # --- container / privilege / api ---
     "kernel:container.init": {
+        "permission_id": "container.init",
+        "risk": "medium",
+        "requires": [],
         "description": "Initialize the container orchestrator",
         "tags": ["kernel", "system", "component", "container"],
         "input_schema": {
@@ -746,6 +783,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:privilege.init": {
+        "permission_id": "privilege.init",
+        "risk": "high",
+        "requires": [],
         "description": "Initialize the host privilege manager",
         "tags": ["kernel", "system", "security", "privilege"],
         "input_schema": {
@@ -770,6 +810,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:api.init": {
+        "permission_id": "api.init",
+        "risk": "medium",
+        "requires": [],
         "description": "Initialize the Pack API server on specified host and port",
         "tags": ["kernel", "system", "init", "api"],
         "input_schema": {
@@ -805,6 +848,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:container.start_approved": {
+        "permission_id": "container.start_approved",
+        "risk": "high",
+        "requires": [],
         "description": "Start containers for all approved packs",
         "tags": ["kernel", "system", "component", "container"],
         "input_schema": {
@@ -853,6 +899,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
 
     # --- component discover / load ---
     "kernel:component.discover": {
+        "permission_id": "component.discover",
+        "risk": "low",
+        "requires": [],
         "description": "Discover components from approved packs with override and disable filtering",
         "tags": ["kernel", "system", "component"],
         "input_schema": {
@@ -887,6 +936,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:component.load": {
+        "permission_id": "component.load",
+        "risk": "medium",
+        "requires": [],
         "description": "Load discovered components and run setup phase",
         "tags": ["kernel", "system", "component"],
         "input_schema": {
@@ -919,6 +971,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
 
     # --- emit / startup.failed / vocab.load / noop ---
     "kernel:emit": {
+        "permission_id": "emit",
+        "risk": "low",
+        "requires": [],
         "description": "Emit an event via EventBus",
         "tags": ["kernel", "system", "event"],
         "input_schema": {
@@ -943,6 +998,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:startup.failed": {
+        "permission_id": "startup.failed",
+        "risk": "low",
+        "requires": [],
         "description": "Record startup failure with pending approval and modified pack details",
         "tags": ["kernel", "system", "init", "error"],
         "input_schema": {
@@ -961,6 +1019,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:vocab.load": {
+        "permission_id": "vocab.load",
+        "risk": "low",
+        "requires": [],
         "description": "Load vocabulary definitions from a file into VocabRegistry",
         "tags": ["kernel", "system", "vocab"],
         "input_schema": {
@@ -999,6 +1060,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:noop": {
+        "permission_id": "noop",
+        "risk": "low",
+        "requires": [],
         "description": "No-operation placeholder handler",
         "tags": ["kernel", "system", "noop"],
         "input_schema": {
@@ -1032,6 +1096,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
 
     # --- flow ---
     "kernel:flow.load_all": {
+        "permission_id": "flow.load_all",
+        "risk": "medium",
+        "requires": [],
         "description": "Load all flow files, apply modifiers, and register to InterfaceRegistry",
         "tags": ["kernel", "runtime", "flow"],
         "input_schema": {
@@ -1067,6 +1134,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:flow.execute_by_id": {
+        "permission_id": "flow.execute_by_id",
+        "risk": "medium",
+        "requires": [],
         "description": "Execute a flow by ID with optional shared dict resolution",
         "tags": ["kernel", "runtime", "flow"],
         "input_schema": {
@@ -1124,6 +1194,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
 
     # --- python_file_call ---
     "kernel:python_file_call": {
+        "permission_id": "python_file_call",
+        "risk": "high",
+        "requires": [],
         "description": "Execute a Python file via container with UDS egress proxy support",
         "tags": ["kernel", "runtime", "exec"],
         "input_schema": {
@@ -1190,6 +1263,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
 
     # --- modifier ---
     "kernel:modifier.load_all": {
+        "permission_id": "modifier.load_all",
+        "risk": "low",
+        "requires": [],
         "description": "Load all modifier files for flow modification",
         "tags": ["kernel", "runtime", "modifier", "flow"],
         "input_schema": {
@@ -1220,6 +1296,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:modifier.apply": {
+        "permission_id": "modifier.apply",
+        "risk": "medium",
+        "requires": [],
         "description": "Apply modifiers to a specific flow and update InterfaceRegistry",
         "tags": ["kernel", "runtime", "modifier", "flow"],
         "input_schema": {
@@ -1254,6 +1333,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
 
     # --- network ---
     "kernel:network.grant": {
+        "permission_id": "network.grant",
+        "risk": "high",
+        "requires": [],
         "description": "Grant network access to a pack with allowed domains and ports",
         "tags": ["kernel", "runtime", "network", "egress"],
         "input_schema": {
@@ -1311,6 +1393,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:network.revoke": {
+        "permission_id": "network.revoke",
+        "risk": "high",
+        "requires": [],
         "description": "Revoke network access for a pack",
         "tags": ["kernel", "runtime", "network", "egress"],
         "input_schema": {
@@ -1348,6 +1433,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:network.check": {
+        "permission_id": "network.check",
+        "risk": "low",
+        "requires": [],
         "description": "Check if a pack has network access to a specific domain and port",
         "tags": ["kernel", "runtime", "network", "egress"],
         "input_schema": {
@@ -1398,6 +1486,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:network.list": {
+        "permission_id": "network.list",
+        "risk": "low",
+        "requires": [],
         "description": "List all network grants and disabled packs",
         "tags": ["kernel", "runtime", "network", "egress"],
         "input_schema": {
@@ -1435,6 +1526,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
 
     # --- egress_proxy ---
     "kernel:egress_proxy.start": {
+        "permission_id": "egress_proxy.start",
+        "risk": "high",
+        "requires": [],
         "description": "Start the HTTP egress proxy server",
         "tags": ["kernel", "runtime", "network", "egress"],
         "input_schema": {
@@ -1470,6 +1564,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:egress_proxy.stop": {
+        "permission_id": "egress_proxy.stop",
+        "risk": "high",
+        "requires": [],
         "description": "Stop the HTTP egress proxy server",
         "tags": ["kernel", "runtime", "network", "egress"],
         "input_schema": {
@@ -1494,6 +1591,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:egress_proxy.status": {
+        "permission_id": "egress_proxy.status",
+        "risk": "low",
+        "requires": [],
         "description": "Get the HTTP egress proxy running status and endpoint",
         "tags": ["kernel", "runtime", "network", "egress"],
         "input_schema": {
@@ -1522,6 +1622,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
 
     # --- lib ---
     "kernel:lib.process_all": {
+        "permission_id": "lib.process_all",
+        "risk": "medium",
+        "requires": [],
         "description": "Process lib install/update scripts for all packs",
         "tags": ["kernel", "runtime", "lib"],
         "input_schema": {
@@ -1559,6 +1662,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:lib.check": {
+        "permission_id": "lib.check",
+        "risk": "low",
+        "requires": [],
         "description": "Check if a pack needs lib install or update",
         "tags": ["kernel", "runtime", "lib"],
         "input_schema": {
@@ -1596,6 +1702,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:lib.execute": {
+        "permission_id": "lib.execute",
+        "risk": "medium",
+        "requires": [],
         "description": "Manually execute a pack lib install or update script",
         "tags": ["kernel", "runtime", "lib"],
         "input_schema": {
@@ -1641,6 +1750,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:lib.clear_record": {
+        "permission_id": "lib.clear_record",
+        "risk": "medium",
+        "requires": [],
         "description": "Clear lib execution record for a pack or all packs",
         "tags": ["kernel", "runtime", "lib"],
         "input_schema": {
@@ -1673,6 +1785,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:lib.list_records": {
+        "permission_id": "lib.list_records",
+        "risk": "low",
+        "requires": [],
         "description": "List all lib execution records",
         "tags": ["kernel", "runtime", "lib"],
         "input_schema": {
@@ -1704,6 +1819,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
 
     # --- audit ---
     "kernel:audit.query": {
+        "permission_id": "audit.query",
+        "risk": "low",
+        "requires": [],
         "description": "Query audit logs with optional filters",
         "tags": ["kernel", "runtime", "audit"],
         "input_schema": {
@@ -1763,6 +1881,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:audit.summary": {
+        "permission_id": "audit.summary",
+        "risk": "low",
+        "requires": [],
         "description": "Get audit log summary by category or date",
         "tags": ["kernel", "runtime", "audit"],
         "input_schema": {
@@ -1798,6 +1919,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:audit.flush": {
+        "permission_id": "audit.flush",
+        "risk": "low",
+        "requires": [],
         "description": "Flush pending audit log entries to storage",
         "tags": ["kernel", "runtime", "audit"],
         "input_schema": {
@@ -1824,6 +1948,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
 
     # --- vocab (runtime) ---
     "kernel:vocab.list_groups": {
+        "permission_id": "vocab.list_groups",
+        "risk": "low",
+        "requires": [],
         "description": "List all vocabulary groups in VocabRegistry",
         "tags": ["kernel", "runtime", "vocab"],
         "input_schema": {
@@ -1853,6 +1980,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:vocab.list_converters": {
+        "permission_id": "vocab.list_converters",
+        "risk": "low",
+        "requires": [],
         "description": "List all vocabulary converters in VocabRegistry",
         "tags": ["kernel", "runtime", "vocab"],
         "input_schema": {
@@ -1882,6 +2012,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:vocab.summary": {
+        "permission_id": "vocab.summary",
+        "risk": "low",
+        "requires": [],
         "description": "Get vocabulary registry summary statistics",
         "tags": ["kernel", "runtime", "vocab"],
         "input_schema": {
@@ -1908,6 +2041,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:vocab.convert": {
+        "permission_id": "vocab.convert",
+        "risk": "low",
+        "requires": [],
         "description": "Convert a term using VocabRegistry converters",
         "tags": ["kernel", "runtime", "vocab"],
         "input_schema": {
@@ -1958,6 +2094,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
 
     # --- shared_dict ---
     "kernel:shared_dict.resolve": {
+        "permission_id": "shared_dict.resolve",
+        "risk": "low",
+        "requires": [],
         "description": "Resolve a key through the shared dictionary chain",
         "tags": ["kernel", "runtime", "shared_dict"],
         "input_schema": {
@@ -2005,6 +2144,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:shared_dict.propose": {
+        "permission_id": "shared_dict.propose",
+        "risk": "medium",
+        "requires": [],
         "description": "Propose a new entry to the shared dictionary",
         "tags": ["kernel", "runtime", "shared_dict"],
         "input_schema": {
@@ -2060,6 +2202,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:shared_dict.explain": {
+        "permission_id": "shared_dict.explain",
+        "risk": "low",
+        "requires": [],
         "description": "Explain resolution chain for a shared dictionary key",
         "tags": ["kernel", "runtime", "shared_dict"],
         "input_schema": {
@@ -2107,6 +2252,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:shared_dict.list": {
+        "permission_id": "shared_dict.list",
+        "risk": "low",
+        "requires": [],
         "description": "List all entries in a shared dictionary namespace",
         "tags": ["kernel", "runtime", "shared_dict"],
         "input_schema": {
@@ -2147,6 +2295,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:shared_dict.remove": {
+        "permission_id": "shared_dict.remove",
+        "risk": "medium",
+        "requires": [],
         "description": "Remove an entry from the shared dictionary",
         "tags": ["kernel", "runtime", "shared_dict"],
         "input_schema": {
@@ -2191,6 +2342,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
 
     # --- uds_proxy ---
     "kernel:uds_proxy.init": {
+        "permission_id": "uds_proxy.init",
+        "risk": "high",
+        "requires": [],
         "description": "Initialize the UDS egress proxy manager",
         "tags": ["kernel", "runtime", "network", "uds"],
         "input_schema": {
@@ -2216,6 +2370,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:uds_proxy.ensure_socket": {
+        "permission_id": "uds_proxy.ensure_socket",
+        "risk": "medium",
+        "requires": [],
         "description": "Ensure a UDS socket exists for a pack",
         "tags": ["kernel", "runtime", "network", "uds"],
         "input_schema": {
@@ -2248,6 +2405,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:uds_proxy.stop": {
+        "permission_id": "uds_proxy.stop",
+        "risk": "medium",
+        "requires": [],
         "description": "Stop a UDS proxy for a specific pack",
         "tags": ["kernel", "runtime", "network", "uds"],
         "input_schema": {
@@ -2280,6 +2440,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:uds_proxy.stop_all": {
+        "permission_id": "uds_proxy.stop_all",
+        "risk": "high",
+        "requires": [],
         "description": "Stop all UDS proxies",
         "tags": ["kernel", "runtime", "network", "uds"],
         "input_schema": {
@@ -2308,6 +2471,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:uds_proxy.status": {
+        "permission_id": "uds_proxy.status",
+        "risk": "low",
+        "requires": [],
         "description": "Get UDS proxy status for a pack or all packs",
         "tags": ["kernel", "runtime", "network", "uds"],
         "input_schema": {
@@ -2347,6 +2513,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
 
     # --- capability_proxy ---
     "kernel:capability_proxy.init": {
+        "permission_id": "capability_proxy.init",
+        "risk": "high",
+        "requires": [],
         "description": "Initialize the capability proxy for principal-based access control",
         "tags": ["kernel", "runtime", "capability"],
         "input_schema": {
@@ -2372,6 +2541,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:capability_proxy.status": {
+        "permission_id": "capability_proxy.status",
+        "risk": "low",
+        "requires": [],
         "description": "Get capability proxy status",
         "tags": ["kernel", "runtime", "capability"],
         "input_schema": {
@@ -2394,6 +2566,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:capability_proxy.stop_all": {
+        "permission_id": "capability_proxy.stop_all",
+        "risk": "high",
+        "requires": [],
         "description": "Stop all capability proxy instances",
         "tags": ["kernel", "runtime", "capability"],
         "input_schema": {
@@ -2424,6 +2599,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
 
     # --- capability grant ---
     "kernel:capability.grant": {
+        "permission_id": "capability.grant",
+        "risk": "high",
+        "requires": [],
         "description": "Grant a capability to a principal",
         "tags": ["kernel", "runtime", "capability"],
         "input_schema": {
@@ -2465,6 +2643,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:capability.revoke": {
+        "permission_id": "capability.revoke",
+        "risk": "high",
+        "requires": [],
         "description": "Revoke a capability from a principal",
         "tags": ["kernel", "runtime", "capability"],
         "input_schema": {
@@ -2502,6 +2683,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
     "kernel:capability.list": {
+        "permission_id": "capability.list",
+        "risk": "low",
+        "requires": [],
         "description": "List capabilities for a principal",
         "tags": ["kernel", "runtime", "capability"],
         "input_schema": {
@@ -2544,6 +2728,9 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
 
     # --- pending export ---
     "kernel:pending.export": {
+        "permission_id": "pending.export",
+        "risk": "low",
+        "requires": [],
         "description": "Export pending pack approval data to output directory",
         "tags": ["kernel", "runtime", "approval"],
         "input_schema": {
@@ -2634,6 +2821,49 @@ class Kernel(KernelSystemHandlersMixin, KernelRuntimeHandlersMixin, KernelFlowEx
         # Phase B-2a: Register kernel handlers to FunctionRegistry
         self._register_handlers_to_function_registry()
 
+
+    def register_kernel_functions_to_registry(self, function_registry=None) -> int:
+        """
+        Phase B1-2: kernel function を FunctionRegistry に登録する。
+        startup flow から呼ばれる。
+
+        Args:
+            function_registry: FunctionRegistry インスタンス。
+                None の場合は InterfaceRegistry から取得を試みる。
+
+        Returns:
+            登録された function の数
+        """
+        if function_registry is None:
+            # InterfaceRegistry から FunctionRegistry を取得
+            function_registry = self.interface_registry.get(
+                "kernel.function_registry", strategy="last"
+            )
+            if function_registry is None:
+                try:
+                    from .function_registry import FunctionRegistry
+                    function_registry = FunctionRegistry()
+                    self.interface_registry.register(
+                        "kernel.function_registry",
+                        function_registry,
+                        meta={"source": "kernel", "phase": "b1"}
+                    )
+                except Exception as e:
+                    _logger.warning("Failed to create FunctionRegistry: %s", e)
+                    return 0
+
+        count = _register_kernel_functions(function_registry)
+
+        self.diagnostics.record_step(
+            phase="startup",
+            step_id="kernel_functions.register",
+            handler="kernel:kernel_functions.register",
+            status="success",
+            meta={"registered_count": count, "total_manifests": len(_KERNEL_HANDLER_MANIFESTS)}
+        )
+
+        return count
+
     def _register_handlers_to_function_registry(self) -> None:
         """
         Phase B-2a: _KERNEL_HANDLER_MANIFESTS の各エントリを
@@ -2723,3 +2953,64 @@ class Kernel(KernelSystemHandlersMixin, KernelRuntimeHandlersMixin, KernelFlowEx
 
 
 __all__ = ["Kernel", "KernelConfig"]
+
+
+# =====================================================================
+# Phase B1-1: _EXPECTED_HANDLER_KEYS を _KERNEL_HANDLER_MANIFESTS から導出
+# 単一権威ソース原則 (D): _KERNEL_HANDLER_MANIFESTS.keys() が唯一のソース
+# =====================================================================
+_EXPECTED_HANDLER_KEYS = frozenset(_KERNEL_HANDLER_MANIFESTS.keys())
+
+
+# =====================================================================
+# Phase B1-2: _register_kernel_functions
+# FunctionRegistry に全 kernel ハンドラを kernel function として登録する
+# =====================================================================
+
+def _register_kernel_functions(function_registry) -> int:
+    """
+    _KERNEL_HANDLER_MANIFESTS の各エントリを FunctionRegistry に
+    kernel function として登録する。
+
+    Phase A で追加される register_kernel_function() を使用する。
+    register_kernel_function() は以下を固定設定する:
+      - pack_id="kernel"
+      - calling_convention="kernel"
+      - is_builtin=True
+
+    Args:
+        function_registry: FunctionRegistry インスタンス
+
+    Returns:
+        登録された function の数
+    """
+    registered = 0
+    for key, manifest in _KERNEL_HANDLER_MANIFESTS.items():
+        try:
+            # Phase A で追加される register_kernel_function() を呼ぶ
+            # まだ存在しない場合は AttributeError → fallback
+            if hasattr(function_registry, 'register_kernel_function'):
+                function_registry.register_kernel_function(key, manifest)
+                registered += 1
+            else:
+                # Phase A 未適用時の fallback: 通常の register() を使用
+                from .function_registry import FunctionEntry
+                entry = FunctionEntry(
+                    function_id=key,
+                    pack_id="kernel",
+                    description=manifest.get("description", ""),
+                    tags=manifest.get("tags", []),
+                    input_schema=manifest.get("input_schema", {}),
+                    output_schema=manifest.get("output_schema", {}),
+                    requires=manifest.get("requires", []),
+                    manifest=manifest,
+                    risk=manifest.get("risk"),
+                )
+                function_registry.register(entry)
+                registered += 1
+        except Exception as e:
+            _logger.warning(
+                "Failed to register kernel function: %s: %s",
+                key, e
+            )
+    return registered
