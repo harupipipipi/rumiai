@@ -63,6 +63,347 @@ _EXPECTED_HANDLER_KEYS = frozenset([
 ])
 
 
+# =====================================================================
+# Phase B-2a: Kernel Handler Manifests (設計決定 D-2)
+# 全 kernel ハンドラの最小メタデータ。唯一の権威ソース。
+# input_schema / output_schema は Phase B-2b で追加する。
+# =====================================================================
+
+_KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
+    # ------------------------------------------------------------------
+    # System handlers (kernel_handlers_system.py) — 29 handlers
+    # ------------------------------------------------------------------
+
+    # --- mounts / registry / active_ecosystem / interfaces ---
+    "kernel:mounts.init": {
+        "description": "Initialize mount points from mounts.json configuration",
+        "tags": ["kernel", "system", "init", "mounts"],
+    },
+    "kernel:registry.load": {
+        "description": "Load the ecosystem pack registry from the ecosystem directory",
+        "tags": ["kernel", "system", "init", "registry"],
+    },
+    "kernel:active_ecosystem.load": {
+        "description": "Load active ecosystem configuration from JSON file",
+        "tags": ["kernel", "system", "init", "ecosystem"],
+    },
+    "kernel:interfaces.publish": {
+        "description": "Publish kernel ready state to InterfaceRegistry",
+        "tags": ["kernel", "system", "ir"],
+    },
+
+    # --- IR (InterfaceRegistry) handlers ---
+    "kernel:ir.get": {
+        "description": "Get a value from InterfaceRegistry by key",
+        "tags": ["kernel", "system", "ir"],
+    },
+    "kernel:ir.call": {
+        "description": "Call a callable registered in InterfaceRegistry by key",
+        "tags": ["kernel", "system", "ir"],
+    },
+    "kernel:ir.register": {
+        "description": "Register a value into InterfaceRegistry",
+        "tags": ["kernel", "system", "ir"],
+    },
+
+    # --- exec_python ---
+    "kernel:exec_python": {
+        "description": "Execute a Python file with sandboxed context and inject support",
+        "tags": ["kernel", "system", "exec"],
+    },
+
+    # --- ctx handlers ---
+    "kernel:ctx.set": {
+        "description": "Set a value in the flow execution context",
+        "tags": ["kernel", "system", "ctx"],
+    },
+    "kernel:ctx.get": {
+        "description": "Get a value from the flow execution context",
+        "tags": ["kernel", "system", "ctx"],
+    },
+    "kernel:ctx.copy": {
+        "description": "Copy a value between keys in the flow execution context",
+        "tags": ["kernel", "system", "ctx"],
+    },
+
+    # --- flow execution ---
+    "kernel:execute_flow": {
+        "description": "Execute a sub-flow by flow_id with optional context and timeout",
+        "tags": ["kernel", "system", "flow"],
+    },
+    "kernel:save_flow": {
+        "description": "Save a flow definition to a YAML file",
+        "tags": ["kernel", "system", "flow"],
+    },
+    "kernel:load_flows": {
+        "description": "Load user-defined flows from a directory",
+        "tags": ["kernel", "system", "flow"],
+    },
+    "kernel:flow.compose": {
+        "description": "Collect and apply flow modifiers via FlowComposer",
+        "tags": ["kernel", "system", "flow", "modifier"],
+    },
+
+    # --- security / docker / approval ---
+    "kernel:security.init": {
+        "description": "Initialize security subsystem with strict mode configuration",
+        "tags": ["kernel", "system", "security", "init"],
+    },
+    "kernel:docker.check": {
+        "description": "Check Docker daemon availability",
+        "tags": ["kernel", "system", "security", "docker"],
+    },
+    "kernel:approval.init": {
+        "description": "Initialize the approval manager for pack approval workflow",
+        "tags": ["kernel", "system", "security", "approval"],
+    },
+    "kernel:approval.scan": {
+        "description": "Scan all packs and classify by approval status",
+        "tags": ["kernel", "system", "security", "approval"],
+    },
+
+    # --- container / privilege / api ---
+    "kernel:container.init": {
+        "description": "Initialize the container orchestrator",
+        "tags": ["kernel", "system", "component", "container"],
+    },
+    "kernel:privilege.init": {
+        "description": "Initialize the host privilege manager",
+        "tags": ["kernel", "system", "security", "privilege"],
+    },
+    "kernel:api.init": {
+        "description": "Initialize the Pack API server on specified host and port",
+        "tags": ["kernel", "system", "init", "api"],
+    },
+    "kernel:container.start_approved": {
+        "description": "Start containers for all approved packs",
+        "tags": ["kernel", "system", "component", "container"],
+    },
+
+    # --- component discover / load ---
+    "kernel:component.discover": {
+        "description": "Discover components from approved packs with override and disable filtering",
+        "tags": ["kernel", "system", "component"],
+    },
+    "kernel:component.load": {
+        "description": "Load discovered components and run setup phase",
+        "tags": ["kernel", "system", "component"],
+    },
+
+    # --- emit / startup.failed / vocab.load / noop ---
+    "kernel:emit": {
+        "description": "Emit an event via EventBus",
+        "tags": ["kernel", "system", "event"],
+    },
+    "kernel:startup.failed": {
+        "description": "Record startup failure with pending approval and modified pack details",
+        "tags": ["kernel", "system", "init", "error"],
+    },
+    "kernel:vocab.load": {
+        "description": "Load vocabulary definitions from a file into VocabRegistry",
+        "tags": ["kernel", "system", "vocab"],
+    },
+    "kernel:noop": {
+        "description": "No-operation placeholder handler",
+        "tags": ["kernel", "system", "noop"],
+    },
+
+    # ------------------------------------------------------------------
+    # Runtime handlers (kernel_handlers_runtime.py) — 41 handlers
+    # ------------------------------------------------------------------
+
+    # --- flow ---
+    "kernel:flow.load_all": {
+        "description": "Load all flow files, apply modifiers, and register to InterfaceRegistry",
+        "tags": ["kernel", "runtime", "flow"],
+    },
+    "kernel:flow.execute_by_id": {
+        "description": "Execute a flow by ID with optional shared dict resolution",
+        "tags": ["kernel", "runtime", "flow"],
+    },
+
+    # --- python_file_call ---
+    "kernel:python_file_call": {
+        "description": "Execute a Python file via container with UDS egress proxy support",
+        "tags": ["kernel", "runtime", "exec"],
+    },
+
+    # --- modifier ---
+    "kernel:modifier.load_all": {
+        "description": "Load all modifier files for flow modification",
+        "tags": ["kernel", "runtime", "modifier", "flow"],
+    },
+    "kernel:modifier.apply": {
+        "description": "Apply modifiers to a specific flow and update InterfaceRegistry",
+        "tags": ["kernel", "runtime", "modifier", "flow"],
+    },
+
+    # --- network ---
+    "kernel:network.grant": {
+        "description": "Grant network access to a pack with allowed domains and ports",
+        "tags": ["kernel", "runtime", "network", "egress"],
+    },
+    "kernel:network.revoke": {
+        "description": "Revoke network access for a pack",
+        "tags": ["kernel", "runtime", "network", "egress"],
+    },
+    "kernel:network.check": {
+        "description": "Check if a pack has network access to a specific domain and port",
+        "tags": ["kernel", "runtime", "network", "egress"],
+    },
+    "kernel:network.list": {
+        "description": "List all network grants and disabled packs",
+        "tags": ["kernel", "runtime", "network", "egress"],
+    },
+
+    # --- egress_proxy ---
+    "kernel:egress_proxy.start": {
+        "description": "Start the HTTP egress proxy server",
+        "tags": ["kernel", "runtime", "network", "egress"],
+    },
+    "kernel:egress_proxy.stop": {
+        "description": "Stop the HTTP egress proxy server",
+        "tags": ["kernel", "runtime", "network", "egress"],
+    },
+    "kernel:egress_proxy.status": {
+        "description": "Get the HTTP egress proxy running status and endpoint",
+        "tags": ["kernel", "runtime", "network", "egress"],
+    },
+
+    # --- lib ---
+    "kernel:lib.process_all": {
+        "description": "Process lib install/update scripts for all packs",
+        "tags": ["kernel", "runtime", "lib"],
+    },
+    "kernel:lib.check": {
+        "description": "Check if a pack needs lib install or update",
+        "tags": ["kernel", "runtime", "lib"],
+    },
+    "kernel:lib.execute": {
+        "description": "Manually execute a pack lib install or update script",
+        "tags": ["kernel", "runtime", "lib"],
+    },
+    "kernel:lib.clear_record": {
+        "description": "Clear lib execution record for a pack or all packs",
+        "tags": ["kernel", "runtime", "lib"],
+    },
+    "kernel:lib.list_records": {
+        "description": "List all lib execution records",
+        "tags": ["kernel", "runtime", "lib"],
+    },
+
+    # --- audit ---
+    "kernel:audit.query": {
+        "description": "Query audit logs with optional filters",
+        "tags": ["kernel", "runtime", "audit"],
+    },
+    "kernel:audit.summary": {
+        "description": "Get audit log summary by category or date",
+        "tags": ["kernel", "runtime", "audit"],
+    },
+    "kernel:audit.flush": {
+        "description": "Flush pending audit log entries to storage",
+        "tags": ["kernel", "runtime", "audit"],
+    },
+
+    # --- vocab (runtime) ---
+    "kernel:vocab.list_groups": {
+        "description": "List all vocabulary groups in VocabRegistry",
+        "tags": ["kernel", "runtime", "vocab"],
+    },
+    "kernel:vocab.list_converters": {
+        "description": "List all vocabulary converters in VocabRegistry",
+        "tags": ["kernel", "runtime", "vocab"],
+    },
+    "kernel:vocab.summary": {
+        "description": "Get vocabulary registry summary statistics",
+        "tags": ["kernel", "runtime", "vocab"],
+    },
+    "kernel:vocab.convert": {
+        "description": "Convert a term using VocabRegistry converters",
+        "tags": ["kernel", "runtime", "vocab"],
+    },
+
+    # --- shared_dict ---
+    "kernel:shared_dict.resolve": {
+        "description": "Resolve a key through the shared dictionary chain",
+        "tags": ["kernel", "runtime", "shared_dict"],
+    },
+    "kernel:shared_dict.propose": {
+        "description": "Propose a new entry to the shared dictionary",
+        "tags": ["kernel", "runtime", "shared_dict"],
+    },
+    "kernel:shared_dict.explain": {
+        "description": "Explain resolution chain for a shared dictionary key",
+        "tags": ["kernel", "runtime", "shared_dict"],
+    },
+    "kernel:shared_dict.list": {
+        "description": "List all entries in a shared dictionary namespace",
+        "tags": ["kernel", "runtime", "shared_dict"],
+    },
+    "kernel:shared_dict.remove": {
+        "description": "Remove an entry from the shared dictionary",
+        "tags": ["kernel", "runtime", "shared_dict"],
+    },
+
+    # --- uds_proxy ---
+    "kernel:uds_proxy.init": {
+        "description": "Initialize the UDS egress proxy manager",
+        "tags": ["kernel", "runtime", "network", "uds"],
+    },
+    "kernel:uds_proxy.ensure_socket": {
+        "description": "Ensure a UDS socket exists for a pack",
+        "tags": ["kernel", "runtime", "network", "uds"],
+    },
+    "kernel:uds_proxy.stop": {
+        "description": "Stop a UDS proxy for a specific pack",
+        "tags": ["kernel", "runtime", "network", "uds"],
+    },
+    "kernel:uds_proxy.stop_all": {
+        "description": "Stop all UDS proxies",
+        "tags": ["kernel", "runtime", "network", "uds"],
+    },
+    "kernel:uds_proxy.status": {
+        "description": "Get UDS proxy status for a pack or all packs",
+        "tags": ["kernel", "runtime", "network", "uds"],
+    },
+
+    # --- capability_proxy ---
+    "kernel:capability_proxy.init": {
+        "description": "Initialize the capability proxy for principal-based access control",
+        "tags": ["kernel", "runtime", "capability"],
+    },
+    "kernel:capability_proxy.status": {
+        "description": "Get capability proxy status",
+        "tags": ["kernel", "runtime", "capability"],
+    },
+    "kernel:capability_proxy.stop_all": {
+        "description": "Stop all capability proxy instances",
+        "tags": ["kernel", "runtime", "capability"],
+    },
+
+    # --- capability grant ---
+    "kernel:capability.grant": {
+        "description": "Grant a capability to a principal",
+        "tags": ["kernel", "runtime", "capability"],
+    },
+    "kernel:capability.revoke": {
+        "description": "Revoke a capability from a principal",
+        "tags": ["kernel", "runtime", "capability"],
+    },
+    "kernel:capability.list": {
+        "description": "List capabilities for a principal",
+        "tags": ["kernel", "runtime", "capability"],
+    },
+
+    # --- pending export ---
+    "kernel:pending.export": {
+        "description": "Export pending pack approval data to output directory",
+        "tags": ["kernel", "runtime", "approval"],
+    },
+}
+
+
 class Kernel(KernelSystemHandlersMixin, KernelRuntimeHandlersMixin, KernelFlowExecutionMixin, KernelCore):
     """
     Rumi AI OS カーネル
