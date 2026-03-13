@@ -1,0 +1,46 @@
+{
+  "function_id": "get",
+  "description": "Read a secret value by key. Access is restricted to keys explicitly listed in grant_config.allowed_keys.",
+  "requires": [
+    "secrets.get"
+  ],
+  "caller_requires": [],
+  "host_execution": true,
+  "tags": [
+    "secrets",
+    "read"
+  ],
+  "risk": "high",
+  "vocab_aliases": [
+    "secrets.get"
+  ],
+  "grant_config": {
+    "type": "object",
+    "properties": {
+      "allowed_keys": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": "Explicit list of secret key names this grant permits. Empty or missing = deny all."
+      }
+    }
+  },
+  "input_schema": {
+    "type": "object",
+    "required": ["key"],
+    "properties": {
+      "key": {
+        "type": "string",
+        "description": "Secret key name (must match ^[A-Z0-9_]{1,64}$)"
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "success": {"type": "boolean"},
+      "value": {"type": "string", "description": "The secret value (only on success)"},
+      "error": {"type": "string"},
+      "error_type": {"type": "string"}
+    }
+  }
+}

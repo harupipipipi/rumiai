@@ -1,0 +1,24 @@
+{
+  "pack_id": "core_secrets_capability",
+  "pack_identity": "core:rumi/secrets-capability",
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": []
+  },
+  "metadata": {
+    "name": "Core Secrets Capability",
+    "description": "Rumi AI OS core pack that provides secret value retrieval capability. Packs request secrets.get via the capability system with explicit key-level grant control.",
+    "author": "Rumi AI Team",
+    "license": "MIT",
+    "is_core_pack": true,
+    "capability_handlers": {
+      "secrets_get": {
+        "handler_id": "core.secrets.get",
+        "permission_id": "secrets.get",
+        "path": "share/capability_handlers/secrets_get"
+      }
+    }
+  },
+  "dependencies": {},
+  "components": {}
+}
