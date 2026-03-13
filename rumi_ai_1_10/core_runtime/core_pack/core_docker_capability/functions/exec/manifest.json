@@ -57,5 +57,6 @@
   "grant_config": {
     "allowed_images": [],
     "max_execution_time": 300
-  }
+  },
+  "calling_convention": "block"
 }

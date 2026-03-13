@@ -44,5 +44,6 @@
       "container_id"
     ]
   },
-  "grant_config": {}
+  "grant_config": {},
+  "calling_convention": "block"
 }

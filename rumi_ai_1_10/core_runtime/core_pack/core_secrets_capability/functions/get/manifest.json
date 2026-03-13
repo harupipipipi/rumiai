@@ -19,14 +19,18 @@
     "properties": {
       "allowed_keys": {
         "type": "array",
-        "items": {"type": "string"},
+        "items": {
+          "type": "string"
+        },
         "description": "Explicit list of secret key names this grant permits. Empty or missing = deny all."
       }
     }
   },
   "input_schema": {
     "type": "object",
-    "required": ["key"],
+    "required": [
+      "key"
+    ],
     "properties": {
       "key": {
         "type": "string",
@@ -37,10 +41,20 @@
   "output_schema": {
     "type": "object",
     "properties": {
-      "success": {"type": "boolean"},
-      "value": {"type": "string", "description": "The secret value (only on success)"},
-      "error": {"type": "string"},
-      "error_type": {"type": "string"}
+      "success": {
+        "type": "boolean"
+      },
+      "value": {
+        "type": "string",
+        "description": "The secret value (only on success)"
+      },
+      "error": {
+        "type": "string"
+      },
+      "error_type": {
+        "type": "string"
+      }
     }
-  }
+  },
+  "calling_convention": "block"
 }

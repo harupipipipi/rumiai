@@ -16,19 +16,37 @@
   ],
   "input_schema": {
     "type": "object",
-    "required": ["store_id", "key"],
+    "required": [
+      "store_id",
+      "key"
+    ],
     "properties": {
-      "store_id": {"type": "string", "description": "Target store ID"},
-      "key": {"type": "string", "description": "Data key (may contain '/' for nested paths)"}
+      "store_id": {
+        "type": "string",
+        "description": "Target store ID"
+      },
+      "key": {
+        "type": "string",
+        "description": "Data key (may contain '/' for nested paths)"
+      }
     }
   },
   "output_schema": {
     "type": "object",
     "properties": {
-      "success": {"type": "boolean"},
-      "value": {"description": "The stored JSON value"},
-      "error": {"type": "string"},
-      "error_type": {"type": "string"}
+      "success": {
+        "type": "boolean"
+      },
+      "value": {
+        "description": "The stored JSON value"
+      },
+      "error": {
+        "type": "string"
+      },
+      "error_type": {
+        "type": "string"
+      }
     }
-  }
+  },
+  "calling_convention": "block"
 }

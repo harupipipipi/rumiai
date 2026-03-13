@@ -16,20 +16,39 @@
   ],
   "input_schema": {
     "type": "object",
-    "required": ["store_id", "key", "value"],
+    "required": [
+      "store_id",
+      "key",
+      "value"
+    ],
     "properties": {
-      "store_id": {"type": "string"},
-      "key": {"type": "string"},
-      "value": {"description": "JSON-serializable value to store"}
+      "store_id": {
+        "type": "string"
+      },
+      "key": {
+        "type": "string"
+      },
+      "value": {
+        "description": "JSON-serializable value to store"
+      }
     }
   },
   "output_schema": {
     "type": "object",
     "properties": {
-      "success": {"type": "boolean"},
-      "path": {"type": "string"},
-      "error": {"type": "string"},
-      "error_type": {"type": "string"}
+      "success": {
+        "type": "boolean"
+      },
+      "path": {
+        "type": "string"
+      },
+      "error": {
+        "type": "string"
+      },
+      "error_type": {
+        "type": "string"
+      }
     }
-  }
+  },
+  "calling_convention": "block"
 }

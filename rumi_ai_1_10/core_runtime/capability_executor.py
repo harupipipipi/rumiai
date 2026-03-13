@@ -12,6 +12,8 @@ Trust / Grant を検証し、ハンドラーをサブプロセスで実行する
 
 Phase B-3: FunctionRegistry 経由の統一パス (_unified_execute) を追加。
            旧パスは _legacy_execute にラップ。
+Wave FIX-A1: _register_builtin_handlers() で core_pack function を FunctionRegistry に登録。
+Wave FIX-A2: _unified_execute() に calling_convention 分岐を追加。
 """
 
 from __future__ import annotations
@@ -37,6 +39,12 @@ try:
 except ImportError:
     _CORE_PACK_ID_PREFIX = "core_"
 
+# core_pack ディレクトリパス
+try:
+    from .paths import CORE_PACK_DIR as _CORE_PACK_DIR
+except ImportError:
+    _CORE_PACK_DIR = str(Path(__file__).resolve().parent / "core_pack")
+
 # W25.5: DockerRunBuilder (optional, for user function container execution)
 try:
     from .docker_run_builder import DockerRunBuilder as _DockerRunBuilder
@@ -50,7 +58,7 @@ except ImportError:
     FunctionRegistry = None
     FunctionEntry = None
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 # レスポンスサイズ上限（1MB）
 MAX_RESPONSE_SIZE = 1 * 1024 * 1024
@@ -96,6 +104,12 @@ _flow_call_stack_local = threading.local()
 # rate limit: secret.get のみ（無限ループ事故防止）
 SECRET_GET_PERMISSION_ID = "secrets.get"
 DEFAULT_SECRET_GET_RATE_LIMIT = 60  # 回/分/principal
+
+# FIX-A2: calling_convention 有効値
+_VALID_CALLING_CONVENTIONS = frozenset({
+    "kernel", "subprocess", "block", "python_host",
+    "python_docker", "binary", "command",
+})
 
 
 @dataclass
@@ -175,6 +189,8 @@ class CapabilityExecutor:
         self._permission_manager = None
         # Wave 29: core function handler table
         self._core_function_handlers: Dict[str, str] = {}
+        # FIX-A1: builtin handlers registration flag
+        self._builtin_handlers_registered = False
 
     def set_kernel(self, kernel) -> None:
         """
@@ -231,6 +247,10 @@ class CapabilityExecutor:
                 self._core_function_handlers = {
                     "core_docker_capability": "docker_capability_handler",
                 }
+
+                # FIX-A1: core_pack function を FunctionRegistry に登録
+                self._register_builtin_handlers()
+
                 # SV-5 fix: 全ステップ成功時のみ _initialized = True
                 self._initialized = True
                 return True
@@ -242,6 +262,147 @@ class CapabilityExecutor:
     def register_core_handler(self, pack_id: str, di_service_name: str) -> None:
         """core function handler を動的に登録する。"""
         self._core_function_handlers[pack_id] = di_service_name
+
+    # ------------------------------------------------------------------
+    # FIX-A1: _register_builtin_handlers — core_pack function を FunctionRegistry に登録
+    # ------------------------------------------------------------------
+
+    def _register_builtin_handlers(self) -> int:
+        """
+        core_pack ディレクトリを走査し、各 function の manifest.json を読み込んで
+        FunctionRegistry に FunctionEntry として登録する。
+
+        原則 H: manifest.json の値をそのまま信頼する。
+
+        走査パス: CORE_PACK_DIR / <pack_id> / functions / <function_id> / manifest.json
+
+        Returns:
+            登録した function 数
+        """
+        if self._builtin_handlers_registered:
+            return 0
+
+        fr = self._function_registry
+        if fr is None:
+            logger.warning(
+                "_register_builtin_handlers: FunctionRegistry not available, skipping"
+            )
+            return 0
+
+        if FunctionEntry is None:
+            logger.warning(
+                "_register_builtin_handlers: FunctionEntry not importable, skipping"
+            )
+            return 0
+
+        core_pack_dir = Path(_CORE_PACK_DIR)
+        if not core_pack_dir.is_dir():
+            logger.warning(
+                "_register_builtin_handlers: core_pack dir not found: %s",
+                core_pack_dir,
+            )
+            return 0
+
+        registered = 0
+
+        for pack_dir in sorted(core_pack_dir.iterdir()):
+            if not pack_dir.is_dir() or pack_dir.name.startswith("."):
+                continue
+
+            # pack_id を ecosystem.json から取得（フォールバック: ディレクトリ名）
+            pack_id = pack_dir.name
+            eco_json_path = pack_dir / "ecosystem.json"
+            if eco_json_path.is_file():
+                try:
+                    with open(eco_json_path, "r", encoding="utf-8") as f:
+                        eco_data = json.load(f)
+                    pack_id = eco_data.get("pack_id", pack_dir.name)
+                except Exception:
+                    pass
+
+            functions_dir = pack_dir / "functions"
+            if not functions_dir.is_dir():
+                continue
+
+            for func_dir in sorted(functions_dir.iterdir()):
+                if not func_dir.is_dir() or func_dir.name.startswith("."):
+                    continue
+
+                manifest_path = func_dir / "manifest.json"
+                if not manifest_path.is_file():
+                    continue
+
+                try:
+                    with open(manifest_path, "r", encoding="utf-8") as f:
+                        manifest = json.load(f)
+                except Exception as exc:
+                    logger.warning(
+                        "_register_builtin_handlers: Failed to read %s: %s",
+                        manifest_path, exc,
+                    )
+                    continue
+
+                function_id = manifest.get("function_id", func_dir.name)
+
+                # main.py パスを解決
+                main_py_path = func_dir / "main.py"
+                if not main_py_path.is_file():
+                    main_py_path = None
+
+                # FunctionEntry を構築（原則 H: manifest の値をそのまま信頼）
+                entry = FunctionEntry(
+                    function_id=function_id,
+                    pack_id=pack_id,
+                    description=manifest.get("description", ""),
+                    requires=manifest.get("requires", []),
+                    caller_requires=manifest.get("caller_requires", []),
+                    host_execution=manifest.get("host_execution", False),
+                    tags=manifest.get("tags", []),
+                    input_schema=manifest.get("input_schema", {}),
+                    output_schema=manifest.get("output_schema", {}),
+                    function_dir=str(func_dir),
+                    main_py_path=str(main_py_path) if main_py_path else None,
+                    manifest=manifest,
+                    runtime=manifest.get("runtime", "python"),
+                    command=manifest.get("command", []),
+                    docker_image=manifest.get("docker_image", ""),
+                    extensions=manifest.get("extensions", {}),
+                    entrypoint=manifest.get("entrypoint"),
+                    risk=manifest.get("risk"),
+                    grant_config=manifest.get("grant_config"),
+                    vocab_aliases=manifest.get("vocab_aliases"),
+                    permission_id=manifest.get("permission_id"),
+                    handler_py_sha256=manifest.get("handler_py_sha256"),
+                    is_builtin=True,
+                    grant_config_schema=manifest.get("grant_config_schema"),
+                    calling_convention=manifest.get("calling_convention"),
+                )
+
+                try:
+                    if fr.register(entry):
+                        registered += 1
+                        logger.debug(
+                            "_register_builtin_handlers: Registered %s:%s",
+                            pack_id, function_id,
+                        )
+                    else:
+                        logger.debug(
+                            "_register_builtin_handlers: Skipped duplicate %s:%s",
+                            pack_id, function_id,
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "_register_builtin_handlers: Failed to register %s:%s: %s",
+                        pack_id, function_id, exc,
+                    )
+
+        self._builtin_handlers_registered = True
+        logger.info(
+            "_register_builtin_handlers: Registered %d core_pack functions", registered,
+        )
+        return registered
+
+    # ------------------------------------------------------------------
 
     def execute(
         self,
@@ -304,7 +465,7 @@ class CapabilityExecutor:
             return None
 
     # ------------------------------------------------------------------
-    # Phase B-3: _unified_execute
+    # Phase B-3 + FIX-A2: _unified_execute
     # ------------------------------------------------------------------
 
     def _unified_execute(
@@ -321,7 +482,8 @@ class CapabilityExecutor:
         1. rate limit チェック
         2. Trust チェック (builtin バイパス or sha256 検証)
         3. Grant チェック (opt-in: grant_config が非 None のときのみ)
-        4. 実行分岐 (flow.run / docker.* / subprocess)
+        4. calling_convention 分岐 → 実行
+           None/未知の場合は既存の permission_id ベース分岐にフォールバック
 
         Args:
             entry: FunctionEntry
@@ -454,9 +616,190 @@ class CapabilityExecutor:
                 return resp
             grant_config = grant_result.config or {}
 
-        # 4. 実行分岐
+        # 4. FIX-A2: calling_convention 分岐
+        calling_convention = getattr(entry, "calling_convention", None)
+
+        if calling_convention and calling_convention in _VALID_CALLING_CONVENTIONS:
+            resp = self._dispatch_by_calling_convention(
+                calling_convention=calling_convention,
+                entry=entry,
+                principal_id=principal_id,
+                effective_permission_id=effective_permission_id,
+                grant_config=grant_config,
+                args=args,
+                timeout_seconds=timeout_seconds,
+                request_id=request_id,
+                start_time=start_time,
+            )
+        else:
+            # calling_convention が None / 未知の値 → 既存の permission_id ベース分岐にフォールバック
+            resp = self._dispatch_by_permission_id(
+                entry=entry,
+                principal_id=principal_id,
+                effective_permission_id=effective_permission_id,
+                grant_config=grant_config,
+                args=args,
+                timeout_seconds=timeout_seconds,
+                request_id=request_id,
+                start_time=start_time,
+            )
+
+        # 5. 監査
+        extra = {"unified_path": True}
+        if is_builtin:
+            extra["builtin_sha256"] = builtin_sha256
+        if calling_convention:
+            extra["calling_convention"] = calling_convention
+
+        self._audit(
+            principal_id, effective_permission_id, handler_id, resp, args, request_id,
+            trusted=True,
+            grant_allowed=True,
+            grant_reason="Granted",
+            extra_details=extra,
+        )
+
+        return resp
+
+    # ------------------------------------------------------------------
+    # FIX-A2: _dispatch_by_calling_convention
+    # ------------------------------------------------------------------
+
+    def _dispatch_by_calling_convention(
+        self,
+        calling_convention: str,
+        entry,
+        principal_id: str,
+        effective_permission_id: str,
+        grant_config: Dict[str, Any],
+        args: Dict[str, Any],
+        timeout_seconds: float,
+        request_id: str,
+        start_time: float,
+    ) -> CapabilityResponse:
+        """
+        calling_convention の値で実行パスを分岐する。
+
+        Args:
+            calling_convention: "kernel" | "subprocess" | "block" |
+                                "python_host" | "python_docker" | "binary" | "command"
+            entry: FunctionEntry
+            (以下は実行メソッドに渡すパラメータ)
+
+        Returns:
+            CapabilityResponse
+        """
+        if calling_convention == "kernel":
+            # kernel function は kernel_core 経由で直接実行される。
+            # capability_executor 経由での実行はエラー。
+            return CapabilityResponse(
+                success=False,
+                error="kernel calling_convention functions must be invoked via kernel handler dispatch, not capability_executor",
+                error_type="invalid_calling_convention",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+
+        if calling_convention == "block":
+            return self._dispatch_core_function(
+                principal_id=principal_id,
+                entry=entry,
+                args=args,
+                request_id=request_id,
+                start_time=start_time,
+            )
+
+        if calling_convention == "subprocess":
+            entrypoint = entry.entrypoint or "main.py:run"
+            function_dir = Path(entry.function_dir) if entry.function_dir else Path(".")
+            ep_file = entrypoint.rsplit(":", 1)[0] if ":" in entrypoint else entrypoint
+            handler_py_path = function_dir / ep_file
+
+            adapter = _HandlerDefAdapter(
+                handler_id=entry.qualified_name,
+                permission_id=effective_permission_id,
+                entrypoint=entrypoint,
+                handler_dir=function_dir,
+                handler_py_path=handler_py_path,
+                is_builtin=getattr(entry, "is_builtin", False),
+            )
+            return self._execute_handler_subprocess(
+                handler_def=adapter,
+                principal_id=principal_id,
+                permission_id=effective_permission_id,
+                grant_config=grant_config,
+                args=args,
+                timeout_seconds=timeout_seconds,
+                request_id=request_id,
+                start_time=start_time,
+            )
+
+        if calling_convention == "python_host":
+            return self._execute_host_function(
+                principal_id=principal_id,
+                entry=entry,
+                args=args,
+                request_id=request_id,
+                start_time=start_time,
+            )
+
+        if calling_convention == "python_docker":
+            return self._execute_user_function(
+                principal_id=principal_id,
+                entry=entry,
+                args=args,
+                request_id=request_id,
+                start_time=start_time,
+            )
+
+        if calling_convention == "binary":
+            return self._execute_binary_function(
+                principal_id=principal_id,
+                entry=entry,
+                args=args,
+                request_id=request_id,
+                start_time=start_time,
+            )
+
+        if calling_convention == "command":
+            return self._execute_command_function(
+                principal_id=principal_id,
+                entry=entry,
+                args=args,
+                request_id=request_id,
+                start_time=start_time,
+            )
+
+        # ここに来ることはないが、安全策
+        return CapabilityResponse(
+            success=False,
+            error=f"Unknown calling_convention: {calling_convention}",
+            error_type="invalid_calling_convention",
+            latency_ms=(time.time() - start_time) * 1000,
+        )
+
+    # ------------------------------------------------------------------
+    # FIX-A2: _dispatch_by_permission_id (既存の permission_id ベース分岐)
+    # ------------------------------------------------------------------
+
+    def _dispatch_by_permission_id(
+        self,
+        entry,
+        principal_id: str,
+        effective_permission_id: str,
+        grant_config: Dict[str, Any],
+        args: Dict[str, Any],
+        timeout_seconds: float,
+        request_id: str,
+        start_time: float,
+    ) -> CapabilityResponse:
+        """
+        calling_convention が None/未知の場合のフォールバック。
+        既存の permission_id ベースで実行パスを分岐する。
+        """
+        handler_id = entry.qualified_name
+
         if effective_permission_id == FLOW_RUN_PERMISSION_ID:
-            resp = self._execute_flow_run(
+            return self._execute_flow_run(
                 principal_id=principal_id,
                 permission_id=effective_permission_id,
                 grant_config=grant_config,
@@ -466,7 +809,7 @@ class CapabilityExecutor:
                 start_time=start_time,
             )
         elif effective_permission_id in DOCKER_PERMISSION_IDS:
-            resp = self._execute_docker_dispatch(
+            return self._execute_docker_dispatch(
                 principal_id=principal_id,
                 permission_id=effective_permission_id,
                 grant_config=grant_config,
@@ -487,9 +830,9 @@ class CapabilityExecutor:
                 entrypoint=entrypoint,
                 handler_dir=function_dir,
                 handler_py_path=handler_py_path,
-                is_builtin=is_builtin,
+                is_builtin=getattr(entry, "is_builtin", False),
             )
-            resp = self._execute_handler_subprocess(
+            return self._execute_handler_subprocess(
                 handler_def=adapter,
                 principal_id=principal_id,
                 permission_id=effective_permission_id,
@@ -499,21 +842,6 @@ class CapabilityExecutor:
                 request_id=request_id,
                 start_time=start_time,
             )
-
-        # 5. 監査
-        extra = {"unified_path": True}
-        if is_builtin:
-            extra["builtin_sha256"] = builtin_sha256
-
-        self._audit(
-            principal_id, effective_permission_id, handler_id, resp, args, request_id,
-            trusted=True,
-            grant_allowed=True,
-            grant_reason="Granted",
-            extra_details=extra,
-        )
-
-        return resp
 
     # ------------------------------------------------------------------
     # Phase B-3: _legacy_execute
@@ -829,8 +1157,6 @@ class CapabilityExecutor:
                     return resp
             except Exception as exc:
                 # SV-15 fix: フェイルクローズ — approval_manager のエラー時の処理
-                # core_pack の場合は警告ログを出して実行を許可する
-                # 非 core_pack の場合は承認チェックをスキップせず拒否する（セキュリティ原則）
                 if is_core:
                     logger.warning(
                         "approval_manager error during function.call for core pack '%s': %s "
@@ -894,7 +1220,6 @@ class CapabilityExecutor:
                         principal_id, entry.caller_requires
                     )
                 else:
-                    # check_caller_requires 未実装: 安全側にフォールバック
                     caller_ok = False
             else:
                 caller_ok = False

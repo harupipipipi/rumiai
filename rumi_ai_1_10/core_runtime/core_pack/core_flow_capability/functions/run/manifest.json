@@ -17,14 +17,26 @@
   "input_schema": {
     "type": "object",
     "properties": {
-      "flow_id": {"type": "string", "description": "Target flow ID to execute"},
-      "inputs": {"type": "object", "description": "Input context for the target flow"},
-      "timeout_seconds": {"type": "number", "description": "Timeout in seconds (default 30)"}
+      "flow_id": {
+        "type": "string",
+        "description": "Target flow ID to execute"
+      },
+      "inputs": {
+        "type": "object",
+        "description": "Input context for the target flow"
+      },
+      "timeout_seconds": {
+        "type": "number",
+        "description": "Timeout in seconds (default 30)"
+      }
     },
-    "required": ["flow_id"]
+    "required": [
+      "flow_id"
+    ]
   },
   "output_schema": {
     "type": "object",
     "description": "Flow execution result context"
-  }
+  },
+  "calling_convention": "block"
 }

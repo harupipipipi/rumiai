@@ -17,23 +17,49 @@
   ],
   "input_schema": {
     "type": "object",
-    "required": ["store_id", "key", "expected_value", "new_value"],
+    "required": [
+      "store_id",
+      "key",
+      "expected_value",
+      "new_value"
+    ],
     "properties": {
-      "store_id": {"type": "string"},
-      "key": {"type": "string"},
-      "expected_value": {"description": "Expected current value (null if key should not exist)"},
-      "new_value": {"description": "New value to set if expected matches current"}
+      "store_id": {
+        "type": "string"
+      },
+      "key": {
+        "type": "string"
+      },
+      "expected_value": {
+        "description": "Expected current value (null if key should not exist)"
+      },
+      "new_value": {
+        "description": "New value to set if expected matches current"
+      }
     }
   },
   "output_schema": {
     "type": "object",
     "properties": {
-      "success": {"type": "boolean"},
-      "store_id": {"type": "string"},
-      "key": {"type": "string"},
-      "error": {"type": "string"},
-      "error_type": {"type": "string"},
-      "current_value": {"description": "Current value on conflict"}
+      "success": {
+        "type": "boolean"
+      },
+      "store_id": {
+        "type": "string"
+      },
+      "key": {
+        "type": "string"
+      },
+      "error": {
+        "type": "string"
+      },
+      "error_type": {
+        "type": "string"
+      },
+      "current_value": {
+        "description": "Current value on conflict"
+      }
     }
-  }
+  },
+  "calling_convention": "block"
 }

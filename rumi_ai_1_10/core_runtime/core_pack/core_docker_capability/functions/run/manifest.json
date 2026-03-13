@@ -82,5 +82,6 @@
     "network_allowed": false,
     "max_containers": 5,
     "max_execution_time": 300
-  }
+  },
+  "calling_convention": "block"
 }
