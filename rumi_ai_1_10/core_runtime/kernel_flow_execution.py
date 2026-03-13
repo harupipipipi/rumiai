@@ -9,6 +9,7 @@ Mixin方式で Kernel クラスに合成される。
 - execute_flow / execute_flow_sync (async/sync Flow 実行エントリ)
 - _execute_flow_internal / _execute_steps_async (async 実行内部)
 - _execute_handler_step_async / _execute_sub_flow_step (ステップ実行)
+- _execute_function_step_async (Wave 27-C: function.call ステップ)
 - _eval_condition (条件式評価)
 - _execute_flow_step (同期 pipeline 用ステップ実行)
 - _check_depends_on (Wave 10-C: depends_on 実行時チェック)
@@ -44,6 +45,13 @@ Wave 15-B: 基盤モジュール統合
 - Profiler でFlow/ステップ実行計測
 - MetricsCollector でステップ成功/失敗/Flow完了カウント
 - 計測エラーでFlow実行が失敗しないよう try-except で防護
+
+Wave 27-D1: 同期 pipeline での function step 対応
+- _execute_flow_step() に function step の分岐を追加
+- step dict に function フィールドがある場合、function step として実行
+
+Wave 27-D2: function step への vocab_normalize 追加
+- _execute_function_step_async() の結果格納前に vocab_normalize を適用 (opt-in)
 """
 
 from __future__ import annotations
@@ -806,6 +814,93 @@ class KernelFlowExecutionMixin:
             on_error = step.get("on_error", {})
             if isinstance(on_error, dict):
                 on_error_action = on_error.get("action")
+
+        # --- Wave 27-D1: function step support in sync pipeline ---
+        function_name = step.get("function") if isinstance(step, dict) else None
+        if function_name:
+            step_id_str = str(step_id or "unknown.step")
+            self.diagnostics.record_step(
+                phase=phase, step_id=f"{step_id_str}.start",
+                handler=f"function:{function_name}", status="success",
+                meta={"function": function_name},
+            )
+            # フェイルクローズ: principal_id が ctx に無い場合は実行拒否
+            principal_id = ctx.get("_principal_id")
+            if not principal_id:
+                _logger.error(
+                    "sync function step '%s': no _principal_id in ctx, refusing execution",
+                    step_id,
+                )
+                self.diagnostics.record_step(
+                    phase=phase, step_id=f"{step_id_str}.failed",
+                    handler=f"function:{function_name}", status="failed",
+                    error={"type": "MissingPrincipalId", "message": "no _principal_id in ctx"},
+                    meta={"optional": optional},
+                )
+                fail_soft = ctx.get("_flow_defaults", {}).get("fail_soft", True)
+                return not fail_soft  # fail_soft=True → continue (False), else abort (True)
+
+            resolved_args = self._resolve_value(step.get("args", {}), ctx)
+
+            # DI コンテナ経由で capability_executor を取得
+            try:
+                from .di_container import get_container as _get_di
+                executor = _get_di().get_or_none("capability_executor")
+            except Exception:
+                executor = None
+
+            if executor is None:
+                _logger.error(
+                    "sync function step '%s': capability_executor not available", step_id,
+                )
+                self.diagnostics.record_step(
+                    phase=phase, step_id=f"{step_id_str}.failed",
+                    handler=f"function:{function_name}", status="failed",
+                    error={"type": "MissingExecutor", "message": "capability_executor not available"},
+                    meta={"optional": optional},
+                )
+                fail_soft = ctx.get("_flow_defaults", {}).get("fail_soft", True)
+                return not fail_soft
+
+            request = {
+                "type": "function.call",
+                "qualified_name": function_name,
+                "args": resolved_args,
+                "request_id": f"sync-pipeline-{step_id or 'unknown'}",
+            }
+
+            try:
+                resp = executor.execute(principal_id, request)
+                result = resp.output if resp.success else {"_error": resp.error}
+
+                # vocab_normalize (opt-in, symmetric with async path)
+                if resp.success and step.get("vocab_normalize") and isinstance(result, dict):
+                    result = self._vocab_normalize_output(result, step, ctx)
+
+                # 出力格納
+                output_key = step.get("output")
+                if output_key:
+                    ctx[output_key] = result
+                elif step_id and result is not None:
+                    ctx[f"_step_out.{step_id}"] = result
+
+                done_status = "success" if resp.success else "failed"
+                self.diagnostics.record_step(
+                    phase=phase, step_id=f"{step_id_str}.done",
+                    handler=f"function:{function_name}", status=done_status,
+                    meta={"function": function_name},
+                )
+                return False  # continue
+            except Exception as e:
+                action = str(on_error_action or ("continue" if ctx.get("_flow_defaults", {}).get("fail_soft", True) else "abort")).lower()
+                self.diagnostics.record_step(
+                    phase=phase, step_id=f"{step_id_str}.failed",
+                    handler=f"function:{function_name}", status="failed",
+                    error=e, meta={"on_error.action": action, "optional": optional},
+                )
+                return action == "abort"
+        # --- end Wave 27-D1 ---
+
         step_id_str = str(step_id or "unknown.step")
         handler_str = str(handler or "unknown.handler")
         fn = self._resolve_handler(handler_str, args)
