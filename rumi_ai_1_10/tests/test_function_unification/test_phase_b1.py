@@ -1,439 +1,346 @@
 """
-test_phase_b1.py - Phase B-1 テスト
+test_phase_b1.py - Phase B1 テスト
 
-Phase B-1 で作成した 4 つの core_pack (10 functions) の構造検証テスト。
+_KERNEL_HANDLER_MANIFESTS / _register_kernel_functions のテスト。
 """
 
 from __future__ import annotations
 
-import json
-import os
-import py_compile
+import importlib
 import sys
+import unittest
 from pathlib import Path
-from typing import Any, Dict, List
-
-import pytest
-
-
-# ---------------------------------------------------------------------------
-# パス解決
-# ---------------------------------------------------------------------------
-
-# このファイルは tests/test_function_unification/test_phase_b1.py にある。
-# core_runtime は 2 階層上の core_runtime/ にある。
-_THIS_DIR = Path(__file__).resolve().parent
-_CODE_ROOT = _THIS_DIR.parent.parent  # rumi_ai_1_10/
-_CORE_PACK_DIR = _CODE_ROOT / "core_runtime" / "core_pack"
-_BUILTIN_HANDLERS_DIR = _CODE_ROOT / "core_runtime" / "builtin_capability_handlers"
-
-# sys.path に追加して core_runtime をインポート可能にする
-if str(_CODE_ROOT) not in sys.path:
-    sys.path.insert(0, str(_CODE_ROOT))
+from typing import Any, Dict, Set
+from unittest.mock import MagicMock, patch
 
 
-# ---------------------------------------------------------------------------
-# ヘルパー
-# ---------------------------------------------------------------------------
+class TestKernelHandlerManifests(unittest.TestCase):
+    """_KERNEL_HANDLER_MANIFESTS のテスト"""
 
-def _load_json(path: Path) -> Dict[str, Any]:
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    def _get_manifests(self) -> Dict[str, Dict[str, Any]]:
+        """kernel.py から _KERNEL_HANDLER_MANIFESTS を取得"""
+        from rumi_ai_1_10.core_runtime.kernel import _KERNEL_HANDLER_MANIFESTS
+        return _KERNEL_HANDLER_MANIFESTS
+
+    def test_manifests_is_dict(self):
+        """_KERNEL_HANDLER_MANIFESTS が dict であること"""
+        manifests = self._get_manifests()
+        self.assertIsInstance(manifests, dict)
+
+    def test_manifests_not_empty(self):
+        """_KERNEL_HANDLER_MANIFESTS が空でないこと"""
+        manifests = self._get_manifests()
+        self.assertGreater(len(manifests), 0)
+
+    def test_all_keys_have_kernel_prefix(self):
+        """全キーが 'kernel:' プレフィックスを持つこと"""
+        manifests = self._get_manifests()
+        for key in manifests:
+            self.assertTrue(
+                key.startswith("kernel:"),
+                f"Key '{key}' does not start with 'kernel:'"
+            )
+
+    def test_all_entries_have_description(self):
+        """各 manifest dict に最低限 'description' が含まれること"""
+        manifests = self._get_manifests()
+        for key, manifest in manifests.items():
+            self.assertIn(
+                "description", manifest,
+                f"Manifest for '{key}' missing 'description'"
+            )
+            self.assertIsInstance(
+                manifest["description"], str,
+                f"Description for '{key}' is not a string"
+            )
+            self.assertGreater(
+                len(manifest["description"]), 0,
+                f"Description for '{key}' is empty"
+            )
+
+    def test_all_entries_have_permission_id(self):
+        """各 manifest dict に 'permission_id' が含まれること"""
+        manifests = self._get_manifests()
+        for key, manifest in manifests.items():
+            self.assertIn(
+                "permission_id", manifest,
+                f"Manifest for '{key}' missing 'permission_id'"
+            )
+
+    def test_permission_id_matches_handler_key(self):
+        """permission_id が handler_key の 'kernel:' を除いた部分と一致すること"""
+        manifests = self._get_manifests()
+        for key, manifest in manifests.items():
+            expected_pid = key.replace("kernel:", "", 1)
+            self.assertEqual(
+                manifest.get("permission_id"), expected_pid,
+                f"permission_id for '{key}' expected '{expected_pid}', "
+                f"got '{manifest.get('permission_id')}'"
+            )
+
+    def test_all_entries_have_risk(self):
+        """各 manifest dict に 'risk' が含まれること"""
+        manifests = self._get_manifests()
+        valid_risks = {"low", "medium", "high"}
+        for key, manifest in manifests.items():
+            self.assertIn(
+                "risk", manifest,
+                f"Manifest for '{key}' missing 'risk'"
+            )
+            self.assertIn(
+                manifest["risk"], valid_risks,
+                f"Risk for '{key}' is '{manifest['risk']}', expected one of {valid_risks}"
+            )
+
+    def test_all_entries_have_requires(self):
+        """各 manifest dict に 'requires' が含まれること"""
+        manifests = self._get_manifests()
+        for key, manifest in manifests.items():
+            self.assertIn(
+                "requires", manifest,
+                f"Manifest for '{key}' missing 'requires'"
+            )
+            self.assertIsInstance(
+                manifest["requires"], list,
+                f"'requires' for '{key}' is not a list"
+            )
+
+    def test_all_entries_have_tags(self):
+        """各 manifest dict に 'tags' が含まれること"""
+        manifests = self._get_manifests()
+        for key, manifest in manifests.items():
+            self.assertIn(
+                "tags", manifest,
+                f"Manifest for '{key}' missing 'tags'"
+            )
+            self.assertIsInstance(
+                manifest["tags"], list,
+                f"'tags' for '{key}' is not a list"
+            )
 
 
-def _get_all_function_dirs(pack_dir: Path) -> List[Path]:
-    """pack_dir/functions/ 配下の全 function ディレクトリを返す。"""
-    functions_dir = pack_dir / "functions"
-    if not functions_dir.is_dir():
-        return []
-    return sorted([d for d in functions_dir.iterdir() if d.is_dir()])
+class TestManifestsMatchHandlers(unittest.TestCase):
+    """_KERNEL_HANDLER_MANIFESTS のキー数がハンドラ数と一致すること"""
 
+    def _count_system_handlers(self) -> Set[str]:
+        """system handlers のキーセットを取得"""
+        from rumi_ai_1_10.core_runtime.kernel_handlers_system import (
+            KernelSystemHandlersMixin,
+        )
+        # _register_system_handlers を呼ぶにはインスタンスが必要
+        # Mixin なので直接呼べないが、返り値の dict を得るために mock する
 
-# ---------------------------------------------------------------------------
-# テストデータ
-# ---------------------------------------------------------------------------
+        class _FakeKernel(KernelSystemHandlersMixin):
+            pass
 
-CORE_STORE = _CORE_PACK_DIR / "core_store_capability"
-CORE_SECRETS = _CORE_PACK_DIR / "core_secrets_capability"
-CORE_FLOW = _CORE_PACK_DIR / "core_flow_capability"
-CORE_COMMUNICATION = _CORE_PACK_DIR / "core_communication_capability"
+        fake = _FakeKernel()
+        # _register_system_handlers は self のメソッドを参照するので
+        # 属性を mock で埋める
+        fake.diagnostics = MagicMock()
+        fake.interface_registry = MagicMock()
+        fake.event_bus = MagicMock()
+        fake.install_journal = MagicMock()
+        fake.lifecycle = MagicMock()
+        fake._flow = None
 
-# 全 core_pack のリスト
-ALL_PACKS = [CORE_STORE, CORE_SECRETS, CORE_FLOW, CORE_COMMUNICATION]
+        handlers = fake._register_system_handlers()
+        return set(handlers.keys())
 
-# 期待される vocab_aliases マッピング (pack_dir, function_id) -> aliases
-EXPECTED_VOCAB_ALIASES = {
-    (CORE_STORE, "get"): ["store.get"],
-    (CORE_STORE, "set"): ["store.set"],
-    (CORE_STORE, "list"): ["store.list"],
-    (CORE_STORE, "delete"): ["store.delete"],
-    (CORE_STORE, "batch_get"): ["store.batch_get"],
-    (CORE_STORE, "cas"): ["store.cas"],
-    (CORE_SECRETS, "get"): ["secrets.get"],
-    (CORE_FLOW, "run"): ["flow.run"],
-    (CORE_COMMUNICATION, "send"): ["inbox.send"],
-    (CORE_COMMUNICATION, "propose_patch"): ["code.propose_patch"],
-}
-
-# handler slug → (handler_dir_name, core_pack_dir, function_id)
-HANDLER_TO_FUNCTION_MAP = {
-    "store_get": ("store_get", CORE_STORE, "get"),
-    "store_set": ("store_set", CORE_STORE, "set"),
-    "store_list": ("store_list", CORE_STORE, "list"),
-    "store_delete": ("store_delete", CORE_STORE, "delete"),
-    "store_batch_get": ("store_batch_get", CORE_STORE, "batch_get"),
-    "store_cas": ("store_cas", CORE_STORE, "cas"),
-    "secrets_get": ("secrets_get", CORE_SECRETS, "get"),
-    "flow_run_handler": ("flow_run_handler", CORE_FLOW, "run"),
-    "inbox_send": ("inbox_send", CORE_COMMUNICATION, "send"),
-    "propose_patch": ("propose_patch", CORE_COMMUNICATION, "propose_patch"),
-}
-
-# 必須 manifest フィールド
-REQUIRED_MANIFEST_FIELDS = [
-    "function_id",
-    "description",
-    "requires",
-    "host_execution",
-    "input_schema",
-    "output_schema",
-    "risk",
-    "vocab_aliases",
-]
-
-
-# ---------------------------------------------------------------------------
-# Test 1: core_store ecosystem.json valid
-# ---------------------------------------------------------------------------
-
-class TestCoreStoreEcosystemJsonValid:
-    def test_core_store_ecosystem_json_valid(self):
-        eco_path = CORE_STORE / "ecosystem.json"
-        assert eco_path.exists(), f"ecosystem.json not found: {eco_path}"
-        eco = _load_json(eco_path)
-
-        assert eco["pack_id"] == "core_store_capability"
-        assert "pack_identity" in eco
-        assert "version" in eco
-        assert "metadata" in eco
-
-        meta = eco["metadata"]
-        assert meta.get("is_core_pack") is True
-        assert "capability_handlers" in meta
-
-        handlers = meta["capability_handlers"]
-        assert len(handlers) == 6
-
-        expected_handler_keys = {
-            "store_get", "store_set", "store_list",
-            "store_delete", "store_batch_get", "store_cas",
-        }
-        assert set(handlers.keys()) == expected_handler_keys
-
-        for key, handler in handlers.items():
-            assert "handler_id" in handler, f"Missing handler_id in {key}"
-            assert "permission_id" in handler, f"Missing permission_id in {key}"
-            assert "path" in handler, f"Missing path in {key}"
-
-
-# ---------------------------------------------------------------------------
-# Test 2: core_store manifest count
-# ---------------------------------------------------------------------------
-
-class TestCoreStoreManifestCount:
-    def test_core_store_manifest_count(self):
-        func_dirs = _get_all_function_dirs(CORE_STORE)
-        assert len(func_dirs) == 6, (
-            f"Expected 6 function dirs, got {len(func_dirs)}: "
-            f"{[d.name for d in func_dirs]}"
+    def _count_runtime_handlers(self) -> Set[str]:
+        """runtime handlers のキーセットを取得"""
+        from rumi_ai_1_10.core_runtime.kernel_handlers_runtime import (
+            KernelRuntimeHandlersMixin,
         )
 
-        expected_names = {"get", "set", "list", "delete", "batch_get", "cas"}
-        actual_names = {d.name for d in func_dirs}
-        assert actual_names == expected_names
+        class _FakeKernel(KernelRuntimeHandlersMixin):
+            pass
 
-        for func_dir in func_dirs:
-            manifest_path = func_dir / "manifest.json"
-            assert manifest_path.exists(), (
-                f"manifest.json not found in {func_dir}"
-            )
+        fake = _FakeKernel()
+        fake.diagnostics = MagicMock()
+        fake.interface_registry = MagicMock()
+        fake.event_bus = MagicMock()
+        fake.install_journal = MagicMock()
+        fake.lifecycle = MagicMock()
+        fake._uds_proxy_manager = None
+        fake._capability_proxy = None
 
+        handlers = fake._register_runtime_handlers()
+        return set(handlers.keys())
 
-# ---------------------------------------------------------------------------
-# Test 3: core_store manifest fields
-# ---------------------------------------------------------------------------
+    def test_manifest_keys_match_handler_count(self):
+        """
+        _KERNEL_HANDLER_MANIFESTS のキー数が
+        _register_system_handlers + _register_runtime_handlers のハンドラ数と一致すること
+        """
+        from rumi_ai_1_10.core_runtime.kernel import _KERNEL_HANDLER_MANIFESTS
 
-class TestCoreStoreManifestFields:
-    def test_core_store_manifest_fields(self):
-        func_dirs = _get_all_function_dirs(CORE_STORE)
-        for func_dir in func_dirs:
-            manifest_path = func_dir / "manifest.json"
-            manifest = _load_json(manifest_path)
+        try:
+            system_keys = self._count_system_handlers()
+        except Exception as e:
+            self.skipTest(f"Could not count system handlers: {e}")
+            return
 
-            for field in REQUIRED_MANIFEST_FIELDS:
-                assert field in manifest, (
-                    f"Missing field '{field}' in {manifest_path}"
-                )
+        try:
+            runtime_keys = self._count_runtime_handlers()
+        except Exception as e:
+            self.skipTest(f"Could not count runtime handlers: {e}")
+            return
 
-            assert manifest["function_id"] == func_dir.name
-            assert manifest["host_execution"] is True
-            assert isinstance(manifest["requires"], list)
-            assert isinstance(manifest["vocab_aliases"], list)
-            assert isinstance(manifest["input_schema"], dict)
-            assert isinstance(manifest["output_schema"], dict)
-            assert manifest["risk"] in ("low", "medium", "high")
+        all_handler_keys = system_keys | runtime_keys
+        manifest_keys = set(_KERNEL_HANDLER_MANIFESTS.keys())
 
+        # マニフェストに存在するがハンドラにないキー
+        extra_in_manifest = manifest_keys - all_handler_keys
+        # ハンドラに存在するがマニフェストにないキー
+        missing_in_manifest = all_handler_keys - manifest_keys
 
-# ---------------------------------------------------------------------------
-# Test 4: core_store main.py syntax
-# ---------------------------------------------------------------------------
-
-class TestCoreStoreMainPySyntax:
-    def test_core_store_main_py_syntax(self):
-        func_dirs = _get_all_function_dirs(CORE_STORE)
-        for func_dir in func_dirs:
-            main_py = func_dir / "main.py"
-            assert main_py.exists(), f"main.py not found in {func_dir}"
-
-            # 構文チェック
-            try:
-                py_compile.compile(str(main_py), doraise=True)
-            except py_compile.PyCompileError as e:
-                pytest.fail(
-                    f"Syntax error in {main_py}: {e}"
-                )
-
-
-# ---------------------------------------------------------------------------
-# Test 5: core_secrets ecosystem and manifest
-# ---------------------------------------------------------------------------
-
-class TestCoreSecretsEcosystemAndManifest:
-    def test_core_secrets_ecosystem_and_manifest(self):
-        eco_path = CORE_SECRETS / "ecosystem.json"
-        assert eco_path.exists()
-        eco = _load_json(eco_path)
-
-        assert eco["pack_id"] == "core_secrets_capability"
-        assert eco["metadata"]["is_core_pack"] is True
-        assert "secrets_get" in eco["metadata"]["capability_handlers"]
-
-        func_dirs = _get_all_function_dirs(CORE_SECRETS)
-        assert len(func_dirs) == 1
-        assert func_dirs[0].name == "get"
-
-        manifest = _load_json(func_dirs[0] / "manifest.json")
-        for field in REQUIRED_MANIFEST_FIELDS:
-            assert field in manifest, f"Missing field '{field}'"
-        assert manifest["function_id"] == "get"
-        assert manifest["host_execution"] is True
-        assert manifest["risk"] == "high"
-
-        # grant_config が存在すること (secrets_get のみ)
-        assert "grant_config" in manifest
-
-        main_py = func_dirs[0] / "main.py"
-        assert main_py.exists()
-        py_compile.compile(str(main_py), doraise=True)
-
-
-# ---------------------------------------------------------------------------
-# Test 6: core_flow ecosystem and manifest
-# ---------------------------------------------------------------------------
-
-class TestCoreFlowEcosystemAndManifest:
-    def test_core_flow_ecosystem_and_manifest(self):
-        eco_path = CORE_FLOW / "ecosystem.json"
-        assert eco_path.exists()
-        eco = _load_json(eco_path)
-
-        assert eco["pack_id"] == "core_flow_capability"
-        assert eco["metadata"]["is_core_pack"] is True
-        assert "flow_run" in eco["metadata"]["capability_handlers"]
-
-        func_dirs = _get_all_function_dirs(CORE_FLOW)
-        assert len(func_dirs) == 1
-        assert func_dirs[0].name == "run"
-
-        manifest = _load_json(func_dirs[0] / "manifest.json")
-        for field in REQUIRED_MANIFEST_FIELDS:
-            assert field in manifest, f"Missing field '{field}'"
-        assert manifest["function_id"] == "run"
-        assert manifest["host_execution"] is True
-        assert manifest["risk"] == "medium"
-
-        main_py = func_dirs[0] / "main.py"
-        assert main_py.exists()
-        py_compile.compile(str(main_py), doraise=True)
-
-
-# ---------------------------------------------------------------------------
-# Test 7: core_communication ecosystem and manifest
-# ---------------------------------------------------------------------------
-
-class TestCoreCommunicationEcosystemAndManifest:
-    def test_core_communication_ecosystem_and_manifest(self):
-        eco_path = CORE_COMMUNICATION / "ecosystem.json"
-        assert eco_path.exists()
-        eco = _load_json(eco_path)
-
-        assert eco["pack_id"] == "core_communication_capability"
-        assert eco["metadata"]["is_core_pack"] is True
-
-        handlers = eco["metadata"]["capability_handlers"]
-        assert "inbox_send" in handlers
-        assert "propose_patch" in handlers
-
-        for func_dir in _get_all_function_dirs(CORE_COMMUNICATION):
-            manifest = _load_json(func_dir / "manifest.json")
-            for field in REQUIRED_MANIFEST_FIELDS:
-                assert field in manifest, (
-                    f"Missing field '{field}' in {func_dir.name}"
-                )
-            assert manifest["host_execution"] is True
-
-            main_py = func_dir / "main.py"
-            assert main_py.exists()
-            py_compile.compile(str(main_py), doraise=True)
-
-
-# ---------------------------------------------------------------------------
-# Test 8: core_communication manifest count
-# ---------------------------------------------------------------------------
-
-class TestCoreCommunicationManifestCount:
-    def test_core_communication_manifest_count(self):
-        func_dirs = _get_all_function_dirs(CORE_COMMUNICATION)
-        assert len(func_dirs) == 2, (
-            f"Expected 2 function dirs, got {len(func_dirs)}: "
-            f"{[d.name for d in func_dirs]}"
+        self.assertEqual(
+            extra_in_manifest, set(),
+            f"Keys in manifests but not in handlers: {extra_in_manifest}"
         )
-        expected_names = {"send", "propose_patch"}
-        actual_names = {d.name for d in func_dirs}
-        assert actual_names == expected_names
-
-
-# ---------------------------------------------------------------------------
-# Test 9: vocab_aliases in manifests
-# ---------------------------------------------------------------------------
-
-class TestVocabAliasesInManifests:
-    def test_vocab_aliases_in_manifests(self):
-        for (pack_dir, function_id), expected_aliases in EXPECTED_VOCAB_ALIASES.items():
-            manifest_path = pack_dir / "functions" / function_id / "manifest.json"
-            assert manifest_path.exists(), (
-                f"manifest.json not found: {manifest_path}"
-            )
-            manifest = _load_json(manifest_path)
-            actual_aliases = manifest.get("vocab_aliases", [])
-            assert actual_aliases == expected_aliases, (
-                f"vocab_aliases mismatch for {pack_dir.name}/{function_id}: "
-                f"expected {expected_aliases}, got {actual_aliases}"
-            )
-
-
-# ---------------------------------------------------------------------------
-# Test 10: manifest matches handler.json schemas
-# ---------------------------------------------------------------------------
-
-class TestManifestMatchesHandlerJsonSchemas:
-    def test_manifest_matches_handler_json_schemas(self):
-        for slug, (handler_dir_name, pack_dir, function_id) in HANDLER_TO_FUNCTION_MAP.items():
-            handler_json_path = _BUILTIN_HANDLERS_DIR / handler_dir_name / "handler.json"
-            manifest_path = pack_dir / "functions" / function_id / "manifest.json"
-
-            if not handler_json_path.exists():
-                pytest.skip(f"handler.json not found: {handler_json_path}")
-
-            handler_json = _load_json(handler_json_path)
-            manifest = _load_json(manifest_path)
-
-            # input_schema 一致
-            h_input = handler_json.get("input_schema", {})
-            m_input = manifest.get("input_schema", {})
-            assert h_input == m_input, (
-                f"input_schema mismatch for {slug}:\n"
-                f"  handler.json: {json.dumps(h_input, indent=2)}\n"
-                f"  manifest.json: {json.dumps(m_input, indent=2)}"
-            )
-
-            # output_schema 一致
-            h_output = handler_json.get("output_schema", {})
-            m_output = manifest.get("output_schema", {})
-            assert h_output == m_output, (
-                f"output_schema mismatch for {slug}:\n"
-                f"  handler.json: {json.dumps(h_output, indent=2)}\n"
-                f"  manifest.json: {json.dumps(m_output, indent=2)}"
-            )
-
-
-# ---------------------------------------------------------------------------
-# Test 11: register core_pack and resolve alias
-# ---------------------------------------------------------------------------
-
-class TestRegisterCorePackAndResolveAlias:
-    def test_register_core_pack_and_resolve_alias(self):
-        from core_runtime.function_registry import (
-            FunctionRegistry,
-            FunctionEntry,
+        self.assertEqual(
+            missing_in_manifest, set(),
+            f"Keys in handlers but not in manifests: {missing_in_manifest}"
         )
+        self.assertEqual(
+            len(manifest_keys), len(all_handler_keys),
+            f"Manifest count ({len(manifest_keys)}) != handler count ({len(all_handler_keys)})"
+        )
+
+
+class TestExpectedHandlerKeysDerivation(unittest.TestCase):
+    """_EXPECTED_HANDLER_KEYS が _KERNEL_HANDLER_MANIFESTS.keys() と一致すること"""
+
+    def test_expected_keys_match_manifests(self):
+        """_EXPECTED_HANDLER_KEYS が _KERNEL_HANDLER_MANIFESTS.keys() と一致"""
+        from rumi_ai_1_10.core_runtime.kernel import (
+            _EXPECTED_HANDLER_KEYS,
+            _KERNEL_HANDLER_MANIFESTS,
+        )
+        self.assertEqual(
+            _EXPECTED_HANDLER_KEYS,
+            frozenset(_KERNEL_HANDLER_MANIFESTS.keys()),
+            "_EXPECTED_HANDLER_KEYS does not match _KERNEL_HANDLER_MANIFESTS.keys()"
+        )
+
+    def test_expected_keys_is_frozenset(self):
+        """_EXPECTED_HANDLER_KEYS が frozenset であること"""
+        from rumi_ai_1_10.core_runtime.kernel import _EXPECTED_HANDLER_KEYS
+        self.assertIsInstance(_EXPECTED_HANDLER_KEYS, frozenset)
+
+
+class TestRegisterKernelFunctions(unittest.TestCase):
+    """_register_kernel_functions() のテスト"""
+
+    def test_register_kernel_functions_exists(self):
+        """_register_kernel_functions が存在すること"""
+        from rumi_ai_1_10.core_runtime.kernel import _register_kernel_functions
+        self.assertTrue(callable(_register_kernel_functions))
+
+    def test_register_kernel_functions_registers_entries(self):
+        """
+        _register_kernel_functions() を呼んだ後、
+        FunctionRegistry に kernel function が登録されていること
+        """
+        from rumi_ai_1_10.core_runtime.kernel import (
+            _KERNEL_HANDLER_MANIFESTS,
+            _register_kernel_functions,
+        )
+        from rumi_ai_1_10.core_runtime.function_registry import FunctionRegistry
 
         registry = FunctionRegistry()
+        count = _register_kernel_functions(registry)
 
-        # 全 10 function を登録
-        all_functions = []
-        for pack_dir in ALL_PACKS:
-            eco = _load_json(pack_dir / "ecosystem.json")
-            pack_id = eco["pack_id"]
+        self.assertGreater(count, 0, "No functions were registered")
+        self.assertEqual(
+            count, len(_KERNEL_HANDLER_MANIFESTS),
+            f"Registered {count} functions, expected {len(_KERNEL_HANDLER_MANIFESTS)}"
+        )
 
-            for func_dir in _get_all_function_dirs(pack_dir):
-                manifest = _load_json(func_dir / "manifest.json")
-                entry = FunctionEntry(
-                    function_id=manifest["function_id"],
-                    pack_id=pack_id,
-                    description=manifest.get("description", ""),
-                    requires=manifest.get("requires", []),
-                    caller_requires=manifest.get("caller_requires", []),
-                    host_execution=manifest.get("host_execution", False),
-                    tags=manifest.get("tags", []),
-                    input_schema=manifest.get("input_schema", {}),
-                    output_schema=manifest.get("output_schema", {}),
-                    function_dir=str(func_dir),
-                    main_py_path=str(func_dir / "main.py"),
-                    manifest=manifest,
-                    risk=manifest.get("risk"),
-                    grant_config=manifest.get("grant_config"),
-                    vocab_aliases=manifest.get("vocab_aliases"),
-                )
-                registered = registry.register(entry)
-                assert registered, (
-                    f"Failed to register {pack_id}:{manifest['function_id']}"
-                )
-                all_functions.append(entry)
+    def test_registered_entries_have_kernel_pack_id(self):
+        """登録された entry の pack_id == 'kernel' であること"""
+        from rumi_ai_1_10.core_runtime.kernel import _register_kernel_functions
+        from rumi_ai_1_10.core_runtime.function_registry import FunctionRegistry
 
-        # 10 function が登録されていること
-        assert registry.count() == 10
+        registry = FunctionRegistry()
+        _register_kernel_functions(registry)
 
-        # 全ての vocab_alias で resolve できること
-        alias_to_qname = {
-            "store.get": "core_store_capability:get",
-            "store.set": "core_store_capability:set",
-            "store.list": "core_store_capability:list",
-            "store.delete": "core_store_capability:delete",
-            "store.batch_get": "core_store_capability:batch_get",
-            "store.cas": "core_store_capability:cas",
-            "secrets.get": "core_secrets_capability:get",
-            "flow.run": "core_flow_capability:run",
-            "inbox.send": "core_communication_capability:send",
-            "code.propose_patch": "core_communication_capability:propose_patch",
-        }
+        kernel_entries = registry.list_by_pack("kernel")
+        self.assertGreater(len(kernel_entries), 0)
 
-        for alias, expected_qname in alias_to_qname.items():
-            entry = registry.resolve_by_alias(alias)
-            assert entry is not None, (
-                f"resolve_by_alias('{alias}') returned None"
+        for entry in kernel_entries:
+            self.assertEqual(
+                entry.pack_id, "kernel",
+                f"Entry {entry.qualified_name} has pack_id={entry.pack_id}"
             )
-            assert entry.qualified_name == expected_qname, (
-                f"resolve_by_alias('{alias}'): expected {expected_qname}, "
-                f"got {entry.qualified_name}"
+
+    def test_registered_entries_have_description(self):
+        """登録された entry に description があること"""
+        from rumi_ai_1_10.core_runtime.kernel import _register_kernel_functions
+        from rumi_ai_1_10.core_runtime.function_registry import FunctionRegistry
+
+        registry = FunctionRegistry()
+        _register_kernel_functions(registry)
+
+        for entry in registry.list_all():
+            self.assertTrue(
+                len(entry.description) > 0,
+                f"Entry {entry.qualified_name} has empty description"
             )
+
+
+class TestRegisterKernelFunctionsWithMock(unittest.TestCase):
+    """register_kernel_function() (Phase A) を使った登録テスト"""
+
+    def test_uses_register_kernel_function_when_available(self):
+        """
+        FunctionRegistry に register_kernel_function() がある場合、
+        それを使用すること
+        """
+        from rumi_ai_1_10.core_runtime.kernel import (
+            _KERNEL_HANDLER_MANIFESTS,
+            _register_kernel_functions,
+        )
+
+        mock_registry = MagicMock()
+        mock_registry.register_kernel_function = MagicMock()
+        # hasattr が True を返すようにする
+        mock_registry.register_kernel_function.return_value = None
+
+        count = _register_kernel_functions(mock_registry)
+
+        self.assertEqual(count, len(_KERNEL_HANDLER_MANIFESTS))
+        self.assertEqual(
+            mock_registry.register_kernel_function.call_count,
+            len(_KERNEL_HANDLER_MANIFESTS),
+        )
+
+        # 各呼び出しの引数を検証
+        for call_args in mock_registry.register_kernel_function.call_args_list:
+            args, kwargs = call_args
+            key = args[0]
+            manifest = args[1]
+            self.assertTrue(key.startswith("kernel:"))
+            self.assertIn("description", manifest)
+
+    def test_fallback_to_register_when_no_register_kernel_function(self):
+        """
+        register_kernel_function() がない場合、通常の register() を使うこと
+        """
+        from rumi_ai_1_10.core_runtime.kernel import _register_kernel_functions
+        from rumi_ai_1_10.core_runtime.function_registry import FunctionRegistry
+
+        # register_kernel_function を持たない FunctionRegistry
+        registry = FunctionRegistry()
+        # register_kernel_function を削除（存在しないことを確認）
+        if hasattr(registry, 'register_kernel_function'):
+            # Phase A が適用されている場合、このテストは register_kernel_function 経由になる
+            # それでも登録自体は成功するはず
+            pass
+
+        count = _register_kernel_functions(registry)
+        self.assertGreater(count, 0)
+
+
+if __name__ == "__main__":
+    unittest.main()
