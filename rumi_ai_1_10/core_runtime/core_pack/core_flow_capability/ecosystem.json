@@ -1,0 +1,24 @@
+{
+  "pack_id": "core_flow_capability",
+  "pack_identity": "core:rumi/flow-capability",
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": []
+  },
+  "metadata": {
+    "name": "Core Flow Capability",
+    "description": "Rumi AI OS core pack that provides flow execution capability. Packs request flow.run via the capability system to execute another flow synchronously.",
+    "author": "Rumi AI Team",
+    "license": "MIT",
+    "is_core_pack": true,
+    "capability_handlers": {
+      "flow_run": {
+        "handler_id": "core.flow.run",
+        "permission_id": "flow.run",
+        "path": "share/capability_handlers/flow_run"
+      }
+    }
+  },
+  "dependencies": {},
+  "components": {}
+}

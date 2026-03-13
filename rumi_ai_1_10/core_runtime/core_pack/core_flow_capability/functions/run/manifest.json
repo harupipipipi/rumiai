@@ -1,0 +1,30 @@
+{
+  "function_id": "run",
+  "description": "Execute another flow synchronously (in-process dispatch by capability_executor)",
+  "requires": [
+    "flow.run"
+  ],
+  "caller_requires": [],
+  "host_execution": true,
+  "tags": [
+    "flow",
+    "execution"
+  ],
+  "risk": "medium",
+  "vocab_aliases": [
+    "flow.run"
+  ],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "flow_id": {"type": "string", "description": "Target flow ID to execute"},
+      "inputs": {"type": "object", "description": "Input context for the target flow"},
+      "timeout_seconds": {"type": "number", "description": "Timeout in seconds (default 30)"}
+    },
+    "required": ["flow_id"]
+  },
+  "output_schema": {
+    "type": "object",
+    "description": "Flow execution result context"
+  }
+}
