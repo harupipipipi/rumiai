@@ -1,346 +1,282 @@
 """
-test_phase_b1.py - Phase B1 テスト
+test_phase_b1.py - Phase B-1 テスト
 
-_KERNEL_HANDLER_MANIFESTS / _register_kernel_functions のテスト。
+テスト対象:
+- _KERNEL_HANDLER_MANIFESTS が dict であること
+- _KERNEL_HANDLER_MANIFESTS のキー数がハンドラ数と一致すること
+- 各 manifest dict に必須フィールドが含まれること
+- _register_kernel_functions() が正しく動作すること
+- _EXPECTED_HANDLER_KEYS が _KERNEL_HANDLER_MANIFESTS.keys() と一致すること
 """
 
 from __future__ import annotations
 
-import importlib
+import pytest
 import sys
-import unittest
 from pathlib import Path
-from typing import Any, Dict, Set
 from unittest.mock import MagicMock, patch
 
+# テスト対象のインポートパスを設定
+_project_root = Path(__file__).resolve().parent.parent.parent
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
 
-class TestKernelHandlerManifests(unittest.TestCase):
-    """_KERNEL_HANDLER_MANIFESTS のテスト"""
 
-    def _get_manifests(self) -> Dict[str, Dict[str, Any]]:
-        """kernel.py から _KERNEL_HANDLER_MANIFESTS を取得"""
-        from rumi_ai_1_10.core_runtime.kernel import _KERNEL_HANDLER_MANIFESTS
+class TestKernelHandlerManifests:
+    """_KERNEL_HANDLER_MANIFESTS の構造テスト"""
+
+    def _get_manifests(self):
+        from core_runtime.kernel import _KERNEL_HANDLER_MANIFESTS
         return _KERNEL_HANDLER_MANIFESTS
 
     def test_manifests_is_dict(self):
         """_KERNEL_HANDLER_MANIFESTS が dict であること"""
         manifests = self._get_manifests()
-        self.assertIsInstance(manifests, dict)
+        assert isinstance(manifests, dict), \
+            f"Expected dict, got {type(manifests).__name__}"
 
     def test_manifests_not_empty(self):
         """_KERNEL_HANDLER_MANIFESTS が空でないこと"""
         manifests = self._get_manifests()
-        self.assertGreater(len(manifests), 0)
+        assert len(manifests) > 0, "Manifests should not be empty"
+
+    def test_manifests_key_count_matches_handlers(self):
+        """
+        _KERNEL_HANDLER_MANIFESTS のキー数が
+        _register_system_handlers + _register_runtime_handlers のハンドラ数と一致すること
+        """
+        manifests = self._get_manifests()
+
+        from core_runtime.kernel_handlers_system import KernelSystemHandlersMixin
+        from core_runtime.kernel_handlers_runtime import KernelRuntimeHandlersMixin
+
+        mock_self = MagicMock()
+        system_handlers = KernelSystemHandlersMixin._register_system_handlers(mock_self)
+        runtime_handlers = KernelRuntimeHandlersMixin._register_runtime_handlers(mock_self)
+
+        expected_count = len(system_handlers) + len(runtime_handlers)
+        actual_count = len(manifests)
+
+        handler_keys = set(system_handlers.keys()) | set(runtime_handlers.keys())
+        manifest_keys = set(manifests.keys())
+
+        missing_in_manifests = handler_keys - manifest_keys
+        missing_in_handlers = manifest_keys - handler_keys
+
+        assert actual_count == expected_count, (
+            f"Manifest count ({actual_count}) != handler count ({expected_count}). "
+            f"Missing in manifests: {sorted(missing_in_manifests)}. "
+            f"Missing in handlers: {sorted(missing_in_handlers)}."
+        )
+
+    def test_each_manifest_has_description(self):
+        """各 manifest dict に 'description' が含まれること"""
+        manifests = self._get_manifests()
+        for key, manifest in manifests.items():
+            assert "description" in manifest, \
+                f"Manifest '{key}' is missing 'description'"
+            assert isinstance(manifest["description"], str), \
+                f"Manifest '{key}' description is not a string"
+            assert len(manifest["description"]) > 0, \
+                f"Manifest '{key}' has empty description"
+
+    def test_each_manifest_has_permission_id(self):
+        """各 manifest dict に 'permission_id' が含まれること (Phase B-1)"""
+        manifests = self._get_manifests()
+        for key, manifest in manifests.items():
+            assert "permission_id" in manifest, \
+                f"Manifest '{key}' is missing 'permission_id'"
+            assert manifest["permission_id"] == key, \
+                f"Manifest '{key}' permission_id mismatch: {manifest['permission_id']} != {key}"
+
+    def test_each_manifest_has_risk(self):
+        """各 manifest dict に 'risk' が含まれること (Phase B-1)"""
+        manifests = self._get_manifests()
+        valid_risk_levels = {"low", "medium", "high"}
+        for key, manifest in manifests.items():
+            assert "risk" in manifest, \
+                f"Manifest '{key}' is missing 'risk'"
+            assert manifest["risk"] in valid_risk_levels, \
+                f"Manifest '{key}' has invalid risk level: {manifest['risk']}"
+
+    def test_each_manifest_has_requires(self):
+        """各 manifest dict に 'requires' が含まれること (Phase B-1)"""
+        manifests = self._get_manifests()
+        for key, manifest in manifests.items():
+            assert "requires" in manifest, \
+                f"Manifest '{key}' is missing 'requires'"
+            assert isinstance(manifest["requires"], list), \
+                f"Manifest '{key}' requires is not a list"
+
+    def test_each_manifest_has_tags(self):
+        """各 manifest dict に 'tags' が含まれること"""
+        manifests = self._get_manifests()
+        for key, manifest in manifests.items():
+            assert "tags" in manifest, \
+                f"Manifest '{key}' is missing 'tags'"
+            assert isinstance(manifest["tags"], list), \
+                f"Manifest '{key}' tags is not a list"
 
     def test_all_keys_have_kernel_prefix(self):
         """全キーが 'kernel:' プレフィックスを持つこと"""
         manifests = self._get_manifests()
         for key in manifests:
-            self.assertTrue(
-                key.startswith("kernel:"),
-                f"Key '{key}' does not start with 'kernel:'"
-            )
-
-    def test_all_entries_have_description(self):
-        """各 manifest dict に最低限 'description' が含まれること"""
-        manifests = self._get_manifests()
-        for key, manifest in manifests.items():
-            self.assertIn(
-                "description", manifest,
-                f"Manifest for '{key}' missing 'description'"
-            )
-            self.assertIsInstance(
-                manifest["description"], str,
-                f"Description for '{key}' is not a string"
-            )
-            self.assertGreater(
-                len(manifest["description"]), 0,
-                f"Description for '{key}' is empty"
-            )
-
-    def test_all_entries_have_permission_id(self):
-        """各 manifest dict に 'permission_id' が含まれること"""
-        manifests = self._get_manifests()
-        for key, manifest in manifests.items():
-            self.assertIn(
-                "permission_id", manifest,
-                f"Manifest for '{key}' missing 'permission_id'"
-            )
-
-    def test_permission_id_matches_handler_key(self):
-        """permission_id が handler_key の 'kernel:' を除いた部分と一致すること"""
-        manifests = self._get_manifests()
-        for key, manifest in manifests.items():
-            expected_pid = key.replace("kernel:", "", 1)
-            self.assertEqual(
-                manifest.get("permission_id"), expected_pid,
-                f"permission_id for '{key}' expected '{expected_pid}', "
-                f"got '{manifest.get('permission_id')}'"
-            )
-
-    def test_all_entries_have_risk(self):
-        """各 manifest dict に 'risk' が含まれること"""
-        manifests = self._get_manifests()
-        valid_risks = {"low", "medium", "high"}
-        for key, manifest in manifests.items():
-            self.assertIn(
-                "risk", manifest,
-                f"Manifest for '{key}' missing 'risk'"
-            )
-            self.assertIn(
-                manifest["risk"], valid_risks,
-                f"Risk for '{key}' is '{manifest['risk']}', expected one of {valid_risks}"
-            )
-
-    def test_all_entries_have_requires(self):
-        """各 manifest dict に 'requires' が含まれること"""
-        manifests = self._get_manifests()
-        for key, manifest in manifests.items():
-            self.assertIn(
-                "requires", manifest,
-                f"Manifest for '{key}' missing 'requires'"
-            )
-            self.assertIsInstance(
-                manifest["requires"], list,
-                f"'requires' for '{key}' is not a list"
-            )
-
-    def test_all_entries_have_tags(self):
-        """各 manifest dict に 'tags' が含まれること"""
-        manifests = self._get_manifests()
-        for key, manifest in manifests.items():
-            self.assertIn(
-                "tags", manifest,
-                f"Manifest for '{key}' missing 'tags'"
-            )
-            self.assertIsInstance(
-                manifest["tags"], list,
-                f"'tags' for '{key}' is not a list"
-            )
+            assert key.startswith("kernel:"), \
+                f"Handler key '{key}' does not start with 'kernel:'"
 
 
-class TestManifestsMatchHandlers(unittest.TestCase):
-    """_KERNEL_HANDLER_MANIFESTS のキー数がハンドラ数と一致すること"""
+class TestExpectedHandlerKeys:
+    """_EXPECTED_HANDLER_KEYS の後方互換テスト"""
 
-    def _count_system_handlers(self) -> Set[str]:
-        """system handlers のキーセットを取得"""
-        from rumi_ai_1_10.core_runtime.kernel_handlers_system import (
-            KernelSystemHandlersMixin,
-        )
-        # _register_system_handlers を呼ぶにはインスタンスが必要
-        # Mixin なので直接呼べないが、返り値の dict を得るために mock する
+    def test_expected_keys_equals_manifest_keys(self):
+        """_EXPECTED_HANDLER_KEYS が _KERNEL_HANDLER_MANIFESTS.keys() と一致すること"""
+        from core_runtime.kernel import _EXPECTED_HANDLER_KEYS, _KERNEL_HANDLER_MANIFESTS
 
-        class _FakeKernel(KernelSystemHandlersMixin):
-            pass
+        assert isinstance(_EXPECTED_HANDLER_KEYS, frozenset), \
+            f"Expected frozenset, got {type(_EXPECTED_HANDLER_KEYS).__name__}"
 
-        fake = _FakeKernel()
-        # _register_system_handlers は self のメソッドを参照するので
-        # 属性を mock で埋める
-        fake.diagnostics = MagicMock()
-        fake.interface_registry = MagicMock()
-        fake.event_bus = MagicMock()
-        fake.install_journal = MagicMock()
-        fake.lifecycle = MagicMock()
-        fake._flow = None
-
-        handlers = fake._register_system_handlers()
-        return set(handlers.keys())
-
-    def _count_runtime_handlers(self) -> Set[str]:
-        """runtime handlers のキーセットを取得"""
-        from rumi_ai_1_10.core_runtime.kernel_handlers_runtime import (
-            KernelRuntimeHandlersMixin,
-        )
-
-        class _FakeKernel(KernelRuntimeHandlersMixin):
-            pass
-
-        fake = _FakeKernel()
-        fake.diagnostics = MagicMock()
-        fake.interface_registry = MagicMock()
-        fake.event_bus = MagicMock()
-        fake.install_journal = MagicMock()
-        fake.lifecycle = MagicMock()
-        fake._uds_proxy_manager = None
-        fake._capability_proxy = None
-
-        handlers = fake._register_runtime_handlers()
-        return set(handlers.keys())
-
-    def test_manifest_keys_match_handler_count(self):
-        """
-        _KERNEL_HANDLER_MANIFESTS のキー数が
-        _register_system_handlers + _register_runtime_handlers のハンドラ数と一致すること
-        """
-        from rumi_ai_1_10.core_runtime.kernel import _KERNEL_HANDLER_MANIFESTS
-
-        try:
-            system_keys = self._count_system_handlers()
-        except Exception as e:
-            self.skipTest(f"Could not count system handlers: {e}")
-            return
-
-        try:
-            runtime_keys = self._count_runtime_handlers()
-        except Exception as e:
-            self.skipTest(f"Could not count runtime handlers: {e}")
-            return
-
-        all_handler_keys = system_keys | runtime_keys
-        manifest_keys = set(_KERNEL_HANDLER_MANIFESTS.keys())
-
-        # マニフェストに存在するがハンドラにないキー
-        extra_in_manifest = manifest_keys - all_handler_keys
-        # ハンドラに存在するがマニフェストにないキー
-        missing_in_manifest = all_handler_keys - manifest_keys
-
-        self.assertEqual(
-            extra_in_manifest, set(),
-            f"Keys in manifests but not in handlers: {extra_in_manifest}"
-        )
-        self.assertEqual(
-            missing_in_manifest, set(),
-            f"Keys in handlers but not in manifests: {missing_in_manifest}"
-        )
-        self.assertEqual(
-            len(manifest_keys), len(all_handler_keys),
-            f"Manifest count ({len(manifest_keys)}) != handler count ({len(all_handler_keys)})"
-        )
-
-
-class TestExpectedHandlerKeysDerivation(unittest.TestCase):
-    """_EXPECTED_HANDLER_KEYS が _KERNEL_HANDLER_MANIFESTS.keys() と一致すること"""
-
-    def test_expected_keys_match_manifests(self):
-        """_EXPECTED_HANDLER_KEYS が _KERNEL_HANDLER_MANIFESTS.keys() と一致"""
-        from rumi_ai_1_10.core_runtime.kernel import (
-            _EXPECTED_HANDLER_KEYS,
-            _KERNEL_HANDLER_MANIFESTS,
-        )
-        self.assertEqual(
-            _EXPECTED_HANDLER_KEYS,
-            frozenset(_KERNEL_HANDLER_MANIFESTS.keys()),
-            "_EXPECTED_HANDLER_KEYS does not match _KERNEL_HANDLER_MANIFESTS.keys()"
+        manifest_keys = frozenset(_KERNEL_HANDLER_MANIFESTS.keys())
+        assert _EXPECTED_HANDLER_KEYS == manifest_keys, (
+            f"_EXPECTED_HANDLER_KEYS does not match _KERNEL_HANDLER_MANIFESTS.keys(). "
+            f"Difference: {_EXPECTED_HANDLER_KEYS.symmetric_difference(manifest_keys)}"
         )
 
     def test_expected_keys_is_frozenset(self):
         """_EXPECTED_HANDLER_KEYS が frozenset であること"""
-        from rumi_ai_1_10.core_runtime.kernel import _EXPECTED_HANDLER_KEYS
-        self.assertIsInstance(_EXPECTED_HANDLER_KEYS, frozenset)
+        from core_runtime.kernel import _EXPECTED_HANDLER_KEYS
+        assert isinstance(_EXPECTED_HANDLER_KEYS, frozenset)
 
 
-class TestRegisterKernelFunctions(unittest.TestCase):
+class TestRegisterKernelFunctions:
     """_register_kernel_functions() のテスト"""
 
-    def test_register_kernel_functions_exists(self):
-        """_register_kernel_functions が存在すること"""
-        from rumi_ai_1_10.core_runtime.kernel import _register_kernel_functions
-        self.assertTrue(callable(_register_kernel_functions))
-
-    def test_register_kernel_functions_registers_entries(self):
+    def test_register_with_mock_registry(self):
         """
         _register_kernel_functions() を呼んだ後、
         FunctionRegistry に kernel function が登録されていること
         """
-        from rumi_ai_1_10.core_runtime.kernel import (
-            _KERNEL_HANDLER_MANIFESTS,
-            _register_kernel_functions,
-        )
-        from rumi_ai_1_10.core_runtime.function_registry import FunctionRegistry
-
-        registry = FunctionRegistry()
-        count = _register_kernel_functions(registry)
-
-        self.assertGreater(count, 0, "No functions were registered")
-        self.assertEqual(
-            count, len(_KERNEL_HANDLER_MANIFESTS),
-            f"Registered {count} functions, expected {len(_KERNEL_HANDLER_MANIFESTS)}"
-        )
-
-    def test_registered_entries_have_kernel_pack_id(self):
-        """登録された entry の pack_id == 'kernel' であること"""
-        from rumi_ai_1_10.core_runtime.kernel import _register_kernel_functions
-        from rumi_ai_1_10.core_runtime.function_registry import FunctionRegistry
-
-        registry = FunctionRegistry()
-        _register_kernel_functions(registry)
-
-        kernel_entries = registry.list_by_pack("kernel")
-        self.assertGreater(len(kernel_entries), 0)
-
-        for entry in kernel_entries:
-            self.assertEqual(
-                entry.pack_id, "kernel",
-                f"Entry {entry.qualified_name} has pack_id={entry.pack_id}"
-            )
-
-    def test_registered_entries_have_description(self):
-        """登録された entry に description があること"""
-        from rumi_ai_1_10.core_runtime.kernel import _register_kernel_functions
-        from rumi_ai_1_10.core_runtime.function_registry import FunctionRegistry
-
-        registry = FunctionRegistry()
-        _register_kernel_functions(registry)
-
-        for entry in registry.list_all():
-            self.assertTrue(
-                len(entry.description) > 0,
-                f"Entry {entry.qualified_name} has empty description"
-            )
-
-
-class TestRegisterKernelFunctionsWithMock(unittest.TestCase):
-    """register_kernel_function() (Phase A) を使った登録テスト"""
-
-    def test_uses_register_kernel_function_when_available(self):
-        """
-        FunctionRegistry に register_kernel_function() がある場合、
-        それを使用すること
-        """
-        from rumi_ai_1_10.core_runtime.kernel import (
-            _KERNEL_HANDLER_MANIFESTS,
-            _register_kernel_functions,
-        )
+        from core_runtime.kernel import _register_kernel_functions, _KERNEL_HANDLER_MANIFESTS
 
         mock_registry = MagicMock()
         mock_registry.register_kernel_function = MagicMock()
-        # hasattr が True を返すようにする
-        mock_registry.register_kernel_function.return_value = None
 
         count = _register_kernel_functions(mock_registry)
 
-        self.assertEqual(count, len(_KERNEL_HANDLER_MANIFESTS))
-        self.assertEqual(
-            mock_registry.register_kernel_function.call_count,
-            len(_KERNEL_HANDLER_MANIFESTS),
-        )
+        assert count == len(_KERNEL_HANDLER_MANIFESTS), \
+            f"Expected {len(_KERNEL_HANDLER_MANIFESTS)} registrations, got {count}"
+        assert mock_registry.register_kernel_function.call_count == len(_KERNEL_HANDLER_MANIFESTS)
 
-        # 各呼び出しの引数を検証
-        for call_args in mock_registry.register_kernel_function.call_args_list:
-            args, kwargs = call_args
-            key = args[0]
-            manifest = args[1]
-            self.assertTrue(key.startswith("kernel:"))
-            self.assertIn("description", manifest)
+    def test_register_with_none_registry(self):
+        """function_registry が None の場合、0 を返すこと"""
+        from core_runtime.kernel import _register_kernel_functions
+        count = _register_kernel_functions(None)
+        assert count == 0
 
-    def test_fallback_to_register_when_no_register_kernel_function(self):
+    def test_register_passes_correct_keys(self):
+        """register_kernel_function() に正しいキーとmanifestが渡されること"""
+        from core_runtime.kernel import _register_kernel_functions, _KERNEL_HANDLER_MANIFESTS
+
+        mock_registry = MagicMock()
+        calls = {}
+
+        def capture_call(key, manifest):
+            calls[key] = manifest
+
+        mock_registry.register_kernel_function = capture_call
+
+        _register_kernel_functions(mock_registry)
+
+        for key in _KERNEL_HANDLER_MANIFESTS:
+            assert key in calls, f"Key '{key}' was not registered"
+            assert calls[key] is _KERNEL_HANDLER_MANIFESTS[key], \
+                f"Manifest for '{key}' does not match"
+
+    def test_register_fallback_without_register_kernel_function(self):
         """
-        register_kernel_function() がない場合、通常の register() を使うこと
+        register_kernel_function() が存在しない場合、
+        フォールバック（汎用 register()）で登録されること
         """
-        from rumi_ai_1_10.core_runtime.kernel import _register_kernel_functions
-        from rumi_ai_1_10.core_runtime.function_registry import FunctionRegistry
+        from core_runtime.kernel import _register_kernel_functions, _KERNEL_HANDLER_MANIFESTS
 
-        # register_kernel_function を持たない FunctionRegistry
-        registry = FunctionRegistry()
-        # register_kernel_function を削除（存在しないことを確認）
-        if hasattr(registry, 'register_kernel_function'):
-            # Phase A が適用されている場合、このテストは register_kernel_function 経由になる
-            # それでも登録自体は成功するはず
-            pass
+        mock_registry = MagicMock(spec=[])
+        # getattr(..., "register_kernel_function", None) が None を返す
+        mock_registry.register = MagicMock(return_value=True)
 
-        count = _register_kernel_functions(registry)
-        self.assertGreater(count, 0)
+        count = _register_kernel_functions(mock_registry)
+
+        assert count == len(_KERNEL_HANDLER_MANIFESTS), \
+            f"Fallback registration count mismatch: {count}"
+        assert mock_registry.register.call_count == len(_KERNEL_HANDLER_MANIFESTS)
+
+    def test_registered_entry_properties(self):
+        """
+        フォールバック登録で作成された FunctionEntry が
+        pack_id="kernel" であること
+        """
+        from core_runtime.kernel import _register_kernel_functions
+
+        captured_entries = []
+        mock_registry = MagicMock(spec=[])
+
+        def capture_register(entry):
+            captured_entries.append(entry)
+            return True
+
+        mock_registry.register = capture_register
+
+        _register_kernel_functions(mock_registry)
+
+        assert len(captured_entries) > 0, "No entries were registered"
+
+        for entry in captured_entries:
+            assert entry.pack_id == "kernel", \
+                f"Entry {entry.qualified_name} has pack_id={entry.pack_id}, expected 'kernel'"
 
 
-if __name__ == "__main__":
-    unittest.main()
+class TestStartupFlowIntegration:
+    """startup flow との統合テスト（YAMLパース）"""
+
+    def test_startup_flow_has_kernel_function_register_step(self):
+        """00_startup.flow.yaml に kernel function 登録ステップが含まれること"""
+        flow_path = Path(__file__).resolve().parent.parent.parent / "flows" / "00_startup.flow.yaml"
+        if not flow_path.exists():
+            pytest.skip(f"Flow file not found: {flow_path}")
+
+        try:
+            import yaml
+        except ImportError:
+            pytest.skip("PyYAML not installed")
+
+        content = flow_path.read_text(encoding="utf-8")
+        flow_def = yaml.safe_load(content)
+
+        steps = flow_def.get("steps", [])
+        step_ids = [s.get("id") for s in steps if isinstance(s, dict)]
+
+        assert "kernel_function_register" in step_ids, \
+            "Startup flow is missing 'kernel_function_register' step"
+
+    def test_kernel_function_register_step_in_ecosystem_phase(self):
+        """kernel_function_register ステップが ecosystem phase, priority 15 にあること"""
+        flow_path = Path(__file__).resolve().parent.parent.parent / "flows" / "00_startup.flow.yaml"
+        if not flow_path.exists():
+            pytest.skip(f"Flow file not found: {flow_path}")
+
+        try:
+            import yaml
+        except ImportError:
+            pytest.skip("PyYAML not installed")
+
+        content = flow_path.read_text(encoding="utf-8")
+        flow_def = yaml.safe_load(content)
+
+        steps = flow_def.get("steps", [])
+        for step in steps:
+            if isinstance(step, dict) and step.get("id") == "kernel_function_register":
+                assert step.get("phase") == "ecosystem", \
+                    f"Expected phase 'ecosystem', got '{step.get('phase')}'"
+                assert step.get("priority") == 15, \
+                    f"Expected priority 15, got {step.get('priority')}"
+                return
+
+        pytest.fail("kernel_function_register step not found")
