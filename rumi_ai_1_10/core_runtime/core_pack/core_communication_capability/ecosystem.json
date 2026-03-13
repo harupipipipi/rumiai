@@ -1,0 +1,29 @@
+{
+  "pack_id": "core_communication_capability",
+  "pack_identity": "core:rumi/communication-capability",
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": []
+  },
+  "metadata": {
+    "name": "Core Communication Capability",
+    "description": "Rumi AI OS core pack that provides inter-pack communication capabilities. Includes inbox message sending and pack file modification proposals.",
+    "author": "Rumi AI Team",
+    "license": "MIT",
+    "is_core_pack": true,
+    "capability_handlers": {
+      "inbox_send": {
+        "handler_id": "core.communication.send",
+        "permission_id": "pack.inbox.send",
+        "path": "share/capability_handlers/inbox_send"
+      },
+      "propose_patch": {
+        "handler_id": "core.communication.propose_patch",
+        "permission_id": "pack.update.propose_patch",
+        "path": "share/capability_handlers/propose_patch"
+      }
+    }
+  },
+  "dependencies": {},
+  "components": {}
+}
