@@ -35,6 +35,11 @@ logger = logging.getLogger(__name__)
 
 _PROTECTED_VOCAB_PREFIXES: frozenset = frozenset({"system.", "kernel.", "core."})
 
+_VALID_CALLING_CONVENTIONS: frozenset = frozenset({
+    "kernel", "subprocess", "block", "python_host",
+    "python_docker", "binary", "command",
+})
+
 
 # =====================================================================
 # データクラス
@@ -67,6 +72,12 @@ class FunctionEntry:
     risk: Optional[str] = None
     grant_config: Optional[Dict[str, Any]] = None
     vocab_aliases: Optional[List[str]] = None
+    # --- Phase A: New fields (shared spec) ---
+    permission_id: Optional[str] = None
+    handler_py_sha256: Optional[str] = None
+    is_builtin: bool = False
+    grant_config_schema: Optional[dict] = None
+    calling_convention: Optional[str] = None
 
     @property
     def qualified_name(self) -> str:
@@ -93,6 +104,11 @@ class FunctionEntry:
             "risk": self.risk,
             "grant_config": self.grant_config,
             "vocab_aliases": self.vocab_aliases,
+            "permission_id": self.permission_id,
+            "handler_py_sha256": self.handler_py_sha256,
+            "is_builtin": self.is_builtin,
+            "grant_config_schema": self.grant_config_schema,
+            "calling_convention": self.calling_convention,
         }
 
 
@@ -123,6 +139,7 @@ class FunctionRegistry:
         self._tag_index: Dict[str, set] = {}  # tag -> {qualified_name, ...}
         self._vocab_registry = vocab_registry
         self._vocab_alias_map: Dict[str, str] = {}  # alias -> qualified_name
+        self._permission_id_index: Dict[str, FunctionEntry] = {}  # permission_id -> entry
 
     # -----------------------------------------------------------------
     # 内部ヘルパー
@@ -185,6 +202,33 @@ class FunctionRegistry:
             if alias in self._vocab_alias_map and self._vocab_alias_map[alias] == qname:
                 del self._vocab_alias_map[alias]
 
+    def _add_to_permission_id_index(self, entry: FunctionEntry) -> None:
+        """permission_id が非 None なら _permission_id_index に追加する。"""
+        if entry.permission_id is not None:
+            self._permission_id_index[entry.permission_id] = entry
+
+    def _remove_from_permission_id_index(self, entry: FunctionEntry) -> None:
+        """entry の permission_id を _permission_id_index から削除する。"""
+        if entry.permission_id is not None and entry.permission_id in self._permission_id_index:
+            if self._permission_id_index[entry.permission_id] is entry:
+                del self._permission_id_index[entry.permission_id]
+
+    def _apply_filters(self, entries: List[FunctionEntry], filters: dict) -> List[FunctionEntry]:
+        """filters dict に基づいてエントリをフィルタリングする。"""
+        result = entries
+        if "pack_id" in filters:
+            result = [e for e in result if e.pack_id == filters["pack_id"]]
+        if "tags" in filters:
+            filter_tags = set(filters["tags"])
+            result = [e for e in result if filter_tags.issubset(set(e.tags))]
+        if "calling_convention" in filters:
+            result = [e for e in result if e.calling_convention == filters["calling_convention"]]
+        if "is_builtin" in filters:
+            result = [e for e in result if e.is_builtin == filters["is_builtin"]]
+        if "permission_id" in filters:
+            result = [e for e in result if e.permission_id == filters["permission_id"]]
+        return result
+
     @staticmethod
     def _entry_from_kwargs(
         pack_id: str,
@@ -240,6 +284,11 @@ class FunctionRegistry:
             risk=m.get("risk"),
             grant_config=m.get("grant_config"),
             vocab_aliases=m.get("vocab_aliases"),
+            permission_id=m.get("permission_id"),
+            handler_py_sha256=m.get("handler_py_sha256"),
+            is_builtin=m.get("is_builtin", False),
+            grant_config_schema=m.get("grant_config_schema"),
+            calling_convention=m.get("calling_convention"),
         )
 
     # -----------------------------------------------------------------
@@ -305,6 +354,7 @@ class FunctionRegistry:
             self._entries[qname] = resolved_entry
             self._add_to_tag_index(resolved_entry)
             self._register_vocab_aliases(resolved_entry)
+            self._add_to_permission_id_index(resolved_entry)
             return True
 
     def register_pack(
@@ -344,6 +394,44 @@ class FunctionRegistry:
             result.success = len(result.errors) == 0
         return result
 
+    def register_kernel_function(self, key: str, manifest: dict) -> None:
+        """
+        manifest dict から FunctionEntry を生成し register() する。
+
+        pack_id = "kernel" 固定
+        calling_convention = "kernel" 固定
+        is_builtin = True 固定
+
+        Args:
+            key: function_id として使用する文字列
+            manifest: manifest.json スキーマに準拠した dict
+        """
+        m = manifest or {}
+        entry = FunctionEntry(
+            function_id=key,
+            pack_id="kernel",
+            description=m.get("description", ""),
+            requires=m.get("requires", []),
+            caller_requires=m.get("caller_requires", []),
+            host_execution=m.get("host_execution", False),
+            tags=m.get("tags", []),
+            input_schema=m.get("input_schema", {}),
+            output_schema=m.get("output_schema", {}),
+            manifest=m,
+            runtime=m.get("runtime", "python"),
+            extensions=m.get("extensions", {}),
+            entrypoint=m.get("entrypoint"),
+            risk=m.get("risk"),
+            grant_config=m.get("grant_config"),
+            vocab_aliases=m.get("vocab_aliases"),
+            permission_id=m.get("permission_id"),
+            handler_py_sha256=m.get("handler_py_sha256"),
+            is_builtin=True,
+            grant_config_schema=m.get("grant_config_schema"),
+            calling_convention="kernel",
+        )
+        self.register(entry)
+
     # -----------------------------------------------------------------
     # 取得
     # -----------------------------------------------------------------
@@ -352,6 +440,11 @@ class FunctionRegistry:
         """qualified_name (pack_id:function_id) で取得する。"""
         with self._lock:
             return self._entries.get(qualified_name)
+
+    def get_by_permission_id(self, permission_id: str) -> Optional[FunctionEntry]:
+        """permission_id から FunctionEntry を O(1) で逆引きする。"""
+        with self._lock:
+            return self._permission_id_index.get(permission_id)
 
     # -----------------------------------------------------------------
     # 一覧
@@ -388,6 +481,7 @@ class FunctionRegistry:
                 entry = self._entries.pop(qname)
                 self._remove_from_tag_index(entry)
                 self._unregister_vocab_aliases(entry)
+                self._remove_from_permission_id_index(entry)
             return len(to_remove)
 
     def clear(self) -> None:
@@ -395,6 +489,7 @@ class FunctionRegistry:
             self._entries.clear()
             self._tag_index.clear()
             self._vocab_alias_map.clear()
+            self._permission_id_index.clear()
 
     # -----------------------------------------------------------------
     # 検索: タグ
@@ -512,45 +607,79 @@ class FunctionRegistry:
     # 検索: 統合検索
     # -----------------------------------------------------------------
 
-    def search_unified(self, query: str, limit: int = 20) -> List[FunctionEntry]:
+    def search_unified(
+        self,
+        query: str = "",
+        filters: Optional[dict] = None,
+        limit: int = 20,
+    ) -> List[FunctionEntry]:
         """
-        alias → tag → vocab → fuzzy の順で検索し、
-        重複排除して結果をマージする統合検索。
+        全フィールド横断のテキスト検索 + フィルタリングを行う統合検索。
+
+        query が指定された場合: alias -> tag -> vocab -> fuzzy の順で検索し、
+        重複排除して結果をマージする。
+        query が空で filters がある場合: 全エントリに対して filters を適用する。
+        query が空で filters もない場合: 空リストを返す。
+
+        filters のキー（存在する場合のみ適用）:
+            pack_id: 完全一致
+            tags: リスト包含（filter の tags が entry の tags のサブセット）
+            calling_convention: 完全一致
+            is_builtin: 完全一致
+            permission_id: 完全一致
+
+        Args:
+            query: テキスト検索クエリ
+            filters: フィルタリング条件の dict
+            limit: 最大返却件数
+
+        Returns:
+            マッチした FunctionEntry のリスト
         """
-        if not query:
-            return []
         with self._lock:
-            seen: set = set()
-            results: List[FunctionEntry] = []
+            # --- 候補の収集 ---
+            if query:
+                seen: set = set()
+                candidates: List[FunctionEntry] = []
 
-            # 1. resolve_by_alias (完全一致)
-            alias_entry = self.resolve_by_alias(query)
-            if alias_entry is not None:
-                seen.add(alias_entry.qualified_name)
-                results.append(alias_entry)
+                # 1. resolve_by_alias (完全一致)
+                alias_entry = self.resolve_by_alias(query)
+                if alias_entry is not None:
+                    seen.add(alias_entry.qualified_name)
+                    candidates.append(alias_entry)
 
-            # 2. search_by_tag
-            tag_entries = self.search_by_tag([query])
-            for e in tag_entries:
-                if e.qualified_name not in seen:
-                    seen.add(e.qualified_name)
-                    results.append(e)
+                # 2. search_by_tag
+                tag_entries = self.search_by_tag([query])
+                for e in tag_entries:
+                    if e.qualified_name not in seen:
+                        seen.add(e.qualified_name)
+                        candidates.append(e)
 
-            # 3. search_by_vocab
-            vocab_entries = self.search_by_vocab(query)
-            for e in vocab_entries:
-                if e.qualified_name not in seen:
-                    seen.add(e.qualified_name)
-                    results.append(e)
+                # 3. search_by_vocab
+                vocab_entries = self.search_by_vocab(query)
+                for e in vocab_entries:
+                    if e.qualified_name not in seen:
+                        seen.add(e.qualified_name)
+                        candidates.append(e)
 
-            # 4. search_fuzzy
-            fuzzy_entries = self.search_fuzzy(query)
-            for _, e in fuzzy_entries:
-                if e.qualified_name not in seen:
-                    seen.add(e.qualified_name)
-                    results.append(e)
+                # 4. search_fuzzy
+                fuzzy_entries = self.search_fuzzy(query)
+                for _, e in fuzzy_entries:
+                    if e.qualified_name not in seen:
+                        seen.add(e.qualified_name)
+                        candidates.append(e)
+            elif filters:
+                # query が空で filters がある場合: 全エントリを候補とする
+                candidates = list(self._entries.values())
+            else:
+                # query が空で filters もない場合
+                return []
 
-            return results[:limit]
+            # --- フィルタリング ---
+            if filters:
+                candidates = self._apply_filters(candidates, filters)
+
+            return candidates[:limit]
 
 
 # =====================================================================
