@@ -872,7 +872,40 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         "input_schema": {"type": "object", "properties": {"output_dir": {"type": "string", "default": "user_data/pending"}}},
         "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
     },
+
+    # --- Phase B-1: kernel function registration ---
+    "kernel:register_kernel_functions": {
+        "description": "Register all kernel handler manifests into FunctionRegistry",
+        "permission_id": "kernel:register_kernel_functions",
+        "risk": "medium",
+        "requires": [],
+        "tags": ["kernel", "system", "init", "function_registry"],
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+        },
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "_kernel_step_status": {
+                    "type": "string",
+                    "enum": ["success", "failed"],
+                },
+                "_kernel_step_meta": {
+                    "type": "object",
+                    "properties": {
+                        "registered_count": {"type": "integer"},
+                        "error": {"type": "string"},
+                    },
+                },
+            },
+            "required": ["_kernel_step_status"],
+        },
+    },
 }
+
+# Phase B-1: _EXPECTED_HANDLER_KEYS derived from _KERNEL_HANDLER_MANIFESTS (原則 D)
+_EXPECTED_HANDLER_KEYS = frozenset(_KERNEL_HANDLER_MANIFESTS.keys())
 
 # =====================================================================
 # Phase B-1: _EXPECTED_HANDLER_KEYS — 後方互換（_KERNEL_HANDLER_MANIFESTS から導出）
