@@ -10,6 +10,9 @@
     "docker",
     "container"
   ],
+  "vocab_aliases": [
+    "docker.exec"
+  ],
   "input_schema": {
     "type": "object",
     "properties": {

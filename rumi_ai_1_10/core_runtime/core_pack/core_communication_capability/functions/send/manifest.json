@@ -12,7 +12,8 @@
   ],
   "risk": "medium",
   "vocab_aliases": [
-    "inbox.send"
+    "inbox.send",
+    "pack.inbox.send"
   ],
   "input_schema": {
     "type": "object",

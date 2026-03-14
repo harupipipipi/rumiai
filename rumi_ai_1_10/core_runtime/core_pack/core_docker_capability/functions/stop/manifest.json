@@ -10,6 +10,9 @@
     "docker",
     "container"
   ],
+  "vocab_aliases": [
+    "docker.stop"
+  ],
   "input_schema": {
     "type": "object",
     "properties": {

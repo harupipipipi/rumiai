@@ -13,7 +13,8 @@
   ],
   "risk": "high",
   "vocab_aliases": [
-    "code.propose_patch"
+    "code.propose_patch",
+    "pack.update.propose_patch"
   ],
   "input_schema": {
     "type": "object",
