@@ -161,3 +161,67 @@ class SecretsHandlersMixin:
         except Exception as e:
             _log_internal_error("secrets_grants_list", e)
             return {"grants": {}, "error": _SAFE_ERROR_MSG}
+
+    # ------------------------------------------------------------------ #
+    # W19-FIX: Missing handler methods
+    # ------------------------------------------------------------------ #
+
+    def _secrets_grants_get_pack(self, pack_id: str) -> dict:
+        """GET /api/secrets/grants/{pack_id}
+
+        指定 Pack の Secret Grant 情報を返す。
+        """
+        if not pack_id:
+            return {"error": "Missing 'pack_id'"}
+
+        try:
+            mgr = _get_secrets_grant_manager()
+            granted_keys = mgr.get_granted_keys(pack_id)
+            return {
+                "pack_id": pack_id,
+                "granted_keys": granted_keys,
+                "count": len(granted_keys),
+            }
+        except Exception as e:
+            _log_internal_error("secrets_grants_get_pack", e)
+            return {"error": _SAFE_ERROR_MSG}
+
+    def _secrets_grants_delete_pack(self, pack_id: str) -> dict:
+        """DELETE /api/secrets/grants/{pack_id}
+
+        指定 Pack の全 Secret Grant を削除する。
+        """
+        if not pack_id:
+            return {"error": "Missing 'pack_id'"}
+
+        try:
+            mgr = _get_secrets_grant_manager()
+            result = mgr.delete_grant(pack_id)
+            if result:
+                return {"success": True, "pack_id": pack_id}
+            else:
+                return {"error": f"No grant found for pack_id '{pack_id}'"}
+        except Exception as e:
+            _log_internal_error("secrets_grants_delete_pack", e)
+            return {"error": _SAFE_ERROR_MSG}
+
+    def _secrets_grants_delete_key(self, pack_id: str, secret_key: str) -> dict:
+        """DELETE /api/secrets/grants/{pack_id}/{secret_key}
+
+        指定 Pack の特定キーの Grant を削除する。
+        """
+        if not pack_id:
+            return {"error": "Missing 'pack_id'"}
+        if not secret_key:
+            return {"error": "Missing 'secret_key'"}
+
+        try:
+            mgr = _get_secrets_grant_manager()
+            result = mgr.revoke_secret_access(pack_id, [secret_key])
+            if result:
+                return {"success": True, "pack_id": pack_id, "revoked_key": secret_key}
+            else:
+                return {"error": f"No grant found for pack_id '{pack_id}' or key '{secret_key}'"}
+        except Exception as e:
+            _log_internal_error("secrets_grants_delete_key", e)
+            return {"error": _SAFE_ERROR_MSG}
