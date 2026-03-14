@@ -10,15 +10,15 @@ Trust / Grant を検証し、ハンドラーをサブプロセスで実行する
 - 全操作を監査ログに記録
 - Pack への返却は汎用エラー（詳細は監査へ）
 
-Phase B-3: FunctionRegistry 経由の統一パス (_unified_execute) を追加。
-           旧パスは _legacy_execute にラップ。
-Wave FIX-A1: _register_builtin_handlers() で core_pack function を FunctionRegistry に登録。
-Wave FIX-A2: _unified_execute() に calling_convention 分岐を追加。
+Phase D: FunctionRegistry を唯一のレジストリとして統一。
+         _unified_execute() が唯一の実行パス。
+         calling_convention 分岐による実行方式の選択。
 """
 
 from __future__ import annotations
 
 import collections
+import hashlib
 import json
 import os
 import subprocess
@@ -51,7 +51,7 @@ try:
 except ImportError:
     _DockerRunBuilder = None
 
-# Phase B-3: FunctionRegistry / FunctionEntry import
+# FunctionRegistry / FunctionEntry import
 try:
     from .function_registry import FunctionRegistry, FunctionEntry
 except ImportError:
@@ -105,11 +105,23 @@ _flow_call_stack_local = threading.local()
 SECRET_GET_PERMISSION_ID = "secrets.get"
 DEFAULT_SECRET_GET_RATE_LIMIT = 60  # 回/分/principal
 
-# FIX-A2: calling_convention 有効値
+# calling_convention 有効値
 _VALID_CALLING_CONVENTIONS = frozenset({
     "kernel", "subprocess", "block", "python_host",
     "python_docker", "binary", "command",
 })
+
+
+def compute_file_sha256(file_path: Path) -> str:
+    """ファイルの SHA-256 ハッシュを計算"""
+    h = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        while True:
+            chunk = f.read(65536)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
 
 
 @dataclass
@@ -134,7 +146,7 @@ class CapabilityResponse:
 @dataclass
 class _HandlerDefAdapter:
     """
-    Phase B-3: FunctionEntry → HandlerDefinition 互換アダプタ。
+    FunctionEntry → HandlerDefinition 互換アダプタ。
 
     _execute_handler_subprocess() が要求する HandlerDefinition のフィールドを
     FunctionEntry から構築する。
@@ -163,17 +175,16 @@ class CapabilityExecutor:
     Capability 実行エンジン
 
     要求を受けて:
-    1. HandlerRegistry から handler を検索
+    1. FunctionRegistry から FunctionEntry を検索
     2. TrustStore で sha256 を検証
     3. GrantManager で principal×permission を検証
-    4. サブプロセスで handler.py を実行
+    4. calling_convention に応じて実行
     5. 監査ログに記録
     """
 
     def __init__(self):
         self._lock = threading.Lock()
         self._initialized = False
-        self._handler_registry = None
         self._trust_store = None
         self._grant_manager = None
         # rate limit 状態: principal_id -> deque of timestamps
@@ -189,8 +200,6 @@ class CapabilityExecutor:
         self._permission_manager = None
         # Wave 29: core function handler table
         self._core_function_handlers: Dict[str, str] = {}
-        # FIX-A1: builtin handlers registration flag
-        self._builtin_handlers_registered = False
 
     def set_kernel(self, kernel) -> None:
         """
@@ -208,27 +217,18 @@ class CapabilityExecutor:
         コンポーネントを初期化
 
         Returns:
-            ハンドラーレジストリのロードが成功したか
+            初期化が成功したか
         """
         with self._lock:
             if self._initialized:
-                return self._handler_registry is not None and self._handler_registry.is_loaded()
+                return True
 
-            from .capability_handler_registry import get_capability_handler_registry
             from .capability_trust_store import get_capability_trust_store
             from .capability_grant_manager import get_capability_grant_manager
 
             try:
-                self._handler_registry = get_capability_handler_registry()
                 self._trust_store = get_capability_trust_store()
                 self._grant_manager = get_capability_grant_manager()
-
-                # ハンドラーレジストリをロード
-                result = self._handler_registry.load_all()
-                if not result.success:
-                    # 重複 permission_id → 起動失敗
-                    # SV-5 fix: 失敗時は _initialized を False のままにし、再初期化を許可
-                    return False
 
                 # Trust store をロード
                 self._trust_store.load()
@@ -248,159 +248,15 @@ class CapabilityExecutor:
                     "core_docker_capability": "docker_capability_handler",
                 }
 
-                # FIX-A1: core_pack function を FunctionRegistry に登録
-                self._register_builtin_handlers()
-
-                # SV-5 fix: 全ステップ成功時のみ _initialized = True
                 self._initialized = True
                 return True
             except Exception as exc:
-                # SV-5 fix: 例外発生時は _initialized を False のままにする
                 logger.error("CapabilityExecutor initialization failed: %s", exc)
                 return False
 
     def register_core_handler(self, pack_id: str, di_service_name: str) -> None:
         """core function handler を動的に登録する。"""
         self._core_function_handlers[pack_id] = di_service_name
-
-    # ------------------------------------------------------------------
-    # FIX-A1: _register_builtin_handlers — core_pack function を FunctionRegistry に登録
-    # ------------------------------------------------------------------
-
-    def _register_builtin_handlers(self) -> int:
-        """
-        core_pack ディレクトリを走査し、各 function の manifest.json を読み込んで
-        FunctionRegistry に FunctionEntry として登録する。
-
-        原則 H: manifest.json の値をそのまま信頼する。
-
-        走査パス: CORE_PACK_DIR / <pack_id> / functions / <function_id> / manifest.json
-
-        Returns:
-            登録した function 数
-        """
-        if self._builtin_handlers_registered:
-            return 0
-
-        fr = self._function_registry
-        if fr is None:
-            logger.warning(
-                "_register_builtin_handlers: FunctionRegistry not available, skipping"
-            )
-            return 0
-
-        if FunctionEntry is None:
-            logger.warning(
-                "_register_builtin_handlers: FunctionEntry not importable, skipping"
-            )
-            return 0
-
-        core_pack_dir = Path(_CORE_PACK_DIR)
-        if not core_pack_dir.is_dir():
-            logger.warning(
-                "_register_builtin_handlers: core_pack dir not found: %s",
-                core_pack_dir,
-            )
-            return 0
-
-        registered = 0
-
-        for pack_dir in sorted(core_pack_dir.iterdir()):
-            if not pack_dir.is_dir() or pack_dir.name.startswith("."):
-                continue
-
-            # pack_id を ecosystem.json から取得（フォールバック: ディレクトリ名）
-            pack_id = pack_dir.name
-            eco_json_path = pack_dir / "ecosystem.json"
-            if eco_json_path.is_file():
-                try:
-                    with open(eco_json_path, "r", encoding="utf-8") as f:
-                        eco_data = json.load(f)
-                    pack_id = eco_data.get("pack_id", pack_dir.name)
-                except Exception:
-                    pass
-
-            functions_dir = pack_dir / "functions"
-            if not functions_dir.is_dir():
-                continue
-
-            for func_dir in sorted(functions_dir.iterdir()):
-                if not func_dir.is_dir() or func_dir.name.startswith("."):
-                    continue
-
-                manifest_path = func_dir / "manifest.json"
-                if not manifest_path.is_file():
-                    continue
-
-                try:
-                    with open(manifest_path, "r", encoding="utf-8") as f:
-                        manifest = json.load(f)
-                except Exception as exc:
-                    logger.warning(
-                        "_register_builtin_handlers: Failed to read %s: %s",
-                        manifest_path, exc,
-                    )
-                    continue
-
-                function_id = manifest.get("function_id", func_dir.name)
-
-                # main.py パスを解決
-                main_py_path = func_dir / "main.py"
-                if not main_py_path.is_file():
-                    main_py_path = None
-
-                # FunctionEntry を構築（原則 H: manifest の値をそのまま信頼）
-                entry = FunctionEntry(
-                    function_id=function_id,
-                    pack_id=pack_id,
-                    description=manifest.get("description", ""),
-                    requires=manifest.get("requires", []),
-                    caller_requires=manifest.get("caller_requires", []),
-                    host_execution=manifest.get("host_execution", False),
-                    tags=manifest.get("tags", []),
-                    input_schema=manifest.get("input_schema", {}),
-                    output_schema=manifest.get("output_schema", {}),
-                    function_dir=str(func_dir),
-                    main_py_path=str(main_py_path) if main_py_path else None,
-                    manifest=manifest,
-                    runtime=manifest.get("runtime", "python"),
-                    command=manifest.get("command", []),
-                    docker_image=manifest.get("docker_image", ""),
-                    extensions=manifest.get("extensions", {}),
-                    entrypoint=manifest.get("entrypoint"),
-                    risk=manifest.get("risk"),
-                    grant_config=manifest.get("grant_config"),
-                    vocab_aliases=manifest.get("vocab_aliases"),
-                    permission_id=manifest.get("permission_id"),
-                    handler_py_sha256=manifest.get("handler_py_sha256"),
-                    is_builtin=True,
-                    grant_config_schema=manifest.get("grant_config_schema"),
-                    calling_convention=manifest.get("calling_convention"),
-                )
-
-                try:
-                    if fr.register(entry):
-                        registered += 1
-                        logger.debug(
-                            "_register_builtin_handlers: Registered %s:%s",
-                            pack_id, function_id,
-                        )
-                    else:
-                        logger.debug(
-                            "_register_builtin_handlers: Skipped duplicate %s:%s",
-                            pack_id, function_id,
-                        )
-                except Exception as exc:
-                    logger.warning(
-                        "_register_builtin_handlers: Failed to register %s:%s: %s",
-                        pack_id, function_id, exc,
-                    )
-
-        self._builtin_handlers_registered = True
-        logger.info(
-            "_register_builtin_handlers: Registered %d core_pack functions", registered,
-        )
-        return registered
 
     # ------------------------------------------------------------------
 
@@ -429,33 +285,45 @@ class CapabilityExecutor:
         if request.get("type") == "function.call":
             return self._execute_function_call(principal_id, request, start_time)
 
-        # Phase B-3: 新パス — FunctionRegistry で解決を試みる
+        # permission_id バリデーション
         permission_id = request.get("permission_id")
-        if permission_id and isinstance(permission_id, str):
-            entry = self._resolve_entry(permission_id)
-            if entry is not None:
-                return self._unified_execute(entry, principal_id, request, start_time)
+        if not permission_id or not isinstance(permission_id, str):
+            resp = CapabilityResponse(
+                success=False,
+                error="Missing or invalid permission_id",
+                error_type="invalid_request",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+            self._audit(principal_id, permission_id or "", None, resp,
+                        request.get("args", {}), request.get("request_id", ""))
+            return resp
 
-        # Phase B-3: 旧パス — フォールバック
-        return self._legacy_execute(principal_id, request, start_time)
+        # FunctionRegistry で解決
+        entry = self._resolve_entry(permission_id)
+        if entry is not None:
+            return self._unified_execute(entry, principal_id, request, start_time)
+
+        # 未登録の permission_id → handler_not_found（フォールバックなし）
+        args = request.get("args", {})
+        request_id = request.get("request_id", "")
+        resp = CapabilityResponse(
+            success=False,
+            error="Permission denied",
+            error_type="handler_not_found",
+            latency_ms=(time.time() - start_time) * 1000,
+        )
+        self._audit(
+            principal_id, permission_id, None, resp, args, request_id,
+            detail_reason=f"No handler registered for permission_id '{permission_id}'",
+        )
+        return resp
 
     # ------------------------------------------------------------------
-    # Phase B-3: _resolve_entry
+    # _resolve_entry
     # ------------------------------------------------------------------
 
     def _resolve_entry(self, permission_id: str):
-        """
-        FunctionRegistry の resolve_by_alias() で permission_id から
-        FunctionEntry を検索する。
-
-        FunctionRegistry が利用不可の場合は None を返す。
-
-        Args:
-            permission_id: 検索対象の permission_id
-
-        Returns:
-            FunctionEntry or None
-        """
+        """FunctionRegistry の resolve_by_alias() で FunctionEntry を検索する。"""
         fr = self._function_registry
         if fr is None:
             return None
@@ -465,36 +333,11 @@ class CapabilityExecutor:
             return None
 
     # ------------------------------------------------------------------
-    # Phase B-3 + FIX-A2: _unified_execute
+    # _unified_execute
     # ------------------------------------------------------------------
 
-    def _unified_execute(
-        self,
-        entry,
-        principal_id: str,
-        request: Dict[str, Any],
-        start_time: float,
-    ) -> CapabilityResponse:
-        """
-        FunctionEntry ベースで統一された実行パス。
-
-        既存の permission_id パスと同等のセキュリティチェックと実行を行う:
-        1. rate limit チェック
-        2. Trust チェック (builtin バイパス or sha256 検証)
-        3. Grant チェック (opt-in: grant_config が非 None のときのみ)
-        4. calling_convention 分岐 → 実行
-           None/未知の場合は既存の permission_id ベース分岐にフォールバック
-
-        Args:
-            entry: FunctionEntry
-            principal_id: 主体ID
-            request: リクエスト辞書
-            start_time: 開始時刻
-
-        Returns:
-            CapabilityResponse
-        """
-        # vocab_aliases から effective_permission_id を取得
+    def _unified_execute(self, entry, principal_id, request, start_time):
+        """FunctionEntry ベースで統一された実行パス。"""
         effective_permission_id = None
         if entry.vocab_aliases:
             effective_permission_id = entry.vocab_aliases[0]
@@ -502,37 +345,24 @@ class CapabilityExecutor:
             effective_permission_id = entry.qualified_name
 
         args = request.get("args", {})
-        timeout_seconds = min(
-            float(request.get("timeout_seconds", DEFAULT_TIMEOUT)),
-            MAX_TIMEOUT,
-        )
+        timeout_seconds = min(float(request.get("timeout_seconds", DEFAULT_TIMEOUT)), MAX_TIMEOUT)
         request_id = request.get("request_id", "")
         handler_id = entry.qualified_name
 
         # 1. rate limit チェック（secrets.get のみ）
         if effective_permission_id == SECRET_GET_PERMISSION_ID:
             if not self._check_rate_limit(principal_id):
-                resp = CapabilityResponse(
-                    success=False,
-                    error="Rate limited",
-                    error_type="rate_limited",
-                    latency_ms=(time.time() - start_time) * 1000,
-                )
-                self._audit(
-                    principal_id, effective_permission_id, handler_id, resp, args, request_id,
-                    detail_reason=f"Rate limit exceeded ({self._secret_get_rate_limit}/min)",
-                )
+                resp = CapabilityResponse(success=False, error="Rate limited", error_type="rate_limited",
+                                          latency_ms=(time.time() - start_time) * 1000)
+                self._audit(principal_id, effective_permission_id, handler_id, resp, args, request_id,
+                            detail_reason=f"Rate limit exceeded ({self._secret_get_rate_limit}/min)")
                 return resp
 
         # 初期化チェック
         if not self._initialized:
             if not self.initialize():
-                resp = CapabilityResponse(
-                    success=False,
-                    error="Capability system failed to initialize",
-                    error_type="initialization_error",
-                    latency_ms=(time.time() - start_time) * 1000,
-                )
+                resp = CapabilityResponse(success=False, error="Capability system failed to initialize",
+                                          error_type="initialization_error", latency_ms=(time.time() - start_time) * 1000)
                 self._audit(principal_id, effective_permission_id, handler_id, resp, args, request_id)
                 return resp
 
@@ -541,108 +371,58 @@ class CapabilityExecutor:
         builtin_sha256 = None
 
         if is_builtin:
-            # built-in: trust bypass（コア同梱のため信頼済み）
             if entry.main_py_path and Path(entry.main_py_path).is_file():
                 try:
-                    from .capability_handler_registry import compute_file_sha256
                     builtin_sha256 = compute_file_sha256(Path(entry.main_py_path))
                 except Exception:
                     builtin_sha256 = "compute_failed"
         else:
-            # 非 built-in: 実行時に sha256 を再計算して Trust 検証
             if not entry.main_py_path or not Path(entry.main_py_path).is_file():
-                resp = CapabilityResponse(
-                    success=False,
-                    error="Permission denied",
-                    error_type="trust_denied",
-                    latency_ms=(time.time() - start_time) * 1000,
-                )
-                self._audit(
-                    principal_id, effective_permission_id, handler_id, resp, args, request_id,
-                    trusted=False,
-                    detail_reason="main_py_path not found for trust verification",
-                )
+                resp = CapabilityResponse(success=False, error="Permission denied", error_type="trust_denied",
+                                          latency_ms=(time.time() - start_time) * 1000)
+                self._audit(principal_id, effective_permission_id, handler_id, resp, args, request_id,
+                            trusted=False, detail_reason="main_py_path not found for trust verification")
                 return resp
-
             try:
-                from .capability_handler_registry import compute_file_sha256
                 actual_sha256 = compute_file_sha256(Path(entry.main_py_path))
             except Exception:
-                resp = CapabilityResponse(
-                    success=False,
-                    error="Permission denied",
-                    error_type="trust_denied",
-                    latency_ms=(time.time() - start_time) * 1000,
-                )
-                self._audit(
-                    principal_id, effective_permission_id, handler_id, resp, args, request_id,
-                    trusted=False,
-                    detail_reason="Failed to compute handler sha256 at execution time",
-                )
+                resp = CapabilityResponse(success=False, error="Permission denied", error_type="trust_denied",
+                                          latency_ms=(time.time() - start_time) * 1000)
+                self._audit(principal_id, effective_permission_id, handler_id, resp, args, request_id,
+                            trusted=False, detail_reason="Failed to compute handler sha256 at execution time")
                 return resp
-
             trust_result = self._trust_store.is_trusted(handler_id, actual_sha256)
             if not trust_result.trusted:
-                resp = CapabilityResponse(
-                    success=False,
-                    error="Permission denied",
-                    error_type="trust_denied",
-                    latency_ms=(time.time() - start_time) * 1000,
-                )
-                self._audit(
-                    principal_id, effective_permission_id, handler_id, resp, args, request_id,
-                    trusted=False,
-                    detail_reason=trust_result.reason,
-                )
+                resp = CapabilityResponse(success=False, error="Permission denied", error_type="trust_denied",
+                                          latency_ms=(time.time() - start_time) * 1000)
+                self._audit(principal_id, effective_permission_id, handler_id, resp, args, request_id,
+                            trusted=False, detail_reason=trust_result.reason)
                 return resp
 
-        # 3. Grant チェック（D-7 opt-in: grant_config が非 None のときのみ）
+        # 3. Grant チェック（opt-in: grant_config が非 None のときのみ）
         grant_config = {}
         if entry.grant_config is not None:
             grant_result = self._grant_manager.check(principal_id, effective_permission_id)
             if not grant_result.allowed:
-                resp = CapabilityResponse(
-                    success=False,
-                    error="Permission denied",
-                    error_type="grant_denied",
-                    latency_ms=(time.time() - start_time) * 1000,
-                )
-                self._audit(
-                    principal_id, effective_permission_id, handler_id, resp, args, request_id,
-                    trusted=True,
-                    grant_allowed=False,
-                    grant_reason=grant_result.reason,
-                )
+                resp = CapabilityResponse(success=False, error="Permission denied", error_type="grant_denied",
+                                          latency_ms=(time.time() - start_time) * 1000)
+                self._audit(principal_id, effective_permission_id, handler_id, resp, args, request_id,
+                            trusted=True, grant_allowed=False, grant_reason=grant_result.reason)
                 return resp
             grant_config = grant_result.config or {}
 
-        # 4. FIX-A2: calling_convention 分岐
+        # 4. calling_convention 分岐
         calling_convention = getattr(entry, "calling_convention", None)
-
         if calling_convention and calling_convention in _VALID_CALLING_CONVENTIONS:
             resp = self._dispatch_by_calling_convention(
-                calling_convention=calling_convention,
-                entry=entry,
-                principal_id=principal_id,
-                effective_permission_id=effective_permission_id,
-                grant_config=grant_config,
-                args=args,
-                timeout_seconds=timeout_seconds,
-                request_id=request_id,
-                start_time=start_time,
-            )
+                calling_convention=calling_convention, entry=entry, principal_id=principal_id,
+                effective_permission_id=effective_permission_id, grant_config=grant_config,
+                args=args, timeout_seconds=timeout_seconds, request_id=request_id, start_time=start_time)
         else:
-            # calling_convention が None / 未知の値 → 既存の permission_id ベース分岐にフォールバック
             resp = self._dispatch_by_permission_id(
-                entry=entry,
-                principal_id=principal_id,
-                effective_permission_id=effective_permission_id,
-                grant_config=grant_config,
-                args=args,
-                timeout_seconds=timeout_seconds,
-                request_id=request_id,
-                start_time=start_time,
-            )
+                entry=entry, principal_id=principal_id, effective_permission_id=effective_permission_id,
+                grant_config=grant_config, args=args, timeout_seconds=timeout_seconds,
+                request_id=request_id, start_time=start_time)
 
         # 5. 監査
         extra = {"unified_path": True}
@@ -650,491 +430,110 @@ class CapabilityExecutor:
             extra["builtin_sha256"] = builtin_sha256
         if calling_convention:
             extra["calling_convention"] = calling_convention
-
-        self._audit(
-            principal_id, effective_permission_id, handler_id, resp, args, request_id,
-            trusted=True,
-            grant_allowed=True,
-            grant_reason="Granted",
-            extra_details=extra,
-        )
-
+        self._audit(principal_id, effective_permission_id, handler_id, resp, args, request_id,
+                    trusted=True, grant_allowed=True, grant_reason="Granted", extra_details=extra)
         return resp
 
     # ------------------------------------------------------------------
-    # FIX-A2: _dispatch_by_calling_convention
+    # _dispatch_by_calling_convention
     # ------------------------------------------------------------------
 
-    def _dispatch_by_calling_convention(
-        self,
-        calling_convention: str,
-        entry,
-        principal_id: str,
-        effective_permission_id: str,
-        grant_config: Dict[str, Any],
-        args: Dict[str, Any],
-        timeout_seconds: float,
-        request_id: str,
-        start_time: float,
-    ) -> CapabilityResponse:
-        """
-        calling_convention の値で実行パスを分岐する。
-
-        Args:
-            calling_convention: "kernel" | "subprocess" | "block" |
-                                "python_host" | "python_docker" | "binary" | "command"
-            entry: FunctionEntry
-            (以下は実行メソッドに渡すパラメータ)
-
-        Returns:
-            CapabilityResponse
-        """
+    def _dispatch_by_calling_convention(self, calling_convention, entry, principal_id,
+                                         effective_permission_id, grant_config, args,
+                                         timeout_seconds, request_id, start_time):
+        """calling_convention の値で実行パスを分岐する。"""
         if calling_convention == "kernel":
-            # kernel function は kernel_core 経由で直接実行される。
-            # capability_executor 経由での実行はエラー。
             return CapabilityResponse(
-                success=False,
-                error="kernel calling_convention functions must be invoked via kernel handler dispatch, not capability_executor",
-                error_type="invalid_calling_convention",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-
+                success=False, error="kernel calling_convention functions must be invoked via kernel handler dispatch, not capability_executor",
+                error_type="invalid_calling_convention", latency_ms=(time.time() - start_time) * 1000)
         if calling_convention == "block":
-            return self._dispatch_core_function(
-                principal_id=principal_id,
-                entry=entry,
-                args=args,
-                request_id=request_id,
-                start_time=start_time,
-            )
-
+            return self._dispatch_core_function(principal_id=principal_id, entry=entry, args=args,
+                                                 request_id=request_id, start_time=start_time)
         if calling_convention == "subprocess":
             entrypoint = entry.entrypoint or "main.py:run"
             function_dir = Path(entry.function_dir) if entry.function_dir else Path(".")
             ep_file = entrypoint.rsplit(":", 1)[0] if ":" in entrypoint else entrypoint
-            handler_py_path = function_dir / ep_file
-
-            adapter = _HandlerDefAdapter(
-                handler_id=entry.qualified_name,
-                permission_id=effective_permission_id,
-                entrypoint=entrypoint,
-                handler_dir=function_dir,
-                handler_py_path=handler_py_path,
-                is_builtin=getattr(entry, "is_builtin", False),
-            )
-            return self._execute_handler_subprocess(
-                handler_def=adapter,
-                principal_id=principal_id,
-                permission_id=effective_permission_id,
-                grant_config=grant_config,
-                args=args,
-                timeout_seconds=timeout_seconds,
-                request_id=request_id,
-                start_time=start_time,
-            )
-
+            adapter = _HandlerDefAdapter(handler_id=entry.qualified_name, permission_id=effective_permission_id,
+                                          entrypoint=entrypoint, handler_dir=function_dir,
+                                          handler_py_path=function_dir / ep_file, is_builtin=getattr(entry, "is_builtin", False))
+            return self._execute_handler_subprocess(handler_def=adapter, principal_id=principal_id,
+                                                     permission_id=effective_permission_id, grant_config=grant_config,
+                                                     args=args, timeout_seconds=timeout_seconds,
+                                                     request_id=request_id, start_time=start_time)
         if calling_convention == "python_host":
-            return self._execute_host_function(
-                principal_id=principal_id,
-                entry=entry,
-                args=args,
-                request_id=request_id,
-                start_time=start_time,
-            )
-
+            return self._execute_host_function(principal_id=principal_id, entry=entry, args=args,
+                                                request_id=request_id, start_time=start_time)
         if calling_convention == "python_docker":
-            return self._execute_user_function(
-                principal_id=principal_id,
-                entry=entry,
-                args=args,
-                request_id=request_id,
-                start_time=start_time,
-            )
-
+            return self._execute_user_function(principal_id=principal_id, entry=entry, args=args,
+                                                request_id=request_id, start_time=start_time)
         if calling_convention == "binary":
-            return self._execute_binary_function(
-                principal_id=principal_id,
-                entry=entry,
-                args=args,
-                request_id=request_id,
-                start_time=start_time,
-            )
-
+            return self._execute_binary_function(principal_id=principal_id, entry=entry, args=args,
+                                                  request_id=request_id, start_time=start_time)
         if calling_convention == "command":
-            return self._execute_command_function(
-                principal_id=principal_id,
-                entry=entry,
-                args=args,
-                request_id=request_id,
-                start_time=start_time,
-            )
-
-        # ここに来ることはないが、安全策
-        return CapabilityResponse(
-            success=False,
-            error=f"Unknown calling_convention: {calling_convention}",
-            error_type="invalid_calling_convention",
-            latency_ms=(time.time() - start_time) * 1000,
-        )
+            return self._execute_command_function(principal_id=principal_id, entry=entry, args=args,
+                                                   request_id=request_id, start_time=start_time)
+        return CapabilityResponse(success=False, error=f"Unknown calling_convention: {calling_convention}",
+                                  error_type="invalid_calling_convention", latency_ms=(time.time() - start_time) * 1000)
 
     # ------------------------------------------------------------------
-    # FIX-A2: _dispatch_by_permission_id (既存の permission_id ベース分岐)
+    # _dispatch_by_permission_id
     # ------------------------------------------------------------------
 
-    def _dispatch_by_permission_id(
-        self,
-        entry,
-        principal_id: str,
-        effective_permission_id: str,
-        grant_config: Dict[str, Any],
-        args: Dict[str, Any],
-        timeout_seconds: float,
-        request_id: str,
-        start_time: float,
-    ) -> CapabilityResponse:
-        """
-        calling_convention が None/未知の場合のフォールバック。
-        既存の permission_id ベースで実行パスを分岐する。
-        """
-        handler_id = entry.qualified_name
-
+    def _dispatch_by_permission_id(self, entry, principal_id, effective_permission_id,
+                                     grant_config, args, timeout_seconds, request_id, start_time):
+        """calling_convention が None/未知の場合のフォールバック。"""
         if effective_permission_id == FLOW_RUN_PERMISSION_ID:
-            return self._execute_flow_run(
-                principal_id=principal_id,
-                permission_id=effective_permission_id,
-                grant_config=grant_config,
-                args=args,
-                timeout_seconds=timeout_seconds,
-                request_id=request_id,
-                start_time=start_time,
-            )
+            return self._execute_flow_run(principal_id=principal_id, permission_id=effective_permission_id,
+                                           grant_config=grant_config, args=args, timeout_seconds=timeout_seconds,
+                                           request_id=request_id, start_time=start_time)
         elif effective_permission_id in DOCKER_PERMISSION_IDS:
-            return self._execute_docker_dispatch(
-                principal_id=principal_id,
-                permission_id=effective_permission_id,
-                grant_config=grant_config,
-                args=args,
-                request_id=request_id,
-                start_time=start_time,
-            )
+            return self._execute_docker_dispatch(principal_id=principal_id, permission_id=effective_permission_id,
+                                                  grant_config=grant_config, args=args,
+                                                  request_id=request_id, start_time=start_time)
         else:
-            # subprocess 実行: FunctionEntry → HandlerDefAdapter に変換
             entrypoint = entry.entrypoint or "main.py:run"
             function_dir = Path(entry.function_dir) if entry.function_dir else Path(".")
             ep_file = entrypoint.rsplit(":", 1)[0] if ":" in entrypoint else entrypoint
-            handler_py_path = function_dir / ep_file
+            adapter = _HandlerDefAdapter(handler_id=entry.qualified_name, permission_id=effective_permission_id,
+                                          entrypoint=entrypoint, handler_dir=function_dir,
+                                          handler_py_path=function_dir / ep_file, is_builtin=getattr(entry, "is_builtin", False))
+            return self._execute_handler_subprocess(handler_def=adapter, principal_id=principal_id,
+                                                     permission_id=effective_permission_id, grant_config=grant_config,
+                                                     args=args, timeout_seconds=timeout_seconds,
+                                                     request_id=request_id, start_time=start_time)
 
-            adapter = _HandlerDefAdapter(
-                handler_id=handler_id,
-                permission_id=effective_permission_id,
-                entrypoint=entrypoint,
-                handler_dir=function_dir,
-                handler_py_path=handler_py_path,
-                is_builtin=getattr(entry, "is_builtin", False),
-            )
-            return self._execute_handler_subprocess(
-                handler_def=adapter,
-                principal_id=principal_id,
-                permission_id=effective_permission_id,
-                grant_config=grant_config,
-                args=args,
-                timeout_seconds=timeout_seconds,
-                request_id=request_id,
-                start_time=start_time,
-            )
-
-    # ------------------------------------------------------------------
-    # Phase B-3: _legacy_execute
-    # ------------------------------------------------------------------
-
-    def _legacy_execute(
-        self,
-        principal_id: str,
-        request: Dict[str, Any],
-        start_time: float,
-    ) -> CapabilityResponse:
-        """
-        旧 permission_id パスの実行ロジック。
-
-        execute() の else 分岐をそのまま移動したもの。
-        警告ログを出力し、RUMI_STRICT_LEGACY=1 の場合はエラーを返す。
-        """
-        permission_id = request.get("permission_id")
-        args = request.get("args", {})
-        request_id = request.get("request_id", "")
-
-        # 警告ログ
-        logger.warning(
-            "Legacy handler path used for permission_id=%s. Migrate to manifest.",
-            permission_id,
-        )
-
-        # STRICT モード: 旧パス無効化
-        if os.environ.get("RUMI_STRICT_LEGACY", "0") == "1":
-            resp = CapabilityResponse(
-                success=False,
-                error="Legacy execution path is disabled (RUMI_STRICT_LEGACY=1)",
-                error_type="legacy_path_disabled",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-            self._audit(
-                principal_id, permission_id or "", None, resp, args, request_id,
-                detail_reason="Legacy path disabled by RUMI_STRICT_LEGACY=1",
-            )
-            return resp
-
-        # --- 以下、既存の execute() else 分岐のコードをそのまま移動 ---
-
-        timeout_seconds = min(
-            float(request.get("timeout_seconds", DEFAULT_TIMEOUT)),
-            MAX_TIMEOUT,
-        )
-
-        # バリデーション
-        if not permission_id or not isinstance(permission_id, str):
-            resp = CapabilityResponse(
-                success=False,
-                error="Missing or invalid permission_id",
-                error_type="invalid_request",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-            self._audit(principal_id, permission_id or "", None, resp, args, request_id)
-            return resp
-
-        # rate limit: secret.get のみ（無限ループ事故防止）
-        if permission_id == SECRET_GET_PERMISSION_ID:
-            if not self._check_rate_limit(principal_id):
-                resp = CapabilityResponse(
-                    success=False,
-                    error="Rate limited",
-                    error_type="rate_limited",
-                    latency_ms=(time.time() - start_time) * 1000,
-                )
-                self._audit(
-                    principal_id, permission_id, None, resp, args, request_id,
-                    detail_reason=f"Rate limit exceeded ({self._secret_get_rate_limit}/min)",
-                )
-                return resp
-
-        # 初期化チェック
-        if not self._initialized:
-            if not self.initialize():
-                resp = CapabilityResponse(
-                    success=False,
-                    error="Capability system failed to initialize",
-                    error_type="initialization_error",
-                    latency_ms=(time.time() - start_time) * 1000,
-                )
-                self._audit(principal_id, permission_id, None, resp, args, request_id)
-                return resp
-
-        # 1. ハンドラー検索
-        handler_def = self._handler_registry.get_by_permission_id(permission_id)
-        if handler_def is None:
-            resp = CapabilityResponse(
-                success=False,
-                error="Permission denied",
-                error_type="handler_not_found",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-            self._audit(
-                principal_id, permission_id, None, resp, args, request_id,
-                detail_reason=f"No handler registered for permission_id '{permission_id}'",
-            )
-            return resp
-
-        handler_id = handler_def.handler_id
-
-        # 2. Trust チェック（built-in はバイパス、非 built-in は sha256 検証必須）
-        is_builtin = getattr(handler_def, 'is_builtin', False)
-
-        if is_builtin:
-            # built-in: trust bypass（コア同梱のため信頼済み）
-            # 実行時 sha256 を計算して audit に残す
-            builtin_sha256 = None
-            try:
-                from .capability_handler_registry import compute_file_sha256
-                builtin_sha256 = compute_file_sha256(handler_def.handler_py_path)
-            except Exception:
-                builtin_sha256 = "compute_failed"
-        else:
-            # 非 built-in: 実行時に handler.py の sha256 を再計算して Trust 検証
-            try:
-                from .capability_handler_registry import compute_file_sha256
-                actual_sha256 = compute_file_sha256(handler_def.handler_py_path)
-            except Exception:
-                resp = CapabilityResponse(
-                    success=False,
-                    error="Permission denied",
-                    error_type="trust_denied",
-                    latency_ms=(time.time() - start_time) * 1000,
-                )
-                self._audit(
-                    principal_id, permission_id, handler_id, resp, args, request_id,
-                    trusted=False,
-                    detail_reason="Failed to compute handler sha256 at execution time",
-                )
-                return resp
-
-            trust_result = self._trust_store.is_trusted(handler_id, actual_sha256)
-            if not trust_result.trusted:
-                resp = CapabilityResponse(
-                    success=False,
-                    error="Permission denied",
-                    error_type="trust_denied",
-                    latency_ms=(time.time() - start_time) * 1000,
-                )
-                self._audit(
-                    principal_id, permission_id, handler_id, resp, args, request_id,
-                    trusted=False,
-                    detail_reason=trust_result.reason,
-                )
-                return resp
-
-        # 3. Grant チェック
-        grant_result = self._grant_manager.check(principal_id, permission_id)
-        if not grant_result.allowed:
-            resp = CapabilityResponse(
-                success=False,
-                error="Permission denied",
-                error_type="grant_denied",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-            self._audit(
-                principal_id, permission_id, handler_id, resp, args, request_id,
-                trusted=True,
-                grant_allowed=False,
-                grant_reason=grant_result.reason,
-            )
-            return resp
-
-        # 4. flow.run 特殊ディスパッチ（インプロセス実行）
-        if permission_id == FLOW_RUN_PERMISSION_ID:
-            resp = self._execute_flow_run(
-                principal_id=principal_id,
-                permission_id=permission_id,
-                grant_config=grant_result.config,
-                args=args,
-                timeout_seconds=timeout_seconds,
-                request_id=request_id,
-                start_time=start_time,
-            )
-        elif permission_id in DOCKER_PERMISSION_IDS:
-            # 4b. docker.* 特殊ディスパッチ（インプロセス実行）
-            resp = self._execute_docker_dispatch(
-                principal_id=principal_id,
-                permission_id=permission_id,
-                grant_config=grant_result.config,
-                args=args,
-                request_id=request_id,
-                start_time=start_time,
-            )
-        else:
-            # 5. 通常: サブプロセスで実行
-            resp = self._execute_handler_subprocess(
-                handler_def=handler_def,
-                principal_id=principal_id,
-                permission_id=permission_id,
-                grant_config=grant_result.config,
-                args=args,
-                timeout_seconds=timeout_seconds,
-                request_id=request_id,
-                start_time=start_time,
-            )
-
-        # 6. 監査（built-in の場合は sha256 を extra_details に記録）
-        extra = None
-        if is_builtin:
-            extra = {"builtin_sha256": builtin_sha256}
-
-        self._audit(
-            principal_id, permission_id, handler_id, resp, args, request_id,
-            trusted=True,
-            grant_allowed=True,
-            grant_reason="Granted",
-            extra_details=extra,
-        )
-
-        return resp
-
-    # ------------------------------------------------------------------
     # ------------------------------------------------------------------
     # function.call dispatch
     # ------------------------------------------------------------------
 
-    def _execute_function_call(
-        self,
-        principal_id: str,
-        request: Dict[str, Any],
-        start_time: float,
-    ) -> CapabilityResponse:
-        """
-        function.call リクエストを処理する。
-
-        フロー:
-        1. qualified_name と args を取得
-        2. FunctionRegistry から FunctionEntry を取得
-        3. ApprovalManager で pack 承認確認
-        4. requires 権限チェック（core_pack はスキップ）
-        5. function.call 権限チェック
-        6. caller_requires チェック
-        7. 実行方式判定・実行
-        """
+    def _execute_function_call(self, principal_id, request, start_time):
+        """function.call リクエストを処理する。"""
         qualified_name = request.get("qualified_name")
         args = request.get("args", {})
         request_id = request.get("request_id", "")
-
-        # 1. qualified_name バリデーション
         if not qualified_name or not isinstance(qualified_name, str):
-            resp = CapabilityResponse(
-                success=False,
-                error="Missing or invalid qualified_name",
-                error_type="invalid_request",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-            self._audit(
-                principal_id, "function.call", None, resp, args, request_id,
-                detail_reason="Missing or invalid qualified_name",
-            )
+            resp = CapabilityResponse(success=False, error="Missing or invalid qualified_name",
+                                      error_type="invalid_request", latency_ms=(time.time() - start_time) * 1000)
+            self._audit(principal_id, "function.call", None, resp, args, request_id,
+                        detail_reason="Missing or invalid qualified_name")
             return resp
-
-        # initialize (DI コンテナからサービス取得)
         if not self._initialized:
             self.initialize()
-
-        # function_registry 可用性チェック
         if self._function_registry is None:
-            resp = CapabilityResponse(
-                success=False,
-                error="FunctionRegistry is not available",
-                error_type="function_registry_unavailable",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-            self._audit(
-                principal_id, "function.call", None, resp, args, request_id,
-                detail_reason="FunctionRegistry not available in DI container",
-            )
+            resp = CapabilityResponse(success=False, error="FunctionRegistry is not available",
+                                      error_type="function_registry_unavailable", latency_ms=(time.time() - start_time) * 1000)
+            self._audit(principal_id, "function.call", None, resp, args, request_id,
+                        detail_reason="FunctionRegistry not available in DI container")
             return resp
-
-        # 2. FunctionEntry 取得
         entry = self._function_registry.get(qualified_name)
         if entry is None:
-            resp = CapabilityResponse(
-                success=False,
-                error=f"Function not found: {qualified_name}",
-                error_type="function_not_found",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-            self._audit(
-                principal_id, "function.call", None, resp, args, request_id,
-                detail_reason=f"Function '{qualified_name}' not found in FunctionRegistry",
-            )
+            resp = CapabilityResponse(success=False, error=f"Function not found: {qualified_name}",
+                                      error_type="function_not_found", latency_ms=(time.time() - start_time) * 1000)
+            self._audit(principal_id, "function.call", None, resp, args, request_id,
+                        detail_reason=f"Function '{qualified_name}' not found in FunctionRegistry")
             return resp
-
         pack_id = entry.pack_id
         is_core = pack_id.startswith(_CORE_PACK_ID_PREFIX)
-
-        # 3. Pack 承認確認（フェイルクローズ: エラー時は拒否）
         if self._approval_manager is not None:
             try:
                 approved_result = self._approval_manager.is_pack_approved_and_verified(pack_id)
@@ -1144,159 +543,70 @@ class CapabilityExecutor:
                     is_approved = bool(approved_result)
                     reason = None
                 if not is_approved:
-                    resp = CapabilityResponse(
-                        success=False,
-                        error=f"Pack not approved: {pack_id}",
-                        error_type="pack_not_approved",
-                        latency_ms=(time.time() - start_time) * 1000,
-                    )
-                    self._audit(
-                        principal_id, "function.call", None, resp, args, request_id,
-                        detail_reason=f"Pack '{pack_id}' not approved: {reason}",
-                    )
+                    resp = CapabilityResponse(success=False, error=f"Pack not approved: {pack_id}",
+                                              error_type="pack_not_approved", latency_ms=(time.time() - start_time) * 1000)
+                    self._audit(principal_id, "function.call", None, resp, args, request_id,
+                                detail_reason=f"Pack '{pack_id}' not approved: {reason}")
                     return resp
             except Exception as exc:
-                # SV-15 fix: フェイルクローズ — approval_manager のエラー時の処理
                 if is_core:
-                    logger.warning(
-                        "approval_manager error during function.call for core pack '%s': %s "
-                        "(allowing execution for core pack)",
-                        pack_id, exc,
-                    )
+                    logger.warning("approval_manager error during function.call for core pack '%s': %s (allowing execution for core pack)", pack_id, exc)
                 else:
-                    logger.error(
-                        "approval_manager error during function.call for pack '%s': %s",
-                        pack_id, exc,
-                    )
-                    resp = CapabilityResponse(
-                        success=False,
-                        error="Approval verification failed",
-                        error_type="approval_check_error",
-                        latency_ms=(time.time() - start_time) * 1000,
-                    )
-                    self._audit(
-                        principal_id, "function.call", None, resp, args, request_id,
-                        detail_reason=f"approval_manager error for pack '{pack_id}': {exc}",
-                    )
+                    logger.error("approval_manager error during function.call for pack '%s': %s", pack_id, exc)
+                    resp = CapabilityResponse(success=False, error="Approval verification failed",
+                                              error_type="approval_check_error", latency_ms=(time.time() - start_time) * 1000)
+                    self._audit(principal_id, "function.call", None, resp, args, request_id,
+                                detail_reason=f"approval_manager error for pack '{pack_id}': {exc}")
                     return resp
-
-        # 4. requires チェック（core_pack はスキップ）
         if not is_core and entry.requires and self._permission_manager is not None:
             for req_perm in entry.requires:
                 if not self._permission_manager.has_permission(pack_id, req_perm):
-                    resp = CapabilityResponse(
-                        success=False,
-                        error=f"Function requires permission '{req_perm}' not granted to pack '{pack_id}'",
-                        error_type="requires_denied",
-                        latency_ms=(time.time() - start_time) * 1000,
-                    )
-                    self._audit(
-                        principal_id, "function.call", None, resp, args, request_id,
-                        detail_reason=f"Pack '{pack_id}' lacks required permission '{req_perm}'",
-                    )
+                    resp = CapabilityResponse(success=False,
+                                              error=f"Function requires permission '{req_perm}' not granted to pack '{pack_id}'",
+                                              error_type="requires_denied", latency_ms=(time.time() - start_time) * 1000)
+                    self._audit(principal_id, "function.call", None, resp, args, request_id,
+                                detail_reason=f"Pack '{pack_id}' lacks required permission '{req_perm}'")
                     return resp
-
-        # 5. function.call 権限チェック
         if self._permission_manager is not None:
             if not self._permission_manager.has_permission(principal_id, "function.call"):
-                resp = CapabilityResponse(
-                    success=False,
-                    error="Permission denied: function.call",
-                    error_type="permission_denied",
-                    latency_ms=(time.time() - start_time) * 1000,
-                )
-                self._audit(
-                    principal_id, "function.call", None, resp, args, request_id,
-                    detail_reason=f"Principal '{principal_id}' lacks 'function.call' permission",
-                )
+                resp = CapabilityResponse(success=False, error="Permission denied: function.call",
+                                          error_type="permission_denied", latency_ms=(time.time() - start_time) * 1000)
+                self._audit(principal_id, "function.call", None, resp, args, request_id,
+                            detail_reason=f"Principal '{principal_id}' lacks 'function.call' permission")
                 return resp
-
-        # 6. caller_requires チェック
         if entry.caller_requires:
             caller_ok = False
-            if self._permission_manager is not None:
-                if hasattr(self._permission_manager, "check_caller_requires"):
-                    caller_ok = self._permission_manager.check_caller_requires(
-                        principal_id, entry.caller_requires
-                    )
-                else:
-                    caller_ok = False
-            else:
-                caller_ok = False
-
+            if self._permission_manager is not None and hasattr(self._permission_manager, "check_caller_requires"):
+                caller_ok = self._permission_manager.check_caller_requires(principal_id, entry.caller_requires)
             if not caller_ok:
-                resp = CapabilityResponse(
-                    success=False,
-                    error="Caller does not meet caller_requires",
-                    error_type="caller_requires_denied",
-                    latency_ms=(time.time() - start_time) * 1000,
-                )
-                self._audit(
-                    principal_id, "function.call", None, resp, args, request_id,
-                    detail_reason=f"Principal '{principal_id}' does not meet caller_requires: {entry.caller_requires}",
-                )
+                resp = CapabilityResponse(success=False, error="Caller does not meet caller_requires",
+                                          error_type="caller_requires_denied", latency_ms=(time.time() - start_time) * 1000)
+                self._audit(principal_id, "function.call", None, resp, args, request_id,
+                            detail_reason=f"Principal '{principal_id}' does not meet caller_requires: {entry.caller_requires}")
                 return resp
-
-        # 7. 実行方式判定
         if is_core:
-            resp = self._dispatch_core_function(
-                principal_id=principal_id,
-                entry=entry,
-                args=args,
-                request_id=request_id,
-                start_time=start_time,
-            )
+            resp = self._dispatch_core_function(principal_id=principal_id, entry=entry, args=args,
+                                                 request_id=request_id, start_time=start_time)
         elif entry.host_execution:
-            resp = self._execute_host_function(
-                principal_id=principal_id,
-                entry=entry,
-                args=args,
-                request_id=request_id,
-                start_time=start_time,
-            )
+            resp = self._execute_host_function(principal_id=principal_id, entry=entry, args=args,
+                                                request_id=request_id, start_time=start_time)
         else:
-            resp = self._execute_user_function(
-                principal_id=principal_id,
-                entry=entry,
-                args=args,
-                request_id=request_id,
-                start_time=start_time,
-            )
-
-        # 監査ログ
-        self._audit(
-            principal_id, "function.call", None, resp, args, request_id,
-            extra_details={
-                "qualified_name": qualified_name,
-                "pack_id": pack_id,
-                "is_core": is_core,
-            },
-        )
-
+            resp = self._execute_user_function(principal_id=principal_id, entry=entry, args=args,
+                                                request_id=request_id, start_time=start_time)
+        self._audit(principal_id, "function.call", None, resp, args, request_id,
+                    extra_details={"qualified_name": qualified_name, "pack_id": pack_id, "is_core": is_core})
         return resp
 
-
     # ------------------------------------------------------------------
-    # W25.5: user function execution (Docker container)
+    # Docker / user function helpers
     # ------------------------------------------------------------------
 
-    def _is_docker_available(self) -> bool:
-        """Check if docker CLI is available (shutil.which based, like SecureExecutor)."""
+    def _is_docker_available(self):
         return shutil.which("docker") is not None
 
-    def _generate_function_runner_script(self) -> str:
-        """
-        Generate a runner script for user function execution.
-
-        Protocol: stdin JSON -> run(context, args) -> stdout JSON
-        Works for both Docker container and host subprocess execution.
-        """
+    def _generate_function_runner_script(self):
         return """
-import sys
-import json
-import importlib.util
-import os
-
+import sys, json, importlib.util, os
 def main():
     input_text = sys.stdin.read()
     try:
@@ -1304,24 +614,18 @@ def main():
     except json.JSONDecodeError as e:
         print(json.dumps({"error": "Invalid input JSON: " + str(e), "error_type": "json_error"}))
         sys.exit(1)
-
     context = input_data.get("context", {})
     args = input_data.get("args", {})
     main_py = input_data.get("main_py_path", "")
-
     if not main_py:
         print(json.dumps({"error": "No main_py_path specified", "error_type": "config_error"}))
         sys.exit(1)
-
     if not os.path.isfile(main_py):
         print(json.dumps({"error": "main.py not found: " + main_py, "error_type": "file_not_found"}))
         sys.exit(1)
-
-    # Add function dir to sys.path
     func_dir = os.path.dirname(main_py)
     if func_dir and func_dir not in sys.path:
         sys.path.insert(0, func_dir)
-
     try:
         spec = importlib.util.spec_from_file_location("function_module", main_py)
         if spec is None or spec.loader is None:
@@ -1333,31 +637,26 @@ def main():
     except Exception as e:
         print(json.dumps({"error": "Module load failed: " + str(e), "error_type": "load_error"}))
         sys.exit(1)
-
     fn = getattr(module, "run", None)
     if fn is None:
         print(json.dumps({"error": "No 'run' function in main.py", "error_type": "func_not_found"}))
         sys.exit(1)
-
     try:
         result = fn(context, args)
     except Exception as e:
         print(json.dumps({"error": str(e), "error_type": type(e).__name__}))
         sys.exit(1)
-
     if result is not None:
         try:
             print(json.dumps(result, ensure_ascii=False, default=str))
         except Exception:
             print(json.dumps({"error": "Result is not JSON serializable", "error_type": "serialize_error"}))
             sys.exit(1)
-
 if __name__ == "__main__":
     main()
 """
 
-    def _get_function_timeout(self, entry) -> float:
-        """Get timeout from manifest grant_config, or default."""
+    def _get_function_timeout(self, entry):
         grant_config = entry.manifest.get("grant_config", {}) if entry.manifest else {}
         t = grant_config.get("timeout", DEFAULT_FUNCTION_TIMEOUT)
         try:
@@ -1366,1244 +665,387 @@ if __name__ == "__main__":
             t = DEFAULT_FUNCTION_TIMEOUT
         return min(max(t, 1.0), MAX_TIMEOUT)
 
-    def _execute_user_function(
-        self,
-        principal_id: str,
-        entry: "FunctionEntry",
-        args: Dict[str, Any],
-        request_id: str,
-        start_time: float,
-    ) -> CapabilityResponse:
-        """
-        User function を実行する。
-
-        Docker 利用可能時: 使い捨てコンテナ内で実行（SecureExecutor パターン）。
-        Docker 利用不可時: ホスト subprocess にフォールバック（警告ログ）。
-        """
-        # --- Wave 28-B: runtime dispatch ---
+    def _execute_user_function(self, principal_id, entry, args, request_id, start_time):
         runtime = getattr(entry, 'runtime', 'python')
-
-        # セキュリティ: host_execution=True のとき binary/command は拒否（Docker 強制）
         if entry.host_execution and runtime != "python":
-            return CapabilityResponse(
-                success=False,
-                error=f"runtime='{runtime}' requires Docker execution (host_execution must be false)",
-                error_type="security_violation",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-
+            return CapabilityResponse(success=False, error=f"runtime='{runtime}' requires Docker execution (host_execution must be false)",
+                                      error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
         if runtime == "binary":
-            return self._execute_binary_function(
-                principal_id=principal_id, entry=entry, args=args,
-                request_id=request_id, start_time=start_time,
-            )
+            return self._execute_binary_function(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time)
         elif runtime == "command":
-            return self._execute_command_function(
-                principal_id=principal_id, entry=entry, args=args,
-                request_id=request_id, start_time=start_time,
-            )
-
-        # runtime == "python" (default): 既存ロジックをそのまま続行
-        pack_id = entry.pack_id
-        function_id = entry.function_id
-        function_dir = entry.function_dir
-        main_py_path = entry.main_py_path
+            return self._execute_command_function(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time)
+        pack_id, function_id = entry.pack_id, entry.function_id
+        function_dir, main_py_path = entry.function_dir, entry.main_py_path
         timeout = self._get_function_timeout(entry)
-
-        # Validate function_dir exists
         if function_dir is None or not Path(function_dir).is_dir():
-            return CapabilityResponse(
-                success=False,
-                error=f"function_dir not found: {function_dir}",
-                error_type="function_dir_not_found",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-
-        # Validate main_py_path exists
+            return CapabilityResponse(success=False, error=f"function_dir not found: {function_dir}", error_type="function_dir_not_found", latency_ms=(time.time() - start_time) * 1000)
         if main_py_path is None or not Path(main_py_path).is_file():
-            return CapabilityResponse(
-                success=False,
-                error=f"main.py not found: {main_py_path}",
-                error_type="main_py_not_found",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-
-        # Docker available? Use container. Otherwise fallback to host subprocess.
+            return CapabilityResponse(success=False, error=f"main.py not found: {main_py_path}", error_type="main_py_not_found", latency_ms=(time.time() - start_time) * 1000)
         if self._is_docker_available() and _DockerRunBuilder is not None:
-            return self._execute_user_function_docker(
-                principal_id=principal_id,
-                entry=entry,
-                args=args,
-                request_id=request_id,
-                start_time=start_time,
-                timeout=timeout,
-            )
+            return self._execute_user_function_docker(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time, timeout=timeout)
         else:
-            logger.warning(
-                "Docker not available, falling back to host subprocess for "
-                "user function %s:%s. This is less secure.",
-                pack_id, function_id,
-            )
-            return self._execute_user_function_host(
-                principal_id=principal_id,
-                entry=entry,
-                args=args,
-                request_id=request_id,
-                start_time=start_time,
-                timeout=timeout,
-            )
+            logger.warning("Docker not available, falling back to host subprocess for user function %s:%s.", pack_id, function_id)
+            return self._execute_user_function_host(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time, timeout=timeout)
 
-    def _execute_user_function_docker(
-        self,
-        principal_id: str,
-        entry: "FunctionEntry",
-        args: Dict[str, Any],
-        request_id: str,
-        start_time: float,
-        timeout: float,
-    ) -> CapabilityResponse:
-        """Execute user function in a disposable Docker container."""
-        pack_id = entry.pack_id
-        function_id = entry.function_id
+    def _execute_user_function_docker(self, principal_id, entry, args, request_id, start_time, timeout):
+        pack_id, function_id = entry.pack_id, entry.function_id
         function_dir = Path(entry.function_dir)
         container_name = f"rumi-func-{pack_id}-{function_id}-{uuid.uuid4().hex[:8]}"
-
-        context = {
-            "principal_id": principal_id,
-            "pack_id": pack_id,
-            "function_id": function_id,
-            "request_id": request_id,
-            "ts": self._now_ts(),
-        }
-        subprocess_input = {
-            "context": context,
-            "args": args,
-            "main_py_path": "/function/main.py",
-        }
+        context = {"principal_id": principal_id, "pack_id": pack_id, "function_id": function_id, "request_id": request_id, "ts": self._now_ts()}
+        subprocess_input = {"context": context, "args": args, "main_py_path": "/function/main.py"}
         input_json = json.dumps(subprocess_input, ensure_ascii=False, default=str)
-
         runner_script = self._generate_function_runner_script()
-
-        # Write input to a temp file for mounting
         input_file = None
         try:
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".json", delete=False, encoding="utf-8"
-            ) as f:
-                f.write(input_json)
-                input_file = f.name
-
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as f:
+                f.write(input_json); input_file = f.name
             builder = _DockerRunBuilder(name=container_name)
-            builder.volume(f"{function_dir.resolve()}:/function:ro")
-            builder.volume(f"{input_file}:/input.json:ro")
-            builder.env("RUMI_PACK_ID", pack_id)
-            builder.env("RUMI_FUNCTION_ID", function_id)
-            builder.label("rumi.managed", "true")
-            builder.label("rumi.type", "function")
-            builder.label("rumi.pack_id", pack_id)
-            image = getattr(entry, 'docker_image', '') or FUNCTION_BASE_IMAGE
-            builder.image(image)
-            # Use stdin protocol: cat /input.json | python -c <script>
-            builder.command([
-                "sh", "-c",
-                f"cat /input.json | python -c {json.dumps(runner_script)}",
-            ])
-            docker_cmd = builder.build()
-
-            proc = subprocess.run(
-                docker_cmd,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
-
+            builder.volume(f"{function_dir.resolve()}:/function:ro"); builder.volume(f"{input_file}:/input.json:ro")
+            builder.env("RUMI_PACK_ID", pack_id); builder.env("RUMI_FUNCTION_ID", function_id)
+            builder.label("rumi.managed", "true"); builder.label("rumi.type", "function"); builder.label("rumi.pack_id", pack_id)
+            builder.image(getattr(entry, 'docker_image', '') or FUNCTION_BASE_IMAGE)
+            builder.command(["sh", "-c", f"cat /input.json | python -c {json.dumps(runner_script)}"])
+            proc = subprocess.run(builder.build(), capture_output=True, text=True, timeout=timeout)
             latency_ms = (time.time() - start_time) * 1000
-
             if proc.returncode != 0:
-                stderr_msg = (proc.stderr or "").strip()
-                return CapabilityResponse(
-                    success=False,
-                    error=f"Function execution failed (exit {proc.returncode}): {stderr_msg}"[:1000],
-                    error_type="function_execution_error",
-                    latency_ms=latency_ms,
-                )
-
+                return CapabilityResponse(success=False, error=f"Function execution failed (exit {proc.returncode}): {(proc.stderr or '').strip()}"[:1000], error_type="function_execution_error", latency_ms=latency_ms)
             stdout = proc.stdout or ""
-
-            # Response size check
             if len(stdout.encode("utf-8")) > MAX_RESPONSE_SIZE:
-                return CapabilityResponse(
-                    success=False,
-                    error="Response too large",
-                    error_type="response_too_large",
-                    latency_ms=latency_ms,
-                )
-
+                return CapabilityResponse(success=False, error="Response too large", error_type="response_too_large", latency_ms=latency_ms)
             stdout_stripped = stdout.strip()
             if not stdout_stripped:
-                return CapabilityResponse(
-                    success=True,
-                    output=None,
-                    latency_ms=latency_ms,
-                )
-
+                return CapabilityResponse(success=True, output=None, latency_ms=latency_ms)
             try:
-                output = json.loads(stdout_stripped)
+                return CapabilityResponse(success=True, output=json.loads(stdout_stripped), latency_ms=latency_ms)
             except json.JSONDecodeError:
-                return CapabilityResponse(
-                    success=False,
-                    error="Function output is not valid JSON",
-                    error_type="invalid_json_output",
-                    latency_ms=latency_ms,
-                )
-
-            return CapabilityResponse(
-                success=True,
-                output=output,
-                latency_ms=latency_ms,
-            )
-
+                return CapabilityResponse(success=False, error="Function output is not valid JSON", error_type="invalid_json_output", latency_ms=latency_ms)
         except subprocess.TimeoutExpired:
-            # Kill the container on timeout
-            try:
-                subprocess.run(
-                    ["docker", "kill", container_name],
-                    capture_output=True,
-                    timeout=5,
-                )
-            except Exception:
-                pass
-            return CapabilityResponse(
-                success=False,
-                error=f"Function execution timed out after {timeout}s",
-                error_type="timeout",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-
+            try: subprocess.run(["docker", "kill", container_name], capture_output=True, timeout=5)
+            except Exception: pass
+            return CapabilityResponse(success=False, error=f"Function execution timed out after {timeout}s", error_type="timeout", latency_ms=(time.time() - start_time) * 1000)
         except Exception as e:
-            return CapabilityResponse(
-                success=False,
-                error=f"Function execution error: {e}",
-                error_type="internal_error",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-
+            return CapabilityResponse(success=False, error=f"Function execution error: {e}", error_type="internal_error", latency_ms=(time.time() - start_time) * 1000)
         finally:
             if input_file:
-                try:
-                    os.unlink(input_file)
-                except Exception:
-                    pass
+                try: os.unlink(input_file)
+                except Exception: pass
 
-    def _execute_user_function_host(
-        self,
-        principal_id: str,
-        entry: "FunctionEntry",
-        args: Dict[str, Any],
-        request_id: str,
-        start_time: float,
-        timeout: float,
-    ) -> CapabilityResponse:
-        """Execute user function as host subprocess (Docker fallback)."""
-        pack_id = entry.pack_id
-        function_id = entry.function_id
-        main_py_path = str(entry.main_py_path)
-
-        context = {
-            "principal_id": principal_id,
-            "pack_id": pack_id,
-            "function_id": function_id,
-            "request_id": request_id,
-            "ts": self._now_ts(),
-        }
-        subprocess_input = {
-            "context": context,
-            "args": args,
-            "main_py_path": main_py_path,
-        }
-        input_json = json.dumps(subprocess_input, ensure_ascii=False, default=str)
-
-        runner_script = self._generate_function_runner_script()
+    def _execute_user_function_host(self, principal_id, entry, args, request_id, start_time, timeout):
+        context = {"principal_id": principal_id, "pack_id": entry.pack_id, "function_id": entry.function_id, "request_id": request_id, "ts": self._now_ts()}
+        input_json = json.dumps({"context": context, "args": args, "main_py_path": str(entry.main_py_path)}, ensure_ascii=False, default=str)
         runner_file = None
         try:
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".py", delete=False, encoding="utf-8"
-            ) as f:
-                f.write(runner_script)
-                runner_file = f.name
-
-            proc = subprocess.run(
-                [sys.executable, runner_file],
-                input=input_json,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                cwd=str(Path(entry.function_dir)),
-            )
-
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as f:
+                f.write(self._generate_function_runner_script()); runner_file = f.name
+            proc = subprocess.run([sys.executable, runner_file], input=input_json, capture_output=True, text=True, timeout=timeout, cwd=str(Path(entry.function_dir)))
             latency_ms = (time.time() - start_time) * 1000
-
             if proc.returncode != 0:
-                stderr_msg = (proc.stderr or "").strip()
-                return CapabilityResponse(
-                    success=False,
-                    error=f"Function execution failed (exit {proc.returncode}): {stderr_msg}"[:1000],
-                    error_type="function_execution_error",
-                    latency_ms=latency_ms,
-                )
-
+                return CapabilityResponse(success=False, error=f"Function execution failed (exit {proc.returncode}): {(proc.stderr or '').strip()}"[:1000], error_type="function_execution_error", latency_ms=latency_ms)
             stdout = proc.stdout or ""
-
             if len(stdout.encode("utf-8")) > MAX_RESPONSE_SIZE:
-                return CapabilityResponse(
-                    success=False,
-                    error="Response too large",
-                    error_type="response_too_large",
-                    latency_ms=latency_ms,
-                )
-
+                return CapabilityResponse(success=False, error="Response too large", error_type="response_too_large", latency_ms=latency_ms)
             stdout_stripped = stdout.strip()
             if not stdout_stripped:
-                return CapabilityResponse(
-                    success=True,
-                    output=None,
-                    latency_ms=latency_ms,
-                )
-
+                return CapabilityResponse(success=True, output=None, latency_ms=latency_ms)
             try:
-                output = json.loads(stdout_stripped)
+                return CapabilityResponse(success=True, output=json.loads(stdout_stripped), latency_ms=latency_ms)
             except json.JSONDecodeError:
-                return CapabilityResponse(
-                    success=False,
-                    error="Function output is not valid JSON",
-                    error_type="invalid_json_output",
-                    latency_ms=latency_ms,
-                )
-
-            return CapabilityResponse(
-                success=True,
-                output=output,
-                latency_ms=latency_ms,
-            )
-
+                return CapabilityResponse(success=False, error="Function output is not valid JSON", error_type="invalid_json_output", latency_ms=latency_ms)
         except subprocess.TimeoutExpired:
-            return CapabilityResponse(
-                success=False,
-                error=f"Function execution timed out after {timeout}s",
-                error_type="timeout",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-
+            return CapabilityResponse(success=False, error=f"Function execution timed out after {timeout}s", error_type="timeout", latency_ms=(time.time() - start_time) * 1000)
         except Exception as e:
-            return CapabilityResponse(
-                success=False,
-                error=f"Function execution error: {e}",
-                error_type="internal_error",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-
+            return CapabilityResponse(success=False, error=f"Function execution error: {e}", error_type="internal_error", latency_ms=(time.time() - start_time) * 1000)
         finally:
             if runner_file:
-                try:
-                    os.unlink(runner_file)
-                except Exception:
-                    pass
+                try: os.unlink(runner_file)
+                except Exception: pass
 
-    # ------------------------------------------------------------------
-    # W25.5: host_execution function (host subprocess)
-    # ------------------------------------------------------------------
-
-    def _execute_host_function(
-        self,
-        principal_id: str,
-        entry: "FunctionEntry",
-        args: Dict[str, Any],
-        request_id: str,
-        start_time: float,
-    ) -> CapabilityResponse:
-        """
-        host_execution function をホスト上の subprocess で実行する。
-
-        RUMI_ALLOW_HOST_EXECUTION 環境変数が "1" or "true" でなければ拒否する。
-        """
-        # Environment variable guard
+    def _execute_host_function(self, principal_id, entry, args, request_id, start_time):
         allow_host = os.environ.get("RUMI_ALLOW_HOST_EXECUTION", "").lower()
         if allow_host not in ("1", "true"):
-            return CapabilityResponse(
-                success=False,
-                error="Host execution is disabled. Set RUMI_ALLOW_HOST_EXECUTION=1 to enable.",
-                error_type="host_execution_disabled",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-
-        pack_id = entry.pack_id
-        function_id = entry.function_id
-        function_dir = entry.function_dir
-        main_py_path = entry.main_py_path
+            return CapabilityResponse(success=False, error="Host execution is disabled. Set RUMI_ALLOW_HOST_EXECUTION=1 to enable.", error_type="host_execution_disabled", latency_ms=(time.time() - start_time) * 1000)
+        function_dir, main_py_path = entry.function_dir, entry.main_py_path
         timeout = self._get_function_timeout(entry)
-
-        # Validate function_dir exists
         if function_dir is None or not Path(function_dir).is_dir():
-            return CapabilityResponse(
-                success=False,
-                error=f"function_dir not found: {function_dir}",
-                error_type="function_dir_not_found",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-
-        # Validate main_py_path exists
+            return CapabilityResponse(success=False, error=f"function_dir not found: {function_dir}", error_type="function_dir_not_found", latency_ms=(time.time() - start_time) * 1000)
         if main_py_path is None or not Path(main_py_path).is_file():
-            return CapabilityResponse(
-                success=False,
-                error=f"main.py not found: {main_py_path}",
-                error_type="main_py_not_found",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-
-        context = {
-            "principal_id": principal_id,
-            "pack_id": pack_id,
-            "function_id": function_id,
-            "request_id": request_id,
-            "ts": self._now_ts(),
-        }
-        subprocess_input = {
-            "context": context,
-            "args": args,
-            "main_py_path": str(main_py_path),
-        }
-        input_json = json.dumps(subprocess_input, ensure_ascii=False, default=str)
-
-        runner_script = self._generate_function_runner_script()
+            return CapabilityResponse(success=False, error=f"main.py not found: {main_py_path}", error_type="main_py_not_found", latency_ms=(time.time() - start_time) * 1000)
+        context = {"principal_id": principal_id, "pack_id": entry.pack_id, "function_id": entry.function_id, "request_id": request_id, "ts": self._now_ts()}
+        input_json = json.dumps({"context": context, "args": args, "main_py_path": str(main_py_path)}, ensure_ascii=False, default=str)
         runner_file = None
         try:
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".py", delete=False, encoding="utf-8"
-            ) as f:
-                f.write(runner_script)
-                runner_file = f.name
-
-            proc = subprocess.run(
-                [sys.executable, runner_file],
-                input=input_json,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                cwd=str(Path(function_dir)),
-            )
-
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as f:
+                f.write(self._generate_function_runner_script()); runner_file = f.name
+            proc = subprocess.run([sys.executable, runner_file], input=input_json, capture_output=True, text=True, timeout=timeout, cwd=str(Path(function_dir)))
             latency_ms = (time.time() - start_time) * 1000
-
             if proc.returncode != 0:
-                stderr_msg = (proc.stderr or "").strip()
-                return CapabilityResponse(
-                    success=False,
-                    error=f"Function execution failed (exit {proc.returncode}): {stderr_msg}"[:1000],
-                    error_type="function_execution_error",
-                    latency_ms=latency_ms,
-                )
-
+                return CapabilityResponse(success=False, error=f"Function execution failed (exit {proc.returncode}): {(proc.stderr or '').strip()}"[:1000], error_type="function_execution_error", latency_ms=latency_ms)
             stdout = proc.stdout or ""
-
             if len(stdout.encode("utf-8")) > MAX_RESPONSE_SIZE:
-                return CapabilityResponse(
-                    success=False,
-                    error="Response too large",
-                    error_type="response_too_large",
-                    latency_ms=latency_ms,
-                )
-
+                return CapabilityResponse(success=False, error="Response too large", error_type="response_too_large", latency_ms=latency_ms)
             stdout_stripped = stdout.strip()
             if not stdout_stripped:
-                return CapabilityResponse(
-                    success=True,
-                    output=None,
-                    latency_ms=latency_ms,
-                )
-
+                return CapabilityResponse(success=True, output=None, latency_ms=latency_ms)
             try:
-                output = json.loads(stdout_stripped)
+                return CapabilityResponse(success=True, output=json.loads(stdout_stripped), latency_ms=latency_ms)
             except json.JSONDecodeError:
-                return CapabilityResponse(
-                    success=False,
-                    error="Function output is not valid JSON",
-                    error_type="invalid_json_output",
-                    latency_ms=latency_ms,
-                )
-
-            return CapabilityResponse(
-                success=True,
-                output=output,
-                latency_ms=latency_ms,
-            )
-
+                return CapabilityResponse(success=False, error="Function output is not valid JSON", error_type="invalid_json_output", latency_ms=latency_ms)
         except subprocess.TimeoutExpired:
-            return CapabilityResponse(
-                success=False,
-                error=f"Function execution timed out after {timeout}s",
-                error_type="timeout",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-
+            return CapabilityResponse(success=False, error=f"Function execution timed out after {timeout}s", error_type="timeout", latency_ms=(time.time() - start_time) * 1000)
         except Exception as e:
-            return CapabilityResponse(
-                success=False,
-                error=f"Function execution error: {e}",
-                error_type="internal_error",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-
+            return CapabilityResponse(success=False, error=f"Function execution error: {e}", error_type="internal_error", latency_ms=(time.time() - start_time) * 1000)
         finally:
             if runner_file:
-                try:
-                    os.unlink(runner_file)
-                except Exception:
-                    pass
+                try: os.unlink(runner_file)
+                except Exception: pass
 
-    def _dispatch_core_function(
-        self,
-        principal_id: str,
-        entry: "FunctionEntry",
-        args: Dict[str, Any],
-        request_id: str,
-        start_time: float,
-    ) -> CapabilityResponse:
-        """
-        core function をインプロセスで実行する。
-
-        Wave 29: テーブル駆動。_core_function_handlers[pack_id] → DI サービス名。
-        handle_{function_id}(principal_id, args, grant_config) を呼ぶ。
-        """
-        pack_id = entry.pack_id
-        function_id = entry.function_id
+    def _dispatch_core_function(self, principal_id, entry, args, request_id, start_time):
+        pack_id, function_id = entry.pack_id, entry.function_id
         grant_config = entry.manifest.get("grant_config", {})
-
-        # Wave 29: テーブル参照
         di_service_name = self._core_function_handlers.get(pack_id)
         if di_service_name is None:
-            return CapabilityResponse(
-                success=False,
-                error=f"No handler registered for core pack: {pack_id}",
-                error_type="unknown_core_function",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-
+            return CapabilityResponse(success=False, error=f"No handler registered for core pack: {pack_id}", error_type="unknown_core_function", latency_ms=(time.time() - start_time) * 1000)
         method_name = f"handle_{function_id}"
         try:
             from .di_container import get_container as _get_di
             handler = _get_di().get_or_none(di_service_name)
         except Exception:
             handler = None
-
         if handler is None:
-            return CapabilityResponse(
-                success=False,
-                error=f"{di_service_name} is not available",
-                error_type="initialization_error",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-
+            return CapabilityResponse(success=False, error=f"{di_service_name} is not available", error_type="initialization_error", latency_ms=(time.time() - start_time) * 1000)
         try:
-            method_fn = getattr(handler, method_name)
-            result = method_fn(principal_id=principal_id, args=args, grant_config=grant_config)
+            result = getattr(handler, method_name)(principal_id=principal_id, args=args, grant_config=grant_config)
         except AttributeError:
-            return CapabilityResponse(
-                success=False,
-                error=f"{di_service_name} has no method '{method_name}'",
-                error_type="function_execution_error",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
+            return CapabilityResponse(success=False, error=f"{di_service_name} has no method '{method_name}'", error_type="function_execution_error", latency_ms=(time.time() - start_time) * 1000)
         except Exception as e:
-            return CapabilityResponse(
-                success=False, error=f"Core function failed: {e}",
-                error_type="function_execution_error",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-
+            return CapabilityResponse(success=False, error=f"Core function failed: {e}", error_type="function_execution_error", latency_ms=(time.time() - start_time) * 1000)
         latency_ms = (time.time() - start_time) * 1000
         if isinstance(result, dict) and "error" in result:
-            return CapabilityResponse(
-                success=False, output=result, error=result["error"],
-                error_type="function_execution_error", latency_ms=latency_ms,
-            )
+            return CapabilityResponse(success=False, output=result, error=result["error"], error_type="function_execution_error", latency_ms=latency_ms)
         return CapabilityResponse(success=True, output=result, latency_ms=latency_ms)
 
-    # ------------------------------------------------------------------
-    # Wave 28-B: binary / command runtime execution
-    # ------------------------------------------------------------------
-
     def _execute_binary_function(self, principal_id, entry, args, request_id, start_time):
-        """コンパイル済みバイナリを subprocess で実行。stdin JSON → stdout JSON。"""
         binary_path = entry.main_binary_path
         if binary_path is None or not Path(binary_path).is_file():
-            return CapabilityResponse(
-                success=False, error=f"Binary not found: {binary_path}",
-                error_type="binary_not_found",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-
-        # パストラバーサル最終検証
+            return CapabilityResponse(success=False, error=f"Binary not found: {binary_path}", error_type="binary_not_found", latency_ms=(time.time() - start_time) * 1000)
         func_dir = Path(entry.function_dir).resolve()
         if not Path(binary_path).resolve().is_relative_to(func_dir):
-            return CapabilityResponse(
-                success=False, error="Binary path escapes function directory",
-                error_type="security_violation",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-
+            return CapabilityResponse(success=False, error="Binary path escapes function directory", error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
         timeout = self._get_function_timeout(entry)
-        context = {
-            "principal_id": principal_id, "pack_id": entry.pack_id,
-            "function_id": entry.function_id, "request_id": request_id,
-            "ts": self._now_ts(),
-        }
-        input_json = json.dumps({"context": context, "args": args},
-                                ensure_ascii=False, default=str)
-
+        context = {"principal_id": principal_id, "pack_id": entry.pack_id, "function_id": entry.function_id, "request_id": request_id, "ts": self._now_ts()}
+        input_json = json.dumps({"context": context, "args": args}, ensure_ascii=False, default=str)
         try:
-            proc = subprocess.run(
-                [str(binary_path)],
-                input=input_json, capture_output=True, text=True,
-                timeout=timeout, cwd=str(func_dir),
-            )
+            proc = subprocess.run([str(binary_path)], input=input_json, capture_output=True, text=True, timeout=timeout, cwd=str(func_dir))
             latency_ms = (time.time() - start_time) * 1000
-
             if proc.returncode != 0:
-                return CapabilityResponse(
-                    success=False,
-                    error=f"Binary exited {proc.returncode}: {(proc.stderr or '').strip()[:500]}",
-                    error_type="function_execution_error", latency_ms=latency_ms,
-                )
-
+                return CapabilityResponse(success=False, error=f"Binary exited {proc.returncode}: {(proc.stderr or '').strip()[:500]}", error_type="function_execution_error", latency_ms=latency_ms)
             stdout = (proc.stdout or "").strip()
-            if not stdout:
-                return CapabilityResponse(success=True, output=None, latency_ms=latency_ms)
+            if not stdout: return CapabilityResponse(success=True, output=None, latency_ms=latency_ms)
             if len(stdout.encode("utf-8")) > MAX_RESPONSE_SIZE:
-                return CapabilityResponse(
-                    success=False, error="Response too large",
-                    error_type="response_too_large", latency_ms=latency_ms,
-                )
-            output = json.loads(stdout)
-            return CapabilityResponse(success=True, output=output, latency_ms=latency_ms)
-
+                return CapabilityResponse(success=False, error="Response too large", error_type="response_too_large", latency_ms=latency_ms)
+            return CapabilityResponse(success=True, output=json.loads(stdout), latency_ms=latency_ms)
         except subprocess.TimeoutExpired:
-            return CapabilityResponse(
-                success=False, error=f"Timed out after {timeout}s",
-                error_type="timeout", latency_ms=(time.time() - start_time) * 1000,
-            )
+            return CapabilityResponse(success=False, error=f"Timed out after {timeout}s", error_type="timeout", latency_ms=(time.time() - start_time) * 1000)
         except json.JSONDecodeError:
-            return CapabilityResponse(
-                success=False, error="Output is not valid JSON",
-                error_type="invalid_json_output",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
+            return CapabilityResponse(success=False, error="Output is not valid JSON", error_type="invalid_json_output", latency_ms=(time.time() - start_time) * 1000)
         except Exception as e:
-            return CapabilityResponse(
-                success=False, error=f"Execution error: {e}",
-                error_type="internal_error",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
+            return CapabilityResponse(success=False, error=f"Execution error: {e}", error_type="internal_error", latency_ms=(time.time() - start_time) * 1000)
 
     def _execute_command_function(self, principal_id, entry, args, request_id, start_time):
-        """command リスト (e.g. ["node", "index.js"]) を subprocess で実行。"""
         command = getattr(entry, 'command', [])
         if not command or not isinstance(command, list):
-            return CapabilityResponse(
-                success=False, error="No command defined for runtime=command",
-                error_type="invalid_config",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-
+            return CapabilityResponse(success=False, error="No command defined for runtime=command", error_type="invalid_config", latency_ms=(time.time() - start_time) * 1000)
         timeout = self._get_function_timeout(entry)
-        context = {
-            "principal_id": principal_id, "pack_id": entry.pack_id,
-            "function_id": entry.function_id, "request_id": request_id,
-            "ts": self._now_ts(),
-        }
-        input_json = json.dumps({"context": context, "args": args},
-                                ensure_ascii=False, default=str)
-
+        context = {"principal_id": principal_id, "pack_id": entry.pack_id, "function_id": entry.function_id, "request_id": request_id, "ts": self._now_ts()}
+        input_json = json.dumps({"context": context, "args": args}, ensure_ascii=False, default=str)
         func_dir = Path(entry.function_dir).resolve() if entry.function_dir else None
-
         try:
-            proc = subprocess.run(
-                command,
-                input=input_json, capture_output=True, text=True,
-                timeout=timeout,
-                cwd=str(func_dir) if func_dir else None,
-            )
+            proc = subprocess.run(command, input=input_json, capture_output=True, text=True, timeout=timeout, cwd=str(func_dir) if func_dir else None)
             latency_ms = (time.time() - start_time) * 1000
-
             if proc.returncode != 0:
-                return CapabilityResponse(
-                    success=False,
-                    error=f"Command exited {proc.returncode}: {(proc.stderr or '').strip()[:500]}",
-                    error_type="function_execution_error", latency_ms=latency_ms,
-                )
-
+                return CapabilityResponse(success=False, error=f"Command exited {proc.returncode}: {(proc.stderr or '').strip()[:500]}", error_type="function_execution_error", latency_ms=latency_ms)
             stdout = (proc.stdout or "").strip()
-            if not stdout:
-                return CapabilityResponse(success=True, output=None, latency_ms=latency_ms)
+            if not stdout: return CapabilityResponse(success=True, output=None, latency_ms=latency_ms)
             if len(stdout.encode("utf-8")) > MAX_RESPONSE_SIZE:
-                return CapabilityResponse(
-                    success=False, error="Response too large",
-                    error_type="response_too_large", latency_ms=latency_ms,
-                )
-            output = json.loads(stdout)
-            return CapabilityResponse(success=True, output=output, latency_ms=latency_ms)
-
+                return CapabilityResponse(success=False, error="Response too large", error_type="response_too_large", latency_ms=latency_ms)
+            return CapabilityResponse(success=True, output=json.loads(stdout), latency_ms=latency_ms)
         except subprocess.TimeoutExpired:
-            return CapabilityResponse(
-                success=False, error=f"Timed out after {timeout}s",
-                error_type="timeout", latency_ms=(time.time() - start_time) * 1000,
-            )
+            return CapabilityResponse(success=False, error=f"Timed out after {timeout}s", error_type="timeout", latency_ms=(time.time() - start_time) * 1000)
         except json.JSONDecodeError:
-            return CapabilityResponse(
-                success=False, error="Output is not valid JSON",
-                error_type="invalid_json_output",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
+            return CapabilityResponse(success=False, error="Output is not valid JSON", error_type="invalid_json_output", latency_ms=(time.time() - start_time) * 1000)
         except Exception as e:
-            return CapabilityResponse(
-                success=False, error=f"Execution error: {e}",
-                error_type="internal_error",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
+            return CapabilityResponse(success=False, error=f"Execution error: {e}", error_type="internal_error", latency_ms=(time.time() - start_time) * 1000)
 
-    # flow.run インプロセス実行
-    # ------------------------------------------------------------------
-
-    def _execute_flow_run(
-        self,
-        principal_id: str,
-        permission_id: str,
-        grant_config: Dict[str, Any],
-        args: Dict[str, Any],
-        timeout_seconds: float,
-        request_id: str,
-        start_time: float,
-    ) -> CapabilityResponse:
-        """
-        flow.run をインプロセスで実行する。
-
-        サブプロセスではなく kernel_core.execute_flow_sync() を直接呼ぶ。
-        スレッドローカルの _flow_call_stack で循環呼び出し・深さ制限を行う。
-        """
-
-        # --- バリデーション ---
+    def _execute_flow_run(self, principal_id, permission_id, grant_config, args, timeout_seconds, request_id, start_time):
         flow_id = args.get("flow_id")
         if not flow_id or not isinstance(flow_id, str):
-            return CapabilityResponse(
-                success=False,
-                error="Missing or invalid 'flow_id' in args",
-                error_type="invalid_request",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-
+            return CapabilityResponse(success=False, error="Missing or invalid 'flow_id' in args", error_type="invalid_request", latency_ms=(time.time() - start_time) * 1000)
         inputs = args.get("inputs") or {}
         if not isinstance(inputs, dict):
-            return CapabilityResponse(
-                success=False,
-                error="'inputs' must be a dict",
-                error_type="invalid_request",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-
-        # --- Kernel 参照チェック ---
+            return CapabilityResponse(success=False, error="'inputs' must be a dict", error_type="invalid_request", latency_ms=(time.time() - start_time) * 1000)
         if self._kernel is None:
-            return CapabilityResponse(
-                success=False,
-                error="Kernel not available for flow.run",
-                error_type="initialization_error",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-
-        # --- Grant config: allowed_flow_ids 制限 ---
+            return CapabilityResponse(success=False, error="Kernel not available for flow.run", error_type="initialization_error", latency_ms=(time.time() - start_time) * 1000)
         allowed_flow_ids = grant_config.get("allowed_flow_ids")
         if allowed_flow_ids is not None:
-            if not isinstance(allowed_flow_ids, list):
-                allowed_flow_ids = [allowed_flow_ids]
+            if not isinstance(allowed_flow_ids, list): allowed_flow_ids = [allowed_flow_ids]
             if flow_id not in allowed_flow_ids:
-                return CapabilityResponse(
-                    success=False,
-                    error="Permission denied",
-                    error_type="grant_denied",
-                    latency_ms=(time.time() - start_time) * 1000,
-                )
-
-        # --- スレッドローカル call stack 取得/初期化 ---
-        if not hasattr(_flow_call_stack_local, "stack"):
-            _flow_call_stack_local.stack = []
+                return CapabilityResponse(success=False, error="Permission denied", error_type="grant_denied", latency_ms=(time.time() - start_time) * 1000)
+        if not hasattr(_flow_call_stack_local, "stack"): _flow_call_stack_local.stack = []
         call_stack = _flow_call_stack_local.stack
-
-        # --- 循環検出 ---
         if flow_id in call_stack:
-            chain = " -> ".join(call_stack + [flow_id])
-            return CapabilityResponse(
-                success=False,
-                error=f"Recursive flow.run detected: {chain}",
-                error_type="recursive_flow",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-
-        # --- 深さ制限 ---
+            return CapabilityResponse(success=False, error=f"Recursive flow.run detected: {' -> '.join(call_stack + [flow_id])}", error_type="recursive_flow", latency_ms=(time.time() - start_time) * 1000)
         if len(call_stack) >= MAX_FLOW_CALL_DEPTH:
-            chain = " -> ".join(call_stack + [flow_id])
-            return CapabilityResponse(
-                success=False,
-                error=f"Flow call depth limit exceeded ({MAX_FLOW_CALL_DEPTH}): {chain}",
-                error_type="flow_depth_exceeded",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-
-        # --- タイムアウト計算 ---
-        effective_timeout = min(
-            float(args.get("timeout_seconds", timeout_seconds)),
-            MAX_TIMEOUT,
-        )
-        # 経過時間を差し引く（呼び出し元の残り時間を引き継ぐ）
-        elapsed = time.time() - start_time
-        remaining_timeout = max(effective_timeout - elapsed, 1.0)
-
-        # --- インプロセス実行 ---
+            return CapabilityResponse(success=False, error=f"Flow call depth limit exceeded ({MAX_FLOW_CALL_DEPTH}): {' -> '.join(call_stack + [flow_id])}", error_type="flow_depth_exceeded", latency_ms=(time.time() - start_time) * 1000)
+        remaining_timeout = max(min(float(args.get("timeout_seconds", timeout_seconds)), MAX_TIMEOUT) - (time.time() - start_time), 1.0)
         call_stack.append(flow_id)
         try:
-            context = {
-                "_flow_run_principal_id": principal_id,
-                "_flow_run_request_id": request_id,
-                "_flow_call_stack": list(call_stack),
-            }
+            context = {"_flow_run_principal_id": principal_id, "_flow_run_request_id": request_id, "_flow_call_stack": list(call_stack)}
             context.update(inputs)
-
-            result = self._kernel.execute_flow_sync(
-                flow_id=flow_id,
-                context=context,
-                timeout=remaining_timeout,
-            )
-
+            result = self._kernel.execute_flow_sync(flow_id=flow_id, context=context, timeout=remaining_timeout)
             latency_ms = (time.time() - start_time) * 1000
-
             if isinstance(result, dict) and result.get("_error"):
-                return CapabilityResponse(
-                    success=False,
-                    error=result["_error"],
-                    error_type="flow_execution_error",
-                    latency_ms=latency_ms,
-                )
-
-            return CapabilityResponse(
-                success=True,
-                output=result,
-                latency_ms=latency_ms,
-            )
-
+                return CapabilityResponse(success=False, error=result["_error"], error_type="flow_execution_error", latency_ms=latency_ms)
+            return CapabilityResponse(success=True, output=result, latency_ms=latency_ms)
         except Exception as e:
-            return CapabilityResponse(
-                success=False,
-                error=f"flow.run execution failed: {e}",
-                error_type="flow_execution_error",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
+            return CapabilityResponse(success=False, error=f"flow.run execution failed: {e}", error_type="flow_execution_error", latency_ms=(time.time() - start_time) * 1000)
         finally:
             call_stack.pop()
 
-    # ------------------------------------------------------------------
-    # docker.* インプロセス実行
-    # ------------------------------------------------------------------
-
-    def _execute_docker_dispatch(
-        self,
-        principal_id: str,
-        permission_id: str,
-        grant_config: Dict[str, Any],
-        args: Dict[str, Any],
-        request_id: str,
-        start_time: float,
-    ) -> CapabilityResponse:
-        """
-        docker.* 系 permission_id をインプロセスで実行する。
-
-        DOCKER_METHOD_MAP を使って DockerCapabilityHandler の対応メソッドに dispatch する。
-        """
+    def _execute_docker_dispatch(self, principal_id, permission_id, grant_config, args, request_id, start_time):
         method_name = DOCKER_METHOD_MAP.get(permission_id)
         if method_name is None:
-            return CapabilityResponse(
-                success=False,
-                error=f"Docker capability '{permission_id}' has no method mapping",
-                error_type="not_implemented",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
+            return CapabilityResponse(success=False, error=f"Docker capability '{permission_id}' has no method mapping", error_type="not_implemented", latency_ms=(time.time() - start_time) * 1000)
+        return self._execute_docker_action(principal_id=principal_id, permission_id=permission_id, grant_config=grant_config, args=args, request_id=request_id, start_time=start_time, method_name=method_name)
 
-        return self._execute_docker_action(
-            principal_id=principal_id,
-            permission_id=permission_id,
-            grant_config=grant_config,
-            args=args,
-            request_id=request_id,
-            start_time=start_time,
-            method_name=method_name,
-        )
-
-    def _execute_docker_action(
-        self,
-        principal_id: str,
-        permission_id: str,
-        grant_config: Dict[str, Any],
-        args: Dict[str, Any],
-        request_id: str,
-        start_time: float,
-        method_name: str,
-    ) -> CapabilityResponse:
-        """
-        docker.* をインプロセスで実行する。
-
-        DI コンテナから DockerCapabilityHandler を取得し、
-        DOCKER_METHOD_MAP に基づくメソッドを呼び出して結果を CapabilityResponse に変換する。
-        """
-        # --- DockerCapabilityHandler 取得 ---
+    def _execute_docker_action(self, principal_id, permission_id, grant_config, args, request_id, start_time, method_name):
         try:
             from .di_container import get_container
             handler = get_container().get_or_none("docker_capability_handler")
         except Exception:
             handler = None
-
         if handler is None:
-            return CapabilityResponse(
-                success=False,
-                error="DockerCapabilityHandler is not available",
-                error_type="initialization_error",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-
-        # --- handler メソッド呼び出し ---
+            return CapabilityResponse(success=False, error="DockerCapabilityHandler is not available", error_type="initialization_error", latency_ms=(time.time() - start_time) * 1000)
         try:
-            method_fn = getattr(handler, method_name)
-            result = method_fn(
-                principal_id=principal_id,
-                args=args,
-                grant_config=grant_config,
-            )
+            result = getattr(handler, method_name)(principal_id=principal_id, args=args, grant_config=grant_config)
         except AttributeError:
-            return CapabilityResponse(
-                success=False,
-                error=f"DockerCapabilityHandler has no method '{method_name}'",
-                error_type="not_implemented",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
+            return CapabilityResponse(success=False, error=f"DockerCapabilityHandler has no method '{method_name}'", error_type="not_implemented", latency_ms=(time.time() - start_time) * 1000)
         except Exception as e:
-            return CapabilityResponse(
-                success=False,
-                error=f"{permission_id} execution failed: {e}",
-                error_type="docker_execution_error",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-
-        # --- 結果を CapabilityResponse に変換 ---
+            return CapabilityResponse(success=False, error=f"{permission_id} execution failed: {e}", error_type="docker_execution_error", latency_ms=(time.time() - start_time) * 1000)
         latency_ms = (time.time() - start_time) * 1000
-
         if isinstance(result, dict) and "error" in result:
-            return CapabilityResponse(
-                success=False,
-                output=result,
-                error=result["error"],
-                error_type=f"{permission_id.replace('.', '_')}_error",
-                latency_ms=latency_ms,
-            )
+            return CapabilityResponse(success=False, output=result, error=result["error"], error_type=f"{permission_id.replace('.', '_')}_error", latency_ms=latency_ms)
+        return CapabilityResponse(success=True, output=result, latency_ms=latency_ms)
 
-        return CapabilityResponse(
-            success=True,
-            output=result,
-            latency_ms=latency_ms,
-        )
-
-    def _execute_handler_subprocess(
-        self,
-        handler_def,
-        principal_id: str,
-        permission_id: str,
-        grant_config: Dict[str, Any],
-        args: Dict[str, Any],
-        timeout_seconds: float,
-        request_id: str,
-        start_time: float,
-    ) -> CapabilityResponse:
-        """ハンドラーをサブプロセスで実行"""
-
-        # entrypoint パース
+    def _execute_handler_subprocess(self, handler_def, principal_id, permission_id, grant_config, args, timeout_seconds, request_id, start_time):
         ep_file, ep_func = handler_def.entrypoint.rsplit(":", 1)
         handler_py_path = handler_def.handler_dir / ep_file
-
-        # context 構築
-        context = {
-            "principal_id": principal_id,
-            "permission_id": permission_id,
-            "handler_id": handler_def.handler_id,
-            "grant_config": grant_config,
-            "request_id": request_id,
-            "ts": self._now_ts(),
-        }
-
-        # サブプロセス用入力 JSON
-        subprocess_input = {
-            "context": context,
-            "args": args,
-        }
-
-        # runner スクリプトを一時生成
-        runner_script = self._generate_runner_script(
-            handler_py_path=str(handler_py_path),
-            func_name=ep_func,
-        )
-
+        context = {"principal_id": principal_id, "permission_id": permission_id, "handler_id": handler_def.handler_id, "grant_config": grant_config, "request_id": request_id, "ts": self._now_ts()}
+        runner_script = self._generate_runner_script(handler_py_path=str(handler_py_path), func_name=ep_func)
         runner_file = None
         try:
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".py", delete=False, encoding="utf-8"
-            ) as f:
-                f.write(runner_script)
-                runner_file = f.name
-
-            input_json = json.dumps(subprocess_input, ensure_ascii=False, default=str)
-
-            proc = subprocess.run(
-                [sys.executable, runner_file],
-                input=input_json,
-                capture_output=True,
-                text=True,
-                timeout=timeout_seconds,
-                cwd=str(Path(__file__).parent.parent) if getattr(handler_def, "is_builtin", False) else str(handler_def.handler_dir),
-            )
-
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as f:
+                f.write(runner_script); runner_file = f.name
+            input_json = json.dumps({"context": context, "args": args}, ensure_ascii=False, default=str)
+            proc = subprocess.run([sys.executable, runner_file], input=input_json, capture_output=True, text=True, timeout=timeout_seconds,
+                                  cwd=str(Path(__file__).parent.parent) if getattr(handler_def, "is_builtin", False) else str(handler_def.handler_dir))
             latency_ms = (time.time() - start_time) * 1000
-
             if proc.returncode != 0:
-                return CapabilityResponse(
-                    success=False,
-                    error="Handler execution failed",
-                    error_type="handler_error",
-                    latency_ms=latency_ms,
-                )
-
+                return CapabilityResponse(success=False, error="Handler execution failed", error_type="handler_error", latency_ms=latency_ms)
             stdout = proc.stdout or ""
-
-            # レスポンスサイズチェック
             if len(stdout.encode("utf-8")) > MAX_RESPONSE_SIZE:
-                return CapabilityResponse(
-                    success=False,
-                    error="Response too large",
-                    error_type="response_too_large",
-                    latency_ms=latency_ms,
-                )
-
-            # JSON パース
+                return CapabilityResponse(success=False, error="Response too large", error_type="response_too_large", latency_ms=latency_ms)
             stdout_stripped = stdout.strip()
             if not stdout_stripped:
-                return CapabilityResponse(
-                    success=True,
-                    output=None,
-                    latency_ms=latency_ms,
-                )
-
+                return CapabilityResponse(success=True, output=None, latency_ms=latency_ms)
             try:
                 output = json.loads(stdout_stripped)
             except json.JSONDecodeError:
                 output = stdout_stripped
-
-            return CapabilityResponse(
-                success=True,
-                output=output,
-                latency_ms=latency_ms,
-            )
-
+            return CapabilityResponse(success=True, output=output, latency_ms=latency_ms)
         except subprocess.TimeoutExpired:
-            return CapabilityResponse(
-                success=False,
-                error="Handler execution timed out",
-                error_type="timeout",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-
+            return CapabilityResponse(success=False, error="Handler execution timed out", error_type="timeout", latency_ms=(time.time() - start_time) * 1000)
         except Exception:
-            return CapabilityResponse(
-                success=False,
-                error="Internal execution error",
-                error_type="internal_error",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-
+            return CapabilityResponse(success=False, error="Internal execution error", error_type="internal_error", latency_ms=(time.time() - start_time) * 1000)
         finally:
             if runner_file:
-                try:
-                    os.unlink(runner_file)
-                except Exception:
-                    pass
+                try: os.unlink(runner_file)
+                except Exception: pass
 
-    def _generate_runner_script(self, handler_py_path: str, func_name: str) -> str:
-        """サブプロセス用 runner スクリプトを生成"""
-        # JSON 文字列として安全にパスと関数名を埋め込む
+    def _generate_runner_script(self, handler_py_path, func_name):
         safe_path = json.dumps(handler_py_path)
         safe_func = json.dumps(func_name)
-
         return f'''
-import sys
-import json
-import importlib.util
-
+import sys, json, importlib.util
 def main():
-    # Ensure cwd is in sys.path for handler imports
     import os
     cwd = os.getcwd()
-    if cwd not in sys.path:
-        sys.path.append(cwd)
-
+    if cwd not in sys.path: sys.path.append(cwd)
     handler_path = {safe_path}
     func_name = {safe_func}
-
-    # stdin から入力 JSON を読む
     input_text = sys.stdin.read()
-    try:
-        input_data = json.loads(input_text)
+    try: input_data = json.loads(input_text)
     except json.JSONDecodeError as e:
-        print(json.dumps({{"error": "Invalid input JSON", "error_type": "json_error"}}))
-        sys.exit(1)
-
+        print(json.dumps({{"error": "Invalid input JSON", "error_type": "json_error"}})); sys.exit(1)
     context = input_data.get("context", {{}})
     args = input_data.get("args", {{}})
-
-    # handler モジュールをロード
     spec = importlib.util.spec_from_file_location("handler_module", handler_path)
     if spec is None or spec.loader is None:
-        print(json.dumps({{"error": "Cannot load handler module", "error_type": "load_error"}}))
-        sys.exit(1)
-
+        print(json.dumps({{"error": "Cannot load handler module", "error_type": "load_error"}})); sys.exit(1)
     module = importlib.util.module_from_spec(spec)
     sys.modules["handler_module"] = module
     spec.loader.exec_module(module)
-
     fn = getattr(module, func_name, None)
     if fn is None:
-        print(json.dumps({{"error": f"Function '{{func_name}}' not found", "error_type": "func_not_found"}}))
-        sys.exit(1)
-
-    # 実行
-    try:
-        result = fn(context, args)
+        print(json.dumps({{"error": f"Function '{{func_name}}' not found", "error_type": "func_not_found"}})); sys.exit(1)
+    try: result = fn(context, args)
     except Exception as e:
-        print(json.dumps({{"error": str(e), "error_type": type(e).__name__}}))
-        sys.exit(1)
-
-    # 結果を JSON で出力
+        print(json.dumps({{"error": str(e), "error_type": type(e).__name__}})); sys.exit(1)
     if result is not None:
-        try:
-            print(json.dumps(result, ensure_ascii=False, default=str))
+        try: print(json.dumps(result, ensure_ascii=False, default=str))
         except Exception:
-            print(json.dumps({{"error": "Result is not JSON serializable", "error_type": "serialize_error"}}))
-            sys.exit(1)
-
-if __name__ == "__main__":
-    main()
+            print(json.dumps({{"error": "Result is not JSON serializable", "error_type": "serialize_error"}})); sys.exit(1)
+if __name__ == "__main__": main()
 '''
 
-    def _check_rate_limit(self, principal_id: str) -> bool:
-        """
-        secret.get の rate limit チェック（sliding window 60秒）。
-
-        Returns:
-            True = 許可, False = 超過
-        """
+    def _check_rate_limit(self, principal_id):
         now = time.time()
-        window = 60.0
-
         with self._rate_limit_lock:
             if principal_id not in self._rate_limit_state:
                 self._rate_limit_state[principal_id] = collections.deque()
-
             dq = self._rate_limit_state[principal_id]
-
-            # ウィンドウ外のエントリを削除
-            while dq and dq[0] < now - window:
-                dq.popleft()
-
-            if len(dq) >= self._secret_get_rate_limit:
-                return False
-
+            while dq and dq[0] < now - 60.0: dq.popleft()
+            if len(dq) >= self._secret_get_rate_limit: return False
             dq.append(now)
             return True
 
-    def _audit(
-        self,
-        principal_id: str,
-        permission_id: str,
-        handler_id: Optional[str],
-        response: CapabilityResponse,
-        args: Any,
-        request_id: str,
-        trusted: Optional[bool] = None,
-        grant_allowed: Optional[bool] = None,
-        grant_reason: Optional[str] = None,
-        detail_reason: Optional[str] = None,
-        extra_details: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        """監査ログに記録"""
+    def _audit(self, principal_id, permission_id, handler_id, response, args, request_id,
+               trusted=None, grant_allowed=None, grant_reason=None, detail_reason=None, extra_details=None):
         try:
             from .audit_logger import get_audit_logger
             audit = get_audit_logger()
-
-            details = {
-                "principal_id": principal_id,
-                "permission_id": permission_id,
-                "handler_id": handler_id,
-                "request_id": request_id,
-                "latency_ms": response.latency_ms,
-                "args_summary": _summarize_args(args),
-            }
-
-            if trusted is not None:
-                details["trusted"] = trusted
-            if grant_allowed is not None:
-                details["grant_allowed"] = grant_allowed
-            if grant_reason is not None:
-                details["grant_reason"] = grant_reason
-            if detail_reason is not None:
-                details["detail_reason"] = detail_reason
-            if extra_details:
-                details.update(extra_details)
-
-            if response.error:
-                details["error"] = response.error
-                details["error_type"] = response.error_type
-
-            audit.log_permission_event(
-                pack_id=principal_id,
-                permission_type="capability",
-                action="execute",
-                success=response.success,
-                details=details,
-                rejection_reason=(
-                    detail_reason or grant_reason or response.error
-                ) if not response.success else None,
-            )
+            details = {"principal_id": principal_id, "permission_id": permission_id, "handler_id": handler_id,
+                        "request_id": request_id, "latency_ms": response.latency_ms, "args_summary": _summarize_args(args)}
+            if trusted is not None: details["trusted"] = trusted
+            if grant_allowed is not None: details["grant_allowed"] = grant_allowed
+            if grant_reason is not None: details["grant_reason"] = grant_reason
+            if detail_reason is not None: details["detail_reason"] = detail_reason
+            if extra_details: details.update(extra_details)
+            if response.error: details["error"] = response.error; details["error_type"] = response.error_type
+            audit.log_permission_event(pack_id=principal_id, permission_type="capability", action="execute",
+                                        success=response.success, details=details,
+                                        rejection_reason=(detail_reason or grant_reason or response.error) if not response.success else None)
         except Exception:
             pass
 
 
-# グローバルインスタンス
 _global_executor: Optional[CapabilityExecutor] = None
 _executor_lock = threading.Lock()
 
-
 def get_capability_executor() -> CapabilityExecutor:
-    """
-    グローバルなCapabilityExecutorを取得する。
-
-    DI コンテナ経由で遅延初期化・キャッシュされる。
-    """
     from .di_container import get_container
     return get_container().get("capability_executor")
 
-
 def reset_capability_executor() -> CapabilityExecutor:
-    """リセット（テスト用）"""
     global _global_executor
     from .di_container import get_container
     container = get_container()

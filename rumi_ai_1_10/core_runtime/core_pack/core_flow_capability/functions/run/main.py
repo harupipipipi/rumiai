@@ -5,8 +5,7 @@ This handler is never executed via subprocess.
 flow.run is intercepted by capability_executor.py and executed
 in-process via kernel_core.execute_flow_sync().
 
-This file exists solely because handler_registry scans for
-handler.json + handler.py pairs in builtin_capability_handlers/.
+This file exists solely as a stub for the FunctionRegistry entry.
 """
 
 

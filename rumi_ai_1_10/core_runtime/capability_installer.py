@@ -78,9 +78,8 @@ def _get_trust_store():
 
 
 def _get_handler_registry():
-    """遅延 import: CapabilityHandlerRegistry"""
-    from .capability_handler_registry import get_capability_handler_registry
-    return get_capability_handler_registry()
+    """Phase D: CapabilityHandlerRegistry は削除済み。互換スタブとして None を返す。"""
+    return None
 
 
 def _get_executor():
@@ -372,8 +371,15 @@ class CapabilityInstaller:
 
     @staticmethod
     def _compute_sha256(file_path: Path) -> str:
-        from .capability_handler_registry import compute_file_sha256
-        return compute_file_sha256(file_path)
+        import hashlib
+        h = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            while True:
+                chunk = f.read(65536)
+                if not chunk:
+                    break
+                h.update(chunk)
+        return h.hexdigest()
 
     # ------------------------------------------------------------------
     # scan_candidates
@@ -729,11 +735,7 @@ class CapabilityInstaller:
                 self._mark_failed(item, f"Copy error: {e}")
                 return ApproveResult(success=False, error=f"Copy error: {e}")
 
-            try:
-                registry = _get_handler_registry()
-                registry.load_all()
-            except Exception:
-                pass
+            # Phase D: CapabilityHandlerRegistry removed. FunctionRegistry handles registration.
 
             try:
                 executor = _get_executor()
