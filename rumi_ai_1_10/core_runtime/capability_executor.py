@@ -18,7 +18,6 @@ Phase D: FunctionRegistry を唯一のレジストリとして統一。
 from __future__ import annotations
 
 import collections
-import hashlib
 import json
 import os
 import subprocess
@@ -57,6 +56,9 @@ try:
 except ImportError:
     FunctionRegistry = None
     FunctionEntry = None
+
+# crypto_utils: compute_file_sha256 (Phase D: D0-3 依存解消)
+from .crypto_utils import compute_file_sha256
 
 from typing import Any, Dict, List, Optional
 
@@ -110,18 +112,6 @@ _VALID_CALLING_CONVENTIONS = frozenset({
     "kernel", "subprocess", "block", "python_host",
     "python_docker", "binary", "command",
 })
-
-
-def compute_file_sha256(file_path: Path) -> str:
-    """ファイルの SHA-256 ハッシュを計算"""
-    h = hashlib.sha256()
-    with open(file_path, "rb") as f:
-        while True:
-            chunk = f.read(65536)
-            if not chunk:
-                break
-            h.update(chunk)
-    return h.hexdigest()
 
 
 @dataclass
