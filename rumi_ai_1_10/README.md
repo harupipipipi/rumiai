@@ -263,6 +263,5 @@ curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
 ---
 
 ## ライセンス
-
-MIT License
+考え中
 ```
