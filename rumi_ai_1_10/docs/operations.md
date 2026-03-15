@@ -1,5 +1,4 @@
 
-```markdown
 # Rumi AI OS — Operations Guide
 
 運用者向けのガイドです。設計の全体像は [architecture.md](architecture.md)、Pack 開発は [pack-development.md](pack-development.md) を参照してください。
@@ -1348,5 +1347,4 @@ WARNING: Using legacy flow path. This is DEPRECATED and will be removed.
 ```
 
 `flow/` や `ecosystem/flows/` から `flows/`、`user_data/shared/flows/`、または Pack 内 `flows/` へ移行してください。
-```
 
