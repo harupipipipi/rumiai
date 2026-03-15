@@ -203,7 +203,7 @@ Pack の通常実行は Docker 隔離で成立するので、ホストに Python
 - ✅ kernel_flow_execution.py: logging→get_structured_logger, Profiler で Flow 計測, MetricsCollector でステップ計測
 - ✅ kernel_handlers_system.py: logging→get_structured_logger, MetricsCollector 計測追加
 - ✅ kernel_handlers_runtime.py: logging→get_structured_logger, MetricsCollector 計測追加
-- ✅ di_container.py: health_checker / metrics_collector / profiler のファクトリ登録（計28サービス）
+- ✅ di_container.py: health_checker / metrics_collector / profiler のファクトリ登録（計32サービス）
 - ✅ app.py: configure_logging() 呼び出し, --health フラグ追加
 
 > 新環境変数: RUMI_LOG_LEVEL, RUMI_LOG_FORMAT, RUMI_DEPRECATION_LEVEL。新 CLI フラグ: --health, --validate。
@@ -269,7 +269,7 @@ vocab_registry はこの問題を解決する仕組みを既に持つが、「Fl
 
 ### 6.6 内部リファクタリング（P3 保留）
 
-- 🟡 グローバルシングルトン → DI コンテナ移行（kernel 統合・28サービス登録済み）— Wave 15
+- 🟡 グローバルシングルトン → DI コンテナ移行（kernel 統合・32サービス登録済み）— Wave 15
 - 🧩 Store バックエンド SQLite 化（ファイルベースからの移行オプション）
 - 🧩 pack_api_server.py の大規模ハンドラ分割（現在 ~80KB）
 - 🧩 Docker 実行ロジック共通化（python_file_executor / secure_executor の統合）

@@ -49,8 +49,8 @@
 ### インストール
 
 ```bash
-git clone https://github.com/your-repo/rumi-ai.git
-cd rumi-ai
+git clone https://github.com/harupipipipi/rumiai.git
+cd rumiai/rumi_ai_1_10
 
 # セットアップ（CLI）
 python bootstrap.py --cli init
@@ -322,6 +322,8 @@ curl -X POST http://localhost:8765/api/network/revoke \
 ---
 
 ## Capability Handler 承認
+
+> **注意**: core_pack（store / secrets / flow / communication / docker）が提供する関数は、この候補導入ワークフローを経由せず、kernel 起動時に FunctionRegistry へ自動登録されます。以下の候補導入ワークフロー（scan → approve → Grant）は、ユーザー Pack が同梱するカスタム capability handler に対して適用されるものです。
 
 Capability handler は 2 段階の操作で使用可能になります。
 
