@@ -1,4 +1,3 @@
-```markdown
 # Rumi AI OS
 
 **「基盤のない基盤」** — 改造される「本体」が存在しないモジュラーAIフレームワーク
@@ -304,4 +303,3 @@ curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
 ## ライセンス
 
 考え中
-```
