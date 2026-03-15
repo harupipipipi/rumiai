@@ -3,9 +3,16 @@ __pycache__/
 *.pyc
 .DS_Store
 *.exe
+*.zip
+*.bak
+*.bak.*
 chats/
 userdata/
 tenpu/
 debug.txt
 erroer_memo.txt
 flow.iranai
+.backups/
+.backup_dead_code_removal/
+.env.local
+deploy.py

@@ -1,5 +1,4 @@
 
-```markdown
 # Pack 開発クイックスタートガイド
 
 > 詳細な API リファレンスは [pack-development.md](pack-development.md) を参照してください。
@@ -448,5 +447,4 @@ def old_handler(input_data, context=None):
 - **独自エンドポイントの定義** → [pack-development.md「Pack 独自エンドポイント」](pack-development.md#pack-独自エンドポイントroutesjson)
 - **スケジュール実行** → [pack-development.md「Flow 定義」](pack-development.md#flow-定義) 内のスケジュール実行セクション
 - **エラーハンドリング** → [pack-development.md「エラーハンドリング ベストプラクティス」](pack-development.md#エラーハンドリング-ベストプラクティス)
-```
 
