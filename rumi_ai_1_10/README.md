@@ -87,7 +87,6 @@ project_root/
 │   │
 │   ├── capability_proxy.py         # Capability Proxy サーバー（UDS）
 │   ├── capability_executor.py      # Capability 実行
-│   ├── capability_handler_registry.py # Handler レジストリ
 │   ├── capability_trust_store.py   # Trust Store（sha256 allowlist）
 │   ├── capability_grant_manager.py # Grant 管理（principal × permission）
 │   ├── capability_installer.py     # Handler 候補導入
@@ -110,6 +109,15 @@ project_root/
 │   │   ├── snapshot.py
 │   │   ├── journal.py
 │   │   └── resolver.py
+│   │
+│   ├── core_pack/                  # Core Pack（公式 Capability 実装）
+│   │   ├── core_store_capability/
+│   │   ├── core_secrets_capability/
+│   │   ├── core_flow_capability/
+│   │   ├── core_communication_capability/
+│   │   └── core_docker_capability/
+│   ├── function_registry.py        # FunctionRegistry / FunctionEntry
+│   ├── crypto_utils.py             # SHA-256 ユーティリティ
 │   │
 │   ├── lib_executor.py             # lib install/update 実行
 │   ├── pip_installer.py            # pip 依存ライブラリ導入
@@ -228,7 +236,7 @@ project_root/
 
 ```bash
 git clone https://github.com/harupipipipi/rumiai.git
-cd rumi-ai
+cd rumiai/rumi_ai_1_10
 python bootstrap.py --cli init
 ```
 
@@ -257,6 +265,7 @@ curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
 |-------------|------|
 | [docs/architecture.md](docs/architecture.md) | 設計と仕組みの全体像（Flow、セキュリティ、権限、監査） |
 | [docs/pack-development.md](docs/pack-development.md) | Pack 開発ガイド（ブロック、Flow、Modifier、lib、pip 依存） |
+| [docs/pack-development-guide.md](docs/pack-development-guide.md) | Pack 開発クイックスタートガイド |
 | [docs/operations.md](docs/operations.md) | 運用ガイド（HTTP API、承認ワークフロー、セットアップ、トラブルシューティング） |
 | [docs/roadmap.md](docs/roadmap.md) | ロードマップ（設計思想、過去案、将来計画） |
 
