@@ -380,6 +380,18 @@ class PackAPIHandler(
                 else:
                     self._send_response(APIResponse(False, error="Pack not found"), 404)
             
+            elif path.startswith("/api/packs/") and path.endswith("/dependencies"):
+                pack_id = path.split("/")[3]
+                if not self._validate_pack_id(pack_id):
+                    self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
+                    return
+                result = self._get_pack_dependencies(pack_id)
+                self._send_result(result)
+
+            elif path == "/api/runtime/available":
+                result = self._get_available_runtimes()
+                self._send_result(result)
+
             elif path == "/api/containers":
                 result = self._get_containers()
                 self._send_result(result)
@@ -795,6 +807,20 @@ class PackAPIHandler(
                 else:
                     self._send_response(APIResponse(False, error=result.get("error")), result.get("status_code", 400))
             
+            elif path.startswith("/api/packs/") and path.endswith("/approve-rule"):
+                pack_id = path.split("/")[3]
+                if not self._validate_pack_id(pack_id):
+                    self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
+                    return
+                result = self._approve_rule_pack(pack_id)
+                if isinstance(result, dict) and "error" in result:
+                    self._send_response(
+                        APIResponse(False, error=result["error"]),
+                        result.get("status_code", 400),
+                    )
+                else:
+                    self._send_response(APIResponse(True, data=result))
+
             elif path.startswith("/api/packs/") and path.endswith("/reject"):
                 pack_id = path.split("/")[3]
                 if not self._validate_pack_id(pack_id):
