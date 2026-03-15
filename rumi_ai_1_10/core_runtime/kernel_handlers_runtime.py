@@ -65,6 +65,7 @@ class KernelRuntimeHandlersMixin:
             "kernel:flow.load_all": self._h_flow_load_all,
             "kernel:flow.execute_by_id": self._h_flow_execute_by_id,
             "kernel:python_file_call": self._h_python_file_call,
+            "kernel:universal_call": self._h_universal_call,
             "kernel:modifier.load_all": self._h_modifier_load_all,
             "kernel:modifier.apply": self._h_modifier_apply,
             "kernel:network.grant": self._h_network_grant,
@@ -545,6 +546,45 @@ class KernelRuntimeHandlersMixin:
     # ------------------------------------------------------------------
     # python_file_call
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # universal_call
+    # ------------------------------------------------------------------
+
+    def _h_universal_call(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """kernel:universal_call handler — delegates to flow execution mixin."""
+        import asyncio
+
+        # Build step dict from args
+        step = {
+            "id": args.get("_step_id", "universal_call"),
+            "type": "universal_call",
+            "owner_pack": args.get("owner_pack", ""),
+            "file": args.get("file", ""),
+            "runtime": args.get("runtime", "python"),
+            "protocol": args.get("protocol", "stdio_json"),
+            "docker_image": args.get("docker_image"),
+            "timeout_seconds": args.get("timeout_seconds", 30.0),
+            "input": args.get("input", {}),
+            "output": args.get("output", ""),
+            "principal_id": args.get("principal_id", ""),
+        }
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            import concurrent.futures
+            future = asyncio.run_coroutine_threadsafe(
+                self._handle_universal_call_async(step, ctx), loop,
+            )
+            return future.result(timeout=120.0)
+        else:
+            return asyncio.run(
+                self._handle_universal_call_async(step, ctx)
+            )
 
     def _h_python_file_call(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
         """
