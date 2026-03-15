@@ -358,6 +358,103 @@ def validate_dependencies(
     return issues
 
 
+
+# ---------------------------------------------------------------------------
+# validate_rule_dependencies — Pack Type 固有の依存関係検証
+# ---------------------------------------------------------------------------
+
+def validate_rule_dependencies(
+    packs: Dict[str, Dict[str, Any]],
+    approval_manager: Any = None,
+) -> List[Dict[str, Any]]:
+    """
+    Pack Type 固有の依存関係検証を行い、問題のリストを返す。
+
+    検証内容:
+        1. application Pack の depends_on に指定された rule Pack が
+           通常承認 + ルール拡張承認済みであること。
+        2. runtime_type が "binary" の application Pack が、
+           binary を提供する rule Pack を depends_on に含むこと。
+
+    approval_manager が None の場合、承認状態の検証はスキップし
+    構造的な検証のみ行う。
+
+    Args:
+        packs: ``{pack_id: pack_manifest}`` の辞書
+        approval_manager: ApprovalManager インスタンス（任意）
+
+    Returns:
+        問題のリスト。問題がなければ空リスト。
+        各要素は dict で、``type`` キーに問題種別を持つ:
+            - ``{"type": "rule_not_approved", "pack_id": ..., "rule_pack_id": ...}``
+            - ``{"type": "rule_not_rule_approved", "pack_id": ..., "rule_pack_id": ...}``
+            - ``{"type": "missing_binary_provider", "pack_id": ...}``
+    """
+    issues: List[Dict[str, Any]] = []
+    all_pack_ids = set(packs.keys())
+
+    # rule Pack の provides_runtime マッピングを構築
+    runtime_providers: Dict[str, set] = {}  # runtime_name -> set of pack_ids
+    for pid, manifest in packs.items():
+        pt = manifest.get("pack_type", "application")
+        if pt == "rule":
+            provides = manifest.get("provides_runtime", [])
+            if isinstance(provides, list):
+                for rt in provides:
+                    if isinstance(rt, str) and rt:
+                        if rt not in runtime_providers:
+                            runtime_providers[rt] = set()
+                        runtime_providers[rt].add(pid)
+
+    for pid, manifest in packs.items():
+        pt = manifest.get("pack_type", "application")
+
+        # --- 検証1: depends_on 内の rule Pack の承認状態 ---
+        if approval_manager is not None:
+            deps = extract_dependencies(manifest)
+            for dep_id in deps:
+                if dep_id not in all_pack_ids:
+                    continue  # missing は validate_dependencies() が検出
+                dep_manifest = packs.get(dep_id, {})
+                dep_type = dep_manifest.get("pack_type", "application")
+                if dep_type == "rule":
+                    # 通常承認チェック
+                    is_approved, reason = approval_manager.is_pack_approved_and_verified(dep_id)
+                    if not is_approved:
+                        issues.append({
+                            "type": "rule_not_approved",
+                            "pack_id": pid,
+                            "rule_pack_id": dep_id,
+                            "reason": reason,
+                        })
+                    # ルール拡張承認チェック
+                    elif not approval_manager.is_rule_approved(dep_id):
+                        issues.append({
+                            "type": "rule_not_rule_approved",
+                            "pack_id": pid,
+                            "rule_pack_id": dep_id,
+                        })
+
+        # --- 検証2: binary runtime_type の Pack が binary provider を含むか ---
+        if pt == "application":
+            rt = manifest.get("runtime_type", "python")
+            if rt == "binary":
+                deps = extract_dependencies(manifest)
+                has_binary_provider = False
+                binary_providers = runtime_providers.get("binary", set())
+                for dep_id in deps:
+                    if dep_id in binary_providers:
+                        has_binary_provider = True
+                        break
+                if not has_binary_provider:
+                    issues.append({
+                        "type": "missing_binary_provider",
+                        "pack_id": pid,
+                    })
+
+    return issues
+
+
 # --- バージョン制約（将来対応 TODO） ---
 # depends_on に {"pack_id": "xxx", "version": ">=1.0.0"} がある場合、
 # バージョン比較を行う関数をここに追加する。
