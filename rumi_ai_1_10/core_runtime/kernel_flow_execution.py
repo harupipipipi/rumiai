@@ -80,6 +80,13 @@ MAX_FLOW_CHAIN_DEPTH = 10
 _CONDITION_OP_RE = re.compile(r'\s+(==|!=|>=|<=|>|<)\s+')
 
 
+
+# ── universal_call constants ────────────────────────────────
+_UC_MAX_RESPONSE_SIZE = 1 * 1024 * 1024   # 1 MiB
+_UC_MAX_TIMEOUT = 120.0                    # seconds
+_UC_DEFAULT_TIMEOUT = 30.0                 # seconds
+_UC_VALID_RUNTIMES = frozenset({"python", "binary", "command"})
+
 class KernelFlowExecutionMixin:
     """
     Flow実行系 Mixin
@@ -940,6 +947,243 @@ class KernelFlowExecutionMixin:
             self.diagnostics.record_step(phase=phase, step_id=f"{step_id_str}.failed", handler=handler_str, status=status, error=e,
                                           meta={"on_error.action": action, "optional": optional})
             return action == "abort"
+
+
+
+    # ================================================================
+    # universal_call – async handler + helpers
+    # ================================================================
+    async def _handle_universal_call_async(
+        self,
+        step: dict,
+        ctx: dict,
+    ) -> dict:
+        """Execute a universal_call step (python / binary / command)."""
+        import asyncio, json, os, time
+
+        owner_pack = step.get("owner_pack", "")
+        uc_file = step.get("file", "")
+        runtime = step.get("runtime", "python")
+        protocol = step.get("protocol", "stdio_json")
+        docker_image = step.get("docker_image")
+        input_data = step.get("input", {}) if isinstance(step.get("input"), dict) else {}
+        timeout = min(
+            float(step.get("timeout_seconds", _UC_DEFAULT_TIMEOUT) or _UC_DEFAULT_TIMEOUT),
+            _UC_MAX_TIMEOUT,
+        )
+        step_id = step.get("id", "universal_call")
+
+        def _err(msg, etype="execution_error"):
+            return {
+                "_kernel_step_status": "failed",
+                "_error": msg,
+                "_error_type": etype,
+                "_step_id": step_id,
+            }
+
+        # ── validation ──
+        if not owner_pack or not uc_file:
+            return _err("owner_pack and file are required", "validation_error")
+        if runtime not in _UC_VALID_RUNTIMES:
+            return _err(f"invalid runtime: {runtime!r}", "validation_error")
+
+        # ── pack approval ──
+        try:
+            from core_runtime.approval_manager import get_approval_manager
+            am = get_approval_manager()
+            if hasattr(am, "is_pack_approved_and_verified"):
+                approved = am.is_pack_approved_and_verified(owner_pack)
+            else:
+                approved = am.is_pack_approved(owner_pack)
+            if not approved:
+                return _err(
+                    f"Pack '{owner_pack}' is not approved for universal_call",
+                    "approval_error",
+                )
+        except Exception as exc:
+            return _err(f"approval check failed: {exc}", "approval_error")
+
+        # ── path resolution & traversal protection ──
+        try:
+            from core_runtime.paths import ECOSYSTEM_DIR, is_path_within
+            pack_dir = os.path.join(ECOSYSTEM_DIR, owner_pack)
+            target = os.path.realpath(os.path.join(pack_dir, uc_file))
+            if not is_path_within(target, pack_dir):
+                return _err(f"path traversal blocked: {uc_file}", "security_error")
+            if not os.path.isfile(target):
+                return _err(f"file not found: {uc_file}", "file_error")
+        except ImportError:
+            pack_dir = ""
+            target = uc_file
+
+        # ── execute by runtime ──
+        t0 = time.monotonic()
+        try:
+            if runtime == "python":
+                result = await self._uc_exec_python(
+                    owner_pack, target, input_data, timeout, docker_image, ctx,
+                )
+            elif runtime == "binary":
+                result = await self._uc_exec_binary(
+                    target, input_data, timeout, docker_image, pack_dir,
+                )
+            elif runtime == "command":
+                result = await self._uc_exec_command(
+                    target, input_data, timeout, docker_image, pack_dir,
+                )
+            else:
+                result = _err(f"unsupported runtime: {runtime}")
+        except asyncio.TimeoutError:
+            result = _err(f"timeout after {timeout}s", "timeout_error")
+        except Exception as exc:
+            result = _err(f"execution failed: {exc}")
+
+        elapsed = time.monotonic() - t0
+
+        # ── output size guard ──
+        raw = json.dumps(result) if isinstance(result, dict) else str(result)
+        if len(raw.encode("utf-8", errors="replace")) > _UC_MAX_RESPONSE_SIZE:
+            result = _err(
+                f"output exceeds {_UC_MAX_RESPONSE_SIZE} bytes",
+                "output_size_error",
+            )
+
+        # ── wrap in kernel envelope ──
+        if isinstance(result, dict) and "_kernel_step_status" in result:
+            return result
+        return {
+            "_kernel_step_status": "success",
+            "_kernel_step_meta": {"elapsed_s": round(elapsed, 4), "runtime": runtime},
+            "result": result,
+        }
+
+    # ── python runtime ──────────────────────────────────────
+    async def _uc_exec_python(self, owner_pack, target, input_data, timeout, docker_image, ctx):
+        try:
+            from core_runtime.python_file_executor import PythonFileExecutor, ExecutionContext
+            executor = PythonFileExecutor()
+            exec_ctx = ExecutionContext(
+                pack_id=owner_pack,
+                file_path=target,
+                input_data=input_data,
+                timeout_seconds=timeout,
+            )
+            exec_result = await executor.execute(exec_ctx)
+            if hasattr(exec_result, "to_dict"):
+                return exec_result.to_dict()
+            return {
+                "stdout": getattr(exec_result, "stdout", ""),
+                "success": getattr(exec_result, "success", False),
+            }
+        except Exception as exc:
+            return {"_kernel_step_status": "failed", "_error": str(exc), "_error_type": "python_exec_error"}
+
+    # ── binary runtime ──────────────────────────────────────
+    async def _uc_exec_binary(self, target, input_data, timeout, docker_image, pack_dir):
+        import asyncio, json, os
+        if docker_image:
+            return await self._uc_exec_in_container(
+                target, input_data, timeout, docker_image, pack_dir, runtime="binary",
+            )
+        input_json = json.dumps(input_data)
+        proc = await asyncio.create_subprocess_exec(
+            target,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(input=input_json.encode("utf-8")),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            raise
+        stdout_str = stdout.decode("utf-8", errors="replace")[:_UC_MAX_RESPONSE_SIZE]
+        try:
+            return json.loads(stdout_str)
+        except json.JSONDecodeError:
+            return {"raw_stdout": stdout_str, "stderr": stderr.decode("utf-8", errors="replace")[:4096]}
+
+    # ── command runtime ─────────────────────────────────────
+    async def _uc_exec_command(self, target, input_data, timeout, docker_image, pack_dir):
+        import asyncio, json, os
+        if docker_image:
+            return await self._uc_exec_in_container(
+                target, input_data, timeout, docker_image, pack_dir, runtime="command",
+            )
+        input_json = json.dumps(input_data)
+        proc = await asyncio.create_subprocess_shell(
+            f"sh {target}",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=os.path.dirname(target) or None,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(input=input_json.encode("utf-8")),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            raise
+        stdout_str = stdout.decode("utf-8", errors="replace")[:_UC_MAX_RESPONSE_SIZE]
+        try:
+            return json.loads(stdout_str)
+        except json.JSONDecodeError:
+            return {"raw_stdout": stdout_str, "stderr": stderr.decode("utf-8", errors="replace")[:4096]}
+
+    # ── Docker container execution ──────────────────────────
+    async def _uc_exec_in_container(self, target, input_data, timeout, docker_image, pack_dir, runtime="binary"):
+        import asyncio, json, os
+        try:
+            from core_runtime.container_orchestrator import get_container_orchestrator
+            orch = get_container_orchestrator()
+            cmd_args = orch.build_universal_call_command(
+                pack_id=os.path.basename(pack_dir) if pack_dir else "unknown",
+                workspace_dir=pack_dir or os.path.dirname(target),
+                input_file="",
+                filename=os.path.basename(target),
+                runtime=runtime,
+                docker_image=docker_image,
+            )
+        except Exception:
+            cmd_args = [
+                "docker", "run", "--rm",
+                "--network=none", "--cap-drop=ALL",
+                "--security-opt=no-new-privileges:true",
+                "--read-only", "--memory=256m", "--cpus=0.5", "--pids-limit=50",
+                "-v", f"{pack_dir}:/workspace:ro",
+                "-w", "/workspace",
+                docker_image or "alpine:latest",
+            ]
+            if runtime == "command":
+                cmd_args += ["sh", os.path.basename(target)]
+            else:
+                cmd_args += [f"./{os.path.basename(target)}"]
+
+        input_bytes = json.dumps(input_data).encode("utf-8")
+        proc = await asyncio.create_subprocess_exec(
+            *cmd_args,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(input=input_bytes),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            raise
+        stdout_str = stdout.decode("utf-8", errors="replace")[:_UC_MAX_RESPONSE_SIZE]
+        try:
+            return json.loads(stdout_str)
+        except json.JSONDecodeError:
+            return {"raw_stdout": stdout_str, "stderr": stderr.decode("utf-8", errors="replace")[:4096]}
 
 
 __all__ = ["KernelFlowExecutionMixin", "MAX_FLOW_CHAIN_DEPTH"]
