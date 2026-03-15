@@ -509,6 +509,39 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}, "output": {}}, "required": ["_kernel_step_status"]},
     },
 
+    # --- universal_call ---
+    "kernel:universal_call": {
+        "description": "Execute a file from a pack with configurable runtime "
+                       "(python/binary/command). Supports stdio_json protocol. "
+                       "Optional Docker isolation.",
+        "permission_id": "kernel:universal_call",
+        "risk": "high",
+        "requires": [],
+        "tags": ["kernel", "runtime", "exec", "universal"],
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "owner_pack": {"type": "string", "description": "Pack ID that owns the target file"},
+                "file": {"type": "string", "description": "Relative path within the pack"},
+                "runtime": {"type": "string", "default": "python", "enum": ["python", "binary", "command"]},
+                "protocol": {"type": "string", "default": "stdio_json"},
+                "input": {"type": "object", "default": {}},
+                "timeout_seconds": {"type": "number", "default": 30, "maximum": 120},
+                "docker_image": {"type": "string", "description": "Optional Docker image override"}
+            },
+            "required": ["owner_pack", "file"]
+        },
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "_kernel_step_status": {"type": "string", "enum": ["success", "failed"]},
+                "_kernel_step_meta": {"type": "object"},
+                "result": {}
+            },
+            "required": ["_kernel_step_status"]
+        },
+    },
+
     # --- modifier ---
     "kernel:modifier.load_all": {
         "description": "Load all modifier files for flow modification",
