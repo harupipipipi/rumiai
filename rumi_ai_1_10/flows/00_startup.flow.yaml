@@ -89,18 +89,6 @@ steps:
     input:
       handler: "kernel:flow.load_all"
 
-  # Phase B-1: kernel function 登録
-  # _register_kernel_functions() を kernel:ir.call 経由で呼び出す
-  - id: kernel_function_register
-    phase: ecosystem
-    priority: 15
-    type: handler
-    input:
-      handler: "kernel:ir.call"
-      args:
-        key: "kernel.register_kernel_functions"
-        strategy: "last"
-
   # Phase B1-3: kernel function 登録ステップ
   # _KERNEL_HANDLER_MANIFESTS の全エントリを FunctionRegistry に登録する
   - id: kernel_functions_register
@@ -109,18 +97,6 @@ steps:
     type: handler
     input:
       handler: "kernel:register_kernel_functions"
-  # FIX-A1: core_pack function を FunctionRegistry に登録
-  # _register_builtin_handlers() は CapabilityExecutor.initialize() 内でも呼ばれるが、
-  # startup flow 経由でも明示的に呼び出して確実に登録する
-  - id: core_pack_functions_register
-    phase: ecosystem
-    priority: 16
-    type: handler
-    input:
-      handler: "kernel:ir.call"
-      args:
-        key: "capability_executor.register_builtin_handlers"
-        strategy: "last"
 
   - id: component_discover
     phase: ecosystem

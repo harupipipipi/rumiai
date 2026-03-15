@@ -1027,22 +1027,6 @@ class Kernel(
                 sorted(extra),
             )
 
-        # Phase B-1: _register_kernel_functions の callable を IR に登録
-        # startup flow の kernel_function_register ステップから kernel:ir.call で呼ばれる
-        try:
-            from .di_container import get_container
-            _c = get_container()
-            _fr = _c.get_or_none("function_registry")
-            if _fr is not None:
-                self.interface_registry.register(
-                    "kernel.register_kernel_functions",
-                    lambda: _register_kernel_functions(_fr),
-                    meta={"source": "kernel", "phase": "b1"},
-                )
-        except Exception as exc:
-            _logger.warning(
-                "Failed to register kernel.register_kernel_functions callable: %s", exc,
-            )
 
     def _vocab_normalize_output(self, output: dict, step: dict, ctx: dict) -> dict:
         """vocab_normalize の実装。VocabRegistry 経由でキー正規化。"""
