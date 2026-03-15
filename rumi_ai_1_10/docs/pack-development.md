@@ -95,6 +95,9 @@ ecosystem/my_pack/
 | `version` | 任意 | セマンティックバージョニング |
 | `description` | 任意 | 説明 |
 | `pack_identity_vocabulary` | 任意 | Pack が使用する語彙のリスト。vocab.txt との連携に使用 |
+| `required_secrets` | 任意 | 必要なシークレットキーのリスト（例: `["OPENAI_API_KEY"]`）。ユーザーへの情報提供用 |
+| `required_network` | 任意 | ネットワーク要件（例: `{"allowed_domains": ["api.example.com"], "allowed_ports": [443]}`）。ユーザーへの情報提供用 |
+| `host_execution` | 任意 | ホスト実行の必要性（`true` / `false`）。`true` の場合、コンテナ隔離ではなくホストプロセスとして実行される |
 
 ### connectivity（Pack 間依存宣言）
 
@@ -402,6 +405,30 @@ steps:
 ```
 
 `flow` タイプは別の Flow をサブ Flow として呼び出します。再帰的な呼び出し（循環参照）は自動検出され、エラーになります。サブ Flow のコンテキストは親からディープコピーされ、`args` で指定した値が追加されます。
+
+#### function（Capability 関数呼び出し）
+
+```yaml
+- id: read_store
+  phase: main
+  priority: 50
+  type: function
+  function: store.get
+  input:
+    store_id: "my_store"
+    key: "${ctx.key}"
+  output: store_result
+```
+
+`function` タイプは FunctionRegistry に登録された関数を `capability_executor` 経由で実行します。`function` フィールドに `permission_id`（例: `store.get`）を指定します。実行には対応する Capability Grant が必要です。
+
+| フィールド | 必須 | 説明 |
+|-----------|------|------|
+| `type` | ✅ | `function` |
+| `function` | ✅ | 実行する関数の permission_id（例: `store.get`, `docker.run`） |
+| `input` | 任意 | 関数への引数（変数展開可能） |
+| `output` | 任意 | 出力先コンテキストキー |
+| `vocab_normalize` | 任意 | `true` の場合、`function` の値を vocab 正規化してから解決する |
 
 ### 変数展開
 
@@ -877,13 +904,21 @@ else:
 
 | permission_id | handler_id | 説明 | risk |
 |---------------|-----------|------|------|
-| `secrets.get` | `builtin.secrets.get` | シークレット値の読み取り | high |
-| `store.get` | `builtin.store.get` | Store からの値の読み取り | low |
-| `store.set` | `builtin.store.set` | Store への値の書き込み | medium |
-| `store.delete` | `builtin.store.delete` | Store からの値の削除 | medium |
-| `store.list` | `builtin.store.list` | Store 内のキー一覧取得 | low |
-| `pack.inbox.send` | `builtin.pack.inbox.send` | 他 Pack コンポーネントの inbox へ JSON パッチ/置換を送信 | medium |
-| `pack.update.propose_patch` | `builtin.pack.update.propose_patch` | 他 Pack へのファイル変更を提案（ステージング作成、自動適用なし） | high |
+| `secrets.get` | `core.secrets.get` | シークレット値の取得 | high |
+| `store.get` | `core.store.get` | Store からの値の読み取り | low |
+| `store.set` | `core.store.set` | Store への値の書き込み | medium |
+| `store.delete` | `core.store.delete` | Store からの値の削除 | medium |
+| `store.list` | `core.store.list` | Store 内のキー一覧取得 | low |
+| `store.batch_get` | `core.store.batch_get` | Store からの一括取得（最大 100 キー） | low |
+| `store.cas` | `core.store.cas` | Store Compare-And-Swap（楽観的排他制御） | medium |
+| `pack.inbox.send` | `core.communication.send` | 他 Pack コンポーネントの inbox へ JSON メッセージ送信 | medium |
+| `pack.update.propose_patch` | `core.communication.propose_patch` | 他 Pack へのファイル変更を提案（ステージング作成、自動適用なし） | high |
+| `flow.run` | `core.flow.run` | 同期 Flow-to-Flow 呼び出し | medium |
+| `docker.run` | `core.docker.run` | Docker コンテナ実行 | — |
+| `docker.exec` | `core.docker.exec` | Docker コンテナ内コマンド実行 | — |
+| `docker.stop` | `core.docker.stop` | Docker コンテナ停止 | — |
+| `docker.logs` | `core.docker.logs` | Docker コンテナログ取得 | — |
+| `docker.list` | `core.docker.list` | Docker コンテナ一覧 | — |
 
 ### Grant の付与
 
@@ -1033,13 +1068,21 @@ curl -X POST http://localhost:8765/api/stores/create \
 
 | permission_id | handler_id | 説明 | risk |
 |---------------|-----------|------|------|
-| `secrets.get` | `builtin.secrets.get` | シークレット値の読み取り | high |
-| `store.get` | `builtin.store.get` | Store からの値の読み取り | low |
-| `store.set` | `builtin.store.set` | Store への値の書き込み | medium |
-| `store.delete` | `builtin.store.delete` | Store からの値の削除 | medium |
-| `store.list` | `builtin.store.list` | Store 内のキー一覧取得 | low |
-| `pack.inbox.send` | `builtin.pack.inbox.send` | 他 Pack コンポーネントの inbox へ JSON パッチ/置換を送信 | medium |
-| `pack.update.propose_patch` | `builtin.pack.update.propose_patch` | 他 Pack へのファイル変更を提案（ステージング作成、自動適用なし） | high |
+| `secrets.get` | `core.secrets.get` | シークレット値の取得 | high |
+| `store.get` | `core.store.get` | Store からの値の読み取り | low |
+| `store.set` | `core.store.set` | Store への値の書き込み | medium |
+| `store.delete` | `core.store.delete` | Store からの値の削除 | medium |
+| `store.list` | `core.store.list` | Store 内のキー一覧取得 | low |
+| `store.batch_get` | `core.store.batch_get` | Store からの一括取得（最大 100 キー） | low |
+| `store.cas` | `core.store.cas` | Store Compare-And-Swap（楽観的排他制御） | medium |
+| `pack.inbox.send` | `core.communication.send` | 他 Pack コンポーネントの inbox へ JSON メッセージ送信 | medium |
+| `pack.update.propose_patch` | `core.communication.propose_patch` | 他 Pack へのファイル変更を提案（ステージング作成、自動適用なし） | high |
+| `flow.run` | `core.flow.run` | 同期 Flow-to-Flow 呼び出し | medium |
+| `docker.run` | `core.docker.run` | Docker コンテナ実行 | — |
+| `docker.exec` | `core.docker.exec` | Docker コンテナ内コマンド実行 | — |
+| `docker.stop` | `core.docker.stop` | Docker コンテナ停止 | — |
+| `docker.logs` | `core.docker.logs` | Docker コンテナログ取得 | — |
+| `docker.list` | `core.docker.list` | Docker コンテナ一覧 | — |
 
 ---
 
@@ -1258,6 +1301,94 @@ Pack の `pack_subdir`（通常 `ecosystem/<pack_id>/backend/`）配下の `shar
 | `risk` | 任意 | リスクの説明 |
 
 候補は scan で検出され、ユーザーの approve を経て `user_data/capabilities/handlers/<slug>/` にコピーされます。approve は Trust（sha256 allowlist）のみを登録し、Grant は別途必要です。
+
+> 上記は旧方式（互換）です。新しい Pack では以下の functions/ 方式を推奨します。
+
+### functions/ 方式（推奨）
+
+Pack が Capability 関数を提供する場合、`functions/` ディレクトリに配置します。
+
+#### 配置
+
+```
+ecosystem/<pack_id>/
+└── backend/
+    └── functions/
+        └── <function_id>/
+            ├── manifest.json
+            └── main.py
+```
+
+#### manifest.json
+
+```json
+{
+  "function_id": "get",
+  "description": "Read a value from a Store by key.",
+  "requires": ["store.get"],
+  "caller_requires": [],
+  "host_execution": true,
+  "tags": ["store", "read"],
+  "risk": "low",
+  "vocab_aliases": ["store.get"],
+  "input_schema": {
+    "type": "object",
+    "required": ["store_id", "key"],
+    "properties": {
+      "store_id": { "type": "string" },
+      "key": { "type": "string" }
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "success": { "type": "boolean" },
+      "value": { "description": "The stored JSON value" }
+    }
+  },
+  "calling_convention": "block"
+}
+```
+
+| フィールド | 必須 | 説明 |
+|-----------|------|------|
+| `function_id` | ✅ | 関数の識別子 |
+| `description` | 任意 | 関数の説明 |
+| `requires` | ✅ | この関数の実行に必要な permission_id のリスト（例: `["store.get"]`） |
+| `caller_requires` | 任意 | 呼び出し元に要求する追加権限のリスト |
+| `host_execution` | 任意 | `true` の場合、コンテナではなくホストプロセスで実行される |
+| `tags` | 任意 | 分類用タグのリスト |
+| `risk` | 任意 | リスクレベル（`low`, `medium`, `high`）。docker 系など一部の関数では省略される |
+| `vocab_aliases` | 任意 | vocab 正規化に使用されるエイリアスのリスト |
+| `input_schema` | 任意 | 入力の JSON Schema |
+| `output_schema` | 任意 | 出力の JSON Schema |
+| `grant_config` | 任意 | Grant のデフォルト設定（docker 系で使用） |
+| `calling_convention` | 任意 | 呼び出し規約。`block`（デフォルト、core_pack 標準）= `execute(context, args)` パターン |
+
+> **注意**: manifest.json に `permission_id` フィールドは存在しません。権限の指定には `requires` 配列を使用してください。
+
+#### main.py
+
+```python
+def execute(context: dict, args: dict) -> dict:
+    """
+    Args:
+        context: 実行コンテキスト
+            - grant_config: Grant 設定（allowed_store_ids 等）
+        args: 入力引数（manifest.json の input_schema に対応）
+
+    Returns:
+        JSON 互換の dict
+    """
+    store_id = args.get("store_id", "")
+    key = args.get("key", "")
+
+    # ... 処理 ...
+
+    return {"success": True, "value": result}
+```
+
+`calling_convention` が `block`（デフォルト）の場合、エントリポイントは `execute(context, args)` です。`context` には `grant_config` 等の実行情報が含まれ、`args` には Flow ステップの `input` で指定された値が渡されます。
 
 ---
 
@@ -1505,8 +1636,8 @@ Flow レベルのエラーハンドラが InterfaceRegistry に `flow.error_hand
 import rumi_capability
 
 result = rumi_capability.call(
-    capability_id="store_get",
-    input_data={"store_id": "my_store", "key": "my_key"},
+    "store.get",
+    args={"store_id": "my_store", "key": "my_key"},
 )
 
 if not result.get("success", False):
