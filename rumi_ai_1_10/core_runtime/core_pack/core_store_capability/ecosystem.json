@@ -10,39 +10,7 @@
     "description": "Rumi AI OS core pack that provides key-value Store capability. Packs request store.get / store.set / store.list / store.delete / store.batch_get / store.cas via the capability system.",
     "author": "Rumi AI Team",
     "license": "MIT",
-    "is_core_pack": true,
-    "capability_handlers": {
-      "store_get": {
-        "handler_id": "core.store.get",
-        "permission_id": "store.get",
-        "path": "share/capability_handlers/store_get"
-      },
-      "store_set": {
-        "handler_id": "core.store.set",
-        "permission_id": "store.set",
-        "path": "share/capability_handlers/store_set"
-      },
-      "store_list": {
-        "handler_id": "core.store.list",
-        "permission_id": "store.list",
-        "path": "share/capability_handlers/store_list"
-      },
-      "store_delete": {
-        "handler_id": "core.store.delete",
-        "permission_id": "store.delete",
-        "path": "share/capability_handlers/store_delete"
-      },
-      "store_batch_get": {
-        "handler_id": "core.store.batch_get",
-        "permission_id": "store.batch_get",
-        "path": "share/capability_handlers/store_batch_get"
-      },
-      "store_cas": {
-        "handler_id": "core.store.cas",
-        "permission_id": "store.cas",
-        "path": "share/capability_handlers/store_cas"
-      }
-    }
+    "is_core_pack": true
   },
   "dependencies": {},
   "components": {}
