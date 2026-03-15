@@ -65,6 +65,10 @@ _docker_cache_lock = threading.Lock()
 MAX_HOST_EXECUTION_TIMEOUT: int = int(os.environ.get("RUMI_HOST_EXEC_TIMEOUT", "120"))
 MAX_STDOUT_SIZE: int = 4 * 1024 * 1024  # 4MB (#14)
 _DOCKER_CHECK_CACHE_TTL: float = float(os.environ.get("RUMI_DOCKER_CHECK_CACHE_TTL", "60"))
+# SEC-2: Docker image ダイジェスト固定
+DEFAULT_EXECUTOR_IMAGE: str = "python:3.11-slim@sha256:d6e4d224f70f9e0172a06a3a2eba2f768eb146811a349278b38fff3a36463b47"
+EXECUTOR_IMAGE: str = os.environ.get("RUMI_EXECUTOR_IMAGE", DEFAULT_EXECUTOR_IMAGE)
+
 
 
 from .docker_run_builder import DockerRunBuilder
@@ -883,7 +887,7 @@ request = http_request
             builder.label("rumi.managed", "true")
             builder.label("rumi.pack_id", owner_pack or "unknown")
             builder.label("rumi.type", "python_file_call")
-            builder.image("python:3.11-slim")
+            builder.image(EXECUTOR_IMAGE)
             builder.command(["python", "/executor.py", file_path.name])
 
             docker_cmd = builder.build()
