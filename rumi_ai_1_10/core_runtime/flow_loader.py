@@ -151,6 +151,10 @@ class FlowStep:
 
     # Wave 10-A: ステップ間依存
     depends_on: Optional[List[str]] = None
+    # universal_call 用
+    runtime: Optional[str] = None
+    protocol: Optional[str] = None
+    docker_image: Optional[str] = None
 
 
 @dataclass
@@ -208,6 +212,12 @@ class FlowDefinition:
             d["principal_id"] = step.principal_id
         if step.depends_on is not None:
             d["depends_on"] = step.depends_on
+        if step.runtime is not None:
+            d["runtime"] = step.runtime
+        if step.protocol is not None:
+            d["protocol"] = step.protocol
+        if step.docker_image is not None:
+            d["docker_image"] = step.docker_image
         return d
 
 
