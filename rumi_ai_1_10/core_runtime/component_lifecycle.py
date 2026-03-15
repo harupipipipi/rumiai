@@ -325,6 +325,26 @@ class ComponentLifecycleExecutor:
                         }
                     )
                     return
+
+                # --- Pack Type "rule" のルール拡張承認チェック ---
+                if hasattr(am, 'is_rule_approved') and not am.is_rule_approved(pack_id):
+                    logger.warning(
+                        "Component '%s' skipped: rule pack '%s' requires "
+                        "rule approval. Call approve_rule() to enable execution.",
+                        comp_id, pack_id,
+                    )
+                    self.diagnostics.record_step(
+                        phase=phase,
+                        step_id=f"{phase}.{comp_id}.rule_not_approved",
+                        handler=f"component_phase:{phase}",
+                        status="skipped",
+                        target={"kind": "component", "id": comp_id},
+                        meta={
+                            "reason": "rule_pack_not_rule_approved",
+                            "pack_id": pack_id,
+                        }
+                    )
+                    return
         except ImportError:
             self.diagnostics.record_step(
                 phase=phase,
