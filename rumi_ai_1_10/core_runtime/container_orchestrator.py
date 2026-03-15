@@ -218,6 +218,52 @@ class ContainerOrchestrator:
             return []
 
 
+
+    # ── universal_call container support ──────────────────────
+    _UC_DEFAULT_IMAGES = {
+        "python": "python:3.11-slim",
+        "binary": "alpine:latest",
+        "command": "alpine:latest",
+    }
+
+    def build_universal_call_command(
+        self,
+        pack_id: str,
+        workspace_dir: str,
+        input_file: str,
+        filename: str,
+        runtime: str = "binary",
+        docker_image: str = None,
+        container_name: str = None,
+    ) -> list:
+        """Build a Docker run command for universal_call execution."""
+        import uuid
+        from core_runtime.docker_run_builder import DockerRunBuilder
+
+        image = docker_image or self._UC_DEFAULT_IMAGES.get(runtime, "alpine:latest")
+        name = container_name or f"rumi-uc-{pack_id}-{uuid.uuid4().hex[:8]}"
+
+        builder = (
+            DockerRunBuilder()
+            .set_pids_limit(100)
+            .add_volume(workspace_dir, "/workspace", read_only=True)
+            .set_workdir("/workspace")
+            .add_label("rumi.pack_id", pack_id)
+            .add_label("rumi.type", "universal_call")
+            .add_label("rumi.runtime", runtime)
+            .set_image(image)
+        )
+
+        if runtime == "command":
+            builder.set_command(["sh", filename])
+        elif runtime == "python":
+            builder.set_command(["python", filename])
+        else:
+            builder.set_command([f"./{filename}"])
+
+        return builder.build()
+
+
 # グローバル変数（後方互換のため残存。DI コンテナ優先）
 _global_orchestrator: Optional[ContainerOrchestrator] = None
 _co_lock = threading.Lock()
