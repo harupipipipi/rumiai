@@ -28,6 +28,10 @@ from .paths import (
 
 logger = logging.getLogger(__name__)
 
+# Pack type validation
+_VALID_PACK_TYPES = frozenset({"rule", "application", "library"})
+_VALID_RUNTIME_TYPES = frozenset({"python", "binary", "command"})
+
 # W18-B: Secret key pattern for required_secrets validation
 _SECRET_KEY_PATTERN = re.compile(r"^[A-Z0-9_]{1,64}$")
 
@@ -323,6 +327,46 @@ def _validate_single_pack(
             logger.error(msg)
             errors.append(msg)
 
+
+    # --- (7a) pack_type バリデーション ---
+    pack_type = eco_data.get("pack_type")
+    if pack_type is not None:
+        if not isinstance(pack_type, str) or pack_type not in _VALID_PACK_TYPES:
+            msg = (
+                f"[{pid}] invalid pack_type '{pack_type}': "
+                f"must be one of {sorted(_VALID_PACK_TYPES)}"
+            )
+            logger.error(msg)
+            errors.append(msg)
+    else:
+        # 省略時のデフォルトは "application" — ここでは警告なし（後方互換）
+        pack_type = "application"
+
+    # --- (7b) provides_runtime バリデーション ---
+    if "provides_runtime" in eco_data:
+        pr = eco_data["provides_runtime"]
+        if pack_type != "rule":
+            msg = (
+                f"[{pid}] provides_runtime is only valid for "
+                f"pack_type 'rule', but pack_type is '{pack_type}'"
+            )
+            logger.error(msg)
+            errors.append(msg)
+        elif not isinstance(pr, list) or not all(isinstance(r, str) for r in pr):
+            msg = f"[{pid}] provides_runtime must be a list of strings"
+            logger.error(msg)
+            errors.append(msg)
+
+    # --- (7c) runtime_type バリデーション ---
+    if "runtime_type" in eco_data:
+        rt = eco_data["runtime_type"]
+        if not isinstance(rt, str) or rt not in _VALID_RUNTIME_TYPES:
+            msg = (
+                f"[{pid}] invalid runtime_type '{rt}': "
+                f"must be one of {sorted(_VALID_RUNTIME_TYPES)}"
+            )
+            logger.error(msg)
+            errors.append(msg)
 
     # --- W24-C (7) functions/ manifest.json バリデーション ---
     func_warnings, func_errors = _validate_functions(loc.pack_subdir, pid)
