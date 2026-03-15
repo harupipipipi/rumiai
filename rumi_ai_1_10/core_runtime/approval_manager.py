@@ -79,6 +79,8 @@ class PackApproval:
     permissions_requested: List[Dict[str, Any]] = field(default_factory=list)
     rejection_reason: Optional[str] = None
     version_history: List[Dict[str, Any]] = field(default_factory=list)  # G-3
+    rule_approved: bool = False
+    rule_approved_at: Optional[str] = None
     
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
@@ -90,6 +92,8 @@ class PackApproval:
         data = dict(data)
         # 後方互換: version_history がなければ空リスト
         data.setdefault("version_history", [])
+        data.setdefault("rule_approved", False)
+        data.setdefault("rule_approved_at", None)
         if isinstance(data.get("status"), str):
             data["status"] = PackStatus(data["status"])
         return cls(**data)
@@ -516,6 +520,99 @@ class ApprovalManager:
             
             return ApprovalResult(success=True, pack_id=pack_id, status=PackStatus.APPROVED)
     
+    def approve_rule(self, pack_id: str) -> ApprovalResult:
+        """rule Pack に対するルール拡張承認を実行する。
+
+        通常の approve() が完了済みであること、かつ pack_type が "rule" で
+        あることを前提とする。条件を満たさない場合はエラーを返す。
+
+        Args:
+            pack_id: Pack ID
+
+        Returns:
+            ApprovalResult
+        """
+        with self._lock:
+            approval = self._approvals.get(pack_id)
+            if not approval:
+                return ApprovalResult(
+                    success=False, pack_id=pack_id, error="Pack not found"
+                )
+
+            # 通常承認が完了していることを確認
+            if approval.status != PackStatus.APPROVED:
+                return ApprovalResult(
+                    success=False,
+                    pack_id=pack_id,
+                    error=f"Pack must be approved first (current status: {approval.status.value})",
+                )
+
+            # pack_type が "rule" であることを確認
+            eco_data = self._read_ecosystem_data(pack_id)
+            pack_type = eco_data.get("pack_type", "application")
+            if pack_type != "rule":
+                return ApprovalResult(
+                    success=False,
+                    pack_id=pack_id,
+                    error=f"approve_rule is only valid for pack_type 'rule', but pack_type is '{pack_type}'",
+                )
+
+            approval.rule_approved = True
+            approval.rule_approved_at = self._now_ts()
+
+            # バージョン履歴にルール拡張承認イベントを記録
+            approval.version_history.append({
+                "version": len(approval.version_history) + 1,
+                "timestamp": approval.rule_approved_at,
+                "action": "approve_rule",
+                "file_hashes": dict(approval.file_hashes),
+            })
+
+            self._save_grant(approval)
+
+        # audit log（ロック外）
+        try:
+            from .audit_logger import get_audit_logger
+            get_audit_logger().log_security_event(
+                event_type="pack_rule_approved",
+                severity="warning",
+                description=f"Rule pack '{pack_id}' rule-approved",
+                pack_id=pack_id,
+            )
+        except Exception:
+            pass
+
+        return ApprovalResult(
+            success=True, pack_id=pack_id, status=PackStatus.APPROVED
+        )
+
+    def is_rule_approved(self, pack_id: str) -> bool:
+        """rule Pack がルール拡張承認済みかどうかを返す。
+
+        pack_type が "rule" でない Pack に対しては常に True を返す
+        （ルール拡張承認は不要なため）。
+
+        Args:
+            pack_id: Pack ID
+
+        Returns:
+            True ならルール拡張承認済み（または不要）、False なら未承認。
+        """
+        # core_pack は常に承認済み
+        if self._is_core_pack(pack_id):
+            return True
+
+        eco_data = self._read_ecosystem_data(pack_id)
+        pack_type = eco_data.get("pack_type", "application")
+        if pack_type != "rule":
+            return True  # rule でなければルール拡張承認は不要
+
+        with self._lock:
+            approval = self._approvals.get(pack_id)
+            if not approval:
+                return False
+            return approval.rule_approved
+
     def reject(self, pack_id: str, reason: str = "") -> ApprovalResult:
         """Packを拒否"""
         with self._lock:
