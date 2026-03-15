@@ -1,0 +1,28 @@
+{
+  "pack_id": "native_runtime_pack",
+  "pack_identity": "core:rumi/native-runtime-pack",
+  "version": "1.0.0",
+  "pack_type": "rule",
+  "provides_runtime": ["binary", "command"],
+  "vocabulary": {
+    "types": []
+  },
+  "metadata": {
+    "name": "Native Runtime Pack",
+    "description": "Rumi AI OS にバイナリ・コマンド実行ランタイムを追加する Rule Pack。stdin/stdout JSON プロトコルによるバイナリ実行とシェルコマンド実行を提供する。",
+    "author": "Rumi AI Team",
+    "license": "MIT",
+    "is_core_pack": true
+  },
+  "connectivity": {
+    "provides": [
+      "native.runtime",
+      "native.binary_call",
+      "native.command_call"
+    ],
+    "network": false,
+    "host_execution": true
+  },
+  "dependencies": {},
+  "components": {}
+}
