@@ -14,6 +14,7 @@ W18-A: UDS ソケットマウント（Egress + Capability）+ Secret ファイ�
 
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import logging
 import os
@@ -42,6 +43,17 @@ PACK_DATA_BASE_DIR = _PACK_DATA_BASE_DIR
 PACK_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]+$')
 # ファイル名に許可する文字（英数字、アンダースコア、ハイフン、ドットのみ）(#57)
 SAFE_FILENAME_PATTERN = re.compile(r'^[a-zA-Z0-9_.-]+$')
+
+# SEC-1 Wave 1: Docker image ダイジェスト固定 + 環境変数上書き
+DEFAULT_EXECUTOR_IMAGE = "python:3.11-slim@sha256:d6e4d224f70f9e0172a06a3a2eba2f768eb146811a349278b38fff3a36463b47"
+EXECUTOR_IMAGE = os.environ.get("RUMI_EXECUTOR_IMAGE", DEFAULT_EXECUTOR_IMAGE)
+
+# SEC-1 Wave 2: payload サニタイズ制限
+MAX_CONTEXT_PAYLOAD_SIZE = 1 * 1024 * 1024  # 1 MB
+MAX_CONTEXT_DEPTH = 10
+
+# SEC-1 Wave 4: ホスト実行タイムアウト
+MAX_HOST_EXECUTION_TIMEOUT = int(os.environ.get("RUMI_HOST_EXEC_TIMEOUT", "120"))
 
 
 @dataclass
@@ -182,7 +194,8 @@ class SecureExecutor:
             component_id=component_id,
             phase=phase,
             file_path=file_path,
-            context=context
+            context=context,
+            timeout=timeout
         )
     
     def _execute_in_container(
@@ -291,7 +304,7 @@ class SecureExecutor:
             except Exception as e:
                 logger.warning("Failed to inject secrets for %s: %s", pack_id, e)
 
-            builder.image("python:3.11-slim")
+            builder.image(EXECUTOR_IMAGE)
             builder.command(["python", "-c", self._get_executor_script(file_path.name)])
 
             docker_cmd = builder.build()
@@ -519,7 +532,8 @@ else:
             lib_file=lib_file,
             pack_data_dir=pack_data_dir,
             context=context,
-            start_time=start_time
+            start_time=start_time,
+            timeout=timeout
         )
     
     def _execute_lib_in_container(
@@ -544,13 +558,14 @@ else:
             pip_site_packages = _sp
         pythonpath_value = "/lib" + (":/pip-packages" if pip_site_packages else "")
         
+        _sanitized = self._sanitize_context(context or {})
         exec_context = {
+            **_sanitized,
             "pack_id": pack_id,
             "lib_type": lib_type,
             "ts": self._now_ts(),
             "lib_dir": str(lib_dir),
             "data_dir": "/data",
-            **(context or {})
         }
         
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
@@ -599,7 +614,7 @@ else:
             except Exception as e:
                 logger.warning("Failed to mount capability socket for lib %s: %s", pack_id, e)
 
-            builder.image("python:3.11-slim")
+            builder.image(EXECUTOR_IMAGE)
             builder.command(["python", "-c", self._get_lib_executor_script(lib_file.name)])
 
             docker_cmd = builder.build()
@@ -672,7 +687,8 @@ else:
         lib_file: Path,
         pack_data_dir: Path,
         context: Dict[str, Any],
-        start_time: float
+        start_time: float,
+        timeout: int = 120
     ) -> ExecutionResult:
         import time
         warnings = [f"Executing lib on host without Docker: Pack={pack_id}, LibType={lib_type}"]
@@ -724,10 +740,25 @@ else:
             }
             import inspect
             sig = inspect.signature(fn)
-            if len(sig.parameters) >= 1:
-                output = fn(exec_context)
-            else:
-                output = fn()
+            _effective_timeout = min(timeout, MAX_HOST_EXECUTION_TIMEOUT)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                if len(sig.parameters) >= 1:
+                    future = pool.submit(fn, exec_context)
+                else:
+                    future = pool.submit(fn)
+                try:
+                    output = future.result(timeout=_effective_timeout)
+                except concurrent.futures.TimeoutError:
+                    return ExecutionResult(
+                        success=False,
+                        error=f"Lib host execution timed out after {_effective_timeout}s",
+                        error_type="timeout",
+                        execution_mode="host_permissive",
+                        execution_time_ms=(time.time() - start_time) * 1000,
+                        warnings=warnings,
+                        pack_id=pack_id,
+                        lib_type=lib_type
+                    )
             return ExecutionResult(
                 success=True,
                 output=output,
@@ -758,7 +789,8 @@ else:
         component_id: str,
         phase: str,
         file_path: Path,
-        context: Dict[str, Any]
+        context: Dict[str, Any],
+        timeout: int = 60
     ) -> ExecutionResult:
         import time
         start_time = time.time()
@@ -799,7 +831,20 @@ else:
                     execution_time_ms=(time.time() - start_time) * 1000,
                     warnings=warnings
                 )
-            result = fn(context)
+            _effective_timeout = min(timeout, MAX_HOST_EXECUTION_TIMEOUT)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(fn, context)
+                try:
+                    result = future.result(timeout=_effective_timeout)
+                except concurrent.futures.TimeoutError:
+                    return ExecutionResult(
+                        success=False,
+                        error=f"Host execution timed out after {_effective_timeout}s",
+                        error_type="timeout",
+                        execution_mode="host_permissive",
+                        execution_time_ms=(time.time() - start_time) * 1000,
+                        warnings=warnings
+                    )
             return ExecutionResult(
                 success=True,
                 output=result,
@@ -820,6 +865,23 @@ else:
             if module_name in sys.modules:
                 del sys.modules[module_name]
     
+    @staticmethod
+    def _check_depth(obj, max_depth: int, _current: int = 0) -> bool:
+        """オブジェクトのネスト深度が max_depth 以下かチェックする。"""
+        if _current > max_depth:
+            return False
+        if isinstance(obj, dict):
+            return all(
+                SecureExecutor._check_depth(v, max_depth, _current + 1)
+                for v in obj.values()
+            )
+        if isinstance(obj, (list, tuple)):
+            return all(
+                SecureExecutor._check_depth(v, max_depth, _current + 1)
+                for v in obj
+            )
+        return True
+
     def _sanitize_context(self, context: Dict[str, Any]) -> Dict[str, Any]:
         safe_keys = {
             "phase", "ts", "ids", "paths",
@@ -830,10 +892,23 @@ else:
             if key in context:
                 value = context[key]
                 try:
-                    json.dumps(value, default=str)
-                    safe_context[key] = value
+                    serialized = json.dumps(value, default=str)
                 except (TypeError, ValueError):
-                    pass
+                    continue
+                if key == "payload":
+                    if len(serialized) > MAX_CONTEXT_PAYLOAD_SIZE:
+                        logger.warning(
+                            "Sanitize: payload exceeds size limit (%d > %d), excluded",
+                            len(serialized), MAX_CONTEXT_PAYLOAD_SIZE,
+                        )
+                        continue
+                    if not self._check_depth(value, MAX_CONTEXT_DEPTH):
+                        logger.warning(
+                            "Sanitize: payload exceeds depth limit (%d), excluded",
+                            MAX_CONTEXT_DEPTH,
+                        )
+                        continue
+                safe_context[key] = value
         return safe_context
 
 

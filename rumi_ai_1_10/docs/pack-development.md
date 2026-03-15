@@ -1,6 +1,7 @@
 
 
 > **クイックスタートガイド**: Pack 開発を始める方は [Pack 開発クイックスタートガイド](pack-development-guide.md) を参照してください。
+```markdown
 # Rumi AI OS — Pack Development Guide
 
 Pack 開発者向けのガイドです。設計の全体像は [architecture.md](architecture.md)、運用手順は [operations.md](operations.md) を参照してください。
@@ -1911,4 +1912,5 @@ curl -X POST http://localhost:8765/api/capability/grants/grant \
 # 天気情報を取得
 curl http://localhost:8765/api/weather/Tokyo \
   -H "Authorization: Bearer YOUR_TOKEN"
+```
 ```

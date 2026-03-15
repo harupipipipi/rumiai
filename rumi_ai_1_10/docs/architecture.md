@@ -1,3 +1,4 @@
+```markdown
 # Rumi AI OS — Architecture
 
 設計と仕組みの全体像を説明するドキュメントです。Pack 開発者は [pack-development.md](pack-development.md)、運用者は [operations.md](operations.md) も参照してください。
@@ -1130,4 +1131,5 @@ python -m backend_core.pack_scaffold --template full --pack-id my_pack --output 
 |---------|------|------|
 | `capability_handler_registry.py` | `function_registry.py` | FunctionRegistry に統合（Phase A〜D） |
 | `builtin_capability_handlers/` | `core_pack/` | core_pack に移行 |
+```
 
