@@ -283,6 +283,7 @@ def get_pack_block_dirs(pack_subdir: Path) -> List[Path]:
     Returns:
         存在するディレクトリのみのリスト
     """
+    # NOTE: functions/ は FunctionRegistry 経由で解決されるため、探索対象に含めない。
     candidates = [
         pack_subdir / "blocks",
         pack_subdir / "backend" / "blocks",

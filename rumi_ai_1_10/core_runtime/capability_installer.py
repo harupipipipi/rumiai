@@ -77,11 +77,6 @@ def _get_trust_store():
     return get_capability_trust_store()
 
 
-def _get_handler_registry():
-    """Phase D: CapabilityHandlerRegistry は削除済み。互換スタブとして None を返す。"""
-    return None
-
-
 def _get_executor():
     """遅延 import: CapabilityExecutor"""
     from .capability_executor import get_capability_executor
