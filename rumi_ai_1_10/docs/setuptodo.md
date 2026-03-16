@@ -1,322 +1,345 @@
-# Rumi AI OS — セットアップ実装 TODO
+# Rumi AI OS — セットアップ & デスクトップ配布 TODO
 
 最終更新: 2026-03-16
 
-デスクトップアプリの初回セットアップ機能と Tauri ビルド時の Python/venv 梱包に関するタスク管理ドキュメントです。セットアップ画面でユーザー情報を収集し、`user_data/settings/profile.json` に保存することで初回セットアップ完了とします。Python 実行環境は python-build-standalone を Tauri resources として梱包し、PyInstaller は使用しません。
+パターン C アーキテクチャに基づくセットアップ実装ロードマップです。Rust ランチャー（薄い）が Kernel プロセスを管理し、セットアップ UI・コントロールパネル・Flow エディタ等は全て Pack が提供する Web UI です。React UI の実装はユーザーが担当します。
 
 ---
 
 ## 1. 設計決定事項
 
-### 1.1 セットアップ方式
+### 1.1 パターン C 採用
 
-ハイブリッド方式を採用します。Kernel が `profile.json` の存在をチェックする最小ブートストラップと、セットアップロジックを担う `core_setup` Pack の組み合わせです。
+Rust ランチャー + Kernel + Pack の 3 層アーキテクチャを採用します。
 
-- **コア最小ブートストラップ**: Kernel 起動時に `user_data/settings/profile.json` の存在を確認し、未存在ならセットアップ未完了と判定する
-- **core_setup Pack**: セットアップデータのバリデーションと保存を担当する Pack。Flow として定義し、validate → save の 2 phase で実行する
+- **Rust ランチャー**: PBS（python-build-standalone）構築、Kernel プロセス起動・ヘルスチェック・トレイアイコン・ブラウザ open の 5 つの責務のみを持つ薄いバイナリ
+- **Kernel**: 既存の Python ランタイム。Flow 実行、Pack 管理、API サーバーの全てを担当
+- **Pack**: セットアップ UI、コントロールパネル等の全ての UI 機能を Pack として提供
 
-### 1.2 Python 梱包
+この設計の理由:
+- **No Favoritism 原則との整合性**: UI フレームワークを強制しない。Pack が自由に選択可能
+- **最小変更**: Kernel に UI 固有のロジックを持ち込まない
+- **配布簡素化**: Rust バイナリ 1 つ + Python 環境 + ソースコード
 
-python-build-standalone を使用します。OS ごとにビルドスクリプトがアーカイブをダウンロード・展開し、Tauri の `bundle.resources` に登録します。PyInstaller は使用しません。
+### 1.2 IPC
 
-- **配布形式**: python-build-standalone のプレビルドバイナリ
-- **依存インストール**: `uv pip install` で venv に依存をインストール
-- **Tauri 登録**: `tauri.conf.json` の `bundle.resources` にパスを登録
+既存の pack_api_server（HTTP localhost:8765）を使用します。新規の IPC 機構は追加しません。
 
-### 1.3 IPC
+### 1.3 profile.json
 
-既存の `pack_api_server`（HTTP localhost:8765）を使用します。新規の IPC 機構は追加しません。セットアップ用エンドポイントを `pack_api_server` に追加します。
+user_data/settings/profile.json にユーザープロフィールを保存します。セットアップ完了の判定はこのファイルの存在と setup_completed フラグで行います。
 
-### 1.4 セットアップデータ保存先
+### 1.4 React UI はユーザーが作成
 
-`user_data/settings/profile.json` に保存します。セットアップ完了の判定はこのファイルの存在チェックで行います。
-
-### 1.5 セットアップ UI フレームワーク
-
-React/TSX でユーザーが実装します。エージェントは Rust ⇔ React ブリッジ（Tauri コマンド・TypeScript 型定義）までを担当し、UI コンポーネントの実装はユーザーに委ねます。
-
-### 1.6 Pack が使用するデスクトップ UI フレームワーク
-
-強制しません。Tauri / Electron / その他は Pack の選択に任せます。公式コアは UI フレームワークを規定しません（No Favoritism 原則）。
-
-### 1.7 Tauri 統合タイミング
-
-Tauri は最後に統合します。Phase A〜D の基盤が完成してから Tauri ビルドに統合する方針です。
+全ての Pack が提供する Web UI（セットアップ画面、コントロールパネル、Flow エディタ等）の React 実装はユーザーが担当します。エージェントは Python バックエンド + Flow 定義 + API エンドポイントまでを担当します。
 
 ---
 
-## 2. タスク一覧
+## 2. アーキテクチャ概要
 
-### Phase A: Python 梱包基盤（担当: エージェント）
-
-#### A-1: ビルドスクリプト作成 — python-build-standalone ダウンロード
-
-OS を検出し（macOS / Windows / Linux）、対応する python-build-standalone のアーカイブを選択してダウンロード・展開するビルドスクリプトを作成します。
-
-- OS 検出（`uname -s` / PowerShell 等）
-- アーカイブ URL の選択（OS × アーキテクチャ）
-- ダウンロード（`curl` / `wget`）
-- 展開（`tar` / `unzip`）
-- 展開先ディレクトリの標準化
-
-#### A-2: ビルドスクリプト作成 — 依存インストール
-
-`uv pip install` を使用して、展開した Python 環境に依存パッケージをインストールするスクリプトを作成します。
-
-- `uv` の存在確認とインストール
-- venv 作成（python-build-standalone 上）
-- `uv pip install -r requirements.lock` の実行
-- インストール結果の検証
-
-#### A-3: tauri.conf.json 設定
-
-Tauri のビルド設定に Python 環境を `bundle.resources` として登録します。
-
-- `tauri.conf.json` の `bundle.resources` に Python ディレクトリパスを追加
-- OS 別のリソースパス設定
-- ビルド時のコピー設定
-
-#### A-4: Rust 側 Python プロセス起動ロジック
-
-Tauri の Rust バックエンドから Python プロセスを起動するロジックを実装します。
-
-- `tauri::api::process` または `std::process::Command` による子プロセス管理
-- `resource_dir()` からの Python バイナリパス解決
-- プロセスのライフサイクル管理（起動・監視・終了）
-- 起動失敗時のエラーハンドリング
-
-### Phase B: ブートストラップ（担当: エージェント）
-
-#### B-1: Kernel にセットアップ状態チェック追加
-
-Kernel 起動時に `user_data/settings/profile.json` の存在をチェックし、セットアップ状態を判定するロジックを追加します。
-
-- `profile.json` の存在チェック
-- `schema_version` の検証
-- `setup_completed` フラグの確認
-- セットアップ未完了時の状態通知
-
-#### B-2: pack_api_server にセットアップ用エンドポイント追加
-
-`pack_api_server` に以下のエンドポイントを追加します。
-
-- `GET /api/setup/status` — セットアップ状態を返す（`completed: bool`, `schema_version: int`）
-- `POST /api/setup/complete` — セットアップデータを受け取り、`core_setup` Flow を実行して `profile.json` を保存する
-
-### Phase C: core_setup Pack（担当: エージェント）
-
-#### C-1: core_setup Pack 作成
-
-セットアップロジックを担う Pack を作成します。
-
-- `ecosystem.json` — Pack メタデータ（pack_id: `core_setup`、provides 等）
-- `validate_profile.py` — 入力データのバリデーション（ユーザーネーム、言語コード等）
-- `save_profile.py` — バリデーション済みデータを `profile.json` に保存
-
-#### C-2: core_setup Flow 定義
-
-validate → save の 2 phase で実行する Flow を定義します。
-
-- Phase 1（validate）: `validate_profile.py` で入力を検証
-- Phase 2（save）: `save_profile.py` で `profile.json` に書き込み
-- エラーハンドリング: バリデーション失敗時は save をスキップ
-
-### Phase D: Rust ⇔ React ブリッジ（担当: エージェント）
-
-#### D-1: Tauri コマンド定義
-
-Tauri の `#[tauri::command]` で以下のコマンドを定義します。
-
-- `check_setup_status` — `GET /api/setup/status` を内部呼び出しし、セットアップ状態を返す
-- `submit_setup` — セットアップデータを受け取り `POST /api/setup/complete` を内部呼び出しする
-
-#### D-2: TypeScript 型定義
-
-フロントエンドで使用する型を定義します。
-
-- `SetupStatus` — `{ completed: boolean; schema_version: number }`
-- `SetupInput` — `{ username: string; language: string }`
-- `SetupResult` — `{ success: boolean; error?: string }`
-
-### Phase E: セットアップ UI（担当: ユーザー）
-
-#### E-1: セットアップ画面の React コンポーネント作成
-
-セットアップ画面の UI コンポーネントを React/TSX で作成します。エージェントが提供する TypeScript 型定義と Tauri コマンドを使用します。
-
-#### E-2: セットアップフローの状態管理
-
-セットアップの進行状態（入力中 → 送信中 → 完了 / エラー）を管理する状態ロジックを実装します。
-
-### Phase F: テスト（担当: エージェント）
-
-#### F-1: core_setup Pack のユニットテスト
-
-`validate_profile.py` と `save_profile.py` の単体テストを作成します。
-
-- 正常系: 有効な入力でのバリデーション成功・保存成功
-- 異常系: 空文字、不正な言語コード、過長文字列等
-- エッジケース: 既存 `profile.json` の上書き
-
-#### F-2: セットアップ Flow の統合テスト
-
-`core_setup` Flow 全体の統合テストを作成します。
-
-- validate → save の正常フロー
-- バリデーション失敗時の save スキップ
-- Flow の冪等性（2 回実行しても問題ないこと）
-
-#### F-3: ビルドスクリプトのテスト
-
-Python 梱包ビルドスクリプトのテストを作成します。
-
-- OS 検出の正確性
-- ダウンロード URL の妥当性
-- 展開後のディレクトリ構造の検証
+```
+┌──────────────────────────────────────────────────────────┐
+│                    Rust ランチャー                         │
+│  (PBS構築 / Kernel起動 / ヘルスチェック / トレイ / open)      │
+└───────┬──────────────────────────────────┬────────────────┘
+        │ spawn                            │ open browser
+        ▼                                  ▼
+┌──────────────────────┐        ┌──────────────────────┐
+│       Kernel         │        │    ブラウザ (Web UI)    │
+│  (Python runtime)    │◄──────►│   React SPA           │
+│                      │  HTTP  │   localhost:8765      │
+│  ┌────────────────┐  │        └──────────────────────┘
+│  │ pack_api_server │  │
+│  │ :8765           │  │
+│  └────────────────┘  │
+│  ┌────────────────┐  │
+│  │ Flow Engine    │  │
+│  └────────────────┘  │
+│  ┌────────────────┐  │
+│  │ Pack Manager   │  │
+│  └────────────────┘  │
+└──────────────────────┘
+        │
+        ▼
+┌──────────────────────────────────────────────────────────┐
+│                         Packs                             │
+│  ┌──────────────┐ ┌──────────────────┐ ┌──────────────┐  │
+│  │ core_setup   │ │ core_control_panel│ │ marketplace  │  │
+│  │ (Phase B)    │ │ (Phase C)         │ │ (Phase D/E)  │  │
+│  └──────────────┘ └──────────────────┘ └──────────────┘  │
+└──────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## 3. 依存関係グラフ
-
-```
-A-1 → A-2 → A-3 → A-4
-                     ↓
-B-1 → B-2 ← C-1 → C-2
-       ↓
-D-1 → D-2 → E-1 → E-2
-       ↓
-F-1, F-2, F-3
-```
-
-- **A-1 → A-2**: ダウンロード・展開が完了しないと依存インストールできない
-- **A-2 → A-3**: Python 環境のパスが確定しないと `tauri.conf.json` に登録できない
-- **A-3 → A-4**: Tauri resources 設定が完了しないと Rust 側のパス解決ロジックを書けない
-- **A-4 → B-2**: Python プロセス起動ができないと API サーバーが動かない
-- **B-1 → B-2**: セットアップ状態チェックが先、エンドポイント追加が後
-- **C-1 → B-2**: core_setup Pack が存在しないとエンドポイントから呼び出せない
-- **C-1 → C-2**: Pack のファイルが揃わないと Flow を定義できない
-- **B-2 → D-1**: API エンドポイントが存在しないと Tauri コマンドから呼び出せない
-- **D-1 → D-2**: コマンド定義が先、型定義はコマンドの入出力に合わせる
-- **D-2 → E-1**: 型定義が揃わないと UI コンポーネントを型安全に書けない
-- **E-1 → E-2**: コンポーネントが存在しないと状態管理を組み込めない
-- **B-2 → F-1, F-2, F-3**: テストは対象の実装完了後に作成（ただし各 Phase と並行可能）
-
----
-
-## 4. 配布構成の設計メモ
-
-### 4.1 macOS .app バンドルのディレクトリ構造
-
-```
-RumiAI.app/
-└── Contents/
-    ├── MacOS/
-    │   └── rumi-ai            # Tauri バイナリ
-    ├── Resources/
-    │   ├── python/
-    │   │   ├── bin/
-    │   │   │   └── python3    # python-build-standalone
-    │   │   └── lib/
-    │   │       └── python3.x/
-    │   │           └── site-packages/
-    │   ├── rumi_ai_1_10/      # ソースコードルート
-    │   │   ├── core_runtime/
-    │   │   ├── backend_core/
-    │   │   └── ...
-    │   └── user_data/         # 初回起動時に作成
-    │       └── settings/
-    │           └── profile.json
-    └── Info.plist
-```
-
-### 4.2 Windows のディレクトリ構造
-
-```
-RumiAI/
-├── rumi-ai.exe                # Tauri バイナリ
-├── python/
-│   ├── python.exe             # python-build-standalone
-│   └── Lib/
-│       └── site-packages/
-├── rumi_ai_1_10/              # ソースコードルート
-│   ├── core_runtime/
-│   ├── backend_core/
-│   └── ...
-└── user_data/                 # 初回起動時に作成
-    └── settings/
-        └── profile.json
-```
-
-### 4.3 起動シーケンス
-
-```
-1. Tauri バイナリ起動
-   ↓
-2. resource_dir() から Python バイナリパスを解決
-   ↓
-3. Python 子プロセスを起動（pack_api_server）
-   ↓
-4. API ready 待機（localhost:8765 へのヘルスチェック）
-   ↓
-5. WebView 起動（React フロントエンド）
-   ↓
-6. フロントエンドが GET /api/setup/status を呼び出し
-   ↓
-7a. setup_completed=true → メイン画面へ
-7b. setup_completed=false → セットアップ画面へ
-```
-
-> **注意**: デスクトップ配布では Docker 非搭載環境が多いため、セキュリティモードは `permissive` が必要になります。`RUMI_SECURITY_MODE=permissive` を設定してください。APP-1 でガード強化済みの場合は `RUMI_ALLOW_PERMISSIVE=true` の環境変数設定も必要です。
-
----
-
-## 5. profile.json の推奨構造
+## 3. profile.json スキーマ
 
 ```json
 {
   "schema_version": 1,
-  "initialized_at": "2026-03-15T12:00:00Z",
-  "username": "haru",
+  "initialized_at": "2026-03-16T12:00:00Z",
+  "username": "",
   "language": "ja",
+  "icon": null,
+  "occupation": null,
   "setup_completed": true
 }
 ```
 
 | フィールド | 型 | 説明 |
 |-----------|-----|------|
-| `schema_version` | `int` | スキーマバージョン。将来のマイグレーション用 |
-| `initialized_at` | `string` (ISO 8601) | セットアップ完了日時（UTC） |
-| `username` | `string` | ユーザーネーム |
-| `language` | `string` | 言語コード（`ja`, `en` 等） |
-| `setup_completed` | `bool` | セットアップ完了フラグ |
+| schema_version | int | スキーマバージョン（将来のマイグレーション用） |
+| initialized_at | string (ISO 8601) | セットアップ完了日時（UTC） |
+| username | string | ユーザーネーム（必須、100文字以内） |
+| language | string | 言語コード（ja, en, zh, ko, es, fr, de, pt, ru, ar） |
+| icon | string or null | アイコン画像パスまたは URL |
+| occupation | string or null | 職業 |
+| setup_completed | bool | セットアップ完了フラグ |
 
 ---
 
-## 6. 未決定事項
+## 4. Phase 構成
 
-以下の項目は現時点で未決定です。実装を進める中で順次決定します。
+### R Phase: Rust ランチャー（担当: エージェント）
 
-- **セットアップで収集する項目の最終リスト** — 現在はユーザーネームと言語のみ。テーマ設定、通知設定、AI プロバイダー設定等を追加するか検討中
-- **言語パックの配布方式** — アプリバンドルに全言語を同梱するか、初回セットアップ時にダウンロードするか
-- **セットアップの「やり直し」機能の要否** — `profile.json` を削除して再セットアップを許可するか。設定画面からリセットできるようにするか
-- **pack_api_server のセットアップ用エンドポイントの認証方式** — localhost 限定のため認証不要とするか、トークン認証を追加するか
-- **Windows での user_data パス** — `%APPDATA%\RumiAI\user_data` とするか、実行ファイルと同階層にするか
-- **デスクトップ配布での Docker 前提の有無** — permissive モードを前提とするか、将来的に Docker Desktop 連携を検討するか
-- **ビルド CI/CD パイプライン** — GitHub Actions でのクロスプラットフォームビルドの設計
-- **Python バージョンの固定方針** — python-build-standalone の特定バージョンに固定するか、最新安定版を追従するか
-- **macOS codesigning / notarization** — Apple Developer Program への登録と署名フローの設計
-- **Windows コード署名** — EV コード署名証明書の取得と署名フローの設計
-- **セットアップが返すデータの最終仕様** — 現在: ユーザーネーム、言語。その他のフィールド（アバター、テーマ等）は検討中
+Rust 製の薄いランチャーバイナリ。責務は以下の 5 つのみ:
+
+1. **PBS 構築**: python-build-standalone のダウンロード・展開・venv 作成・依存インストール
+2. **Kernel 起動**: Python 子プロセスの spawn とライフサイクル管理
+3. **ヘルスチェック**: localhost:8765 へのポーリングで Kernel の ready 状態を監視
+4. **トレイアイコン**: システムトレイに常駐アイコンを表示（終了・再起動メニュー）
+5. **ブラウザ open**: Kernel ready 後にデフォルトブラウザで Web UI を開く
+
+タスク:
+- R-1: Cargo プロジェクト初期化 + クロスプラットフォームビルド設定
+- R-2: PBS ダウンロード・展開スクリプト（macOS / Windows / Linux）
+- R-3: venv 作成 + uv pip install
+- R-4: Kernel プロセス spawn + stdout/stderr パイプ
+- R-5: ヘルスチェックループ（localhost:8765/health、タイムアウト 30s）
+- R-6: システムトレイ（tray-icon crate）
+- R-7: ブラウザ open（open crate）
+- R-8: graceful shutdown（SIGTERM → Kernel 停止 → プロセス終了）
+
+### Phase A: Kernel API 拡張（担当: エージェント）
+
+- A-1: AppLifecycleManager 実装（起動状態管理、セットアップ状態チェック）
+- A-2: pack_api_server エンドポイント追加
+  - GET /health — ヘルスチェック
+  - GET /api/setup/status — セットアップ状態
+  - POST /api/setup/complete — セットアップ完了（core_setup.setup_wizard Flow 実行）
+- A-3: 静的ファイル配信ミドルウェア（Pack 提供の Web UI を配信）
+
+### Phase B: core_setup Pack（★ Python バックエンド実装済み）
+
+Python バックエンド + Flow 定義は本プロンプトで実装済みです:
+- core_runtime/core_pack/core_setup/ecosystem.json
+- core_runtime/core_pack/core_setup/check_profile.py
+- core_runtime/core_pack/core_setup/save_profile.py
+- core_runtime/core_pack/core_setup/launch_setup_ui.py
+- core_runtime/core_pack/core_setup/flows/setup_wizard.flow.yaml
+- flows/00_startup.flow.yaml に setup_check + setup_launch_ui ステップ追加済み
+
+残タスク:
+- B-1: **React UI はユーザーが作成** — セットアップ画面（ユーザーネーム入力、言語選択、送信）
+- B-2: pack_api_server との統合テスト
+
+### Phase C: core_control_panel Pack（担当: エージェント + ユーザー）
+
+ダッシュボード + Pack 管理 + Flow エディタ + 設定画面を提供する Pack。
+
+- C-1: ecosystem.json 作成（pack_id: core_control_panel）
+- C-2: ダッシュボード API エンドポイント（Pack 一覧、Flow 一覧、システム状態）
+- C-3: Pack 管理 API（インストール、アンインストール、有効化/無効化）
+- C-4: Flow エディタ API（Flow CRUD、ステップ編集、実行）
+- C-5: 設定 API（profile.json 編集、環境設定）
+- C-6: **React UI はユーザーが作成** — ダッシュボード、Pack 管理、Flow エディタ、設定画面
+
+### Phase D: マーケットプレイス BE（担当: エージェント）
+
+Cloudflare Workers + R2 + D1 + Supabase Auth によるバックエンド。
+
+- D-1: Supabase Auth セットアップ（ユーザー認証、OAuth）
+- D-2: D1 スキーマ設計（packs テーブル、versions、reviews、downloads）
+- D-3: Cloudflare Workers API 実装（Pack 検索、詳細、ダウンロード URL 発行）
+- D-4: R2 ストレージ設計（Pack アーカイブの保管、署名付き URL）
+- D-5: Pack アップロード API（バリデーション、ハッシュ計算、R2 アップロード）
+- D-6: レビュー・レーティング API
+
+### Phase E: マーケットプレイス FE + ランチャー統合（担当: エージェント + ユーザー）
+
+- E-1: マーケットプレイス Cloudflare Pages デプロイ設定
+- E-2: **React UI はユーザーが作成** — マーケットプレイス Web UI（検索、詳細、インストール）
+- E-3: core_control_panel からマーケットプレイス統合（Pack インストール UI）
+- E-4: ランチャーからのマーケットプレイス直接アクセス
+
+### Phase F: Pack 開発者 CLI（担当: エージェント）
+
+- F-1: rumi-pack init — Pack スキャフォールド生成
+- F-2: rumi-pack validate — ecosystem.json バリデーション
+- F-3: rumi-pack build — Pack アーカイブ作成（.tar.gz）
+- F-4: rumi-pack publish — マーケットプレイスへの公開
+- F-5: rumi-pack test — Pack テスト実行
+
+### Phase G: セキュリティ強化（担当: エージェント）
+
+- G-1: Pack 署名検証（ed25519）
+- G-2: コード署名（macOS notarization, Windows Authenticode）
+- G-3: 自動アップデート機構（Rust ランチャー経由）
+- G-4: CSP ヘッダー設定（Web UI のセキュリティ強化）
+
+### Phase H: 収益化（担当: エージェント）
+
+- H-1: 有料 Pack 課金基盤（Stripe 統合）
+- H-2: サブスクリプション管理
+- H-3: 収益分配ロジック（開発者 70% / プラットフォーム 30%）
 
 ---
 
-## 7. 優先順位
+## 5. 依存関係グラフ
 
-| 優先度 | 対象 | 理由 |
-|--------|------|------|
-| 最優先 | Phase A（Python 梱包基盤） | 全ての後続タスクの前提。Python が動かないと何も始まらない |
-| 高 | Phase B + C（並行可能） | ブートストラップと core_setup Pack は相互依存があるが並行着手可能 |
-| 高 | Phase D | Rust ⇔ React ブリッジは Phase B/C 完了後すぐに着手 |
-| 中 | Phase E（ユーザー担当） | UI 実装はユーザーが担当。D-2 の型定義完了後に着手可能 |
-| 中 | Phase F（各 Phase と並行） | テストは各 Phase の実装と並行して作成可能 |
-| 最後 | Tauri 統合 | Phase A〜D の基盤が全て揃ってから統合する |
+```
+R Phase ──────┐
+              ▼
+Phase A ◄──── Phase B (★実装済み)
+  │               │
+  ▼               ▼
+Phase C ──── Phase D
+  │               │
+  ▼               ▼
+Phase E ◄──── Phase F
+  │
+  ▼
+Phase G ──── Phase H
+```
+
+- R Phase → Phase A: ランチャーが Kernel を起動できないと API が使えない
+- Phase A → Phase B: API エンドポイントが必要（ただし Phase B の Python バックエンドは完了）
+- Phase A → Phase C: API 拡張が前提
+- Phase C → Phase E: コントロールパネルにマーケットプレイス統合
+- Phase D → Phase E: BE が先、FE が後
+- Phase D → Phase F: マーケットプレイスが存在しないと publish できない
+- Phase E → Phase G: セキュリティ強化は配布基盤完成後
+- Phase G → Phase H: セキュリティが確保されてから収益化
+
+---
+
+## 6. MVP 定義
+
+最小構成 MVP: **R Phase + Phase A + Phase B + Phase C の最小構成**
+
+MVP で実現すること:
+- Rust ランチャーでアプリ起動
+- 初回起動時にセットアップ画面を表示
+- セットアップ完了後にコントロールパネルを表示
+- Pack の一覧表示と有効化/無効化
+
+---
+
+## 7. 起動シーケンス
+
+### 初回起動
+
+```
+1. Rust ランチャー起動
+2. PBS 存在チェック → なければダウンロード・展開・venv 作成・依存インストール
+3. Kernel プロセス spawn
+4. ヘルスチェック (localhost:8765/health) → ready 待機
+5. Kernel startup flow 実行:
+   a. setup_check: profile.json チェック → needs_setup: true
+   b. mounts_init → registry_load → ... (通常の起動シーケンス)
+   c. setup_launch_ui: needs_setup なのでブラウザを開く
+   d. interfaces_publish → emit_ready
+6. ブラウザでセットアップ画面表示 (localhost:8765/setup)
+7. ユーザーがフォーム入力 → POST /api/setup/complete
+8. core_setup.setup_wizard Flow 実行 → profile.json 保存
+9. セットアップ完了 → コントロールパネルへリダイレクト
+```
+
+### 通常起動（2回目以降）
+
+```
+1. Rust ランチャー起動
+2. PBS 存在チェック → 存在する → スキップ
+3. Kernel プロセス spawn
+4. ヘルスチェック → ready 待機
+5. Kernel startup flow 実行:
+   a. setup_check: profile.json チェック → needs_setup: false
+   b. mounts_init → registry_load → ... (通常の起動シーケンス)
+   c. setup_launch_ui: needs_setup: false なのでスキップ
+   d. interfaces_publish → emit_ready
+6. ブラウザでコントロールパネル表示 (localhost:8765/)
+```
+
+---
+
+## 8. インフラ構成
+
+- **Cloudflare Pages**: マーケットプレイス Web UI のホスティング
+- **Cloudflare Workers**: マーケットプレイス API
+- **Cloudflare R2**: Pack アーカイブストレージ
+- **Cloudflare D1**: Pack メタデータ DB
+- **Supabase Auth**: ユーザー認証（OAuth: GitHub, Google）
+
+---
+
+## 9. 配布構成の設計メモ
+
+### 9.1 macOS
+
+```
+RumiAI.app/
+└── Contents/
+    ├── MacOS/
+    │   └── rumi-launcher      # Rust ランチャー
+    ├── Resources/
+    │   ├── python/             # PBS (python-build-standalone)
+    │   ├── rumi_ai_1_10/      # ソースコードルート
+    │   └── user_data/         # 初回起動時に作成
+    └── Info.plist
+```
+
+### 9.2 Windows
+
+```
+RumiAI/
+├── rumi-launcher.exe          # Rust ランチャー
+├── python/                    # PBS
+├── rumi_ai_1_10/              # ソースコードルート
+└── user_data/                 # 初回起動時に作成
+```
+
+### 9.3 Linux
+
+```
+rumi-ai/
+├── rumi-launcher              # Rust ランチャー
+├── python/                    # PBS
+├── rumi_ai_1_10/              # ソースコードルート
+└── user_data/                 # 初回起動時に作成
+```
+
+---
+
+## 10. Rust ランチャーの責務一覧（5つのみ）
+
+1. **PBS 構築**: python-build-standalone のダウンロード・展開・venv 作成・依存インストール
+2. **Kernel 起動**: Python 子プロセスの spawn とライフサイクル管理
+3. **ヘルスチェック**: localhost:8765 へのポーリングで ready 状態を監視
+4. **トレイアイコン**: システムトレイに常駐アイコンを表示
+5. **ブラウザ open**: ready 後にデフォルトブラウザで Web UI を開く
+
+ランチャーは UI を一切持ちません。全ての UI は Pack が提供する Web UI です。
+
+---
+
+## 11. 未決定事項
+
+- セットアップで収集する項目の最終リスト（現在: username, language, icon, occupation）
+- 言語パックの配布方式
+- セットアップの「やり直し」機能の要否
+- Windows での user_data パス（%APPDATA% vs 実行ファイル同階層）
+- ビルド CI/CD パイプライン設計（GitHub Actions クロスプラットフォーム）
+- Python バージョンの固定方針
+- macOS codesigning / notarization
+- Windows コード署名
+- Pack の静的ファイル配信サーバーの実装方式
