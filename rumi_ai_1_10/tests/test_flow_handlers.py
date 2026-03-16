@@ -442,14 +442,20 @@ class TestRunFlow:
             "_internal": "secret",
             "_error": "",  # falsy _error はエラーとして扱われない
             "diagnostics": MagicMock(),  # _CTX_OBJECT_KEYS に含まれる
+            "_flow_id": "abc",  # Kernel内部キー — 除外される
         }
         kernel = _make_kernel(flow_ids=["f"], execute_return=ctx)
         handler = StubHandler(kernel=kernel)
         result = handler._run_flow("f", {}, 30)
         assert result["success"] is True
         assert "output" in result["result"]
-        assert "_internal" not in result["result"]
+        # Pack開発者の _ キーはレスポンスに残る（警告ログ付き）
+        assert "_internal" in result["result"]
+        assert result["result"]["_internal"] == "secret"
         assert "diagnostics" not in result["result"]
+        # Kernel内部キーは除外される
+        assert "_flow_id" not in result["result"]
+        assert "_error" not in result["result"]
 
     def test_callable_excluded(self):
         ctx = {"output": "ok", "func": lambda: None}

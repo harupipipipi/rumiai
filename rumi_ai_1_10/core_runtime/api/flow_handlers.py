@@ -125,6 +125,21 @@ class FlowHandlersMixin:
         "secrets_store",
     })
 
+    # Kernel内部キーのプレフィックス — これにマッチするキーはレスポンスから除外する
+    # Pack開発者が返す _ プレフィックスキー（_debug 等）は除外しない
+    _KERNEL_INTERNAL_PREFIXES: tuple[str, ...] = (
+        "_flow_",
+        "_kernel_",
+        "_step_out.",
+        "_current_step",
+        "_total_steps",
+        "_parent_flow",
+        "_principal_id",
+        "_flow_control",
+        "_error",
+        "_flow_defaults",
+    )
+
     @classmethod
     def _get_flow_semaphore(cls) -> threading.Semaphore:
         """同時実行制限用Semaphoreを取得（遅延初期化）"""
@@ -229,14 +244,25 @@ class FlowHandlersMixin:
 
             # 結果から内部キーを除外
             result_data = {}
+            _pack_underscore_keys: list[str] = []
             if isinstance(ctx, dict):
-                result_data = {
-                    k: v for k, v in ctx.items()
-                    if not k.startswith("_")
-                    and k not in self._CTX_OBJECT_KEYS
-                    and not callable(v)
-                    and _is_json_serializable(v)
-                }
+                for k, v in ctx.items():
+                    if k in self._CTX_OBJECT_KEYS:
+                        continue
+                    if callable(v):
+                        continue
+                    if not _is_json_serializable(v):
+                        continue
+                    if any(k.startswith(p) for p in self._KERNEL_INTERNAL_PREFIXES):
+                        continue
+                    if k.startswith("_"):
+                        _pack_underscore_keys.append(k)
+                    result_data[k] = v
+                if _pack_underscore_keys:
+                    logger.warning(
+                        "Pack-defined underscore key(s) included in flow result: %s",
+                        ", ".join(sorted(_pack_underscore_keys)),
+                    )
 
             # レスポンスサイズ制限 (デフォルト 4MB)
             max_bytes = int(os.environ.get("RUMI_MAX_RESPONSE_BYTES", str(4 * 1024 * 1024)))
