@@ -556,6 +556,8 @@ class KernelSystemHandlersMixin:
     def _h_api_init(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
         try:
             from .pack_api_server import initialize_pack_api_server
+            from .app_lifecycle_manager import AppLifecycleManager
+            from .paths import BASE_DIR as _api_base_dir
 
             host = args.get("host", "127.0.0.1")
             port = args.get("port", 8765)
@@ -566,7 +568,8 @@ class KernelSystemHandlersMixin:
                 approval_manager=ctx.get("approval_manager"),
                 container_orchestrator=ctx.get("container_orchestrator"),
                 host_privilege_manager=ctx.get("host_privilege_manager"),
-                kernel=self
+                kernel=self,
+                app_lifecycle_manager=AppLifecycleManager(base_dir=_api_base_dir)
             )
             ctx["pack_api_server"] = api_server
 
