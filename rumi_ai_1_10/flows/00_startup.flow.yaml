@@ -18,6 +18,15 @@ defaults:
 
 steps:
   # === init phase ===
+  - id: setup_check
+    phase: init
+    priority: 1
+    type: handler
+    input:
+      handler: "kernel:exec_python"
+      args:
+        file: "core_runtime/core_pack/core_setup/check_profile.py"
+
   - id: mounts_init
     phase: init
     priority: 10
@@ -134,6 +143,15 @@ steps:
     output: pending_export_result
 
   # === finalize phase ===
+  - id: setup_launch_ui
+    phase: finalize
+    priority: 5
+    type: handler
+    input:
+      handler: "kernel:exec_python"
+      args:
+        file: "core_runtime/core_pack/core_setup/launch_setup_ui.py"
+
   - id: interfaces_publish
     phase: finalize
     priority: 10
