@@ -273,6 +273,26 @@ class Registry:
             print(f"    スキーマ検証エラー: {e}")
             return None
         
+        # D-PATCH: pack_id auto-complement ---------------------------------
+        _pi = ecosystem_data.get("pack_identity")
+        _pid = ecosystem_data.get("pack_id")
+
+        if not _pid and _pi:
+            _pid = _pi.split("/")[-1].split(":")[-1]
+            ecosystem_data["pack_id"] = _pid
+            logger.info(
+                "[Registry] pack_id auto-generated from pack_identity '%s' -> '%s'",
+                _pi, _pid,
+            )
+
+        if not _pi and _pid:
+            logger.warning(
+                "[Registry] pack_identity is missing for pack_id '%s'. "
+                "Distribution and update features require pack_identity.",
+                _pid,
+            )
+        # END D-PATCH -------------------------------------------------------
+
         # UUIDを生成（または既存の値を使用）
         pack_identity = ecosystem_data['pack_identity']
         pack_uuid = ecosystem_data.get('pack_uuid') or str(generate_pack_uuid(pack_identity))
