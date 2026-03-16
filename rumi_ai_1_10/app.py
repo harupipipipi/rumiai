@@ -28,22 +28,26 @@ def L(key, **kwargs):
 
 def _check_permissive_production_guard():
     """
-    VULN-C01: production 環境で --permissive フラグが使用された場合に起動を拒否する。
-    自動化を妨げないため確認プロンプトは入れない。
+    VULN-C01: 明示的な許可がない限り --permissive フラグの使用を拒否する。
+    ホワイトリスト方式: RUMI_ALLOW_PERMISSIVE=true または
+    RUMI_ENVIRONMENT=development|dev の場合のみ許可。
     """
     import os
-    if os.environ.get("RUMI_ENVIRONMENT", "").lower() == "production":
-        print(
-            "FATAL: --permissive flag is not allowed when "
-            "RUMI_ENVIRONMENT=production.",
-            file=sys.stderr,
-        )
-        print(
-            "Remove --permissive or set RUMI_ENVIRONMENT to a "
-            "non-production value.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+    if os.environ.get("RUMI_ALLOW_PERMISSIVE", "").lower() == "true":
+        return
+    env_val = os.environ.get("RUMI_ENVIRONMENT", "").lower()
+    if env_val in ("development", "dev"):
+        return
+    print(
+        "FATAL: --permissive flag requires explicit opt-in.",
+        file=sys.stderr,
+    )
+    print(
+        "Set RUMI_ALLOW_PERMISSIVE=true or "
+        "RUMI_ENVIRONMENT=development to use --permissive.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 
 
 
