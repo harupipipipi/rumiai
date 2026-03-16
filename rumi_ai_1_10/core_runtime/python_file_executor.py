@@ -139,6 +139,7 @@ class ExecutionResult:
     execution_mode: str = "unknown"  # "container", "host_permissive", "rejected"
     execution_time_ms: float = 0.0
     warnings: List[str] = field(default_factory=list)
+    is_streaming: bool = False
 
 
 class PackApprovalChecker:
@@ -981,6 +982,7 @@ import importlib.util
 
 # rumi_syscall を先にimport可能にする
 sys.path.insert(0, "/")
+sys.path.insert(0, "/workspace")
 
 # 入力を読み込み
 with open("/input.json", "r") as f:
@@ -1143,17 +1145,39 @@ else:
             effective_timeout = min(timeout_seconds, MAX_HOST_EXECUTION_TIMEOUT)
 
             def _run_target():
-                if param_count >= 2:
-                    return run_fn(input_data, exec_context)
-                elif param_count == 1:
-                    return run_fn(input_data)
+                # --- async/generator support ---
+                if inspect.isgeneratorfunction(run_fn):
+                    if param_count >= 2:
+                        gen = run_fn(input_data, exec_context)
+                    elif param_count == 1:
+                        gen = run_fn(input_data)
+                    else:
+                        gen = run_fn()
+                    chunks = list(gen)
+                    return {"chunks": chunks, "is_streaming": True}
+                elif inspect.iscoroutinefunction(run_fn):
+                    import asyncio
+                    if param_count >= 2:
+                        coro = run_fn(input_data, exec_context)
+                    elif param_count == 1:
+                        coro = run_fn(input_data)
+                    else:
+                        coro = run_fn()
+                    return asyncio.run(coro)
                 else:
-                    return run_fn()
+                    if param_count >= 2:
+                        return run_fn(input_data, exec_context)
+                    elif param_count == 1:
+                        return run_fn(input_data)
+                    else:
+                        return run_fn()
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                 future = pool.submit(_run_target)
                 try:
                     output = future.result(timeout=effective_timeout)
+                    if isinstance(output, dict) and output.get("is_streaming"):
+                        result.is_streaming = True
                 except concurrent.futures.TimeoutError:
                     result.error = f"Host execution timed out after {effective_timeout}s"
                     result.error_type = "timeout"
