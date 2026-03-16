@@ -1,0 +1,17 @@
+{
+  "pack_id": "core_setup",
+  "pack_identity": "core:rumi/setup",
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": []
+  },
+  "metadata": {
+    "name": "Core Setup",
+    "description": "Rumi AI OS core pack that provides initial setup functionality. Checks profile.json existence, validates and saves user profile data, and launches the setup UI when needed.",
+    "author": "Rumi AI Team",
+    "license": "MIT",
+    "is_core_pack": true
+  },
+  "dependencies": {},
+  "components": {}
+}

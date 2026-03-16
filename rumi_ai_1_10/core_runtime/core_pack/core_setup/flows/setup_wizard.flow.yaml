@@ -1,0 +1,78 @@
+# core_setup/flows/setup_wizard.flow.yaml
+# セットアップウィザードの Flow 定義
+#
+# pack_api_server の POST /api/setup/complete エンドポイントから
+# execute_flow_sync("core_setup.setup_wizard", context) で呼ばれる想定。
+# context には username, language 等のセットアップデータが含まれる。
+
+flow_id: core_setup.setup_wizard
+inputs:
+  username: string
+  language: string
+outputs:
+  setup_result: object
+
+phases:
+  - validate
+  - configure
+  - finalize
+
+defaults:
+  fail_soft: false
+  on_missing_step: skip
+
+steps:
+  # === validate phase ===
+  - id: validate_profile_data
+    phase: validate
+    priority: 10
+    type: handler
+    input:
+      handler: "kernel:exec_python"
+      args:
+        file: "core_runtime/core_pack/core_setup/save_profile.py"
+        phase: "validate"
+        inject:
+          username: "{{username}}"
+          language: "{{language}}"
+          icon: "{{icon}}"
+          occupation: "{{occupation}}"
+    output: validation_result
+
+  # === configure phase ===
+  - id: save_profile
+    phase: configure
+    priority: 10
+    type: handler
+    input:
+      handler: "kernel:exec_python"
+      args:
+        file: "core_runtime/core_pack/core_setup/save_profile.py"
+        phase: "save"
+        inject:
+          username: "{{username}}"
+          language: "{{language}}"
+          icon: "{{icon}}"
+          occupation: "{{occupation}}"
+    output: save_result
+
+  - id: verify_profile_saved
+    phase: configure
+    priority: 20
+    type: handler
+    input:
+      handler: "kernel:exec_python"
+      args:
+        file: "core_runtime/core_pack/core_setup/check_profile.py"
+        phase: "verify"
+
+  # === finalize phase ===
+  - id: mark_setup_complete
+    phase: finalize
+    priority: 10
+    type: handler
+    input:
+      handler: "kernel:ctx.set"
+      args:
+        key: "setup_completed"
+        value: true
