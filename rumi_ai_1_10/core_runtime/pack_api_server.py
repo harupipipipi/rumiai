@@ -163,6 +163,7 @@ class PackAPIHandler(
     _allowed_origins_from_env: bool = False
     _hmac_key_manager: HMACKeyManager = None
     kernel = None  # Kernel インスタンス参照（Flow実行API用）
+    app_lifecycle_manager = None  # AppLifecycleManager インスタンス参照（Phase A）
     
     def log_message(self, format: str, *args) -> None:
         logger.info(f"API: {args[0]}")
@@ -290,6 +291,72 @@ class PackAPIHandler(
             )
             return None
     
+
+    # --- Phase A: 静的ファイル配信メソッド ---
+    _MIME_TYPES = {
+        ".html": "text/html; charset=utf-8",
+        ".js": "application/javascript; charset=utf-8",
+        ".css": "text/css; charset=utf-8",
+        ".json": "application/json; charset=utf-8",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".svg": "image/svg+xml",
+        ".ico": "image/x-icon",
+        ".woff": "font/woff",
+        ".woff2": "font/woff2",
+        ".ttf": "font/ttf",
+        ".map": "application/json",
+    }
+
+    def _serve_static_file(self, request_path: str) -> None:
+        """Pack が提供する Web UI の静的ファイルを配信する（認証不要）。
+
+        パストラバーサル防止: Path.resolve() + relative_to() で web_root 内に制限。
+        """
+        # /setup/xxx → core_runtime/core_pack/core_setup/web/xxx
+        if request_path.startswith("/setup"):
+            sub_path = request_path[len("/setup"):]
+            if not sub_path or sub_path == "/":
+                sub_path = "/index.html"
+            web_root = Path(__file__).resolve().parent / "core_pack" / "core_setup" / "web"
+        else:
+            self._send_response(APIResponse(False, error="Not found"), 404)
+            return
+
+        # パストラバーサル防止
+        try:
+            target = (web_root / sub_path.lstrip("/")).resolve()
+            target.relative_to(web_root.resolve())
+        except (ValueError, OSError):
+            self._send_response(APIResponse(False, error="Forbidden"), 403)
+            return
+
+        if not target.is_file():
+            self._send_response(APIResponse(False, error="Not found"), 404)
+            return
+
+        # MIME type 判定
+        suffix = target.suffix.lower()
+        content_type = self._MIME_TYPES.get(suffix, "application/octet-stream")
+
+        try:
+            data = target.read_bytes()
+        except OSError:
+            self._send_response(APIResponse(False, error="Read error"), 500)
+            return
+
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        origin = self._get_cors_origin(self.headers.get("Origin", ""))
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_OPTIONS(self) -> None:
         self.send_response(200)
         origin = self._get_cors_origin(self.headers.get('Origin', ''))
@@ -353,6 +420,32 @@ class PackAPIHandler(
     def do_GET(self) -> None:
         if not self._check_rate_limit():
             return
+
+        # --- Phase A: 認証不要エンドポイント ---
+        _pre_auth_path = urlparse(self.path).path
+        if _pre_auth_path == "/health":
+            _alm = self.__class__.app_lifecycle_manager
+            if _alm is not None:
+                _health = _alm.get_health()
+            else:
+                _health = {"status": "ok", "needs_setup": True}
+            self._send_response(APIResponse(True, data=_health))
+            return
+
+        if _pre_auth_path == "/api/setup/status":
+            _alm = self.__class__.app_lifecycle_manager
+            if _alm is not None:
+                _setup_status = _alm.check_setup_status()
+            else:
+                _setup_status = {"needs_setup": True, "reason": "lifecycle_manager_unavailable"}
+            self._send_response(APIResponse(True, data=_setup_status))
+            return
+
+        # --- Phase A: 静的ファイル配信 (認証不要) ---
+        if _pre_auth_path.startswith("/setup/") or _pre_auth_path == "/setup":
+            self._serve_static_file(_pre_auth_path)
+            return
+
         if not self._check_auth():
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return
@@ -501,6 +594,34 @@ class PackAPIHandler(
     def do_POST(self) -> None:
         if not self._check_rate_limit():
             return
+
+        # --- Phase A: 認証不要エンドポイント ---
+        _pre_auth_path_post = urlparse(self.path).path
+        if _pre_auth_path_post == "/api/setup/complete":
+            _body_setup = self._parse_body()
+            if _body_setup is None:
+                return
+            _alm = self.__class__.app_lifecycle_manager
+            if _alm is None:
+                self._send_response(APIResponse(False, error="Lifecycle manager not initialized"), 500)
+                return
+            _setup_result = _alm.complete_setup(_body_setup)
+            if _setup_result.get("success"):
+                try:
+                    _k = self.__class__.kernel
+                    if _k and hasattr(_k, 'event_bus') and _k.event_bus:
+                        _k.event_bus.publish("setup.completed", {
+                            "username": _body_setup.get("username"),
+                            "language": _body_setup.get("language"),
+                        })
+                except Exception:
+                    pass
+                self._send_response(APIResponse(True, data=_setup_result))
+            else:
+                _errors = _setup_result.get("errors", ["Setup failed"])
+                self._send_response(APIResponse(False, error="; ".join(_errors)), 400)
+            return
+
         if not self._check_auth():
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return
@@ -1028,9 +1149,11 @@ class PackAPIServer:
         container_orchestrator = None,
         host_privilege_manager = None,
         internal_token: str = None,
-        kernel = None
+        kernel = None,
+        app_lifecycle_manager = None
     ):
         self.kernel = kernel
+        self.app_lifecycle_manager = app_lifecycle_manager
         # Fix #3: bind address restriction — env var override + 0.0.0.0 warning
         resolved_host = os.environ.get("RUMI_API_BIND_ADDRESS", host) or "127.0.0.1"
         if resolved_host == "0.0.0.0":
@@ -1079,6 +1202,7 @@ class PackAPIServer:
         PackAPIHandler.internal_token = self.internal_token
         PackAPIHandler._hmac_key_manager = self._hmac_key_manager
         PackAPIHandler.kernel = self.kernel
+        PackAPIHandler.app_lifecycle_manager = self.app_lifecycle_manager
 
         # BUG-20260306-02 fix: Pack ルートの読み込みを system.ready イベント後に遅延実行する。
         # API サーバー自体は security phase で初期化し、Pack ルートは
@@ -1152,7 +1276,8 @@ def initialize_pack_api_server(
     container_orchestrator = None,
     host_privilege_manager = None,
     internal_token: str = None,
-    kernel = None
+    kernel = None,
+    app_lifecycle_manager = None
 ) -> PackAPIServer:
     global _api_server
     
@@ -1166,7 +1291,8 @@ def initialize_pack_api_server(
         container_orchestrator=container_orchestrator,
         host_privilege_manager=host_privilege_manager,
         internal_token=internal_token,
-        kernel=kernel
+        kernel=kernel,
+        app_lifecycle_manager=app_lifecycle_manager
     )
     _api_server.start()
     # DI コンテナのキャッシュも更新
