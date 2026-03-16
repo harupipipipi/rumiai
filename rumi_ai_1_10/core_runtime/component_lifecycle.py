@@ -287,44 +287,105 @@ class ComponentLifecycleExecutor:
             if am._initialized:
                 status = am.get_status(pack_id)
                 if status != PackStatus.APPROVED:
-                    logger.warning(
-                        "Component '%s' skipped: pack '%s' status is '%s'. "
-                        "Approve the pack to enable execution.",
-                        comp_id, pack_id, status.value if status else "unknown",
-                    )
-                    self.diagnostics.record_step(
-                        phase=phase,
-                        step_id=f"{phase}.{comp_id}.not_approved",
-                        handler=f"component_phase:{phase}",
-                        status="skipped",
-                        target={"kind": "component", "id": comp_id},
-                        meta={
-                            "reason": "pack_not_approved",
-                            "pack_id": pack_id,
-                            "pack_status": status.value if status else "unknown"
-                        }
-                    )
-                    return
+                    # Wave 1-2: 開発モード自動承認を試行
+                    if hasattr(am, 'auto_approve_if_dev') and am.auto_approve_if_dev(pack_id):
+                        self.diagnostics.record_step(
+                            phase=phase,
+                            step_id=f"{phase}.{comp_id}.dev_auto_approved",
+                            handler=f"component_phase:{phase}",
+                            status="success",
+                            target={"kind": "component", "id": comp_id},
+                            meta={
+                                "reason": "dev_auto_approved",
+                                "pack_id": pack_id,
+                            }
+                        )
+                    else:
+                        logger.warning(
+                            "Component '%s' skipped: pack '%s' status is '%s'. "
+                            "Approve the pack to enable execution.",
+                            comp_id, pack_id, status.value if status else "unknown",
+                        )
+                        self.diagnostics.record_step(
+                            phase=phase,
+                            step_id=f"{phase}.{comp_id}.not_approved",
+                            handler=f"component_phase:{phase}",
+                            status="skipped",
+                            target={"kind": "component", "id": comp_id},
+                            meta={
+                                "reason": "pack_not_approved",
+                                "pack_id": pack_id,
+                                "pack_status": status.value if status else "unknown"
+                            }
+                        )
+                        return
                 
-                if not am.verify_hash(pack_id):
-                    am.mark_modified(pack_id)
-                    logger.warning(
-                        "Component '%s' skipped: pack '%s' files changed after approval. "
-                        "Re-approve to fix.",
-                        comp_id, pack_id,
-                    )
-                    self.diagnostics.record_step(
-                        phase=phase,
-                        step_id=f"{phase}.{comp_id}.hash_mismatch",
-                        handler=f"component_phase:{phase}",
-                        status="skipped",
-                        target={"kind": "component", "id": comp_id},
-                        meta={
-                            "reason": "hash_verification_failed",
-                            "pack_id": pack_id
-                        }
-                    )
-                    return
+                # Wave 2: ハッシュ粒度緩和 — verify_hash_detailed を使用
+                if hasattr(am, 'verify_hash_detailed'):
+                    hash_result = am.verify_hash_detailed(pack_id)
+                    if not hash_result["valid"]:
+                        if hash_result["critical_changed"]:
+                            am.mark_modified(pack_id)
+                            logger.warning(
+                                "Component '%s' skipped: pack '%s' critical files changed after approval. "
+                                "Re-approve to fix.",
+                                comp_id, pack_id,
+                            )
+                            self.diagnostics.record_step(
+                                phase=phase,
+                                step_id=f"{phase}.{comp_id}.hash_mismatch",
+                                handler=f"component_phase:{phase}",
+                                status="skipped",
+                                target={"kind": "component", "id": comp_id},
+                                meta={
+                                    "reason": "critical_hash_verification_failed",
+                                    "pack_id": pack_id,
+                                    "changed_files": hash_result["changed_files"],
+                                    "added_files": hash_result["added_files"],
+                                    "removed_files": hash_result["removed_files"],
+                                }
+                            )
+                            return
+                        else:
+                            logger.warning(
+                                "Component '%s': pack '%s' has non-critical file changes (blocks only). "
+                                "Continuing execution with warning.",
+                                comp_id, pack_id,
+                            )
+                            self.diagnostics.record_step(
+                                phase=phase,
+                                step_id=f"{phase}.{comp_id}.hash_noncritical",
+                                handler=f"component_phase:{phase}",
+                                status="success",
+                                target={"kind": "component", "id": comp_id},
+                                meta={
+                                    "reason": "non_critical_hash_change",
+                                    "pack_id": pack_id,
+                                    "changed_files": hash_result["changed_files"],
+                                    "added_files": hash_result["added_files"],
+                                    "removed_files": hash_result["removed_files"],
+                                }
+                            )
+                else:
+                    if not am.verify_hash(pack_id):
+                        am.mark_modified(pack_id)
+                        logger.warning(
+                            "Component '%s' skipped: pack '%s' files changed after approval. "
+                            "Re-approve to fix.",
+                            comp_id, pack_id,
+                        )
+                        self.diagnostics.record_step(
+                            phase=phase,
+                            step_id=f"{phase}.{comp_id}.hash_mismatch",
+                            handler=f"component_phase:{phase}",
+                            status="skipped",
+                            target={"kind": "component", "id": comp_id},
+                            meta={
+                                "reason": "hash_verification_failed",
+                                "pack_id": pack_id
+                            }
+                        )
+                        return
 
                 # --- Pack Type "rule" のルール拡張承認チェック ---
                 if hasattr(am, 'is_rule_approved') and not am.is_rule_approved(pack_id):
