@@ -457,6 +457,79 @@ class ApprovalManager:
         
         return True, None
     
+    # ------------------------------------------------------------------ #
+    # Wave 1-2: 開発モード自動承認
+    # ------------------------------------------------------------------ #
+
+    def auto_approve_if_dev(self, pack_id: str) -> bool:
+        """開発環境で未承認Packを自動承認する。
+
+        発動条件:
+          - RUMI_ENVIRONMENT が 'development' または 'dev'
+          - RUMI_AUTO_APPROVE_LOCAL が 'true'
+
+        BLOCKED 状態のPackは自動承認しない。
+        既に APPROVED なら True を返す。
+
+        Returns:
+            True: 自動承認成功（または既に APPROVED）
+            False: 自動承認しなかった
+        """
+        # 環境変数の2重ガード
+        rumi_env = os.environ.get("RUMI_ENVIRONMENT", "").lower()
+        if rumi_env not in ("development", "dev"):
+            return False
+
+        auto_approve = os.environ.get("RUMI_AUTO_APPROVE_LOCAL", "").lower()
+        if auto_approve != "true":
+            return False
+
+        # 現在の状態を確認
+        with self._lock:
+            approval = self._approvals.get(pack_id)
+            if not approval:
+                return False
+            current_status = approval.status
+
+        # 既に APPROVED なら True
+        if current_status == PackStatus.APPROVED:
+            return True
+
+        # BLOCKED は自動承認しない
+        if current_status == PackStatus.BLOCKED:
+            return False
+
+        # approve() を呼び出す
+        result = self.approve(pack_id)
+
+        if result.success:
+            logger.info(
+                "DEV_AUTO_APPROVE: Pack '%s' auto-approved in development mode.",
+                pack_id,
+            )
+            # 監査ログに記録
+            try:
+                from .audit_logger import get_audit_logger
+                get_audit_logger().log_security_event(
+                    event_type="dev_auto_approve",
+                    severity="warning",
+                    description=f"Pack '{pack_id}' auto-approved in development mode",
+                    pack_id=pack_id,
+                    details={
+                        "rumi_environment": rumi_env,
+                        "auto_approve_local": auto_approve,
+                    },
+                )
+            except Exception:
+                pass
+            return True
+
+        logger.warning(
+            "DEV_AUTO_APPROVE: Failed to auto-approve pack '%s': %s",
+            pack_id, result.error,
+        )
+        return False
+
     def approve(self, pack_id: str) -> ApprovalResult:
         """Packを承認"""
         with self._lock:
@@ -637,6 +710,125 @@ class ApprovalManager:
                 self._approvals[pack_id].status = PackStatus.MODIFIED
                 self._save_grant(self._approvals[pack_id])
     
+    # ------------------------------------------------------------------ #
+    # Wave 1-1: ハッシュ粒度緩和 — ファイルごとのクリティカル判定
+    # ------------------------------------------------------------------ #
+
+    # セキュリティクリティカルファイル/ディレクトリ定義
+    CRITICAL_FILES = frozenset({
+        "backend/ecosystem.json",
+        "backend/permissions.json",
+        "backend/routes.json",
+    })
+    CRITICAL_DIRS = (
+        "backend/flows/",
+        "backend/lib/",
+        "backend/components/",
+    )
+
+    def verify_hash_detailed(self, pack_id: str, use_cache: bool = True) -> Dict[str, Any]:
+        """ファイルごとのハッシュ検証結果を返し、クリティカル/非クリティカルを判定する。
+
+        Returns:
+            {
+                "valid": bool,            # 全ファイルが一致なら True
+                "critical_changed": bool,  # クリティカルファイルに変更があるか
+                "changed_files": list,     # 変更されたファイルのパスリスト
+                "added_files": list,       # 追加されたファイルのパスリスト
+                "removed_files": list,     # 削除されたファイルのパスリスト
+            }
+        """
+        # core_pack はハッシュ検証不要
+        if self._is_core_pack(pack_id):
+            return {
+                "valid": True,
+                "critical_changed": False,
+                "changed_files": [],
+                "added_files": [],
+                "removed_files": [],
+            }
+
+        # ロック内で approval を取得
+        with self._lock:
+            approval = self._approvals.get(pack_id)
+            if not approval or not approval.file_hashes:
+                return {
+                    "valid": False,
+                    "critical_changed": True,
+                    "changed_files": [],
+                    "added_files": [],
+                    "removed_files": [],
+                }
+            stored_hashes = dict(approval.file_hashes)
+
+        # ロック外でファイル I/O
+        if pack_id == LOCAL_PACK_ID:
+            current_hashes = self._compute_local_pack_hashes()
+        else:
+            pack_dir = self._resolve_pack_dir(pack_id)
+            if pack_dir is None or not pack_dir.exists():
+                return {
+                    "valid": False,
+                    "critical_changed": True,
+                    "changed_files": [],
+                    "added_files": [],
+                    "removed_files": [],
+                }
+            if use_cache:
+                current_hashes = self._compute_pack_hashes(pack_dir)
+            else:
+                current_hashes = self._compute_pack_hashes_nocache(pack_dir)
+
+        stored_keys = set(stored_hashes.keys())
+        current_keys = set(current_hashes.keys())
+
+        removed_files = sorted(stored_keys - current_keys)
+        added_files = sorted(current_keys - stored_keys)
+        changed_files = sorted(
+            p for p in (stored_keys & current_keys)
+            if stored_hashes[p] != current_hashes[p]
+        )
+
+        valid = (not removed_files and not added_files and not changed_files)
+
+        # --- クリティカル判定 ---
+        critical_changed = False
+
+        # ファイル削除は常にクリティカル
+        if removed_files:
+            critical_changed = True
+
+        # クリティカルファイル/ディレクトリの変更チェック
+        if not critical_changed:
+            for fp in changed_files:
+                if self._is_critical_path(fp):
+                    critical_changed = True
+                    break
+
+        # ファイル追加: blocks/ 内のみ非クリティカル、それ以外はクリティカル
+        if not critical_changed:
+            for fp in added_files:
+                if not fp.startswith("blocks/"):
+                    critical_changed = True
+                    break
+
+        return {
+            "valid": valid,
+            "critical_changed": critical_changed,
+            "changed_files": changed_files,
+            "added_files": added_files,
+            "removed_files": removed_files,
+        }
+
+    def _is_critical_path(self, file_path: str) -> bool:
+        """ファイルパスがセキュリティクリティカルかどうかを判定する。"""
+        if file_path in self.CRITICAL_FILES:
+            return True
+        for critical_dir in self.CRITICAL_DIRS:
+            if file_path.startswith(critical_dir):
+                return True
+        return False
+
     def verify_hash(self, pack_id: str, use_cache: bool = True) -> bool:
         """Packのファイルハッシュを検証"""
         # W22-A: core_pack はハッシュ検証不要
