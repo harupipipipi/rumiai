@@ -32,6 +32,9 @@ Pack 開発者向けのガイドです。設計の全体像は [architecture.md]
 21. [Pack 独自エンドポイント（routes.json）](#pack-独自エンドポイントroutesjson)
 22. [HTTP ステータスコード制御](#http-ステータスコード制御)
 23. [エラーハンドリング ベストプラクティス](#エラーハンドリング-ベストプラクティス)
+24. [Flow Modifier 推奨パターン](#flow-modifier-推奨パターン)
+25. [ハンドラ API 分類](#ハンドラ-api-分類)
+26. [出力キー命名規則（詳細）](#出力キー命名規則詳細)
 24. [注意事項](#注意事項)
 25. [API リファレンス](#api-リファレンス)
 26. [チュートリアル: 簡単な Pack を作る](#チュートリアル-簡単な-pack-を作る)
@@ -1664,6 +1667,167 @@ Capability 呼び出しの失敗原因には以下があります。
 これらのエラーも try-except ではなく、戻り値の `success` フィールドで判定することを推奨します。
 
 ---
+
+---
+
+## Flow Modifier 推奨パターン
+
+Flow Modifier は強力な機能ですが、最初から全てのアクションを使おうとすると複雑になります。以下の2つのパターンから始めることを推奨します。
+
+### パターン 1: append（フェーズ末尾に追加）
+
+最も安全で理解しやすいパターンです。既存の Flow を変更せず、末尾に処理を追加します。
+
+```yaml
+modifier_id: add_logging
+target_flow_id: ai_response
+phase: postprocess
+priority: 90
+action: append
+
+step:
+  id: log_response
+  type: python_file_call
+  owner_pack: logging_pack
+  file: blocks/log_response.py
+  input:
+    response: "${ctx.response}"
+```
+
+使いどころ: ロギング、監査、通知、後処理の追加
+
+### パターン 2: replace（ステップの置換）
+
+既存ステップの実装を差し替えるパターンです。例えば、AI クライアントを OpenAI から Anthropic に切り替える場合に使います。
+
+```yaml
+modifier_id: swap_ai_client
+target_flow_id: ai_response
+phase: generate
+priority: 50
+action: replace
+target_step_id: call_openai
+
+step:
+  id: call_anthropic
+  type: python_file_call
+  owner_pack: anthropic_client
+  file: blocks/generate.py
+  input:
+    user_input: "${ctx.user_input}"
+  output: ai_output
+```
+
+使いどころ: 実装の差し替え、プロバイダの切り替え
+
+### いつ inject_before / inject_after を使うか
+
+inject_before / inject_after は特定のステップの前後に処理を差し込みたい場合に使います。ただし、対象ステップの id に依存するため、Flow の構造変更に弱くなります。以下の場合にのみ使用を検討してください。
+
+- 特定のステップの入力データを事前変換する必要がある場合（inject_before）
+- 特定のステップの出力データを後処理する必要がある場合（inject_after）
+- append では実行タイミングが遅すぎる場合
+
+### remove は最後の手段
+
+remove は既存ステップを削除するため、Flow の動作を大きく変える可能性があります。通常は replace で代替実装を提供する方が安全です。
+
+---
+
+## ハンドラ API 分類
+
+Kernel が提供するハンドラには「Pack 開発者向け」と「内部 API」の2種類があります。
+
+### Pack 開発者向け API
+
+Flow 定義で直接使用できるハンドラです。安定したインターフェースが保証されます。
+
+| ハンドラ | 説明 | Flow での使い方 |
+|---------|------|----------------|
+| `python_file_call` | Python ファイルを実行 | `type: python_file_call` |
+| `flow` | サブ Flow を呼び出し | `type: flow` |
+| `function` | Capability 関数を実行 | `type: function` |
+| `set` | コンテキストに値を設定 | `type: set` |
+| `handler` | 登録済みハンドラを直接呼び出し | `type: handler` |
+
+### 内部 API（Pack 開発者は使用しない）
+
+Kernel の内部動作に使用されるハンドラです。Pack 開発者がこれらを直接呼び出す必要はありません。
+
+| カテゴリ | 例 | 説明 |
+|---------|-----|------|
+| `kernel:*` | `kernel:ctx.get`, `kernel:ctx.set` | Kernel 内部のコンテキスト操作 |
+| `flow.hooks.*` | `flow.hooks.pre_step`, `flow.hooks.post_step` | Flow ライフサイクルフック |
+| `flow.construct.*` | `flow.construct.set`, `flow.construct.if` | Flow 構文の内部実装 |
+| `component_phase:*` | `component_phase:setup`, `component_phase:startup` | コンポーネントライフサイクル |
+
+> **注意**: 内部 API は予告なく変更される可能性があります。Pack の Flow 定義からはこれらを直接参照しないでください。
+
+---
+
+## 出力キー命名規則（詳細）
+
+### Kernel 内部キーの除外ルール
+
+Flow 実行結果が HTTP レスポンスとして返される際、以下のプレフィックスで始まるキーは **Kernel 内部キー** として自動的に除外されます。
+
+| プレフィックス | 説明 |
+|---------------|------|
+| `_flow_` | Flow 制御情報 |
+| `_kernel_` | Kernel ステップメタデータ |
+| `_step_out.` | ステップ出力の内部参照 |
+| `_current_step` | 現在のステップ番号 |
+| `_total_steps` | 総ステップ数 |
+| `_parent_flow` | 親 Flow 情報 |
+| `_principal_id` | 実行者ID |
+| `_flow_control` | フロー制御シグナル |
+| `_error` | エラー情報 |
+| `_flow_defaults` | Flow デフォルト値 |
+
+### Pack 開発者が `_` プレフィックスキーを返した場合
+
+上記の Kernel 内部プレフィックスに **一致しない** `_` プレフィックスキー（例: `_debug`, `_my_internal`）は、レスポンスから除外されません。ただし、警告ログが記録されます。
+
+```python
+# この例では _debug は除外されず、レスポンスに含まれる（警告ログ付き）
+def run(input_data, context=None):
+    return {
+        "result": "ok",
+        "_debug": {"raw_response": "..."},  # 警告ログが出るがレスポンスに残る
+    }
+```
+
+### 推奨事項
+
+- Pack の出力キーには `_` プレフィックスを使わないことを推奨します
+- デバッグ情報を含めたい場合は `debug` や `metadata` のような通常のキー名を使用してください
+- Kernel 内部プレフィックスと偶然一致するキー名（例: `_flow_result`）は意図せず除外されるため、特に避けてください
+
+```python
+# ✅ 推奨
+def run(input_data, context=None):
+    return {
+        "result": "ok",
+        "debug_info": {"raw_response": "..."},
+        "metadata": {"source": "my_pack", "version": "1.0"},
+    }
+
+# ⚠️ 非推奨（動作はするが警告ログが出る）
+def run(input_data, context=None):
+    return {
+        "result": "ok",
+        "_debug": {"raw_response": "..."},
+    }
+
+# ❌ 避けるべき（Kernel 内部キーとして除外される）
+def run(input_data, context=None):
+    return {
+        "result": "ok",
+        "_flow_result": "this will be silently removed",
+        "_kernel_data": "this will also be removed",
+    }
+```
+
 
 ## 注意事項
 
