@@ -1,0 +1,30 @@
+[package]
+name = "rumi_launcher"
+version = "0.1.0"
+edition = "2021"
+description = "Rumi AI native launcher – manages Python environment, Kernel lifecycle, and system tray"
+license = "MIT"
+
+[dependencies]
+tray-icon = "0.21"
+open = "5"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+flate2 = "1"
+tar = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["png"] }
+log = "0.4"
+env_logger = "0.11"
+dirs = "6"
+anyhow = "1"
+
+[build-dependencies]
+winres = "0.1"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+opt-level = "z"
+panic = "abort"
