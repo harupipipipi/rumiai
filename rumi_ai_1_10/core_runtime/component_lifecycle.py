@@ -436,15 +436,25 @@ class ComponentLifecycleExecutor:
                 comp_path = Path(getattr(component, "path", "."))
                 pack_subdir = comp_path.parent
                 
-                vocab_result = vr.load_pack_vocab(pack_subdir, pack_id)
-                
-                if vocab_result["groups"] > 0 or vocab_result["converters"] > 0:
+                # --- [F] vocab lazy load ---
+                if self._should_load_vocab(pack_id, pack_subdir):
+                    vocab_result = vr.load_pack_vocab(pack_subdir, pack_id)
+                    
+                    if vocab_result["groups"] > 0 or vocab_result["converters"] > 0:
+                        self.diagnostics.record_step(
+                            phase=phase,
+                            step_id=f"{phase}.{comp_id}.vocab_loaded",
+                            handler=f"component_phase:{phase}",
+                            status="success",
+                            meta=vocab_result
+                        )
+                else:
                     self.diagnostics.record_step(
                         phase=phase,
-                        step_id=f"{phase}.{comp_id}.vocab_loaded",
+                        step_id=f"{phase}.{comp_id}.vocab_skipped",
                         handler=f"component_phase:{phase}",
                         status="success",
-                        meta=vocab_result
+                        meta={"reason": "uses_vocab_false_or_no_vocab_files"}
                     )
             except Exception as e:
                 self.diagnostics.record_step(
@@ -508,6 +518,36 @@ class ComponentLifecycleExecutor:
                                           "result": "failed", "paths": {"created": [], "modified": []}, "meta": {"file": str(file_path)}, "error": err})
             self.diagnostics.record_step(phase="startup", step_id=f"{phase}.{comp_id}.failed", handler=f"component_phase:{phase}",
                                           status="disabled", target={"kind": "component", "id": comp_id}, error=err, meta={"file": str(file_path)})
+
+    def _should_load_vocab(self, pack_id: str, pack_subdir) -> bool:
+        """[F] vocab lazy load: determine whether to load vocab for a pack.
+
+        Decision logic:
+          - uses_vocab == True  in ecosystem.json -> load
+          - uses_vocab == False in ecosystem.json -> skip
+          - uses_vocab unset -> fallback to physical file existence
+          - _read_ecosystem_data raises -> safe-side fallback (load)
+
+        Returns:
+            True if vocab should be loaded, False otherwise.
+        """
+        try:
+            from .approval_manager import get_approval_manager as _get_am
+            from .vocab_registry import VOCAB_FILENAME, CONVERTERS_DIRNAME
+            _am = _get_am()
+            eco_data = _am._read_ecosystem_data(pack_id)
+            uses_vocab = eco_data.get("uses_vocab", None)
+            if uses_vocab is True:
+                return True
+            elif uses_vocab is False:
+                return False
+            else:
+                # unspecified: fallback to physical file existence
+                vocab_file = pack_subdir / VOCAB_FILENAME
+                converters_dir = pack_subdir / CONVERTERS_DIRNAME
+                return vocab_file.exists() or converters_dir.exists()
+        except Exception:
+            return True  # safe-side fallback
 
     def _short_trace(self) -> str:
         try:
