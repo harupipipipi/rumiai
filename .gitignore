@@ -1,10 +1,11 @@
 # === git root (rumi_ai/) 用 ===
-# rumi_ai_1_10/ 以外は全て無視
+# rumi_ai_1_10/ と rumi_launcher/ 以外は全て無視
 /*
 !.gitignore
 !/rumi_ai_1_10/
+!/rumi_launcher/
 
-# === rumi_ai_1_10/ 内の不要ファイル ===
+# === 共通の不要ファイル ===
 venv/
 __pycache__/
 *.pyc
@@ -13,6 +14,11 @@ __pycache__/
 *.zip
 *.bak
 *.bak.*
+.env.local
+node_modules/
+dist/
+
+# === rumi_ai_1_10/ 内の不要ファイル ===
 chats/
 userdata/
 tenpu/
@@ -21,9 +27,4 @@ erroer_memo.txt
 flow.iranai
 .backups/
 .backup_dead_code_removal/
-.env.local
-node_modules/
-dist/deploy.py
-
-# Phase R: Rust launcher
-!/rumi_launcher/
+deploy.py
