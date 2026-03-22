@@ -3,7 +3,7 @@
 //! Startup flow:
 //! 1. Detect paths (`AppConfig::detect`)
 //! 2. Bootstrap Python environment (PBS + uv + venv)
-//! 3. Start Kernel (`app.py`)
+//! 3. Start Kernel (`python -m app`)
 //! 4. Wait for health-check
 //! 5. Open browser
 //! 6. Enter tray-icon event loop (menu actions + Kernel monitoring)
@@ -31,7 +31,11 @@ use kernel_manager::KernelManager;
 /// synthesise a small solid-colour fallback.
 fn load_tray_icon(config: &AppConfig) -> Icon {
     let candidates = [
-        config.app_dir.join("rumi_launcher").join("assets").join("icon.png"),
+        config
+            .app_dir
+            .join("rumi_launcher")
+            .join("assets")
+            .join("icon.png"),
         config.app_dir.join("assets").join("icon.png"),
     ];
 
@@ -63,7 +67,7 @@ fn load_tray_icon(config: &AppConfig) -> Icon {
 
 fn run() -> Result<()> {
     env_logger::init();
-    info!("Rumi Launcher starting …");
+    info!("Rumi Launcher starting ...");
 
     // ---- 1. Configuration --------------------------------------------------
     let config = AppConfig::detect().context("failed to detect app configuration")?;
@@ -129,12 +133,10 @@ fn run() -> Result<()> {
     let id_restart = item_restart.id().clone();
     let id_quit = item_quit.id().clone();
 
-    // Ctrl+C flag — Drop impl on KernelManager will stop the child.
     let quit = Arc::new(AtomicBool::new(false));
     {
         let q = Arc::clone(&quit);
         thread::spawn(move || {
-            // Park forever; on process signal Drop takes care of cleanup.
             loop {
                 thread::sleep(Duration::from_secs(3600));
                 if q.load(Ordering::SeqCst) {
@@ -174,15 +176,15 @@ fn run() -> Result<()> {
             if !kernel.is_running() {
                 match kernel.wait_and_handle_restart() {
                     Ok(true) => {
-                        info!("Auto-restarting Kernel (exit code 42) …");
+                        info!("Auto-restarting Kernel ...");
                         if let Err(e) = kernel.start() {
                             error!("Auto-restart failed: {e}");
                         }
                     }
                     Ok(false) => {
-                        warn!("Kernel stopped unexpectedly");
+                        warn!("Kernel stopped -- not restarting");
                         if let Err(e) =
-                            _tray.set_tooltip(Some("Rumi AI — Kernel stopped"))
+                            _tray.set_tooltip(Some("Rumi AI -- Kernel stopped"))
                         {
                             warn!("Tooltip update failed: {e}");
                         }
@@ -194,7 +196,6 @@ fn run() -> Result<()> {
             }
         }
 
-        // ---- External quit flag --------------------------------------------
         if quit.load(Ordering::SeqCst) {
             break;
         }
@@ -203,7 +204,7 @@ fn run() -> Result<()> {
     }
 
     // ---- Cleanup -----------------------------------------------------------
-    info!("Shutting down …");
+    info!("Shutting down ...");
     kernel.stop().ok();
     info!("Goodbye");
     Ok(())

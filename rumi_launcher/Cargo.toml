@@ -1,9 +1,7 @@
 [package]
-name = "rumi_launcher"
+name = "rumi-launcher"
 version = "0.1.0"
 edition = "2021"
-description = "Rumi AI native launcher – manages Python environment, Kernel lifecycle, and system tray"
-license = "MIT"
 
 [dependencies]
 tray-icon = "0.21"
@@ -18,9 +16,6 @@ log = "0.4"
 env_logger = "0.11"
 dirs = "6"
 anyhow = "1"
-
-[build-dependencies]
-winres = "0.1"
 
 [profile.release]
 strip = true

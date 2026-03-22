@@ -1,9 +1,10 @@
 //! Kernel process lifecycle management.
 //!
 //! Responsibilities:
-//! - Start the Python Kernel (`app.py`) inside the venv.
-//! - Stop it gracefully (SIGTERM → timeout → SIGKILL on Unix, kill on Windows).
+//! - Start the Python Kernel (`python -m app`) inside the venv.
+//! - Stop it gracefully (SIGTERM -> timeout -> SIGKILL on Unix, kill on Windows).
 //! - Detect exit-code 42 to signal "please restart me".
+//! - Auto-restart on unexpected exit (max 3 times).
 
 use std::fs;
 use std::process::{Child, Command, Stdio};
@@ -16,6 +17,9 @@ use crate::config::AppConfig;
 /// Special exit code: the Kernel requests a restart.
 const RESTART_EXIT_CODE: i32 = 42;
 
+/// Maximum consecutive non-42 restarts before giving up.
+const MAX_AUTO_RESTARTS: u32 = 3;
+
 /// Seconds to wait after SIGTERM before sending SIGKILL.
 const KILL_TIMEOUT_SECS: u64 = 5;
 
@@ -23,10 +27,10 @@ const KILL_TIMEOUT_SECS: u64 = 5;
 pub struct KernelManager {
     child: Option<Child>,
     config: AppConfig,
-    /// Stores the exit code from the most recent child exit so that the
-    /// caller can retrieve it even after `is_running()` has consumed the
-    /// status.
+    /// Stores the exit code from the most recent child exit.
     last_exit_code: Option<i32>,
+    /// Counter for consecutive non-42 restarts.
+    restart_count: u32,
 }
 
 impl KernelManager {
@@ -35,11 +39,13 @@ impl KernelManager {
             child: None,
             config: config.clone(),
             last_exit_code: None,
+            restart_count: 0,
         }
     }
 
     /// Start the Kernel process.
     ///
+    /// Runs `{venv}/bin/python -m app` with cwd = `rumi_home`.
     /// Stdout and stderr are redirected to `{log_dir}/kernel.log`.
     pub fn start(&mut self) -> Result<()> {
         if self.is_running() {
@@ -48,16 +54,18 @@ impl KernelManager {
         }
 
         let venv_python = self.config.venv_python();
-        let entry = self.config.rumi_home.join(&self.config.kernel_entry);
 
         if !venv_python.exists() {
             bail!(
-                "venv Python not found at {} — run environment setup first",
+                "venv Python not found at {} -- run environment setup first",
                 venv_python.display()
             );
         }
-        if !entry.exists() {
-            bail!("Kernel entry-point not found: {}", entry.display());
+        if !self.config.rumi_home.exists() {
+            bail!(
+                "Kernel directory not found: {}",
+                self.config.rumi_home.display()
+            );
         }
 
         fs::create_dir_all(&self.config.log_dir)?;
@@ -68,13 +76,13 @@ impl KernelManager {
             .context("failed to clone log file handle")?;
 
         info!(
-            "Starting Kernel: {} {}",
+            "Starting Kernel: {} -m app (cwd={})",
             venv_python.display(),
-            entry.display()
+            self.config.rumi_home.display()
         );
 
         let child = Command::new(&venv_python)
-            .arg(&entry)
+            .args(["-m", "app"])
             .current_dir(&self.config.rumi_home)
             .stdout(Stdio::from(log_file))
             .stderr(Stdio::from(log_stderr))
@@ -97,7 +105,7 @@ impl KernelManager {
             }
         };
 
-        info!("Stopping Kernel (pid {}) …", child.id());
+        info!("Stopping Kernel (pid {}) ...", child.id());
 
         #[cfg(unix)]
         {
@@ -115,18 +123,17 @@ impl KernelManager {
         Ok(())
     }
 
-    /// Stop then start.
+    /// Stop then start. Resets the restart counter.
     pub fn restart(&mut self) -> Result<()> {
         self.stop()?;
+        self.restart_count = 0;
         self.start()
     }
 
-    /// Consume the last exit status.
+    /// Consume the last exit status and decide whether to auto-restart.
     ///
-    /// If the child is still present, this blocks briefly to collect the
-    /// status.  Returns `true` if exit code was 42 (restart requested).
+    /// Returns `true` if the caller should call `start()` again.
     pub fn wait_and_handle_restart(&mut self) -> Result<bool> {
-        // If we still hold the child handle, wait on it.
         if let Some(child) = self.child.as_mut() {
             let status = child.wait().context("failed to wait on Kernel")?;
             let code = status.code().unwrap_or(-1);
@@ -134,10 +141,10 @@ impl KernelManager {
             self.child = None;
         }
 
-        // Check the stored exit code.
         match self.last_exit_code.take() {
             Some(RESTART_EXIT_CODE) => {
-                info!("Kernel exited with code 42 — restart requested");
+                info!("Kernel exited with code 42 -- restart requested");
+                self.restart_count = 0;
                 Ok(true)
             }
             Some(0) => {
@@ -145,8 +152,20 @@ impl KernelManager {
                 Ok(false)
             }
             Some(code) => {
-                warn!("Kernel exited with code {code}");
-                Ok(false)
+                self.restart_count += 1;
+                if self.restart_count <= MAX_AUTO_RESTARTS {
+                    warn!(
+                        "Kernel exited with code {code} -- auto-restart {}/{}",
+                        self.restart_count, MAX_AUTO_RESTARTS
+                    );
+                    Ok(true)
+                } else {
+                    error!(
+                        "Kernel exited with code {code} -- max restarts ({}) exceeded, giving up",
+                        MAX_AUTO_RESTARTS
+                    );
+                    Ok(false)
+                }
             }
             None => Ok(false),
         }
@@ -213,14 +232,14 @@ mod tests {
     fn is_running_default_false() {
         let config = AppConfig::detect().unwrap();
         let mut km = KernelManager::new(&config);
-        assert!(!km.is_running(), "should not be running by default");
+        assert!(!km.is_running());
     }
 
     #[test]
     fn stop_without_start_is_ok() {
         let config = AppConfig::detect().unwrap();
         let mut km = KernelManager::new(&config);
-        assert!(km.stop().is_ok(), "stop with no child should succeed");
+        assert!(km.stop().is_ok());
     }
 
     #[test]
@@ -228,6 +247,6 @@ mod tests {
         let config = AppConfig::detect().unwrap();
         let mut km = KernelManager::new(&config);
         let result = km.wait_and_handle_restart().unwrap();
-        assert!(!result, "no child should return false");
+        assert!(!result);
     }
 }

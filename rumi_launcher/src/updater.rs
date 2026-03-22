@@ -1,8 +1,6 @@
 //! Application update mechanism — **stub**.
 //!
-//! This module will be fully implemented in Phase U.  For now it provides
-//! no-op functions so that `main.rs` can compile and call the update API
-//! without conditional compilation.
+//! This module will be fully implemented in Phase U.
 
 use anyhow::Result;
 
@@ -14,17 +12,14 @@ use anyhow::Result;
 /// # Current implementation
 /// Always returns `Ok(None)` (stub).
 pub fn check_for_update() -> Result<Option<String>> {
-    // Phase U: implement real update check against GitHub releases.
     Ok(None)
 }
 
 /// Download and apply the given update.
 ///
 /// # Current implementation
-/// Returns `Ok(())` without doing anything (stub — never called because
-/// `check_for_update` always returns `None`).
+/// Returns `Ok(())` without doing anything (stub).
 pub fn apply_update(_version: &str) -> Result<()> {
-    // Phase U: implement real update logic (self_update crate, etc.).
     Ok(())
 }
 
@@ -35,7 +30,7 @@ mod tests {
     #[test]
     fn check_for_update_returns_none() {
         let result = check_for_update().unwrap();
-        assert!(result.is_none(), "stub should return None");
+        assert!(result.is_none());
     }
 
     #[test]

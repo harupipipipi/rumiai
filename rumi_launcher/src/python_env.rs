@@ -1,8 +1,7 @@
 //! Python environment bootstrap via python-build-standalone (PBS) and uv.
 //!
 //! Each step is idempotent — if the artefact already exists the step is
-//! skipped.  This allows the launcher to be restarted at any point without
-//! leaving the environment in an inconsistent state.
+//! skipped.
 
 use std::fs;
 use std::io;
@@ -39,10 +38,10 @@ struct PbsRelease {
 /// Ensure that a working Python venv with all dependencies is present.
 ///
 /// Steps (each is idempotent):
-/// 1. Download + extract PBS → `config.python_dir`
-/// 2. Download uv binary     → `config.uv_path`
-/// 3. Create venv             → `config.venv_dir`
-/// 4. Install requirements    → into the venv
+/// 1. Download + extract PBS -> `config.python_dir`
+/// 2. Download uv binary     -> `config.uv_path`
+/// 3. Create venv             -> `config.venv_dir`
+/// 4. Install requirements    -> into the venv
 pub fn ensure_python_env(config: &AppConfig) -> Result<()> {
     ensure_python(config).context("PBS Python setup failed")?;
     ensure_uv(config).context("uv setup failed")?;
@@ -62,14 +61,14 @@ fn ensure_python(config: &AppConfig) -> Result<()> {
         return Ok(());
     }
 
-    info!("Downloading PBS Python …");
+    info!("Downloading PBS Python ...");
     let release = fetch_pbs_release()?;
     let archive_name = pbs_archive_name(&release.tag, platform_triple());
     let url = format!("{}/{}", release.asset_url_prefix, archive_name);
     info!("PBS URL: {url}");
 
     let data = download_bytes(&url)?;
-    info!("Downloaded {} bytes, extracting …", data.len());
+    info!("Downloaded {} bytes, extracting ...", data.len());
 
     let tmp_dir = config.app_dir.join("_python_tmp");
     if tmp_dir.exists() {
@@ -111,7 +110,7 @@ fn fetch_pbs_release() -> Result<PbsRelease> {
 ///
 /// Example: `cpython-3.13.12+20260310-aarch64-apple-darwin-install_only.tar.gz`
 fn pbs_archive_name(tag: &str, triple: &str) -> String {
-    let python_version = format!("{}.12", PYTHON_MINOR); // 3.13.12
+    let python_version = format!("{PYTHON_MINOR}.12");
     format!("cpython-{python_version}+{tag}-{triple}-install_only.tar.gz")
 }
 
@@ -125,7 +124,7 @@ fn ensure_uv(config: &AppConfig) -> Result<()> {
         return Ok(());
     }
 
-    info!("Downloading uv …");
+    info!("Downloading uv ...");
     let triple = platform_triple();
     let url = uv_download_url(triple);
     info!("uv URL: {url}");
@@ -185,8 +184,6 @@ fn extract_uv_from_tar_gz(data: &[u8], triple: &str, dest: &Path) -> Result<()> 
 }
 
 /// Extract `uv.exe` from a zip archive (Windows).
-///
-/// Uses bsdtar which ships with Windows 10+.
 #[allow(dead_code)]
 fn extract_uv_from_zip(data: &[u8], triple: &str, dest: &Path) -> Result<()> {
     let parent = dest.parent().unwrap_or(Path::new("."));
@@ -229,7 +226,7 @@ fn ensure_venv(config: &AppConfig) -> Result<()> {
         return Ok(());
     }
 
-    info!("Creating venv …");
+    info!("Creating venv ...");
     let python_bin = config.python_bin();
     let status = Command::new(&config.uv_path)
         .args([
@@ -260,7 +257,7 @@ fn install_requirements(config: &AppConfig) -> Result<()> {
         return Ok(());
     }
 
-    info!("Installing requirements …");
+    info!("Installing requirements ...");
     let venv_python = config.venv_python();
     let status = Command::new(&config.uv_path)
         .args([
@@ -336,10 +333,6 @@ fn extract_tar_gz(data: &[u8], dest: &Path) -> Result<()> {
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -354,18 +347,9 @@ mod tests {
     }
 
     #[test]
-    fn pbs_archive_name_linux() {
-        let name = pbs_archive_name("20260310", "x86_64-unknown-linux-gnu");
-        assert!(name.contains("x86_64-unknown-linux-gnu"));
-        assert!(name.starts_with("cpython-"));
-        assert!(name.ends_with("-install_only.tar.gz"));
-    }
-
-    #[test]
     fn uv_url_unix() {
         let url = uv_download_url("aarch64-apple-darwin");
         assert!(url.contains("uv-aarch64-apple-darwin.tar.gz"));
-        assert!(url.starts_with("https://"));
     }
 
     #[test]

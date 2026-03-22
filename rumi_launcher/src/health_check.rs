@@ -30,7 +30,7 @@ pub fn check_health(port: u16) -> Result<bool> {
 /// Checks once per second.
 pub fn wait_for_healthy(port: u16, timeout_secs: u64) -> Result<()> {
     info!(
-        "Waiting for Kernel health-check on port {port} (timeout {timeout_secs}s) …"
+        "Waiting for Kernel health-check on port {port} (timeout {timeout_secs}s) ..."
     );
 
     for elapsed in 0..timeout_secs {
@@ -50,9 +50,8 @@ mod tests {
 
     #[test]
     fn check_health_unreachable_port() {
-        // Port 1 is almost certainly not running an HTTP server.
         let result = check_health(1);
-        assert!(result.is_ok(), "check_health should not error");
-        assert!(!result.unwrap(), "unreachable port should return false");
+        assert!(result.is_ok());
+        assert!(!result.unwrap());
     }
 }

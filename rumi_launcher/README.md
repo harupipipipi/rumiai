@@ -1,16 +1,16 @@
 # rumi_launcher
 
-Native launcher for **Rumi AI OS**.  Written in Rust.
+Native launcher for **Rumi AI OS**. Written in Rust.
 
 ## Responsibilities
 
 1. **Python environment bootstrap** — downloads python-build-standalone (PBS)
    and `uv`, creates a virtual-environment, and installs `requirements.txt`.
-2. **Kernel process management** — starts `app.py` in the venv, monitors the
+2. **Kernel process management** — starts the Kernel in the venv, monitors the
    process, and auto-restarts on exit code 42.
 3. **System tray** — provides "Open Rumi AI", "Restart Kernel", and "Quit"
    menu items via the `tray-icon` crate.
-4. **Health check** — polls `GET /health` on the Kernel HTTP port.
+4. **Health check** — polls `GET /health` on the Kernel HTTP port (default 8765).
 5. **Update** — stub for Phase U.
 
 ## Building
@@ -25,7 +25,7 @@ cargo build --release
 
 ## Dependencies
 
-See `Cargo.toml`.  Key crates:
+See `Cargo.toml`. Key crates:
 
 | Crate | Purpose |
 |-------|---------|
@@ -39,11 +39,11 @@ See `Cargo.toml`.  Key crates:
 
 ```text
 {app_dir}/
-├── rumi_launcher(.exe)
+├── rumi-launcher(.exe)
 ├── rumi_ai_1_10/       ← Python source tree
 ├── python/             ← PBS standalone Python
 ├── uv(.exe)            ← uv package manager
-├── .venv/              ← Python venv
+├── venv/               ← Python venv
 ├── user_data/
 └── logs/
 ```

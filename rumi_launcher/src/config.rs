@@ -11,13 +11,13 @@ use std::path::PathBuf;
 pub struct AppConfig {
     /// Directory that contains the launcher binary (= distribution root).
     pub app_dir: PathBuf,
-    /// `{app_dir}/rumi_ai_1_10` — Python source tree.
+    /// `{app_dir}/rumi_ai_1_10` — Python source tree (= kernel_dir).
     pub rumi_home: PathBuf,
     /// `{app_dir}/python` — PBS standalone Python.
     pub python_dir: PathBuf,
     /// Path to the `uv` binary.
     pub uv_path: PathBuf,
-    /// `{app_dir}/.venv` — Python virtual-environment.
+    /// `{app_dir}/venv` — Python virtual-environment.
     pub venv_dir: PathBuf,
     /// `{app_dir}/user_data` — persistent user data.
     pub user_data_dir: PathBuf,
@@ -25,8 +25,6 @@ pub struct AppConfig {
     pub log_dir: PathBuf,
     /// Kernel HTTP port (default 8765).
     pub kernel_port: u16,
-    /// Python entry-point relative to `rumi_home` (default `app.py`).
-    pub kernel_entry: String,
 }
 
 impl AppConfig {
@@ -35,11 +33,11 @@ impl AppConfig {
     /// The layout mirrors the distribution structure:
     /// ```text
     /// {app_dir}/
-    /// ├── rumi_launcher(.exe)
+    /// ├── rumi-launcher(.exe)
     /// ├── rumi_ai_1_10/
     /// ├── python/
     /// ├── uv(.exe)
-    /// ├── .venv/
+    /// ├── venv/
     /// ├── user_data/
     /// └── logs/
     /// ```
@@ -57,7 +55,7 @@ impl AppConfig {
         } else {
             app_dir.join("uv")
         };
-        let venv_dir = app_dir.join(".venv");
+        let venv_dir = app_dir.join("venv");
         let user_data_dir = app_dir.join("user_data");
         let log_dir = app_dir.join("logs");
 
@@ -70,7 +68,6 @@ impl AppConfig {
             user_data_dir,
             log_dir,
             kernel_port: 8765,
-            kernel_entry: "app.py".to_string(),
         })
     }
 
@@ -100,9 +97,6 @@ impl AppConfig {
 
 /// Return the platform triple string used by python-build-standalone
 /// and the `uv` release filenames.
-///
-/// Examples: `"x86_64-unknown-linux-gnu"`, `"aarch64-apple-darwin"`,
-/// `"x86_64-pc-windows-msvc"`.
 pub fn platform_triple() -> &'static str {
     #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
     { "x86_64-unknown-linux-gnu" }
@@ -140,29 +134,20 @@ mod tests {
     #[test]
     fn platform_triple_is_not_empty() {
         let triple = platform_triple();
-        assert!(!triple.is_empty(), "platform_triple() must not be empty");
-        assert!(
-            triple.contains('-'),
-            "platform_triple() should contain hyphens"
-        );
+        assert!(!triple.is_empty());
+        assert!(triple.contains('-'));
     }
 
     #[test]
     fn detect_does_not_panic() {
-        // In test environments rumi_ai_1_10 may not exist next to the
-        // test binary, but detect() should still succeed (it only
-        // builds paths, it does not check existence).
         let config = AppConfig::detect();
-        assert!(config.is_ok(), "AppConfig::detect() should not fail");
+        assert!(config.is_ok());
     }
 
     #[test]
     fn venv_python_path_is_reasonable() {
         let config = AppConfig::detect().unwrap();
         let vp = config.venv_python();
-        assert!(
-            vp.to_string_lossy().contains(".venv"),
-            "venv_python path should contain .venv"
-        );
+        assert!(vp.to_string_lossy().contains("venv"));
     }
 }
