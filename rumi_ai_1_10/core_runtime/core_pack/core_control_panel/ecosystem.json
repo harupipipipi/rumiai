@@ -1,0 +1,17 @@
+{
+  "pack_id": "core_control_panel",
+  "pack_identity": "core:rumi/control_panel",
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": []
+  },
+  "metadata": {
+    "name": "Core Control Panel",
+    "description": "Rumi AI OS core pack that provides the control panel backend API. Dashboard, Pack management, Flow CRUD, settings, and kernel restart endpoints.",
+    "author": "Rumi AI Team",
+    "license": "MIT",
+    "is_core_pack": true
+  },
+  "dependencies": {},
+  "components": {}
+}
