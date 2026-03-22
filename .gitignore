@@ -1,7 +1,8 @@
 # === git root (rumi_ai/) 用 ===
 # rumi_ai_1_10/ 以外は全て無視
 /*
-!.gitignore!/rumi_ai_1_10/
+!.gitignore
+!/rumi_ai_1_10/
 
 # === rumi_ai_1_10/ 内の不要ファイル ===
 venv/
@@ -21,7 +22,8 @@ flow.iranai
 .backups/
 .backup_dead_code_removal/
 .env.local
-deploy.py
+node_modules/
+dist/deploy.py
 
 # Phase R: Rust launcher
 !/rumi_launcher/
