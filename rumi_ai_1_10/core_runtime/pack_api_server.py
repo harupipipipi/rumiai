@@ -1143,7 +1143,7 @@ class PackAPIHandler(
     
 
     def do_PUT(self) -> None:
-        """PUT メソッド — Pack独自ルート専用"""
+        """PUT メソッド — Panel API + Pack独自ルート"""
         if not self._check_rate_limit():
             return
         if not self._check_auth():
@@ -1175,14 +1175,13 @@ class PackAPIHandler(
                 match = self._match_pack_route(path, "PUT")
                 if match:
                     self._handle_pack_route_request(path, body, "PUT", match)
-            else:
-                logger.debug("Unmatched PUT path: %s", path)
-                self._send_response(APIResponse(False, error="Not found"), 404)
+                else:
+                    logger.debug("Unmatched PUT path: %s", path)
+                    self._send_response(APIResponse(False, error="Not found"), 404)
 
         except Exception as e:
             _log_internal_error("do_PUT", e)
             self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
-
     def do_DELETE(self) -> None:
         if not self._check_rate_limit():
             return
@@ -1223,11 +1222,10 @@ class PackAPIHandler(
                     return
                 result = self._remove_container(pack_id)
                 self._send_result(result)
-            
 
             elif path.startswith("/api/packs/"):
                 parts = path.strip("/").split("/")
-                # Built-in: DELETE /api/packs/{pack_id} (exactly 3 segments: api/packs/{id})
+                # DELETE /api/packs/{pack_id} (exactly 3 segments: api/packs/{id})
                 if len(parts) == 3:
                     pack_id = parts[2]
                     if not self._validate_pack_id(pack_id):
@@ -1236,9 +1234,10 @@ class PackAPIHandler(
                         result = self._uninstall_pack(pack_id)
                         self._send_result(result)
                 else:
-                    # Non-built-in sub-path → try Pack custom routes
-                    # --- Control Panel API (Phase C) ---
-            if path.startswith("/api/panel/flows/") and not path.endswith("/"):
+                    self._send_response(APIResponse(False, error="Not found"), 404)
+
+            # --- Control Panel API (Phase C) ---
+            elif path.startswith("/api/panel/flows/") and not path.endswith("/"):
                 _panel_flow_id = path[len("/api/panel/flows/"):]
                 from urllib.parse import unquote as _unquote_del
                 _panel_flow_id = _unquote_del(_panel_flow_id)
@@ -1247,20 +1246,9 @@ class PackAPIHandler(
                     return
                 result = self._panel_delete_flow(_panel_flow_id)
                 self._send_result(result)
-                return
 
-            match = self._match_pack_route(path, "DELETE")
-                    if match:
-                        body = self._parse_body()
-                        if body is None:
-                            return  # レスポンス送信済み
-                        self._handle_pack_route_request(path, body, "DELETE", match)
-                    else:
-                        logger.debug("Unmatched DELETE path: %s", path)
-                        self._send_response(APIResponse(False, error="Not found"), 404)
-            
             else:
-                # T-009: Pack独自ルートフォールバック追加
+                # T-009: Pack独自ルートフォールバック
                 match = self._match_pack_route(path, "DELETE")
                 if match:
                     body = self._parse_body()
@@ -1274,8 +1262,6 @@ class PackAPIHandler(
         except Exception as e:
             _log_internal_error("do_DELETE", e)
             self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
-
-
 class PackAPIServer:
     
     def __init__(
