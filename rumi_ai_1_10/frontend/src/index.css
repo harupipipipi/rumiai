@@ -1,0 +1,186 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-bg-main: var(--bg-main);
+  --color-bg-sidebar: var(--bg-sidebar);
+  --color-bg-header: var(--bg-header);
+  --color-bg-card: var(--bg-card);
+  --color-bg-hover: var(--bg-hover);
+  --color-text-main: var(--text-main);
+  --color-text-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-border: var(--border);
+
+  --radius-xl: var(--radius);
+  --radius-lg: calc(var(--radius) - 2px);
+  --radius-md: calc(var(--radius) - 4px);
+  --radius-sm: calc(var(--radius) - 6px);
+  
+  --font-serif: 'Noto Serif JP', serif;
+}
+
+@layer base {
+  /* ----------------------------------
+     Rumi (Default)
+     ---------------------------------- */
+  :root {
+    --bg-main: #ffffff;
+    --bg-sidebar: #f8f9fa;
+    --bg-header: #ffffff;
+    --bg-card: #ffffff;
+    --bg-hover: #f1f3f5;
+    --text-main: #1a1a1a;
+    --text-muted: #666666;
+    --border: #e5e5e5;
+    --accent: #6366f1;
+    --accent-fg: #ffffff;
+    --radius: 0.75rem;
+  }
+
+  :root.dark {
+    --bg-main: #0a0a0a;
+    --bg-sidebar: #121212;
+    --bg-header: #0a0a0a;
+    --bg-card: #171717;
+    --bg-hover: #262626;
+    --text-main: #f5f5f5;
+    --text-muted: #a3a3a3;
+    --border: #262626;
+  }
+
+  /* ----------------------------------
+     Minimal (Claude風)
+     ---------------------------------- */
+  :root.theme-minimal {
+    --bg-main: #ffffff;
+    --bg-sidebar: #f8f9fa;
+    --bg-header: #ffffff;
+    --bg-card: #ffffff;
+    --bg-hover: #f1f3f5;
+    --text-main: #1a1a1a;
+    --text-muted: #666666;
+    --border: #e5e5e5;
+    --accent: #d97757;
+    --accent-fg: #ffffff;
+    --radius: 0.5rem;
+  }
+
+  :root.dark.theme-minimal {
+    --bg-main: #111111;
+    --bg-sidebar: #181818;
+    --bg-header: #111111;
+    --bg-card: #1e1e1e;
+    --bg-hover: #2a2a2a;
+    --text-main: #ececec;
+    --text-muted: #8e8e8e;
+    --border: #2a2a2a;
+  }
+
+  /* ----------------------------------
+     Standard (ChatGPT風)
+     ---------------------------------- */
+  :root.theme-standard {
+    --bg-main: #ffffff;
+    --bg-sidebar: #f9f9f9;
+    --bg-header: #ffffff;
+    --bg-card: #ffffff;
+    --bg-hover: #ececec;
+    --text-main: #0d0d0d;
+    --text-muted: #676767;
+    --border: #e5e5e5;
+    --accent: #10a37f;
+    --accent-fg: #ffffff;
+    --radius: 0.5rem;
+  }
+
+  :root.dark.theme-standard {
+    --bg-main: #212121;
+    --bg-sidebar: #171717;
+    --bg-header: #212121;
+    --bg-card: #2f2f2f;
+    --bg-hover: #3a3a3a;
+    --text-main: #ececec;
+    --text-muted: #b4b4b4;
+    --border: #424242;
+  }
+
+  /* ----------------------------------
+     Rounded (Gemini風)
+     ---------------------------------- */
+  :root.theme-rounded {
+    --bg-main: #f0f4f9;
+    --bg-sidebar: #f0f4f9;
+    --bg-header: #f0f4f9;
+    --bg-card: #ffffff;
+    --bg-hover: #e1e5ea;
+    --text-main: #1f1f1f;
+    --text-muted: #444746;
+    --border: #e0e0e0;
+    --accent: #0b57d0;
+    --accent-fg: #ffffff;
+    --radius: 1.5rem;
+  }
+
+  :root.dark.theme-rounded {
+    --bg-main: #131314;
+    --bg-sidebar: #1e1f20;
+    --bg-header: #131314;
+    --bg-card: #282a2c;
+    --bg-hover: #333537;
+    --text-main: #e3e3e3;
+    --text-muted: #c4c7c5;
+    --border: #444746;
+    --accent: #a8c7fa;
+    --accent-fg: #041e49;
+  }
+
+  body {
+    background-color: var(--bg-main);
+    color: var(--text-main);
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  /* React Flow Controls Override */
+  .react-flow__controls {
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius-md) !important;
+    background-color: var(--bg-card) !important;
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  .react-flow__controls-button {
+    background-color: var(--bg-card) !important;
+    border-bottom: 1px solid var(--border) !important;
+    border-top: none !important;
+    border-left: none !important;
+    border-right: none !important;
+    fill: var(--text-main) !important;
+    color: var(--text-main) !important;
+    transition: background-color 0.2s !important;
+    width: 32px !important;
+    height: 32px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 0 !important;
+  }
+
+  .react-flow__controls-button:hover {
+    background-color: var(--bg-hover) !important;
+  }
+
+  .react-flow__controls-button:last-child {
+    border-bottom: none !important;
+  }
+  
+  .react-flow__controls-button svg {
+    width: 16px !important;
+    height: 16px !important;
+    fill: currentColor !important;
+  }
+}
