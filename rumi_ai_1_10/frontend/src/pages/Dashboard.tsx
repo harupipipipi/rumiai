@@ -6,17 +6,17 @@ import { Activity, Clock, Box, GitMerge, RotateCw, CheckCircle2, XCircle, AlertC
 export function Dashboard() {
   const t = useT();
   const dashboard = useAppStore(state => state.dashboard);
+  const isLoading = useAppStore(state => state.isLoading);
+  const loadDashboard = useAppStore(state => state.loadDashboard);
+  const restartKernel = useAppStore(state => state.restartKernel);
   const showDialog = useAppStore(state => state.showDialog);
   const addToast = useAppStore(state => state.addToast);
   const closeDialog = useAppStore(state => state.closeDialog);
-  const setKernelStatus = useAppStore(state => state.setKernelStatus);
   const [showAllActivities, setShowAllActivities] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const timer = setTimeout(() => setIsLoading(false), 800);
-    return () => clearTimeout(timer);
-  }, []);
+    loadDashboard();
+  }, [loadDashboard]);
 
   if (isLoading) {
     return (
@@ -35,11 +35,8 @@ export function Dashboard() {
       message: t('dashboard.restart_message'),
       confirmText: t('dashboard.restart_button'),
       onConfirm: () => {
-        setKernelStatus('stopped');
+        restartKernel();
         closeDialog();
-        setTimeout(() => {
-          setKernelStatus('running');
-        }, 2000);
       }
     });
   };
@@ -114,31 +111,40 @@ export function Dashboard() {
         {/* Activity Timeline */}
         <div className="bg-bg-card border border-border rounded-xl p-6 shadow-sm">
           <h2 className="text-lg font-bold text-text-main mb-6">{t('dashboard.activity')}</h2>
-          <div className="space-y-6 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-border before:to-transparent">
-            {displayedActivities.map((activity) => (
-              <div key={activity.id} className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
-                <div className="flex items-center justify-center w-10 h-10 rounded-full border border-border bg-bg-card shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 shadow-sm z-10">
-                  {getActivityIcon(activity.type)}
-                </div>
-                <div className="w-[calc(100%-4rem)] md:w-[calc(50%-2.5rem)] bg-bg-hover p-4 rounded-lg border border-border shadow-sm">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-bold text-text-main text-sm">{activity.message}</span>
-                    <span className="text-xs text-text-muted">{activity.timestamp}</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-          
-          {dashboard.activities.length > 3 && (
-            <div className="mt-6 text-center">
-              <button 
-                onClick={() => setShowAllActivities(!showAllActivities)}
-                className="text-sm text-text-muted hover:text-text-main transition-colors"
-              >
-                {showAllActivities ? t('dashboard.close') : t('dashboard.show_more')}
-              </button>
+          {dashboard.activities.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <Activity className="mb-3 h-10 w-10 text-text-muted opacity-20" />
+              <p className="text-sm text-text-muted">No recent activity</p>
             </div>
+          ) : (
+            <>
+              <div className="space-y-6 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-border before:to-transparent">
+                {displayedActivities.map((activity) => (
+                  <div key={activity.id} className="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
+                    <div className="flex items-center justify-center w-10 h-10 rounded-full border border-border bg-bg-card shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 shadow-sm z-10">
+                      {getActivityIcon(activity.type)}
+                    </div>
+                    <div className="w-[calc(100%-4rem)] md:w-[calc(50%-2.5rem)] bg-bg-hover p-4 rounded-lg border border-border shadow-sm">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-bold text-text-main text-sm">{activity.message}</span>
+                        <span className="text-xs text-text-muted">{activity.timestamp}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              
+              {dashboard.activities.length > 3 && (
+                <div className="mt-6 text-center">
+                  <button 
+                    onClick={() => setShowAllActivities(!showAllActivities)}
+                    className="text-sm text-text-muted hover:text-text-main transition-colors"
+                  >
+                    {showAllActivities ? t('dashboard.close') : t('dashboard.show_more')}
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

@@ -12,18 +12,20 @@ export function PackDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const packs = useAppStore(state => state.packs);
+  const isLoading = useAppStore(state => state.isLoading);
+  const loadPacks = useAppStore(state => state.loadPacks);
   const togglePack = useAppStore(state => state.togglePack);
   const addToast = useAppStore(state => state.addToast);
-  const [isLoading, setIsLoading] = useState(true);
 
   const pack = packs.find(p => p.id === id);
 
   useEffect(() => {
-    const timer = setTimeout(() => setIsLoading(false), 500);
-    return () => clearTimeout(timer);
-  }, []);
+    if (packs.length === 0) {
+      loadPacks();
+    }
+  }, [packs.length, loadPacks]);
 
-  if (isLoading) {
+  if (isLoading && packs.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center bg-bg-main">
         <div className="flex flex-col items-center gap-3">
@@ -69,7 +71,7 @@ export function PackDetail() {
           <div className="rounded-xl border border-border bg-bg-card p-6 shadow-sm">
             <h3 className="mb-4 text-lg font-semibold text-text-main">{t('pack.capabilities')}</h3>
             {pack.capabilities.length === 0 ? (
-              <p className="text-sm text-text-muted">{t('pack.none')}</p>
+              <p className="text-sm text-text-muted">No data available</p>
             ) : (
               <ul className="space-y-3">
                 {pack.capabilities.map((cap, i) => (
@@ -87,7 +89,7 @@ export function PackDetail() {
           <div className="rounded-xl border border-border bg-bg-card p-6 shadow-sm">
             <h3 className="mb-4 text-lg font-semibold text-text-main">{t('pack.flows')}</h3>
             {pack.flows.length === 0 ? (
-              <p className="text-sm text-text-muted">{t('pack.none')}</p>
+              <p className="text-sm text-text-muted">No data available</p>
             ) : (
               <ul className="space-y-3">
                 {pack.flows.map((flow, i) => (
@@ -108,7 +110,7 @@ export function PackDetail() {
           <div className="rounded-xl border border-border bg-bg-card p-6 shadow-sm">
             <h3 className="mb-4 text-lg font-semibold text-text-main">{t('pack.dependencies')}</h3>
             {pack.dependencies.length === 0 ? (
-              <p className="text-sm text-text-muted">{t('pack.none')}</p>
+              <p className="text-sm text-text-muted">No data available</p>
             ) : (
               <div className="flex flex-wrap gap-2">
                 {pack.dependencies.map((dep, i) => (

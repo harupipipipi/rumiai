@@ -1,4 +1,26 @@
 import { create } from 'zustand';
+import {
+  fetchDashboard,
+  fetchPacks,
+  fetchFlows,
+  fetchProfile,
+  fetchVersion,
+  enablePack as apiEnablePack,
+  disablePack as apiDisablePack,
+  createFlow as apiCreateFlow,
+  updateFlow as apiUpdateFlow,
+  deleteFlow as apiDeleteFlow,
+  updateProfile as apiUpdateProfile,
+  restartKernel as apiRestartKernel,
+  startOAuth,
+} from './lib/api';
+import {
+  transformDashboard,
+  transformPacks,
+  transformFlows,
+  transformProfile,
+  transformVersion,
+} from './lib/transforms';
 
 export type Theme = 'Rumi' | 'Minimal' | 'Standard' | 'Rounded';
 const VALID_THEMES: Theme[] = ['Rumi', 'Minimal', 'Standard', 'Rounded'];
@@ -101,74 +123,62 @@ interface AppState {
   showDialog: (config: DialogConfig) => void;
   closeDialog: () => void;
 
+  isLoading: boolean;
+  apiError: string | null;
+
   packs: Pack[];
-  togglePack: (id: string) => void;
+  loadPacks: () => Promise<void>;
+  togglePack: (id: string) => Promise<void>;
 
   flows: Flow[];
-  addFlow: (flow: Flow) => void;
-  updateFlow: (id: string, content: string) => void;
-  deleteFlow: (id: string) => void;
+  loadFlows: () => Promise<void>;
+  addFlow: (flow: { id: string; name: string; content: string }) => Promise<void>;
+  updateFlow: (id: string, content: string) => Promise<void>;
+  deleteFlow: (id: string) => Promise<void>;
 
   dashboard: DashboardData;
+  loadDashboard: () => Promise<void>;
   setKernelStatus: (status: 'running' | 'stopped' | 'error') => void;
+  restartKernel: () => Promise<void>;
 
   profile: Profile;
-  updateProfile: (profile: Partial<Profile>) => void;
-  connectAccount: () => void;
+  loadProfile: () => Promise<void>;
+  updateProfile: (profile: Partial<Profile>) => Promise<void>;
+  connectAccount: () => Promise<void>;
 
   version: VersionInfo;
+  loadVersion: () => Promise<void>;
 }
 
-const initialPacks: Pack[] = [
-  { id: 'core_setup', name: 'core_setup', version: 'v1.0.0', type: 'core', enabled: true, description: 'System setup utilities', capabilities: [{ name: 'fs_read', description: 'Read files' }], flows: ['00_startup'], dependencies: [] },
-  { id: 'core_control_panel', name: 'core_control_panel', version: 'v1.1.0', type: 'core', enabled: true, description: 'Control panel UI backend', capabilities: [], flows: [], dependencies: ['core_setup'] },
-  { id: 'core_communication', name: 'core_communication', version: 'v0.9.5', type: 'core', enabled: false, description: 'External API communication', capabilities: [{ name: 'network_access', description: 'Access internet' }], flows: [], dependencies: [] },
-  { id: 'core_docker', name: 'core_docker', version: 'v2.0.1', type: 'community', enabled: true, description: 'Docker container management', capabilities: [{ name: 'docker_socket', description: 'Access Docker daemon' }], flows: ['setup_wizard'], dependencies: [] },
-];
-
-const initialFlows: Flow[] = [
-  { id: '00_startup', name: '00_startup.yaml', content: 'steps:\n  - name: init\n    action: core_setup.init\n  - name: start_ui\n    action: core_control_panel.start' },
-  { id: 'setup_wizard', name: 'setup_wizard.yaml', content: 'steps:\n  - name: check_docker\n    action: core_docker.check\n  - name: pull_image\n    action: core_docker.pull\n    args:\n      image: "ubuntu:latest"' },
-];
-
-const initialDashboard: DashboardData = {
-  kernelStatus: 'running',
-  uptime: '12h 34m',
-  activePacks: 3,
-  registeredFlows: 2,
-  activities: [
-    { id: 1, timestamp: '10:00', type: 'kernel_start', message: 'Kernel started successfully' },
-    { id: 2, timestamp: '10:05', type: 'pack_load', message: 'Loaded core_setup' },
-    { id: 3, timestamp: '10:06', type: 'flow_success', message: 'Flow 00_startup executed' },
-    { id: 4, timestamp: '11:20', type: 'error', message: 'Failed to connect to Docker daemon' },
-    { id: 5, timestamp: '11:25', type: 'flow_fail', message: 'Flow setup_wizard failed' },
-    { id: 6, timestamp: '12:00', type: 'pack_load', message: 'Loaded core_docker' },
-    { id: 7, timestamp: '12:15', type: 'flow_success', message: 'Flow setup_wizard retried and succeeded' },
-    { id: 8, timestamp: '13:00', type: 'kernel_start', message: 'Kernel health check passed' },
-  ],
+const defaultDashboard: DashboardData = {
+  kernelStatus: 'stopped',
+  uptime: '--',
+  activePacks: 0,
+  registeredFlows: 0,
+  activities: [],
 };
 
-const initialProfile: Profile = {
+const defaultProfile: Profile = {
   avatar: AVATAR_OPTIONS[0],
   username: 'User',
   language: 'en',
-  job: 'Developer',
+  job: '',
   connected: false,
 };
 
-const initialVersion: VersionInfo = {
-  app: 'v1.2.0',
-  kernel: 'v0.8.5',
-  python: '3.11.4',
-  launcher: 'v2.0.1',
+const defaultVersion: VersionInfo = {
+  app: 'v1.10.0',
+  kernel: '--',
+  python: '--',
+  launcher: '--',
   docker: {
-    installed: true,
-    version: '24.0.5',
-    type: 'Docker Desktop',
+    installed: false,
+    version: '',
+    type: '',
   },
 };
 
-export const useAppStore = create<AppState>((set) => ({
+export const useAppStore = create<AppState>((set, get) => ({
   theme: (localStorage.getItem('rumi-theme') as Theme) || 'Rumi',
   setTheme: (theme) => {
     localStorage.setItem('rumi-theme', theme);
@@ -204,44 +214,193 @@ export const useAppStore = create<AppState>((set) => ({
   showDialog: (config) => set({ dialog: config }),
   closeDialog: () => set({ dialog: null }),
 
-  packs: initialPacks,
-  togglePack: (id) =>
-    set((state) => {
-      const newPacks = state.packs.map((p) => (p.id === id ? { ...p, enabled: !p.enabled } : p));
-      return { packs: newPacks, dashboard: { ...state.dashboard, activePacks: newPacks.filter((p) => p.enabled).length } };
-    }),
+  isLoading: false,
+  apiError: null,
 
-  flows: initialFlows,
-  addFlow: (flow) =>
-    set((state) => {
-      const newFlows = [...state.flows, flow];
-      return { flows: newFlows, dashboard: { ...state.dashboard, registeredFlows: newFlows.length } };
-    }),
-  updateFlow: (id, content) =>
-    set((state) => ({
-      flows: state.flows.map((f) => (f.id === id ? { ...f, content } : f)),
-    })),
-  deleteFlow: (id) =>
-    set((state) => {
-      const newFlows = state.flows.filter((f) => f.id !== id);
-      return { flows: newFlows, dashboard: { ...state.dashboard, registeredFlows: newFlows.length } };
-    }),
+  // ============================================================
+  // Packs
+  // ============================================================
 
-  dashboard: initialDashboard,
+  packs: [],
+
+  loadPacks: async () => {
+    set({ isLoading: true, apiError: null });
+    try {
+      const data = await fetchPacks();
+      set({ packs: transformPacks(data.packs), isLoading: false });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to load packs';
+      set({ apiError: msg, isLoading: false });
+      get().addToast(msg, 'error');
+    }
+  },
+
+  togglePack: async (id) => {
+    const pack = get().packs.find((p) => p.id === id);
+    if (!pack) return;
+    try {
+      if (pack.enabled) {
+        await apiDisablePack(id);
+      } else {
+        await apiEnablePack(id);
+      }
+      await get().loadPacks();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to toggle pack';
+      get().addToast(msg, 'error');
+    }
+  },
+
+  // ============================================================
+  // Flows
+  // ============================================================
+
+  flows: [],
+
+  loadFlows: async () => {
+    set({ isLoading: true, apiError: null });
+    try {
+      const data = await fetchFlows();
+      set({ flows: transformFlows(data.flows), isLoading: false });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to load flows';
+      set({ apiError: msg, isLoading: false });
+      get().addToast(msg, 'error');
+    }
+  },
+
+  addFlow: async (flow) => {
+    try {
+      await apiCreateFlow({
+        flow_id: flow.id,
+        yaml_content: flow.content,
+        filename: flow.name,
+      });
+      await get().loadFlows();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to create flow';
+      get().addToast(msg, 'error');
+    }
+  },
+
+  updateFlow: async (id, content) => {
+    try {
+      await apiUpdateFlow(id, { yaml_content: content });
+      await get().loadFlows();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to update flow';
+      get().addToast(msg, 'error');
+    }
+  },
+
+  deleteFlow: async (id) => {
+    try {
+      await apiDeleteFlow(id);
+      await get().loadFlows();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to delete flow';
+      get().addToast(msg, 'error');
+    }
+  },
+
+  // ============================================================
+  // Dashboard
+  // ============================================================
+
+  dashboard: defaultDashboard,
+
+  loadDashboard: async () => {
+    set({ isLoading: true, apiError: null });
+    try {
+      const data = await fetchDashboard();
+      set({ dashboard: transformDashboard(data), isLoading: false });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to load dashboard';
+      set({ apiError: msg, isLoading: false });
+      get().addToast(msg, 'error');
+    }
+  },
+
   setKernelStatus: (status) =>
     set((state) => ({
       dashboard: { ...state.dashboard, kernelStatus: status },
     })),
 
-  profile: initialProfile,
-  updateProfile: (profile) =>
-    set((state) => ({
-      profile: { ...state.profile, ...profile },
-    })),
-  connectAccount: () =>
-    set((state) => ({
-      profile: { ...state.profile, connected: true },
-    })),
+  restartKernel: async () => {
+    try {
+      await apiRestartKernel();
+      set((state) => ({
+        dashboard: { ...state.dashboard, kernelStatus: 'stopped' },
+      }));
+      setTimeout(() => {
+        get().loadDashboard();
+      }, 3000);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to restart kernel';
+      get().addToast(msg, 'error');
+    }
+  },
 
-  version: initialVersion,
+  // ============================================================
+  // Profile
+  // ============================================================
+
+  profile: defaultProfile,
+
+  loadProfile: async () => {
+    try {
+      const data = await fetchProfile();
+      set({ profile: transformProfile(data.profile) });
+    } catch (e) {
+      // Profile not found (404) is expected for new users
+      const msg = e instanceof Error ? e.message : '';
+      if (!msg.includes('Profile not found')) {
+        set({ apiError: msg });
+      }
+    }
+  },
+
+  updateProfile: async (profileUpdate) => {
+    try {
+      const current = get().profile;
+      const payload: Record<string, unknown> = {
+        username: profileUpdate.username ?? current.username,
+        language: profileUpdate.language ?? current.language,
+        icon: profileUpdate.avatar ?? current.avatar,
+        occupation: profileUpdate.job ?? current.job,
+      };
+      await apiUpdateProfile(payload);
+      await get().loadProfile();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to update profile';
+      get().addToast(msg, 'error');
+    }
+  },
+
+  connectAccount: async () => {
+    try {
+      const data = await startOAuth();
+      window.location.href = data.authorize_url;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to start OAuth';
+      get().addToast(msg, 'error');
+    }
+  },
+
+  // ============================================================
+  // Version
+  // ============================================================
+
+  version: defaultVersion,
+
+  loadVersion: async () => {
+    try {
+      const data = await fetchVersion();
+      set({ version: transformVersion(data) });
+    } catch (e) {
+      // Version fetch failure is non-critical
+      const msg = e instanceof Error ? e.message : 'Failed to load version';
+      console.warn('Version fetch failed:', msg);
+    }
+  },
 }));

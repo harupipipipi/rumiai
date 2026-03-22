@@ -1,31 +1,69 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAppStore } from '@/src/store';
 import { Button } from '@/src/components/ui/Button';
 import { useT } from '@/src/lib/i18n';
-import { Loader2 } from 'lucide-react';
+import { Loader2, CheckCircle2 } from 'lucide-react';
 
 export function Setup() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const setSetupDone = useAppStore(state => state.setSetupDone);
   const connectAccount = useAppStore(state => state.connectAccount);
+  const addToast = useAppStore(state => state.addToast);
   const t = useT();
   const [loading, setLoading] = useState(false);
+  const [linked, setLinked] = useState(false);
 
-  const handleConnect = () => {
-    setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      connectAccount();
+  // Handle OAuth callback redirect params
+  useEffect(() => {
+    const isLinked = searchParams.get('linked');
+    const error = searchParams.get('error');
+
+    if (isLinked === 'true') {
+      setLinked(true);
       setSetupDone(true);
-      navigate('/panel');
-    }, 2000);
+      addToast(t('setup.link_success') || 'Account linked successfully!', 'success');
+      const timer = setTimeout(() => {
+        navigate('/panel');
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+
+    if (error) {
+      addToast(`OAuth error: ${error}`, 'error');
+    }
+  }, [searchParams, setSetupDone, addToast, navigate, t]);
+
+  const handleConnect = async () => {
+    setLoading(true);
+    try {
+      await connectAccount();
+      // connectAccount redirects the page via window.location.href
+      // so we won't reach here normally
+    } catch {
+      setLoading(false);
+      addToast(t('setup.connect_failed') || 'Failed to connect', 'error');
+    }
   };
 
   const handleSkip = () => {
     setSetupDone(true);
     navigate('/panel');
   };
+
+  if (linked) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-bg-main p-4 transition-colors duration-200">
+        <div className="flex w-full max-w-md flex-col items-center justify-center gap-6 text-center animate-in fade-in zoom-in-95">
+          <CheckCircle2 className="h-16 w-16 text-green-500" />
+          <h1 className="text-2xl font-bold text-text-main">{t('setup.linked_title') || 'Account Linked!'}</h1>
+          <p className="text-text-muted">{t('setup.redirecting') || 'Redirecting to dashboard...'}</p>
+          <Loader2 className="h-5 w-5 animate-spin text-accent" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-bg-main p-4 transition-colors duration-200">

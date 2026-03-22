@@ -27,6 +27,8 @@ import { useFlowKeyboard } from '@/src/hooks/useFlowKeyboard';
 import { useFlowDragDrop } from '@/src/hooks/useFlowDragDrop';
 import { useFlowEditor } from '@/src/hooks/useFlowEditor';
 import type { AvailableStep } from '@/src/lib/types';
+import { fetchFlowDetail } from '@/src/lib/api';
+import { transformFlowDetail } from '@/src/lib/transforms';
 
 const AVAILABLE_STEPS: AvailableStep[] = [
   { id: 'mounts.init', name: 'mounts.init', pack: 'core', description: 'Initialize mounts' },
@@ -43,6 +45,8 @@ const AVAILABLE_STEPS: AvailableStep[] = [
 function FlowEditorInner() {
   const t = useT();
   const flows = useAppStore(state => state.flows);
+  const isLoading = useAppStore(state => state.isLoading);
+  const loadFlows = useAppStore(state => state.loadFlows);
   const addFlow = useAppStore(state => state.addFlow);
   const updateFlow = useAppStore(state => state.updateFlow);
   const deleteFlow = useAppStore(state => state.deleteFlow);
@@ -50,12 +54,12 @@ function FlowEditorInner() {
   const addToast = useAppStore(state => state.addToast);
   const colorMode = useAppStore(state => state.colorMode);
 
-  const [selectedFlowId, setSelectedFlowId] = useState<string | null>(flows[0]?.id || null);
+  const [selectedFlowId, setSelectedFlowId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [newFlowName, setNewFlowName] = useState('');
   const [activeTab, setActiveTab] = useState<'yaml' | 'result'>('yaml');
   const [selectedPack, setSelectedPack] = useState<string>('all');
-  const [isLoading, setIsLoading] = useState(true);
+  const [flowLoading, setFlowLoading] = useState(false);
 
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -111,20 +115,41 @@ function FlowEditorInner() {
     return dragDrop.setupPointerTracking();
   }, [dragDrop.setupPointerTracking]);
 
-  // Loading
+  // Load flows from API
   useEffect(() => {
-    const timer = setTimeout(() => setIsLoading(false), 700);
-    return () => clearTimeout(timer);
-  }, []);
+    loadFlows();
+  }, [loadFlows]);
 
-  // Load flow data
+  // Select first flow when flows load
   useEffect(() => {
-    if (selectedFlowId && selectedFlow) {
-      const { nodes: newNodes, edges: newEdges } = yamlToNodes(selectedFlow.content);
-      setNodes(newNodes);
-      setEdges(newEdges);
-      editorHook.setSelectedNode(null);
-      execution.clearResult();
+    if (flows.length > 0 && !selectedFlowId && !isCreating) {
+      setSelectedFlowId(flows[0].id);
+    }
+  }, [flows, selectedFlowId, isCreating]);
+
+  // Load flow detail when selected flow changes
+  useEffect(() => {
+    if (selectedFlowId && !isCreating) {
+      setFlowLoading(true);
+      fetchFlowDetail(selectedFlowId)
+        .then((detail) => {
+          const flow = transformFlowDetail(detail);
+          const { nodes: newNodes, edges: newEdges } = yamlToNodes(flow.content);
+          setNodes(newNodes);
+          setEdges(newEdges);
+          editorHook.setSelectedNode(null);
+          execution.clearResult();
+        })
+        .catch((err) => {
+          // Fallback: use flow content from list (empty string)
+          if (selectedFlow) {
+            const { nodes: newNodes, edges: newEdges } = yamlToNodes(selectedFlow.content);
+            setNodes(newNodes);
+            setEdges(newEdges);
+          }
+          addToast(err instanceof Error ? err.message : 'Failed to load flow detail', 'error');
+        })
+        .finally(() => setFlowLoading(false));
     }
   }, [selectedFlowId]);
 
@@ -145,7 +170,7 @@ function FlowEditorInner() {
     setEdges([]);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const generatedYaml = nodesToYaml(nodes, edges);
 
     if (isCreating) {
@@ -154,12 +179,18 @@ function FlowEditorInner() {
         return;
       }
       const newId = Math.random().toString(36).substring(2, 9);
-      addFlow({ id: newId, name: newFlowName.endsWith('.yaml') ? newFlowName : `${newFlowName}.yaml`, content: generatedYaml });
-      setSelectedFlowId(newId);
+      const fileName = newFlowName.endsWith('.yaml') ? newFlowName : `${newFlowName}.yaml`;
+      await addFlow({ id: newId, name: fileName, content: generatedYaml });
+      // After API create + reload, select the new flow
+      const updatedFlows = useAppStore.getState().flows;
+      const created = updatedFlows.find(f => f.name === fileName);
+      if (created) {
+        setSelectedFlowId(created.id);
+      }
       setIsCreating(false);
       addToast(t('flows.created'), 'success');
     } else if (selectedFlowId) {
-      updateFlow(selectedFlowId, generatedYaml);
+      await updateFlow(selectedFlowId, generatedYaml);
       addToast(t('flows.saved'), 'success');
     }
   };
@@ -170,8 +201,8 @@ function FlowEditorInner() {
       title: t('flows.delete_title'),
       message: t('flows.delete_message'),
       confirmText: t('flows.delete_confirm'),
-      onConfirm: () => {
-        deleteFlow(selectedFlowId);
+      onConfirm: async () => {
+        await deleteFlow(selectedFlowId);
         setSelectedFlowId(null);
         setNodes([]);
         setEdges([]);
@@ -228,7 +259,7 @@ function FlowEditorInner() {
 
   const generatedYaml = nodesToYaml(nodes, edges);
 
-  if (isLoading) {
+  if (isLoading && flows.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center bg-bg-main">
         <div className="flex flex-col items-center gap-3">
@@ -282,7 +313,7 @@ function FlowEditorInner() {
               )}
               <div className="flex items-center gap-2">
                 {!isCreating && (
-                  <Button variant="outline" onClick={handleExecute} disabled={execution.isExecuting} className="gap-2">
+                  <Button variant="outline" onClick={handleExecute} disabled={true} className="gap-2" title="Flow execution is not yet available">
                     <Play className="h-4 w-4" />
                     {t('flows.execute')}
                   </Button>
@@ -329,37 +360,43 @@ function FlowEditorInner() {
 
             {/* Main Area: Node Editor */}
             <div ref={reactFlowWrapper} className={`flex-1 relative border border-border rounded-md overflow-hidden ${colorMode === 'dark' ? 'bg-[#1a1a1a]' : 'bg-gray-50'}`}>
-              <ReactFlow
-                nodes={nodes}
-                edges={edges}
-                onNodesChange={onNodesChange}
-                onEdgesChange={onEdgesChange}
-                onConnect={editorHook.onConnect}
-                onNodeClick={editorHook.onNodeClick}
-                onNodeDragStart={dragDrop.onNodeDragStart}
-                onNodeDrag={dragDrop.onNodeDrag}
-                onNodeDragStop={dragDrop.onNodeDragStop}
-                onPaneClick={editorHook.onPaneClick}
-                onPaneContextMenu={editorHook.onPaneContextMenu}
-                onConnectEnd={editorHook.onConnectEnd}
-                onEdgeClick={editorHook.onEdgeClick}
-                onReconnect={editorHook.onReconnect}
-                onEdgeDoubleClick={editorHook.onEdgeDoubleClick}
-                onNodesDelete={editorHook.onNodesDelete}
-                onEdgesDelete={editorHook.onEdgesDelete}
-                onInit={setReactFlowInstance}
-                onDrop={dragDrop.onDrop}
-                onDragOver={dragDrop.onDragOver}
-                nodeTypes={nodeTypes}
-                panOnDrag={[1, 2]}
-                selectionOnDrag={true}
-                selectionMode={SelectionMode.Partial}
-                fitView
-                className={colorMode === 'dark' ? 'bg-[#1a1a1a]' : 'bg-gray-50'}
-              >
-                <Background color={colorMode === 'dark' ? '#333' : '#ccc'} gap={16} />
-                <Controls className="bg-bg-card border-border fill-text-main" />
-              </ReactFlow>
+              {flowLoading ? (
+                <div className="flex items-center justify-center h-full">
+                  <Loader2 className="w-6 h-6 animate-spin text-accent" />
+                </div>
+              ) : (
+                <ReactFlow
+                  nodes={nodes}
+                  edges={edges}
+                  onNodesChange={onNodesChange}
+                  onEdgesChange={onEdgesChange}
+                  onConnect={editorHook.onConnect}
+                  onNodeClick={editorHook.onNodeClick}
+                  onNodeDragStart={dragDrop.onNodeDragStart}
+                  onNodeDrag={dragDrop.onNodeDrag}
+                  onNodeDragStop={dragDrop.onNodeDragStop}
+                  onPaneClick={editorHook.onPaneClick}
+                  onPaneContextMenu={editorHook.onPaneContextMenu}
+                  onConnectEnd={editorHook.onConnectEnd}
+                  onEdgeClick={editorHook.onEdgeClick}
+                  onReconnect={editorHook.onReconnect}
+                  onEdgeDoubleClick={editorHook.onEdgeDoubleClick}
+                  onNodesDelete={editorHook.onNodesDelete}
+                  onEdgesDelete={editorHook.onEdgesDelete}
+                  onInit={setReactFlowInstance}
+                  onDrop={dragDrop.onDrop}
+                  onDragOver={dragDrop.onDragOver}
+                  nodeTypes={nodeTypes}
+                  panOnDrag={[1, 2]}
+                  selectionOnDrag={true}
+                  selectionMode={SelectionMode.Partial}
+                  fitView
+                  className={colorMode === 'dark' ? 'bg-[#1a1a1a]' : 'bg-gray-50'}
+                >
+                  <Background color={colorMode === 'dark' ? '#333' : '#ccc'} gap={16} />
+                  <Controls className="bg-bg-card border-border fill-text-main" />
+                </ReactFlow>
+              )}
 
               {/* Delete Drop Zone */}
               <div

@@ -11,17 +11,17 @@ export function Packs() {
   const t = useT();
   const navigate = useNavigate();
   const packs = useAppStore(state => state.packs);
+  const isLoading = useAppStore(state => state.isLoading);
+  const loadPacks = useAppStore(state => state.loadPacks);
   const togglePack = useAppStore(state => state.togglePack);
   const addToast = useAppStore(state => state.addToast);
   const [search, setSearch] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const timer = setTimeout(() => setIsLoading(false), 600);
-    return () => clearTimeout(timer);
-  }, []);
+    loadPacks();
+  }, [loadPacks]);
 
-  if (isLoading) {
+  if (isLoading && packs.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center bg-bg-main">
         <div className="flex flex-col items-center gap-3">

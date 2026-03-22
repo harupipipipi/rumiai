@@ -13,6 +13,8 @@ export function Settings() {
   const profile = useAppStore(state => state.profile);
   const updateProfile = useAppStore(state => state.updateProfile);
   const connectAccount = useAppStore(state => state.connectAccount);
+  const loadProfile = useAppStore(state => state.loadProfile);
+  const loadVersion = useAppStore(state => state.loadVersion);
   const version = useAppStore(state => state.version);
   const theme = useAppStore(state => state.theme);
   const setTheme = useAppStore(state => state.setTheme);
@@ -26,21 +28,28 @@ export function Settings() {
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
 
   useEffect(() => {
+    loadProfile();
+    loadVersion();
+  }, [loadProfile, loadVersion]);
+
+  useEffect(() => {
     setFormData(profile);
   }, [profile]);
 
-  const handleSave = () => {
-    updateProfile(formData);
+  const handleSave = async () => {
+    await updateProfile(formData);
     addToast(t('settings.saved'), 'success');
   };
 
-  const handleConnect = () => {
+  const handleConnect = async () => {
     setIsConnecting(true);
-    setTimeout(() => {
-      connectAccount();
+    try {
+      await connectAccount();
+      // connectAccount redirects the page, so we won't reach here
+    } catch {
       setIsConnecting(false);
-      addToast(t('settings.connect_success'), 'success');
-    }, 2000);
+      addToast(t('settings.connect_failed') || 'Failed to connect', 'error');
+    }
   };
 
   const themes: Theme[] = ['Rumi', 'Minimal', 'Standard', 'Rounded'];
@@ -88,7 +97,7 @@ export function Settings() {
                         <p className="text-xs text-text-muted">{t('settings.connected')}</p>
                       </div>
                     </div>
-                    <Button variant="outline" size="sm">{t('settings.reconnect')}</Button>
+                    <Button variant="outline" size="sm" onClick={handleConnect}>{t('settings.reconnect')}</Button>
                   </div>
                 ) : (
                   <div className="flex flex-col items-center gap-4 py-6">

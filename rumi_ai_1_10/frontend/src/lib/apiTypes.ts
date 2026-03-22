@@ -1,53 +1,132 @@
 /**
- * API Response type definitions.
+ * API Type definitions — aligned with backend APIResponse envelope.
  *
- * Currently re-exports types from store.ts.
- * When the backend API is finalized, these may diverge from store types,
- * and a mapping/transform layer will be added.
+ * Backend always returns: { success: boolean, data: T | null, error: string | null }
+ * The apiFetch wrapper unwraps this envelope and returns data directly.
  */
 
-import type {
-  Pack,
-  Flow,
-  DashboardData,
-  Activity,
-  Profile,
-  VersionInfo,
-} from '../store';
-
-// Re-export domain types for use by API consumers
-export type { Pack, Flow, DashboardData, Activity, Profile, VersionInfo };
-
 // ============================================================
-// Generic API wrapper
+// Generic API envelope
 // ============================================================
 
-/** Generic API response envelope for future error handling */
 export interface ApiResponse<T> {
-  ok: boolean;
-  data: T;
-  error?: string;
+  success: boolean;
+  data: T | null;
+  error: string | null;
 }
 
 // ============================================================
-// Endpoint-specific response types
+// Backend data types (as returned inside envelope's `data`)
 // ============================================================
 
-export type DashboardResponse = DashboardData;
-export type ActivityResponse = Activity[];
-export type PacksResponse = Pack[];
-export type PackDetailResponse = Pack;
-export type FlowsResponse = Flow[];
-export type FlowDetailResponse = Flow;
-export type ProfileResponse = Profile;
-export type VersionResponse = VersionInfo;
-
-export interface SetupStatusResponse {
-  setupDone: boolean;
-  currentStep: string;
+/** GET /api/panel/packs → data.packs[] */
+export interface ApiPack {
+  pack_id: string;
+  name: string;
+  version: string;
+  description: string;
+  is_core: boolean;
+  enabled: boolean;
 }
 
-export interface HealthResponse {
+/** GET /api/panel/flows → data.flows[] */
+export interface ApiFlow {
+  flow_id: string;
+  name: string;
+  pack_id: string;
+  filename: string;
+}
+
+/** GET /api/panel/flows/{id} → data */
+export interface ApiFlowDetail {
+  flow_id: string;
+  name: string;
+  pack_id: string;
+  filename: string;
+  yaml_content: string;
+}
+
+/** GET /api/panel/dashboard → data */
+export interface ApiDashboard {
+  packs: { total: number; enabled: number; disabled: number };
+  flows: { total: number };
+  kernel: { status: string; uptime: number | null };
+  profile: { username: string; language: string; icon: string | null } | null;
+}
+
+/** GET /api/panel/settings/profile → data.profile */
+export interface ApiProfile {
+  username: string;
+  language: string;
+  icon: string | null;
+  occupation: string | null;
+}
+
+/** GET /api/panel/version → data */
+export interface ApiVersion {
+  kernel_version: string;
+  python_version: string;
+  platform: string;
+  platform_release: string;
+}
+
+// ============================================================
+// Endpoint-specific response data shapes (inside envelope)
+// ============================================================
+
+export interface PacksResponseData {
+  packs: ApiPack[];
+  count: number;
+}
+
+export interface PackToggleResponseData {
+  pack_id: string;
+  enabled: boolean;
+}
+
+export interface FlowsResponseData {
+  flows: ApiFlow[];
+  count: number;
+}
+
+export interface FlowCreateResponseData {
+  flow_id: string;
+  filename: string;
+  created: boolean;
+}
+
+export interface FlowUpdateResponseData {
+  flow_id: string;
+  filename: string;
+  updated: boolean;
+}
+
+export interface FlowDeleteResponseData {
+  flow_id: string;
+  deleted: boolean;
+}
+
+export interface ProfileResponseData {
+  profile: ApiProfile;
+  updated?: boolean;
+}
+
+export interface KernelRestartResponseData {
+  restarting: boolean;
+  message: string;
+}
+
+export interface OAuthStartResponseData {
+  authorize_url: string;
+  state: string;
+}
+
+export interface SetupStatusResponseData {
+  needs_setup: boolean;
+  reason?: string;
+}
+
+export interface HealthResponseData {
   status: 'ok' | 'error';
-  timestamp: string;
+  needs_setup?: boolean;
 }

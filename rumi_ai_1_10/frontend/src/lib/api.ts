@@ -1,15 +1,19 @@
 import type {
   ApiResponse,
-  DashboardResponse,
-  ActivityResponse,
-  PacksResponse,
-  PackDetailResponse,
-  FlowsResponse,
-  FlowDetailResponse,
-  ProfileResponse,
-  VersionResponse,
-  SetupStatusResponse,
-  HealthResponse,
+  PacksResponseData,
+  PackToggleResponseData,
+  FlowsResponseData,
+  ApiFlowDetail,
+  FlowCreateResponseData,
+  FlowUpdateResponseData,
+  FlowDeleteResponseData,
+  ApiDashboard,
+  ProfileResponseData,
+  ApiVersion,
+  KernelRestartResponseData,
+  OAuthStartResponseData,
+  SetupStatusResponseData,
+  HealthResponseData,
 } from './apiTypes';
 
 // Base URL: empty string means relative path (works with Vite proxy)
@@ -19,8 +23,9 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
  * Common fetch wrapper for API calls.
  * - Prepends API_BASE_URL
  * - Sets JSON headers
- * - Throws on non-ok responses
- * - Placeholder for future OAuth token injection
+ * - Parses {success, data, error} envelope
+ * - Throws on success===false or non-ok HTTP status
+ * - Returns unwrapped `data`
  */
 export async function apiFetch<T>(
   path: string,
@@ -33,7 +38,7 @@ export async function apiFetch<T>(
     ...(options.headers as Record<string, string> | undefined),
   };
 
-  // TODO: OAuth token injection (Phase C)
+  // TODO: OAuth token injection (Phase D)
   // const token = getAccessToken();
   // if (token) {
   //   headers['Authorization'] = `Bearer ${token}`;
@@ -45,48 +50,53 @@ export async function apiFetch<T>(
   });
 
   if (!response.ok) {
-    const errorBody = await response.text().catch(() => '');
-    throw new Error(
-      `API Error: ${response.status} ${response.statusText} - ${errorBody}`,
-    );
+    // Try to parse error envelope even on non-ok status
+    let errorMessage = `API Error: ${response.status} ${response.statusText}`;
+    try {
+      const errorBody: ApiResponse<unknown> = await response.json();
+      if (errorBody.error) {
+        errorMessage = errorBody.error;
+      }
+    } catch {
+      // If JSON parsing fails, use the default error message
+    }
+    throw new Error(errorMessage);
   }
 
-  return response.json() as Promise<T>;
+  const envelope: ApiResponse<T> = await response.json();
+
+  if (!envelope.success) {
+    throw new Error(envelope.error || 'Unknown API error');
+  }
+
+  return envelope.data as T;
 }
 
 // ============================================================
 // Dashboard
 // ============================================================
 
-export function fetchDashboard(): Promise<DashboardResponse> {
-  return apiFetch<DashboardResponse>('/api/panel/dashboard');
-}
-
-export function fetchActivity(limit = 20): Promise<ActivityResponse> {
-  return apiFetch<ActivityResponse>(`/api/panel/activity?limit=${limit}`);
+export function fetchDashboard(): Promise<ApiDashboard> {
+  return apiFetch<ApiDashboard>('/api/panel/dashboard');
 }
 
 // ============================================================
 // Packs
 // ============================================================
 
-export function fetchPacks(): Promise<PacksResponse> {
-  return apiFetch<PacksResponse>('/api/packs');
+export function fetchPacks(): Promise<PacksResponseData> {
+  return apiFetch<PacksResponseData>('/api/panel/packs');
 }
 
-export function fetchPackDetail(id: string): Promise<PackDetailResponse> {
-  return apiFetch<PackDetailResponse>(`/api/packs/${encodeURIComponent(id)}`);
-}
-
-export function enablePack(id: string): Promise<ApiResponse<null>> {
-  return apiFetch<ApiResponse<null>>(
+export function enablePack(id: string): Promise<PackToggleResponseData> {
+  return apiFetch<PackToggleResponseData>(
     `/api/panel/packs/${encodeURIComponent(id)}/enable`,
     { method: 'POST' },
   );
 }
 
-export function disablePack(id: string): Promise<ApiResponse<null>> {
-  return apiFetch<ApiResponse<null>>(
+export function disablePack(id: string): Promise<PackToggleResponseData> {
+  return apiFetch<PackToggleResponseData>(
     `/api/panel/packs/${encodeURIComponent(id)}/disable`,
     { method: 'POST' },
   );
@@ -96,20 +106,20 @@ export function disablePack(id: string): Promise<ApiResponse<null>> {
 // Flows
 // ============================================================
 
-export function fetchFlows(): Promise<FlowsResponse> {
-  return apiFetch<FlowsResponse>('/api/flows');
+export function fetchFlows(): Promise<FlowsResponseData> {
+  return apiFetch<FlowsResponseData>('/api/panel/flows');
 }
 
-export function fetchFlowDetail(id: string): Promise<FlowDetailResponse> {
-  return apiFetch<FlowDetailResponse>(
+export function fetchFlowDetail(id: string): Promise<ApiFlowDetail> {
+  return apiFetch<ApiFlowDetail>(
     `/api/panel/flows/${encodeURIComponent(id)}`,
   );
 }
 
 export function createFlow(
-  data: Record<string, unknown>,
-): Promise<FlowDetailResponse> {
-  return apiFetch<FlowDetailResponse>('/api/panel/flows', {
+  data: { flow_id: string; yaml_content: string; filename?: string },
+): Promise<FlowCreateResponseData> {
+  return apiFetch<FlowCreateResponseData>('/api/panel/flows', {
     method: 'POST',
     body: JSON.stringify(data),
   });
@@ -117,9 +127,9 @@ export function createFlow(
 
 export function updateFlow(
   id: string,
-  data: Record<string, unknown>,
-): Promise<FlowDetailResponse> {
-  return apiFetch<FlowDetailResponse>(
+  data: { yaml_content: string },
+): Promise<FlowUpdateResponseData> {
+  return apiFetch<FlowUpdateResponseData>(
     `/api/panel/flows/${encodeURIComponent(id)}`,
     {
       method: 'PUT',
@@ -128,19 +138,10 @@ export function updateFlow(
   );
 }
 
-export function deleteFlow(id: string): Promise<ApiResponse<null>> {
-  return apiFetch<ApiResponse<null>>(
+export function deleteFlow(id: string): Promise<FlowDeleteResponseData> {
+  return apiFetch<FlowDeleteResponseData>(
     `/api/panel/flows/${encodeURIComponent(id)}`,
     { method: 'DELETE' },
-  );
-}
-
-export function runFlow(
-  id: string,
-): Promise<ApiResponse<{ status: string }>> {
-  return apiFetch<ApiResponse<{ status: string }>>(
-    `/api/flows/${encodeURIComponent(id)}/run`,
-    { method: 'POST' },
   );
 }
 
@@ -148,14 +149,14 @@ export function runFlow(
 // Settings
 // ============================================================
 
-export function fetchProfile(): Promise<ProfileResponse> {
-  return apiFetch<ProfileResponse>('/api/panel/settings/profile');
+export function fetchProfile(): Promise<ProfileResponseData> {
+  return apiFetch<ProfileResponseData>('/api/panel/settings/profile');
 }
 
 export function updateProfile(
   data: Record<string, unknown>,
-): Promise<ProfileResponse> {
-  return apiFetch<ProfileResponse>('/api/panel/settings/profile', {
+): Promise<ProfileResponseData> {
+  return apiFetch<ProfileResponseData>('/api/panel/settings/profile', {
     method: 'PUT',
     body: JSON.stringify(data),
   });
@@ -165,12 +166,12 @@ export function updateProfile(
 // System
 // ============================================================
 
-export function fetchVersion(): Promise<VersionResponse> {
-  return apiFetch<VersionResponse>('/api/panel/version');
+export function fetchVersion(): Promise<ApiVersion> {
+  return apiFetch<ApiVersion>('/api/panel/version');
 }
 
-export function restartKernel(): Promise<ApiResponse<null>> {
-  return apiFetch<ApiResponse<null>>('/api/panel/kernel/restart', {
+export function restartKernel(): Promise<KernelRestartResponseData> {
+  return apiFetch<KernelRestartResponseData>('/api/panel/kernel/restart', {
     method: 'POST',
   });
 }
@@ -179,18 +180,18 @@ export function restartKernel(): Promise<ApiResponse<null>> {
 // Setup
 // ============================================================
 
-export function fetchSetupStatus(): Promise<SetupStatusResponse> {
-  return apiFetch<SetupStatusResponse>('/api/setup/status');
+export function fetchSetupStatus(): Promise<SetupStatusResponseData> {
+  return apiFetch<SetupStatusResponseData>('/api/setup/status');
 }
 
-export function startOAuth(): Promise<ApiResponse<{ url: string }>> {
-  return apiFetch<ApiResponse<{ url: string }>>('/api/setup/oauth/start');
+export function startOAuth(): Promise<OAuthStartResponseData> {
+  return apiFetch<OAuthStartResponseData>('/api/setup/oauth/start');
 }
 
 // ============================================================
 // Health
 // ============================================================
 
-export function checkHealth(): Promise<HealthResponse> {
-  return apiFetch<HealthResponse>('/health');
+export function checkHealth(): Promise<HealthResponseData> {
+  return apiFetch<HealthResponseData>('/health');
 }
