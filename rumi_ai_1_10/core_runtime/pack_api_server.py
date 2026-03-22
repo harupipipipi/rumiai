@@ -491,7 +491,8 @@ class PackAPIHandler(
             self._serve_static_file(_pre_auth_path)
             return
 
-        if not self._check_auth():
+        # --- Panel API: 認証不要（localhost SPA 向け） ---
+        if not urlparse(self.path).path.startswith('/api/panel/') and not self._check_auth():
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return
         
@@ -698,7 +699,8 @@ class PackAPIHandler(
                 self._send_response(APIResponse(False, error="; ".join(_errors)), 400)
             return
 
-        if not self._check_auth():
+        # --- Panel API: 認証不要（localhost SPA 向け） ---
+        if not urlparse(self.path).path.startswith('/api/panel/') and not self._check_auth():
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return
         
@@ -1146,7 +1148,8 @@ class PackAPIHandler(
         """PUT メソッド — Panel API + Pack独自ルート"""
         if not self._check_rate_limit():
             return
-        if not self._check_auth():
+        # --- Panel API: 認証不要（localhost SPA 向け） ---
+        if not urlparse(self.path).path.startswith('/api/panel/') and not self._check_auth():
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return
 
@@ -1185,7 +1188,8 @@ class PackAPIHandler(
     def do_DELETE(self) -> None:
         if not self._check_rate_limit():
             return
-        if not self._check_auth():
+        # --- Panel API: 認証不要（localhost SPA 向け） ---
+        if not urlparse(self.path).path.startswith('/api/panel/') and not self._check_auth():
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return
         
