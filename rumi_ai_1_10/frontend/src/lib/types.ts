@@ -1,8 +1,3 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import type { Node } from '@xyflow/react';
 
 /** Execution status for flow nodes during simulation */

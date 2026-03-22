@@ -1,8 +1,3 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import { useEffect, useRef } from 'react';
 import type { Node, ReactFlowInstance } from '@xyflow/react';
 

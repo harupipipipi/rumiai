@@ -1,5 +1,5 @@
 {
-  "name": "react-example",
+  "name": "rumi-ai-frontend",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -12,14 +12,12 @@
   },
   "dependencies": {
     "@codemirror/lang-yaml": "^6.1.2",
-    "@google/genai": "^1.29.0",
     "@tailwindcss/vite": "^4.1.14",
     "@uiw/react-codemirror": "^4.25.8",
     "@vitejs/plugin-react": "^5.0.4",
     "@xyflow/react": "^12.10.1",
     "clsx": "^2.1.1",
     "dotenv": "^17.2.3",
-    "express": "^4.21.2",
     "js-yaml": "^4.1.1",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
@@ -31,7 +29,6 @@
     "zustand": "^5.0.12"
   },
   "devDependencies": {
-    "@types/express": "^4.17.21",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.14.0",
     "autoprefixer": "^10.4.21",

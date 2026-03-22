@@ -1,8 +1,3 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import { useState, useCallback } from 'react';
 import type { Node, Edge, Connection, ReactFlowInstance } from '@xyflow/react';
 import { addEdge, reconnectEdge } from '@xyflow/react';

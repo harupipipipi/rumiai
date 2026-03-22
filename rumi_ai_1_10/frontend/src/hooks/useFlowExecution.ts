@@ -1,8 +1,3 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import { useState, useCallback, useRef } from 'react';
 import type { Node } from '@xyflow/react';
 import { useMountedRef } from './useMountedRef';

@@ -1,8 +1,3 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useAppStore } from '@/src/store';
 import { useT } from '@/src/lib/i18n';

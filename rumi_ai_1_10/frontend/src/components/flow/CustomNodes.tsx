@@ -1,8 +1,3 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Play, Settings2, Square, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';

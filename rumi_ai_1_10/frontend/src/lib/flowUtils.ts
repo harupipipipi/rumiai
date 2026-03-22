@@ -1,8 +1,3 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import yaml from 'js-yaml';
 import type { Node, Edge } from '@xyflow/react';
 import type { AppNode, TriggerNodeData, StepNodeData } from '@/src/lib/types';

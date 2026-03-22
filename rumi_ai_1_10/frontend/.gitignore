@@ -6,3 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+.vite/
+*.tsbuildinfo
+metadata.json

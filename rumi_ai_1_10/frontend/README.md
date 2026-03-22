@@ -1,20 +1,57 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Rumi AI Frontend
 
-# Run and deploy your AI Studio app
+Rumi AI のコントロールパネル用フロントエンドアプリケーション。
 
-This contains everything you need to run your app locally.
+## 技術スタック
 
-View your app in AI Studio: https://ai.studio/apps/41e4a57d-6239-4715-a357-839baac0abb6
+- React 19 + TypeScript
+- Vite
+- Tailwind CSS v4
+- Zustand (状態管理)
+- React Flow (フローエディタ)
 
-## Run Locally
+## 開発
 
-**Prerequisites:**  Node.js
+### 前提条件
 
+- Node.js 18+
+- npm
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+### セットアップ
+
+```bash
+npm install
+```
+
+### 開発サーバー起動
+
+```bash
+npm run dev
+```
+
+http://localhost:3000 でアクセスできます。
+バックエンド API（http://localhost:8765）へのリクエストは Vite proxy で自動転送されます。
+
+### ビルド
+
+```bash
+npm run build
+```
+
+### 型チェック
+
+```bash
+npm run lint
+```
+
+## ディレクトリ構成
+
+```
+src/
+├── components/    UI コンポーネント
+├── hooks/         カスタムフック
+├── lib/           ユーティリティ・API クライアント・型定義
+├── pages/         ページコンポーネント
+├── store.ts       Zustand ストア
+└── main.tsx       エントリーポイント
+```
