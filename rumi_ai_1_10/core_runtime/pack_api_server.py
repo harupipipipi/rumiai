@@ -49,6 +49,8 @@ from .api import (
     FlowHandlersMixin,
     RouteHandlersMixin,
     PackLifecycleHandlersMixin,
+    ControlPanelHandlersMixin,
+    OAuthHandlersMixin,
 )
 from .api._helpers import _log_internal_error, _SAFE_ERROR_MSG
 
@@ -153,6 +155,8 @@ class PackAPIHandler(
     FlowHandlersMixin,
     RouteHandlersMixin,
     PackLifecycleHandlersMixin,
+    ControlPanelHandlersMixin,
+    OAuthHandlersMixin,
     BaseHTTPRequestHandler,
 ):
     approval_manager = None
@@ -321,6 +325,11 @@ class PackAPIHandler(
             if not sub_path or sub_path == "/":
                 sub_path = "/index.html"
             web_root = Path(__file__).resolve().parent / "core_pack" / "core_setup" / "web"
+        elif request_path.startswith("/panel"):
+            sub_path = request_path[len("/panel"):]
+            if not sub_path or sub_path == "/":
+                sub_path = "/index.html"
+            web_root = Path(__file__).resolve().parent / "core_pack" / "core_control_panel" / "web"
         else:
             self._send_response(APIResponse(False, error="Not found"), 404)
             return
@@ -334,8 +343,13 @@ class PackAPIHandler(
             return
 
         if not target.is_file():
-            self._send_response(APIResponse(False, error="Not found"), 404)
-            return
+            # SPA フォールバック: 拡張子のないパスは index.html に解決
+            index_fallback = web_root / "index.html"
+            if index_fallback.is_file() and "." not in target.name:
+                target = index_fallback
+            else:
+                self._send_response(APIResponse(False, error="Not found"), 404)
+                return
 
         # MIME type 判定
         suffix = target.suffix.lower()
@@ -441,8 +455,39 @@ class PackAPIHandler(
             self._send_response(APIResponse(True, data=_setup_status))
             return
 
+        # --- OAuth 2.1: 認可開始 (認証不要) ---
+        if _pre_auth_path == "/api/setup/oauth/start":
+            try:
+                result = self._oauth_start()
+                self._send_response(APIResponse(True, data=result))
+            except Exception as e:
+                _log_internal_error("oauth_start", e)
+                self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
+            return
+
+        # --- OAuth 2.1: コールバック (認証不要) ---
+        if _pre_auth_path == "/callback":
+            try:
+                from urllib.parse import urlparse as _urlparse, parse_qs as _parse_qs
+                _cb_query = _parse_qs(_urlparse(self.path).query)
+                result = self._oauth_callback(_cb_query)
+                if result is None:
+                    self._oauth_send_redirect("/setup?linked=true")
+                else:
+                    _err_msg = result.get("error", "unknown_error")
+                    self._oauth_send_redirect("/setup?error=" + _err_msg)
+            except Exception as e:
+                _log_internal_error("oauth_callback", e)
+                self._oauth_send_redirect("/setup?error=internal_error")
+            return
+
         # --- Phase A: 静的ファイル配信 (認証不要) ---
         if _pre_auth_path.startswith("/setup/") or _pre_auth_path == "/setup":
+            self._serve_static_file(_pre_auth_path)
+            return
+
+        # --- Phase C: コントロールパネル静的ファイル配信 (認証不要) ---
+        if _pre_auth_path.startswith("/panel/") or _pre_auth_path == "/panel":
             self._serve_static_file(_pre_auth_path)
             return
 
@@ -567,6 +612,37 @@ class PackAPIHandler(
                 query = parse_qs(urlparse(self.path).query)
                 status_filter = query.get("status", ["all"])[0]
                 result = self._pip_list_requests(status_filter)
+                self._send_result(result)
+
+            # --- Control Panel API (Phase C) ---
+            elif path == "/api/panel/dashboard":
+                result = self._panel_get_dashboard()
+                self._send_result(result)
+
+            elif path == "/api/panel/packs":
+                result = self._panel_get_packs()
+                self._send_result(result)
+
+            elif path == "/api/panel/flows":
+                result = self._panel_get_flows()
+                self._send_result(result)
+
+            elif path.startswith("/api/panel/flows/") and not path.endswith("/"):
+                _panel_flow_id = path[len("/api/panel/flows/"):]
+                from urllib.parse import unquote as _unquote
+                _panel_flow_id = _unquote(_panel_flow_id)
+                if not self._is_safe_id(_panel_flow_id):
+                    self._send_response(APIResponse(False, error="Invalid flow_id"), 400)
+                else:
+                    result = self._panel_get_flow_detail(_panel_flow_id)
+                    self._send_result(result)
+
+            elif path == "/api/panel/settings/profile":
+                result = self._panel_get_profile()
+                self._send_result(result)
+
+            elif path == "/api/panel/version":
+                result = self._panel_get_version()
                 self._send_result(result)
 
             # --- Flow execution API ---
@@ -1008,6 +1084,39 @@ class PackAPIHandler(
                 result = self._reload_pack_routes()
                 self._send_result(result)
 
+            # --- Control Panel API (Phase C) ---
+            elif path.startswith("/api/panel/packs/") and path.endswith("/enable"):
+                _panel_pack_parts = path.split("/")
+                if len(_panel_pack_parts) >= 5:
+                    _panel_pack_id = _panel_pack_parts[4]
+                    if not self._validate_pack_id(_panel_pack_id):
+                        self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
+                    else:
+                        result = self._panel_enable_pack(_panel_pack_id)
+                        self._send_result(result)
+                else:
+                    self._send_response(APIResponse(False, error="Invalid path"), 400)
+
+            elif path.startswith("/api/panel/packs/") and path.endswith("/disable"):
+                _panel_pack_parts = path.split("/")
+                if len(_panel_pack_parts) >= 5:
+                    _panel_pack_id = _panel_pack_parts[4]
+                    if not self._validate_pack_id(_panel_pack_id):
+                        self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
+                    else:
+                        result = self._panel_disable_pack(_panel_pack_id)
+                        self._send_result(result)
+                else:
+                    self._send_response(APIResponse(False, error="Invalid path"), 400)
+
+            elif path == "/api/panel/flows":
+                result = self._panel_create_flow(body)
+                self._send_result(result)
+
+            elif path == "/api/panel/kernel/restart":
+                result = self._panel_restart_kernel()
+                self._send_response(APIResponse(True, data=result))
+
             # --- Flow execution API ---
             elif path.startswith("/api/flows/") and path.endswith("/run"):
                 # flow_id バリデーション（flow_handlers 呼び出し前に検証）
@@ -1047,9 +1156,25 @@ class PackAPIHandler(
                 return  # レスポンス送信済み
             path = urlparse(self.path).path
 
-            match = self._match_pack_route(path, "PUT")
-            if match:
-                self._handle_pack_route_request(path, body, "PUT", match)
+            # --- Control Panel API (Phase C) ---
+            if path.startswith("/api/panel/flows/") and not path.endswith("/"):
+                _panel_flow_id = path[len("/api/panel/flows/"):]
+                from urllib.parse import unquote as _unquote_put
+                _panel_flow_id = _unquote_put(_panel_flow_id)
+                if not self._is_safe_id(_panel_flow_id):
+                    self._send_response(APIResponse(False, error="Invalid flow_id"), 400)
+                else:
+                    result = self._panel_update_flow(_panel_flow_id, body)
+                    self._send_result(result)
+
+            elif path == "/api/panel/settings/profile":
+                result = self._panel_update_profile(body)
+                self._send_result(result)
+
+            else:
+                match = self._match_pack_route(path, "PUT")
+                if match:
+                    self._handle_pack_route_request(path, body, "PUT", match)
             else:
                 logger.debug("Unmatched PUT path: %s", path)
                 self._send_response(APIResponse(False, error="Not found"), 404)
@@ -1112,7 +1237,19 @@ class PackAPIHandler(
                         self._send_result(result)
                 else:
                     # Non-built-in sub-path → try Pack custom routes
-                    match = self._match_pack_route(path, "DELETE")
+                    # --- Control Panel API (Phase C) ---
+            if path.startswith("/api/panel/flows/") and not path.endswith("/"):
+                _panel_flow_id = path[len("/api/panel/flows/"):]
+                from urllib.parse import unquote as _unquote_del
+                _panel_flow_id = _unquote_del(_panel_flow_id)
+                if not self._is_safe_id(_panel_flow_id):
+                    self._send_response(APIResponse(False, error="Invalid flow_id"), 400)
+                    return
+                result = self._panel_delete_flow(_panel_flow_id)
+                self._send_result(result)
+                return
+
+            match = self._match_pack_route(path, "DELETE")
                     if match:
                         body = self._parse_body()
                         if body is None:

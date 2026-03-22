@@ -14,6 +14,8 @@ api パッケージ — PackAPIHandler のハンドラ Mixin 群
 from .api_response import APIResponse
 from .flow_handlers import FlowHandlersMixin
 from .route_handlers import RouteHandlersMixin
+from .control_panel_handlers import ControlPanelHandlersMixin
+from .oauth_handlers import OAuthHandlersMixin
 from .security import (
     CapabilityGrantHandlersMixin,
     CapabilityInstallerHandlersMixin,
@@ -49,4 +51,6 @@ __all__ = [
     "FlowHandlersMixin",
     "RouteHandlersMixin",
     "PackLifecycleHandlersMixin",
+    "ControlPanelHandlersMixin",
+    "OAuthHandlersMixin",
 ]
