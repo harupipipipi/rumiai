@@ -32,12 +32,12 @@ export default function App() {
   }, [colorMode]);
 
   return (
-    <BrowserRouter>
+    <BrowserRouter basename="/panel">
       <Routes>
-        <Route path="/" element={<Navigate to={isSetupDone ? "/panel" : "/setup"} replace />} />
+        <Route path="/" element={<Navigate to={isSetupDone ? "/" : "/setup"} replace />} />
         <Route path="/setup" element={<Setup />} />
         
-        <Route path="/panel" element={<Layout />}>
+        <Route path="/" element={<Layout />}>
           <Route index element={<Dashboard />} />
           <Route path="packs" element={<Packs />} />
           <Route path="packs/:id" element={<PackDetail />} />
