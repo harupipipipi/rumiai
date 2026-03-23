@@ -28,6 +28,7 @@ import os
 import re
 import socket
 import socketserver
+import sys
 import struct
 import tempfile
 import threading
@@ -37,6 +38,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 MAX_REQUEST_SIZE = 4 * 1024 * 1024
 MAX_RESPONSE_SIZE = 1 * 1024 * 1024
+
+_IS_WINDOWS = sys.platform == "win32"
 
 _UNSAFE_CHARS = re.compile(r'[/\\:*?"<>|.\x00-\x1f]')
 
@@ -83,6 +86,8 @@ def _apply_dir_permissions(dir_path: Path) -> None:
     - RUMI_CAPABILITY_SOCKET_GID 指定時は chown で group を合わせる
     - 全て失敗しても例外を出さず、audit に警告を残す
     """
+    if _IS_WINDOWS:
+        return  # Windows: skip Unix permissions
     try:
         os.chmod(dir_path, _DEFAULT_DIR_MODE)
     except (OSError, PermissionError) as e:
@@ -106,6 +111,8 @@ def _apply_socket_permissions(sock_path: Path) -> None:
     - RUMI_CAPABILITY_SOCKET_MODE=0666 の場合のみ 0666（audit に記録）
     - RUMI_CAPABILITY_SOCKET_GID 指定時は chown で group を合わせる
     """
+    if _IS_WINDOWS:
+        return  # Windows: skip Unix permissions
     mode = _get_socket_mode()
 
     # 0666 が有効な場合は audit/diagnostics に記録
@@ -236,21 +243,32 @@ class _PrincipalHandler(socketserver.BaseRequestHandler):
             pass
 
 
-class _ThreadedUnixServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
-    """スレッド対応 Unix ドメインソケットサーバー"""
-    daemon_threads = True
-    allow_reuse_address = True
+if not _IS_WINDOWS:
+    class _ThreadedUnixServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+        """スレッド対応 Unix ドメインソケットサーバー"""
+        daemon_threads = True
+        allow_reuse_address = True
 
-    def __init__(self, socket_path: str, handler_class, principal_id: str, capability_executor):
-        self.principal_id = principal_id
-        self.capability_executor = capability_executor
-        # 既存ソケットファイルを削除
-        sock_path = Path(socket_path)
-        if sock_path.exists():
-            sock_path.unlink()
-        super().__init__(socket_path, handler_class)
-        # ソケットファイルにパーミッション適用（best-effort）
-        _apply_socket_permissions(Path(socket_path))
+        def __init__(self, socket_path: str, handler_class, principal_id: str, capability_executor):
+            self.principal_id = principal_id
+            self.capability_executor = capability_executor
+            # 既存ソケットファイルを削除
+            sock_path = Path(socket_path)
+            if sock_path.exists():
+                sock_path.unlink()
+            super().__init__(socket_path, handler_class)
+            # ソケットファイルにパーミッション適用（best-effort）
+            _apply_socket_permissions(Path(socket_path))
+else:
+    class _ThreadedUnixServer:
+        """Windows stub - Unix domain sockets not available."""
+        daemon_threads = True
+
+        def __init__(self, *args, **kwargs):
+            raise NotImplementedError(
+                "Unix domain sockets are not supported on Windows. "
+                "Capability proxy requires Linux/macOS."
+            )
 
 
 # ============================================================
@@ -265,10 +283,16 @@ class HostCapabilityProxyServer:
     """
 
     # ベースディレクトリ候補
-    DEFAULT_BASE_DIRS = [
-        "/run/rumi/capability/principals",
-        "/tmp/rumi/capability/principals",
-    ]
+    if _IS_WINDOWS:
+        DEFAULT_BASE_DIRS = [
+            str(Path(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")))
+                / "rumi" / "capability" / "principals"),
+        ]
+    else:
+        DEFAULT_BASE_DIRS = [
+            "/run/rumi/capability/principals",
+            "/tmp/rumi/capability/principals",
+        ]
 
     def __init__(self):
         self._lock = threading.RLock()
@@ -335,6 +359,13 @@ class HostCapabilityProxyServer:
         Returns:
             (success, error, socket_path)
         """
+        if _IS_WINDOWS:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "HostCapabilityProxyServer.ensure_principal_socket() skipped: "
+                "Unix domain sockets not available on Windows."
+            )
+            return False, "Unix domain sockets not available on Windows", None
         with self._lock:
             if not self._initialized:
                 if not self.initialize():
