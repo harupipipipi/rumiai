@@ -214,10 +214,25 @@ def main():
             from core_runtime.kernel_facade import KernelFacade
             http_server(KernelFacade(_kernel))
         else:
-            print(f"[Rumi] {L('startup.no_http')}")
-            print(f"[Rumi] {L('startup.install_http_pack')}")
-            print(f"[Rumi] {L('startup.press_ctrl_c')}")
-            _wait_for_signal()
+            # Wave fix: フォールバック — pack_api_server が直接起動済みかチェック
+            try:
+                from core_runtime.pack_api_server import get_pack_api_server
+                _api_srv = get_pack_api_server()
+                if _api_srv is not None:
+                    _srv_host = getattr(_api_srv, 'host', '127.0.0.1')
+                    _srv_port = getattr(_api_srv, 'port', 8765)
+                    print(f"[Rumi] Pack API server running on http://{_srv_host}:{_srv_port}")
+                    _wait_for_signal()
+                else:
+                    print(f"[Rumi] {L('startup.no_http')}")
+                    print(f"[Rumi] {L('startup.install_http_pack')}")
+                    print(f"[Rumi] {L('startup.press_ctrl_c')}")
+                    _wait_for_signal()
+            except Exception:
+                print(f"[Rumi] {L('startup.no_http')}")
+                print(f"[Rumi] {L('startup.install_http_pack')}")
+                print(f"[Rumi] {L('startup.press_ctrl_c')}")
+                _wait_for_signal()
 
     except KeyboardInterrupt:
         print(f"\n[Rumi] {L('shutdown.starting')}")

@@ -96,6 +96,11 @@ class KernelCore:
 
         self.install_journal.set_interface_registry(self.interface_registry)
 
+        # Wave fix: _init_kernel_handlers() を呼び出してカーネルハンドラを登録
+        # Kernel サブクラスで定義された _init_kernel_handlers() が MRO 経由で呼ばれる
+        if hasattr(self, '_init_kernel_handlers') and callable(self._init_kernel_handlers):
+            self._init_kernel_handlers()
+
     def _now_ts(self) -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 

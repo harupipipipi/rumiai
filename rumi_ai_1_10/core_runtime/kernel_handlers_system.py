@@ -573,6 +573,26 @@ class KernelSystemHandlersMixin:
             )
             ctx["pack_api_server"] = api_server
 
+            # Wave fix: io.http.server を InterfaceRegistry に登録
+            # app.py が HTTP サーバーの起動を検知できるようにする
+            _api_host, _api_port = host, port
+            def _api_server_runner(kernel_facade):
+                """Pack API server is already running. Block until termination."""
+                print(f"[Rumi] Pack API server running on http://{_api_host}:{_api_port}")
+                import signal as _sig
+                try:
+                    _sig.pause()
+                except AttributeError:
+                    # Windows: signal.pause() is not available
+                    import time as _time
+                    while True:
+                        _time.sleep(1)
+            self.interface_registry.register(
+                "io.http.server",
+                _api_server_runner,
+                meta={"_system": True, "source": "kernel:api.init", "host": host, "port": port},
+            )
+
             self.diagnostics.record_step(
                 phase="startup",
                 step_id="api.init",
