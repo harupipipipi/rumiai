@@ -1,0 +1,81 @@
+{
+  "pack_id": "node_example_pack",
+  "pack_identity": "examples:rumi/node-example-pack",
+  "version": "0.1.0",
+  "metadata": {
+    "name": "Node.js Example Pack",
+    "description": "Rumi AI OS の Node.js Pack サンプル。Hello 機能と KV Store 機能を提供します。",
+    "author": "Rumi AI Team",
+    "license": "MIT",
+    "is_core_pack": false
+  },
+  "vocabulary": {
+    "types": []
+  },
+  "dependencies": {},
+  "components": {},
+  "runtime": {
+    "type": "command",
+    "build": {
+      "command": "npm install"
+    }
+  },
+  "functions": {
+    "hello": {
+      "description": "名前を受け取り挨拶を返す",
+      "runtime": "command",
+      "command": ["node", "index.js"],
+      "calling_convention": "command",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "挨拶する相手の名前（省略時: World）"
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "message": { "type": "string" },
+          "greeted_by": { "type": "string" },
+          "principal": { "type": "string" },
+          "timestamp": { "type": "string" }
+        }
+      },
+      "tags": ["example", "hello", "node"],
+      "grant_config": {
+        "timeout": 30
+      }
+    },
+    "kv_store": {
+      "description": "キー-バリューストア操作（set/get/delete/list）",
+      "runtime": "command",
+      "command": ["node", "index.js"],
+      "calling_convention": "command",
+      "input_schema": {
+        "type": "object",
+        "required": ["action"],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["set", "get", "delete", "list"],
+            "description": "実行するアクション"
+          },
+          "key": {
+            "type": "string",
+            "description": "キー（set/get/delete 時に必要）"
+          },
+          "value": {
+            "description": "値（set 時に必要）"
+          }
+        }
+      },
+      "tags": ["example", "kv", "node"],
+      "grant_config": {
+        "timeout": 30
+      }
+    }
+  }
+}

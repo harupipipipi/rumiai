@@ -1,0 +1,14 @@
+{
+  "name": "node-example-pack",
+  "version": "0.1.0",
+  "description": "Rumi AI OS の Node.js Pack サンプル。Hello 機能と KV Store 機能を提供します。",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test:hello": "echo '{\"context\":{\"principal_id\":\"test\",\"pack_id\":\"node_example_pack\",\"function_id\":\"hello\",\"request_id\":\"1\",\"ts\":\"2026-01-01T00:00:00Z\"},\"args\":{\"name\":\"Rumi\"}}' | node index.js",
+    "test:kv_set": "echo '{\"context\":{\"principal_id\":\"test\",\"pack_id\":\"node_example_pack\",\"function_id\":\"kv_store\",\"request_id\":\"2\",\"ts\":\"2026-01-01T00:00:00Z\"},\"args\":{\"action\":\"set\",\"key\":\"greeting\",\"value\":\"hello\"}}' | node index.js"
+  },
+  "keywords": ["rumi", "pack", "example", "nodejs"],
+  "author": "Rumi AI Team",
+  "license": "MIT"
+}
