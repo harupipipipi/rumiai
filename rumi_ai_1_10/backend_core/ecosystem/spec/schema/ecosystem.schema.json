@@ -17,7 +17,11 @@
       "pattern": "^[a-z][a-z0-9_-]*$",
       "minLength": 1,
       "maxLength": 64,
-      "examples": ["default", "pro", "enterprise"]
+      "examples": [
+        "default",
+        "pro",
+        "enterprise"
+      ]
     },
     "pack_identity": {
       "type": "string",
@@ -32,7 +36,10 @@
       "type": "string",
       "description": "セマンティックバージョニング",
       "pattern": "^\\d+\\.\\d+\\.\\d+(-[a-zA-Z0-9.]+)?(\\+[a-zA-Z0-9.]+)?$",
-      "examples": ["1.0.0", "2.1.0-beta.1"]
+      "examples": [
+        "1.0.0",
+        "2.1.0-beta.1"
+      ]
     },
     "pack_uuid": {
       "type": "string",
@@ -71,12 +78,18 @@
     "license": {
       "type": "string",
       "description": "ライセンス識別子（SPDX形式推奨）",
-      "examples": ["MIT", "Apache-2.0", "proprietary"]
+      "examples": [
+        "MIT",
+        "Apache-2.0",
+        "proprietary"
+      ]
     },
     "vocabulary": {
       "type": "object",
       "description": "このPackで使用可能なComponent typeの定義",
-      "required": ["types"],
+      "required": [
+        "types"
+      ],
       "properties": {
         "types": {
           "type": "array",
@@ -88,7 +101,13 @@
           "uniqueItems": true,
           "minItems": 1,
           "examples": [
-            ["chats", "tool_pack", "prompt_pack", "supporter_pack", "ai_client_provider"]
+            [
+              "chats",
+              "tool_pack",
+              "prompt_pack",
+              "supporter_pack",
+              "ai_client_provider"
+            ]
           ]
         },
         "custom_types": {
@@ -117,7 +136,11 @@
       "additionalProperties": {
         "type": "string",
         "description": "依存するPackのバージョン範囲",
-        "examples": [">=1.0.0", "^2.0.0", "1.x"]
+        "examples": [
+          ">=1.0.0",
+          "^2.0.0",
+          "1.x"
+        ]
       }
     },
     "metadata": {
@@ -131,7 +154,10 @@
       "additionalProperties": {
         "type": "object",
         "description": "個別のComponent定義",
-        "required": ["type", "id"],
+        "required": [
+          "type",
+          "id"
+        ],
         "properties": {
           "type": {
             "type": "string",
@@ -190,11 +216,15 @@
       "properties": {
         "provides": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "requires": {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         }
       },
       "additionalProperties": false
@@ -229,6 +259,68 @@
       "type": "object",
       "description": "Pack が公開する関数定義",
       "additionalProperties": true
+    },
+    "web_mount": {
+      "type": "object",
+      "description": "Pack が提供する静的 Web UI のマウント定義",
+      "properties": {
+        "path_prefix": {
+          "type": "string",
+          "description": "URL パスプレフィックス (例: /panel, /setup)",
+          "pattern": "^/[a-zA-Z0-9_-]+$"
+        },
+        "static_root": {
+          "type": "string",
+          "description": "静的ファイルのルートディレクトリ (Pack subdir からの相対パス)",
+          "pattern": "^[a-zA-Z0-9_./\\\\-]+$"
+        },
+        "spa_fallback": {
+          "type": "boolean",
+          "description": "拡張子なしのパスを index.html にフォールバックするか",
+          "default": false
+        },
+        "auth_required": {
+          "type": "boolean",
+          "description": "静的ファイルへのアクセスに認証が必要か",
+          "default": true
+        }
+      },
+      "required": [
+        "path_prefix",
+        "static_root"
+      ],
+      "additionalProperties": false
+    },
+    "pre_auth_routes": {
+      "type": "array",
+      "description": "認証なしでアクセスを許可する API ルートの定義リスト",
+      "items": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string",
+            "description": "HTTP メソッド (GET, POST, PUT, DELETE)",
+            "enum": [
+              "GET",
+              "POST",
+              "PUT",
+              "DELETE"
+            ]
+          },
+          "path": {
+            "type": "string",
+            "description": "完全一致するパス"
+          },
+          "path_prefix": {
+            "type": "string",
+            "description": "プレフィックス一致するパス"
+          }
+        },
+        "required": [
+          "method"
+        ],
+        "additionalProperties": false
+      }
     }
   },
   "additionalProperties": false

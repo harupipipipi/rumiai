@@ -168,6 +168,8 @@ class PackAPIHandler(
     _hmac_key_manager: HMACKeyManager = None
     kernel = None  # Kernel インスタンス参照（Flow実行API用）
     app_lifecycle_manager = None  # AppLifecycleManager インスタンス参照（Phase A）
+    _web_mounts: list = []           # web_mount テーブル（テーブル駆動静的配信）
+    _pre_auth_table: list = []       # pre_auth_routes テーブル（テーブル駆動認証バイパス）
     
     def log_message(self, format: str, *args) -> None:
         logger.info(f"API: {args[0]}")
@@ -182,7 +184,108 @@ class PackAPIHandler(
         """汎用 ID バリデーション。staging_id, privilege_id, flow_id 等に使用する。"""
         return _v_is_safe_id(value)
 
-    
+
+    # --- テーブル駆動: web_mount / pre_auth_routes ---
+
+    @classmethod
+    def load_web_mounts(cls, registry) -> int:
+        """Registry から全 Pack の web_mount 情報を読み込み、テーブルを構築する。"""
+        cls._web_mounts = []
+        if registry is None:
+            return 0
+        count = 0
+        for pack_id, pack_info in registry.packs.items():
+            wm = pack_info.ecosystem.get("web_mount")
+            if not wm or not isinstance(wm, dict):
+                continue
+            path_prefix = wm.get("path_prefix", "")
+            static_root_rel = wm.get("static_root", "")
+            if not path_prefix or not static_root_rel:
+                continue
+            # subdir が利用可能ならそちらを使う（ecosystem.json の位置基準）
+            base_dir = getattr(pack_info, "subdir", None) or pack_info.path
+            web_root = Path(str(base_dir)) / static_root_rel
+            cls._web_mounts.append({
+                "path_prefix": path_prefix,
+                "web_root": web_root.resolve(),
+                "spa_fallback": wm.get("spa_fallback", False),
+                "auth_required": wm.get("auth_required", True),
+                "pack_id": pack_id,
+            })
+            count += 1
+        # 最長一致のために path_prefix の長さで降順ソート
+        cls._web_mounts.sort(key=lambda e: len(e["path_prefix"]), reverse=True)
+        logger.info("Loaded %d web_mount entries", count)
+        return count
+
+    @classmethod
+    def load_pre_auth_routes(cls, registry) -> int:
+        """Registry から全 Pack の pre_auth_routes を読み込み、テーブルを構築する。
+
+        web_mount で auth_required=false の静的配信パスも自動的に
+        pre-auth テーブルに含める。
+        """
+        cls._pre_auth_table = []
+        if registry is None:
+            return 0
+        count = 0
+        for pack_id, pack_info in registry.packs.items():
+            # 1. 明示的な pre_auth_routes
+            routes = pack_info.ecosystem.get("pre_auth_routes")
+            if routes and isinstance(routes, list):
+                for route in routes:
+                    if not isinstance(route, dict):
+                        continue
+                    method = route.get("method", "").upper()
+                    if not method:
+                        continue
+                    entry = {"method": method, "pack_id": pack_id}
+                    if "path" in route:
+                        entry["path"] = route["path"]
+                    if "path_prefix" in route:
+                        entry["path_prefix"] = route["path_prefix"]
+                    cls._pre_auth_table.append(entry)
+                    count += 1
+            # 2. web_mount で auth_required=false のパスも pre-auth に追加
+            wm = pack_info.ecosystem.get("web_mount")
+            if wm and isinstance(wm, dict) and not wm.get("auth_required", True):
+                prefix = wm.get("path_prefix", "")
+                if prefix:
+                    for m in ("GET", "POST", "PUT", "DELETE"):
+                        cls._pre_auth_table.append({
+                            "method": m,
+                            "path_prefix": prefix,
+                            "pack_id": pack_id,
+                            "_source": "web_mount",
+                        })
+                    count += 4
+        logger.info("Loaded %d pre_auth_route entries", count)
+        return count
+
+    def _match_web_mount(self, request_path: str):
+        """リクエストパスが web_mount テーブルにマッチするか判定する。
+
+        最長一致（テーブルは path_prefix 長の降順ソート済み）。
+        マッチした場合は web_mount dict を返す。しなければ None。
+        """
+        for wm in self._web_mounts:
+            prefix = wm["path_prefix"]
+            if request_path == prefix or request_path.startswith(prefix + "/"):
+                return wm
+        return None
+
+    def _is_pre_auth_route(self, method: str, path: str) -> bool:
+        """method + path が pre_auth_table にマッチするか判定する。"""
+        method_upper = method.upper()
+        for entry in self._pre_auth_table:
+            if entry["method"] != method_upper:
+                continue
+            if "path" in entry and entry["path"] == path:
+                return True
+            if "path_prefix" in entry and path.startswith(entry["path_prefix"]):
+                return True
+        return False
+
     def _send_response(self, response: APIResponse, status: int = 200) -> None:
         self.send_response(status)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
@@ -314,25 +417,25 @@ class PackAPIHandler(
         ".map": "application/json",
     }
 
-    def _serve_static_file(self, request_path: str) -> None:
+    def _serve_static_file(self, request_path: str, _wm: dict = None) -> None:
         """Pack が提供する Web UI の静的ファイルを配信する（認証不要）。
 
         パストラバーサル防止: Path.resolve() + relative_to() で web_root 内に制限。
+        テーブル駆動: _web_mounts テーブルからパスを解決する。
         """
-        # /setup/xxx → core_runtime/core_pack/core_setup/web/xxx
-        if request_path.startswith("/setup"):
-            sub_path = request_path[len("/setup"):]
-            if not sub_path or sub_path == "/":
-                sub_path = "/index.html"
-            web_root = Path(__file__).resolve().parent / "core_pack" / "core_setup" / "web"
-        elif request_path.startswith("/panel"):
-            sub_path = request_path[len("/panel"):]
-            if not sub_path or sub_path == "/":
-                sub_path = "/index.html"
-            web_root = Path(__file__).resolve().parent / "core_pack" / "core_control_panel" / "web"
-        else:
+        if _wm is None:
+            _wm = self._match_web_mount(request_path)
+        if _wm is None:
             self._send_response(APIResponse(False, error="Not found"), 404)
             return
+
+        path_prefix = _wm["path_prefix"]
+        web_root = _wm["web_root"]
+        spa_fallback = _wm.get("spa_fallback", False)
+
+        sub_path = request_path[len(path_prefix):]
+        if not sub_path or sub_path == "/":
+            sub_path = "/index.html"
 
         # パストラバーサル防止
         try:
@@ -345,7 +448,7 @@ class PackAPIHandler(
         if not target.is_file():
             # SPA フォールバック: 拡張子のないパスは index.html に解決
             index_fallback = web_root / "index.html"
-            if index_fallback.is_file() and "." not in target.name:
+            if spa_fallback and index_fallback.is_file() and "." not in target.name:
                 target = index_fallback
             else:
                 self._send_response(APIResponse(False, error="Not found"), 404)
@@ -435,7 +538,7 @@ class PackAPIHandler(
         if not self._check_rate_limit():
             return
 
-        # --- Phase A: 認証不要エンドポイント ---
+        # --- システムルート（テーブル化対象外）---
         _pre_auth_path = urlparse(self.path).path
         if _pre_auth_path == "/health":
             _alm = self.__class__.app_lifecycle_manager
@@ -446,53 +549,57 @@ class PackAPIHandler(
             self._send_response(APIResponse(True, data=_health))
             return
 
-        if _pre_auth_path == "/api/setup/status":
-            _alm = self.__class__.app_lifecycle_manager
-            if _alm is not None:
-                _setup_status = _alm.check_setup_status()
-            else:
-                _setup_status = {"needs_setup": True, "reason": "lifecycle_manager_unavailable"}
-            self._send_response(APIResponse(True, data=_setup_status))
+        # --- テーブル駆動: 静的配信 (web_mount) ---
+        _wm = self._match_web_mount(_pre_auth_path)
+        if _wm is not None:
+            self._serve_static_file(_pre_auth_path, _wm)
             return
 
-        # --- OAuth 2.1: 認可開始 (認証不要) ---
-        if _pre_auth_path == "/api/setup/oauth/start":
-            try:
-                result = self._oauth_start()
-                self._send_response(APIResponse(True, data=result))
-            except Exception as e:
-                _log_internal_error("oauth_start", e)
-                self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
-            return
+        # --- テーブル駆動: pre-auth API ルート ---
+        _is_pre_auth = self._is_pre_auth_route("GET", _pre_auth_path)
 
-        # --- OAuth 2.1: コールバック (認証不要) ---
-        if _pre_auth_path == "/callback":
-            try:
-                from urllib.parse import urlparse as _urlparse, parse_qs as _parse_qs
-                _cb_query = _parse_qs(_urlparse(self.path).query)
-                result = self._oauth_callback(_cb_query)
-                if result is None:
-                    self._oauth_send_redirect("/setup?linked=true")
+        if _is_pre_auth:
+            # 認証不要ルート: ビジネスロジックはここで処理
+            if _pre_auth_path == "/api/setup/status":
+                _alm = self.__class__.app_lifecycle_manager
+                if _alm is not None:
+                    _setup_status = _alm.check_setup_status()
                 else:
-                    _err_msg = result.get("error", "unknown_error")
-                    self._oauth_send_redirect("/setup?error=" + _err_msg)
-            except Exception as e:
-                _log_internal_error("oauth_callback", e)
-                self._oauth_send_redirect("/setup?error=internal_error")
-            return
+                    _setup_status = {"needs_setup": True, "reason": "lifecycle_manager_unavailable"}
+                self._send_response(APIResponse(True, data=_setup_status))
+                return
 
-        # --- Phase A: 静的ファイル配信 (認証不要) ---
-        if _pre_auth_path.startswith("/setup/") or _pre_auth_path == "/setup":
-            self._serve_static_file(_pre_auth_path)
-            return
+            # --- OAuth 2.1: 認可開始 (認証不要) ---
+            if _pre_auth_path == "/api/setup/oauth/start":
+                try:
+                    result = self._oauth_start()
+                    self._send_response(APIResponse(True, data=result))
+                except Exception as e:
+                    _log_internal_error("oauth_start", e)
+                    self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
+                return
 
-        # --- Phase C: コントロールパネル静的ファイル配信 (認証不要) ---
-        if _pre_auth_path.startswith("/panel/") or _pre_auth_path == "/panel":
-            self._serve_static_file(_pre_auth_path)
-            return
+            # --- OAuth 2.1: コールバック (認証不要) ---
+            if _pre_auth_path == "/callback":
+                try:
+                    from urllib.parse import urlparse as _urlparse, parse_qs as _parse_qs
+                    _cb_query = _parse_qs(_urlparse(self.path).query)
+                    result = self._oauth_callback(_cb_query)
+                    if result is None:
+                        self._oauth_send_redirect("/setup?linked=true")
+                    else:
+                        _err_msg = result.get("error", "unknown_error")
+                        self._oauth_send_redirect("/setup?error=" + _err_msg)
+                except Exception as e:
+                    _log_internal_error("oauth_callback", e)
+                    self._oauth_send_redirect("/setup?error=internal_error")
+                return
 
-        # --- Panel API: 認証不要（localhost SPA 向け） ---
-        if not urlparse(self.path).path.startswith('/api/panel/') and not self._check_auth():
+            # pre-auth テーブルにマッチしたが上記に該当しない場合
+            # → 認証スキップして通常ルーティングへ通過
+
+        # --- 認証チェック（pre-auth ルート以外）---
+        if not _is_pre_auth and not self._check_auth():
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return
         
@@ -672,35 +779,42 @@ class PackAPIHandler(
         if not self._check_rate_limit():
             return
 
-        # --- Phase A: 認証不要エンドポイント ---
+        # --- テーブル駆動: pre-auth API ルート ---
         _pre_auth_path_post = urlparse(self.path).path
-        if _pre_auth_path_post == "/api/setup/complete":
-            _body_setup = self._parse_body()
-            if _body_setup is None:
-                return
-            _alm = self.__class__.app_lifecycle_manager
-            if _alm is None:
-                self._send_response(APIResponse(False, error="Lifecycle manager not initialized"), 500)
-                return
-            _setup_result = _alm.complete_setup(_body_setup)
-            if _setup_result.get("success"):
-                try:
-                    _k = self.__class__.kernel
-                    if _k and hasattr(_k, 'event_bus') and _k.event_bus:
-                        _k.event_bus.publish("setup.completed", {
-                            "username": _body_setup.get("username"),
-                            "language": _body_setup.get("language"),
-                        })
-                except Exception:
-                    pass
-                self._send_response(APIResponse(True, data=_setup_result))
-            else:
-                _errors = _setup_result.get("errors", ["Setup failed"])
-                self._send_response(APIResponse(False, error="; ".join(_errors)), 400)
-            return
+        _is_pre_auth_post = self._is_pre_auth_route("POST", _pre_auth_path_post)
 
-        # --- Panel API: 認証不要（localhost SPA 向け） ---
-        if not urlparse(self.path).path.startswith('/api/panel/') and not self._check_auth():
+        if _is_pre_auth_post:
+            # 認証不要ルート: ビジネスロジックはここで処理
+            if _pre_auth_path_post == "/api/setup/complete":
+                _body_setup = self._parse_body()
+                if _body_setup is None:
+                    return
+                _alm = self.__class__.app_lifecycle_manager
+                if _alm is None:
+                    self._send_response(APIResponse(False, error="Lifecycle manager not initialized"), 500)
+                    return
+                _setup_result = _alm.complete_setup(_body_setup)
+                if _setup_result.get("success"):
+                    try:
+                        _k = self.__class__.kernel
+                        if _k and hasattr(_k, 'event_bus') and _k.event_bus:
+                            _k.event_bus.publish("setup.completed", {
+                                "username": _body_setup.get("username"),
+                                "language": _body_setup.get("language"),
+                            })
+                    except Exception:
+                        pass
+                    self._send_response(APIResponse(True, data=_setup_result))
+                else:
+                    _errors = _setup_result.get("errors", ["Setup failed"])
+                    self._send_response(APIResponse(False, error="; ".join(_errors)), 400)
+                return
+
+            # pre-auth テーブルにマッチしたが上記に該当しない場合
+            # → 認証スキップして通常ルーティングへ通過
+
+        # --- 認証チェック（pre-auth ルート以外）---
+        if not _is_pre_auth_post and not self._check_auth():
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return
         
@@ -1148,8 +1262,9 @@ class PackAPIHandler(
         """PUT メソッド — Panel API + Pack独自ルート"""
         if not self._check_rate_limit():
             return
-        # --- Panel API: 認証不要（localhost SPA 向け） ---
-        if not urlparse(self.path).path.startswith('/api/panel/') and not self._check_auth():
+        # --- テーブル駆動: 認証チェック ---
+        _pre_auth_path_put = urlparse(self.path).path
+        if not self._is_pre_auth_route("PUT", _pre_auth_path_put) and not self._check_auth():
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return
 
@@ -1188,8 +1303,9 @@ class PackAPIHandler(
     def do_DELETE(self) -> None:
         if not self._check_rate_limit():
             return
-        # --- Panel API: 認証不要（localhost SPA 向け） ---
-        if not urlparse(self.path).path.startswith('/api/panel/') and not self._check_auth():
+        # --- テーブル駆動: 認証チェック ---
+        _pre_auth_path_del = urlparse(self.path).path
+        if not self._is_pre_auth_route("DELETE", _pre_auth_path_del) and not self._check_auth():
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return
         
@@ -1346,6 +1462,8 @@ class PackAPIServer:
                                 from backend_core.ecosystem.registry import get_registry
                                 reg = get_registry()
                                 PackAPIHandler.load_pack_routes(reg)
+                                PackAPIHandler.load_web_mounts(reg)
+                                PackAPIHandler.load_pre_auth_routes(reg)
                                 logger.info("Pack routes loaded (deferred after system.ready)")
                             except Exception as e:
                                 logger.warning("Failed to load pack routes (deferred): %s", e)
@@ -1356,6 +1474,8 @@ class PackAPIServer:
                     from backend_core.ecosystem.registry import get_registry
                     reg = get_registry()
                     PackAPIHandler.load_pack_routes(reg)
+                    PackAPIHandler.load_web_mounts(reg)
+                    PackAPIHandler.load_pre_auth_routes(reg)
                     self._routes_loaded = True
                 except Exception as e:
                     logger.warning("Failed to load pack routes: %s", e)
