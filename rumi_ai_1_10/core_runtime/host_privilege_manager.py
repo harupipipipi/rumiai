@@ -20,6 +20,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
+from .compat import safe_chmod
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -279,7 +281,7 @@ class HostPrivilegeManager:
             fd = -1
             os.replace(tmp_path, str(self._persist_path))
             try:
-                os.chmod(str(self._persist_path), 0o600)
+                safe_chmod(str(self._persist_path), 0o600)
             except (OSError, AttributeError):
                 pass
         except Exception:

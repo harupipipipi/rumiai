@@ -23,6 +23,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from .compat import safe_chmod
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -97,7 +98,7 @@ class CapabilityUsageStore:
         key_file.parent.mkdir(parents=True, exist_ok=True)
         key_file.write_text(key, encoding="utf-8")
         try:
-            os.chmod(key_file, 0o600)
+            safe_chmod(key_file, 0o600)
         except (OSError, AttributeError):
             pass
         return key

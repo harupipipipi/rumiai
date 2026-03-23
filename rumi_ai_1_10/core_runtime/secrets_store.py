@@ -42,6 +42,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from .compat import safe_chmod
 from cryptography.fernet import Fernet
 
 
@@ -118,7 +119,7 @@ class _CryptoBackend:
                 fd = -1
                 os.replace(tmp_path, str(key_path))
                 try:
-                    os.chmod(str(key_path), 0o600)
+                    safe_chmod(str(key_path), 0o600)
                 except (OSError, AttributeError):
                     pass
                 logger.info("Generated new encryption key → %s", SECRETS_KEY_FILE)
@@ -251,7 +252,7 @@ def _atomic_write_json(path: Path, data: Dict[str, Any]) -> None:
         fd = -1
         os.replace(tmp_path, str(path))
         try:
-            os.chmod(str(path), 0o600)
+            safe_chmod(str(path), 0o600)
         except (OSError, AttributeError):
             pass
     except Exception:

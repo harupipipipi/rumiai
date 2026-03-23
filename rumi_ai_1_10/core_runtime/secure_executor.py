@@ -32,6 +32,7 @@ from typing import Any, Dict, Optional, List
 
 logger = logging.getLogger(__name__)
 
+from .compat import safe_chmod
 from .docker_run_builder import DockerRunBuilder
 from .paths import LOCAL_PACK_ID, PACK_DATA_BASE_DIR as _PACK_DATA_BASE_DIR
 
@@ -284,7 +285,7 @@ class SecureExecutor:
                             os.write(_sf_fd, _sv.encode("utf-8"))
                             os.close(_sf_fd)
                             _sf_fd = -1
-                            os.chmod(_sf_path, 0o600)
+                            safe_chmod(_sf_path, 0o600)
                             builder.secret_file(_sf_path, f"/run/secrets/{_sk}")
                             builder.env(f"RUMI_SECRET_{_sk}", f"/run/secrets/{_sk}")
                             _secret_tmpfiles.append(_sf_path)

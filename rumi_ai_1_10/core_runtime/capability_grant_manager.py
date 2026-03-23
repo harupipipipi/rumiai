@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from .compat import safe_chmod
 from .hierarchical_grant import parse_principal_chain, intersect_config
 
 _UNSAFE_CHARS = re.compile(r'[/\\:*?"<>|.\x00-\x1f]')
@@ -147,7 +148,7 @@ class CapabilityGrantManager:
         key_file.write_text(key, encoding="utf-8")
         
         try:
-            os.chmod(key_file, 0o600)
+            safe_chmod(key_file, 0o600)
         except (OSError, AttributeError):
             pass
         

@@ -37,6 +37,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from .compat import safe_chmod
 from .paths import is_path_within
 
 
@@ -512,7 +513,7 @@ class UnitExecutor:
                         raise OSError(f"Partial write: {written}/{len(verified_content)}")
                 finally:
                     os.close(fd)
-                os.chmod(verified_ep_file, 0o500)
+                safe_chmod(verified_ep_file, 0o500)
                 target_ep_path = verified_ep_file
             except Exception:
                 if verified_ep_file:
@@ -684,7 +685,7 @@ class UnitExecutor:
                         raise OSError(f"Partial write: {written}/{len(verified_content)}")
                 finally:
                     os.close(fd)
-                os.chmod(verified_bin_file, 0o500)
+                safe_chmod(verified_bin_file, 0o500)
                 target_bin_path = verified_bin_file
             except Exception:
                 if verified_bin_file:

@@ -32,6 +32,8 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from .compat import safe_chmod
+
 logger = logging.getLogger(__name__)
 
 # Fernet 暗号化の可用性 (W21-B)
@@ -123,7 +125,7 @@ def generate_or_load_signing_key(
         fd = -1
         os.replace(tmp_path, str(key_path))
         try:
-            os.chmod(str(key_path), 0o600)
+            safe_chmod(str(key_path), 0o600)
         except (OSError, AttributeError):
             pass
     except Exception:
@@ -319,7 +321,7 @@ class HMACKeyManager:
             fd = -1
             os.replace(tmp_path, str(enc_key_path))
             try:
-                os.chmod(str(enc_key_path), 0o600)
+                safe_chmod(str(enc_key_path), 0o600)
             except (OSError, AttributeError):
                 pass
         except Exception:
@@ -536,7 +538,7 @@ class HMACKeyManager:
             fd = -1
             os.replace(tmp_path, str(self._keys_path))
             try:
-                os.chmod(str(self._keys_path), 0o600)
+                safe_chmod(str(self._keys_path), 0o600)
             except (OSError, AttributeError):
                 pass
         except Exception:
