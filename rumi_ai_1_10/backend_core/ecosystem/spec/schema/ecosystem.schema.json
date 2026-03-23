@@ -321,6 +321,94 @@
         ],
         "additionalProperties": false
       }
+    },
+    "api_routes": {
+      "type": "array",
+      "description": "Pack が宣言する API ルート定義のリスト",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "description": "Pack のランタイム環境を宣言的に指定する。未指定の場合は既存ロジック（core_ 接頭辞判定等）で決定される。",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "実行方式。FunctionEntry の calling_convention に対応する。",
+          "enum": [
+            "python_host",
+            "python_docker",
+            "binary",
+            "command",
+            "wasm"
+          ]
+        },
+        "language": {
+          "type": "string",
+          "description": "開発言語（情報用。実行には影響しない）。",
+          "examples": [
+            "python",
+            "rust",
+            "go",
+            "nodejs",
+            "c",
+            "cpp"
+          ]
+        },
+        "protocol": {
+          "type": "string",
+          "description": "通信プロトコル。現時点では stdio_json のみ。",
+          "enum": [
+            "stdio_json"
+          ],
+          "default": "stdio_json"
+        },
+        "docker": {
+          "type": "object",
+          "description": "Docker 環境の設定",
+          "properties": {
+            "image": {
+              "type": "string",
+              "description": "Docker イメージ名 (例: python:3.11-slim)"
+            },
+            "build_command": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "ビルドコマンド（将来拡張用）"
+            },
+            "network": {
+              "type": "boolean",
+              "description": "コンテナにネットワークアクセスを許可するか",
+              "default": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "host_requirements": {
+          "type": "object",
+          "description": "ホスト環境の要求",
+          "properties": {
+            "min_memory_mb": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "最小メモリ要求 (MB)"
+            },
+            "gpu": {
+              "type": "boolean",
+              "description": "GPU が必要か",
+              "default": false
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

@@ -514,6 +514,13 @@ class Registry:
         # --- functions/ 配下のサブディレクトリを走査 ---
         functions_dir_resolved = functions_dir.resolve()
 
+        # --- 施策4: ecosystem.json の runtime セクションをデフォルトとして読み取る ---
+        pack_runtime = pack_info.ecosystem.get("runtime", {})
+        pack_runtime_type = pack_runtime.get("type")  # e.g. "binary", "python_docker"
+        pack_runtime_docker = pack_runtime.get("docker", {})
+        pack_runtime_docker_image = pack_runtime_docker.get("image", "")
+        pack_host_execution_from_runtime = pack_runtime_type == "python_host"
+
         try:
             subdirs = sorted(functions_dir.iterdir())
         except OSError as exc:
@@ -577,6 +584,18 @@ class Registry:
 
             # --- FunctionRegistry に登録 ---
             try:
+            # --- 施策4: Pack レベルの runtime をデフォルトとして注入 ---
+            if pack_runtime_type:
+                if "calling_convention" not in manifest:
+                    manifest["calling_convention"] = pack_runtime_type
+                if "runtime" not in manifest:
+                    if pack_runtime_type in ("binary", "command"):
+                        manifest["runtime"] = pack_runtime_type
+                if "docker_image" not in manifest and pack_runtime_docker_image:
+                    manifest["docker_image"] = pack_runtime_docker_image
+                if "host_execution" not in manifest and pack_host_execution_from_runtime:
+                    manifest["host_execution"] = True
+
                 func_registry.register(
                     pack_id=pack_info.pack_id,
                     function_id=function_id,
