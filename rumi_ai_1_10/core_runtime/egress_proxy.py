@@ -46,6 +46,7 @@ import json
 import os
 import socket
 import ssl
+import sys
 import stat
 import threading
 import concurrent.futures
@@ -115,6 +116,8 @@ _EGRESS_DEFAULT_SOCKET_MODE = 0o660
 _EGRESS_DEFAULT_DIR_MODE = 0o750
 _EGRESS_RELAXED_SOCKET_MODE = 0o666
 
+_IS_WINDOWS = sys.platform == "win32"
+
 
 # 細粒度タイムアウト (W12-T046)
 try:
@@ -170,6 +173,8 @@ def _apply_egress_dir_permissions(dir_path: Path) -> None:
     - RUMI_EGRESS_SOCKET_GID 指定時は chown で group を合わせる
     - 全て失敗しても例外を出さず、audit に警告を残す
     """
+    if _IS_WINDOWS:
+        return  # Windows: skip Unix permissions
     try:
         os.chmod(dir_path, _EGRESS_DEFAULT_DIR_MODE)
     except (OSError, PermissionError) as e:
@@ -193,6 +198,8 @@ def _apply_egress_socket_permissions(sock_path: Path) -> None:
     - RUMI_EGRESS_SOCKET_MODE=0666 の場合のみ 0666（audit に記録）
     - RUMI_EGRESS_SOCKET_GID 指定時は chown で group を合わせる
     """
+    if _IS_WINDOWS:
+        return  # Windows: skip Unix permissions
     mode = _get_egress_socket_mode()
 
     if mode == _EGRESS_RELAXED_SOCKET_MODE:
@@ -616,8 +623,14 @@ def execute_http_request(
 class UDSSocketManager:
     """Pack別UDSソケット管理"""
 
-    DEFAULT_BASE_DIR = "/run/rumi/egress/packs"
-    FALLBACK_BASE_DIR = "/tmp/rumi/egress/packs"
+    if sys.platform == "win32":
+        _win_base = str(Path(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")))
+                        / "rumi" / "egress" / "packs")
+        DEFAULT_BASE_DIR = _win_base
+        FALLBACK_BASE_DIR = _win_base
+    else:
+        DEFAULT_BASE_DIR = "/run/rumi/egress/packs"
+        FALLBACK_BASE_DIR = "/tmp/rumi/egress/packs"
 
     def __init__(self):
         self._base_dir: Optional[Path] = None
@@ -746,6 +759,13 @@ class UDSEgressServer:
 
     def start(self) -> bool:
         """サーバーを起動"""
+        if _IS_WINDOWS:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "UDSEgressServer.start() skipped: "
+                "Unix domain sockets not available on Windows."
+            )
+            return False
         with self._lock:
             if self._running:
                 return True
