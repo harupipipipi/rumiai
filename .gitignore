@@ -4,7 +4,7 @@
 !.gitignore
 !/rumi_ai_1_10/
 !/rumi_launcher/
-
+!/tests/
 # === 共通の不要ファイル ===
 venv/
 __pycache__/
