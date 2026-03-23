@@ -16,3 +16,6 @@ flow.iranai
 .backup_dead_code_removal/
 .env.local
 deploy.py
+
+# Build output (control panel)
+core_runtime/core_pack/core_control_panel/web/
