@@ -36,7 +36,7 @@ from pathlib import Path
 try:
     from .paths import CORE_PACK_ID_PREFIX as _CORE_PACK_ID_PREFIX
 except ImportError:
-    _CORE_PACK_ID_PREFIX = "core_"
+    _CORE_PACK_ID_PREFIX = None  # resolved after _load_permissions_config()
 
 # core_pack ディレクトリパス
 try:
@@ -78,33 +78,59 @@ MAX_TIMEOUT = 120.0
 # W25.5: user function execution
 DEFAULT_FUNCTION_TIMEOUT = 30.0
 FUNCTION_BASE_IMAGE = "python:3.11-slim"
+
+# --- permissions config loading (施策5: No Favoritism) ---
+def _load_permissions_config():
+    """Load permission constants from config/permissions.json (fallback: None)."""
+    config_path = Path(__file__).parent / "config" / "permissions.json"
+    if config_path.is_file():
+        try:
+            return json.loads(config_path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+    return None
+
+_permissions_config = _load_permissions_config()
+
+# Resolve _CORE_PACK_ID_PREFIX fallback from config if paths.py import failed
+if _CORE_PACK_ID_PREFIX is None:
+    _CORE_PACK_ID_PREFIX = (
+        (_permissions_config or {}).get("core_pack_id_prefix", "core_")
+    )
+
 # flow.run in-process dispatch
-FLOW_RUN_PERMISSION_ID = "flow.run"
+FLOW_RUN_PERMISSION_ID = (
+    (_permissions_config or {}).get("permission_ids", {}).get("flow_run", "flow.run")
+)
 MAX_FLOW_CALL_DEPTH = 10
 
 # docker.* in-process dispatch
-DOCKER_PERMISSION_IDS: frozenset = frozenset({
-    "docker.run",
-    "docker.exec",
-    "docker.stop",
-    "docker.logs",
-    "docker.list",
-})
-DOCKER_RUN_PERMISSION_ID = "docker.run"
+DOCKER_PERMISSION_IDS: frozenset = frozenset(
+    (_permissions_config or {}).get("permission_ids", {}).get(
+        "docker", ["docker.run", "docker.exec", "docker.stop", "docker.logs", "docker.list"]
+    )
+)
+DOCKER_RUN_PERMISSION_ID = (
+    (_permissions_config or {}).get("permission_ids", {}).get("docker_run", "docker.run")
+)
 
-DOCKER_METHOD_MAP = {
-    "docker.run": "handle_run",
-    "docker.exec": "handle_exec",
-    "docker.stop": "handle_stop",
-    "docker.logs": "handle_logs",
-    "docker.list": "handle_list",
-}
+DOCKER_METHOD_MAP = (
+    (_permissions_config or {}).get("docker_method_map", {
+        "docker.run": "handle_run",
+        "docker.exec": "handle_exec",
+        "docker.stop": "handle_stop",
+        "docker.logs": "handle_logs",
+        "docker.list": "handle_list",
+    })
+)
 
 # Thread-local storage for flow.run call stack
 _flow_call_stack_local = threading.local()
 
 # rate limit: secret.get のみ（無限ループ事故防止）
-SECRET_GET_PERMISSION_ID = "secrets.get"
+SECRET_GET_PERMISSION_ID = (
+    (_permissions_config or {}).get("permission_ids", {}).get("secret_get", "secrets.get")
+)
 DEFAULT_SECRET_GET_RATE_LIMIT = 60  # 回/分/principal
 
 # calling_convention 有効値
@@ -234,9 +260,11 @@ class CapabilityExecutor:
                     pass  # function.call 以外の機能に影響させない
 
                 # Wave 29: core function handler table initialization
-                self._core_function_handlers = {
-                    "core_docker_capability": "docker_capability_handler",
-                }
+                self._core_function_handlers = (
+                    (_permissions_config or {}).get("core_function_handlers", {
+                        "core_docker_capability": "docker_capability_handler",
+                    })
+                ).copy()
 
                 self._initialized = True
                 return True

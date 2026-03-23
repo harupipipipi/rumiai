@@ -1,0 +1,25 @@
+{
+  "core_pack_id_prefix": "core_",
+  "permission_ids": {
+    "flow_run": "flow.run",
+    "secret_get": "secrets.get",
+    "docker": [
+      "docker.run",
+      "docker.exec",
+      "docker.stop",
+      "docker.logs",
+      "docker.list"
+    ],
+    "docker_run": "docker.run"
+  },
+  "docker_method_map": {
+    "docker.run": "handle_run",
+    "docker.exec": "handle_exec",
+    "docker.stop": "handle_stop",
+    "docker.logs": "handle_logs",
+    "docker.list": "handle_list"
+  },
+  "core_function_handlers": {
+    "core_docker_capability": "docker_capability_handler"
+  }
+}
