@@ -37,5 +37,76 @@
       "method": "DELETE",
       "path_prefix": "/api/panel/"
     }
+  ],
+  "api_routes": [
+    {
+      "method": "GET",
+      "path": "/api/panel/dashboard",
+      "handler": "_panel_get_dashboard"
+    },
+    {
+      "method": "GET",
+      "path": "/api/panel/packs",
+      "handler": "_panel_get_packs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/panel/flows",
+      "handler": "_panel_get_flows"
+    },
+    {
+      "method": "GET",
+      "path_pattern": "/api/panel/flows/{id}",
+      "handler": "_panel_get_flow_detail"
+    },
+    {
+      "method": "GET",
+      "path": "/api/panel/settings/profile",
+      "handler": "_panel_get_profile"
+    },
+    {
+      "method": "GET",
+      "path": "/api/panel/version",
+      "handler": "_panel_get_version"
+    },
+    {
+      "method": "POST",
+      "path_pattern": "/api/panel/packs/{id}/enable",
+      "handler": "_panel_enable_pack"
+    },
+    {
+      "method": "POST",
+      "path_pattern": "/api/panel/packs/{id}/disable",
+      "handler": "_panel_disable_pack"
+    },
+    {
+      "method": "POST",
+      "path": "/api/panel/flows",
+      "handler": "_panel_create_flow",
+      "pass_body": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/panel/kernel/restart",
+      "handler": "_panel_restart_kernel",
+      "response_mode": "raw"
+    },
+    {
+      "method": "PUT",
+      "path_pattern": "/api/panel/flows/{id}",
+      "handler": "_panel_update_flow",
+      "pass_body": true
+    },
+    {
+      "method": "PUT",
+      "path": "/api/panel/settings/profile",
+      "handler": "_panel_update_profile",
+      "pass_body": true
+    },
+    {
+      "method": "DELETE",
+      "path_pattern": "/api/panel/flows/{id}",
+      "handler": "_panel_delete_flow"
+    }
   ]
 }

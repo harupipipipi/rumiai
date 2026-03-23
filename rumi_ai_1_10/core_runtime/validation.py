@@ -32,6 +32,10 @@ SAFE_ID_RE = re.compile(r'^[a-zA-Z0-9_.:/-]{1,256}$')
 # slug バリデーション: 英数字・アンダースコア・ハイフンのみ (長さ制限なし)
 SLUG_PATTERN = re.compile(r'^[a-zA-Z0-9_-]+$')
 
+# api_routes ハンドラ名バリデーション: メソッド名 (英数字・アンダースコアのみ、1〜128文字)
+HANDLER_NAME_RE = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]{0,127}$')
+
+
 # リクエストボディサイズ上限 (10 MB)
 MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024
 

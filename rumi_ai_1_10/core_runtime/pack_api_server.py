@@ -30,7 +30,10 @@ from .validation import (
     PACK_ID_RE,
     SAFE_ID_RE,
     MAX_REQUEST_BODY_BYTES,
+    HANDLER_NAME_RE,
 )
+
+from .api.route_handlers import _compile_template_path, _is_safe_path_param
 
 from .api.api_response import APIResponse
 
@@ -170,6 +173,8 @@ class PackAPIHandler(
     app_lifecycle_manager = None  # AppLifecycleManager インスタンス参照（Phase A）
     _web_mounts: list = []           # web_mount テーブル（テーブル駆動静的配信）
     _pre_auth_table: list = []       # pre_auth_routes テーブル（テーブル駆動認証バイパス）
+    _api_route_exact: dict = {}      # api_routes 完全一致テーブル {(METHOD, path): entry}
+    _api_route_patterns: list = []   # api_routes パターンテーブル [(METHOD, regex, params, entry)]
     
     def log_message(self, format: str, *args) -> None:
         logger.info(f"API: {args[0]}")
@@ -274,6 +279,53 @@ class PackAPIHandler(
                 return wm
         return None
 
+
+    @classmethod
+    def load_api_routes(cls, registry) -> int:
+        """Registry から全 Pack の api_routes を読み込み、ルーティングテーブルを構築する。
+
+        完全一致ルートは dict で O(1) ルックアップ。
+        パスパラメータ付きルートは正規表現でマッチ（route_handlers.py のパターンを踏襲）。
+        """
+        cls._api_route_exact = {}
+        cls._api_route_patterns = []
+        if registry is None:
+            return 0
+        count = 0
+        for pack_id, pack_info in registry.packs.items():
+            routes = pack_info.ecosystem.get("api_routes")
+            if not routes or not isinstance(routes, list):
+                continue
+            for route in routes:
+                if not isinstance(route, dict):
+                    continue
+                method = route.get("method", "").upper()
+                handler_name = route.get("handler", "")
+                if not method or not handler_name:
+                    continue
+                if not HANDLER_NAME_RE.match(handler_name):
+                    logger.warning("Invalid handler name in api_routes: %s", handler_name)
+                    continue
+                entry = {
+                    "handler": handler_name,
+                    "pack_id": pack_id,
+                    "pass_body": route.get("pass_body", False),
+                    "response_mode": route.get("response_mode", "result"),
+                }
+                if "path_pattern" in route:
+                    compiled = _compile_template_path(route["path_pattern"])
+                    if compiled is not None:
+                        pattern, param_names = compiled
+                        cls._api_route_patterns.append(
+                            (method, pattern, param_names, entry)
+                        )
+                        count += 1
+                elif "path" in route:
+                    cls._api_route_exact[(method, route["path"])] = entry
+                    count += 1
+        logger.info("Loaded %d api_route entries", count)
+        return count
+
     def _is_pre_auth_route(self, method: str, path: str) -> bool:
         """method + path が pre_auth_table にマッチするか判定する。"""
         method_upper = method.upper()
@@ -285,6 +337,86 @@ class PackAPIHandler(
             if "path_prefix" in entry and path.startswith(entry["path_prefix"]):
                 return True
         return False
+
+
+    def _dispatch_api_route(self, method: str, path: str, body: dict = None) -> bool:
+        """api_routes テーブルからルートをディスパッチする。
+
+        マッチした場合はレスポンスを送信して True を返す。
+        マッチしなかった場合は False を返す（既存分岐に fallthrough）。
+        """
+        method_upper = method.upper()
+
+        # 1. 完全一致 (O(1))
+        entry = self._api_route_exact.get((method_upper, path))
+        path_params = {}
+
+        # 2. パターンマッチ (正規表現)
+        if entry is None:
+            normalized = path.rstrip("/")
+            if not normalized.startswith("/"):
+                normalized = "/" + normalized
+            for tmpl_method, pattern, param_names, route_entry in self._api_route_patterns:
+                if tmpl_method != method_upper:
+                    continue
+                m = pattern.match(normalized)
+                if m is None:
+                    continue
+                safe = True
+                params = {}
+                for name in param_names:
+                    decoded = unquote(m.group(name))
+                    if not _is_safe_path_param(decoded):
+                        safe = False
+                        break
+                    params[name] = decoded
+                if safe:
+                    entry = route_entry
+                    path_params = params
+                    break
+
+        if entry is None:
+            return False
+
+        handler_name = entry["handler"]
+        pass_body = entry.get("pass_body", False)
+        response_mode = entry.get("response_mode", "result")
+
+        # ハンドラの存在確認
+        handler = getattr(self, handler_name, None)
+        if handler is None:
+            logger.error("api_route handler not found: %s", handler_name)
+            self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
+            return True
+
+        # パスパラメータのバリデーション
+        for param_val in path_params.values():
+            if not self._is_safe_id(param_val):
+                self._send_response(
+                    APIResponse(False, error="Invalid path parameter"), 400
+                )
+                return True
+
+        # ハンドラ呼び出し
+        try:
+            args = []
+            if path_params:
+                first_param = next(iter(path_params.values()))
+                args.append(first_param)
+            if pass_body:
+                args.append(body if body is not None else {})
+
+            result = handler(*args)
+
+            if response_mode == "raw":
+                self._send_response(APIResponse(True, data=result))
+            else:
+                self._send_result(result)
+        except Exception as e:
+            _log_internal_error(f"api_route:{handler_name}", e)
+            self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
+
+        return True
 
     def _send_response(self, response: APIResponse, status: int = 200) -> None:
         self.send_response(status)
@@ -607,6 +739,10 @@ class PackAPIHandler(
         path = parsed.path
         
         try:
+            # --- api_routes テーブルディスパッチ (施策3) ---
+            if self._dispatch_api_route("GET", path):
+                return
+
             if path == "/api/packs":
                 result = self._get_all_packs()
                 self._send_result(result)
@@ -722,37 +858,6 @@ class PackAPIHandler(
                 result = self._pip_list_requests(status_filter)
                 self._send_result(result)
 
-            # --- Control Panel API (Phase C) ---
-            elif path == "/api/panel/dashboard":
-                result = self._panel_get_dashboard()
-                self._send_result(result)
-
-            elif path == "/api/panel/packs":
-                result = self._panel_get_packs()
-                self._send_result(result)
-
-            elif path == "/api/panel/flows":
-                result = self._panel_get_flows()
-                self._send_result(result)
-
-            elif path.startswith("/api/panel/flows/") and not path.endswith("/"):
-                _panel_flow_id = path[len("/api/panel/flows/"):]
-                from urllib.parse import unquote as _unquote
-                _panel_flow_id = _unquote(_panel_flow_id)
-                if not self._is_safe_id(_panel_flow_id):
-                    self._send_response(APIResponse(False, error="Invalid flow_id"), 400)
-                else:
-                    result = self._panel_get_flow_detail(_panel_flow_id)
-                    self._send_result(result)
-
-            elif path == "/api/panel/settings/profile":
-                result = self._panel_get_profile()
-                self._send_result(result)
-
-            elif path == "/api/panel/version":
-                result = self._panel_get_version()
-                self._send_result(result)
-
             # --- Flow execution API ---
             elif path == "/api/flows":
                 result = self._get_flow_list()
@@ -823,6 +928,10 @@ class PackAPIHandler(
             if body is None:
                 return  # レスポンス送信済み（サイズ超過 or JSONパース失敗）
             path = urlparse(self.path).path
+
+            # --- api_routes テーブルディスパッチ (施策3) ---
+            if self._dispatch_api_route("POST", path, body):
+                return
 
             if path == "/api/network/grant":
                 pack_id = body.get("pack_id", "")
@@ -1200,39 +1309,6 @@ class PackAPIHandler(
                 result = self._reload_pack_routes()
                 self._send_result(result)
 
-            # --- Control Panel API (Phase C) ---
-            elif path.startswith("/api/panel/packs/") and path.endswith("/enable"):
-                _panel_pack_parts = path.split("/")
-                if len(_panel_pack_parts) >= 5:
-                    _panel_pack_id = _panel_pack_parts[4]
-                    if not self._validate_pack_id(_panel_pack_id):
-                        self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
-                    else:
-                        result = self._panel_enable_pack(_panel_pack_id)
-                        self._send_result(result)
-                else:
-                    self._send_response(APIResponse(False, error="Invalid path"), 400)
-
-            elif path.startswith("/api/panel/packs/") and path.endswith("/disable"):
-                _panel_pack_parts = path.split("/")
-                if len(_panel_pack_parts) >= 5:
-                    _panel_pack_id = _panel_pack_parts[4]
-                    if not self._validate_pack_id(_panel_pack_id):
-                        self._send_response(APIResponse(False, error="Invalid pack_id"), 400)
-                    else:
-                        result = self._panel_disable_pack(_panel_pack_id)
-                        self._send_result(result)
-                else:
-                    self._send_response(APIResponse(False, error="Invalid path"), 400)
-
-            elif path == "/api/panel/flows":
-                result = self._panel_create_flow(body)
-                self._send_result(result)
-
-            elif path == "/api/panel/kernel/restart":
-                result = self._panel_restart_kernel()
-                self._send_response(APIResponse(True, data=result))
-
             # --- Flow execution API ---
             elif path.startswith("/api/flows/") and path.endswith("/run"):
                 # flow_id バリデーション（flow_handlers 呼び出し前に検証）
@@ -1274,28 +1350,16 @@ class PackAPIHandler(
                 return  # レスポンス送信済み
             path = urlparse(self.path).path
 
-            # --- Control Panel API (Phase C) ---
-            if path.startswith("/api/panel/flows/") and not path.endswith("/"):
-                _panel_flow_id = path[len("/api/panel/flows/"):]
-                from urllib.parse import unquote as _unquote_put
-                _panel_flow_id = _unquote_put(_panel_flow_id)
-                if not self._is_safe_id(_panel_flow_id):
-                    self._send_response(APIResponse(False, error="Invalid flow_id"), 400)
-                else:
-                    result = self._panel_update_flow(_panel_flow_id, body)
-                    self._send_result(result)
+            # --- api_routes テーブルディスパッチ (施策3) ---
+            if self._dispatch_api_route("PUT", path, body):
+                return
 
-            elif path == "/api/panel/settings/profile":
-                result = self._panel_update_profile(body)
-                self._send_result(result)
-
+            match = self._match_pack_route(path, "PUT")
+            if match:
+                self._handle_pack_route_request(path, body, "PUT", match)
             else:
-                match = self._match_pack_route(path, "PUT")
-                if match:
-                    self._handle_pack_route_request(path, body, "PUT", match)
-                else:
-                    logger.debug("Unmatched PUT path: %s", path)
-                    self._send_response(APIResponse(False, error="Not found"), 404)
+                logger.debug("Unmatched PUT path: %s", path)
+                self._send_response(APIResponse(False, error="Not found"), 404)
 
         except Exception as e:
             _log_internal_error("do_PUT", e)
@@ -1312,6 +1376,10 @@ class PackAPIHandler(
         path = urlparse(self.path).path
         
         try:
+            # --- api_routes テーブルディスパッチ (施策3) ---
+            if self._dispatch_api_route("DELETE", path):
+                return
+
             # --- W19-B: Secret Grant DELETE endpoints ---
             if path.startswith("/api/secrets/grants/"):
                 parts = path.strip("/").split("/")
@@ -1355,17 +1423,6 @@ class PackAPIHandler(
                         self._send_result(result)
                 else:
                     self._send_response(APIResponse(False, error="Not found"), 404)
-
-            # --- Control Panel API (Phase C) ---
-            elif path.startswith("/api/panel/flows/") and not path.endswith("/"):
-                _panel_flow_id = path[len("/api/panel/flows/"):]
-                from urllib.parse import unquote as _unquote_del
-                _panel_flow_id = _unquote_del(_panel_flow_id)
-                if not self._is_safe_id(_panel_flow_id):
-                    self._send_response(APIResponse(False, error="Invalid flow_id"), 400)
-                    return
-                result = self._panel_delete_flow(_panel_flow_id)
-                self._send_result(result)
 
             else:
                 # T-009: Pack独自ルートフォールバック
@@ -1464,6 +1521,7 @@ class PackAPIServer:
                                 PackAPIHandler.load_pack_routes(reg)
                                 PackAPIHandler.load_web_mounts(reg)
                                 PackAPIHandler.load_pre_auth_routes(reg)
+                                PackAPIHandler.load_api_routes(reg)
                                 logger.info("Pack routes loaded (deferred after system.ready)")
                             except Exception as e:
                                 logger.warning("Failed to load pack routes (deferred): %s", e)
@@ -1476,6 +1534,7 @@ class PackAPIServer:
                     PackAPIHandler.load_pack_routes(reg)
                     PackAPIHandler.load_web_mounts(reg)
                     PackAPIHandler.load_pre_auth_routes(reg)
+                    PackAPIHandler.load_api_routes(reg)
                     self._routes_loaded = True
                 except Exception as e:
                     logger.warning("Failed to load pack routes: %s", e)
