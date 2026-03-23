@@ -64,6 +64,7 @@ class DockerCapabilityHandler:
         "--privileged",
         "--cap-add",
         "/var/run/docker.sock",
+        "//./pipe/docker_engine",
         "--pid=host",
         "--ipc=host",
         "--net=host",
