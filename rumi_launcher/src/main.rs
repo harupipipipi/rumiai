@@ -98,17 +98,36 @@ fn run() -> Result<()> {
     }
 
     // ---- 6. Update check (best-effort) -------------------------------------
-    match updater::check_for_update() {
-        Ok(Some(ver)) => info!("Update available: {ver}"),
-        Ok(None) => {}
-        Err(e) => warn!("Update check failed: {e}"),
-    }
+    let update_info = match updater::check_for_update() {
+        Ok(Some(info)) => {
+            info!(
+                "Update available: v{} -> v{}",
+                info.current_version, info.latest_version
+            );
+            Some(info)
+        }
+        Ok(None) => {
+            info!("Application is up to date");
+            None
+        }
+        Err(e) => {
+            warn!("Update check failed: {e}");
+            None
+        }
+    };
 
     // ---- 7. System tray ----------------------------------------------------
     let icon = load_tray_icon(&config);
 
     let item_open = MenuItem::new("Open Rumi AI", true, None);
     let item_restart = MenuItem::new("Restart Kernel", true, None);
+    let item_update = update_info.as_ref().map(|info| {
+        MenuItem::new(
+            format!("Update available: v{} → Download", info.latest_version),
+            true,
+            None,
+        )
+    });
     let item_quit = MenuItem::new("Quit", true, None);
 
     let tray_menu = Menu::new();
@@ -117,6 +136,9 @@ fn run() -> Result<()> {
     tray_menu
         .append(&PredefinedMenuItem::separator())
         .context("menu append failed")?;
+    if let Some(ref item) = item_update {
+        tray_menu.append(item).context("menu append failed")?;
+    }
     tray_menu.append(&item_quit).context("menu append failed")?;
 
     // Keep `_tray` alive for the lifetime of the event loop.
@@ -129,6 +151,7 @@ fn run() -> Result<()> {
 
     let id_open = item_open.id().clone();
     let id_restart = item_restart.id().clone();
+    let id_update = item_update.as_ref().map(|item| item.id().clone());
     let id_quit = item_quit.id().clone();
 
     let menu_rx = MenuEvent::receiver();
@@ -147,6 +170,13 @@ fn run() -> Result<()> {
                 info!("User requested Kernel restart");
                 if let Err(e) = kernel.restart() {
                     error!("Kernel restart failed: {e}");
+                }
+            } else if id_update.as_ref() == Some(event.id()) {
+                info!("User requested update download");
+                if let Some(ref info) = update_info {
+                    if let Err(e) = updater::open_release_page(info) {
+                        error!("Failed to open release page: {e}");
+                    }
                 }
             } else if event.id() == &id_quit {
                 info!("Quit requested");
