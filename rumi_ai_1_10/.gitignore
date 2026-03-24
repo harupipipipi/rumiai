@@ -17,5 +17,5 @@ flow.iranai
 .env.local
 deploy.py
 
-# Build output (control panel)
-core_runtime/core_pack/core_control_panel/web/
+# Frontend build artifacts (配布に必要なので除外しない)
+!core_runtime/core_pack/*/web/

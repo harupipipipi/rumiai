@@ -18,6 +18,9 @@ __pycache__/
 node_modules/
 dist/
 
+# フロントエンドビルド成果物（配布に必要なので除外しない）
+!rumi_ai_1_10/core_runtime/core_pack/*/web/
+
 # === rumi_ai_1_10/ 内の不要ファイル ===
 chats/
 userdata/
