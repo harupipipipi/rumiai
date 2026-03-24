@@ -1,0 +1,99 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            uv_asset: uv-aarch64-apple-darwin.tar.gz
+          - os: macos-13
+            target: x86_64-apple-darwin
+            uv_asset: uv-x86_64-apple-darwin.tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            uv_asset: uv-x86_64-pc-windows-msvc.zip
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            uv_asset: uv-x86_64-unknown-linux-gnu.tar.gz
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxdo-dev libayatana-appindicator3-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cargo-packager
+        run: cargo install cargo-packager --locked
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build frontend
+        working-directory: rumi_ai_1_10/frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Download uv binary (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p rumi_launcher/bundled
+          curl -fsSL \
+            "https://github.com/astral-sh/uv/releases/latest/download/${{ matrix.uv_asset }}" \
+            -o uv-archive.tar.gz
+          tar xzf uv-archive.tar.gz
+          # The archive extracts to uv-<triple>/uv — find and copy it
+          find . -maxdepth 2 -name 'uv' -type f ! -path './rumi_launcher/*' \
+            -exec cp {} rumi_launcher/bundled/uv \;
+          chmod +x rumi_launcher/bundled/uv
+          rm -f uv-archive.tar.gz
+          rm -rf uv-*/
+
+      - name: Download uv binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path rumi_launcher\bundled | Out-Null
+          $uvUrl = "https://github.com/astral-sh/uv/releases/latest/download/${{ matrix.uv_asset }}"
+          Invoke-WebRequest -Uri $uvUrl -OutFile uv-archive.zip
+          Expand-Archive -Path uv-archive.zip -DestinationPath uv-extracted -Force
+          $uvExe = Get-ChildItem -Path uv-extracted -Recurse -Filter "uv.exe" |
+                   Select-Object -First 1
+          Copy-Item $uvExe.FullName -Destination rumi_launcher\bundled\uv.exe
+          Remove-Item uv-archive.zip -Force
+          Remove-Item uv-extracted -Recurse -Force
+
+      - name: Package with cargo-packager
+        working-directory: rumi_launcher
+        run: cargo packager --release --target ${{ matrix.target }}
+
+      - name: Upload release artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          files: rumi_launcher/dist/*
+          draft: true
+          generate_release_notes: true
