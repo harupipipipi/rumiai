@@ -93,6 +93,35 @@ impl AppConfig {
     pub fn requirements_txt(&self) -> PathBuf {
         self.rumi_home.join("requirements.txt")
     }
+
+    /// Return the path where a bundled `uv` binary would live.
+    ///
+    /// Layout: `{app_dir}/bundled/uv` (Unix) or `{app_dir}/bundled/uv.exe` (Windows).
+    pub fn bundled_uv_path(&self) -> PathBuf {
+        self.app_dir.join("bundled").join(uv_binary_name())
+    }
+
+    /// Resolve the best available `uv` binary path.
+    ///
+    /// Prefers the bundled copy shipped alongside the launcher.  Falls back
+    /// to the downloaded copy at `self.uv_path`.
+    pub fn resolved_uv_path(&self) -> PathBuf {
+        let bundled = self.bundled_uv_path();
+        if bundled.exists() {
+            bundled
+        } else {
+            self.uv_path.clone()
+        }
+    }
+}
+
+/// Return the platform-appropriate file name for the `uv` binary.
+fn uv_binary_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "uv.exe"
+    } else {
+        "uv"
+    }
 }
 
 /// Return the platform triple string used by python-build-standalone

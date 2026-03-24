@@ -1,4 +1,10 @@
-//! Python environment bootstrap via python-build-standalone (PBS) and uv.
+//! Python environment bootstrap via **uv**.
+//!
+//! Flow:
+//! 1. Ensure `uv` binary is available  (bundled → downloaded)
+//! 2. `uv python install 3.13`         (into a temp dir, then rename)
+//! 3. `uv venv`                         (create virtual-environment)
+//! 4. `uv pip install -r requirements.txt`
 //!
 //! Each step is idempotent — if the artefact already exists the step is
 //! skipped.
@@ -11,25 +17,16 @@ use std::process::Command;
 use anyhow::{bail, Context, Result};
 use flate2::read::GzDecoder;
 use log::info;
-use serde::Deserialize;
 
 use crate::config::{platform_triple, AppConfig};
 
 // ---------------------------------------------------------------------------
-// PBS latest-release metadata
+// Constants
 // ---------------------------------------------------------------------------
 
-const PBS_LATEST_URL: &str =
-    "https://raw.githubusercontent.com/indygreg/python-build-standalone/latest-release/latest-release.json";
-
-/// Pinned CPython minor version.
+/// Pinned CPython minor version.  `uv python install` resolves the latest
+/// patch release automatically, so we never hard-code a patch number.
 const PYTHON_MINOR: &str = "3.13";
-
-#[derive(Debug, Deserialize)]
-struct PbsRelease {
-    tag: String,
-    asset_url_prefix: String,
-}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -38,89 +35,26 @@ struct PbsRelease {
 /// Ensure that a working Python venv with all dependencies is present.
 ///
 /// Steps (each is idempotent):
-/// 1. Download + extract PBS -> `config.python_dir`
-/// 2. Download uv binary     -> `config.uv_path`
-/// 3. Create venv             -> `config.venv_dir`
-/// 4. Install requirements    -> into the venv
+/// 1. Ensure uv binary        → bundled or downloaded
+/// 2. uv python install 3.13  → `config.python_dir`
+/// 3. uv venv                 → `config.venv_dir`
+/// 4. uv pip install           → into the venv
 pub fn ensure_python_env(config: &AppConfig) -> Result<()> {
-    ensure_python(config).context("PBS Python setup failed")?;
     ensure_uv(config).context("uv setup failed")?;
+    ensure_python(config).context("Python setup failed")?;
     ensure_venv(config).context("venv creation failed")?;
     install_requirements(config).context("pip install failed")?;
     Ok(())
 }
 
 // ---------------------------------------------------------------------------
-// Step 1 — PBS Python
-// ---------------------------------------------------------------------------
-
-fn ensure_python(config: &AppConfig) -> Result<()> {
-    let python_bin = config.python_bin();
-    if python_bin.exists() {
-        info!("PBS Python already present at {}", python_bin.display());
-        return Ok(());
-    }
-
-    info!("Downloading PBS Python ...");
-    let release = fetch_pbs_release()?;
-    let archive_name = pbs_archive_name(&release.tag, platform_triple());
-    let url = format!("{}/{}", release.asset_url_prefix, archive_name);
-    info!("PBS URL: {url}");
-
-    let data = download_bytes(&url)?;
-    info!("Downloaded {} bytes, extracting ...", data.len());
-
-    let tmp_dir = config.app_dir.join("_python_tmp");
-    if tmp_dir.exists() {
-        fs::remove_dir_all(&tmp_dir)?;
-    }
-    fs::create_dir_all(&tmp_dir)?;
-
-    extract_tar_gz(&data, &tmp_dir)?;
-
-    // The archive extracts to `_python_tmp/python/`.
-    let extracted = tmp_dir.join("python");
-    if !extracted.exists() {
-        bail!(
-            "expected `python/` directory inside PBS archive but found: {:?}",
-            fs::read_dir(&tmp_dir)?
-                .filter_map(|e| e.ok().map(|e| e.file_name()))
-                .collect::<Vec<_>>()
-        );
-    }
-
-    if config.python_dir.exists() {
-        fs::remove_dir_all(&config.python_dir)?;
-    }
-    fs::rename(&extracted, &config.python_dir)?;
-    fs::remove_dir_all(&tmp_dir).ok();
-
-    info!("PBS Python installed at {}", config.python_dir.display());
-    Ok(())
-}
-
-fn fetch_pbs_release() -> Result<PbsRelease> {
-    let body = download_string(PBS_LATEST_URL)?;
-    let release: PbsRelease =
-        serde_json::from_str(&body).context("failed to parse PBS latest-release.json")?;
-    Ok(release)
-}
-
-/// Build the archive file-name that PBS publishes.
-///
-/// Example: `cpython-3.13.12+20260310-aarch64-apple-darwin-install_only.tar.gz`
-fn pbs_archive_name(tag: &str, triple: &str) -> String {
-    let python_version = format!("{PYTHON_MINOR}.12");
-    format!("cpython-{python_version}+{tag}-{triple}-install_only.tar.gz")
-}
-
-// ---------------------------------------------------------------------------
-// Step 2 — uv
+// Step 1 — uv binary
 // ---------------------------------------------------------------------------
 
 fn ensure_uv(config: &AppConfig) -> Result<()> {
-    if config.uv_path.exists() {
-        info!("uv already present at {}", config.uv_path.display());
+    let uv = config.resolved_uv_path();
+    if uv.exists() {
+        info!("uv already present at {}", uv.display());
         return Ok(());
     }
 
@@ -132,22 +66,25 @@ fn ensure_uv(config: &AppConfig) -> Result<()> {
     let data = download_bytes(&url)?;
     info!("Downloaded {} bytes", data.len());
 
+    // Download destination is always the non-bundled location.
+    let dest = &config.uv_path;
+
     if cfg!(target_os = "windows") {
-        extract_uv_from_zip(&data, triple, &config.uv_path)?;
+        extract_uv_from_zip(&data, triple, dest)?;
     } else {
-        extract_uv_from_tar_gz(&data, triple, &config.uv_path)?;
+        extract_uv_from_tar_gz(&data, triple, dest)?;
     }
 
     // Make the binary executable on Unix.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&config.uv_path)?.permissions();
+        let mut perms = fs::metadata(dest)?.permissions();
         perms.set_mode(0o755);
-        fs::set_permissions(&config.uv_path, perms)?;
+        fs::set_permissions(dest, perms)?;
     }
 
-    info!("uv installed at {}", config.uv_path.display());
+    info!("uv installed at {}", dest.display());
     Ok(())
 }
 
@@ -217,6 +154,84 @@ fn extract_uv_from_zip(data: &[u8], triple: &str, dest: &Path) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
+// Step 2 — Python via `uv python install`
+// ---------------------------------------------------------------------------
+
+fn ensure_python(config: &AppConfig) -> Result<()> {
+    let python_bin = config.python_bin();
+    if python_bin.exists() {
+        info!("Python already present at {}", python_bin.display());
+        return Ok(());
+    }
+
+    info!("Installing Python {PYTHON_MINOR} via uv ...");
+    let uv = config.resolved_uv_path();
+
+    // Install into a temporary directory, then move the versioned
+    // sub-directory to `config.python_dir` so that `config.python_bin()`
+    // resolves correctly (same layout as PBS install_only archives).
+    let tmp_dir = config.app_dir.join("_python_tmp");
+    if tmp_dir.exists() {
+        fs::remove_dir_all(&tmp_dir)?;
+    }
+    fs::create_dir_all(&tmp_dir)?;
+
+    let status = Command::new(&uv)
+        .args([
+            "python",
+            "install",
+            PYTHON_MINOR,
+            "--install-dir",
+            &tmp_dir.to_string_lossy(),
+        ])
+        .status()
+        .context("failed to run uv python install")?;
+
+    if !status.success() {
+        fs::remove_dir_all(&tmp_dir).ok();
+        bail!("uv python install exited with {status}");
+    }
+
+    // `uv python install --install-dir {tmp}` creates a sub-directory
+    // like `cpython-3.13.12-macos-aarch64-none/`.  Find it by prefix.
+    let prefix = format!("cpython-{PYTHON_MINOR}");
+    let found = fs::read_dir(&tmp_dir)?
+        .filter_map(|e| e.ok())
+        .find(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .starts_with(&prefix)
+        });
+
+    let extracted = match found {
+        Some(entry) => entry.path(),
+        None => {
+            let contents: Vec<String> = fs::read_dir(&tmp_dir)?
+                .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().into_owned()))
+                .collect();
+            fs::remove_dir_all(&tmp_dir).ok();
+            bail!(
+                "uv python install succeeded but no directory matching \
+                 `{prefix}*` was found in the install dir.\n\
+                 Contents of {}: {:?}\n\
+                 This may indicate a change in uv's directory naming scheme.",
+                tmp_dir.display(),
+                contents,
+            );
+        }
+    };
+
+    if config.python_dir.exists() {
+        fs::remove_dir_all(&config.python_dir)?;
+    }
+    fs::rename(&extracted, &config.python_dir)?;
+    fs::remove_dir_all(&tmp_dir).ok();
+
+    info!("Python installed at {}", config.python_dir.display());
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Step 3 — venv
 // ---------------------------------------------------------------------------
 
@@ -227,8 +242,9 @@ fn ensure_venv(config: &AppConfig) -> Result<()> {
     }
 
     info!("Creating venv ...");
+    let uv = config.resolved_uv_path();
     let python_bin = config.python_bin();
-    let status = Command::new(&config.uv_path)
+    let status = Command::new(&uv)
         .args([
             "venv",
             "--python",
@@ -258,8 +274,9 @@ fn install_requirements(config: &AppConfig) -> Result<()> {
     }
 
     info!("Installing requirements ...");
+    let uv = config.resolved_uv_path();
     let venv_python = config.venv_python();
-    let status = Command::new(&config.uv_path)
+    let status = Command::new(&uv)
         .args([
             "pip",
             "install",
@@ -305,46 +322,13 @@ fn download_bytes(url: &str) -> Result<Vec<u8>> {
     Ok(bytes.to_vec())
 }
 
-fn download_string(url: &str) -> Result<String> {
-    let client = http_client()?;
-    let resp = client
-        .get(url)
-        .send()
-        .with_context(|| format!("HTTP GET failed: {url}"))?;
-    if !resp.status().is_success() {
-        bail!("HTTP {} for {url}", resp.status());
-    }
-    let text = resp
-        .text()
-        .with_context(|| format!("failed to read response text from {url}"))?;
-    Ok(text)
-}
-
 // ---------------------------------------------------------------------------
-// Archive helpers
+// Tests
 // ---------------------------------------------------------------------------
-
-fn extract_tar_gz(data: &[u8], dest: &Path) -> Result<()> {
-    let decoder = GzDecoder::new(data);
-    let mut archive = tar::Archive::new(decoder);
-    archive
-        .unpack(dest)
-        .context("failed to extract tar.gz archive")?;
-    Ok(())
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn pbs_archive_name_format() {
-        let name = pbs_archive_name("20260310", "aarch64-apple-darwin");
-        assert_eq!(
-            name,
-            "cpython-3.13.12+20260310-aarch64-apple-darwin-install_only.tar.gz"
-        );
-    }
 
     #[test]
     fn uv_url_unix() {
