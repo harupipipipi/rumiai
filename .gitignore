@@ -2,6 +2,7 @@
 # rumi_ai_1_10/ と rumi_launcher/ 以外は全て無視
 /*
 !.gitignore
+!/.github/
 !/.github/!/rumi_ai_1_10/
 !/rumi_launcher/
 !/tests/
