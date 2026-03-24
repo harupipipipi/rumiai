@@ -14,8 +14,6 @@ mod kernel_manager;
 mod python_env;
 mod updater;
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -133,19 +131,6 @@ fn run() -> Result<()> {
     let id_restart = item_restart.id().clone();
     let id_quit = item_quit.id().clone();
 
-    let quit = Arc::new(AtomicBool::new(false));
-    {
-        let q = Arc::clone(&quit);
-        thread::spawn(move || {
-            loop {
-                thread::sleep(Duration::from_secs(3600));
-                if q.load(Ordering::SeqCst) {
-                    break;
-                }
-            }
-        });
-    }
-
     let menu_rx = MenuEvent::receiver();
     let mut last_health = Instant::now();
 
@@ -194,10 +179,6 @@ fn run() -> Result<()> {
                     }
                 }
             }
-        }
-
-        if quit.load(Ordering::SeqCst) {
-            break;
         }
 
         thread::sleep(Duration::from_millis(50));
