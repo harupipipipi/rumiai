@@ -13,6 +13,7 @@ user_data/pack_staging/<staging_id>/payload/ に安全に展開する。
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import threading
@@ -41,6 +42,8 @@ class ImportResult:
     is_multi_pack: bool = False
     error: Optional[str] = None
     meta: Dict[str, Any] = field(default_factory=dict)
+    warnings: List[str] = field(default_factory=list)
+    build_commands: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -53,6 +56,8 @@ class ImportResult:
             "is_multi_pack": self.is_multi_pack,
             "error": self.error,
             "meta": self.meta,
+            "warnings": self.warnings,
+            "build_commands": self.build_commands,
         }
 
 
@@ -101,7 +106,8 @@ class PackImporter:
             else:
                 self._import_archive(src, payload_dir)
 
-            detected, is_multi = self._detect_packs(payload_dir)
+            detected, is_multi, det_warnings, det_build_cmds = \
+                self._detect_packs(payload_dir)
 
             meta = {
                 "staging_id": staging_id,
@@ -133,6 +139,8 @@ class PackImporter:
                 detected_pack_ids=detected,
                 is_multi_pack=is_multi,
                 meta=meta,
+                warnings=det_warnings,
+                build_commands=det_build_cmds,
             )
         except Exception as e:
             if staging_dir.exists():
@@ -237,7 +245,84 @@ class PackImporter:
                 with zf.open(info) as src_f, open(target, "wb") as dst_f:
                     shutil.copyfileobj(src_f, dst_f)
 
-    def _detect_packs(self, payload_dir: Path) -> Tuple[List[str], bool]:
+    # ------------------------------------------------------------------
+    # ecosystem.json validation (BUG-2-1)
+    # ------------------------------------------------------------------
+    _ECOSYSTEM_REQUIRED_FIELDS = ("pack_id", "version")
+
+    def _validate_ecosystem_json(
+        self, eco_path: Path,
+    ) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
+        """Validate ecosystem.json schema.
+
+        Required fields:
+          - pack_id  (str)
+          - version  (str)
+          - metadata.name (str)
+
+        Returns:
+            (valid, error_message, parsed_data)
+        """
+        logger = logging.getLogger(__name__)
+        try:
+            with open(eco_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except json.JSONDecodeError as e:
+            msg = f"ecosystem.json is not valid JSON: {eco_path} ({e})"
+            logger.warning(msg)
+            return False, msg, None
+        except OSError as e:
+            msg = f"Failed to read ecosystem.json: {eco_path} ({e})"
+            logger.warning(msg)
+            return False, msg, None
+
+        if not isinstance(data, dict):
+            msg = f"ecosystem.json root must be an object: {eco_path}"
+            logger.warning(msg)
+            return False, msg, None
+
+        # Check top-level required string fields
+        for key in self._ECOSYSTEM_REQUIRED_FIELDS:
+            if key not in data:
+                msg = f"ecosystem.json missing required field '{key}': {eco_path}"
+                logger.warning(msg)
+                return False, msg, None
+            if not isinstance(data[key], str):
+                msg = (
+                    f"ecosystem.json field '{key}' must be a string, "
+                    f"got {type(data[key]).__name__}: {eco_path}"
+                )
+                logger.warning(msg)
+                return False, msg, None
+
+        # Check metadata.name
+        metadata = data.get("metadata")
+        if not isinstance(metadata, dict) or "name" not in metadata:
+            msg = f"ecosystem.json missing required field 'metadata.name': {eco_path}"
+            logger.warning(msg)
+            return False, msg, None
+        if not isinstance(metadata["name"], str):
+            msg = (
+                f"ecosystem.json field 'metadata.name' must be a string, "
+                f"got {type(metadata['name']).__name__}: {eco_path}"
+            )
+            logger.warning(msg)
+            return False, msg, None
+
+        return True, None, data
+
+    def _detect_packs(
+        self, payload_dir: Path,
+    ) -> Tuple[List[str], bool, List[str], List[Dict[str, Any]]]:
+        """Detect packs in payload directory.
+
+        Returns:
+            (pack_ids, is_multi_pack, warnings, build_commands)
+        """
+        logger = logging.getLogger(__name__)
+        warnings: List[str] = []
+        build_commands: List[Dict[str, Any]] = []
+
         top_dirs = [d for d in payload_dir.iterdir() if d.is_dir()]
         if len(top_dirs) != 1:
             raise ValueError(
@@ -246,21 +331,56 @@ class PackImporter:
             )
         top_dir = top_dirs[0]
 
+        # --- helper: validate + extract build command ---
+        def _check_and_collect(eco_path: Path, pack_id: str) -> bool:
+            """Validate ecosystem.json and collect build commands.
+
+            Returns True if validation passed, False otherwise.
+            """
+            valid, err, data = self._validate_ecosystem_json(eco_path)
+            if not valid:
+                warnings.append(
+                    f"Pack '{pack_id}' skipped: {err}"
+                )
+                return False
+            # BUG-1-1: record build.command if present
+            runtime = data.get("runtime")
+            if isinstance(runtime, dict):
+                build = runtime.get("build")
+                if isinstance(build, dict):
+                    command = build.get("command")
+                    if isinstance(command, str) and command.strip():
+                        build_commands.append({
+                            "pack_id": pack_id,
+                            "command": command,
+                        })
+                        logger.info(
+                            "Build command found for pack '%s': %s. "
+                            "Will be executed after approval.",
+                            pack_id, command,
+                        )
+            return True
+
         packs_dir = top_dir / "packs"
         if packs_dir.is_dir():
             pack_ids = []
             for d in sorted(packs_dir.iterdir()):
                 if d.is_dir() and (d / "ecosystem.json").exists():
-                    pack_ids.append(d.name)
+                    if _check_and_collect(d / "ecosystem.json", d.name):
+                        pack_ids.append(d.name)
             if pack_ids:
-                return pack_ids, True
+                return pack_ids, True, warnings, build_commands
 
         if (top_dir / "ecosystem.json").exists():
-            return [top_dir.name], False
+            if _check_and_collect(top_dir / "ecosystem.json", top_dir.name):
+                return [top_dir.name], False, warnings, build_commands
+            # validation failed -> warning already recorded, fall through
 
         for d in sorted(top_dir.iterdir()):
             if d.is_dir() and (d / "ecosystem.json").exists():
-                return [top_dir.name], False
+                if _check_and_collect(d / "ecosystem.json", top_dir.name):
+                    return [top_dir.name], False, warnings, build_commands
+                # validation failed -> warning already recorded, continue
 
         raise ValueError(
             "No ecosystem.json found in payload. "
