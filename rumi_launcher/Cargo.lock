@@ -1678,6 +1678,7 @@ dependencies = [
  "log",
  "open",
  "reqwest",
+ "semver",
  "serde",
  "serde_json",
  "tar",
