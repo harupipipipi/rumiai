@@ -584,17 +584,17 @@ class Registry:
 
             # --- FunctionRegistry に登録 ---
             try:
-            # --- 施策4: Pack レベルの runtime をデフォルトとして注入 ---
-            if pack_runtime_type:
-                if "calling_convention" not in manifest:
-                    manifest["calling_convention"] = pack_runtime_type
-                if "runtime" not in manifest:
-                    if pack_runtime_type in ("binary", "command"):
-                        manifest["runtime"] = pack_runtime_type
-                if "docker_image" not in manifest and pack_runtime_docker_image:
-                    manifest["docker_image"] = pack_runtime_docker_image
-                if "host_execution" not in manifest and pack_host_execution_from_runtime:
-                    manifest["host_execution"] = True
+                # --- 施策4: Pack レベルの runtime をデフォルトとして注入 ---
+                if pack_runtime_type:
+                    if "calling_convention" not in manifest:
+                        manifest["calling_convention"] = pack_runtime_type
+                    if "runtime" not in manifest:
+                        if pack_runtime_type in ("binary", "command"):
+                            manifest["runtime"] = pack_runtime_type
+                    if "docker_image" not in manifest and pack_runtime_docker_image:
+                        manifest["docker_image"] = pack_runtime_docker_image
+                    if "host_execution" not in manifest and pack_host_execution_from_runtime:
+                        manifest["host_execution"] = True
 
                 func_registry.register(
                     pack_id=pack_info.pack_id,
