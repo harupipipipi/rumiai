@@ -1,5 +1,94 @@
 # Rumi AI OS — Roadmap
 
+## 🚀 Phase V: Rumi Viewer + Pack デスクトップアプリ化 [最重要・最優先]
+
+> **このフェーズは全ての他タスクに優先する。**
+> Rumi を「ターミナル不要のデスクトップアプリ」として配布可能にするための最重要マイルストーン。
+
+### アーキテクチャ概要
+
+**インストーラーの中身（ユーザーに配布されるもの）:**
+
+1. **Rumi Console**（rumi-launcher, Rust）— トレイ常駐。Kernel プロセス管理。ユーザーは普段意識しない。
+2. **Rumi Viewer**（Tauri）— Pack のフロントエンドを表示する汎用 WebView アプリ。ユーザーが日常使うメインアプリ。
+3. **bundled/uv** — Python 環境構築用。
+4. **app/**（rumi_ai_1_10/）— Kernel ソースコード。
+
+**Rumi Viewer とは:**
+- Tauri で作った汎用 WebView アプリ
+- Pack が `web_mount` で宣言したフロントエンド（HTML/CSS/JS）を表示する
+- Kernel API（localhost:8765）にのみ接続可能。外部サイトには行けない
+- Pack はフロントエンドファイルを渡すだけ。ホスト環境には触れない（sandbox WebView）
+- Pack のバックエンドは Docker コンテナ内で隔離されて動く
+- 「フロントエンド = sandbox WebView」+「バックエンド = Docker 隔離」で二重隔離
+
+**セキュリティモデル:**
+- Viewer に何かを表示するには `viewer:display` capability が必要（capability ベースの権限管理）
+- 権限さえあればどの Pack でも Viewer を使える
+- `core_viewer_capability` は `core_docker_capability` や `core_communication_capability` と同じ位置づけ
+- Pack が独自のデスクトップアプリ（Tauri/Electron 等）を提供することも可能だが、それは「危険な権限」（`desktop_app:execute`）として扱われ、明示的なユーザー承認が必要
+- ほとんどの Pack は安全な Viewer 経由を使うはず
+
+**ユーザー体験:**
+1. ユーザーがインストーラー（.dmg / .exe）でインストール
+2. Rumi Viewer をダブルクリック
+3. Rumi Console が自動起動 → Kernel が裏で起動
+4. Viewer に Control Panel が表示される
+5. Pack をインストール → Pack の AI チャット等のフロントエンドが Viewer 内に表示される
+6. ターミナルを一切触らない
+
+**起動フロー:**
+```
+Rumi Viewer 起動
+  → Kernel ヘルスチェック（localhost:8765/health）
+  → 未起動なら Rumi Console を自動起動
+  → Kernel ready を待機
+  → Viewer が localhost:8765/panel/ を WebView に表示
+  → ユーザーが Pack を選択 → Pack のフロントエンドに遷移
+```
+
+**競合・エラー処理:**
+- 競合、起動時エラーは Rumi Console（トレイアイコン）で表示・対処
+- Viewer はあくまで「表示するだけ」
+
+### TODO（実装順）
+
+**Phase V-1: Rumi Viewer（Tauri）新規作成** [最重要・最優先]
+- [ ] `rumi_viewer/` Tauri プロジェクト新規作成
+- [ ] Kernel ヘルスチェック + 自動起動（Rumi Console 経由）
+- [ ] WebView で localhost:8765/panel/ を表示
+- [ ] Pack 切替 UI（Viewer 内のナビゲーション）
+- [ ] Kernel API へのリクエストのみ許可（外部 URL ブロック）
+- [ ] ウィンドウ管理（複数 Pack を同時に開ける）
+
+**Phase V-2: core_viewer_capability 新規作成**
+- [ ] `core_runtime/core_pack/core_viewer_capability/` 新規作成
+- [ ] `viewer:display` capability 定義
+- [ ] Pack が Viewer にフロントエンドを表示するための Grant 管理
+- [ ] Viewer 用の pack_token 発行 API（`/api/viewer/token`）
+
+**Phase V-3: インストーラー統合**
+- [ ] Packager.toml に Rumi Viewer を追加
+- [ ] release.yml 更新（Viewer のビルドを追加）
+- [ ] インストーラーに Rumi Console + Rumi Viewer + bundled/uv + app/ を全て含める
+- [ ] macOS: .dmg に両方のアプリを含める
+- [ ] Windows: NSIS で両方インストール + スタートメニュー登録
+
+**Phase V-4: Pack デスクトップアプリ対応（オプション）**
+- [ ] ecosystem.json に `desktop_app` セクション追加
+- [ ] `desktop_app.command` で任意コマンドを宣言可能
+- [ ] `desktop_app:execute` capability（危険な権限、明示的承認必要）
+- [ ] pack-shell バイナリ（Kernel 自動起動 + token 取得 + コマンド実行）
+- [ ] .app / .lnk 生成（PackAppRegistrar）
+
+**Phase V-5: ドキュメント + テンプレート**
+- [ ] `docs/pack_desktop_app_guide.md` 新規作成
+- [ ] Tauri Pack テンプレートプロジェクト
+- [ ] サンプル Pack（AI チャットフロントエンド）
+
+---
+
+
 最終更新: 2026-02-24
 
 設計思想・過去案を含む完全版ロードマップです。設計の全体像は [architecture.md](architecture.md) を参照してください。
