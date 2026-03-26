@@ -31,10 +31,6 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "resources": {
-      "../../rumi_ai_1_10/": "app/",
-      "bundled/": "app/bundled/"
-    },
     "macOS": {
       "minimumSystemVersion": "11.0"
     },
