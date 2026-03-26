@@ -33,3 +33,5 @@ flow.iranai
 .backups/
 .backup_dead_code_removal/
 deploy.py
+**/target/
+rumi_ai_1_10/user_data/

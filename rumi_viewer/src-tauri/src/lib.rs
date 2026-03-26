@@ -21,14 +21,12 @@ use kernel_manager::KernelManager;
 pub struct SetupProgress(pub Arc<Mutex<String>>);
 
 /// Returns the current setup progress message.
-/// Called by splash/index.html via IPC polling.
 #[tauri::command]
 fn get_setup_progress(state: tauri::State<'_, SetupProgress>) -> String {
     state.0.lock().unwrap().clone()
 }
 
 /// Restart the Kernel process.
-/// Called from the tray menu's "Restart Kernel" item.
 #[tauri::command]
 fn restart_kernel(state: tauri::State<'_, Arc<Mutex<KernelManager>>>) -> Result<String, String> {
     let mut km = state.lock().map_err(|e| format!("lock error: {e}"))?;
@@ -41,10 +39,6 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        // Navigation guard ─────────────────────────────────────
-        // Production: allow  tauri://  and  http://localhost:8765
-        // Development: also allow the Tauri CLI built-in dev server
-        //              (http://localhost:<random-port>)
         .plugin(
             tauri::plugin::Builder::<tauri::Wry, ()>::new("nav-guard")
                 .on_navigation(|_webview, url| {
@@ -56,8 +50,6 @@ pub fn run() {
                         || (scheme == "http"
                             && host == "localhost"
                             && (port == Some(8765)
-                                // In debug builds, allow any localhost port
-                                // so the Tauri CLI built-in dev server works.
                                 || cfg!(debug_assertions)));
 
                     if !allowed {
@@ -68,7 +60,6 @@ pub fn run() {
                 .build(),
         )
         .setup(|app| {
-            // ── Path resolution ──
             let resource_dir = app
                 .path()
                 .resource_dir()
@@ -81,37 +72,29 @@ pub fn run() {
             let config = AppConfig::detect_for_tauri(resource_dir, app_data_dir)
                 .expect("failed to build AppConfig");
 
-            // Ensure directories exist
             std::fs::create_dir_all(&config.log_dir).ok();
             std::fs::create_dir_all(&config.user_data_dir).ok();
 
-            // ── State: setup progress ──
             let progress = SetupProgress(Arc::new(Mutex::new(
                 "Initializing...".to_string(),
             )));
             let progress_arc = progress.0.clone();
             app.manage(progress);
 
-            // ── State: kernel manager (created but NOT started yet) ──
             let km = Arc::new(Mutex::new(KernelManager::new(&config)));
             let km_for_thread = km.clone();
             app.manage(km);
 
-            // ── State: config ──
             app.manage(config.clone());
 
-            // ── Show the splash window ──
-            // tauri.conf.json defines it as visible:false; show it now.
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.show();
             }
 
-            // ── Kernel startup sequence (background thread) ──
             let handle = app.handle().clone();
             let port = config.kernel_port;
 
             std::thread::spawn(move || {
-                // Helper to update the progress string
                 let set_progress = |msg: &str| {
                     if let Ok(mut p) = progress_arc.lock() {
                         *p = msg.to_string();
@@ -119,7 +102,6 @@ pub fn run() {
                     info!("{msg}");
                 };
 
-                // 1. Python environment
                 set_progress("Checking Python environment...");
                 if let Err(e) = python_env::ensure_python_env(&config) {
                     let msg = format!("Error: Python setup failed — {e}");
@@ -128,7 +110,6 @@ pub fn run() {
                     return;
                 }
 
-                // 2. Start Kernel
                 set_progress("Starting Kernel...");
                 {
                     let mut km = km_for_thread.lock().unwrap();
@@ -140,7 +121,6 @@ pub fn run() {
                     }
                 }
 
-                // 3. Wait for Kernel health check
                 set_progress("Waiting for Kernel...");
                 if let Err(e) = health_check::wait_for_healthy(port, 60) {
                     let msg = format!("Error: Kernel health check failed — {e}");
@@ -149,7 +129,6 @@ pub fn run() {
                     return;
                 }
 
-                // 4. Ready — navigate to the Panel
                 set_progress("Ready");
 
                 if let Some(win) = handle.get_webview_window("main") {
@@ -162,7 +141,6 @@ pub fn run() {
                 }
             });
 
-            // ── Tray icon ──
             tray::setup_tray(app)?;
 
             Ok(())
