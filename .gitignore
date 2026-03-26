@@ -5,6 +5,7 @@
 !/.github/
 !/rumi_ai_1_10/
 !/rumi_launcher/
+!/rumi_viewer/
 !/tests/
 # === 共通の不要ファイル ===
 venv/
