@@ -43,7 +43,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         // Navigation guard: only allow tauri:// and http://localhost:8765
         .plugin(
-            tauri::plugin::Builder::new("nav-guard")
+            tauri::plugin::Builder::<tauri::Wry, ()>::new("nav-guard")
                 .on_navigation(|_webview, url| {
                     let scheme = url.scheme();
                     let host = url.host_str().unwrap_or("");

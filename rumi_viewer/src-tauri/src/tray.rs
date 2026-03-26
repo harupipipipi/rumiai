@@ -34,17 +34,17 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             "restart_kernel" => {
-                let km_state = app.state::<Arc<Mutex<KernelManager>>>();
-                if let Ok(mut km) = km_state.lock() {
-                    if let Err(e) = km.restart() {
+                let km = app.state::<Arc<Mutex<KernelManager>>>().inner().clone();
+                if let Ok(mut guard) = km.lock() {
+                    if let Err(e) = guard.restart() {
                         error!("Failed to restart kernel: {e}");
                     }
                 }
             }
             "quit" => {
-                let km_state = app.state::<Arc<Mutex<KernelManager>>>();
-                if let Ok(mut km) = km_state.lock() {
-                    let _ = km.stop();
+                let km = app.state::<Arc<Mutex<KernelManager>>>().inner().clone();
+                if let Ok(mut guard) = km.lock() {
+                    let _ = guard.stop();
                 }
                 app.exit(0);
             }
