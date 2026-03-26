@@ -1,0 +1,8 @@
+{
+  "version": "1.0",
+  "mounts": {
+    "data.user": "./user_data",
+    "data.settings": "./user_data/settings",
+    "data.cache": "./user_data/cache"
+  }
+}
