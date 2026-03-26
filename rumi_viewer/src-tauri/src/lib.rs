@@ -46,11 +46,12 @@ pub fn run() {
                     let host = url.host_str().unwrap_or("");
                     let port = url.port();
 
-                    let allowed = scheme == "tauri"
-                        || (scheme == "http"
-                            && host == "localhost"
-                            && (port == Some(8765)
-                                || cfg!(debug_assertions)));
+                    let is_tauri = scheme == "tauri";
+                    let is_local_http = scheme == "http"
+                        && (host == "localhost" || host == "127.0.0.1")
+                        && (port == Some(8765) || cfg!(debug_assertions));
+
+                    let allowed = is_tauri || is_local_http;
 
                     if !allowed {
                         log::warn!("Blocked navigation to: {url}");
