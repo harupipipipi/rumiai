@@ -5,20 +5,106 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Rumi AI</title>
   <style>
-    body {
+    * {
       margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: #1a1a2e;
+      color: #e0e0e0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                   Helvetica, Arial, sans-serif;
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
       height: 100vh;
-      background: #1a1a2e;
-      color: #e0e0e0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      overflow: hidden;
+      user-select: none;
     }
-    .loading { font-size: 1.5rem; }
+
+    .title {
+      font-size: 2.4rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      margin-bottom: 2rem;
+      color: #ffffff;
+    }
+
+    .spinner {
+      width: 48px;
+      height: 48px;
+      border: 4px solid rgba(255, 255, 255, 0.15);
+      border-top-color: #7c83ff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 2rem;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .progress {
+      font-size: 1rem;
+      color: #b0b0b0;
+      text-align: center;
+      min-height: 1.5em;
+      padding: 0 2rem;
+      transition: color 0.3s;
+    }
+
+    .progress.error {
+      color: #ff6b6b;
+    }
+
+    .progress.ready {
+      color: #69db7c;
+    }
   </style>
 </head>
 <body>
-  <div class="loading">Loading Rumi AI...</div>
+  <div class="title">Rumi AI</div>
+  <div class="spinner" id="spinner"></div>
+  <div class="progress" id="progress">Initializing...</div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      var el = document.getElementById('progress');
+      var spinner = document.getElementById('spinner');
+
+      function poll() {
+        // Wait until Tauri IPC is available
+        if (!window.__TAURI__ || !window.__TAURI__.core) {
+          setTimeout(poll, 500);
+          return;
+        }
+
+        window.__TAURI__.core.invoke('get_setup_progress')
+          .then(function (msg) {
+            el.textContent = msg;
+            el.className = 'progress';
+
+            if (msg.indexOf('Error') === 0) {
+              el.className = 'progress error';
+              spinner.style.display = 'none';
+            } else if (msg === 'Ready') {
+              el.className = 'progress ready';
+              spinner.style.display = 'none';
+            }
+          })
+          .catch(function (err) {
+            el.textContent = 'IPC error: ' + err;
+            el.className = 'progress error';
+          });
+
+        setTimeout(poll, 1000);
+      }
+
+      poll();
+    });
+  </script>
 </body>
 </html>
