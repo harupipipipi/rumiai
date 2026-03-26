@@ -1,3 +1,10 @@
+> **⚠️ 非推奨 (Deprecated)**
+>
+> このディレクトリは非推奨です。全機能は `rumi_viewer/` (Tauri v2) に統合されました。
+> 今後の変更は `rumi_viewer/` に対して行ってください。
+
+---
+
 # rumi_launcher
 
 Native launcher for **Rumi AI OS**. Written in Rust.
