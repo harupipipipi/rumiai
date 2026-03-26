@@ -11,6 +11,12 @@ use tauri::{
 
 use crate::kernel_manager::KernelManager;
 
+/// Helper: clone the Arc<Mutex<KernelManager>> out of Tauri State.
+/// This avoids lifetime issues with the temporary State borrow.
+fn get_km(app: &tauri::AppHandle) -> Arc<Mutex<KernelManager>> {
+    Arc::clone(app.state::<Arc<Mutex<KernelManager>>>().inner())
+}
+
 /// Build and register the system-tray icon with Open / Restart Kernel / Quit.
 pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let open_i = MenuItem::with_id(app, "open", "Open", true, None::<&str>)?;
@@ -34,17 +40,23 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             "restart_kernel" => {
-                let km = app.state::<Arc<Mutex<KernelManager>>>().inner().clone();
-                if let Ok(mut guard) = km.lock() {
-                    if let Err(e) = guard.restart() {
-                        error!("Failed to restart kernel: {e}");
+                let km = get_km(app);
+                match km.lock() {
+                    Ok(mut guard) => {
+                        if let Err(e) = guard.restart() {
+                            error!("Failed to restart kernel: {e}");
+                        }
                     }
+                    Err(e) => error!("KernelManager lock poisoned: {e}"),
                 }
             }
             "quit" => {
-                let km = app.state::<Arc<Mutex<KernelManager>>>().inner().clone();
-                if let Ok(mut guard) = km.lock() {
-                    let _ = guard.stop();
+                let km = get_km(app);
+                match km.lock() {
+                    Ok(mut guard) => {
+                        let _ = guard.stop();
+                    }
+                    Err(e) => error!("KernelManager lock poisoned: {e}"),
                 }
                 app.exit(0);
             }
