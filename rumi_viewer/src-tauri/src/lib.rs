@@ -41,17 +41,25 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        // Navigation guard: only allow tauri:// and http://localhost:8765
+        // Navigation guard ─────────────────────────────────────
+        // Production: allow  tauri://  and  http://localhost:8765
+        // Development: also allow the Tauri CLI built-in dev server
+        //              (http://localhost:<random-port>)
         .plugin(
             tauri::plugin::Builder::<tauri::Wry, ()>::new("nav-guard")
                 .on_navigation(|_webview, url| {
                     let scheme = url.scheme();
                     let host = url.host_str().unwrap_or("");
                     let port = url.port();
+
                     let allowed = scheme == "tauri"
-                        || scheme == "http"
+                        || (scheme == "http"
                             && host == "localhost"
-                            && port == Some(8765);
+                            && (port == Some(8765)
+                                // In debug builds, allow any localhost port
+                                // so the Tauri CLI built-in dev server works.
+                                || cfg!(debug_assertions)));
+
                     if !allowed {
                         log::warn!("Blocked navigation to: {url}");
                     }
