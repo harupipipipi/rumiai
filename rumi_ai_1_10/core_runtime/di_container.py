@@ -368,6 +368,11 @@ def _register_defaults(container: DIContainer) -> None:
         return DockerCapabilityHandler()
 
 
+
+    # --- Wave V2: Viewer capability ---
+    def _viewer_capability_handler_factory() -> "ViewerCapabilityHandler":  # noqa: F821
+        from .viewer_capability import ViewerCapabilityHandler
+        return ViewerCapabilityHandler()
     # --- Wave 24: FunctionRegistry ---
     def _function_registry_factory() -> "FunctionRegistry":  # noqa: F821
         from .function_registry import FunctionRegistry
@@ -407,4 +412,5 @@ def _register_defaults(container: DIContainer) -> None:
     container.register("metrics_collector", _metrics_collector_factory)
     container.register("profiler", _profiler_factory)
     container.register("docker_capability_handler", _docker_capability_handler_factory)
+    container.register("viewer_capability_handler", _viewer_capability_handler_factory)
     container.register("function_registry", _function_registry_factory)
