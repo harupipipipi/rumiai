@@ -1,0 +1,26 @@
+{
+  "pack_id": "core_viewer_capability",
+  "pack_identity": "core:rumi/viewer-capability",
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": []
+  },
+  "metadata": {
+    "name": "Core Viewer Capability",
+    "description": "Rumi AI OS core pack that provides Viewer display capability. Packs request viewer.display via capability system and Rumi manages display grants and token issuance for the Tauri Viewer.",
+    "author": "Rumi AI Team",
+    "license": "MIT",
+    "is_core_pack": true
+  },
+  "dependencies": {},
+  "components": {},
+  "pre_auth_routes": [],
+  "api_routes": [
+    {
+      "method": "POST",
+      "path": "/api/viewer/token",
+      "handler": "_viewer_issue_token",
+      "pass_body": true
+    }
+  ]
+}

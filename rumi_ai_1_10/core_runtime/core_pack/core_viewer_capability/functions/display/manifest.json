@@ -1,0 +1,61 @@
+{
+  "function_id": "display",
+  "description": "Viewer にフロントエンドを表示する",
+  "requires": [
+    "viewer.display"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "tags": [
+    "viewer",
+    "display",
+    "frontend"
+  ],
+  "vocab_aliases": [
+    "viewer.display"
+  ],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "pack_id": {
+        "type": "string",
+        "description": "Pack ID whose frontend to display"
+      },
+      "route": {
+        "type": "string",
+        "description": "Optional route path within the pack frontend",
+        "default": "/"
+      }
+    },
+    "required": [
+      "pack_id"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "web_mount_url": {
+        "type": "string",
+        "description": "URL path prefix for the pack frontend"
+      },
+      "token": {
+        "type": "string",
+        "description": "Short-lived access token for the Viewer"
+      },
+      "expires_in": {
+        "type": "integer",
+        "description": "Token expiry in seconds"
+      }
+    },
+    "required": [
+      "web_mount_url",
+      "token",
+      "expires_in"
+    ]
+  },
+  "grant_config": {
+    "allowed_packs": [],
+    "max_token_lifetime": 3600
+  },
+  "calling_convention": "block"
+}
