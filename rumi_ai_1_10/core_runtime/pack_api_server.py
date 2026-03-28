@@ -55,6 +55,7 @@ from .api import (
     ControlPanelHandlersMixin,
     OAuthHandlersMixin,
     ViewerHandlersMixin,
+    DesktopHandlersMixin,
 )
 from .api._helpers import _log_internal_error, _SAFE_ERROR_MSG
 
@@ -162,6 +163,7 @@ class PackAPIHandler(
     ControlPanelHandlersMixin,
     OAuthHandlersMixin,
     ViewerHandlersMixin,
+    DesktopHandlersMixin,
     BaseHTTPRequestHandler,
 ):
     approval_manager = None

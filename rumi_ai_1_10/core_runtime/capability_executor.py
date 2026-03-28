@@ -263,6 +263,7 @@ class CapabilityExecutor:
                 self._core_function_handlers = (
                     (_permissions_config or {}).get("core_function_handlers", {
                         "core_docker_capability": "docker_capability_handler",
+                        "core_desktop_capability": "desktop_capability_handler",
                     })
                 ).copy()
 

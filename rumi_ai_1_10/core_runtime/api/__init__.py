@@ -16,7 +16,9 @@ from .flow_handlers import FlowHandlersMixin
 from .route_handlers import RouteHandlersMixin
 from .control_panel_handlers import ControlPanelHandlersMixin
 from .oauth_handlers import OAuthHandlersMixin
-from .viewer_handlers import ViewerHandlersMixinfrom .security import (
+from .viewer_handlers import ViewerHandlersMixin
+from .desktop_handlers import DesktopHandlersMixin
+from .security import (
     CapabilityGrantHandlersMixin,
     CapabilityInstallerHandlersMixin,
     NetworkHandlersMixin,
@@ -53,4 +55,6 @@ __all__ = [
     "PackLifecycleHandlersMixin",
     "ControlPanelHandlersMixin",
     "OAuthHandlersMixin",
-    "ViewerHandlersMixin",]
+    "ViewerHandlersMixin",
+    "DesktopHandlersMixin",
+]
