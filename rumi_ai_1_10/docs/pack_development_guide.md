@@ -87,7 +87,6 @@ my_pack/
 | dependencies | object | — | 依存する他の Pack |
 | components | object | — | コンポーネント定義 |
 | runtime | object | — | ランタイム設定（多言語 Pack 用。詳細は multilang_pack_guide.md を参照） |
-- [Pack デスクトップアプリ開発ガイド](pack_desktop_app_guide.md) — デスクトップアプリ対応の Pack を開発する方法
 
 ### 2.3 Function マニフェスト
 
@@ -343,4 +342,5 @@ echo '{"context":{"principal_id":"test","pack_id":"my_pack","function_id":"my_fu
 ## 関連ドキュメント
 
 - [多言語 Pack 開発ガイド](multilang_pack_guide.md) — Python 以外の言語で Pack を開発する方法
+- [Pack デスクトップアプリ開発ガイド](pack_desktop_app_guide.md) — デスクトップアプリ対応の Pack を開発する方法
 - [セットアップ & デスクトップ配布 TODO](setuptodo.md) — Rumi AI OS 全体のロードマップ
