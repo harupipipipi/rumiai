@@ -1,0 +1,74 @@
+{
+  "pack_id": "example_viewer_pack",
+  "pack_identity": "examples:rumi/viewer-example-pack",
+  "version": "0.1.0",
+  "metadata": {
+    "name": "Viewer Example Pack",
+    "description": "Rumi AI OS の viewer:display capability 使用例。Pack フロントエンドを Rumi Viewer に表示するサンプルです。",
+    "author": "Rumi AI Team",
+    "license": "MIT",
+    "is_core_pack": false
+  },
+  "vocabulary": {
+    "types": []
+  },
+  "dependencies": {},
+  "components": {},
+  "web_mount": {
+    "path": "/example-viewer-pack/",
+    "directory": "web"
+  },
+  "functions": {
+    "request_display": {
+      "description": "Rumi Viewer にフロントエンドの表示を要求する",
+      "calling_convention": "block",
+      "vocab_aliases": [
+        "viewer.display"
+      ],
+      "requires": [
+        "viewer.display"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "route": {
+            "type": "string",
+            "description": "Pack フロントエンド内のルートパス",
+            "default": "/"
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "web_mount_url": {
+            "type": "string",
+            "description": "Pack フロントエンドの URL パスプレフィックス"
+          },
+          "token": {
+            "type": "string",
+            "description": "Viewer 用の短寿命アクセストークン"
+          },
+          "expires_in": {
+            "type": "integer",
+            "description": "トークンの有効期限（秒）"
+          }
+        },
+        "required": [
+          "web_mount_url",
+          "token",
+          "expires_in"
+        ]
+      },
+      "tags": [
+        "example",
+        "viewer",
+        "display"
+      ],
+      "grant_config": {
+        "allowed_packs": [],
+        "max_token_lifetime": 3600
+      }
+    }
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "function_id": "request_display",
+  "description": "Rumi Viewer にフロントエンドの表示を要求する",
+  "requires": [
+    "viewer.display"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "tags": [
+    "example",
+    "viewer",
+    "display"
+  ],
+  "vocab_aliases": [
+    "viewer.display"
+  ],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "route": {
+        "type": "string",
+        "description": "Pack フロントエンド内のルートパス",
+        "default": "/"
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "web_mount_url": {
+        "type": "string",
+        "description": "Pack フロントエンドの URL パスプレフィックス"
+      },
+      "token": {
+        "type": "string",
+        "description": "Viewer 用の短寿命アクセストークン"
+      },
+      "expires_in": {
+        "type": "integer",
+        "description": "トークンの有効期限（秒）"
+      }
+    },
+    "required": [
+      "web_mount_url",
+      "token",
+      "expires_in"
+    ]
+  },
+  "grant_config": {
+    "allowed_packs": [],
+    "max_token_lifetime": 3600
+  },
+  "calling_convention": "block"
+}
