@@ -87,6 +87,7 @@ my_pack/
 | dependencies | object | — | 依存する他の Pack |
 | components | object | — | コンポーネント定義 |
 | runtime | object | — | ランタイム設定（多言語 Pack 用。詳細は multilang_pack_guide.md を参照） |
+- [Pack デスクトップアプリ開発ガイド](pack_desktop_app_guide.md) — デスクトップアプリ対応の Pack を開発する方法
 
 ### 2.3 Function マニフェスト
 
