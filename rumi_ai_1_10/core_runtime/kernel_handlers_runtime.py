@@ -1800,3 +1800,33 @@ class KernelRuntimeHandlersMixin:
                 "packs_pending": summary.get("packs", {}).get("pending_count", 0),
             },
         }
+
+    # ------------------------------------------------------------------
+    # desktop handlers (Phase V-4)
+    # ------------------------------------------------------------------
+
+    def _h_desktop_launch(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """kernel:desktop.launch — Pack のデスクトップアプリを起動する。"""
+        pack_id = args.get("pack_id", "")
+        if not pack_id:
+            return {"success": False, "error": "Missing pack_id"}
+        try:
+            from .desktop_app_manager import DesktopAppManager
+            manager = DesktopAppManager()
+            result = manager.launch_app(pack_id)
+            return {"success": result.get("success", False), "data": result}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _h_desktop_stop(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        """kernel:desktop.stop — Pack のデスクトップアプリを停止する。"""
+        pack_id = args.get("pack_id", "")
+        if not pack_id:
+            return {"success": False, "error": "Missing pack_id"}
+        try:
+            from .desktop_app_manager import DesktopAppManager
+            manager = DesktopAppManager()
+            result = manager.stop_app(pack_id)
+            return {"success": result.get("success", False), "data": result}
+        except Exception as e:
+            return {"success": False, "error": str(e)}

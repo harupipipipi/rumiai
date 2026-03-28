@@ -935,6 +935,24 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
             "required": ["_kernel_step_status"],
         },
     },
+    "kernel:desktop.launch": {
+        "description": "Launch a desktop app for a Pack",
+        "permission_id": "kernel:desktop.launch",
+        "risk": "high",
+        "requires": [],
+        "tags": ["kernel", "runtime", "desktop"],
+        "input_schema": {"type": "object", "properties": {"pack_id": {"type": "string"}}, "required": ["pack_id"]},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
+    },
+    "kernel:desktop.stop": {
+        "description": "Stop a running desktop app for a Pack",
+        "permission_id": "kernel:desktop.stop",
+        "risk": "medium",
+        "requires": [],
+        "tags": ["kernel", "runtime", "desktop"],
+        "input_schema": {"type": "object", "properties": {"pack_id": {"type": "string"}}, "required": ["pack_id"]},
+        "output_schema": {"type": "object", "properties": {"_kernel_step_status": {"type": "string", "enum": ["success", "failed"]}, "_kernel_step_meta": {"type": "object"}}, "required": ["_kernel_step_status"]},
+    },
 }
 
 # Phase B-1: _EXPECTED_HANDLER_KEYS derived from _KERNEL_HANDLER_MANIFESTS (原則 D)
