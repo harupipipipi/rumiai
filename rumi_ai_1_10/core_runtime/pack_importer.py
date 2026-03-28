@@ -309,6 +309,31 @@ class PackImporter:
             logger.warning(msg)
             return False, msg, None
 
+        # --- desktop_app section (optional) ---
+        desktop_app = data.get("desktop_app")
+        if desktop_app is not None:
+            if not isinstance(desktop_app, dict):
+                msg = f"[{pack_id}] 'desktop_app' must be a dict"
+                return False, msg, None
+            da_command = desktop_app.get("command")
+            if da_command is None or not isinstance(da_command, str):
+                msg = f"[{pack_id}] 'desktop_app.command' is required and must be a string"
+                return False, msg, None
+            if not da_command.strip():
+                msg = f"[{pack_id}] 'desktop_app.command' must not be empty"
+                return False, msg, None
+            for opt_key, opt_type, opt_label in [
+                ("working_dir", str, "string"),
+                ("env", dict, "dict"),
+                ("capabilities", list, "list"),
+                ("window", dict, "dict"),
+                ("platforms", list, "list"),
+            ]:
+                opt_val = desktop_app.get(opt_key)
+                if opt_val is not None and not isinstance(opt_val, opt_type):
+                    msg = f"[{pack_id}] 'desktop_app.{opt_key}' must be a {opt_label}"
+                    return False, msg, None
+
         return True, None, data
 
     def _detect_packs(

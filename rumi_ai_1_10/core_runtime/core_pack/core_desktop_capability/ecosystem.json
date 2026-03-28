@@ -1,0 +1,26 @@
+{
+  "pack_id": "core_desktop_capability",
+  "pack_identity": "core:rumi/desktop-capability",
+  "version": "1.0.0",
+  "vocabulary": {
+    "types": []
+  },
+  "metadata": {
+    "name": "Core Desktop App Capability",
+    "description": "Rumi AI OS core pack that provides desktop_app:execute capability. Packs request desktop_app.execute via capability system and Rumi manages execution grants and token issuance for Pack Shell desktop applications.",
+    "author": "Rumi AI Team",
+    "license": "MIT",
+    "is_core_pack": true
+  },
+  "dependencies": {},
+  "components": {},
+  "pre_auth_routes": [],
+  "api_routes": [
+    {
+      "method": "POST",
+      "path": "/api/desktop/token",
+      "handler": "_desktop_issue_token",
+      "pass_body": true
+    }
+  ]
+}

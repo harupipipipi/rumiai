@@ -1,0 +1,64 @@
+{
+  "function_id": "execute",
+  "description": "デスクトップアプリケーションを起動・管理する",
+  "requires": [
+    "desktop_app.execute"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "tags": [
+    "desktop",
+    "app",
+    "execute"
+  ],
+  "vocab_aliases": [
+    "desktop_app.execute"
+  ],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "pack_id": {
+        "type": "string",
+        "description": "Pack ID whose desktop app to execute"
+      },
+      "action": {
+        "type": "string",
+        "description": "Action to perform: launch, stop, status",
+        "default": "launch",
+        "enum": ["launch", "stop", "status"]
+      }
+    },
+    "required": [
+      "pack_id"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "token": {
+        "type": "string",
+        "description": "Short-lived access token for the desktop app"
+      },
+      "port": {
+        "type": "integer",
+        "description": "WebSocket port for pack-shell communication"
+      },
+      "expires_in": {
+        "type": "integer",
+        "description": "Token expiry in seconds"
+      }
+    },
+    "required": [
+      "token",
+      "port",
+      "expires_in"
+    ]
+  },
+  "grant_config": {
+    "permission_id": "desktop_app:execute",
+    "dangerous": true,
+    "allowed_packs": [],
+    "max_token_lifetime": 3600
+  },
+  "calling_convention": "block"
+}
