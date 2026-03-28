@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Viewer Hello Pack</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                   "Helvetica Neue", Arial, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+    .container {
+      max-width: 640px;
+      width: 100%;
+      text-align: center;
+    }
+    h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+      background: linear-gradient(135deg, #38bdf8, #818cf8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .subtitle {
+      color: #94a3b8;
+      margin-bottom: 2rem;
+      font-size: 0.95rem;
+    }
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+      text-align: left;
+    }
+    .card h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #38bdf8;
+      margin-bottom: 0.75rem;
+    }
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #475569;
+    }
+    .status-dot.ok {
+      background: #22c55e;
+    }
+    .status-dot.error {
+      background: #ef4444;
+    }
+    .status-dot.loading {
+      background: #eab308;
+      animation: pulse 1s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    .status-text {
+      font-size: 0.875rem;
+      color: #cbd5e1;
+    }
+    #api-result {
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 1rem;
+      font-family: "SF Mono", "Fira Code", monospace;
+      font-size: 0.8rem;
+      color: #94a3b8;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    button {
+      background: linear-gradient(135deg, #38bdf8, #818cf8);
+      color: #0f172a;
+      border: none;
+      border-radius: 8px;
+      padding: 0.6rem 1.5rem;
+      font-size: 0.875rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s;
+      margin-top: 0.75rem;
+    }
+    button:hover {
+      opacity: 0.85;
+    }
+    button:active {
+      opacity: 0.7;
+    }
+    .footer {
+      margin-top: 2rem;
+      font-size: 0.75rem;
+      color: #475569;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Hello, Rumi Viewer!</h1>
+    <p class="subtitle">このページは Rumi Viewer 内に表示されています</p>
+
+    <div class="card">
+      <h2>Kernel API 接続テスト</h2>
+      <div class="status">
+        <div class="status-dot loading" id="status-dot"></div>
+        <span class="status-text" id="status-text">接続を確認中...</span>
+      </div>
+      <button onclick="RumiApp.testConnection()">再テスト</button>
+    </div>
+
+    <div class="card">
+      <h2>API レスポンス</h2>
+      <div id="api-result">まだリクエストを送信していません。</div>
+      <button onclick="RumiApp.fetchHealthCheck()">Health Check を実行</button>
+    </div>
+
+    <p class="footer">viewer_hello_pack v0.1.0 — Rumi AI OS サンプル Pack</p>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+{
+  "pack_id": "viewer_hello_pack",
+  "pack_identity": "examples:rumi/viewer-hello-pack",
+  "version": "0.1.0",
+  "metadata": {
+    "name": "Viewer Hello Pack",
+    "description": "Rumi AI OS の Viewer 表示サンプル。viewer:display capability を使って Viewer に Hello World フロントエンドを表示します。",
+    "author": "Rumi AI Team",
+    "license": "MIT",
+    "is_core_pack": false
+  },
+  "vocabulary": {
+    "types": []
+  },
+  "dependencies": {},
+  "components": {},
+  "capabilities": [
+    "viewer.display"
+  ],
+  "web_mount": "web",
+  "functions": {}
+}
