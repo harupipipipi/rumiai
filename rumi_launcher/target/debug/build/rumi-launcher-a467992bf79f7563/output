@@ -1,3 +1,0 @@
-cargo:rerun-if-changed=assets/icon.png
-cargo:rerun-if-changed=Packager.toml
-cargo:rerun-if-changed=build.rs

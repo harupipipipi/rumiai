@@ -1,10 +1,8 @@
 # === git root (rumi_ai/) 用 ===
-# rumi_ai_1_10/ と rumi_launcher/ 以外は全て無視
 /*
 !.gitignore
 !/.github/
 !/rumi_ai_1_10/
-!/rumi_launcher/
 !/rumi_viewer/
 !/pack-shell/
 !/tests/
