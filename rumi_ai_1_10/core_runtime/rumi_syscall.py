@@ -39,6 +39,12 @@ DEFAULT_SOCKET_PATH = "/run/rumi/egress.sock"
 # 環境変数でオーバーライド可能
 SOCKET_PATH = os.environ.get("RUMI_EGRESS_SOCKET", DEFAULT_SOCKET_PATH)
 
+# BUG-5-1: TCP fallback environment variables
+EGRESS_HOST = os.environ.get("RUMI_EGRESS_HOST", "")
+EGRESS_PORT = int(os.environ.get("RUMI_EGRESS_PORT", "0") or "0")
+EGRESS_TOKEN = os.environ.get("RUMI_EGRESS_TOKEN", "")
+_TCP_MODE = bool(EGRESS_HOST and EGRESS_PORT)
+
 # プロトコル定数
 MAX_RESPONSE_SIZE = 4 * 1024 * 1024  # 4MB
 DEFAULT_TIMEOUT = 30.0
@@ -132,30 +138,52 @@ def http_request(
     
     sock = None
     try:
-        # UDSに接続
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.settimeout(timeout + 5)  # プロキシ処理時間を考慮
-        
-        try:
-            sock.connect(sock_path)
-        except FileNotFoundError:
-            return {
-                "success": False,
-                "error": f"Egress proxy socket not found: {sock_path}",
-                "error_type": "socket_not_found",
-            }
-        except PermissionError:
-            return {
-                "success": False,
-                "error": f"Permission denied to egress proxy socket: {sock_path}",
-                "error_type": "permission_denied",
-            }
-        except ConnectionRefusedError:
-            return {
-                "success": False,
-                "error": f"Connection refused to egress proxy: {sock_path}",
-                "error_type": "connection_refused",
-            }
+        # BUG-5-1: TCP fallback connection
+        if _TCP_MODE:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout + 5)
+            try:
+                sock.connect((EGRESS_HOST, EGRESS_PORT))
+            except ConnectionRefusedError:
+                return {
+                    "success": False,
+                    "error": f"Connection refused to egress proxy: {EGRESS_HOST}:{EGRESS_PORT}",
+                    "error_type": "connection_refused",
+                }
+            # TCP 認証ハンドシェイク
+            _write_length_prefixed_json(sock, {"auth_token": EGRESS_TOKEN})
+            auth_resp = _read_length_prefixed_json(sock, 65536)
+            if not auth_resp or not auth_resp.get("auth_ok"):
+                auth_err = auth_resp.get("error", "Unknown auth error") if auth_resp else "No auth response"
+                return {
+                    "success": False,
+                    "error": f"Egress proxy auth failed: {auth_err}",
+                    "error_type": "auth_failed",
+                }
+        else:
+            # UDSに接続
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.settimeout(timeout + 5)  # プロキシ処理時間を考慮
+            try:
+                sock.connect(sock_path)
+            except FileNotFoundError:
+                return {
+                    "success": False,
+                    "error": f"Egress proxy socket not found: {sock_path}",
+                    "error_type": "socket_not_found",
+                }
+            except PermissionError:
+                return {
+                    "success": False,
+                    "error": f"Permission denied to egress proxy socket: {sock_path}",
+                    "error_type": "permission_denied",
+                }
+            except ConnectionRefusedError:
+                return {
+                    "success": False,
+                    "error": f"Connection refused to egress proxy: {sock_path}",
+                    "error_type": "connection_refused",
+                }
         
         # リクエスト送信
         _write_length_prefixed_json(sock, request)

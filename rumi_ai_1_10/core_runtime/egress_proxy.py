@@ -89,6 +89,10 @@ from .egress_domain_controller import (  # noqa: F401 — re-export
     DomainController,
     _ECOSYSTEM_DIR,
 )
+# BUG-5-1: IPC 認証 (Windows TCP フォールバック)
+from .ipc_auth import IpcAuthManager, perform_server_auth  # noqa: F401
+
+
 
 
 # ============================================================
@@ -635,6 +639,8 @@ class UDSSocketManager:
     def __init__(self):
         self._base_dir: Optional[Path] = None
         self._active_sockets: Dict[str, Path] = {}
+        # BUG-5-1: TCP port management
+        self._tcp_ports: Dict[str, int] = {}
         self._lock = threading.Lock()
 
     def _get_base_dir(self) -> Path:
@@ -728,6 +734,22 @@ class UDSSocketManager:
                 except Exception:
                     pass
 
+    # BUG-5-1: TCP port management methods
+    def get_port(self, pack_id: str) -> Optional[int]:
+        """Pack の TCP ポート番号を取得"""
+        with self._lock:
+            return self._tcp_ports.get(pack_id)
+
+    def set_port(self, pack_id: str, port: int) -> None:
+        """Pack の TCP ポート番号を設定"""
+        with self._lock:
+            self._tcp_ports[pack_id] = port
+
+    def clear_port(self, pack_id: str) -> None:
+        """Pack の TCP ポート番号をクリア"""
+        with self._lock:
+            self._tcp_ports.pop(pack_id, None)
+
     def get_base_dir_path(self) -> Path:
         """ベースディレクトリパスを取得"""
         return self._get_base_dir()
@@ -756,16 +778,16 @@ class UDSEgressServer:
         self._max_workers = int(os.environ.get("RUMI_EGRESS_MAX_WORKERS", "20"))
         self._executor: Optional[concurrent.futures.ThreadPoolExecutor] = None
         self._worker_semaphore: Optional[threading.Semaphore] = None
+        # BUG-5-1: TCP fallback params
+        self._is_tcp = False
+        self._tcp_port: Optional[int] = None
+        self._ipc_auth: Optional["IpcAuthManager"] = None
 
     def start(self) -> bool:
         """サーバーを起動"""
         if _IS_WINDOWS:
-            import logging as _logging
-            _logging.getLogger(__name__).warning(
-                "UDSEgressServer.start() skipped: "
-                "Unix domain sockets not available on Windows."
-            )
-            return False
+            # BUG-5-1: TCP fallback for Windows
+            return self._start_tcp()
         with self._lock:
             if self._running:
                 return True
@@ -884,10 +906,81 @@ class UDSEgressServer:
                 if self._running:
                     print(f"[UDSEgressServer] Accept error for {self.pack_id}: {e}")
 
+    def _start_tcp(self) -> bool:
+        """Windows TCP フォールバック: TCP localhost サーバーを起動 (BUG-5-1)"""
+        try:
+            self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self._server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self._server_socket.bind(("127.0.0.1", 0))
+            self._tcp_port = self._server_socket.getsockname()[1]
+            self._server_socket.listen(5)
+            self._server_socket.settimeout(1.0)
+            self._is_tcp = True
+
+            self._running = True
+            self._executor = concurrent.futures.ThreadPoolExecutor(
+                max_workers=self._max_workers,
+                thread_name_prefix=f"egress-tcp-{self.pack_id[:16]}",
+            )
+            self._worker_semaphore = threading.Semaphore(self._max_workers)
+            self._thread = threading.Thread(target=self._serve_forever, daemon=True)
+            self._thread.start()
+
+            print(f"[UDSEgressServer] TCP started for pack '{self.pack_id}' on port {self._tcp_port}")
+            return True
+        except Exception as e:
+            print(f"[UDSEgressServer] TCP start failed for {self.pack_id}: {e}")
+            self._cleanup()
+            return False
+
+    def _handle_client_tcp(self, client_sock: socket.socket) -> None:
+        """TCP クライアント: 認証後に _handle_client に委譲 (BUG-5-1)"""
+        try:
+            if self._ipc_auth is None:
+                try:
+                    client_sock.close()
+                except Exception:
+                    pass
+                return
+
+            authed_pack_id = perform_server_auth(client_sock, self._ipc_auth)
+            if authed_pack_id is None:
+                try:
+                    client_sock.close()
+                except Exception:
+                    pass
+                return
+
+            if authed_pack_id != self.pack_id:
+                try:
+                    write_length_prefixed_json(client_sock, {
+                        "success": False,
+                        "error": "Pack ID mismatch",
+                        "error_type": "auth_error",
+                    })
+                except Exception:
+                    pass
+                try:
+                    client_sock.close()
+                except Exception:
+                    pass
+                return
+
+            self._handle_client(client_sock)
+        except Exception:
+            try:
+                client_sock.close()
+            except Exception:
+                pass
+
     def _handle_client_pooled(self, client_sock: socket.socket) -> None:
         """スレッドプール用クライアントハンドラ (セマフォ解放付き) (#33)"""
         try:
-            self._handle_client(client_sock)
+            # BUG-5-1: TCP auth delegation
+            if self._is_tcp:
+                self._handle_client_tcp(client_sock)
+            else:
+                self._handle_client(client_sock)
         finally:
             self._worker_semaphore.release()
 
@@ -967,6 +1060,8 @@ class UDSEgressProxyManager:
         self._lock = threading.Lock()
         self._rate_limiter = PackRateLimiter()
         self._domain_controller = DomainController()
+        # BUG-5-1: IPC auth manager
+        self._ipc_auth = IpcAuthManager() if _IS_WINDOWS else None
 
     def set_network_grant_manager(self, manager) -> None:
         """NetworkGrantManagerを設定"""
@@ -999,6 +1094,10 @@ class UDSEgressProxyManager:
     def ensure_pack_socket(self, pack_id: str) -> Tuple[bool, str, Optional[Path]]:
         """Pack用のソケットを確保しサーバーを起動"""
         with self._lock:
+            # BUG-5-1: Windows TCP fallback
+            if _IS_WINDOWS:
+                return self._ensure_pack_tcp(pack_id)
+
             # 既に起動済みならそのまま返す
             if pack_id in self._servers:
                 server = self._servers[pack_id]
@@ -1026,6 +1125,52 @@ class UDSEgressProxyManager:
             self._servers[pack_id] = server
             return True, "", sock_path
 
+    def _ensure_pack_tcp(self, pack_id: str) -> Tuple[bool, str, Optional[Path]]:
+        """Windows TCP フォールバック: TCP サーバーを起動 (BUG-5-1)"""
+        if pack_id in self._servers:
+            server = self._servers[pack_id]
+            if server._tcp_port is not None:
+                return True, "", None
+            self._servers[pack_id].stop()
+            del self._servers[pack_id]
+
+        if self._ipc_auth is None:
+            self._ipc_auth = IpcAuthManager()
+        self._ipc_auth.generate_token(pack_id)
+
+        success, error, sock_path = self._socket_manager.ensure_socket(pack_id)
+        # Windows ではソケットファイル不要。失敗しても続行。
+
+        server = UDSEgressServer(
+            pack_id=pack_id,
+            socket_path=sock_path or Path("."),
+            network_grant_manager=self._network_grant_manager,
+            audit_logger=self._audit_logger,
+            rate_limiter=self._rate_limiter,
+            domain_controller=self._domain_controller,
+        )
+        server._ipc_auth = self._ipc_auth
+
+        if not server.start():
+            return False, f"Failed to start TCP server for {pack_id}", None
+
+        self._servers[pack_id] = server
+        self._socket_manager.set_port(pack_id, server._tcp_port)
+        return True, "", None
+
+    def get_auth_token(self, pack_id: str) -> Optional[str]:
+        """Pack の認証トークンを取得 (BUG-5-1)"""
+        if self._ipc_auth is None:
+            return None
+        return self._ipc_auth.get_token(pack_id)
+
+    def get_tcp_port(self, pack_id: str) -> Optional[int]:
+        """Pack の TCP ポート番号を取得 (BUG-5-1)"""
+        with self._lock:
+            if pack_id in self._servers:
+                return self._servers[pack_id]._tcp_port
+            return None
+
     def get_socket_path(self, pack_id: str) -> Optional[Path]:
         """Pack用ソケットパスを取得（存在する場合）"""
         with self._lock:
@@ -1040,6 +1185,10 @@ class UDSEgressProxyManager:
                 self._servers[pack_id].stop()
                 del self._servers[pack_id]
             self._socket_manager.cleanup_socket(pack_id)
+            # BUG-5-1: TCP cleanup
+            self._socket_manager.clear_port(pack_id)
+            if self._ipc_auth is not None:
+                self._ipc_auth.revoke_token(pack_id)
 
     def stop_all(self) -> None:
         """全サーバーを停止"""

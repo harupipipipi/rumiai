@@ -39,6 +39,10 @@ from typing import Any, Dict, List, Optional, Tuple
 MAX_REQUEST_SIZE = 4 * 1024 * 1024
 MAX_RESPONSE_SIZE = 1 * 1024 * 1024
 
+# BUG-5-1: IPC 認証 (Windows TCP フォールバック)
+from .ipc_auth import IpcAuthManager, perform_server_auth
+
+
 _IS_WINDOWS = sys.platform == "win32"
 
 _UNSAFE_CHARS = re.compile(r'[/\\:*?"<>|.\x00-\x1f]')
@@ -270,6 +274,84 @@ else:
                 "Capability proxy requires Linux/macOS."
             )
 
+    # BUG-5-1: Windows TCP フォールバック
+    import socketserver as _ss_tcp
+
+    class _TCPPrincipalHandler(_ss_tcp.BaseRequestHandler):
+        """TCP 版の principal ハンドラ (認証付き) (BUG-5-1)"""
+
+        def handle(self):
+            ipc_auth = getattr(self.server, "_ipc_auth", None)
+            executor = getattr(self.server, "capability_executor", None)
+
+            if ipc_auth is None:
+                return
+            pack_id = perform_server_auth(self.request, ipc_auth)
+            if pack_id is None:
+                return
+
+            expected_principal = getattr(self.server, "principal_id", None)
+            if expected_principal and pack_id != expected_principal:
+                try:
+                    error_resp = {
+                        "success": False,
+                        "error": "Principal ID mismatch",
+                        "error_type": "auth_error",
+                        "latency_ms": 0,
+                    }
+                    resp_bytes = json.dumps(error_resp, ensure_ascii=False).encode("utf-8")
+                    _write_length_prefixed(self.request, resp_bytes)
+                except Exception:
+                    pass
+                return
+
+            try:
+                raw = _read_length_prefixed(self.request, MAX_REQUEST_SIZE)
+                request_data = json.loads(raw.decode("utf-8"))
+            except (ConnectionError, json.JSONDecodeError, ValueError):
+                error_resp = {
+                    "success": False,
+                    "error": "Invalid request",
+                    "error_type": "protocol_error",
+                    "latency_ms": 0,
+                }
+                try:
+                    resp_bytes = json.dumps(error_resp, ensure_ascii=False).encode("utf-8")
+                    _write_length_prefixed(self.request, resp_bytes)
+                except Exception:
+                    pass
+                return
+
+            response = executor.execute(pack_id, request_data)
+            resp_dict = response.to_dict()
+            resp_bytes = json.dumps(resp_dict, ensure_ascii=False, default=str).encode("utf-8")
+
+            if len(resp_bytes) > MAX_RESPONSE_SIZE:
+                resp_dict = {
+                    "success": False,
+                    "error": "Response too large",
+                    "error_type": "response_too_large",
+                    "output": None,
+                    "latency_ms": response.latency_ms,
+                }
+                resp_bytes = json.dumps(resp_dict, ensure_ascii=False).encode("utf-8")
+
+            try:
+                _write_length_prefixed(self.request, resp_bytes)
+            except Exception:
+                pass
+
+    class _ThreadedTCPServer(_ss_tcp.ThreadingMixIn, _ss_tcp.TCPServer):
+        """Windows TCP フォールバック用サーバー (BUG-5-1)"""
+        daemon_threads = True
+        allow_reuse_address = True
+
+        def __init__(self, port, handler_class, principal_id, capability_executor, ipc_auth):
+            self.principal_id = principal_id
+            self.capability_executor = capability_executor
+            self._ipc_auth = ipc_auth
+            super().__init__(("127.0.0.1", port), handler_class)
+
 
 # ============================================================
 # Host Capability Proxy Server
@@ -301,6 +383,9 @@ class HostCapabilityProxyServer:
         self._base_dir: Optional[Path] = None
         self._executor = None
         self._initialized = False
+        # BUG-5-1: IPC auth manager
+        self._ipc_auth: Optional[IpcAuthManager] = IpcAuthManager() if _IS_WINDOWS else None
+        self._tcp_ports: Dict[str, int] = {}
 
     def _now_ts(self) -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -360,12 +445,8 @@ class HostCapabilityProxyServer:
             (success, error, socket_path)
         """
         if _IS_WINDOWS:
-            import logging as _logging
-            _logging.getLogger(__name__).warning(
-                "HostCapabilityProxyServer.ensure_principal_socket() skipped: "
-                "Unix domain sockets not available on Windows."
-            )
-            return False, "Unix domain sockets not available on Windows", None
+            # BUG-5-1: Windows TCP fallback
+            return self._ensure_principal_tcp(principal_id)
         with self._lock:
             if not self._initialized:
                 if not self.initialize():
@@ -408,6 +489,59 @@ class HostCapabilityProxyServer:
             except Exception as e:
                 return False, f"Failed to start capability server: {e}", None
 
+    def _ensure_principal_tcp(self, principal_id: str) -> Tuple[bool, Optional[str], Optional[Path]]:
+        """Windows TCP フォールバック (BUG-5-1)"""
+        with self._lock:
+            if not self._initialized:
+                if not self.initialize():
+                    return False, "Capability proxy failed to initialize", None
+
+            if principal_id in self._servers:
+                port = self._tcp_ports.get(principal_id)
+                if port is not None:
+                    return True, None, None
+
+            if self._ipc_auth is None:
+                self._ipc_auth = IpcAuthManager()
+            self._ipc_auth.generate_token(principal_id)
+
+            try:
+                server = _ThreadedTCPServer(
+                    0,
+                    _TCPPrincipalHandler,
+                    principal_id,
+                    self._executor,
+                    self._ipc_auth,
+                )
+                port = server.server_address[1]
+
+                thread = threading.Thread(
+                    target=server.serve_forever,
+                    name=f"capability-tcp-{principal_id[:16]}",
+                    daemon=True,
+                )
+                thread.start()
+
+                self._servers[principal_id] = server
+                self._threads[principal_id] = thread
+                self._tcp_ports[principal_id] = port
+
+                return True, None, None
+
+            except Exception as e:
+                return False, f"Failed to start TCP capability server: {e}", None
+
+    def get_auth_token(self, principal_id: str) -> Optional[str]:
+        """principal の認証トークンを取得 (BUG-5-1)"""
+        if self._ipc_auth is None:
+            return None
+        return self._ipc_auth.get_token(principal_id)
+
+    def get_tcp_port(self, principal_id: str) -> Optional[int]:
+        """principal の TCP ポート番号を取得 (BUG-5-1)"""
+        with self._lock:
+            return self._tcp_ports.get(principal_id)
+
     def stop_principal(self, principal_id: str) -> None:
         """principal_id のサーバーを停止"""
         with self._lock:
@@ -417,6 +551,10 @@ class HostCapabilityProxyServer:
         """内部: サーバー停止"""
         server = self._servers.pop(principal_id, None)
         thread = self._threads.pop(principal_id, None)
+        # BUG-5-1: TCP cleanup
+        self._tcp_ports.pop(principal_id, None)
+        if self._ipc_auth is not None:
+            self._ipc_auth.revoke_token(principal_id)
 
         if server:
             try:

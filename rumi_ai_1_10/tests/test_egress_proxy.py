@@ -600,3 +600,100 @@ class TestIsIpLiteral:
 
     def test_empty_string(self):
         assert _is_ip_literal("") is False
+
+
+# ======================================================================
+# BUG-5-1: TCP Fallback Tests
+# ======================================================================
+
+class TestTCPFallback:
+    """Windows TCP フォールバックのテスト (BUG-5-1)"""
+
+    def test_uds_socket_manager_tcp_port_management(self, tmp_path, monkeypatch):
+        """UDSSocketManager の TCP ポート管理"""
+        monkeypatch.setenv("RUMI_EGRESS_SOCK_DIR", str(tmp_path))
+        mgr = UDSSocketManager()
+        assert mgr.get_port("pack_a") is None
+        mgr.set_port("pack_a", 12345)
+        assert mgr.get_port("pack_a") == 12345
+        mgr.clear_port("pack_a")
+        assert mgr.get_port("pack_a") is None
+
+    def test_uds_egress_server_tcp_start_on_windows(self, tmp_path, monkeypatch):
+        """Windows 時に TCP サーバーが起動する"""
+        monkeypatch.setattr("core_runtime.egress_proxy._IS_WINDOWS", True)
+        from core_runtime.egress_proxy import UDSEgressServer
+        from core_runtime.ipc_auth import IpcAuthManager
+
+        auth_mgr = IpcAuthManager()
+        auth_mgr.generate_token("test_pack_tcp")
+
+        server = UDSEgressServer(
+            pack_id="test_pack_tcp",
+            socket_path=tmp_path / "dummy.sock",
+            network_grant_manager=None,
+            audit_logger=None,
+        )
+        server._ipc_auth = auth_mgr
+        started = server.start()
+
+        try:
+            if started:
+                assert server._is_tcp is True
+                assert server._tcp_port is not None
+                assert server._tcp_port > 0
+        finally:
+            if started:
+                server.stop()
+
+    def test_tcp_auth_reject_invalid_token(self, tmp_path, monkeypatch):
+        """TCP サーバーが不正トークンを拒否する"""
+        monkeypatch.setattr("core_runtime.egress_proxy._IS_WINDOWS", True)
+        import socket as _socket
+        import struct as _struct
+        import json as _json
+        from core_runtime.egress_proxy import UDSEgressServer
+        from core_runtime.ipc_auth import IpcAuthManager
+
+        auth_mgr = IpcAuthManager()
+        auth_mgr.generate_token("test_pack_reject")
+
+        server = UDSEgressServer(
+            pack_id="test_pack_reject",
+            socket_path=tmp_path / "dummy.sock",
+            network_grant_manager=None,
+            audit_logger=None,
+        )
+        server._ipc_auth = auth_mgr
+        started = server.start()
+
+        try:
+            if started:
+                client = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+                client.settimeout(5)
+                client.connect(("127.0.0.1", server._tcp_port))
+                try:
+                    auth_msg = _json.dumps({"auth_token": "wrong_token"}).encode("utf-8")
+                    client.sendall(_struct.pack(">I", len(auth_msg)) + auth_msg)
+
+                    length_data = b""
+                    while len(length_data) < 4:
+                        chunk = client.recv(4 - len(length_data))
+                        if not chunk:
+                            break
+                        length_data += chunk
+                    if len(length_data) == 4:
+                        length = _struct.unpack(">I", length_data)[0]
+                        resp_data = b""
+                        while len(resp_data) < length:
+                            chunk = client.recv(length - len(resp_data))
+                            if not chunk:
+                                break
+                            resp_data += chunk
+                        resp = _json.loads(resp_data.decode("utf-8"))
+                        assert resp["auth_ok"] is False
+                finally:
+                    client.close()
+        finally:
+            if started:
+                server.stop()

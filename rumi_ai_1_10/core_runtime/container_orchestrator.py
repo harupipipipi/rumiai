@@ -12,6 +12,7 @@ import json
 import logging
 import subprocess
 import threading
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -99,14 +100,27 @@ class ContainerOrchestrator:
                 builder.label("rumi.pack_id", pack_id)
                 builder.label("rumi.managed", "true")
 
+                # BUG-5-1: Windows needs bridge network for TCP
+                if sys.platform == "win32":
+                    builder.network("bridge")
+
                 # Egress UDS ソケットマウント
                 try:
                     from .egress_proxy import get_uds_egress_proxy_manager
                     _egress_mgr = get_uds_egress_proxy_manager()
                     _ok, _err, _egress_sock = _egress_mgr.ensure_pack_socket(pack_id)
-                    if _ok and _egress_sock:
-                        builder.volume(f"{_egress_sock}:/run/rumi/egress.sock:rw")
-                        builder.env("RUMI_EGRESS_SOCKET", "/run/rumi/egress.sock")
+                    if _ok:
+                        if sys.platform == "win32":
+                            # BUG-5-1: Windows TCP egress fallback
+                            _egress_port = _egress_mgr.get_tcp_port(pack_id)
+                            _egress_token = _egress_mgr.get_auth_token(pack_id)
+                            if _egress_port and _egress_token:
+                                builder.env("RUMI_EGRESS_HOST", "host.docker.internal")
+                                builder.env("RUMI_EGRESS_PORT", str(_egress_port))
+                                builder.env("RUMI_EGRESS_TOKEN", _egress_token)
+                        elif _egress_sock:
+                            builder.volume(f"{_egress_sock}:/run/rumi/egress.sock:rw")
+                            builder.env("RUMI_EGRESS_SOCKET", "/run/rumi/egress.sock")
                 except Exception as e:
                     logger.warning("Failed to mount egress socket for %s: %s", pack_id, e)
 
@@ -115,9 +129,18 @@ class ContainerOrchestrator:
                     from .capability_proxy import get_capability_proxy
                     _cap_proxy = get_capability_proxy()
                     _cap_ok, _cap_err, _cap_sock = _cap_proxy.ensure_principal_socket(pack_id)
-                    if _cap_ok and _cap_sock:
-                        builder.volume(f"{_cap_sock}:/run/rumi/capability.sock:rw")
-                        builder.env("RUMI_CAPABILITY_SOCKET", "/run/rumi/capability.sock")
+                    if _cap_ok:
+                        if sys.platform == "win32":
+                            # BUG-5-1: Windows TCP capability fallback
+                            _cap_port = _cap_proxy.get_tcp_port(pack_id)
+                            _cap_token = _cap_proxy.get_auth_token(pack_id)
+                            if _cap_port and _cap_token:
+                                builder.env("RUMI_CAPABILITY_HOST", "host.docker.internal")
+                                builder.env("RUMI_CAPABILITY_PORT", str(_cap_port))
+                                builder.env("RUMI_CAPABILITY_TOKEN", _cap_token)
+                        elif _cap_sock:
+                            builder.volume(f"{_cap_sock}:/run/rumi/capability.sock:rw")
+                            builder.env("RUMI_CAPABILITY_SOCKET", "/run/rumi/capability.sock")
                 except Exception as e:
                     logger.warning("Failed to mount capability socket for %s: %s", pack_id, e)
 
