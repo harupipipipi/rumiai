@@ -62,9 +62,9 @@ pub fn check_for_update() -> Result<Option<UpdateInfo>> {
 }
 
 /// Open the release page in the user's default browser.
-///
-/// V1 stub — V2 will use Tauri's shell plugin to open the URL.
-pub fn open_release_page(_info: &UpdateInfo) -> Result<()> {
+pub fn open_release_page(info: &UpdateInfo) -> Result<()> {
+    open::that_detached(&info.release_url)
+        .context("failed to open release page in browser")?;
     Ok(())
 }
 
