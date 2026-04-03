@@ -20,6 +20,7 @@ from __future__ import annotations
 import collections
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -173,6 +174,48 @@ class _HandlerDefAdapter:
     handler_dir: Path
     handler_py_path: Path
     is_builtin: bool = False
+
+
+
+def _sanitize_error(msg: str) -> str:
+    """stderr/エラーメッセージからファイルパス・トレースバック・環境変数情報を除去する。
+
+    RUMI_ENVIRONMENT=development の場合はサニタイズをスキップし、
+    開発時のデバッグ情報を維持する。
+    """
+    if os.environ.get("RUMI_ENVIRONMENT", "").lower() == "development":
+        return msg
+    # トレースバック行: File "/path/to/file.py", line 123
+    msg = re.sub(r'File ".*?", line \d+.*', '<traceback>', msg)
+    # ファイルパス: /foo/bar/baz or C:\foo\bar
+    msg = re.sub(r'(?:[A-Za-z]:)?[/\\\\](?:[\w.\-]+[/\\\\]){2,}[\w.\-]*', '<path>', msg)
+    # 環境変数: FOO_BAR= 形式
+    msg = re.sub(r'[A-Z_]{3,}=\S*', '<env>', msg)
+    return msg
+
+
+
+# --- secure temp directory ---
+_SECURE_TMP_DIR: Optional[Path] = None
+_secure_tmp_lock = threading.Lock()
+
+
+def _get_secure_tmp_dir() -> str:
+    """user_data/tmp/ 配下に安全な一時ディレクトリを返す（パーミッション 0700）。
+
+    ディレクトリが存在しない場合は作成する。
+    """
+    global _SECURE_TMP_DIR
+    if _SECURE_TMP_DIR is not None and _SECURE_TMP_DIR.is_dir():
+        return str(_SECURE_TMP_DIR)
+    with _secure_tmp_lock:
+        if _SECURE_TMP_DIR is not None and _SECURE_TMP_DIR.is_dir():
+            return str(_SECURE_TMP_DIR)
+        base = Path(__file__).resolve().parent.parent / "user_data" / "tmp"
+        base.mkdir(parents=True, exist_ok=True)
+        os.chmod(str(base), 0o700)
+        _SECURE_TMP_DIR = base
+        return str(_SECURE_TMP_DIR)
 
 
 def _summarize_args(args: Any, max_length: int = MAX_ARGS_SUMMARY_LENGTH) -> str:
@@ -704,6 +747,9 @@ if __name__ == "__main__":
             return self._execute_user_function_docker(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time, timeout=timeout)
         else:
             logger.warning("Docker not available, falling back to host subprocess for user function %s:%s.", pack_id, function_id)
+            allow_fallback = os.environ.get("RUMI_ALLOW_HOST_FALLBACK", "").lower()
+            if allow_fallback not in ("1", "true"):
+                return CapabilityResponse(success=False, error="Docker is not available and host fallback is disabled. Set RUMI_ALLOW_HOST_FALLBACK=1 to enable.", error_type="docker_unavailable", latency_ms=(time.time() - start_time) * 1000)
             return self._execute_user_function_host(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time, timeout=timeout)
 
     def _execute_user_function_docker(self, principal_id, entry, args, request_id, start_time, timeout):
@@ -716,8 +762,11 @@ if __name__ == "__main__":
         runner_script = self._generate_function_runner_script()
         input_file = None
         try:
-            with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as f:
-                f.write(input_json); input_file = f.name
+            fd, input_file = tempfile.mkstemp(suffix=".json", dir=_get_secure_tmp_dir())
+            try:
+                os.write(fd, input_json.encode("utf-8"))
+            finally:
+                os.close(fd)
             builder = _DockerRunBuilder(name=container_name)
             builder.volume(f"{function_dir.resolve()}:/function:ro"); builder.volume(f"{input_file}:/input.json:ro")
             builder.env("RUMI_PACK_ID", pack_id); builder.env("RUMI_FUNCTION_ID", function_id)
@@ -727,7 +776,7 @@ if __name__ == "__main__":
             proc = subprocess.run(builder.build(), capture_output=True, text=True, timeout=timeout)
             latency_ms = (time.time() - start_time) * 1000
             if proc.returncode != 0:
-                return CapabilityResponse(success=False, error=f"Function execution failed (exit {proc.returncode}): {(proc.stderr or '').strip()}"[:1000], error_type="function_execution_error", latency_ms=latency_ms)
+                return CapabilityResponse(success=False, error=_sanitize_error(f"Function execution failed (exit {proc.returncode}): {(proc.stderr or '').strip()}"[:1000]), error_type="function_execution_error", latency_ms=latency_ms)
             stdout = proc.stdout or ""
             if len(stdout.encode("utf-8")) > MAX_RESPONSE_SIZE:
                 return CapabilityResponse(success=False, error="Response too large", error_type="response_too_large", latency_ms=latency_ms)
@@ -754,12 +803,15 @@ if __name__ == "__main__":
         input_json = json.dumps({"context": context, "args": args, "main_py_path": str(entry.main_py_path)}, ensure_ascii=False, default=str)
         runner_file = None
         try:
-            with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as f:
-                f.write(self._generate_function_runner_script()); runner_file = f.name
+            fd, runner_file = tempfile.mkstemp(suffix=".py", dir=_get_secure_tmp_dir())
+            try:
+                os.write(fd, self._generate_function_runner_script().encode("utf-8"))
+            finally:
+                os.close(fd)
             proc = subprocess.run([sys.executable, runner_file], input=input_json, capture_output=True, text=True, timeout=timeout, cwd=str(Path(entry.function_dir)))
             latency_ms = (time.time() - start_time) * 1000
             if proc.returncode != 0:
-                return CapabilityResponse(success=False, error=f"Function execution failed (exit {proc.returncode}): {(proc.stderr or '').strip()}"[:1000], error_type="function_execution_error", latency_ms=latency_ms)
+                return CapabilityResponse(success=False, error=_sanitize_error(f"Function execution failed (exit {proc.returncode}): {(proc.stderr or '').strip()}"[:1000]), error_type="function_execution_error", latency_ms=latency_ms)
             stdout = proc.stdout or ""
             if len(stdout.encode("utf-8")) > MAX_RESPONSE_SIZE:
                 return CapabilityResponse(success=False, error="Response too large", error_type="response_too_large", latency_ms=latency_ms)
@@ -793,12 +845,15 @@ if __name__ == "__main__":
         input_json = json.dumps({"context": context, "args": args, "main_py_path": str(main_py_path)}, ensure_ascii=False, default=str)
         runner_file = None
         try:
-            with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as f:
-                f.write(self._generate_function_runner_script()); runner_file = f.name
+            fd, runner_file = tempfile.mkstemp(suffix=".py", dir=_get_secure_tmp_dir())
+            try:
+                os.write(fd, self._generate_function_runner_script().encode("utf-8"))
+            finally:
+                os.close(fd)
             proc = subprocess.run([sys.executable, runner_file], input=input_json, capture_output=True, text=True, timeout=timeout, cwd=str(Path(function_dir)))
             latency_ms = (time.time() - start_time) * 1000
             if proc.returncode != 0:
-                return CapabilityResponse(success=False, error=f"Function execution failed (exit {proc.returncode}): {(proc.stderr or '').strip()}"[:1000], error_type="function_execution_error", latency_ms=latency_ms)
+                return CapabilityResponse(success=False, error=_sanitize_error(f"Function execution failed (exit {proc.returncode}): {(proc.stderr or '').strip()}"[:1000]), error_type="function_execution_error", latency_ms=latency_ms)
             stdout = proc.stdout or ""
             if len(stdout.encode("utf-8")) > MAX_RESPONSE_SIZE:
                 return CapabilityResponse(success=False, error="Response too large", error_type="response_too_large", latency_ms=latency_ms)
@@ -857,7 +912,7 @@ if __name__ == "__main__":
             proc = subprocess.run([str(binary_path)], input=input_json, capture_output=True, text=True, timeout=timeout, cwd=str(func_dir))
             latency_ms = (time.time() - start_time) * 1000
             if proc.returncode != 0:
-                return CapabilityResponse(success=False, error=f"Binary exited {proc.returncode}: {(proc.stderr or '').strip()[:500]}", error_type="function_execution_error", latency_ms=latency_ms)
+                return CapabilityResponse(success=False, error=_sanitize_error(f"Binary exited {proc.returncode}: {(proc.stderr or '').strip()[:500]}"), error_type="function_execution_error", latency_ms=latency_ms)
             stdout = (proc.stdout or "").strip()
             if not stdout: return CapabilityResponse(success=True, output=None, latency_ms=latency_ms)
             if len(stdout.encode("utf-8")) > MAX_RESPONSE_SIZE:
@@ -871,9 +926,18 @@ if __name__ == "__main__":
             return CapabilityResponse(success=False, error=f"Execution error: {e}", error_type="internal_error", latency_ms=(time.time() - start_time) * 1000)
 
     def _execute_command_function(self, principal_id, entry, args, request_id, start_time):
+        # Security: RUMI_ALLOW_HOST_EXECUTION guard (symmetric with _execute_host_function)
+        allow_host = os.environ.get("RUMI_ALLOW_HOST_EXECUTION", "").lower()
+        if allow_host not in ("1", "true"):
+            return CapabilityResponse(success=False, error="Host execution is disabled. Set RUMI_ALLOW_HOST_EXECUTION=1 to enable.", error_type="host_execution_disabled", latency_ms=(time.time() - start_time) * 1000)
         command = getattr(entry, 'command', [])
         if not command or not isinstance(command, list):
             return CapabilityResponse(success=False, error="No command defined for runtime=command", error_type="invalid_config", latency_ms=(time.time() - start_time) * 1000)
+        # Security: path traversal check (symmetric with _execute_binary_function)
+        func_dir = Path(entry.function_dir).resolve() if entry.function_dir else None
+        if func_dir and Path(command[0]).is_absolute():
+            if not Path(command[0]).resolve().is_relative_to(func_dir):
+                return CapabilityResponse(success=False, error="Command path escapes function directory", error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
         timeout = self._get_function_timeout(entry)
         context = {"principal_id": principal_id, "pack_id": entry.pack_id, "function_id": entry.function_id, "request_id": request_id, "ts": self._now_ts()}
         input_json = json.dumps({"context": context, "args": args}, ensure_ascii=False, default=str)
@@ -882,7 +946,7 @@ if __name__ == "__main__":
             proc = subprocess.run(command, input=input_json, capture_output=True, text=True, timeout=timeout, cwd=str(func_dir) if func_dir else None)
             latency_ms = (time.time() - start_time) * 1000
             if proc.returncode != 0:
-                return CapabilityResponse(success=False, error=f"Command exited {proc.returncode}: {(proc.stderr or '').strip()[:500]}", error_type="function_execution_error", latency_ms=latency_ms)
+                return CapabilityResponse(success=False, error=_sanitize_error(f"Command exited {proc.returncode}: {(proc.stderr or '').strip()[:500]}"), error_type="function_execution_error", latency_ms=latency_ms)
             stdout = (proc.stdout or "").strip()
             if not stdout: return CapabilityResponse(success=True, output=None, latency_ms=latency_ms)
             if len(stdout.encode("utf-8")) > MAX_RESPONSE_SIZE:
@@ -962,8 +1026,11 @@ if __name__ == "__main__":
         runner_script = self._generate_runner_script(handler_py_path=str(handler_py_path), func_name=ep_func)
         runner_file = None
         try:
-            with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as f:
-                f.write(runner_script); runner_file = f.name
+            fd, runner_file = tempfile.mkstemp(suffix=".py", dir=_get_secure_tmp_dir())
+            try:
+                os.write(fd, runner_script.encode("utf-8"))
+            finally:
+                os.close(fd)
             input_json = json.dumps({"context": context, "args": args}, ensure_ascii=False, default=str)
             proc = subprocess.run([sys.executable, runner_file], input=input_json, capture_output=True, text=True, timeout=timeout_seconds,
                                   cwd=str(Path(__file__).parent.parent) if getattr(handler_def, "is_builtin", False) else str(handler_def.handler_dir))
