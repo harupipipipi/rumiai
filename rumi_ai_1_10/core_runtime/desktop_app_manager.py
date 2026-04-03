@@ -133,15 +133,22 @@ class DesktopAppManager:
             if not pack_shell:
                 return {"success": False, "error": "pack-shell binary not found"}
 
+        command = meta.get("command", "")
+        if not command:
+            return {"success": False, "error": f"No command configured for app: {pack_id}"}
+
         env = dict(os.environ)
         env.update(meta.get("env", {}))
         env["RUMI_PACK_ID"] = pack_id
+        api_token = os.environ.get("RUMI_API_TOKEN", "")
+        if api_token:
+            env["RUMI_API_TOKEN"] = api_token
 
         working_dir = meta.get("working_dir") or meta.get("pack_dir", "")
 
         try:
             proc = subprocess.Popen(
-                [pack_shell, "--pack-id", pack_id],
+                [pack_shell, "run", pack_id, "--command", command],
                 cwd=working_dir or None,
                 env=env,
                 stdout=subprocess.DEVNULL,
@@ -261,7 +268,8 @@ class DesktopAppManager:
 
         # 実行ファイル
         launch_path = os.path.join(macos_dir, "launch")
-        launch_script = f'#!/bin/bash\nexec "{pack_shell}" --pack-id "{pack_id}"\n'
+        command = config.get("command", "")
+        launch_script = f'#!/bin/bash\nexec "{pack_shell}" run "{pack_id}" --command "{command}"\n'
         with open(launch_path, "w", encoding="utf-8") as f:
             f.write(launch_script)
         os.chmod(
@@ -281,6 +289,7 @@ class DesktopAppManager:
         """Windows .lnk ショートカットを PowerShell で生成する。"""
         app_name = config.get("window", {}).get("title", pack_id)
         safe_name = app_name.replace("/", "_").replace(" ", "_")
+        command = config.get("command", "")
 
         if self._apps_dir:
             lnk_dir = self._apps_dir
@@ -293,7 +302,7 @@ class DesktopAppManager:
             f'$ws = New-Object -ComObject WScript.Shell; '
             f'$s = $ws.CreateShortcut("{lnk_path}"); '
             f'$s.TargetPath = "{pack_shell}"; '
-            f'$s.Arguments = "--pack-id {pack_id}"; '
+            f'$s.Arguments = "run {pack_id} --command ""{command}"""; '
             f'$s.WorkingDirectory = "{pack_dir}"; '
             f'$s.Save()'
         )
@@ -319,6 +328,7 @@ class DesktopAppManager:
         """Linux .desktop ファイルを生成する。"""
         app_name = config.get("window", {}).get("title", pack_id)
         safe_name = app_name.replace("/", "_").replace(" ", "_")
+        command = config.get("command", "")
 
         desktop_dir = os.path.expanduser("~/.local/share/applications")
         os.makedirs(desktop_dir, exist_ok=True)
@@ -328,7 +338,7 @@ class DesktopAppManager:
             "[Desktop Entry]\n"
             "Type=Application\n"
             f"Name={app_name}\n"
-            f'Exec="{pack_shell}" --pack-id "{pack_id}"\n'
+            f'Exec="{pack_shell}" run "{pack_id}" --command "{command}"\n'
             f"Path={pack_dir}\n"
             "Terminal=false\n"
             "Categories=Utility;\n"
