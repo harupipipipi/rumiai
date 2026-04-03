@@ -1,0 +1,278 @@
+"""
+test_capability_executor_security.py - CapabilityExecutor セキュリティ修正のユニットテスト
+
+対象: core_runtime/capability_executor.py (Wave 1-1 〜 1-4)
+pytest ベース。mock/monkeypatch で環境変数を制御。
+"""
+from __future__ import annotations
+
+import os
+import sys
+import json
+import time
+import tempfile
+from pathlib import Path
+from unittest.mock import MagicMock, patch, PropertyMock
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
+import pytest
+
+_project_root = Path(__file__).resolve().parent.parent
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+
+from core_runtime.capability_executor import (
+    CapabilityExecutor,
+    CapabilityResponse,
+    _sanitize_error,
+    _get_secure_tmp_dir,
+)
+
+
+# ---------------------------------------------------------------------------
+# テスト用 FunctionEntry モック
+# ---------------------------------------------------------------------------
+@dataclass
+class _MockFunctionEntry:
+    """FunctionEntry の必要フィールドを模倣"""
+    pack_id: str = "test_pack"
+    function_id: str = "test_func"
+    qualified_name: str = "test_pack.test_func"
+    function_dir: Optional[str] = "/tmp/test_func_dir"
+    main_py_path: Optional[str] = "/tmp/test_func_dir/main.py"
+    main_binary_path: Optional[str] = None
+    entrypoint: Optional[str] = "main.py:run"
+    calling_convention: Optional[str] = None
+    runtime: str = "python"
+    host_execution: bool = False
+    manifest: Optional[Dict] = None
+    grant_config: Optional[Dict] = None
+    vocab_aliases: Optional[List[str]] = None
+    requires: Optional[List[str]] = None
+    caller_requires: Optional[List[str]] = None
+    docker_image: str = ""
+    command: Optional[List[str]] = None
+
+    def __post_init__(self):
+        if self.manifest is None:
+            self.manifest = {}
+        if self.vocab_aliases is None:
+            self.vocab_aliases = []
+
+
+def _make_test_executor() -> CapabilityExecutor:
+    """テスト用 CapabilityExecutor を生成"""
+    executor = CapabilityExecutor()
+    executor._initialized = True
+    executor._trust_store = MagicMock()
+    executor._grant_manager = MagicMock()
+    executor._function_registry = MagicMock()
+    executor._approval_manager = None
+    executor._permission_manager = None
+    return executor
+
+
+# ===========================================================================
+# Wave 1-1: Docker 未使用時フォールバック禁止
+# ===========================================================================
+class TestDockerFallbackBlocked:
+    """RUMI_ALLOW_HOST_FALLBACK 未設定時にフォールバックがブロックされること"""
+
+    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    def test_fallback_blocked_without_env(self, mock_audit, monkeypatch):
+        """RUMI_ALLOW_HOST_FALLBACK 未設定 → docker_unavailable エラー"""
+        monkeypatch.delenv("RUMI_ALLOW_HOST_FALLBACK", raising=False)
+        executor = _make_test_executor()
+        entry = _MockFunctionEntry(
+            host_execution=False,
+            runtime="python",
+            function_dir="/tmp/test_func_dir",
+            main_py_path="/tmp/test_func_dir/main.py",
+        )
+        # Docker unavailable をシミュレート
+        with patch.object(executor, "_is_docker_available", return_value=False):
+            with patch("core_runtime.capability_executor._DockerRunBuilder", None):
+                with patch("pathlib.Path.is_dir", return_value=True):
+                    with patch("pathlib.Path.is_file", return_value=True):
+                        resp = executor._execute_user_function(
+                            principal_id="test_principal",
+                            entry=entry,
+                            args={},
+                            request_id="req_001",
+                            start_time=time.time(),
+                        )
+        assert not resp.success
+        assert resp.error_type == "docker_unavailable"
+        assert "RUMI_ALLOW_HOST_FALLBACK" in resp.error
+
+
+class TestDockerFallbackAllowed:
+    """RUMI_ALLOW_HOST_FALLBACK=true 時にフォールバックが許可されること"""
+
+    @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
+    def test_fallback_allowed_with_env(self, mock_audit, monkeypatch, tmp_path):
+        """RUMI_ALLOW_HOST_FALLBACK=true → _execute_user_function_host が呼ばれる"""
+        monkeypatch.setenv("RUMI_ALLOW_HOST_FALLBACK", "true")
+        executor = _make_test_executor()
+
+        func_dir = tmp_path / "test_func"
+        func_dir.mkdir()
+        main_py = func_dir / "main.py"
+        main_py.write_text('def run(ctx, args): return {"ok": True}', encoding="utf-8")
+
+        entry = _MockFunctionEntry(
+            host_execution=False,
+            runtime="python",
+            function_dir=str(func_dir),
+            main_py_path=str(main_py),
+        )
+        mock_resp = CapabilityResponse(success=True, output={"ok": True})
+        with patch.object(executor, "_is_docker_available", return_value=False):
+            with patch("core_runtime.capability_executor._DockerRunBuilder", None):
+                with patch.object(executor, "_execute_user_function_host", return_value=mock_resp) as mock_host:
+                    resp = executor._execute_user_function(
+                        principal_id="test_principal",
+                        entry=entry,
+                        args={},
+                        request_id="req_002",
+                        start_time=time.time(),
+                    )
+        assert resp.success
+        mock_host.assert_called_once()
+
+
+# ===========================================================================
+# Wave 1-2: _execute_command_function ガード
+# ===========================================================================
+class TestCommandFunctionHostExecutionGuard:
+    """_execute_command_function の RUMI_ALLOW_HOST_EXECUTION ガードが機能すること"""
+
+    def test_command_blocked_without_host_execution_env(self, monkeypatch):
+        """RUMI_ALLOW_HOST_EXECUTION 未設定 → host_execution_disabled"""
+        monkeypatch.delenv("RUMI_ALLOW_HOST_EXECUTION", raising=False)
+        executor = _make_test_executor()
+        entry = _MockFunctionEntry(command=["echo", "hello"])
+        resp = executor._execute_command_function(
+            principal_id="test_principal",
+            entry=entry,
+            args={},
+            request_id="req_003",
+            start_time=time.time(),
+        )
+        assert not resp.success
+        assert resp.error_type == "host_execution_disabled"
+
+
+class TestCommandFunctionPathTraversal:
+    """_execute_command_function のパストラバーサル検証が機能すること"""
+
+    def test_command_path_traversal_blocked(self, monkeypatch, tmp_path):
+        """command[0] が function_dir の外を指す絶対パス → security_violation"""
+        monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
+        executor = _make_test_executor()
+
+        func_dir = tmp_path / "func"
+        func_dir.mkdir()
+
+        entry = _MockFunctionEntry(
+            command=["/etc/evil_script"],
+            function_dir=str(func_dir),
+        )
+        resp = executor._execute_command_function(
+            principal_id="test_principal",
+            entry=entry,
+            args={},
+            request_id="req_004",
+            start_time=time.time(),
+        )
+        assert not resp.success
+        assert resp.error_type == "security_violation"
+        assert "escapes" in resp.error.lower()
+
+
+# ===========================================================================
+# Wave 1-3: _sanitize_error
+# ===========================================================================
+class TestSanitizeErrorRemovesPaths:
+    """_sanitize_error() がファイルパスを除去すること"""
+
+    def test_sanitize_removes_unix_path(self, monkeypatch):
+        monkeypatch.delenv("RUMI_ENVIRONMENT", raising=False)
+        msg = 'Error at /home/user/project/src/main.py: something failed'
+        result = _sanitize_error(msg)
+        assert "/home/user/" not in result
+        assert "<path>" in result
+
+    def test_sanitize_removes_traceback(self, monkeypatch):
+        monkeypatch.delenv("RUMI_ENVIRONMENT", raising=False)
+        msg = 'File "/home/user/project/main.py", line 42, in foo'
+        result = _sanitize_error(msg)
+        assert "<traceback>" in result
+        assert "line 42" not in result
+
+    def test_sanitize_removes_env_vars(self, monkeypatch):
+        monkeypatch.delenv("RUMI_ENVIRONMENT", raising=False)
+        msg = "Config error: DATABASE_URL=postgres://secret@host/db"
+        result = _sanitize_error(msg)
+        assert "DATABASE_URL=" not in result
+        assert "<env>" in result
+
+
+class TestSanitizeErrorDevelopmentSkip:
+    """_sanitize_error() が development 環境ではスキップされること"""
+
+    def test_sanitize_skipped_in_development(self, monkeypatch):
+        monkeypatch.setenv("RUMI_ENVIRONMENT", "development")
+        msg = 'Error at /home/user/project/src/main.py: something failed'
+        result = _sanitize_error(msg)
+        assert result == msg  # サニタイズされない
+
+
+# ===========================================================================
+# Wave 1-4: 一時ファイルの安全化
+# ===========================================================================
+class TestSecureTmpDir:
+    """一時ファイルが user_data/tmp/ に作成されること"""
+
+    def test_get_secure_tmp_dir_creates_directory(self, monkeypatch, tmp_path):
+        """_get_secure_tmp_dir が user_data/tmp/ を作成する"""
+        import core_runtime.capability_executor as mod
+
+        # グローバル変数をリセット
+        original = mod._SECURE_TMP_DIR
+        mod._SECURE_TMP_DIR = None
+
+        # __file__ をモック用の場所に設定して user_data/tmp/ の基準パスを制御
+        fake_core_runtime = tmp_path / "rumi_ai_1_10" / "core_runtime"
+        fake_core_runtime.mkdir(parents=True)
+        fake_file = fake_core_runtime / "capability_executor.py"
+        fake_file.touch()
+
+        expected_tmp = tmp_path / "rumi_ai_1_10" / "user_data" / "tmp"
+
+        with patch.object(mod, "__file__", str(fake_file)):
+            result = _get_secure_tmp_dir()
+
+        assert Path(result) == expected_tmp
+        assert expected_tmp.is_dir()
+        # パーミッション確認 (Unix のみ)
+        if hasattr(os, "stat"):
+            mode = oct(os.stat(str(expected_tmp)).st_mode & 0o777)
+            assert mode == "0o700"
+
+        # クリーンアップ
+        mod._SECURE_TMP_DIR = original
+
+    def test_mkstemp_uses_secure_dir(self, monkeypatch, tmp_path):
+        """mkstemp が _get_secure_tmp_dir() のディレクトリを使用する"""
+        secure_dir = tmp_path / "secure_tmp"
+        secure_dir.mkdir(mode=0o700)
+
+        with patch("core_runtime.capability_executor._get_secure_tmp_dir", return_value=str(secure_dir)):
+            fd, path = tempfile.mkstemp(suffix=".py", dir=str(secure_dir))
+            try:
+                assert Path(path).parent == secure_dir
+            finally:
+                os.close(fd)
+                os.unlink(path)
