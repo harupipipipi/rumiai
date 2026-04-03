@@ -17,6 +17,9 @@ import sys
 import atexit
 import argparse
 import traceback
+import threading
+from pathlib import Path
+import logging
 
 _kernel = None
 
@@ -31,24 +34,66 @@ def _check_permissive_production_guard():
     VULN-C01: 明示的な許可がない限り --permissive フラグの使用を拒否する。
     ホワイトリスト方式: RUMI_ALLOW_PERMISSIVE=true または
     RUMI_ENVIRONMENT=development|dev の場合のみ許可。
+    追加条件: user_data/permissive.lock ファイルの存在も必須。
     """
     import os
+    # --- 環境変数チェック ---
+    env_ok = False
     if os.environ.get("RUMI_ALLOW_PERMISSIVE", "").lower() == "true":
-        return
-    env_val = os.environ.get("RUMI_ENVIRONMENT", "").lower()
-    if env_val in ("development", "dev"):
-        return
-    print(
-        "FATAL: --permissive flag requires explicit opt-in.",
-        file=sys.stderr,
-    )
-    print(
-        "Set RUMI_ALLOW_PERMISSIVE=true or "
-        "RUMI_ENVIRONMENT=development to use --permissive.",
-        file=sys.stderr,
-    )
-    sys.exit(1)
+        env_ok = True
+    else:
+        env_val = os.environ.get("RUMI_ENVIRONMENT", "").lower()
+        if env_val in ("development", "dev"):
+            env_ok = True
 
+    if not env_ok:
+        print(
+            "FATAL: --permissive flag requires explicit opt-in.",
+            file=sys.stderr,
+        )
+        print(
+            "Set RUMI_ALLOW_PERMISSIVE=true or "
+            "RUMI_ENVIRONMENT=development to use --permissive.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    # --- lockfile チェック ---
+    user_data_dir = os.environ.get("RUMI_USER_DATA")
+    if user_data_dir:
+        lockfile = Path(user_data_dir) / "permissive.lock"
+    else:
+        lockfile = Path(__file__).resolve().parent / "user_data" / "permissive.lock"
+
+    if not lockfile.is_file():
+        print(
+            "FATAL: --permissive requires lockfile: "
+            f"{lockfile}",
+            file=sys.stderr,
+        )
+        print(
+            "Create it with: touch "
+            f"{lockfile}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+
+def _start_permissive_warning_loop():
+    """permissive モード中に 30 秒間隔で WARNING ログを出力する。"""
+    import time as _time
+    _logger = logging.getLogger(__name__)
+
+    def _warn_loop():
+        while True:
+            _time.sleep(30)
+            _logger.warning(
+                "Rumi is running in PERMISSIVE mode. "
+                "Sandbox is disabled. Do NOT use in production."
+            )
+
+    t = threading.Thread(target=_warn_loop, daemon=True)
+    t.start()
 
 
 def _check_critical_dependencies():
@@ -122,6 +167,7 @@ def main():
         print("Pack code may execute on host without Docker isolation.")
         print("Do NOT use --permissive in production.")
         print("=" * 60)
+        _start_permissive_warning_loop()
     else:
         # 明示的に strict を設定（外部環境変数による意図しない permissive 化を防止）
         os.environ.setdefault("RUMI_SECURITY_MODE", "strict")

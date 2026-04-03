@@ -43,6 +43,9 @@ _RE_YAML_FILENAME = re.compile(r'^[a-zA-Z0-9_.\-]{1,128}\.ya?ml$')
 # Kernel バージョン（ハードコード。Phase U でバージョンファイルから読むように変更予定）
 _KERNEL_VERSION = "1.10.0"
 
+# レート制限: 最後の restart 要求タイムスタンプ（epoch秒）
+_last_restart_time: float = 0.0
+
 
 class ControlPanelHandlersMixin:
     """Control Panel API のハンドラ"""
@@ -513,7 +516,19 @@ class ControlPanelHandlersMixin:
 
         exit code 42 を返し、Rust ランチャーが再起動する。
         daemon スレッドで 1 秒遅延させてからプロセスを終了する。
+        レート制限: 前回の再起動から 60 秒以内のリクエストは拒否する。
         """
+        global _last_restart_time
+        now = time.time()
+        elapsed = now - _last_restart_time
+        if elapsed < 60.0:
+            remaining = int(60.0 - elapsed) + 1
+            return {
+                "error": f"Restart rate limited. Try again in {remaining}s.",
+                "status_code": 429,
+            }
+        _last_restart_time = now
+
         def _delayed_exit():
             time.sleep(1.0)
             logger.info("Kernel restart requested via API — exiting with code 42")
