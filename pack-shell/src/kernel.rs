@@ -46,18 +46,33 @@ impl KernelProcess {
         if let Some(ref mut child) = self.child {
             info!("Stopping kernel process (pid={})...", child.id());
 
-            // Try graceful kill first
-            if let Err(e) = child.kill() {
-                warn!("Failed to send kill signal: {}", e);
+            // Phase 1: Send graceful termination signal
+            #[cfg(unix)]
+            {
+                let pid = child.id() as i32;
+                // SAFETY: pid is a valid child process ID obtained from Child::id()
+                let ret = unsafe { libc::kill(pid, libc::SIGTERM) };
+                if ret != 0 {
+                    warn!(
+                        "Failed to send SIGTERM (errno={}), falling back to SIGKILL",
+                        std::io::Error::last_os_error()
+                    );
+                    let _ = child.kill();
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                // Windows: TerminateProcess is the only option
+                let _ = child.kill();
             }
 
-            // Wait up to 5 seconds for the process to exit
+            // Phase 2: Wait up to 5 seconds for the process to exit
             match Self::wait_with_timeout(child, std::time::Duration::from_secs(5)) {
                 Ok(_) => {
                     info!("Kernel process stopped.");
                 }
                 Err(_) => {
-                    warn!("Kernel process did not exit within 5s, force killing...");
+                    warn!("Kernel process did not exit within 5s after SIGTERM, sending SIGKILL...");
                     Self::force_kill(child);
                 }
             }
