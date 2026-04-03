@@ -89,12 +89,13 @@ fn run(config: PackShellConfig) -> Result<i32> {
 
     // Step 5: Launch app subprocess
     info!("Launching app: {}", config.command);
-    let parts: Vec<&str> = config.command.split_whitespace().collect();
+    let parts: Vec<String> = shell_words::split(&config.command)
+        .context("Failed to parse --command (unmatched quote?)")?;
     if parts.is_empty() {
         anyhow::bail!("--command is empty");
     }
 
-    let program = parts[0];
+    let program = &parts[0];
     let args = &parts[1..];
 
     let mut cmd = Command::new(program);

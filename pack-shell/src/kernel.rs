@@ -17,12 +17,13 @@ impl KernelProcess {
     /// The command string is split by whitespace into program + arguments.
     /// RUMI_PORT is set in the child environment.
     pub fn start(&mut self, port: u16) -> Result<()> {
-        let parts: Vec<&str> = self.cmd.split_whitespace().collect();
+        let parts: Vec<String> = shell_words::split(&self.cmd)
+            .context("Failed to parse kernel_cmd (unmatched quote?)")?;
         if parts.is_empty() {
             anyhow::bail!("kernel_cmd is empty");
         }
 
-        let program = parts[0];
+        let program = &parts[0];
         let args = &parts[1..];
 
         info!("Starting kernel: {} (port={})", self.cmd, port);
