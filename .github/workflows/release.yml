@@ -65,5 +65,5 @@ jobs:
             rumi_viewer/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
             rumi_viewer/src-tauri/target/${{ matrix.target }}/release/bundle/deb/*.deb
             rumi_viewer/src-tauri/target/${{ matrix.target }}/release/bundle/appimage/*.AppImage
-          draft: true
+          draft: false
           generate_release_notes: true
