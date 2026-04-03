@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use log::error;
+use log::{error, info};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -10,6 +10,7 @@ use tauri::{
 };
 
 use crate::kernel_manager::KernelManager;
+use crate::updater;
 
 /// Helper: clone the Arc<Mutex<KernelManager>> out of Tauri State.
 fn get_km(app: &tauri::AppHandle) -> Arc<Mutex<KernelManager>> {
@@ -21,9 +22,11 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let open_i = MenuItem::with_id(app, "open", "Open", true, None::<&str>)?;
     let restart_i =
         MenuItem::with_id(app, "restart_kernel", "Restart Kernel", true, None::<&str>)?;
+    let update_i =
+        MenuItem::with_id(app, "check_update", "Check for Updates", true, None::<&str>)?;
     let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
 
-    let menu = Menu::with_items(app, &[&open_i, &restart_i, &quit_i])?;
+    let menu = Menu::with_items(app, &[&open_i, &restart_i, &update_i, &quit_i])?;
 
     let _ = TrayIconBuilder::with_id("main-tray")
         .tooltip("Rumi AI")
@@ -44,6 +47,27 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 if let Err(e) = guard.restart() {
                     error!("Failed to restart kernel: {e}");
                 }
+            }
+            "check_update" => {
+                std::thread::spawn(|| {
+                    match updater::check_for_update() {
+                        Ok(Some(info)) => {
+                            info!(
+                                "Update available: {} -> {}",
+                                info.current_version, info.latest_version
+                            );
+                            if let Err(e) = updater::open_release_page(&info) {
+                                error!("Failed to open release page: {e}");
+                            }
+                        }
+                        Ok(None) => {
+                            info!("Rumi AI is up to date.");
+                        }
+                        Err(e) => {
+                            error!("Update check failed: {e}");
+                        }
+                    }
+                });
             }
             "quit" => {
                 let km = get_km(app);

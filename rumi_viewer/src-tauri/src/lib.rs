@@ -140,6 +140,22 @@ pub fn run() {
                         error!("Failed to navigate to panel: {e}");
                     }
                 }
+
+                // Background update check — log only, never interrupt startup.
+                match updater::check_for_update() {
+                    Ok(Some(info)) => {
+                        info!(
+                            "Update available: {} -> {}",
+                            info.current_version, info.latest_version
+                        );
+                    }
+                    Ok(None) => {
+                        info!("Rumi AI is up to date.");
+                    }
+                    Err(e) => {
+                        error!("Startup update check failed (non-fatal): {e}");
+                    }
+                }
             });
 
             tray::setup_tray(app)?;
