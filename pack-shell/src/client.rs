@@ -1,5 +1,5 @@
 use anyhow::{bail, Context, Result};
-use log::{debug, warn};
+use log::debug;
 use serde::Deserialize;
 use std::time::Duration;
 
@@ -13,6 +13,7 @@ pub struct DesktopToken {
 
 /// Wrapper for the API response envelope
 #[derive(Debug, Deserialize)]
+#[serde(bound(deserialize = "T: serde::Deserialize<'de>"))]
 struct ApiResponse<T> {
     success: bool,
     #[serde(default)]
@@ -120,20 +121,19 @@ impl KernelClient {
             bail!("Token request failed (HTTP {}): {}", status, text);
         }
 
-        let api_resp: ApiResponse<DesktopToken> = resp
-            .json()
-            .context("Failed to parse token response")?;
+        let api_resp: ApiResponse<DesktopToken> =
+            resp.json().context("Failed to parse token response")?;
 
         if !api_resp.success {
             bail!(
                 "Token request returned success=false: {}",
-                api_resp.error.unwrap_or_else(|| "unknown error".to_string())
+                api_resp
+                    .error
+                    .unwrap_or_else(|| "unknown error".to_string())
             );
         }
 
-        api_resp
-            .data
-            .context("Token response missing 'data' field")
+        api_resp.data.context("Token response missing 'data' field")
     }
 }
 

@@ -61,7 +61,10 @@ fn run(config: PackShellConfig) -> Result<i32> {
 
     if !client.is_healthy() {
         // Step 2: Start kernel
-        info!("Kernel not responding. Starting with: {}", config.kernel_cmd);
+        info!(
+            "Kernel not responding. Starting with: {}",
+            config.kernel_cmd
+        );
         let mut kp = KernelProcess::new(config.kernel_cmd.clone());
         kp.start(config.port)
             .context("Failed to start kernel process")?;
@@ -85,7 +88,10 @@ fn run(config: PackShellConfig) -> Result<i32> {
     let token_response = client
         .get_desktop_token(&config.pack_id)
         .context("Failed to get desktop token")?;
-    info!("Desktop token acquired (expires in {}s).", token_response.expires_in);
+    info!(
+        "Desktop token acquired (expires in {}s).",
+        token_response.expires_in
+    );
 
     // Step 5: Launch app subprocess
     info!("Launching app: {}", config.command);
@@ -111,7 +117,9 @@ fn run(config: PackShellConfig) -> Result<i32> {
         cmd.current_dir(dir);
     }
 
-    let mut child = cmd.spawn().context(format!("Failed to spawn: {}", program))?;
+    let mut child = cmd
+        .spawn()
+        .context(format!("Failed to spawn: {}", program))?;
 
     let status = child.wait().context("Failed to wait for app process")?;
 

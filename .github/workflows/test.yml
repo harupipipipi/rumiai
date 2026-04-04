@@ -25,6 +25,7 @@ jobs:
 
       - name: Run pytest
         run: |
+          pytest tests/ -v
           cd rumi_ai_1_10 && pytest tests/ -v
 
   rust-test:

@@ -72,7 +72,9 @@ impl KernelProcess {
                     info!("Kernel process stopped.");
                 }
                 Err(_) => {
-                    warn!("Kernel process did not exit within 5s after SIGTERM, sending SIGKILL...");
+                    warn!(
+                        "Kernel process did not exit within 5s after SIGTERM, sending SIGKILL..."
+                    );
                     Self::force_kill(child);
                 }
             }
