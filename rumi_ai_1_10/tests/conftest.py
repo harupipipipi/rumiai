@@ -21,6 +21,9 @@ if "core_runtime" not in sys.modules:
     _pkg.__path__ = [_CORE_RUNTIME_DIR]
     _pkg.__package__ = "core_runtime"
     _pkg.__file__ = _CORE_RUNTIME_DIR + "/__init__.py"
+    # 一部テストは top-level re-export を patch 対象にしているため、
+    # __init__.py を実行しないスタブにも最低限の属性を置いておく。
+    _pkg.Kernel = None
     sys.modules["core_runtime"] = _pkg
 
 # ---------------------------------------------------------------------------

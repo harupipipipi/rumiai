@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import tempfile
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -348,12 +349,28 @@ class CapabilityTrustStore:
 
             # HMAC 署名を追加
             data["_hmac_signature"] = compute_data_hmac(self._secret_key, data)
-            
-            with open(self._trust_file, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            
+
+            fd, tmp_path = tempfile.mkstemp(
+                dir=str(self._trust_dir),
+                prefix=".trusted_handlers_tmp_",
+                suffix=".json",
+            )
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp_path, str(self._trust_file))
+            except Exception:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    logger.debug("Failed to clean up temp trust store file: %s", tmp_path, exc_info=True)
+                raise
+
             return True
         except Exception:
+            logger.debug("Failed to save capability trust store", exc_info=True)
             return False
 
 

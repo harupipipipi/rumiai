@@ -239,8 +239,8 @@ def main():
         try:
             from backend_core.ecosystem.compat import mark_ecosystem_initialized
             mark_ecosystem_initialized()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to mark ecosystem initialized: %s", e, exc_info=True)
 
         print(f"[Rumi] {L('startup.success')}")
 
@@ -260,8 +260,8 @@ def main():
                 http_server = _kernel.interface_registry.get_by_owner(
                     "io.http.server", override_pack
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to resolve interface override for io.http.server: %s", e, exc_info=True)
 
         # override が見つからなければ通常の last を使う
         if http_server is None:
@@ -287,7 +287,8 @@ def main():
                     print(f"[Rumi] {L('startup.install_http_pack')}")
                     print(f"[Rumi] {L('startup.press_ctrl_c')}")
                     _wait_for_signal()
-            except Exception:
+            except Exception as e:
+                logger.debug("Failed to inspect pack_api_server fallback: %s", e, exc_info=True)
                 print(f"[Rumi] {L('startup.no_http')}")
                 print(f"[Rumi] {L('startup.install_http_pack')}")
                 print(f"[Rumi] {L('startup.press_ctrl_c')}")

@@ -718,6 +718,22 @@ if __name__ == "__main__":
     main()
 """
 
+    def _write_runner_script(self) -> str:
+        """Runner script を一時ファイルへ保存してパスを返す。"""
+        fd, runner_file = tempfile.mkstemp(suffix=".py", dir=_get_secure_tmp_dir())
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(self._generate_function_runner_script())
+                f.flush()
+                os.fsync(f.fileno())
+        except Exception:
+            try:
+                os.unlink(runner_file)
+            except OSError:
+                logger.debug("Failed to clean up runner script after write failure: %s", runner_file, exc_info=True)
+            raise
+        return runner_file
+
     def _get_function_timeout(self, entry):
         grant_config = entry.manifest.get("grant_config", {}) if entry.manifest else {}
         t = grant_config.get("timeout", DEFAULT_FUNCTION_TIMEOUT)
@@ -759,20 +775,21 @@ if __name__ == "__main__":
         context = {"principal_id": principal_id, "pack_id": pack_id, "function_id": function_id, "request_id": request_id, "ts": self._now_ts()}
         subprocess_input = {"context": context, "args": args, "main_py_path": "/function/main.py"}
         input_json = json.dumps(subprocess_input, ensure_ascii=False, default=str)
-        runner_script = self._generate_function_runner_script()
         input_file = None
+        runner_file = None
         try:
             fd, input_file = tempfile.mkstemp(suffix=".json", dir=_get_secure_tmp_dir())
             try:
                 os.write(fd, input_json.encode("utf-8"))
             finally:
                 os.close(fd)
+            runner_file = self._write_runner_script()
             builder = _DockerRunBuilder(name=container_name)
-            builder.volume(f"{function_dir.resolve()}:/function:ro"); builder.volume(f"{input_file}:/input.json:ro")
+            builder.volume(f"{function_dir.resolve()}:/function:ro"); builder.volume(f"{input_file}:/input.json:ro"); builder.volume(f"{runner_file}:/runner.py:ro")
             builder.env("RUMI_PACK_ID", pack_id); builder.env("RUMI_FUNCTION_ID", function_id)
             builder.label("rumi.managed", "true"); builder.label("rumi.type", "function"); builder.label("rumi.pack_id", pack_id)
             builder.image(getattr(entry, 'docker_image', '') or FUNCTION_BASE_IMAGE)
-            builder.command(["sh", "-c", f"cat /input.json | python -c {json.dumps(runner_script)}"])
+            builder.command(["sh", "-c", "cat /input.json | python /runner.py"])
             proc = subprocess.run(builder.build(), capture_output=True, text=True, timeout=timeout)
             latency_ms = (time.time() - start_time) * 1000
             if proc.returncode != 0:
@@ -788,26 +805,31 @@ if __name__ == "__main__":
             except json.JSONDecodeError:
                 return CapabilityResponse(success=False, error="Function output is not valid JSON", error_type="invalid_json_output", latency_ms=latency_ms)
         except subprocess.TimeoutExpired:
-            try: subprocess.run(["docker", "kill", container_name], capture_output=True, timeout=5)
-            except Exception: pass
+            try:
+                subprocess.run(["docker", "kill", container_name], capture_output=True, timeout=5)
+            except Exception as e:
+                logger.debug("Failed to kill timed-out function container %s: %s", container_name, e, exc_info=True)
             return CapabilityResponse(success=False, error=f"Function execution timed out after {timeout}s", error_type="timeout", latency_ms=(time.time() - start_time) * 1000)
         except Exception as e:
             return CapabilityResponse(success=False, error=f"Function execution error: {e}", error_type="internal_error", latency_ms=(time.time() - start_time) * 1000)
         finally:
             if input_file:
-                try: os.unlink(input_file)
-                except Exception: pass
+                try:
+                    os.unlink(input_file)
+                except Exception as e:
+                    logger.debug("Failed to remove user function input file %s: %s", input_file, e, exc_info=True)
+            if runner_file:
+                try:
+                    os.unlink(runner_file)
+                except Exception as e:
+                    logger.debug("Failed to remove user function runner file %s: %s", runner_file, e, exc_info=True)
 
     def _execute_user_function_host(self, principal_id, entry, args, request_id, start_time, timeout):
         context = {"principal_id": principal_id, "pack_id": entry.pack_id, "function_id": entry.function_id, "request_id": request_id, "ts": self._now_ts()}
         input_json = json.dumps({"context": context, "args": args, "main_py_path": str(entry.main_py_path)}, ensure_ascii=False, default=str)
         runner_file = None
         try:
-            fd, runner_file = tempfile.mkstemp(suffix=".py", dir=_get_secure_tmp_dir())
-            try:
-                os.write(fd, self._generate_function_runner_script().encode("utf-8"))
-            finally:
-                os.close(fd)
+            runner_file = self._write_runner_script()
             proc = subprocess.run([sys.executable, runner_file], input=input_json, capture_output=True, text=True, timeout=timeout, cwd=str(Path(entry.function_dir)))
             latency_ms = (time.time() - start_time) * 1000
             if proc.returncode != 0:
@@ -828,8 +850,10 @@ if __name__ == "__main__":
             return CapabilityResponse(success=False, error=f"Function execution error: {e}", error_type="internal_error", latency_ms=(time.time() - start_time) * 1000)
         finally:
             if runner_file:
-                try: os.unlink(runner_file)
-                except Exception: pass
+                try:
+                    os.unlink(runner_file)
+                except Exception as e:
+                    logger.debug("Failed to remove host fallback runner file %s: %s", runner_file, e, exc_info=True)
 
     def _execute_host_function(self, principal_id, entry, args, request_id, start_time):
         allow_host = os.environ.get("RUMI_ALLOW_HOST_EXECUTION", "").lower()
@@ -845,11 +869,7 @@ if __name__ == "__main__":
         input_json = json.dumps({"context": context, "args": args, "main_py_path": str(main_py_path)}, ensure_ascii=False, default=str)
         runner_file = None
         try:
-            fd, runner_file = tempfile.mkstemp(suffix=".py", dir=_get_secure_tmp_dir())
-            try:
-                os.write(fd, self._generate_function_runner_script().encode("utf-8"))
-            finally:
-                os.close(fd)
+            runner_file = self._write_runner_script()
             proc = subprocess.run([sys.executable, runner_file], input=input_json, capture_output=True, text=True, timeout=timeout, cwd=str(Path(function_dir)))
             latency_ms = (time.time() - start_time) * 1000
             if proc.returncode != 0:
@@ -870,8 +890,10 @@ if __name__ == "__main__":
             return CapabilityResponse(success=False, error=f"Function execution error: {e}", error_type="internal_error", latency_ms=(time.time() - start_time) * 1000)
         finally:
             if runner_file:
-                try: os.unlink(runner_file)
-                except Exception: pass
+                try:
+                    os.unlink(runner_file)
+                except Exception as e:
+                    logger.debug("Failed to remove host execution runner file %s: %s", runner_file, e, exc_info=True)
 
     def _dispatch_core_function(self, principal_id, entry, args, request_id, start_time):
         pack_id, function_id = entry.pack_id, entry.function_id
@@ -1050,12 +1072,15 @@ if __name__ == "__main__":
             return CapabilityResponse(success=True, output=output, latency_ms=latency_ms)
         except subprocess.TimeoutExpired:
             return CapabilityResponse(success=False, error="Handler execution timed out", error_type="timeout", latency_ms=(time.time() - start_time) * 1000)
-        except Exception:
+        except Exception as e:
+            logger.debug("Handler subprocess execution failed: %s", e, exc_info=True)
             return CapabilityResponse(success=False, error="Internal execution error", error_type="internal_error", latency_ms=(time.time() - start_time) * 1000)
         finally:
             if runner_file:
-                try: os.unlink(runner_file)
-                except Exception: pass
+                try:
+                    os.unlink(runner_file)
+                except Exception as e:
+                    logger.debug("Failed to remove handler runner file %s: %s", runner_file, e, exc_info=True)
 
     def _generate_runner_script(self, handler_py_path, func_name):
         safe_path = json.dumps(handler_py_path)

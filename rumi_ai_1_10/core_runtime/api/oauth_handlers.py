@@ -24,11 +24,12 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
-from urllib.parse import urlencode, urlparse, parse_qs
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 
 from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
+from ..hmac_key_manager import _FERNET_AVAILABLE, _Fernet
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ _pkce_store: Dict[str, Dict[str, Any]] = {}
 
 # --- トークン保存ファイル名 ---
 _TOKEN_FILE_NAME = "oauth_tokens.json"
+_TOKEN_KEY_FILE_NAME = ".oauth_tokens.key"
 
 
 def _generate_code_verifier() -> str:
@@ -65,14 +67,49 @@ def _get_token_path() -> Path:
     return base_dir / "user_data" / "settings" / _TOKEN_FILE_NAME
 
 
+def _get_token_key_path() -> Path:
+    """OAuth トークン暗号化鍵のパスを返す"""
+    return _get_token_path().with_name(_TOKEN_KEY_FILE_NAME)
+
+
+def _get_or_create_token_cipher():
+    """OAuth トークン保存用の Fernet cipher を返す。"""
+    if not _FERNET_AVAILABLE or _Fernet is None:
+        raise RuntimeError("cryptography is required for encrypted OAuth token storage")
+
+    key_path = _get_token_key_path()
+    if key_path.exists():
+        key_data = key_path.read_bytes().strip()
+        if key_data:
+            return _Fernet(key_data)
+
+    key_path.parent.mkdir(parents=True, exist_ok=True)
+    key_data = _Fernet.generate_key()
+    tmp_path = key_path.with_name(f".{key_path.stem}.tmp")
+    tmp_path.write_bytes(key_data)
+    os.replace(tmp_path, key_path)
+    try:
+        os.chmod(key_path, 0o600)
+    except OSError:
+        logger.debug("Failed to chmod OAuth token key file: %s", key_path, exc_info=True)
+    return _Fernet(key_data)
+
+
 def _save_tokens(tokens: Dict[str, Any]) -> None:
     """トークンをファイルに保存する"""
     token_path = _get_token_path()
     token_path.parent.mkdir(parents=True, exist_ok=True)
-    token_path.write_text(
-        json.dumps(tokens, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    payload = json.dumps(tokens, ensure_ascii=False, indent=2)
+    cipher = _get_or_create_token_cipher()
+    encrypted_payload = cipher.encrypt(payload.encode("utf-8")).decode("ascii")
+    wrapped = {
+        "version": "1.0",
+        "encryption": "fernet",
+        "payload": encrypted_payload,
+    }
+    tmp_path = token_path.with_name(f".{token_path.stem}.tmp")
+    tmp_path.write_text(json.dumps(wrapped, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp_path, token_path)
 
 
 def _load_tokens() -> Optional[Dict[str, Any]]:
@@ -81,8 +118,17 @@ def _load_tokens() -> Optional[Dict[str, Any]]:
     if not token_path.is_file():
         return None
     try:
-        return json.loads(token_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+        raw = json.loads(token_path.read_text(encoding="utf-8"))
+        if (
+            isinstance(raw, dict)
+            and raw.get("encryption") == "fernet"
+            and isinstance(raw.get("payload"), str)
+        ):
+            cipher = _get_or_create_token_cipher()
+            decrypted = cipher.decrypt(raw["payload"].encode("ascii")).decode("utf-8")
+            return json.loads(decrypted)
+        return raw if isinstance(raw, dict) else None
+    except (json.JSONDecodeError, OSError, RuntimeError, ValueError):
         return None
 
 
@@ -245,8 +291,8 @@ class OAuthHandlersMixin:
                     "source": "oauth",
                     "username": profile_data.get("username") if profile_data else None,
                 })
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to publish OAuth setup completion event: %s", e, exc_info=True)
 
         return None
 

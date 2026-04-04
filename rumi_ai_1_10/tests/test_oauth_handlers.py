@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock
 from urllib.parse import urlparse, parse_qs
 
 # テスト対象のインポートパスを解決
@@ -17,6 +18,10 @@ from core_runtime.api.oauth_handlers import (
     OAuthHandlersMixin,
     _generate_code_verifier,
     _generate_code_challenge,
+    _get_token_path,
+    _get_token_key_path,
+    _load_tokens,
+    _save_tokens,
     _pkce_store,
     _CLIENT_ID,
     _REDIRECT_URI,
@@ -179,6 +184,34 @@ class TestOAuthCallback(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertIn("error", result)
         self.assertIn("expired", result["error"])
+
+
+class TestOAuthTokenStorage(unittest.TestCase):
+    def tearDown(self):
+        token_path = _get_token_path()
+        key_path = _get_token_key_path()
+        if token_path.exists():
+            token_path.unlink()
+        if key_path.exists():
+            key_path.unlink()
+
+    def test_tokens_are_saved_encrypted(self):
+        _save_tokens({"access_token": "access", "refresh_token": "refresh"})
+        raw = json.loads(_get_token_path().read_text(encoding="utf-8"))
+        self.assertEqual(raw.get("encryption"), "fernet")
+        self.assertIn("payload", raw)
+        self.assertNotIn("access", raw.get("payload", ""))
+
+    def test_load_tokens_decrypts_encrypted_payload(self):
+        expected = {"access_token": "access", "refresh_token": "refresh"}
+        _save_tokens(expected)
+        self.assertEqual(_load_tokens(), expected)
+
+    def test_load_tokens_keeps_legacy_plaintext_compatibility(self):
+        legacy = {"access_token": "legacy", "refresh_token": "legacy-refresh"}
+        _get_token_path().parent.mkdir(parents=True, exist_ok=True)
+        _get_token_path().write_text(json.dumps(legacy), encoding="utf-8")
+        self.assertEqual(_load_tokens(), legacy)
 
 
 class TestOAuthSendRedirect(unittest.TestCase):

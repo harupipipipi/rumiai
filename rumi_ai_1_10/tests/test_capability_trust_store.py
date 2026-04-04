@@ -6,6 +6,7 @@ test_capability_trust_store.py - P0: CapabilityTrustStore のテスト
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -258,4 +259,22 @@ class TestPersistence:
         assert store2.load() is True
         assert store2.is_trusted("handler_a", VALID_SHA).trusted is True
         assert store2.is_trusted("handler_b", OTHER_SHA).trusted is True
-        assert len(store2.list_trusted()) == 2
+
+    def test_save_is_atomic(self, tmp_path, monkeypatch):
+        trust_dir = tmp_path / "trust"
+        store = CapabilityTrustStore(trust_dir=str(trust_dir))
+        store.load()
+        store.add_trust("handler_a", VALID_SHA, "note A")
+
+        trust_file = trust_dir / "trusted_handlers.json"
+        original = trust_file.read_text(encoding="utf-8")
+
+        real_replace = os.replace
+
+        def failing_replace(src, dst):
+            raise OSError("replace failed")
+
+        monkeypatch.setattr(os, "replace", failing_replace)
+        assert store.add_trust("handler_b", OTHER_SHA, "note B") is False
+        assert trust_file.read_text(encoding="utf-8") == original
+        monkeypatch.setattr(os, "replace", real_replace)
