@@ -258,6 +258,7 @@ function FlowEditorInner() {
   );
 
   const generatedYaml = nodesToYaml(nodes, edges);
+  const isExecuteDisabled = execution.isExecuting || !selectedFlowId;
 
   if (isLoading && flows.length === 0) {
     return (
@@ -313,9 +314,14 @@ function FlowEditorInner() {
               )}
               <div className="flex items-center gap-2">
                 {!isCreating && (
-                  <Button variant="outline" onClick={handleExecute} disabled={true} className="gap-2" title="Flow execution is not yet available">
+                  <Button
+                    variant="outline"
+                    onClick={handleExecute}
+                    disabled={isExecuteDisabled}
+                    className="gap-2"
+                  >
                     <Play className="h-4 w-4" />
-                    {t('flows.execute')}
+                    {execution.isExecuting ? t('flows.executing') : t('flows.execute')}
                   </Button>
                 )}
                 <Button variant="outline" onClick={handleSave} className="gap-2">

@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 # pack-shell バイナリのパスを解決する環境変数
 _PACK_SHELL_PATH_ENV = "RUMI_PACK_SHELL_PATH"
+_PACK_API_TOKEN_ENV = "RUMI_API_TOKEN"
 
 # 登録済みアプリのメタデータ保存先（REPO/user_data/apps/ 相当）
 _APPS_SUBDIR = "user_data/apps"
@@ -86,6 +87,7 @@ class DesktopAppManager:
                 "command": command,
                 "pack_dir": pack_dir,
                 "pack_shell": pack_shell,
+                "requires_api_token": True,
                 "window": desktop_app_config.get("window", {}),
                 "env": desktop_app_config.get("env", {}),
                 "working_dir": desktop_app_config.get("working_dir", ""),
@@ -137,18 +139,31 @@ class DesktopAppManager:
         if not command:
             return {"success": False, "error": f"No command configured for app: {pack_id}"}
 
+        requires_api_token = meta.get("requires_api_token", True)
+        api_token = os.environ.get(_PACK_API_TOKEN_ENV, "")
+        if requires_api_token and not api_token:
+            return {
+                "success": False,
+                "error": (
+                    f"Missing {_PACK_API_TOKEN_ENV}. "
+                    "Desktop apps require an API token before launch."
+                ),
+            }
+
         env = dict(os.environ)
         env.update(meta.get("env", {}))
         env["RUMI_PACK_ID"] = pack_id
-        api_token = os.environ.get("RUMI_API_TOKEN", "")
         if api_token:
-            env["RUMI_API_TOKEN"] = api_token
+            env[_PACK_API_TOKEN_ENV] = api_token
 
         working_dir = meta.get("working_dir") or meta.get("pack_dir", "")
+        popen_args = [pack_shell, "run", pack_id, "--command", command]
+        if working_dir:
+            popen_args.extend(["--working-dir", working_dir])
 
         try:
             proc = subprocess.Popen(
-                [pack_shell, "run", pack_id, "--command", command],
+                popen_args,
                 cwd=working_dir or None,
                 env=env,
                 stdout=subprocess.DEVNULL,
@@ -269,7 +284,10 @@ class DesktopAppManager:
         # 実行ファイル
         launch_path = os.path.join(macos_dir, "launch")
         command = config.get("command", "")
-        launch_script = f'#!/bin/bash\nexec "{pack_shell}" run "{pack_id}" --command "{command}"\n'
+        launch_script = (
+            '#!/bin/bash\n'
+            f'exec "{pack_shell}" run "{pack_id}" --command "{command}" --working-dir "{pack_dir}"\n'
+        )
         with open(launch_path, "w", encoding="utf-8") as f:
             f.write(launch_script)
         os.chmod(
@@ -302,7 +320,7 @@ class DesktopAppManager:
             f'$ws = New-Object -ComObject WScript.Shell; '
             f'$s = $ws.CreateShortcut("{lnk_path}"); '
             f'$s.TargetPath = "{pack_shell}"; '
-            f'$s.Arguments = "run {pack_id} --command ""{command}"""; '
+            f'$s.Arguments = "run {pack_id} --command ""{command}"" --working-dir ""{pack_dir}"""; '
             f'$s.WorkingDirectory = "{pack_dir}"; '
             f'$s.Save()'
         )
@@ -338,7 +356,7 @@ class DesktopAppManager:
             "[Desktop Entry]\n"
             "Type=Application\n"
             f"Name={app_name}\n"
-            f'Exec="{pack_shell}" run "{pack_id}" --command "{command}"\n'
+            f'Exec="{pack_shell}" run "{pack_id}" --command "{command}" --working-dir "{pack_dir}"\n'
             f"Path={pack_dir}\n"
             "Terminal=false\n"
             "Categories=Utility;\n"

@@ -1,5 +1,7 @@
 use clap::{Parser, Subcommand};
 
+const DEFAULT_KERNEL_CMD: &str = "python -m rumi_ai";
+
 /// Pack desktop app launcher
 #[derive(Parser, Debug)]
 #[command(name = "pack-shell", version, about = "Pack desktop app launcher")]
@@ -24,7 +26,7 @@ pub enum Commands {
         port: u16,
 
         /// Command to start the kernel if not running
-        #[arg(long, default_value = "python -m rumi_ai_1_10")]
+        #[arg(long, default_value = DEFAULT_KERNEL_CMD)]
         kernel_cmd: String,
 
         /// API token (falls back to RUMI_API_TOKEN env var)
@@ -86,7 +88,7 @@ mod tests {
             "test-pack-123".to_string(),
             "python app.py".to_string(),
             8765,
-            "python -m rumi_ai_1_10".to_string(),
+            DEFAULT_KERNEL_CMD.to_string(),
             "test-token-abc".to_string(),
             60,
             Some("/tmp/work".to_string()),
@@ -94,7 +96,7 @@ mod tests {
         assert_eq!(config.pack_id, "test-pack-123");
         assert_eq!(config.command, "python app.py");
         assert_eq!(config.port, 8765);
-        assert_eq!(config.kernel_cmd, "python -m rumi_ai_1_10");
+        assert_eq!(config.kernel_cmd, DEFAULT_KERNEL_CMD);
         assert_eq!(config.api_token, "test-token-abc");
         assert_eq!(config.timeout, 60);
         assert_eq!(config.working_dir, Some("/tmp/work".to_string()));
@@ -106,7 +108,7 @@ mod tests {
             "pack-456".to_string(),
             "node index.js".to_string(),
             9000,
-            "python -m rumi_ai_1_10".to_string(),
+            DEFAULT_KERNEL_CMD.to_string(),
             "token-xyz".to_string(),
             30,
             None,

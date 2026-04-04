@@ -7,7 +7,7 @@ pack-shell 経由で起動されると、環境変数 RUMI_TOKEN, RUMI_PORT, RUM
 自動的に設定されます。
 
 使い方:
-  pack-shell run desktop_app_pack --command "python app.py" --api-token "$TOKEN"
+  pack-shell run desktop_app_pack --command "python app.py" --working-dir /path/to/desktop_app_pack --api-token "$TOKEN"
 
   または手動で環境変数を設定して直接起動:
   RUMI_TOKEN=xxx RUMI_PORT=8765 RUMI_PACK_ID=desktop_app_pack python app.py

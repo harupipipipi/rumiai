@@ -72,6 +72,7 @@ Kernel の API または管理画面から Pack を承認してください。
 ```bash
 pack-shell run desktop_app_pack \
   --command "python app.py" \
+  --working-dir /path/to/desktop_app_pack \
   --api-token "$RUMI_API_TOKEN"
 ```
 
@@ -99,6 +100,7 @@ tkinter ウィンドウが開き、Kernel API への接続情報と Health Check
 | フィールド | 説明 |
 |-----------|------|
 | `desktop_app.command` | pack-shell が起動するコマンド。`--command` 引数として渡される |
+| `desktop_app.requires_api_token` | `DesktopAppManager` が `RUMI_API_TOKEN` 必須として扱うか。現状は常に `true` で保存される |
 | `desktop_app.window.title` | ショートカット名・ウィンドウタイトルに使用される |
 | `desktop_app.window.width/height` | ウィンドウの推奨サイズ（アプリ側で読み取る場合） |
 | `desktop_app.platforms` | サポートするプラットフォーム |
@@ -136,6 +138,7 @@ pack-shell が設定する環境変数:
 - **GUI を変更する**: `app.py` の tkinter コードを Qt, wxPython, Electron 等に置き換えられます
 - **API 呼び出しを追加する**: `RUMI_TOKEN` を `Authorization: Bearer` ヘッダーに設定して Kernel API を呼び出せます
 - **command を変更する**: `ecosystem.json` の `desktop_app.command` を `"node app.js"` や `"./my_binary"` に変更できます
+- **token 契約**: `DesktopAppManager` 経由の起動では `RUMI_API_TOKEN` が事前に必要です
 - **Pack 名を変更する**: `ecosystem.json` の `pack_id` と `pack_identity` を変更してください
 - **ウィンドウ設定**: `desktop_app.window` の `title`, `width`, `height` を変更できます
 

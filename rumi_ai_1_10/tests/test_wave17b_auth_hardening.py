@@ -232,10 +232,11 @@ class TestLegacyBackwardCompat:
         }
         trust_file.write_text(json.dumps(legacy_data), "utf-8")
 
-        store = CapabilityTrustStore(trust_dir=str(tmp_dir))
-        assert store.load() is True
-        result = store.is_trusted("h_legacy", "d" * 64)
-        assert result.trusted is True
+        with mock.patch.dict(os.environ, {"RUMI_REQUIRE_HMAC": "0"}):
+            store = CapabilityTrustStore(trust_dir=str(tmp_dir))
+            assert store.load() is True
+            result = store.is_trusted("h_legacy", "d" * 64)
+            assert result.trusted is True
 
     def test_sharing_manager_loads_unsigned_file(self, tmp_dir):
         """SharedStoreManager loads legacy file without HMAC."""
@@ -255,8 +256,9 @@ class TestLegacyBackwardCompat:
         index_path.write_text(json.dumps(legacy_data), "utf-8")
 
         from core_runtime.store_sharing_manager import SharedStoreManager
-        mgr = SharedStoreManager(index_path=str(index_path))
-        assert mgr.is_sharing_approved("cons", "sid") is True
+        with mock.patch.dict(os.environ, {"RUMI_REQUIRE_HMAC": "0"}):
+            mgr = SharedStoreManager(index_path=str(index_path))
+            assert mgr.is_sharing_approved("cons", "sid") is True
 
     def test_installer_index_loads_unsigned_file(self, tmp_dir):
         """CapabilityInstaller loads legacy index.json without HMAC."""
@@ -273,11 +275,12 @@ class TestLegacyBackwardCompat:
         index_file.write_text(json.dumps(legacy_data), "utf-8")
 
         from core_runtime.capability_installer import CapabilityInstaller
-        inst = CapabilityInstaller(
-            requests_dir=str(req_dir),
-            handlers_dest_dir=str(tmp_dir / "handlers"),
-        )
-        assert inst.list_items() == []
+        with mock.patch.dict(os.environ, {"RUMI_REQUIRE_HMAC": "0"}):
+            inst = CapabilityInstaller(
+                requests_dir=str(req_dir),
+                handlers_dest_dir=str(tmp_dir / "handlers"),
+            )
+            assert inst.list_items() == []
 
     def test_installer_blocked_loads_unsigned_file(self, tmp_dir):
         """CapabilityInstaller loads legacy blocked.json without HMAC."""
@@ -292,11 +295,12 @@ class TestLegacyBackwardCompat:
         blocked_file.write_text(json.dumps(legacy_data), "utf-8")
 
         from core_runtime.capability_installer import CapabilityInstaller
-        inst = CapabilityInstaller(
-            requests_dir=str(req_dir),
-            handlers_dest_dir=str(tmp_dir / "handlers"),
-        )
-        assert "key_old" in inst.list_blocked()
+        with mock.patch.dict(os.environ, {"RUMI_REQUIRE_HMAC": "0"}):
+            inst = CapabilityInstaller(
+                requests_dir=str(req_dir),
+                handlers_dest_dir=str(tmp_dir / "handlers"),
+            )
+            assert "key_old" in inst.list_blocked()
 
 
 # ---------------------------------------------------------------------------
@@ -524,8 +528,9 @@ class TestPermissionManagerMode:
         import logging
         from core_runtime.permission_manager import PermissionManager
 
-        with caplog.at_level(logging.WARNING, logger="core_runtime.permission_manager"):
-            PermissionManager()
+        with mock.patch.dict(os.environ, {"RUMI_PERMISSION_MODE": "permissive"}, clear=False):
+            with caplog.at_level(logging.WARNING, logger="core_runtime.permission_manager"):
+                PermissionManager()
 
         assert any("PERMISSIVE" in r.message for r in caplog.records)
 

@@ -18,8 +18,10 @@ import atexit
 import argparse
 import traceback
 import threading
+import time
 from pathlib import Path
 import logging
+from typing import Dict
 
 _kernel = None
 
@@ -123,10 +125,16 @@ def main():
     global _kernel
 
     parser = argparse.ArgumentParser(description="Rumi AI OS")
+    parser.add_argument("command", nargs="?", help="Optional command such as 'migrate-hmac'")
     parser.add_argument("--headless", action="store_true", help="Run without HTTP server")
     parser.add_argument("--permissive", action="store_true", help="Run in permissive security mode (development only)")
     parser.add_argument("--validate", action="store_true", help="Validate all Pack ecosystem.json files and exit")
     parser.add_argument("--health", action="store_true", help="Run health check and exit with status")
+    parser.add_argument(
+        "--migrate-trust-store-hmac",
+        action="store_true",
+        help="Rewrite legacy trusted_handlers.json with an HMAC signature and exit",
+    )
     args = parser.parse_args()
 
     _check_critical_dependencies()
@@ -154,6 +162,10 @@ def main():
     # --- Pack validation mode (early exit) ---
     if args.validate:
         _run_validation()
+        return
+
+    if args.command == "migrate-hmac" or args.migrate_trust_store_hmac:
+        _run_hmac_migration()
         return
 
     # セキュリティモード設定 — デフォルトは strict（secure）
@@ -259,6 +271,7 @@ def main():
             # Wave 17-A: KernelFacade でラップし、Pack コードへの Kernel 直接参照を遮断
             from core_runtime.kernel_facade import KernelFacade
             http_server(KernelFacade(_kernel))
+            _wait_for_signal()
         else:
             # Wave fix: フォールバック — pack_api_server が直接起動済みかチェック
             try:
@@ -289,15 +302,19 @@ def main():
 
 
 def _wait_for_signal():
-    """シグナル待機（プラットフォーム対応）"""
-    try:
-        import signal
-        signal.pause()
-    except AttributeError:
-        # Windows
-        import time
-        while True:
-            time.sleep(1)
+    """停止シグナルまたは restart 要求を待機する。"""
+    from core_runtime.api.control_panel_handlers import (
+        _RESTART_EXIT_CODE,
+        clear_kernel_restart_request,
+        is_kernel_restart_requested,
+    )
+
+    while True:
+        if is_kernel_restart_requested():
+            clear_kernel_restart_request()
+            print(f"[Rumi] {L('shutdown.starting')}")
+            raise SystemExit(_RESTART_EXIT_CODE)
+        time.sleep(1)
 
 
 def _run_validation():
@@ -316,6 +333,48 @@ def _run_validation():
         f"{len(report.warnings)} warnings, {len(report.errors)} errors"
     )
     print(summary)
+
+
+def _run_hmac_migration():
+    """署名なしの HMAC 対象ファイルを再署名する。"""
+    from core_runtime.capability_trust_store import CapabilityTrustStore
+    from core_runtime.store_sharing_manager import SharedStoreManager
+    from core_runtime.capability_installer import CapabilityInstaller
+    from backend_core.ecosystem.active_ecosystem import ActiveEcosystemManager
+
+    result_counts = {"already_signed": 0, "migrated": 0, "failed": 0}
+    detailed: Dict[str, str] = {}
+
+    trust_store = CapabilityTrustStore()
+    detailed["trust_store"] = trust_store.migrate_hmac_signature()
+
+    sharing_manager = SharedStoreManager()
+    detailed["store_sharing"] = sharing_manager.migrate_hmac_signature()
+
+    installer = CapabilityInstaller()
+    installer_results = installer.migrate_hmac_signatures()
+    detailed["capability_index"] = installer_results["index"]
+    detailed["capability_blocked"] = installer_results["blocked"]
+
+    active_ecosystem = ActiveEcosystemManager()
+    detailed["active_ecosystem"] = active_ecosystem.migrate_hmac_signature()
+
+    for status in detailed.values():
+        if status in result_counts:
+            result_counts[status] += 1
+
+    for name, status in detailed.items():
+        print(f"{name}: {status}")
+
+    print(
+        "Summary: "
+        f"already_signed={result_counts['already_signed']} "
+        f"migrated={result_counts['migrated']} "
+        f"failed={result_counts['failed']}"
+    )
+
+    if result_counts["failed"] > 0:
+        sys.exit(1)
 
 
 if __name__ == '__main__':

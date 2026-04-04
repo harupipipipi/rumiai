@@ -29,6 +29,7 @@ from typing import Any, Dict, List, Optional
 from .hmac_key_manager import generate_or_load_signing_key, compute_data_hmac, verify_data_hmac
 
 logger = logging.getLogger(__name__)
+_REQUIRE_HMAC_DEFAULT = "1"
 
 SHARING_INDEX_PATH = "user_data/stores/sharing.json"
 
@@ -117,7 +118,7 @@ class SharedStoreManager:
                     self._entries = {}
                     return
             else:
-                require_hmac = os.environ.get("RUMI_REQUIRE_HMAC", "0") == "1"
+                require_hmac = os.environ.get("RUMI_REQUIRE_HMAC", _REQUIRE_HMAC_DEFAULT) == "1"
                 if require_hmac:
                     logger.critical("Sharing store has no HMAC signature and RUMI_REQUIRE_HMAC=1")
                     self._entries = {}
@@ -148,6 +149,33 @@ class SharedStoreManager:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         tmp.replace(self._index_path)
+
+    def hmac_status(self) -> str:
+        """署名状態を返す: missing / signed / invalid / absent"""
+        if not self._index_path.exists():
+            return "absent"
+        try:
+            with open(self._index_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            stored_sig = data.pop("_hmac_signature", None)
+            if not stored_sig:
+                return "missing"
+            return "signed" if verify_data_hmac(self._secret_key, data, stored_sig) else "invalid"
+        except Exception:
+            return "invalid"
+
+    def migrate_hmac_signature(self) -> str:
+        """署名なし sharing.json を署名付きで保存し直す。"""
+        status = self.hmac_status()
+        if status == "absent":
+            return "absent"
+        if status == "signed":
+            return "already_signed"
+        if status == "invalid":
+            return "failed"
+        with self._lock:
+            self._save()
+        return "migrated"
 
     # ------------------------------------------------------------------
     # 公開API

@@ -209,7 +209,7 @@ pack-shell にはサブコマンド `run` と `version` があります。
 #### run サブコマンド
 
 ```
-pack-shell run <PACK_ID> --command <COMMAND> --api-token <TOKEN> [OPTIONS]
+pack-shell run <PACK_ID> --command <COMMAND> [OPTIONS]
 ```
 
 | 引数 | 型 | 必須 | デフォルト | 説明 |
@@ -218,7 +218,7 @@ pack-shell run <PACK_ID> --command <COMMAND> --api-token <TOKEN> [OPTIONS]
 | `--command` | string | ✅ | — | 実行するコマンド（例: `"python app.py"`） |
 | `--api-token` | string | ✅ | 環境変数 `RUMI_API_TOKEN` | Kernel API の認証トークン |
 | `--port` | u16 | — | `8765` | Kernel API のポート番号 |
-| `--kernel-cmd` | string | — | `"python -m rumi_ai_1_10"` | Kernel が未起動の場合に起動するコマンド |
+| `--kernel-cmd` | string | — | `"python -m rumi_ai"` | Kernel が未起動の場合に起動するコマンド |
 | `--timeout` | u64 | — | `60` | Kernel 起動待ちのタイムアウト（秒） |
 | `--working-dir` | string | — | なし | アプリの作業ディレクトリ |
 
@@ -233,14 +233,14 @@ pack-shell version
 
 ```bash
 # 基本的な使い方
-pack-shell run my_desktop_pack --command "python app.py" --api-token "$TOKEN"
+pack-shell run my_desktop_pack --command "python app.py" --working-dir /path/to/my_desktop_pack --api-token "$TOKEN"
 
 # 全オプション指定
 pack-shell run my_desktop_pack \
   --command "python app.py" \
-  --api-token "your-api-token" \
   --port 8765 \
-  --kernel-cmd "python -m rumi_ai_1_10" \
+  --kernel-cmd "python -m rumi_ai" \
+  --api-token "your-api-token" \
   --timeout 60 \
   --working-dir /path/to/workdir
 ```
@@ -262,6 +262,8 @@ pack-shell が読む環境変数:
 | 変数 | 説明 |
 |------|------|
 | `RUMI_API_TOKEN` | `--api-token` の代替。CLI 引数が優先される |
+
+`DesktopAppManager` 経由の起動は `RUMI_API_TOKEN` を環境変数で供給する契約に固定されています。
 
 pack-shell がアプリに渡す環境変数:
 
@@ -406,7 +408,7 @@ Pack は悪意前提で設計されています。デスクトップアプリの
 
 1. **アプリを開発する**: tkinter, Qt, Electron など任意のフレームワークでデスクトップアプリを作成
 2. **環境変数に対応する**: アプリ内で `RUMI_TOKEN`, `RUMI_PORT`, `RUMI_PACK_ID` を読み取り、Kernel API と通信するコードを実装
-3. **pack-shell でテストする**: `pack-shell run <PACK_ID> --command "python app.py" --api-token <TOKEN>` で動作確認
+3. **pack-shell でテストする**: `pack-shell run <PACK_ID> --command "python app.py" --working-dir <DIR> --api-token <TOKEN>` で動作確認
 4. **ecosystem.json に desktop_app を追加する**: `command`, `window`, `platforms` 等を設定
 5. **Pack をインストールする**: `ecosystem_packs/` に配置するか、PackImporter でインポート
 6. **Grant を承認する**: GrantManager で `desktop_app.execute` の Grant を設定

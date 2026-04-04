@@ -25,12 +25,16 @@ import logging
 import os
 import re
 import sys
-import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
+
+try:
+    from rumi_ai import __version__ as _KERNEL_VERSION
+except ImportError:
+    _KERNEL_VERSION = "1.10.0"
 
 logger = logging.getLogger(__name__)
 
@@ -40,11 +44,24 @@ _RE_FLOW_ID = re.compile(r'^[a-zA-Z0-9_.\-]{1,128}$')
 # YAML ファイル名バリデーション
 _RE_YAML_FILENAME = re.compile(r'^[a-zA-Z0-9_.\-]{1,128}\.ya?ml$')
 
-# Kernel バージョン（ハードコード。Phase U でバージョンファイルから読むように変更予定）
-_KERNEL_VERSION = "1.10.0"
-
 # レート制限: 最後の restart 要求タイムスタンプ（epoch秒）
 _last_restart_time: float = 0.0
+_RESTART_EXIT_CODE = 42
+_restart_requested = False
+
+
+def request_kernel_restart() -> None:
+    global _restart_requested
+    _restart_requested = True
+
+
+def is_kernel_restart_requested() -> bool:
+    return _restart_requested
+
+
+def clear_kernel_restart_request() -> None:
+    global _restart_requested
+    _restart_requested = False
 
 
 class ControlPanelHandlersMixin:
@@ -515,7 +532,8 @@ class ControlPanelHandlersMixin:
         """POST /api/panel/kernel/restart — Kernel 再起動
 
         exit code 42 を返し、Rust ランチャーが再起動する。
-        daemon スレッドで 1 秒遅延させてからプロセスを終了する。
+        API では再起動要求フラグのみを立て、メインプロセス側で
+        atexit を通るグレースフル終了を行う。
         レート制限: 前回の再起動から 60 秒以内のリクエストは拒否する。
         """
         global _last_restart_time
@@ -528,13 +546,6 @@ class ControlPanelHandlersMixin:
                 "status_code": 429,
             }
         _last_restart_time = now
-
-        def _delayed_exit():
-            time.sleep(1.0)
-            logger.info("Kernel restart requested via API — exiting with code 42")
-            os._exit(42)
-
-        timer = threading.Thread(target=_delayed_exit, daemon=True)
-        timer.start()
-
-        return {"restarting": True, "message": "Kernel will restart in ~1 second"}
+        request_kernel_restart()
+        logger.info("Kernel restart requested via API — flag set for graceful shutdown")
+        return {"restarting": True, "message": "Kernel restart requested"}

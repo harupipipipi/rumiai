@@ -52,6 +52,12 @@ ecosystem は第三者が作成でき、悪意ある作者も存在しうると�
 - **Egress Proxy**: 外部通信は UDS ソケット経由のプロキシでのみ許可
 - **Capability（Trust + Grant）**: ホスト権限は二段階の承認で制御
 
+既存環境で HMAC 署名なしの設定ファイルを再署名する場合:
+
+```bash
+python -m rumi_ai migrate-hmac
+```
+
 ---
 
 ## プロジェクト構造

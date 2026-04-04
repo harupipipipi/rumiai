@@ -5,13 +5,14 @@ import json
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 # テスト対象のインポートパスを解決
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
 from core_runtime.api.control_panel_handlers import ControlPanelHandlersMixin
+import core_runtime.api.control_panel_handlers as control_panel_handlers
 
 
 class _FakeHandler(ControlPanelHandlersMixin):
@@ -154,21 +155,27 @@ class TestPanelGetProfile(unittest.TestCase):
 class TestPanelRestartKernel(unittest.TestCase):
     """POST /api/panel/kernel/restart のレスポンス形式テスト"""
 
-    @patch("threading.Thread")
-    def test_restart_returns_restarting(self, mock_thread_cls):
-        mock_instance = MagicMock()
-        mock_thread_cls.return_value = mock_instance
+    def test_restart_returns_restarting(self):
+        control_panel_handlers._last_restart_time = 0.0
+        control_panel_handlers.clear_kernel_restart_request()
         handler = _FakeHandler()
         result = handler._panel_restart_kernel()
         self.assertIn("restarting", result)
         self.assertTrue(result["restarting"])
-        mock_instance.start.assert_called_once()
+        self.assertTrue(control_panel_handlers.is_kernel_restart_requested())
+
+    def test_restart_sets_graceful_shutdown_flag(self):
+        control_panel_handlers._last_restart_time = 0.0
+        control_panel_handlers.clear_kernel_restart_request()
+        handler = _FakeHandler()
+        handler._panel_restart_kernel()
+        self.assertTrue(control_panel_handlers.is_kernel_restart_requested())
 
 
 class TestPanelEnableDisablePack(unittest.TestCase):
     """POST /api/panel/packs/{id}/enable|disable のテスト"""
 
-    @patch("core_runtime.api.control_panel_handlers.discover_pack_locations")
+    @patch("core_runtime.paths.discover_pack_locations", create=True)
     def test_enable_pack_not_found(self, mock_discover):
         mock_discover.return_value = []
         handler = _FakeHandler()

@@ -1,6 +1,6 @@
 """tests/test_security_guards.py — セキュリティガード強化テスト
 
-Wave 1-1: os._exit(42) 保護（レート制限）
+Wave 1-1: restart 保護（レート制限 + graceful flag）
 Wave 1-2: --permissive ガード強化（lockfile チェック）
 """
 import time
@@ -26,10 +26,11 @@ class TestRestartRateLimit:
         """初回呼び出しは成功する"""
         import core_runtime.api.control_panel_handlers as mod
         monkeypatch.setattr(mod, "_last_restart_time", 0.0)
-        monkeypatch.setattr("os._exit", lambda code: None)
+        mod.clear_kernel_restart_request()
         obj = _make_mixin()
         result = obj._panel_restart_kernel()
         assert result.get("restarting") is True
+        assert mod.is_kernel_restart_requested() is True
 
     def test_second_call_within_60s_rejected(self, monkeypatch):
         """60秒以内の2回目は HTTP 429 で拒否される"""
@@ -44,10 +45,11 @@ class TestRestartRateLimit:
         """60秒経過後の呼び出しは成功する"""
         import core_runtime.api.control_panel_handlers as mod
         monkeypatch.setattr(mod, "_last_restart_time", time.time() - 61)
-        monkeypatch.setattr("os._exit", lambda code: None)
+        mod.clear_kernel_restart_request()
         obj = _make_mixin()
         result = obj._panel_restart_kernel()
         assert result.get("restarting") is True
+        assert mod.is_kernel_restart_requested() is True
 
 
 # ======================================================================

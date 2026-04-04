@@ -6,6 +6,7 @@
 
 import json
 import copy
+import os
 import threading
 from pathlib import Path
 from typing import Dict, Optional, Any, List
@@ -20,6 +21,7 @@ from core_runtime.hmac_key_manager import (
 )
 
 logger = logging.getLogger(__name__)
+_REQUIRE_HMAC_DEFAULT = "1"
 
 
 @dataclass
@@ -99,12 +101,21 @@ class ActiveEcosystemManager:
                         data = json.load(f)
                     stored_sig = data.pop("_hmac_signature", None)
                     if not stored_sig:
-                        logger.warning(
-                            "Unsigned active_ecosystem config detected at %s, "
-                            "re-signing on next save",
-                            self.config_path,
-                        )
-                        self._config = ActiveEcosystemConfig.from_dict(data)
+                        require_hmac = os.environ.get("RUMI_REQUIRE_HMAC", _REQUIRE_HMAC_DEFAULT) == "1"
+                        if require_hmac:
+                            logger.warning(
+                                "Unsigned active_ecosystem config detected at %s, "
+                                "falling back to defaults because HMAC is required",
+                                self.config_path,
+                            )
+                            self._config = self._create_default_config()
+                        else:
+                            logger.warning(
+                                "Unsigned active_ecosystem config detected at %s, "
+                                "re-signing on next save",
+                                self.config_path,
+                            )
+                            self._config = ActiveEcosystemConfig.from_dict(data)
                     elif not verify_data_hmac(self._secret_key, data, stored_sig):
                         logger.warning(
                             "HMAC verification failed for active_ecosystem "
@@ -170,6 +181,36 @@ class ActiveEcosystemManager:
         """設定を保存"""
         with self._lock:
             self._save_config_internal()
+
+    def hmac_status(self) -> str:
+        if not self.config_path.exists():
+            return "absent"
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            stored_sig = data.pop("_hmac_signature", None)
+            if not stored_sig:
+                return "missing"
+            return "signed" if verify_data_hmac(self._secret_key, data, stored_sig) else "invalid"
+        except Exception:
+            return "invalid"
+
+    def migrate_hmac_signature(self) -> str:
+        """署名なし active_ecosystem.json を署名付きで保存し直す。"""
+        status = self.hmac_status()
+        if status == "absent":
+            return "absent"
+        if status == "signed":
+            return "already_signed"
+        if status == "invalid":
+            return "failed"
+        with self._lock:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            data.pop("_hmac_signature", None)
+            self._config = ActiveEcosystemConfig.from_dict(data)
+            self._save_config_internal()
+        return "migrated"
     
     @property
     def config(self) -> ActiveEcosystemConfig:

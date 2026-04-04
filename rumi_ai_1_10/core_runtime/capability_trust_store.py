@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional
 from .hmac_key_manager import generate_or_load_signing_key, compute_data_hmac, verify_data_hmac
 
 logger = logging.getLogger(__name__)
+_REQUIRE_HMAC_DEFAULT = "1"
 
 
 @dataclass
@@ -75,6 +76,46 @@ class CapabilityTrustStore:
     
     def _now_ts(self) -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    def _load_trusted_entries(self, data: Dict[str, Any]) -> bool:
+        trusted_list = data.get("trusted", [])
+        if not isinstance(trusted_list, list):
+            self._load_error = "'trusted' must be an array"
+            return False
+
+        for i, entry in enumerate(trusted_list):
+            if not isinstance(entry, dict):
+                self._load_error = f"trusted[{i}] must be an object"
+                return False
+
+            handler_id = entry.get("handler_id")
+            sha256 = entry.get("sha256")
+
+            if not handler_id or not isinstance(handler_id, str):
+                self._load_error = f"trusted[{i}]: missing or invalid 'handler_id'"
+                return False
+
+            if not sha256 or not isinstance(sha256, str):
+                self._load_error = f"trusted[{i}]: missing or invalid 'sha256'"
+                return False
+
+            if len(sha256) != 64:
+                self._load_error = f"trusted[{i}]: sha256 must be 64 hex characters, got {len(sha256)}"
+                return False
+
+            try:
+                int(sha256, 16)
+            except ValueError:
+                self._load_error = f"trusted[{i}]: sha256 is not valid hex"
+                return False
+
+            self._trusted[handler_id] = TrustedHandler(
+                handler_id=handler_id,
+                sha256=sha256.lower(),
+                note=entry.get("note", ""),
+            )
+
+        return True
     
     def load(self) -> bool:
         """信頼リストをロード"""
@@ -109,7 +150,7 @@ class CapabilityTrustStore:
                     return False
             else:
                 # 署名なし（旧バージョンファイル）
-                require_hmac = os.environ.get("RUMI_REQUIRE_HMAC", "0") == "1"
+                require_hmac = os.environ.get("RUMI_REQUIRE_HMAC", _REQUIRE_HMAC_DEFAULT) == "1"
                 if require_hmac:
                     logger.critical("Trust store has no HMAC signature and RUMI_REQUIRE_HMAC=1")
                     self._trusted = {}
@@ -121,46 +162,68 @@ class CapabilityTrustStore:
                         "Signature will be added on next save."
                     )
 
-            trusted_list = data.get("trusted", [])
-            if not isinstance(trusted_list, list):
-                self._load_error = "'trusted' must be an array"
+            if not self._load_trusted_entries(data):
                 return False
-            
-            for i, entry in enumerate(trusted_list):
-                if not isinstance(entry, dict):
-                    self._load_error = f"trusted[{i}] must be an object"
-                    return False
-                
-                handler_id = entry.get("handler_id")
-                sha256 = entry.get("sha256")
-                
-                if not handler_id or not isinstance(handler_id, str):
-                    self._load_error = f"trusted[{i}]: missing or invalid 'handler_id'"
-                    return False
-                
-                if not sha256 or not isinstance(sha256, str):
-                    self._load_error = f"trusted[{i}]: missing or invalid 'sha256'"
-                    return False
-                
-                # sha256 形式の基本チェック（64文字の16進数）
-                if len(sha256) != 64:
-                    self._load_error = f"trusted[{i}]: sha256 must be 64 hex characters, got {len(sha256)}"
-                    return False
-                
-                try:
-                    int(sha256, 16)
-                except ValueError:
-                    self._load_error = f"trusted[{i}]: sha256 is not valid hex"
-                    return False
-                
-                self._trusted[handler_id] = TrustedHandler(
-                    handler_id=handler_id,
-                    sha256=sha256.lower(),
-                    note=entry.get("note", ""),
-                )
             
             self._loaded = True
             return True
+
+    def migrate_legacy_file(self) -> bool:
+        """署名なし trust file を署名付きで保存し直す。"""
+        with self._lock:
+            self._trusted.clear()
+            self._loaded = False
+            self._load_error = None
+
+            if not self._trust_file.exists():
+                self._loaded = True
+                return True
+
+            try:
+                with open(self._trust_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except (json.JSONDecodeError, OSError) as e:
+                self._load_error = f"Failed to parse trust file: {e}"
+                return False
+
+            if not isinstance(data, dict):
+                self._load_error = "Trust file must be a JSON object"
+                return False
+
+            stored_sig = data.pop("_hmac_signature", None)
+            if stored_sig and not verify_data_hmac(self._secret_key, data, stored_sig):
+                self._load_error = "HMAC verification failed"
+                return False
+
+            if not self._load_trusted_entries(data):
+                return False
+
+            self._loaded = True
+            return self._save()
+
+    def hmac_status(self) -> str:
+        """署名状態を返す: missing / signed / invalid / absent"""
+        if not self._trust_file.exists():
+            return "absent"
+        try:
+            with open(self._trust_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            stored_sig = data.pop("_hmac_signature", None)
+            if not stored_sig:
+                return "missing"
+            return "signed" if verify_data_hmac(self._secret_key, data, stored_sig) else "invalid"
+        except Exception:
+            return "invalid"
+
+    def migrate_hmac_signature(self) -> str:
+        status = self.hmac_status()
+        if status == "absent":
+            return "absent"
+        if status == "signed":
+            return "already_signed"
+        if status == "invalid":
+            return "failed"
+        return "migrated" if self.migrate_legacy_file() else "failed"
     
     def is_trusted(self, handler_id: str, actual_sha256: str) -> TrustCheckResult:
         """

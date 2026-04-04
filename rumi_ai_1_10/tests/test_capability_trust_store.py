@@ -136,7 +136,24 @@ class TestLoad:
         assert store.is_loaded() is True
         assert store.list_trusted() == []
 
-    def test_load_from_file(self, tmp_path):
+    def test_load_rejects_unsigned_file_by_default(self, tmp_path):
+        trust_dir = tmp_path / "trust"
+        trust_dir.mkdir(parents=True)
+        trust_file = trust_dir / "trusted_handlers.json"
+        trust_file.write_text(json.dumps({
+            "version": "1.0",
+            "trusted": [
+                {"handler_id": "h1", "sha256": VALID_SHA, "note": "test"},
+                {"handler_id": "h2", "sha256": OTHER_SHA},
+            ],
+        }), encoding="utf-8")
+
+        store = CapabilityTrustStore(trust_dir=str(trust_dir))
+        assert store.load() is False
+        assert "HMAC signature missing" in (store.get_load_error() or "")
+
+    def test_load_from_legacy_file_when_env_allows_it(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("RUMI_REQUIRE_HMAC", "0")
         trust_dir = tmp_path / "trust"
         trust_dir.mkdir(parents=True)
         trust_file = trust_dir / "trusted_handlers.json"
@@ -151,6 +168,25 @@ class TestLoad:
         store = CapabilityTrustStore(trust_dir=str(trust_dir))
         assert store.load() is True
         assert len(store.list_trusted()) == 2
+
+    def test_migrate_legacy_file_adds_signature(self, tmp_path):
+        trust_dir = tmp_path / "trust"
+        trust_dir.mkdir(parents=True)
+        trust_file = trust_dir / "trusted_handlers.json"
+        trust_file.write_text(json.dumps({
+            "version": "1.0",
+            "trusted": [{"handler_id": "h1", "sha256": VALID_SHA}],
+        }), encoding="utf-8")
+
+        store = CapabilityTrustStore(trust_dir=str(trust_dir))
+        assert store.migrate_legacy_file() is True
+
+        data = json.loads(trust_file.read_text(encoding="utf-8"))
+        assert "_hmac_signature" in data
+
+        reloaded = CapabilityTrustStore(trust_dir=str(trust_dir))
+        assert reloaded.load() is True
+        assert reloaded.is_trusted("h1", VALID_SHA).trusted is True
 
     def test_load_malformed_json(self, tmp_path):
         trust_dir = tmp_path / "trust"

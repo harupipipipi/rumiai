@@ -5,9 +5,11 @@ import importlib
 import importlib.util
 import json
 import logging
+import os
 import sys
 import types
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -137,8 +139,9 @@ class TestActiveEcosystemHMAC:
             json.dumps(legacy_data, ensure_ascii=False), encoding="utf-8"
         )
 
-        with caplog.at_level(logging.WARNING):
-            mgr = _make_manager(tmp_path)
+        with mock.patch.dict(os.environ, {"RUMI_REQUIRE_HMAC": "0"}):
+            with caplog.at_level(logging.WARNING):
+                mgr = _make_manager(tmp_path)
 
         assert "Unsigned active_ecosystem config detected" in caplog.text
         assert mgr.active_pack_identity == "legacy_pack"

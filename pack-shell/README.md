@@ -31,7 +31,7 @@ pack-shell run my-pack-123 \
   --command "python app.py" \
   --api-token "your-api-token" \
   --port 8765 \
-  --kernel-cmd "python -m rumi_ai_1_10" \
+  --kernel-cmd "python -m rumi_ai" \
   --timeout 60 \
   --working-dir /path/to/workdir
 
@@ -77,6 +77,8 @@ Wait for app exit → return exit code
 | 変数 | 説明 | 備考 |
 |------|------|------|
 | RUMI_API_TOKEN | API 認証トークン | --api-token の代替 |
+
+`DesktopAppManager` から起動される desktop app は `RUMI_API_TOKEN` を環境変数で受け取る契約です。
 
 ### 出力（アプリに渡す）
 

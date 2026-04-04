@@ -65,6 +65,7 @@ from .capability_models import (          # noqa: F401 — re-export
 )
 
 logger = logging.getLogger(__name__)
+_REQUIRE_HMAC_DEFAULT = "1"
 
 
 # ======================================================================
@@ -187,7 +188,7 @@ class CapabilityInstaller:
                     self._index_items = {}
                     return
             else:
-                require_hmac = os.environ.get("RUMI_REQUIRE_HMAC", "0") == "1"
+                require_hmac = os.environ.get("RUMI_REQUIRE_HMAC", _REQUIRE_HMAC_DEFAULT) == "1"
                 if require_hmac:
                     logger.critical("Capability index has no HMAC signature and RUMI_REQUIRE_HMAC=1")
                     self._index_items = {}
@@ -248,7 +249,7 @@ class CapabilityInstaller:
                     self._blocked = {}
                     return
             else:
-                require_hmac = os.environ.get("RUMI_REQUIRE_HMAC", "0") == "1"
+                require_hmac = os.environ.get("RUMI_REQUIRE_HMAC", _REQUIRE_HMAC_DEFAULT) == "1"
                 if require_hmac:
                     logger.critical("Capability blocked list has no HMAC signature and RUMI_REQUIRE_HMAC=1")
                     self._blocked = {}
@@ -278,6 +279,49 @@ class CapabilityInstaller:
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         tmp_path.replace(path)
+
+    def _hmac_file_status(self, path: Path) -> str:
+        if not path.exists():
+            return "absent"
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            stored_sig = data.pop("_hmac_signature", None)
+            if not stored_sig:
+                return "missing"
+            return "signed" if verify_data_hmac(self._secret_key, data, stored_sig) else "invalid"
+        except Exception:
+            return "invalid"
+
+    def migrate_hmac_signatures(self) -> Dict[str, str]:
+        """署名なし index / blocked を署名付きで保存し直す。"""
+        statuses = {
+            "index": self._hmac_file_status(self._index_path()),
+            "blocked": self._hmac_file_status(self._blocked_path()),
+        }
+        results: Dict[str, str] = {}
+
+        if statuses["index"] == "signed":
+            results["index"] = "already_signed"
+        elif statuses["index"] == "missing":
+            self._save_index()
+            results["index"] = "migrated"
+        elif statuses["index"] == "absent":
+            results["index"] = "absent"
+        else:
+            results["index"] = "failed"
+
+        if statuses["blocked"] == "signed":
+            results["blocked"] = "already_signed"
+        elif statuses["blocked"] == "missing":
+            self._save_blocked()
+            results["blocked"] = "migrated"
+        elif statuses["blocked"] == "absent":
+            results["blocked"] = "absent"
+        else:
+            results["blocked"] = "failed"
+
+        return results
 
     # ------------------------------------------------------------------
     # Persistence: requests.jsonl

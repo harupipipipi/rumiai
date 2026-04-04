@@ -29,6 +29,7 @@ def sample_meta():
         "command": "python app.py --verbose",
         "pack_dir": "/tmp/packs/test-pack-001",
         "pack_shell": "/usr/local/bin/pack-shell",
+        "requires_api_token": True,
         "window": {"title": "Test App"},
         "env": {"CUSTOM_VAR": "hello"},
         "working_dir": "/tmp/packs/test-pack-001",
@@ -54,7 +55,8 @@ class TestLaunchAppArguments:
 
         manager._load_meta = mock.MagicMock(return_value=sample_meta)
 
-        result = manager.launch_app("test-pack-001")
+        with mock.patch.dict(os.environ, {"RUMI_API_TOKEN": "secret-token-xyz"}):
+            result = manager.launch_app("test-pack-001")
 
         assert result["success"] is True
         assert result["status"] == "launched"
@@ -67,6 +69,8 @@ class TestLaunchAppArguments:
             "test-pack-001",
             "--command",
             "python app.py --verbose",
+            "--working-dir",
+            "/tmp/packs/test-pack-001",
         ]
 
     @mock.patch("subprocess.Popen")
@@ -141,7 +145,8 @@ class TestLaunchAppArguments:
 
         manager._load_meta = mock.MagicMock(return_value=sample_meta)
 
-        result = manager.launch_app("test-pack-001")
+        with mock.patch.dict(os.environ, {"RUMI_API_TOKEN": "secret-token-xyz"}):
+            result = manager.launch_app("test-pack-001")
 
         assert result["success"] is True
         call_kwargs = mock_popen.call_args[1]
@@ -151,22 +156,16 @@ class TestLaunchAppArguments:
 
     @mock.patch("subprocess.Popen")
     @mock.patch("os.path.isfile", return_value=True)
-    def test_launch_app_without_rumi_api_token_env(
+    def test_launch_app_errors_without_rumi_api_token_env(
         self, mock_isfile, mock_popen, manager, sample_meta
     ):
-        """If RUMI_API_TOKEN is not in os.environ, env should not force it."""
-        mock_proc = mock.MagicMock()
-        mock_proc.poll.return_value = None
-        mock_proc.pid = 12345
-        mock_popen.return_value = mock_proc
-
+        """Desktop app launch should fail fast when RUMI_API_TOKEN is missing."""
         manager._load_meta = mock.MagicMock(return_value=sample_meta)
 
-        # Clear RUMI_API_TOKEN from environment
         env_clean = {k: v for k, v in os.environ.items() if k != "RUMI_API_TOKEN"}
         with mock.patch.dict(os.environ, env_clean, clear=True):
             result = manager.launch_app("test-pack-001")
 
-        assert result["success"] is True
-        # When RUMI_API_TOKEN is not set, it should not appear as a forced
-        # entry (though it may not be present at all, which is fine)
+        assert result["success"] is False
+        assert "RUMI_API_TOKEN" in result["error"]
+        mock_popen.assert_not_called()
