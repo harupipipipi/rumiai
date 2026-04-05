@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import socket
@@ -42,6 +43,7 @@ MAX_RESPONSE_SIZE = 1 * 1024 * 1024
 # BUG-5-1: IPC 認証 (Windows TCP フォールバック)
 from .ipc_auth import IpcAuthManager, perform_server_auth
 
+logger = logging.getLogger(__name__)
 
 _IS_WINDOWS = sys.platform == "win32"
 
@@ -51,6 +53,24 @@ _UNSAFE_CHARS = re.compile(r'[/\\:*?"<>|.\x00-\x1f]')
 _DEFAULT_SOCKET_MODE = 0o660
 _DEFAULT_DIR_MODE = 0o750
 _RELAXED_SOCKET_MODE = 0o666
+
+
+def _windows_tcp_fallback_enabled() -> bool:
+    return os.environ.get("RUMI_ALLOW_WINDOWS_TCP_FALLBACK", "").lower() in ("1", "true")
+
+
+def _audit_transport_warning(event_type: str, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+    try:
+        from .audit_logger import get_audit_logger
+        audit = get_audit_logger()
+        audit.log_security_event(
+            event_type=event_type,
+            severity="warning",
+            description=message,
+            details=details or {},
+        )
+    except Exception:
+        logger.debug("Failed to record capability transport audit warning", exc_info=True)
 
 
 def _principal_socket_name(principal_id: str) -> str:
@@ -154,7 +174,7 @@ def _audit_permission_warning(event_type: str, path: str, message: str) -> None:
             details={"path": path},
         )
     except Exception:
-        pass
+        logger.debug("Failed to record capability proxy permission warning", exc_info=True)
 
 
 # ============================================================
@@ -221,7 +241,7 @@ class _PrincipalHandler(socketserver.BaseRequestHandler):
                 resp_bytes = json.dumps(error_resp, ensure_ascii=False).encode("utf-8")
                 _write_length_prefixed(self.request, resp_bytes)
             except Exception:
-                pass
+                logger.debug("Failed to send capability protocol error response", exc_info=True)
             return
 
         # executor に委譲（principal_id はソケット由来）
@@ -244,7 +264,7 @@ class _PrincipalHandler(socketserver.BaseRequestHandler):
         try:
             _write_length_prefixed(self.request, resp_bytes)
         except Exception:
-            pass
+            logger.debug("Failed to write capability proxy response", exc_info=True)
 
 
 if not _IS_WINDOWS:
@@ -302,7 +322,7 @@ else:
                     resp_bytes = json.dumps(error_resp, ensure_ascii=False).encode("utf-8")
                     _write_length_prefixed(self.request, resp_bytes)
                 except Exception:
-                    pass
+                    logger.debug("Failed to write TCP capability auth error response", exc_info=True)
                 return
 
             try:
@@ -319,7 +339,7 @@ else:
                     resp_bytes = json.dumps(error_resp, ensure_ascii=False).encode("utf-8")
                     _write_length_prefixed(self.request, resp_bytes)
                 except Exception:
-                    pass
+                    logger.debug("Failed to write TCP capability protocol error response", exc_info=True)
                 return
 
             response = executor.execute(pack_id, request_data)
@@ -339,7 +359,7 @@ else:
             try:
                 _write_length_prefixed(self.request, resp_bytes)
             except Exception:
-                pass
+                logger.debug("Failed to write TCP capability response", exc_info=True)
 
     class _ThreadedTCPServer(_ss_tcp.ThreadingMixIn, _ss_tcp.TCPServer):
         """Windows TCP フォールバック用サーバー (BUG-5-1)"""
@@ -386,6 +406,7 @@ class HostCapabilityProxyServer:
         # BUG-5-1: IPC auth manager
         self._ipc_auth: Optional[IpcAuthManager] = IpcAuthManager() if _IS_WINDOWS else None
         self._tcp_ports: Dict[str, int] = {}
+        self._windows_tcp_warning_emitted = False
 
     def _now_ts(self) -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -424,6 +445,20 @@ class HostCapabilityProxyServer:
             # ディレクトリパーミッション適用（best-effort）
             _apply_dir_permissions(self._base_dir)
 
+            if _IS_WINDOWS and _windows_tcp_fallback_enabled() and not self._windows_tcp_warning_emitted:
+                warning_msg = (
+                    "Windows capability TCP fallback is enabled via "
+                    "RUMI_ALLOW_WINDOWS_TCP_FALLBACK. This is a less secure transport mode."
+                )
+                logger.warning(warning_msg)
+                print(f"[Rumi] WARNING: {warning_msg}", file=sys.stderr)
+                _audit_transport_warning(
+                    "capability_proxy_windows_tcp_fallback_enabled",
+                    warning_msg,
+                    {"base_dir": str(self._base_dir)},
+                )
+                self._windows_tcp_warning_emitted = True
+
             # executor 初期化
             from .capability_executor import get_capability_executor
             self._executor = get_capability_executor()
@@ -445,7 +480,18 @@ class HostCapabilityProxyServer:
             (success, error, socket_path)
         """
         if _IS_WINDOWS:
-            # BUG-5-1: Windows TCP fallback
+            if not _windows_tcp_fallback_enabled():
+                msg = (
+                    "Capability proxy TCP fallback is disabled on Windows. "
+                    "Set RUMI_ALLOW_WINDOWS_TCP_FALLBACK=1 to opt in."
+                )
+                logger.warning(msg)
+                _audit_transport_warning(
+                    "capability_proxy_windows_tcp_fallback_denied",
+                    msg,
+                    {"principal_id": principal_id},
+                )
+                return False, msg, None
             return self._ensure_principal_tcp(principal_id)
         with self._lock:
             if not self._initialized:
@@ -505,6 +551,17 @@ class HostCapabilityProxyServer:
                 self._ipc_auth = IpcAuthManager()
             self._ipc_auth.generate_token(principal_id)
 
+            warning_msg = (
+                "Using Windows TCP fallback for capability proxy. "
+                "This mode is less secure than Unix domain sockets."
+            )
+            logger.warning("%s principal_id=%s", warning_msg, principal_id)
+            _audit_transport_warning(
+                "capability_proxy_windows_tcp_fallback_used",
+                warning_msg,
+                {"principal_id": principal_id},
+            )
+
             try:
                 server = _ThreadedTCPServer(
                     0,
@@ -559,18 +616,18 @@ class HostCapabilityProxyServer:
         if server:
             try:
                 server.shutdown()
-                # ソケットファイル削除
-                sock_path = Path(server.server_address)
-                if sock_path.exists():
-                    sock_path.unlink()
+                if not _IS_WINDOWS and isinstance(server.server_address, str):
+                    sock_path = Path(server.server_address)
+                    if sock_path.exists():
+                        sock_path.unlink()
             except Exception:
-                pass
+                logger.debug("Failed to stop capability proxy server for '%s'", principal_id, exc_info=True)
 
         if thread:
             try:
                 thread.join(timeout=5)
             except Exception:
-                pass
+                logger.debug("Failed to join capability proxy thread for '%s'", principal_id, exc_info=True)
 
     def stop_all(self) -> None:
         """全サーバーを停止"""

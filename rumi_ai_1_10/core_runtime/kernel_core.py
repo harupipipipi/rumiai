@@ -275,7 +275,7 @@ class KernelCore:
                 details={"warning": warning_msg, "deprecated": True}
             )
         except Exception:
-            pass
+            _logger.debug("Failed to audit legacy flow fallback warning", exc_info=True)
 
     @deprecated(since="1.0", removed_in="2.0", alternative="kernel:flow.load_all")
     def _load_legacy_flow(self) -> Dict[str, Any]:
@@ -529,7 +529,7 @@ class KernelCore:
         try:
             self.event_bus.clear()
         except Exception:
-            pass
+            _logger.debug("Failed to clear event bus during shutdown", exc_info=True)
         try:
             # SV-4 fix: wait=True で実行中タスクの完了を待つ（データ破損防止）
             # cancel_futures=True で待機中タスクはキャンセル
@@ -538,7 +538,7 @@ class KernelCore:
             # Python 3.8 以前は cancel_futures 非対応
             self._executor.shutdown(wait=True)
         except Exception:
-            pass
+            _logger.debug("Failed to shutdown kernel executor cleanly", exc_info=True)
         self.diagnostics.record_step(phase="shutdown", step_id="kernel.shutdown", handler="kernel:shutdown",
                                       status="success", meta={"handlers_count": len(results)})
         return {"results": results}

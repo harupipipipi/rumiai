@@ -261,6 +261,10 @@ def _register_defaults(container: DIContainer) -> None:
         from .permission_manager import PermissionManager
         return PermissionManager()
 
+    def _capability_trust_store_factory() -> "CapabilityTrustStore":  # noqa: F821
+        from .capability_trust_store import CapabilityTrustStore
+        return CapabilityTrustStore()
+
     # --- Wave 4: orchestration / composition ---
     def _container_orchestrator_factory() -> "ContainerOrchestrator":  # noqa: F821
         from .container_orchestrator import ContainerOrchestrator
@@ -388,6 +392,7 @@ def _register_defaults(container: DIContainer) -> None:
     container.register("store_registry", _store_registry_factory)
     container.register("approval_manager", _approval_manager_factory)
     container.register("permission_manager", _permission_manager_factory)
+    container.register("capability_trust_store", _capability_trust_store_factory)
     container.register("container_orchestrator", _container_orchestrator_factory)
     container.register("host_privilege_manager", _host_privilege_manager_factory)
     container.register("flow_composer", _flow_composer_factory)

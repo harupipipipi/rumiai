@@ -1,266 +1,170 @@
 """
 core_runtime package
 
-PR-B追加:
-- lang export不整合の修正（B6）
-- rumi_syscall のexport追加（B5）
+外部公開 API は小さく保ち、旧来の top-level re-export は
+互換 shim と deprecation warning で段階的に縮小する。
 """
 
-from .kernel import Kernel, KernelConfig
-from .diagnostics import Diagnostics
-from .di_container import (
-    DIContainer,
-    get_container,
-    reset_container,
-)
-from .install_journal import InstallJournal, InstallJournalConfig
-from .interface_registry import InterfaceRegistry
-from .event_bus import EventBus
-from .component_lifecycle import ComponentLifecycleExecutor
-from .permission_manager import PermissionManager, get_permission_manager
-from .function_alias import FunctionAliasRegistry, get_function_alias_registry
-from .flow_composer import FlowComposer, FlowModifier, get_flow_composer
-from .approval_manager import (
-    ApprovalManager,
-    PackStatus,
-    PackApproval,
-    ApprovalResult,
-    get_approval_manager,
-    initialize_approval_manager,
-)
-from .container_orchestrator import (
-    ContainerOrchestrator,
-    ContainerResult,
-    get_container_orchestrator,
-    initialize_container_orchestrator,
-)
-from .host_privilege_manager import (
-    HostPrivilegeManager,
-    PrivilegeResult,
-    get_host_privilege_manager,
-    initialize_host_privilege_manager,
-)
-from .pack_api_server import (
-    PackAPIServer,
-    get_pack_api_server,
-    initialize_pack_api_server,
-    shutdown_pack_api_server,
-)
-from .docker_run_builder import DockerRunBuilder
-from .secure_executor import (
-    SecureExecutor,
-    ExecutionResult,
-    get_secure_executor,
-    reset_secure_executor,
-)
-from .vocab_registry import (
-    VocabRegistry,
-    VocabGroup,
-    ConverterInfo,
-    get_vocab_registry,
-    reset_vocab_registry,
-    VOCAB_FILENAME,
-    CONVERTERS_DIRNAME,
-)
-from .lang import (
-    LangRegistry,
-    LangManager,  # B6: 互換alias (= LangRegistry)
-    get_lang_registry,
-    get_lang_manager,  # B6: 互換alias (= get_lang_registry)
-    L,
-    Lp,
-    set_locale,
-    get_locale,
-    reload_lang,
-)
-from .flow_loader import (
-    FlowLoader,
-    FlowDefinition,
-    FlowStep,
-    FlowLoadResult,
-    get_flow_loader,
-    reset_flow_loader,
-    load_all_flows,
-)
-from .flow_modifier import (
-    FlowModifierDef,
-    FlowModifierLoader,
-    FlowModifierApplier,
-    ModifierRequires,
-    ModifierLoadResult,
-    ModifierApplyResult,
-    get_modifier_loader,
-    get_modifier_applier,
-    reset_modifier_loader,
-    reset_modifier_applier,
-)
-from .audit_logger import (
-    AuditLogger,
-    AuditEntry,
-    AuditCategory,
-    AuditSeverity,
-    get_audit_logger,
-    reset_audit_logger,
-)
-from .python_file_executor import (
-    PythonFileExecutor,
-    ExecutionContext,
-    ExecutionResult as PythonExecutionResult,
-    PackApprovalChecker,
-    PathValidator,
-    get_python_file_executor,
-    reset_python_file_executor,
-)
-from .network_grant_manager import (
-    NetworkGrantManager,
-    NetworkGrant,
-    NetworkCheckResult,
-    get_network_grant_manager,
-    reset_network_grant_manager,
-)
-from .egress_proxy import (
-    EgressProxyServer,
-    EgressProxyHandler,
-    ProxyRequest,
-    ProxyResponse,
-    get_egress_proxy,
-    initialize_egress_proxy,
-    shutdown_egress_proxy,
-    make_proxy_request,
-)
-from .lib_executor import (
-    LibExecutor,
-    LibExecutionRecord,
-    LibCheckResult,
-    LibExecutionResult,
-    get_lib_executor,
-    reset_lib_executor,
-)
-# B5: rumi_syscall（単一ソース）
-from . import rumi_syscall
-from . import syscall  # 互換ラッパー
+from __future__ import annotations
 
-__all__ = [
-    "Kernel",
-    "KernelConfig",
-    "Diagnostics",
-    # DI Container
-    "DIContainer",
-    "get_container",
-    "reset_container",
-    "InstallJournal",
-    "InstallJournalConfig",
-    "InterfaceRegistry",
-    "EventBus",
-    "ComponentLifecycleExecutor",
-    "PermissionManager",
-    "get_permission_manager",
-    "FunctionAliasRegistry",
-    "get_function_alias_registry",
-    "FlowComposer",
-    "FlowModifier",
-    "get_flow_composer",
-    # Security Components
-    "ApprovalManager",
-    "PackStatus",
-    "PackApproval",
-    "ApprovalResult",
-    "get_approval_manager",
-    "initialize_approval_manager",
-    "ContainerOrchestrator",
-    "ContainerResult",
-    "get_container_orchestrator",
-    "initialize_container_orchestrator",
-    "HostPrivilegeManager",
-    "PrivilegeResult",
-    "get_host_privilege_manager",
-    "initialize_host_privilege_manager",
-    "PackAPIServer",
-    "get_pack_api_server",
-    "initialize_pack_api_server",
-    "shutdown_pack_api_server",
-    # Docker Run Builder
-    "DockerRunBuilder",
-    # Secure Executor
-    "SecureExecutor",
-    "ExecutionResult",
-    "get_secure_executor",
-    "reset_secure_executor",
-    # Vocab Registry
-    "VocabRegistry",
-    "VocabGroup",
-    "ConverterInfo",
-    "get_vocab_registry",
-    "reset_vocab_registry",
-    "VOCAB_FILENAME",
-    "CONVERTERS_DIRNAME",
-    # Lang
-    "LangRegistry",
-    "LangManager",  # B6: 互換alias
-    "get_lang_registry",
-    "get_lang_manager",  # B6: 互換alias
-    "L",
-    "Lp",
-    "set_locale",
-    "get_locale",
-    "reload_lang",
-    # Flow Loader
-    "FlowLoader",
-    "FlowDefinition",
-    "FlowStep",
-    "FlowLoadResult",
-    "get_flow_loader",
-    "reset_flow_loader",
-    "load_all_flows",
-    # Flow Modifier
-    "FlowModifierDef",
-    "FlowModifierLoader",
-    "FlowModifierApplier",
-    "ModifierRequires",
-    "ModifierLoadResult",
-    "ModifierApplyResult",
-    "get_modifier_loader",
-    "get_modifier_applier",
-    "reset_modifier_loader",
-    "reset_modifier_applier",
-    # Audit Logger
-    "AuditLogger",
-    "AuditEntry",
-    "AuditCategory",
-    "AuditSeverity",
-    "get_audit_logger",
-    "reset_audit_logger",
-    # Python File Executor
-    "PythonFileExecutor",
-    "ExecutionContext",
-    "PythonExecutionResult",
-    "PackApprovalChecker",
-    "PathValidator",
-    "get_python_file_executor",
-    "reset_python_file_executor",
-    # Network Grant Manager
-    "NetworkGrantManager",
-    "NetworkGrant",
-    "NetworkCheckResult",
-    "get_network_grant_manager",
-    "reset_network_grant_manager",
-    # Egress Proxy
-    "EgressProxyServer",
-    "EgressProxyHandler",
-    "ProxyRequest",
-    "ProxyResponse",
-    "get_egress_proxy",
-    "initialize_egress_proxy",
-    "shutdown_egress_proxy",
-    "make_proxy_request",
-    # Lib Executor
-    "LibExecutor",
-    "LibExecutionRecord",
-    "LibCheckResult",
-    "LibExecutionResult",
-    "get_lib_executor",
-    "reset_lib_executor",
-    # B5: Syscall modules
-    "rumi_syscall",
-    "syscall",
-]
+import importlib
+import warnings
+from typing import Dict, Tuple
+
+
+_ExportTarget = Tuple[str, str]
+
+
+_PUBLIC_EXPORTS: Dict[str, _ExportTarget] = {
+    "Kernel": (".kernel", "Kernel"),
+    "KernelConfig": (".kernel", "KernelConfig"),
+    "Diagnostics": (".diagnostics", "Diagnostics"),
+    "DIContainer": (".di_container", "DIContainer"),
+    "get_container": (".di_container", "get_container"),
+    "reset_container": (".di_container", "reset_container"),
+    "ApprovalManager": (".approval_manager", "ApprovalManager"),
+    "get_approval_manager": (".approval_manager", "get_approval_manager"),
+    "PermissionManager": (".permission_manager", "PermissionManager"),
+    "get_permission_manager": (".permission_manager", "get_permission_manager"),
+    "AuditLogger": (".audit_logger", "AuditLogger"),
+    "get_audit_logger": (".audit_logger", "get_audit_logger"),
+    "PackAPIServer": (".pack_api_server", "PackAPIServer"),
+    "get_pack_api_server": (".pack_api_server", "get_pack_api_server"),
+    "L": (".lang", "L"),
+}
+
+
+_LEGACY_EXPORTS: Dict[str, _ExportTarget] = {
+    "InstallJournal": (".install_journal", "InstallJournal"),
+    "InstallJournalConfig": (".install_journal", "InstallJournalConfig"),
+    "InterfaceRegistry": (".interface_registry", "InterfaceRegistry"),
+    "EventBus": (".event_bus", "EventBus"),
+    "ComponentLifecycleExecutor": (".component_lifecycle", "ComponentLifecycleExecutor"),
+    "FunctionAliasRegistry": (".function_alias", "FunctionAliasRegistry"),
+    "get_function_alias_registry": (".function_alias", "get_function_alias_registry"),
+    "FlowComposer": (".flow_composer", "FlowComposer"),
+    "FlowModifier": (".flow_composer", "FlowModifier"),
+    "get_flow_composer": (".flow_composer", "get_flow_composer"),
+    "PackStatus": (".approval_manager", "PackStatus"),
+    "PackApproval": (".approval_manager", "PackApproval"),
+    "ApprovalResult": (".approval_manager", "ApprovalResult"),
+    "initialize_approval_manager": (".approval_manager", "initialize_approval_manager"),
+    "ContainerOrchestrator": (".container_orchestrator", "ContainerOrchestrator"),
+    "ContainerResult": (".container_orchestrator", "ContainerResult"),
+    "get_container_orchestrator": (".container_orchestrator", "get_container_orchestrator"),
+    "initialize_container_orchestrator": (".container_orchestrator", "initialize_container_orchestrator"),
+    "HostPrivilegeManager": (".host_privilege_manager", "HostPrivilegeManager"),
+    "PrivilegeResult": (".host_privilege_manager", "PrivilegeResult"),
+    "get_host_privilege_manager": (".host_privilege_manager", "get_host_privilege_manager"),
+    "initialize_host_privilege_manager": (".host_privilege_manager", "initialize_host_privilege_manager"),
+    "initialize_pack_api_server": (".pack_api_server", "initialize_pack_api_server"),
+    "shutdown_pack_api_server": (".pack_api_server", "shutdown_pack_api_server"),
+    "DockerRunBuilder": (".docker_run_builder", "DockerRunBuilder"),
+    "SecureExecutor": (".secure_executor", "SecureExecutor"),
+    "ExecutionResult": (".secure_executor", "ExecutionResult"),
+    "get_secure_executor": (".secure_executor", "get_secure_executor"),
+    "reset_secure_executor": (".secure_executor", "reset_secure_executor"),
+    "VocabRegistry": (".vocab_registry", "VocabRegistry"),
+    "VocabGroup": (".vocab_registry", "VocabGroup"),
+    "ConverterInfo": (".vocab_registry", "ConverterInfo"),
+    "get_vocab_registry": (".vocab_registry", "get_vocab_registry"),
+    "reset_vocab_registry": (".vocab_registry", "reset_vocab_registry"),
+    "VOCAB_FILENAME": (".vocab_registry", "VOCAB_FILENAME"),
+    "CONVERTERS_DIRNAME": (".vocab_registry", "CONVERTERS_DIRNAME"),
+    "LangRegistry": (".lang", "LangRegistry"),
+    "LangManager": (".lang", "LangManager"),
+    "get_lang_registry": (".lang", "get_lang_registry"),
+    "get_lang_manager": (".lang", "get_lang_manager"),
+    "Lp": (".lang", "Lp"),
+    "set_locale": (".lang", "set_locale"),
+    "get_locale": (".lang", "get_locale"),
+    "reload_lang": (".lang", "reload_lang"),
+    "FlowLoader": (".flow_loader", "FlowLoader"),
+    "FlowDefinition": (".flow_loader", "FlowDefinition"),
+    "FlowStep": (".flow_loader", "FlowStep"),
+    "FlowLoadResult": (".flow_loader", "FlowLoadResult"),
+    "get_flow_loader": (".flow_loader", "get_flow_loader"),
+    "reset_flow_loader": (".flow_loader", "reset_flow_loader"),
+    "load_all_flows": (".flow_loader", "load_all_flows"),
+    "FlowModifierDef": (".flow_modifier", "FlowModifierDef"),
+    "FlowModifierLoader": (".flow_modifier", "FlowModifierLoader"),
+    "FlowModifierApplier": (".flow_modifier", "FlowModifierApplier"),
+    "ModifierRequires": (".flow_modifier", "ModifierRequires"),
+    "ModifierLoadResult": (".flow_modifier", "ModifierLoadResult"),
+    "ModifierApplyResult": (".flow_modifier", "ModifierApplyResult"),
+    "get_modifier_loader": (".flow_modifier", "get_modifier_loader"),
+    "get_modifier_applier": (".flow_modifier", "get_modifier_applier"),
+    "reset_modifier_loader": (".flow_modifier", "reset_modifier_loader"),
+    "reset_modifier_applier": (".flow_modifier", "reset_modifier_applier"),
+    "AuditEntry": (".audit_logger", "AuditEntry"),
+    "AuditCategory": (".audit_logger", "AuditCategory"),
+    "AuditSeverity": (".audit_logger", "AuditSeverity"),
+    "reset_audit_logger": (".audit_logger", "reset_audit_logger"),
+    "PythonFileExecutor": (".python_file_executor", "PythonFileExecutor"),
+    "ExecutionContext": (".python_file_executor", "ExecutionContext"),
+    "PythonExecutionResult": (".python_file_executor", "ExecutionResult"),
+    "PackApprovalChecker": (".python_file_executor", "PackApprovalChecker"),
+    "PathValidator": (".python_file_executor", "PathValidator"),
+    "get_python_file_executor": (".python_file_executor", "get_python_file_executor"),
+    "reset_python_file_executor": (".python_file_executor", "reset_python_file_executor"),
+    "NetworkGrantManager": (".network_grant_manager", "NetworkGrantManager"),
+    "NetworkGrant": (".network_grant_manager", "NetworkGrant"),
+    "NetworkCheckResult": (".network_grant_manager", "NetworkCheckResult"),
+    "get_network_grant_manager": (".network_grant_manager", "get_network_grant_manager"),
+    "reset_network_grant_manager": (".network_grant_manager", "reset_network_grant_manager"),
+    "EgressProxyServer": (".egress_proxy", "EgressProxyServer"),
+    "EgressProxyHandler": (".egress_proxy", "EgressProxyHandler"),
+    "ProxyRequest": (".egress_proxy", "ProxyRequest"),
+    "ProxyResponse": (".egress_proxy", "ProxyResponse"),
+    "get_egress_proxy": (".egress_proxy", "get_egress_proxy"),
+    "initialize_egress_proxy": (".egress_proxy", "initialize_egress_proxy"),
+    "shutdown_egress_proxy": (".egress_proxy", "shutdown_egress_proxy"),
+    "make_proxy_request": (".egress_proxy", "make_proxy_request"),
+    "LibExecutor": (".lib_executor", "LibExecutor"),
+    "LibExecutionRecord": (".lib_executor", "LibExecutionRecord"),
+    "LibCheckResult": (".lib_executor", "LibCheckResult"),
+    "LibExecutionResult": (".lib_executor", "LibExecutionResult"),
+    "get_lib_executor": (".lib_executor", "get_lib_executor"),
+    "reset_lib_executor": (".lib_executor", "reset_lib_executor"),
+}
+
+
+__all__ = [*_PUBLIC_EXPORTS.keys(), "rumi_syscall", "syscall"]
+
+
+def _load_export(name: str, target: _ExportTarget):
+    module_name, attr_name = target
+    module = importlib.import_module(module_name, __name__)
+    value = getattr(module, attr_name)
+    globals()[name] = value
+    return value
+
+
+def _deprecation_message(name: str, target: _ExportTarget) -> str:
+    module_name, attr_name = target
+    clean_module = module_name.removeprefix(".")
+    return (
+        f"core_runtime.{name} is deprecated as a top-level import. "
+        f"Use from core_runtime.{clean_module} import {attr_name} instead."
+    )
+
+
+def __getattr__(name: str):
+    if name in _PUBLIC_EXPORTS:
+        return _load_export(name, _PUBLIC_EXPORTS[name])
+    if name in _LEGACY_EXPORTS:
+        warnings.warn(
+            _deprecation_message(name, _LEGACY_EXPORTS[name]),
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return _load_export(name, _LEGACY_EXPORTS[name])
+    if name in {"rumi_syscall", "syscall"}:
+        module = importlib.import_module(f".{name}", __name__)
+        globals()[name] = module
+        return module
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__():
+    return sorted(set(globals()) | set(__all__) | set(_LEGACY_EXPORTS))

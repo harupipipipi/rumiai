@@ -17,7 +17,6 @@ Phase D: FunctionRegistry を唯一のレジストリとして統一。
 
 from __future__ import annotations
 
-import collections
 import json
 import os
 import re
@@ -60,6 +59,7 @@ except ImportError:
 
 # crypto_utils: compute_file_sha256 (Phase D: D0-3 依存解消)
 from .crypto_utils import compute_file_sha256
+from .rate_limit_store import PersistentRateLimitStore
 
 from typing import Any, Dict, List, Optional
 
@@ -70,6 +70,7 @@ MAX_RESPONSE_SIZE = 1 * 1024 * 1024
 MAX_ARGS_SUMMARY_LENGTH = 500
 
 logger = logging.getLogger(__name__)
+FUNCTION_RUNNER_PATH = Path(__file__).with_name("function_runner.py")
 
 # デフォルトタイムアウト
 DEFAULT_TIMEOUT = 30.0
@@ -246,9 +247,7 @@ class CapabilityExecutor:
         self._initialized = False
         self._trust_store = None
         self._grant_manager = None
-        # rate limit 状態: principal_id -> deque of timestamps
-        self._rate_limit_state = {}
-        self._rate_limit_lock = threading.Lock()
+        self._rate_limit_store = PersistentRateLimitStore()
         self._secret_get_rate_limit = int(
             os.environ.get("RUMI_SECRET_GET_RATE_LIMIT",
                            str(DEFAULT_SECRET_GET_RATE_LIMIT)))
@@ -300,7 +299,10 @@ class CapabilityExecutor:
                     self._approval_manager = _c.get_or_none("approval_manager")
                     self._permission_manager = _c.get_or_none("permission_manager")
                 except Exception:
-                    pass  # function.call 以外の機能に影響させない
+                    logger.debug(
+                        "CapabilityExecutor failed to resolve optional DI services",
+                        exc_info=True,
+                    )
 
                 # Wave 29: core function handler table initialization
                 self._core_function_handlers = (
@@ -392,6 +394,7 @@ class CapabilityExecutor:
         try:
             return fr.resolve_by_alias(permission_id)
         except Exception:
+            logger.debug("FunctionRegistry lookup failed for '%s'", permission_id, exc_info=True)
             return None
 
     # ------------------------------------------------------------------
@@ -666,57 +669,74 @@ class CapabilityExecutor:
     def _is_docker_available(self):
         return shutil.which("docker") is not None
 
-    def _generate_function_runner_script(self):
-        return """
-import sys, json, importlib.util, os
-def main():
-    input_text = sys.stdin.read()
-    try:
-        input_data = json.loads(input_text)
-    except json.JSONDecodeError as e:
-        print(json.dumps({"error": "Invalid input JSON: " + str(e), "error_type": "json_error"}))
-        sys.exit(1)
-    context = input_data.get("context", {})
-    args = input_data.get("args", {})
-    main_py = input_data.get("main_py_path", "")
-    if not main_py:
-        print(json.dumps({"error": "No main_py_path specified", "error_type": "config_error"}))
-        sys.exit(1)
-    if not os.path.isfile(main_py):
-        print(json.dumps({"error": "main.py not found: " + main_py, "error_type": "file_not_found"}))
-        sys.exit(1)
-    func_dir = os.path.dirname(main_py)
-    if func_dir and func_dir not in sys.path:
-        sys.path.insert(0, func_dir)
-    try:
-        spec = importlib.util.spec_from_file_location("function_module", main_py)
-        if spec is None or spec.loader is None:
-            print(json.dumps({"error": "Cannot load module: " + main_py, "error_type": "load_error"}))
-            sys.exit(1)
-        module = importlib.util.module_from_spec(spec)
-        sys.modules["function_module"] = module
-        spec.loader.exec_module(module)
-    except Exception as e:
-        print(json.dumps({"error": "Module load failed: " + str(e), "error_type": "load_error"}))
-        sys.exit(1)
-    fn = getattr(module, "run", None)
-    if fn is None:
-        print(json.dumps({"error": "No 'run' function in main.py", "error_type": "func_not_found"}))
-        sys.exit(1)
-    try:
-        result = fn(context, args)
-    except Exception as e:
-        print(json.dumps({"error": str(e), "error_type": type(e).__name__}))
-        sys.exit(1)
-    if result is not None:
+    def _build_runner_payload(self, module_path, callable_name, context, args):
+        return json.dumps(
+            {
+                "module_path": module_path,
+                "callable_name": callable_name,
+                "context": context,
+                "args": args,
+            },
+            ensure_ascii=False,
+            default=str,
+        )
+
+    def _runner_command(self):
+        return [sys.executable, str(FUNCTION_RUNNER_PATH)]
+
+    def _cleanup_temp_file(self, path, description):
+        if not path:
+            return
         try:
-            print(json.dumps(result, ensure_ascii=False, default=str))
+            os.unlink(path)
         except Exception:
-            print(json.dumps({"error": "Result is not JSON serializable", "error_type": "serialize_error"}))
-            sys.exit(1)
-if __name__ == "__main__":
-    main()
-"""
+            logger.debug("Failed to clean up %s: %s", description, path, exc_info=True)
+
+    def _response_from_completed_process(self, proc, start_time, failure_prefix):
+        latency_ms = (time.time() - start_time) * 1000
+        if proc.returncode != 0:
+            stderr = (proc.stderr or "").strip()
+            return CapabilityResponse(
+                success=False,
+                error=_sanitize_error(f"{failure_prefix}: {stderr}"[:1000]),
+                error_type="function_execution_error",
+                latency_ms=latency_ms,
+            )
+        stdout = proc.stdout or ""
+        if len(stdout.encode("utf-8")) > MAX_RESPONSE_SIZE:
+            return CapabilityResponse(
+                success=False,
+                error="Response too large",
+                error_type="response_too_large",
+                latency_ms=latency_ms,
+            )
+        stdout_stripped = stdout.strip()
+        if not stdout_stripped:
+            return CapabilityResponse(success=True, output=None, latency_ms=latency_ms)
+        try:
+            return CapabilityResponse(
+                success=True,
+                output=json.loads(stdout_stripped),
+                latency_ms=latency_ms,
+            )
+        except json.JSONDecodeError:
+            return CapabilityResponse(
+                success=False,
+                error="Function output is not valid JSON",
+                error_type="invalid_json_output",
+                latency_ms=latency_ms,
+            )
+
+    def _run_runner_on_host(self, *, payload, cwd, timeout, start_time, failure_prefix):
+        proc = subprocess.run(
+            self._runner_command(),
+            input=payload,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=cwd,
+        )
+        return self._response_from_completed_process(proc, start_time, failure_prefix)
 
     def _get_function_timeout(self, entry):
         grant_config = entry.manifest.get("grant_config", {}) if entry.manifest else {}
@@ -756,10 +776,9 @@ if __name__ == "__main__":
         pack_id, function_id = entry.pack_id, entry.function_id
         function_dir = Path(entry.function_dir)
         container_name = f"rumi-func-{pack_id}-{function_id}-{uuid.uuid4().hex[:8]}"
+        runtime_root = Path(__file__).resolve().parent.parent
         context = {"principal_id": principal_id, "pack_id": pack_id, "function_id": function_id, "request_id": request_id, "ts": self._now_ts()}
-        subprocess_input = {"context": context, "args": args, "main_py_path": "/function/main.py"}
-        input_json = json.dumps(subprocess_input, ensure_ascii=False, default=str)
-        runner_script = self._generate_function_runner_script()
+        input_json = self._build_runner_payload("/function/main.py", "run", context, args)
         input_file = None
         try:
             fd, input_file = tempfile.mkstemp(suffix=".json", dir=_get_secure_tmp_dir())
@@ -768,68 +787,43 @@ if __name__ == "__main__":
             finally:
                 os.close(fd)
             builder = _DockerRunBuilder(name=container_name)
-            builder.volume(f"{function_dir.resolve()}:/function:ro"); builder.volume(f"{input_file}:/input.json:ro")
+            builder.volume(f"{function_dir.resolve()}:/function:ro"); builder.volume(f"{input_file}:/input.json:ro"); builder.volume(f"{runtime_root.resolve()}:/runtime:ro")
             builder.env("RUMI_PACK_ID", pack_id); builder.env("RUMI_FUNCTION_ID", function_id)
             builder.label("rumi.managed", "true"); builder.label("rumi.type", "function"); builder.label("rumi.pack_id", pack_id)
             builder.image(getattr(entry, 'docker_image', '') or FUNCTION_BASE_IMAGE)
-            builder.command(["sh", "-c", f"cat /input.json | python -c {json.dumps(runner_script)}"])
+            builder.command(["python", "/runtime/core_runtime/function_runner.py", "--input-file", "/input.json"])
             proc = subprocess.run(builder.build(), capture_output=True, text=True, timeout=timeout)
-            latency_ms = (time.time() - start_time) * 1000
-            if proc.returncode != 0:
-                return CapabilityResponse(success=False, error=_sanitize_error(f"Function execution failed (exit {proc.returncode}): {(proc.stderr or '').strip()}"[:1000]), error_type="function_execution_error", latency_ms=latency_ms)
-            stdout = proc.stdout or ""
-            if len(stdout.encode("utf-8")) > MAX_RESPONSE_SIZE:
-                return CapabilityResponse(success=False, error="Response too large", error_type="response_too_large", latency_ms=latency_ms)
-            stdout_stripped = stdout.strip()
-            if not stdout_stripped:
-                return CapabilityResponse(success=True, output=None, latency_ms=latency_ms)
-            try:
-                return CapabilityResponse(success=True, output=json.loads(stdout_stripped), latency_ms=latency_ms)
-            except json.JSONDecodeError:
-                return CapabilityResponse(success=False, error="Function output is not valid JSON", error_type="invalid_json_output", latency_ms=latency_ms)
+            return self._response_from_completed_process(
+                proc,
+                start_time,
+                f"Function execution failed (exit {proc.returncode})",
+            )
         except subprocess.TimeoutExpired:
-            try: subprocess.run(["docker", "kill", container_name], capture_output=True, timeout=5)
-            except Exception: pass
+            try:
+                subprocess.run(["docker", "kill", container_name], capture_output=True, timeout=5)
+            except Exception:
+                logger.debug("Failed to kill timed-out Docker function container '%s'", container_name, exc_info=True)
             return CapabilityResponse(success=False, error=f"Function execution timed out after {timeout}s", error_type="timeout", latency_ms=(time.time() - start_time) * 1000)
         except Exception as e:
             return CapabilityResponse(success=False, error=f"Function execution error: {e}", error_type="internal_error", latency_ms=(time.time() - start_time) * 1000)
         finally:
-            if input_file:
-                try: os.unlink(input_file)
-                except Exception: pass
+            self._cleanup_temp_file(input_file, "Docker function input file")
 
     def _execute_user_function_host(self, principal_id, entry, args, request_id, start_time, timeout):
         context = {"principal_id": principal_id, "pack_id": entry.pack_id, "function_id": entry.function_id, "request_id": request_id, "ts": self._now_ts()}
-        input_json = json.dumps({"context": context, "args": args, "main_py_path": str(entry.main_py_path)}, ensure_ascii=False, default=str)
-        runner_file = None
+        input_json = self._build_runner_payload(str(entry.main_py_path), "run", context, args)
         try:
-            fd, runner_file = tempfile.mkstemp(suffix=".py", dir=_get_secure_tmp_dir())
-            try:
-                os.write(fd, self._generate_function_runner_script().encode("utf-8"))
-            finally:
-                os.close(fd)
-            proc = subprocess.run([sys.executable, runner_file], input=input_json, capture_output=True, text=True, timeout=timeout, cwd=str(Path(entry.function_dir)))
-            latency_ms = (time.time() - start_time) * 1000
-            if proc.returncode != 0:
-                return CapabilityResponse(success=False, error=_sanitize_error(f"Function execution failed (exit {proc.returncode}): {(proc.stderr or '').strip()}"[:1000]), error_type="function_execution_error", latency_ms=latency_ms)
-            stdout = proc.stdout or ""
-            if len(stdout.encode("utf-8")) > MAX_RESPONSE_SIZE:
-                return CapabilityResponse(success=False, error="Response too large", error_type="response_too_large", latency_ms=latency_ms)
-            stdout_stripped = stdout.strip()
-            if not stdout_stripped:
-                return CapabilityResponse(success=True, output=None, latency_ms=latency_ms)
-            try:
-                return CapabilityResponse(success=True, output=json.loads(stdout_stripped), latency_ms=latency_ms)
-            except json.JSONDecodeError:
-                return CapabilityResponse(success=False, error="Function output is not valid JSON", error_type="invalid_json_output", latency_ms=latency_ms)
+            return self._run_runner_on_host(
+                payload=input_json,
+                cwd=str(Path(entry.function_dir)),
+                timeout=timeout,
+                start_time=start_time,
+                failure_prefix="Function execution failed",
+            )
         except subprocess.TimeoutExpired:
             return CapabilityResponse(success=False, error=f"Function execution timed out after {timeout}s", error_type="timeout", latency_ms=(time.time() - start_time) * 1000)
         except Exception as e:
             return CapabilityResponse(success=False, error=f"Function execution error: {e}", error_type="internal_error", latency_ms=(time.time() - start_time) * 1000)
-        finally:
-            if runner_file:
-                try: os.unlink(runner_file)
-                except Exception: pass
 
     def _execute_host_function(self, principal_id, entry, args, request_id, start_time):
         allow_host = os.environ.get("RUMI_ALLOW_HOST_EXECUTION", "").lower()
@@ -842,36 +836,19 @@ if __name__ == "__main__":
         if main_py_path is None or not Path(main_py_path).is_file():
             return CapabilityResponse(success=False, error=f"main.py not found: {main_py_path}", error_type="main_py_not_found", latency_ms=(time.time() - start_time) * 1000)
         context = {"principal_id": principal_id, "pack_id": entry.pack_id, "function_id": entry.function_id, "request_id": request_id, "ts": self._now_ts()}
-        input_json = json.dumps({"context": context, "args": args, "main_py_path": str(main_py_path)}, ensure_ascii=False, default=str)
-        runner_file = None
+        input_json = self._build_runner_payload(str(main_py_path), "run", context, args)
         try:
-            fd, runner_file = tempfile.mkstemp(suffix=".py", dir=_get_secure_tmp_dir())
-            try:
-                os.write(fd, self._generate_function_runner_script().encode("utf-8"))
-            finally:
-                os.close(fd)
-            proc = subprocess.run([sys.executable, runner_file], input=input_json, capture_output=True, text=True, timeout=timeout, cwd=str(Path(function_dir)))
-            latency_ms = (time.time() - start_time) * 1000
-            if proc.returncode != 0:
-                return CapabilityResponse(success=False, error=_sanitize_error(f"Function execution failed (exit {proc.returncode}): {(proc.stderr or '').strip()}"[:1000]), error_type="function_execution_error", latency_ms=latency_ms)
-            stdout = proc.stdout or ""
-            if len(stdout.encode("utf-8")) > MAX_RESPONSE_SIZE:
-                return CapabilityResponse(success=False, error="Response too large", error_type="response_too_large", latency_ms=latency_ms)
-            stdout_stripped = stdout.strip()
-            if not stdout_stripped:
-                return CapabilityResponse(success=True, output=None, latency_ms=latency_ms)
-            try:
-                return CapabilityResponse(success=True, output=json.loads(stdout_stripped), latency_ms=latency_ms)
-            except json.JSONDecodeError:
-                return CapabilityResponse(success=False, error="Function output is not valid JSON", error_type="invalid_json_output", latency_ms=latency_ms)
+            return self._run_runner_on_host(
+                payload=input_json,
+                cwd=str(Path(function_dir)),
+                timeout=timeout,
+                start_time=start_time,
+                failure_prefix="Function execution failed",
+            )
         except subprocess.TimeoutExpired:
             return CapabilityResponse(success=False, error=f"Function execution timed out after {timeout}s", error_type="timeout", latency_ms=(time.time() - start_time) * 1000)
         except Exception as e:
             return CapabilityResponse(success=False, error=f"Function execution error: {e}", error_type="internal_error", latency_ms=(time.time() - start_time) * 1000)
-        finally:
-            if runner_file:
-                try: os.unlink(runner_file)
-                except Exception: pass
 
     def _dispatch_core_function(self, principal_id, entry, args, request_id, start_time):
         pack_id, function_id = entry.pack_id, entry.function_id
@@ -1023,86 +1000,32 @@ if __name__ == "__main__":
         ep_file, ep_func = handler_def.entrypoint.rsplit(":", 1)
         handler_py_path = handler_def.handler_dir / ep_file
         context = {"principal_id": principal_id, "permission_id": permission_id, "handler_id": handler_def.handler_id, "grant_config": grant_config, "request_id": request_id, "ts": self._now_ts()}
-        runner_script = self._generate_runner_script(handler_py_path=str(handler_py_path), func_name=ep_func)
-        runner_file = None
+        input_json = self._build_runner_payload(str(handler_py_path), ep_func, context, args)
         try:
-            fd, runner_file = tempfile.mkstemp(suffix=".py", dir=_get_secure_tmp_dir())
-            try:
-                os.write(fd, runner_script.encode("utf-8"))
-            finally:
-                os.close(fd)
-            input_json = json.dumps({"context": context, "args": args}, ensure_ascii=False, default=str)
-            proc = subprocess.run([sys.executable, runner_file], input=input_json, capture_output=True, text=True, timeout=timeout_seconds,
-                                  cwd=str(Path(__file__).parent.parent) if getattr(handler_def, "is_builtin", False) else str(handler_def.handler_dir))
-            latency_ms = (time.time() - start_time) * 1000
-            if proc.returncode != 0:
-                return CapabilityResponse(success=False, error="Handler execution failed", error_type="handler_error", latency_ms=latency_ms)
-            stdout = proc.stdout or ""
-            if len(stdout.encode("utf-8")) > MAX_RESPONSE_SIZE:
-                return CapabilityResponse(success=False, error="Response too large", error_type="response_too_large", latency_ms=latency_ms)
-            stdout_stripped = stdout.strip()
-            if not stdout_stripped:
-                return CapabilityResponse(success=True, output=None, latency_ms=latency_ms)
-            try:
-                output = json.loads(stdout_stripped)
-            except json.JSONDecodeError:
-                output = stdout_stripped
-            return CapabilityResponse(success=True, output=output, latency_ms=latency_ms)
+            return self._run_runner_on_host(
+                payload=input_json,
+                cwd=str(Path(__file__).parent.parent) if getattr(handler_def, "is_builtin", False) else str(handler_def.handler_dir),
+                timeout=timeout_seconds,
+                start_time=start_time,
+                failure_prefix="Handler execution failed",
+            )
         except subprocess.TimeoutExpired:
             return CapabilityResponse(success=False, error="Handler execution timed out", error_type="timeout", latency_ms=(time.time() - start_time) * 1000)
         except Exception:
+            logger.debug("Handler subprocess execution failed", exc_info=True)
             return CapabilityResponse(success=False, error="Internal execution error", error_type="internal_error", latency_ms=(time.time() - start_time) * 1000)
-        finally:
-            if runner_file:
-                try: os.unlink(runner_file)
-                except Exception: pass
-
-    def _generate_runner_script(self, handler_py_path, func_name):
-        safe_path = json.dumps(handler_py_path)
-        safe_func = json.dumps(func_name)
-        return f'''
-import sys, json, importlib.util
-def main():
-    import os
-    cwd = os.getcwd()
-    if cwd not in sys.path: sys.path.append(cwd)
-    handler_path = {safe_path}
-    func_name = {safe_func}
-    input_text = sys.stdin.read()
-    try: input_data = json.loads(input_text)
-    except json.JSONDecodeError as e:
-        print(json.dumps({{"error": "Invalid input JSON", "error_type": "json_error"}})); sys.exit(1)
-    context = input_data.get("context", {{}})
-    args = input_data.get("args", {{}})
-    spec = importlib.util.spec_from_file_location("handler_module", handler_path)
-    if spec is None or spec.loader is None:
-        print(json.dumps({{"error": "Cannot load handler module", "error_type": "load_error"}})); sys.exit(1)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["handler_module"] = module
-    spec.loader.exec_module(module)
-    fn = getattr(module, func_name, None)
-    if fn is None:
-        print(json.dumps({{"error": f"Function '{{func_name}}' not found", "error_type": "func_not_found"}})); sys.exit(1)
-    try: result = fn(context, args)
-    except Exception as e:
-        print(json.dumps({{"error": str(e), "error_type": type(e).__name__}})); sys.exit(1)
-    if result is not None:
-        try: print(json.dumps(result, ensure_ascii=False, default=str))
-        except Exception:
-            print(json.dumps({{"error": "Result is not JSON serializable", "error_type": "serialize_error"}})); sys.exit(1)
-if __name__ == "__main__": main()
-'''
 
     def _check_rate_limit(self, principal_id):
-        now = time.time()
-        with self._rate_limit_lock:
-            if principal_id not in self._rate_limit_state:
-                self._rate_limit_state[principal_id] = collections.deque()
-            dq = self._rate_limit_state[principal_id]
-            while dq and dq[0] < now - 60.0: dq.popleft()
-            if len(dq) >= self._secret_get_rate_limit: return False
-            dq.append(now)
-            return True
+        try:
+            return self._rate_limit_store.allow(
+                principal_id=principal_id,
+                scope=SECRET_GET_PERMISSION_ID,
+                limit=self._secret_get_rate_limit,
+                window_seconds=60.0,
+            )
+        except Exception:
+            logger.debug("Persistent rate limit check failed for '%s'", principal_id, exc_info=True)
+            return False
 
     def _audit(self, principal_id, permission_id, handler_id, response, args, request_id,
                trusted=None, grant_allowed=None, grant_reason=None, detail_reason=None, extra_details=None):
@@ -1121,7 +1044,7 @@ if __name__ == "__main__": main()
                                         success=response.success, details=details,
                                         rejection_reason=(detail_reason or grant_reason or response.error) if not response.success else None)
         except Exception:
-            pass
+            logger.debug("Capability audit logging failed", exc_info=True)
 
 
 _global_executor: Optional[CapabilityExecutor] = None

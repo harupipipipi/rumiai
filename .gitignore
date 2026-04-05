@@ -6,6 +6,10 @@
 !/rumi_viewer/
 !/pack-shell/
 !/tests/
+
+# 整理退避用ディレクトリは Git 管理しない
+/others/
+
 # === 共通の不要ファイル ===
 venv/
 __pycache__/
@@ -16,6 +20,10 @@ __pycache__/
 *.bak
 *.bak.*
 .env.local
+.env.*
+apikey.env
+sample.env.local
+.vscode/
 node_modules/
 dist/
 
