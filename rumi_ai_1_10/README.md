@@ -308,4 +308,5 @@ curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
 
 ## ライセンス
 
-考え中
+MIT License
+詳細はリポジトリルートの LICENSE を参照してください。

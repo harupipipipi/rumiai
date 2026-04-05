@@ -39,7 +39,6 @@ for _mod_name in ("audit_logger", "di_container"):
 
 from core_runtime.secrets_store import (  # noqa: E402
     SecretsStore,
-    _crypto,
     _FERNET_PREFIX,
 )
 from cryptography.fernet import Fernet  # noqa: E402
@@ -54,13 +53,9 @@ TEST_FERNET_KEY = Fernet.generate_key().decode("utf-8")
 
 @pytest.fixture(autouse=True)
 def _reset_crypto(monkeypatch):
-    """各テスト前に暗号化バックエンドをリセットし、固定キーを使用する。"""
+    """各テスト前に固定キーを設定する。"""
     monkeypatch.setenv("RUMI_SECRETS_KEY", TEST_FERNET_KEY)
-    _crypto._initialized = False
-    _crypto._fernet = None
     yield
-    _crypto._initialized = False
-    _crypto._fernet = None
 
 
 @pytest.fixture()

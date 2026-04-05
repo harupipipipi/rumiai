@@ -18,12 +18,12 @@ import atexit
 import argparse
 import traceback
 import threading
-import time
 from pathlib import Path
 import logging
 from typing import Dict
 
 _kernel = None
+_logger = logging.getLogger(__name__)
 
 
 # Fallback L() — overwritten if core_runtime.lang loads successfully
@@ -152,9 +152,16 @@ def main():
             get_health_checker, probe_disk_space, probe_file_writable,
         )
         import json
+        import os
+        import tempfile
         checker = get_health_checker()
-        checker.register_probe("disk", lambda: probe_disk_space("/"))
-        checker.register_probe("writable_tmp", lambda: probe_file_writable("/tmp"))
+        if os.name == "nt":
+            disk_path = os.environ.get("SystemDrive", "C:") + "\\"
+        else:
+            disk_path = "/"
+        tmp_dir = tempfile.gettempdir()
+        checker.register_probe("disk", lambda: probe_disk_space(disk_path))
+        checker.register_probe("writable_tmp", lambda: probe_file_writable(tmp_dir))
         result = checker.aggregate_health()
         print(json.dumps(result, indent=2))
         sys.exit(0 if result["status"] == "UP" else 1)
@@ -192,7 +199,7 @@ def main():
         raise
     except Exception:
         # Pack 探索に失敗してもメイン起動は妨げない（ecosystem 未構築時など）
-        pass
+        _logger.debug("validate_host_execution failed during startup preflight", exc_info=True)
 
     try:
         from core_runtime import Kernel
@@ -226,7 +233,7 @@ def main():
                 elif he_msg:
                     print(f'[Rumi] [{loc.pack_id}] {he_msg}')
             except Exception:
-                pass
+                _logger.debug("host_execution validation skipped for pack '%s'", loc.pack_id, exc_info=True)
         if blocked_packs:
             for pid, he_msg in blocked_packs:
                 print(f'[Rumi] BLOCKED [{pid}]: {he_msg}')
@@ -240,7 +247,7 @@ def main():
             from backend_core.ecosystem.compat import mark_ecosystem_initialized
             mark_ecosystem_initialized()
         except Exception:
-            pass
+            _logger.debug("mark_ecosystem_initialized failed", exc_info=True)
 
         print(f"[Rumi] {L('startup.success')}")
 
@@ -261,7 +268,7 @@ def main():
                     "io.http.server", override_pack
                 )
         except Exception:
-            pass
+            _logger.debug("HTTP server override lookup failed", exc_info=True)
 
         # override が見つからなければ通常の last を使う
         if http_server is None:
@@ -288,6 +295,7 @@ def main():
                     print(f"[Rumi] {L('startup.press_ctrl_c')}")
                     _wait_for_signal()
             except Exception:
+                _logger.debug("Pack API server fallback inspection failed", exc_info=True)
                 print(f"[Rumi] {L('startup.no_http')}")
                 print(f"[Rumi] {L('startup.install_http_pack')}")
                 print(f"[Rumi] {L('startup.press_ctrl_c')}")
@@ -309,12 +317,12 @@ def _wait_for_signal():
         is_kernel_restart_requested,
     )
 
-    while True:
+    stop_event = threading.Event()
+    while not stop_event.wait(timeout=1.0):
         if is_kernel_restart_requested():
             clear_kernel_restart_request()
             print(f"[Rumi] {L('shutdown.starting')}")
             raise SystemExit(_RESTART_EXIT_CODE)
-        time.sleep(1)
 
 
 def _run_validation():

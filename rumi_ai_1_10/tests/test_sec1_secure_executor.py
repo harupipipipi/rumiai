@@ -203,3 +203,24 @@ class TestHostExecutionTimeout:
         assert not result.success
         assert result.error_type == "timeout"
         assert result.pack_id == "test-pack"
+
+    def test_host_execution_cleans_added_sys_path(self, monkeypatch, tmp_path) -> None:
+        executor = _make_executor(monkeypatch, mode="permissive")
+        module_dir = tmp_path / "component"
+        module_dir.mkdir()
+        runner_file = module_dir / "runner.py"
+        runner_file.write_text("def run(ctx):\n    return {'ok': True}\n")
+
+        original_path = list(sys.path)
+        result = executor._execute_on_host_with_warning(
+            pack_id="test-pack",
+            component_id="component",
+            phase="setup",
+            file_path=runner_file,
+            context={"phase": "setup"},
+            timeout=10,
+        )
+
+        assert result.success
+        assert str(module_dir) not in sys.path
+        assert sys.path == original_path

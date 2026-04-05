@@ -808,6 +808,8 @@ else:
             pack_id, component_id, phase
         )
         module_name = f"rumi_exec_{pack_id}_{phase}_{abs(hash(str(file_path)))}"
+        file_dir = str(file_path.parent)
+        path_added = False
         try:
             import importlib.util
             spec = importlib.util.spec_from_file_location(module_name, str(file_path))
@@ -822,7 +824,14 @@ else:
                 )
             module = importlib.util.module_from_spec(spec)
             sys.modules[module_name] = module
-            spec.loader.exec_module(module)
+            if file_dir not in sys.path:
+                sys.path.append(file_dir)
+                path_added = True
+            try:
+                spec.loader.exec_module(module)
+            finally:
+                if path_added and file_dir in sys.path:
+                    sys.path.remove(file_dir)
             fn = getattr(module, "run", None) or getattr(module, "main", None)
             if fn is None:
                 return ExecutionResult(
@@ -913,10 +922,6 @@ else:
         return safe_context
 
 
-_global_secure_executor: Optional[SecureExecutor] = None
-_executor_lock = threading.Lock()
-
-
 def get_secure_executor() -> SecureExecutor:
     """
     グローバルなSecureExecutorを取得する。
@@ -929,11 +934,8 @@ def get_secure_executor() -> SecureExecutor:
 
 def reset_secure_executor() -> SecureExecutor:
     """SecureExecutorをリセット（テスト用）"""
-    global _global_secure_executor
     from .di_container import get_container
     container = get_container()
     new = SecureExecutor()
-    with _executor_lock:
-        _global_secure_executor = new
     container.set_instance("secure_executor", new)
     return new

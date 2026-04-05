@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import tempfile
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -348,33 +349,39 @@ class CapabilityTrustStore:
 
             # HMAC 署名を追加
             data["_hmac_signature"] = compute_data_hmac(self._secret_key, data)
-            
-            with open(self._trust_file, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            
+
+            fd, tmp_path = tempfile.mkstemp(
+                dir=str(self._trust_dir),
+                suffix=".tmp",
+                prefix=".trust_",
+            )
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                Path(tmp_path).replace(self._trust_file)
+            except BaseException:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
             return True
         except Exception:
+            logger.debug("Failed to save capability trust store", exc_info=True)
             return False
 
 
-# グローバルインスタンス
-_global_trust_store: Optional[CapabilityTrustStore] = None
-_trust_lock = threading.Lock()
-
-
 def get_capability_trust_store() -> CapabilityTrustStore:
-    """グローバルなCapabilityTrustStoreを取得"""
-    global _global_trust_store
-    if _global_trust_store is None:
-        with _trust_lock:
-            if _global_trust_store is None:
-                _global_trust_store = CapabilityTrustStore()
-    return _global_trust_store
+    """DI コンテナ経由で CapabilityTrustStore を取得"""
+    from .di_container import get_container
+    return get_container().get("capability_trust_store")
 
 
 def reset_capability_trust_store(trust_dir: str = None) -> CapabilityTrustStore:
     """リセット（テスト用）"""
-    global _global_trust_store
-    with _trust_lock:
-        _global_trust_store = CapabilityTrustStore(trust_dir)
-    return _global_trust_store
+    from .di_container import get_container
+    store = CapabilityTrustStore(trust_dir)
+    get_container().set_instance("capability_trust_store", store)
+    return store

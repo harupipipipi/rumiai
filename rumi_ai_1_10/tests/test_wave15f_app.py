@@ -11,6 +11,7 @@ import io
 import json
 import os
 import sys
+import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -211,6 +212,9 @@ class TestHealthFlag(unittest.TestCase):
         calls = mock_checker.register_probe.call_args_list
         probe_names = [c[0][0] for c in calls]
         self.assertIn("disk", probe_names)
+        disk_probe = next(c[0][1] for c in calls if c[0][0] == "disk")
+        disk_probe()
+        mock_pds.assert_called_with("/")
 
     @patch("core_runtime.health.probe_file_writable")
     @patch("core_runtime.health.probe_disk_space")
@@ -235,6 +239,37 @@ class TestHealthFlag(unittest.TestCase):
         calls = mock_checker.register_probe.call_args_list
         probe_names = [c[0][0] for c in calls]
         self.assertIn("writable_tmp", probe_names)
+        tmp_probe = next(c[0][1] for c in calls if c[0][0] == "writable_tmp")
+        tmp_probe()
+        mock_pfw.assert_called_with(tempfile.gettempdir())
+
+    @patch("core_runtime.health.probe_file_writable")
+    @patch("core_runtime.health.probe_disk_space")
+    @patch("core_runtime.health.get_health_checker")
+    @patch("core_runtime.logging_utils.configure_logging")
+    def test_health_uses_windows_disk_path_on_nt(
+        self, mock_configure, mock_ghc, mock_pds, mock_pfw
+    ):
+        """Windows では SystemDrive を disk プローブに使う。"""
+        mock_checker = MagicMock()
+        mock_checker.aggregate_health.return_value = {
+            "status": "UP", "timestamp": "T", "probes": {}
+        }
+        mock_ghc.return_value = mock_checker
+
+        with patch("sys.argv", ["app.py", "--health"]), \
+             patch("os.name", "nt"), \
+             patch.dict("os.environ", {"SystemDrive": "D:"}, clear=False):
+            from app import main
+            buf = io.StringIO()
+            with redirect_stdout(buf), self.assertRaises(SystemExit):
+                main()
+
+        disk_probe = next(
+            c[0][1] for c in mock_checker.register_probe.call_args_list if c[0][0] == "disk"
+        )
+        disk_probe()
+        mock_pds.assert_called_with("D:\\")
 
 
 class TestExistingFlagsNotBroken(unittest.TestCase):
@@ -255,7 +290,7 @@ class TestExistingFlagsNotBroken(unittest.TestCase):
         mock_kernel_instance = MagicMock()
 
         with patch("sys.argv", ["app.py", "--headless"]), \
-             patch("core_runtime.Kernel", return_value=mock_kernel_instance), \
+             patch("core_runtime.Kernel", return_value=mock_kernel_instance, create=True), \
              patch("core_runtime.lang.L", side_effect=lambda k, **kw: k), \
              patch("core_runtime.lang.load_system_lang"):
             from app import main

@@ -88,10 +88,11 @@ class IpcAuthManager:
         if not token:
             return None
         with self._lock:
+            matched_pack_id: Optional[str] = None
             for stored_token, pack_id in self._tokens.items():
                 if hmac.compare_digest(stored_token, token):
-                    return pack_id
-            return None
+                    matched_pack_id = pack_id
+            return matched_pack_id
 
     def revoke_token(self, pack_id: str) -> None:
         """

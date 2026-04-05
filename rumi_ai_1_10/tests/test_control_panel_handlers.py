@@ -4,7 +4,9 @@ from __future__ import annotations
 import json
 import sys
 import unittest
+import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 # テスト対象のインポートパスを解決
@@ -182,6 +184,60 @@ class TestPanelEnableDisablePack(unittest.TestCase):
         result = handler._panel_enable_pack("nonexistent_pack")
         self.assertIn("error", result)
         self.assertEqual(result["status_code"], 404)
+
+    @patch.object(ControlPanelHandlersMixin, "_panel_pack_overrides_path")
+    @patch("core_runtime.paths.discover_pack_locations", create=True)
+    def test_disable_pack_writes_overlay_without_touching_ecosystem(
+        self, mock_discover, mock_overrides_path
+    ):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            overrides_path = root / "pack_enabled_overrides.json"
+            eco_path = root / "ecosystem.json"
+            eco_path.write_text(json.dumps({
+                "pack_id": "pack_a",
+                "enabled": True,
+                "metadata": {"name": "Pack A"},
+            }), encoding="utf-8")
+            mock_overrides_path.return_value = overrides_path
+            mock_discover.return_value = [
+                SimpleNamespace(pack_id="pack_a", ecosystem_json_path=eco_path)
+            ]
+
+            handler = _FakeHandler()
+            result = handler._panel_disable_pack("pack_a")
+
+            self.assertEqual(result["enabled"], False)
+            eco = json.loads(eco_path.read_text(encoding="utf-8"))
+            self.assertTrue(eco["enabled"])
+            self.assertEqual(
+                json.loads(overrides_path.read_text(encoding="utf-8")),
+                {"pack_a": False},
+            )
+
+    @patch.object(ControlPanelHandlersMixin, "_panel_read_pack_overrides")
+    @patch("core_runtime.paths.discover_pack_locations", create=True)
+    def test_list_packs_applies_overlay_enabled_value(
+        self, mock_discover, mock_read_overrides
+    ):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            eco_path = root / "ecosystem.json"
+            eco_path.write_text(json.dumps({
+                "pack_id": "pack_a",
+                "enabled": True,
+                "metadata": {"name": "Pack A"},
+            }), encoding="utf-8")
+            mock_read_overrides.return_value = {"pack_a": False}
+            mock_discover.return_value = [
+                SimpleNamespace(pack_id="pack_a", ecosystem_json_path=eco_path)
+            ]
+
+            handler = _FakeHandler()
+            result = handler._panel_get_packs()
+
+            pack = next(p for p in result["packs"] if p["pack_id"] == "pack_a")
+            self.assertFalse(pack["enabled"])
 
 
 if __name__ == "__main__":

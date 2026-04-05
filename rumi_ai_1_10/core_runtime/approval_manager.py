@@ -923,6 +923,16 @@ class ApprovalManager:
                 del self._approvals[pack_id]
                 
                 grant_file = self.grants_dir / f"{pack_id}.grants.json"
+                grants_dir_resolved = self.grants_dir.resolve()
+                grant_file_resolved = grant_file.resolve()
+                try:
+                    grant_file_resolved.relative_to(grants_dir_resolved)
+                except ValueError:
+                    logger.error(
+                        "Path traversal detected in remove_approval for pack_id '%s'",
+                        pack_id,
+                    )
+                    return False
                 if grant_file.exists():
                     grant_file.unlink()
                 

@@ -18,10 +18,6 @@ def _isolate_env(monkeypatch, tmp_path):
     monkeypatch.setenv("RUMI_SECRETS_KEY", _TEST_KEY)
     # PLAINTEXT ポリシーをデフォルト (auto) にリセット
     monkeypatch.delenv("RUMI_SECRETS_ALLOW_PLAINTEXT", raising=False)
-    # _crypto をリセットして RUMI_SECRETS_KEY を反映させる
-    from core_runtime.secrets_store import _crypto
-    _crypto._initialized = False
-    _crypto._fernet = None
 
 
 @pytest.fixture()
@@ -120,6 +116,19 @@ class TestEncryptDecryptRoundtrip:
     def test_roundtrip_empty_string(self, store):
         store.set_secret("EMPTY_VAL", "")
         assert store._read_value("EMPTY_VAL") == ""
+
+    def test_key_file_follows_custom_secrets_dir(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("RUMI_SECRETS_KEY", raising=False)
+        secrets_dir = tmp_path / "custom" / "secrets"
+
+        from core_runtime.secrets_store import SecretsStore
+
+        store = SecretsStore(secrets_dir=str(secrets_dir))
+        result = store.set_secret("FOLLOW_DIR", "value")
+
+        assert result.success is True
+        assert (tmp_path / "custom" / ".secrets_key").exists()
+        assert not (tmp_path / "user_data" / ".secrets_key").exists()
 
 
 # ──────────────────────────────────────────────
@@ -238,6 +247,7 @@ class TestPlaintextPolicy:
     def test_auto_allows_plaintext_then_migrates(self, monkeypatch, tmp_path):
         """auto モード: 平文 secret があれば読み込み許可 → 自動マイグレーション"""
         monkeypatch.setenv("RUMI_SECRETS_ALLOW_PLAINTEXT", "auto")
+        monkeypatch.setenv("RUMI_SECURITY_MODE", "permissive")
         secrets_dir = tmp_path / "secrets"
 
         # 平文 secret を直接書き込む
@@ -285,6 +295,7 @@ class TestPlaintextPolicy:
     def test_auto_migration_marker(self, monkeypatch, tmp_path):
         """auto モード: 全暗号化完了後にマーカーが作成される"""
         monkeypatch.setenv("RUMI_SECRETS_ALLOW_PLAINTEXT", "auto")
+        monkeypatch.setenv("RUMI_SECURITY_MODE", "permissive")
         secrets_dir = tmp_path / "secrets"
 
         # 暗号化済み secret のみの状態で初期化

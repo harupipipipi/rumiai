@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 
 SECRETS_DIR = "user_data/secrets"
 KEY_PATTERN = re.compile(r"^[A-Z0-9_]{1,64}$")
-SECRETS_KEY_FILE = "user_data/.secrets_key"
+SECRETS_KEY_FILE_NAME = ".secrets_key"
 
 # Fernet トークンは常に "gAAAAA" で始まる
 _FERNET_PREFIX = "gAAAAA"
@@ -66,7 +66,8 @@ MIGRATION_MARKER_FILE = ".migration_complete"
 class _CryptoBackend:
     """Fernet 暗号化バックエンド"""
 
-    def __init__(self) -> None:
+    def __init__(self, key_path: Path) -> None:
+        self._key_path = Path(key_path)
         self._fernet: Optional[Fernet] = None
         self._initialized = False
         self._init_lock = threading.Lock()
@@ -94,35 +95,34 @@ class _CryptoBackend:
             return env_key.encode("utf-8")
 
         # 2. ファイルから取得
-        key_path = Path(SECRETS_KEY_FILE)
-        if key_path.exists():
+        if self._key_path.exists():
             try:
-                key_data = key_path.read_text(encoding="utf-8").strip()
+                key_data = self._key_path.read_text(encoding="utf-8").strip()
                 if key_data:
-                    logger.debug("Using encryption key from %s.", SECRETS_KEY_FILE)
+                    logger.debug("Using encryption key from %s.", self._key_path)
                     return key_data.encode("utf-8")
             except Exception as e:
-                logger.warning("Failed to read key file %s: %s", SECRETS_KEY_FILE, e)
+                logger.warning("Failed to read key file %s: %s", self._key_path, e)
 
         # 3. 自動生成
         new_key = Fernet.generate_key()
 
         # ファイルに保存 (atomic write)
         try:
-            key_path.parent.mkdir(parents=True, exist_ok=True)
+            self._key_path.parent.mkdir(parents=True, exist_ok=True)
             fd, tmp_path = tempfile.mkstemp(
-                dir=str(key_path.parent), prefix=".secrets_key_tmp_"
+                dir=str(self._key_path.parent), prefix=".secrets_key_tmp_"
             )
             try:
                 os.write(fd, new_key if isinstance(new_key, bytes) else new_key.encode("utf-8"))
                 os.close(fd)
                 fd = -1
-                os.replace(tmp_path, str(key_path))
+                os.replace(tmp_path, str(self._key_path))
                 try:
-                    safe_chmod(str(key_path), 0o600)
+                    safe_chmod(str(self._key_path), 0o600)
                 except (OSError, AttributeError):
                     pass
-                logger.info("Generated new encryption key → %s", SECRETS_KEY_FILE)
+                logger.info("Generated new encryption key → %s", self._key_path)
             except Exception:
                 if fd >= 0:
                     try:
@@ -135,7 +135,7 @@ class _CryptoBackend:
                     pass
                 raise
         except Exception as e:
-            logger.warning("Failed to save key to %s: %s", SECRETS_KEY_FILE, e)
+            logger.warning("Failed to save key to %s: %s", self._key_path, e)
 
         return new_key if isinstance(new_key, bytes) else new_key.encode("utf-8")
 
@@ -172,10 +172,6 @@ class _CryptoBackend:
         if not isinstance(value, str):
             return False
         return value.startswith(_FERNET_PREFIX)
-
-
-# グローバルバックエンドインスタンス
-_crypto = _CryptoBackend()
 
 
 # ------------------------------------------------------------------
@@ -286,6 +282,8 @@ class SecretsStore:
 
     def __init__(self, secrets_dir: Optional[str] = None):
         self._secrets_dir = Path(secrets_dir or SECRETS_DIR)
+        self._secrets_key_path = self._secrets_dir.parent / SECRETS_KEY_FILE_NAME
+        self._crypto = _CryptoBackend(self._secrets_key_path)
         self._lock = threading.RLock()
         self._secrets_dir.mkdir(parents=True, exist_ok=True)
         # auto モードの初期化: マーカーがなければ全スキャンして判定
@@ -363,7 +361,7 @@ class SecretsStore:
                 if data.get("deleted_at"):
                     continue
                 raw_value = data.get("value", "")
-                if raw_value and not _crypto.is_encrypted(raw_value):
+                if raw_value and not self._crypto.is_encrypted(raw_value):
                     return False
             except Exception:
                 continue
@@ -433,7 +431,7 @@ class SecretsStore:
                     created = True
 
             now = self._now_ts()
-            encrypted_value = _crypto.encrypt(value)
+            encrypted_value = self._crypto.encrypt(value)
             data = {
                 "key": key,
                 "value": encrypted_value,
@@ -549,7 +547,7 @@ class SecretsStore:
 
                 # 復号
                 try:
-                    plaintext = _crypto.decrypt(
+                    plaintext = self._crypto.decrypt(
                         raw_value, allow_plaintext=allow_plaintext
                     )
                 except Exception as e:
@@ -557,7 +555,7 @@ class SecretsStore:
                     return None
 
                 # 平文データの自動マイグレーション
-                if not _crypto.is_encrypted(raw_value):
+                if not self._crypto.is_encrypted(raw_value):
                     # CRITICAL 監査ログ: 平文フォールバックが発生
                     self._audit("plaintext_fallback", True, {
                         "key": key,
@@ -593,7 +591,7 @@ class SecretsStore:
     ) -> None:
         """平文の secret を暗号化して書き直す（自動マイグレーション）"""
         try:
-            encrypted_value = _crypto.encrypt(plaintext)
+            encrypted_value = self._crypto.encrypt(plaintext)
             migrated_data = dict(data)
             migrated_data["value"] = encrypted_value
             path = self._key_path(key)

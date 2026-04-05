@@ -157,11 +157,12 @@ class ControlPanelHandlersMixin:
         # ecosystem packs
         try:
             from ..paths import discover_pack_locations
+            overrides = self._panel_read_pack_overrides()
             for loc in discover_pack_locations():
                 try:
                     with open(loc.ecosystem_json_path, "r", encoding="utf-8") as f:
                         eco = json.load(f)
-                    enabled = eco.get("enabled", True)
+                    enabled = overrides.get(loc.pack_id, eco.get("enabled", True))
                     packs.append({
                         "pack_id": loc.pack_id,
                         "name": eco.get("metadata", {}).get("name", loc.pack_id),
@@ -190,6 +191,36 @@ class ControlPanelHandlersMixin:
         """POST /api/panel/packs/{id}/disable — Pack 無効化"""
         return self._panel_set_pack_enabled(pack_id, False)
 
+    def _panel_pack_overrides_path(self) -> Path:
+        """Pack の有効/無効オーバーレイ設定ファイルのパスを返す。"""
+        base_dir = Path(__file__).resolve().parent.parent.parent
+        settings_dir = base_dir / "user_data" / "settings"
+        settings_dir.mkdir(parents=True, exist_ok=True)
+        return settings_dir / "pack_enabled_overrides.json"
+
+    def _panel_read_pack_overrides(self) -> Dict[str, bool]:
+        """Pack の enabled オーバーレイ設定を読む。"""
+        path = self._panel_pack_overrides_path()
+        if not path.is_file():
+            return {}
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                return {}
+            return {str(k): bool(v) for k, v in data.items()}
+        except Exception:
+            return {}
+
+    def _panel_write_pack_overrides(self, overrides: Dict[str, bool]) -> None:
+        """Pack の enabled オーバーレイ設定を atomic に保存する。"""
+        path = self._panel_pack_overrides_path()
+        tmp_path = path.with_suffix(".tmp")
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(overrides, f, ensure_ascii=False, indent=2)
+            f.write("\n")
+        os.replace(tmp_path, path)
+
     def _panel_set_pack_enabled(self, pack_id: str, enabled: bool) -> Dict[str, Any]:
         """Pack の enabled フラグを変更する"""
         try:
@@ -199,10 +230,13 @@ class ControlPanelHandlersMixin:
                     eco_path = loc.ecosystem_json_path
                     with open(eco_path, "r", encoding="utf-8") as f:
                         eco = json.load(f)
-                    eco["enabled"] = enabled
-                    with open(eco_path, "w", encoding="utf-8") as f:
-                        json.dump(eco, f, ensure_ascii=False, indent=2)
-                        f.write("\n")
+                    default_enabled = bool(eco.get("enabled", True))
+                    overrides = self._panel_read_pack_overrides()
+                    if enabled == default_enabled:
+                        overrides.pop(pack_id, None)
+                    else:
+                        overrides[pack_id] = enabled
+                    self._panel_write_pack_overrides(overrides)
                     return {
                         "pack_id": pack_id,
                         "enabled": enabled,

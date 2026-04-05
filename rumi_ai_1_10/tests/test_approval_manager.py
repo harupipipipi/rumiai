@@ -260,6 +260,18 @@ class TestMiscOperations:
         mgr, _ = _make_manager(tmp_path, monkeypatch=monkeypatch)
         assert mgr.remove_approval("nonexistent") is False
 
+    def test_remove_approval_rejects_path_traversal(self, tmp_path, monkeypatch):
+        mgr, _ = _make_manager(tmp_path, monkeypatch=monkeypatch)
+        pack_id = "../escape"
+        mgr._approvals[pack_id] = PackApproval(
+            pack_id=pack_id,
+            status=PackStatus.APPROVED,
+            created_at="2025-01-01T00:00:00Z",
+        )
+
+        assert mgr.remove_approval(pack_id) is False
+        assert pack_id not in mgr._approvals
+
     def test_get_pending_packs(self, tmp_path, monkeypatch):
         mgr, _ = _make_manager(tmp_path, monkeypatch=monkeypatch)
         # INSTALLED counts as pending
