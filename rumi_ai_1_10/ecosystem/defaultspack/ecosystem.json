@@ -1,0 +1,47 @@
+{
+  "pack_id": "defaultspack",
+  "pack_identity": "rumi/defaultspack",
+  "version": "2.0.0",
+  "display_name": "Defaults Pack",
+  "description": "Official first-party defaults pack for rumiai.",
+  "author": "rumi",
+  "risk": "safe",
+  "recommended": true,
+  "tags": [
+    "official",
+    "core",
+    "recommended"
+  ],
+  "vocabulary": {
+    "types": [
+      "ai_client",
+      "prompt",
+      "tool",
+      "chat",
+      "agent",
+      "memory",
+      "knowledge",
+      "coding",
+      "media",
+      "sandbox"
+    ]
+  },
+  "dependencies": [],
+  "runtime": {
+    "type": "python_host"
+  },
+  "permissions": {
+    "level": "all_ok",
+    "capabilities": [
+      "ai_completion",
+      "ai_stream",
+      "prompt_render",
+      "tool_invoke",
+      "chat_send",
+      "agent_execute",
+      "memory_store",
+      "knowledge_search",
+      "file_ops"
+    ]
+  }
+}
