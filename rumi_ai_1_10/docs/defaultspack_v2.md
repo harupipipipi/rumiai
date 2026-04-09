@@ -34,3 +34,23 @@ Dependency failures degrade dependents without taking down the whole pack.
 - `POST /api/defaultspack/setup/packs/{id}/grant-all-ok`
 - `POST /api/defaultspack/setup/packs/{id}/revoke-all-ok`
 - `GET /api/defaultspack/migration/status`
+- `GET /api/defaultspack/pack-requests`
+- `POST /api/defaultspack/pack-requests/request-extension`
+- `POST /api/defaultspack/pack-requests/forced-patch`
+- `POST /api/defaultspack/pack-requests/{id}/approve`
+- `POST /api/defaultspack/pack-requests/{id}/reject`
+- `POST /api/defaultspack/pack-requests/{id}/rollback`
+
+## Setup flow
+
+The setup UI under `/setup` now lists discovered setup packs, installs one directly,
+shows migration state, and exposes defaultspack-only `all OK` grant and revoke actions.
+
+## Pack modification flow
+
+Pack changes can be staged first, then submitted as either:
+
+- `request_extension`
+- `forced_patch`
+
+Both produce an approval-backed request record before any apply occurs.

@@ -61,3 +61,71 @@ class DefaultspackHandlersMixin:
 
     def _defaultspack_get_migration_status(self) -> Dict[str, Any]:
         return invoke_defaultspack_function("defaultspack:get_migration_status")
+
+    def _defaultspack_list_pack_requests(self) -> Dict[str, Any]:
+        return invoke_defaultspack_function("defaultspack:list_pack_requests")
+
+    def _defaultspack_get_pack_request(self, request_id: str) -> Dict[str, Any]:
+        return invoke_defaultspack_function(
+            "defaultspack:get_pack_request", {"request_id": request_id}
+        )
+
+    def _defaultspack_request_extension(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        return invoke_defaultspack_function(
+            "defaultspack:request_extension",
+            {
+                "staging_id": body.get("staging_id", ""),
+                "target_pack_id": body.get("target_pack_id", ""),
+                "notes": body.get("notes", ""),
+                "slot": body.get("slot", "default"),
+                "fullscreen": bool(body.get("fullscreen", False)),
+                "exclusive": bool(body.get("exclusive", False)),
+            },
+        )
+
+    def _defaultspack_forced_patch(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        return invoke_defaultspack_function(
+            "defaultspack:forced_patch",
+            {
+                "staging_id": body.get("staging_id", ""),
+                "target_pack_id": body.get("target_pack_id", ""),
+                "notes": body.get("notes", ""),
+                "slot": body.get("slot", "default"),
+                "fullscreen": bool(body.get("fullscreen", False)),
+                "exclusive": bool(body.get("exclusive", False)),
+            },
+        )
+
+    def _defaultspack_approve_pack_request(
+        self,
+        request_id: str,
+        body: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        return invoke_defaultspack_function(
+            "defaultspack:review_pack_request",
+            {
+                "request_id": request_id,
+                "decision": "approve",
+                "decision_notes": body.get("decision_notes", ""),
+            },
+        )
+
+    def _defaultspack_reject_pack_request(
+        self,
+        request_id: str,
+        body: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        return invoke_defaultspack_function(
+            "defaultspack:review_pack_request",
+            {
+                "request_id": request_id,
+                "decision": "reject",
+                "decision_notes": body.get("decision_notes", ""),
+            },
+        )
+
+    def _defaultspack_rollback_pack_request(self, request_id: str) -> Dict[str, Any]:
+        return invoke_defaultspack_function(
+            "defaultspack:rollback_pack_request",
+            {"request_id": request_id},
+        )

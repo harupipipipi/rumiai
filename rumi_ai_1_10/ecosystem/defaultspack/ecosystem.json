@@ -79,6 +79,45 @@
       "method": "GET",
       "path": "/api/defaultspack/migration/status",
       "handler": "_defaultspack_get_migration_status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/defaultspack/pack-requests",
+      "handler": "_defaultspack_list_pack_requests"
+    },
+    {
+      "method": "GET",
+      "path_pattern": "/api/defaultspack/pack-requests/{id}",
+      "handler": "_defaultspack_get_pack_request"
+    },
+    {
+      "method": "POST",
+      "path": "/api/defaultspack/pack-requests/request-extension",
+      "handler": "_defaultspack_request_extension",
+      "pass_body": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/defaultspack/pack-requests/forced-patch",
+      "handler": "_defaultspack_forced_patch",
+      "pass_body": true
+    },
+    {
+      "method": "POST",
+      "path_pattern": "/api/defaultspack/pack-requests/{id}/approve",
+      "handler": "_defaultspack_approve_pack_request",
+      "pass_body": true
+    },
+    {
+      "method": "POST",
+      "path_pattern": "/api/defaultspack/pack-requests/{id}/reject",
+      "handler": "_defaultspack_reject_pack_request",
+      "pass_body": true
+    },
+    {
+      "method": "POST",
+      "path_pattern": "/api/defaultspack/pack-requests/{id}/rollback",
+      "handler": "_defaultspack_rollback_pack_request"
     }
   ]
 }

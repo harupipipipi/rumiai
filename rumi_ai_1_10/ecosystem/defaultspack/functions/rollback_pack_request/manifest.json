@@ -1,0 +1,19 @@
+{
+  "function_id": "rollback_pack_request",
+  "description": "Rollback an applied pack modification request using its recorded backup.",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": true,
+  "tags": ["defaultspack", "pack", "rollback"],
+  "vocab_aliases": ["defaultspack.rollback_pack_request"],
+  "risk": "medium",
+  "input_schema": {
+    "type": "object",
+    "required": ["request_id"],
+    "properties": {
+      "request_id": {"type": "string"}
+    }
+  },
+  "output_schema": {"type": "object"},
+  "calling_convention": "block"
+}

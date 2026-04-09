@@ -64,9 +64,17 @@ class TestSetupPackManager(unittest.TestCase):
             target_json = Path(tmp) / "ecosystem.json"
             target_json.write_text('{"pack_identity":"rumi:ecosystem/defaultspack"}\n', encoding="utf-8")
 
+            fake_active = SimpleNamespace(active_pack_identity=None)
+            fake_approval = SimpleNamespace(_initialized=False)
             with patch("core_runtime.setup_pack.discover_pack_locations", return_value=[
                 SimpleNamespace(pack_id="defaultspack", ecosystem_json_path=target_json)
-            ]):
+            ]), patch(
+                "backend_core.ecosystem.active_ecosystem.get_active_ecosystem_manager",
+                return_value=fake_active,
+            ), patch(
+                "core_runtime.approval_manager.get_approval_manager",
+                return_value=fake_approval,
+            ):
                 result = manager.install("defaultspack")
 
             self.assertTrue(result["installed"])

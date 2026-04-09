@@ -1,0 +1,21 @@
+{
+  "function_id": "review_pack_request",
+  "description": "Approve or reject a pending pack modification request.",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": true,
+  "tags": ["defaultspack", "pack", "review"],
+  "vocab_aliases": ["defaultspack.review_pack_request"],
+  "risk": "high",
+  "input_schema": {
+    "type": "object",
+    "required": ["request_id", "decision"],
+    "properties": {
+      "request_id": {"type": "string"},
+      "decision": {"type": "string"},
+      "decision_notes": {"type": "string"}
+    }
+  },
+  "output_schema": {"type": "object"},
+  "calling_convention": "block"
+}

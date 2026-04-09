@@ -1,0 +1,18 @@
+{
+  "function_id": "list_pack_requests",
+  "description": "List pending and historical pack modification requests.",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": true,
+  "tags": ["defaultspack", "pack", "request"],
+  "vocab_aliases": ["defaultspack.list_pack_requests"],
+  "risk": "low",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "status": {"type": "string"}
+    }
+  },
+  "output_schema": {"type": "object"},
+  "calling_convention": "block"
+}

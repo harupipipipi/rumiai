@@ -7,6 +7,8 @@
 - Function-first defaultspack operation surface
 - Module catalog, persisted module state, dependency degradation, and recovery events
 - Legacy `user.csv` to `user.json` migration helper
+- setup UI integration for setup-pack selection and migration visibility
+- approval-backed `request_extension` / `forced_patch` request flow with rollback support
 
 ## Operational notes
 
