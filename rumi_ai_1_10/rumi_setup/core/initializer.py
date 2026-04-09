@@ -11,6 +11,8 @@ from typing import Dict, Any, Optional, Callable
 
 from .state import get_state
 
+DEFAULT_PRIMARY_PACK_IDENTITY = "rumi:ecosystem/defaultspack"
+
 
 class Initializer:
     """初期化処理"""
@@ -141,11 +143,14 @@ class Initializer:
             return None
         
         active_data = {
-            "active_pack_identity": None,
+            "active_pack_identity": DEFAULT_PRIMARY_PACK_IDENTITY,
             "overrides": {},
             "disabled_components": [],
             "disabled_addons": [],
-            "metadata": {}
+            "metadata": {
+                "primary_pack_id": "defaultspack",
+                "source": "rumi_setup_initializer",
+            }
         }
         
         active_path.parent.mkdir(parents=True, exist_ok=True)
@@ -182,38 +187,33 @@ class Initializer:
         self,
         confirm_callback: Callable[[str], bool] = None
     ) -> Dict[str, Any]:
-        default_dest = self.base_dir / "ecosystem" / "default"
-        
-        try:
-            from ..defaults import get_default_pack_path
-            default_src = get_default_pack_path()
-        except ImportError:
-            default_src = Path(__file__).parent.parent / "defaults" / "default"
+        default_dest = self.base_dir / "ecosystem" / "defaultspack"
+        default_src = self.base_dir / "ecosystem" / "defaults"
         
         if not default_src.exists():
             self.state.log_warn(
-                "default pack のテンプレートが見つかりません",
+                "defaultspack v2 のコピー元 defaults が見つかりません",
                 f"パス: {default_src}"
             )
             return {"created": [], "errors": [], "skipped": True}
         
         if default_dest.exists():
             if confirm_callback:
-                if not confirm_callback("ecosystem/default は既に存在します。上書きしますか？"):
+                if not confirm_callback("ecosystem/defaultspack は既に存在します。defaults から再構築しますか？"):
                     return {"created": [], "errors": [], "skipped": True}
                 shutil.rmtree(default_dest)
             else:
-                self.state.log_info("ecosystem/default は既に存在します")
+                self.state.log_info("ecosystem/defaultspack は既に存在します")
                 return {"created": [], "errors": [], "skipped": True}
         else:
             if confirm_callback:
-                if not confirm_callback("default pack をインストールしますか？"):
+                if not confirm_callback("defaults から defaultspack v2 を作成しますか？"):
                     return {"created": [], "errors": [], "skipped": True}
         
         try:
             shutil.copytree(default_src, default_dest)
-            self.state.log_success("インストール: ecosystem/default")
-            return {"created": ["ecosystem/default"], "errors": [], "skipped": False}
+            self.state.log_success("インストール: ecosystem/defaultspack")
+            return {"created": ["ecosystem/defaultspack"], "errors": [], "skipped": False}
         except Exception as e:
-            self.state.log_error(f"default pack のインストールに失敗: {e}")
+            self.state.log_error(f"defaultspack v2 のインストールに失敗: {e}")
             return {"created": [], "errors": [str(e)], "skipped": False}

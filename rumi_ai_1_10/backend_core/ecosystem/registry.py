@@ -686,18 +686,44 @@ class Registry:
         components = self.get_components_by_type(component_type)
         if not components:
             return None
+        preferred_pack_id = None
+        if aem:
+            try:
+                active_identity = (
+                    aem.active_pack_identity
+                    if hasattr(aem, "active_pack_identity")
+                    else None
+                )
+            except Exception:
+                active_identity = None
+            if active_identity:
+                try:
+                    active_pack = self.get_pack_by_identity(active_identity)
+                    if active_pack:
+                        preferred_pack_id = active_pack.pack_id
+                except Exception:
+                    preferred_pack_id = None
+        if preferred_pack_id is None and "defaultspack" in self.packs:
+            preferred_pack_id = "defaultspack"
+
+        ordered_components = list(components)
+        if preferred_pack_id:
+            ordered_components.sort(
+                key=lambda comp: (comp.pack_id != preferred_pack_id, comp.pack_id, comp.id)
+            )
+
         if aem:
             try:
                 override_id = aem.get_override(component_type) if hasattr(aem, 'get_override') else None
             except Exception:
                 override_id = None
             if override_id:
-                for comp in components:
+                for comp in ordered_components:
                     if comp.id == override_id:
                         if not (hasattr(aem, 'is_component_disabled') and aem.is_component_disabled(comp.full_id)):
                             return comp
                         break
-        for comp in components:
+        for comp in ordered_components:
             if aem and hasattr(aem, 'is_component_disabled') and aem.is_component_disabled(comp.full_id):
                 continue
             return comp

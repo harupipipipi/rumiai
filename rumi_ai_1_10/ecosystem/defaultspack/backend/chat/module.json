@@ -1,0 +1,13 @@
+{
+  "module_id": "chat",
+  "kind": "backend",
+  "display_name": "Chat Core",
+  "description": "Conversation, message, and channel primitives cloned from defaults for defaultspack v2.",
+  "dependencies": [
+    "ai_client",
+    "memory",
+    "prompt"
+  ],
+  "default_state": "enabled",
+  "failure_threshold": 3
+}

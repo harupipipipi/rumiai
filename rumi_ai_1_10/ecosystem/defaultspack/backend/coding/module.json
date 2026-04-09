@@ -1,0 +1,11 @@
+{
+  "module_id": "coding",
+  "kind": "backend",
+  "display_name": "Coding Core",
+  "description": "File, terminal, and git operations cloned from defaults for defaultspack v2.",
+  "dependencies": [
+    "tool"
+  ],
+  "default_state": "enabled",
+  "failure_threshold": 3
+}

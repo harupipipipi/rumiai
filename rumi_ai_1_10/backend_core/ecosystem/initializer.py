@@ -20,6 +20,8 @@ from .active_ecosystem import (
     DEFAULT_CONFIG
 )
 
+DEFAULT_PRIMARY_PACK_IDENTITY = "rumi:ecosystem/defaultspack"
+
 
 class EcosystemInitializer:
     """
@@ -159,12 +161,14 @@ class EcosystemInitializer:
         # active_ecosystem.jsonが存在しない場合は作成
         if not active_file.exists():
             default_data = {
-                # 公式は内容を定義しない - 最初のPackが自己設定する
-                "active_pack_identity": None,
+                "active_pack_identity": DEFAULT_PRIMARY_PACK_IDENTITY,
                 "overrides": {},
                 "disabled_components": [],
                 "disabled_addons": [],
-                "metadata": {}
+                "metadata": {
+                    "primary_pack_id": "defaultspack",
+                    "source": "ecosystem_initializer",
+                }
             }
             
             with open(active_file, 'w', encoding='utf-8') as f:
