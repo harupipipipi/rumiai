@@ -200,7 +200,7 @@ class TestAutoOutputStorage:
         async def run():
             return await engine._execute_handler_step_async(step, ctx)
 
-        new_ctx, result = asyncio.get_event_loop().run_until_complete(run())
+        new_ctx, result = asyncio.run(run())
         assert "my_result" in new_ctx
         assert new_ctx["my_result"] is None
 
@@ -219,7 +219,7 @@ class TestAutoOutputStorage:
         async def run():
             return await engine._execute_handler_step_async(step, ctx)
 
-        new_ctx, result = asyncio.get_event_loop().run_until_complete(run())
+        new_ctx, result = asyncio.run(run())
         assert "_step_out.analyze" in new_ctx
         assert new_ctx["_step_out.analyze"] == {"data": 42}
 
@@ -238,7 +238,7 @@ class TestAutoOutputStorage:
         async def run():
             return await engine._execute_handler_step_async(step, ctx)
 
-        new_ctx, result = asyncio.get_event_loop().run_until_complete(run())
+        new_ctx, result = asyncio.run(run())
         assert "_step_out.noop" not in new_ctx
 
     # 13. id: registry のステップ → ctx["registry"] は上書きされない
@@ -260,7 +260,7 @@ class TestAutoOutputStorage:
         async def run():
             return await engine._execute_handler_step_async(step, ctx)
 
-        new_ctx, result = asyncio.get_event_loop().run_until_complete(run())
+        new_ctx, result = asyncio.run(run())
         assert new_ctx["registry"] == "original_value"
         assert new_ctx["_step_out.registry"] == {"registered": True}
 
@@ -290,7 +290,7 @@ class TestFunctionStep:
         async def run():
             return await engine._execute_function_step_async(step, ctx)
 
-        new_ctx, result = asyncio.get_event_loop().run_until_complete(run())
+        new_ctx, result = asyncio.run(run())
         assert result["_error"] == "no _principal_id in ctx"
         assert "_step_out.fn1" in new_ctx
 
@@ -308,7 +308,7 @@ class TestFunctionStep:
             async def run():
                 return await engine._execute_function_step_async(step, ctx)
 
-            new_ctx, result = asyncio.get_event_loop().run_until_complete(run())
+            new_ctx, result = asyncio.run(run())
             assert result["_error"] == "capability_executor not available"
 
     # 16. 正常実行 → 明示 output に格納
@@ -346,7 +346,7 @@ class TestFunctionStep:
                 finally:
                     loop.run_in_executor = original_rie
 
-            new_ctx, result = asyncio.get_event_loop().run_until_complete(run())
+            new_ctx, result = asyncio.run(run())
             assert new_ctx["analyze_result"] == {"score": 95}
             assert "_step_out.fn3" not in new_ctx
 
@@ -380,7 +380,7 @@ class TestFunctionStep:
                 loop.run_in_executor = fake_rie
                 return await engine._execute_function_step_async(step, ctx)
 
-            new_ctx, result = asyncio.get_event_loop().run_until_complete(run())
+            new_ctx, result = asyncio.run(run())
             assert "_step_out.fn4" in new_ctx
             assert new_ctx["_step_out.fn4"] == {"score": 50}
 
@@ -415,7 +415,7 @@ class TestFunctionStep:
                 loop.run_in_executor = fake_rie
                 return await engine._execute_function_step_async(step, ctx)
 
-            new_ctx, result = asyncio.get_event_loop().run_until_complete(run())
+            new_ctx, result = asyncio.run(run())
             assert "_error" in result
             assert result["_error"] == "something went wrong"
             assert new_ctx["bad_result"] == {"_error": "something went wrong"}

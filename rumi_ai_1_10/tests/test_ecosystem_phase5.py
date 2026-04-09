@@ -279,12 +279,14 @@ class TestEcosystemIntegration:
         
         shutil.rmtree(temp_dir, ignore_errors=True)
     
-    def test_full_initialization(self, full_ecosystem):
+    def test_full_initialization(self, full_ecosystem, monkeypatch):
         """完全な初期化フロー"""
         from backend_core.ecosystem.mounts import MountManager
         from backend_core.ecosystem.registry import Registry
         from backend_core.ecosystem.active_ecosystem import ActiveEcosystemManager
         from backend_core.ecosystem import compat
+
+        monkeypatch.setenv("RUMI_REQUIRE_HMAC", "0")
         
         # マウント初期化
         mounts = MountManager(

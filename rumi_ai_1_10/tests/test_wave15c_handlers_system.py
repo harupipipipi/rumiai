@@ -211,17 +211,17 @@ class TestComponentDiscover:
 
 class TestMountsInitErrorLogging:
     def test_error_returns_none(self, mixin):
-        with patch("core_runtime.kernel_handlers_system.Path"):
-            # backend_core が無い環境では ImportError
+        with patch.dict("sys.modules", {"backend_core.ecosystem.mounts": None}):
             result = mixin._h_mounts_init({}, {})
-        assert result is None
+        assert result["_kernel_step_status"] == "failed"
         mixin.diagnostics.record_step.assert_called_once()
 
 
 class TestRegistryLoadErrorLogging:
     def test_error_returns_none(self, mixin):
-        result = mixin._h_registry_load({}, {})
-        assert result is None
+        with patch.dict("sys.modules", {"backend_core.ecosystem.registry": None}):
+            result = mixin._h_registry_load({}, {})
+        assert result["_kernel_step_status"] == "failed"
         mixin.diagnostics.record_step.assert_called_once()
 
 

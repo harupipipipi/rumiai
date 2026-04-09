@@ -26,6 +26,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from .types import FlowId
 from .diagnostics import Diagnostics
+from .di_container import get_container
 from .install_journal import InstallJournal
 from .interface_registry import InterfaceRegistry
 from .event_bus import EventBus
@@ -61,7 +62,6 @@ class KernelCore:
     def __init__(self, config: Optional[KernelConfig] = None, diagnostics: Optional[Diagnostics] = None,
                  install_journal: Optional[InstallJournal] = None, interface_registry: Optional[InterfaceRegistry] = None,
                  event_bus: Optional[EventBus] = None, lifecycle: Optional[ComponentLifecycleExecutor] = None) -> None:
-        from .di_container import get_container
         _c = get_container()
 
         self.config = config or KernelConfig()
@@ -422,14 +422,15 @@ class KernelCore:
             return []
         loaded: List[str] = []
         for f in flow_dir.glob("*.flow.json"):
+            flow_id = f.stem.removesuffix(".flow")
             try:
                 flow_def = json.loads(f.read_text(encoding="utf-8"))
-                self.interface_registry.register(f"flow.{f.stem}", flow_def)
-                loaded.append(f.stem)
-                self.diagnostics.record_step(phase="startup", step_id=f"flow.{f.stem}.load", handler="kernel:load_user_flows",
+                self.interface_registry.register(f"flow.{flow_id}", flow_def)
+                loaded.append(flow_id)
+                self.diagnostics.record_step(phase="startup", step_id=f"flow.{flow_id}.load", handler="kernel:load_user_flows",
                                               status="success", meta={"path": str(f)})
             except Exception as e:
-                self.diagnostics.record_step(phase="startup", step_id=f"flow.{f.stem}.load", handler="kernel:load_user_flows",
+                self.diagnostics.record_step(phase="startup", step_id=f"flow.{flow_id}.load", handler="kernel:load_user_flows",
                                               status="failed", error=e, meta={"path": str(f)})
         return loaded
 

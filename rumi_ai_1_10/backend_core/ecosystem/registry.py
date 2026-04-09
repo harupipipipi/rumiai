@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+import sys
 from collections import deque
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
@@ -51,26 +52,59 @@ RUMI_MAX_JSON_FILE_BYTES: int = int(
 )
 
 
+def _get_max_json_file_bytes() -> int:
+    raw = os.environ.get("RUMI_MAX_JSON_FILE_BYTES")
+    if raw is None:
+        return RUMI_MAX_JSON_FILE_BYTES
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning(
+            "[Registry] Invalid RUMI_MAX_JSON_FILE_BYTES=%r, using default=%d",
+            raw,
+            RUMI_MAX_JSON_FILE_BYTES,
+        )
+        return RUMI_MAX_JSON_FILE_BYTES
+    return value
+
+
 def _check_json_file_size(filepath, max_bytes=None) -> bool:
-    """Return *True* (= caller should skip) when *filepath* exceeds the limit."""
+    """Return *True* when *filepath* is within the size limit and safe to load."""
     if max_bytes is None:
-        max_bytes = RUMI_MAX_JSON_FILE_BYTES
+        max_bytes = _get_max_json_file_bytes()
     try:
         file_size = os.path.getsize(filepath)
     except OSError as exc:
         logger.warning(
-            "[Registry] Cannot stat JSON file, skipping: %s (%s)", filepath, exc
+            "[Registry] Cannot stat JSON file, skipping: path=%s error=%s limit=%d",
+            filepath,
+            exc,
+            max_bytes,
         )
-        return True
+        return False
     if file_size > max_bytes:
         logger.warning(
-            "[Registry] JSON file size %d bytes exceeds limit %d bytes, skipping: %s",
+            "[Registry] JSON file too large, skipping: path=%s size=%d limit=%d",
+            filepath,
             file_size,
             max_bytes,
-            filepath,
         )
+        return False
+    return True
+
+
+def _should_include_core_packs(ecosystem_dir: Path) -> bool:
+    default_ecosystem_dir = Path(_ECOSYSTEM_DIR).resolve()
+    requested_ecosystem_dir = ecosystem_dir.resolve()
+    if requested_ecosystem_dir == default_ecosystem_dir:
         return True
-    return False
+
+    configured_core_pack_dir = Path(_CORE_PACK_DIR_PATHS)
+    expected_sibling_core_pack_dir = ecosystem_dir.parent / "core_runtime" / "core_pack"
+    try:
+        return configured_core_pack_dir.resolve() == expected_sibling_core_pack_dir.resolve()
+    except OSError:
+        return False
 
 @dataclass
 class ComponentInfo:
@@ -117,7 +151,7 @@ class Registry:
             ecosystem_dir: エコシステムディレクトリのパス
         """
         self.ecosystem_dir = Path(ecosystem_dir)
-        self._include_core_packs = str(self.ecosystem_dir.resolve()) == str(Path(_ECOSYSTEM_DIR).resolve())
+        self._include_core_packs = _should_include_core_packs(self.ecosystem_dir)
         self.packs: Dict[str, PackInfo] = {}
         self._component_index: Dict[str, ComponentInfo] = {}  # uuid -> ComponentInfo
         self._type_index: Dict[str, List[ComponentInfo]] = {}  # type -> [ComponentInfo]
@@ -153,6 +187,14 @@ class Registry:
                         candidates.append(d)
             except OSError:
                 logger.warning("[Registry] Failed to scan core_pack directory: %s", _core_pack_dir)
+        else:
+            logger.info(
+                "[Registry] Core pack scan skipped: include_core=%s core_pack_dir=%s exists=%s ecosystem_dir=%s",
+                self._include_core_packs,
+                _core_pack_dir,
+                _core_pack_dir.is_dir(),
+                self.ecosystem_dir,
+            )
         # --- END W22-A ---
 
         if self.ecosystem_dir.exists():
@@ -265,7 +307,7 @@ class Registry:
             return None
         
         # ecosystem.jsonを読み込み
-        if _check_json_file_size(ecosystem_file):
+        if not _check_json_file_size(ecosystem_file):
             return None
         with open(ecosystem_file, 'r', encoding='utf-8') as f:
             ecosystem_data = json.load(f)
@@ -346,7 +388,7 @@ class Registry:
                     continue
                 
                 try:
-                    if _check_json_file_size(manifest_file):
+                    if not _check_json_file_size(manifest_file):
                         continue
                     with open(manifest_file, 'r', encoding='utf-8') as f:
                         manifest = json.load(f)
@@ -401,7 +443,7 @@ class Registry:
         """
         for addon_file in addons_dir.glob("*.addon.json"):
             try:
-                if _check_json_file_size(addon_file):
+                if not _check_json_file_size(addon_file):
                     continue
                 with open(addon_file, 'r', encoding='utf-8') as f:
                     addon_data = json.load(f)
@@ -430,7 +472,7 @@ class Registry:
         }
         """
         try:
-            if _check_json_file_size(routes_file):
+            if not _check_json_file_size(routes_file):
                 return
             with open(routes_file, 'r', encoding='utf-8') as f:
                 routes_data = json.load(f)
@@ -502,16 +544,23 @@ class Registry:
 
         # --- FunctionRegistry を DI コンテナから取得 (ImportError セーフ) ---
         func_registry = None
+        get_container = None
         try:
-            from core_runtime.di_container import get_container
+            di_module = sys.modules.get("core_runtime.di_container")
+            if di_module is not None:
+                get_container = getattr(di_module, "get_container", None)
+            if get_container is None:
+                from core_runtime.di_container import get_container as _get_container
+                get_container = _get_container
             func_registry = get_container().get_or_none("function_registry")
         except Exception:
             pass
 
         if func_registry is None:
-            logger.info(
-                "[Registry] FunctionRegistry not available, skipping functions/ scan for pack '%s'",
+            logger.warning(
+                "[Registry] FunctionRegistry not available, skipping functions scan: pack_id=%s pack_subdir=%s",
                 pack_info.pack_id,
+                pack_subdir,
             )
             return
 
@@ -554,7 +603,7 @@ class Registry:
                 continue
 
             # --- JSON ファイルサイズチェック ---
-            if _check_json_file_size(manifest_file):
+            if not _check_json_file_size(manifest_file):
                 continue
 
             # --- manifest.json パース ---
@@ -563,8 +612,11 @@ class Registry:
                     manifest = json.load(f)
             except (json.JSONDecodeError, OSError) as exc:
                 logger.warning(
-                    "[Registry] Failed to parse functions manifest, skipping: %s (%s)",
-                    manifest_file, exc,
+                    "[Registry] Failed to parse functions manifest, skipping: pack_id=%s function_dir=%s manifest=%s error=%s",
+                    pack_info.pack_id,
+                    func_subdir,
+                    manifest_file,
+                    exc,
                 )
                 continue
 
@@ -572,19 +624,21 @@ class Registry:
             function_id = manifest.get("function_id", func_subdir.name)
             if not _FUNC_ID_RE.match(function_id):
                 logger.warning(
-                    "[Registry] Invalid function_id '%s' for pack '%s', skipping",
-                    function_id, pack_info.pack_id,
+                    "[Registry] Invalid function_id, skipping function registration: pack_id=%s function_id=%s manifest=%s",
+                    pack_info.pack_id,
+                    function_id,
+                    manifest_file,
                 )
                 continue
 
-            # --- PC-4 fix: main.py 存在チェック ---
             main_py = func_subdir / "main.py"
             if not main_py.is_file():
-                logger.warning(
-                    "[Registry] main.py not found in function dir '%s' for pack '%s', skipping",
-                    func_subdir, pack_info.pack_id,
+                logger.info(
+                    "[Registry] Function dir has no main.py; registering manifest-only function: pack_id=%s function_id=%s function_dir=%s",
+                    pack_info.pack_id,
+                    function_id,
+                    func_subdir,
                 )
-                continue
 
             # --- FunctionRegistry に登録 ---
             try:
@@ -609,8 +663,11 @@ class Registry:
                 print(f"      \u2713 Function: {function_id}")
             except Exception as exc:
                 logger.warning(
-                    "[Registry] Failed to register function '%s' for pack '%s': %s",
-                    function_id, pack_info.pack_id, exc,
+                    "[Registry] Failed to register function: pack_id=%s function_id=%s function_dir=%s error=%s",
+                    pack_info.pack_id,
+                    function_id,
+                    func_subdir,
+                    exc,
                 )
 
     def get_all_routes(self) -> Dict[str, List[Dict[str, Any]]]:

@@ -739,7 +739,11 @@ class KernelFlowExecutionMixin:
 
         if not resp.success:
             _logger.warning(
-                "function.call step '%s' failed: %s", step.get("id"), resp.error
+                "function.call step failed",
+                step_id=step.get("id"),
+                qualified_name=qualified_name,
+                principal_id=principal_id,
+                error=resp.error,
             )
 
         return ctx, result

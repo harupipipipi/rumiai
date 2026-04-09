@@ -42,6 +42,24 @@ _INJECT_BLOCKED_KEYS = frozenset({
 })
 
 
+def initialize_approval_manager():
+    from .approval_manager import initialize_approval_manager as _initialize_approval_manager
+
+    return _initialize_approval_manager()
+
+
+def get_approval_manager():
+    from .approval_manager import get_approval_manager as _get_approval_manager
+
+    return _get_approval_manager()
+
+
+def get_registry():
+    from backend_core.ecosystem.registry import get_registry as _get_registry
+
+    return _get_registry()
+
+
 
 
 class KernelSystemHandlersMixin:
@@ -420,7 +438,6 @@ class KernelSystemHandlersMixin:
 
     def _h_approval_init(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
         try:
-            from .approval_manager import initialize_approval_manager, get_approval_manager
             initialize_approval_manager()
             am = get_approval_manager()
             ctx["approval_manager"] = am
@@ -446,7 +463,6 @@ class KernelSystemHandlersMixin:
 
     def _h_approval_scan(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
         try:
-            from .approval_manager import get_approval_manager
             am = get_approval_manager()
 
             packs = am.scan_packs()
@@ -660,7 +676,6 @@ class KernelSystemHandlersMixin:
         approved = ctx.get("_packs_approved", [])
 
         try:
-            from backend_core.ecosystem.registry import get_registry
             reg = get_registry()
 
 

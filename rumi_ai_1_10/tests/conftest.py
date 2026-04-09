@@ -24,74 +24,35 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 # ---------------------------------------------------------------------------
-# rumi_ai_1_10 namespace package を明示登録する
-# ---------------------------------------------------------------------------
-if "rumi_ai_1_10" not in sys.modules:
-    _pkg = types.ModuleType("rumi_ai_1_10")
-    _pkg.__path__ = [str(_PROJECT_ROOT)]
-    _pkg.__package__ = "rumi_ai_1_10"
-    _pkg.__file__ = str(_PROJECT_ROOT / "__init__.py")
-    sys.modules["rumi_ai_1_10"] = _pkg
-
-if "rumi_ai_1_10.core_runtime" not in sys.modules:
-    _pkg = types.ModuleType("rumi_ai_1_10.core_runtime")
-    _pkg.__path__ = [str(_PROJECT_ROOT / "core_runtime")]
-    _pkg.__package__ = "rumi_ai_1_10.core_runtime"
-    _pkg.__file__ = str(_PROJECT_ROOT / "core_runtime" / "__init__.py")
-    sys.modules["rumi_ai_1_10.core_runtime"] = _pkg
-
-if "rumi_ai_1_10.backend_core" not in sys.modules:
-    _pkg = types.ModuleType("rumi_ai_1_10.backend_core")
-    _pkg.__path__ = [str(_PROJECT_ROOT / "backend_core")]
-    _pkg.__package__ = "rumi_ai_1_10.backend_core"
-    _pkg.__file__ = str(_PROJECT_ROOT / "backend_core" / "__init__.py")
-    sys.modules["rumi_ai_1_10.backend_core"] = _pkg
-
-if "backend_core" not in sys.modules:
-    _pkg = types.ModuleType("backend_core")
-    _pkg.__path__ = [str(_PROJECT_ROOT / "backend_core")]
-    _pkg.__package__ = "backend_core"
-    _pkg.__file__ = str(_PROJECT_ROOT / "backend_core" / "__init__.py")
-    sys.modules["backend_core"] = _pkg
-
-if "backend_core.ecosystem" not in sys.modules:
-    _pkg = types.ModuleType("backend_core.ecosystem")
-    _pkg.__path__ = [str(_PROJECT_ROOT / "backend_core" / "ecosystem")]
-    _pkg.__package__ = "backend_core.ecosystem"
-    _pkg.__file__ = str(_PROJECT_ROOT / "backend_core" / "ecosystem" / "__init__.py")
-    sys.modules["backend_core.ecosystem"] = _pkg
-
-# ---------------------------------------------------------------------------
 # core_runtime パッケージを __init__.py を実行せずに登録する
 # ---------------------------------------------------------------------------
 _CORE_RUNTIME_DIR = str(_PROJECT_ROOT / "core_runtime")
 
-if "core_runtime" not in sys.modules:
-    _pkg = types.ModuleType("core_runtime")
-    _pkg.__path__ = [_CORE_RUNTIME_DIR]
-    _pkg.__package__ = "core_runtime"
-    _pkg.__file__ = _CORE_RUNTIME_DIR + "/__init__.py"
-    sys.modules["core_runtime"] = _pkg
+def _ensure_package_module(module_name: str, package_dir: Path) -> None:
+    pkg = sys.modules.get(module_name)
+    if pkg is None:
+        pkg = types.ModuleType(module_name)
+        sys.modules[module_name] = pkg
+    pkg.__path__ = [str(package_dir)]
+    pkg.__package__ = module_name
+    pkg.__file__ = str(package_dir / "__init__.py")
+    if "." in module_name:
+        parent_name, attr_name = module_name.rsplit(".", 1)
+        parent = sys.modules.get(parent_name)
+        if parent is not None:
+            setattr(parent, attr_name, pkg)
 
-if "rumi_ai_1_10.core_runtime.paths" not in sys.modules:
-    sys.modules["rumi_ai_1_10.core_runtime.paths"] = importlib.import_module("core_runtime.paths")
-for _mod_name in (
-    "core_runtime.metrics",
-    "core_runtime.profiling",
-    "backend_core.ecosystem.mounts",
-    "backend_core.ecosystem.registry",
-):
-    if _mod_name not in sys.modules:
-        importlib.import_module(_mod_name)
 
-for _alias_name, _target_name in (
-    ("rumi_ai_1_10.core_runtime.metrics", "core_runtime.metrics"),
-    ("rumi_ai_1_10.core_runtime.profiling", "core_runtime.profiling"),
-    ("rumi_ai_1_10.backend_core.ecosystem.mounts", "backend_core.ecosystem.mounts"),
-    ("rumi_ai_1_10.backend_core.ecosystem.registry", "backend_core.ecosystem.registry"),
-):
-    if _alias_name not in sys.modules and _target_name in sys.modules:
-        sys.modules[_alias_name] = sys.modules[_target_name]
+def _reset_package_roots() -> None:
+    _ensure_package_module("core_runtime", _PROJECT_ROOT / "core_runtime")
+    _ensure_package_module("backend_core", _PROJECT_ROOT / "backend_core")
+    _ensure_package_module("backend_core.ecosystem", _PROJECT_ROOT / "backend_core" / "ecosystem")
+    _ensure_package_module("rumi_ai_1_10", _PROJECT_ROOT)
+    _ensure_package_module("rumi_ai_1_10.core_runtime", _PROJECT_ROOT / "core_runtime")
+    _ensure_package_module("rumi_ai_1_10.backend_core", _PROJECT_ROOT / "backend_core")
+
+
+_reset_package_roots()
 
 
 def _compute_file_sha256(file_path: Path) -> str | None:
@@ -239,6 +200,124 @@ def _install_capability_handler_registry_shim() -> None:
     alias_name = "rumi_ai_1_10.core_runtime.capability_handler_registry"
     if alias_name not in sys.modules:
         sys.modules[alias_name] = sys.modules[module_name]
+
+
+def _force_real_import(module_name: str) -> None:
+    """collection 時の sys.modules 汚染を、必要なテストの前に実 module へ戻す。"""
+    sys.modules.pop(module_name, None)
+    module = importlib.import_module(module_name)
+    _bind_parent_module(module_name, module)
+
+
+def _bind_parent_module(module_name: str, module=None) -> None:
+    module = sys.modules.get(module_name) if module is None else module
+    if module is None or "." not in module_name:
+        return
+    parent_name, attr_name = module_name.rsplit(".", 1)
+    parent = sys.modules.get(parent_name)
+    if parent is not None:
+        setattr(parent, attr_name, module)
+
+
+def _sync_alias_module(alias_name: str, target_name: str) -> None:
+    target_module = sys.modules.get(target_name)
+    if target_module is None:
+        target_module = importlib.import_module(target_name)
+    sys.modules[alias_name] = target_module
+    _bind_parent_module(alias_name, target_module)
+
+_RESTORE_REAL_MODULES = (
+    "core_runtime.paths",
+    "core_runtime.di_container",
+    "backend_core.ecosystem.mounts",
+    "backend_core.ecosystem.registry",
+    "backend_core.ecosystem.compat",
+)
+
+_BIND_ONLY_MODULES = (
+    "core_runtime.egress_proxy",
+    "core_runtime.store_registry",
+    "core_runtime.container_orchestrator",
+    "core_runtime.kernel_core",
+    "core_runtime.kernel_handlers_system",
+)
+
+_ALIAS_MODULES = (
+    ("rumi_ai_1_10.core_runtime.di_container", "core_runtime.di_container"),
+    ("rumi_ai_1_10.core_runtime.health", "core_runtime.health"),
+    ("rumi_ai_1_10.core_runtime.metrics", "core_runtime.metrics"),
+    ("rumi_ai_1_10.core_runtime.paths", "core_runtime.paths"),
+    ("rumi_ai_1_10.core_runtime.profiling", "core_runtime.profiling"),
+)
+
+_RESTORE_SKIP_PREFIXES = (
+    "tests/test_wave20a_active_ecosystem_hmac.py",
+    "tests/test_wave20b_container_cleanup.py",
+    "tests/test_wave21a_host_privilege_hardening.py",
+    "tests/test_wave22c_core_pack_structure.py",
+    "tests/test_wave24b_registry_function_scan.py",
+    "tests/test_wave27_flow_engine.py",
+    "tests/test_function_unification/test_wave27_flow_engine.py",
+)
+
+
+def _should_skip_restore(nodeid: str | None) -> bool:
+    return bool(nodeid) and nodeid.startswith(_RESTORE_SKIP_PREFIXES)
+
+
+def _restore_test_module_mocks(test_module) -> None:
+    mock_mods = getattr(test_module, "_mock_mods", None)
+    if isinstance(mock_mods, dict):
+        for module_name, module in mock_mods.items():
+            sys.modules[module_name] = module
+            _bind_parent_module(module_name, module)
+    registry_mod = getattr(test_module, "_registry_mod", None)
+    if registry_mod is not None:
+        sys.modules["backend_core.ecosystem.registry"] = registry_mod
+        _bind_parent_module("backend_core.ecosystem.registry", registry_mod)
+
+
+def pytest_runtest_setup(item):
+    _reset_package_roots()
+    if _should_skip_restore(item.nodeid):
+        _restore_test_module_mocks(getattr(item, "module", None))
+        return
+    for _mod_name in _RESTORE_REAL_MODULES:
+        try:
+            _force_real_import(_mod_name)
+        except Exception:
+            pass
+    for _mod_name in _BIND_ONLY_MODULES:
+        try:
+            _bind_parent_module(_mod_name)
+        except Exception:
+            pass
+    for _alias_name, _target_name in _ALIAS_MODULES:
+        try:
+            _sync_alias_module(_alias_name, _target_name)
+        except Exception:
+            pass
+
+
+def pytest_collectreport(report):
+    _reset_package_roots()
+    if _should_skip_restore(getattr(report, "nodeid", None)):
+        return
+    for _mod_name in _RESTORE_REAL_MODULES:
+        try:
+            _force_real_import(_mod_name)
+        except Exception:
+            pass
+    for _mod_name in _BIND_ONLY_MODULES:
+        try:
+            _bind_parent_module(_mod_name)
+        except Exception:
+            pass
+    for _alias_name, _target_name in _ALIAS_MODULES:
+        try:
+            _sync_alias_module(_alias_name, _target_name)
+        except Exception:
+            pass
 
 
 _install_capability_handler_registry_shim()
