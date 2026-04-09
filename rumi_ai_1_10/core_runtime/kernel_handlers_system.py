@@ -60,6 +60,18 @@ def get_registry():
     return _get_registry()
 
 
+def _failed_step_result(handler: str, error: Exception | str, **meta: Any) -> Dict[str, Any]:
+    error_text = str(error)
+    step_meta = {"error": error_text, "handler": handler}
+    if meta:
+        step_meta.update(meta)
+    return {
+        "_kernel_step_status": "failed",
+        "_kernel_step_error": error_text,
+        "_kernel_step_meta": step_meta,
+    }
+
+
 
 
 class KernelSystemHandlersMixin:
@@ -130,7 +142,7 @@ class KernelSystemHandlersMixin:
             self.diagnostics.record_step(phase="startup", step_id="startup.mounts.internal", handler="kernel:mounts.init",
                                           status="failed", error=e, meta={"mounts_file": mounts_file})
             _logger.error("Mounts init failed", exc_info=e, mounts_file=mounts_file)
-            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e), "handler": "kernel:mounts.init"}}
+            return _failed_step_result("kernel:mounts.init", e, mounts_file=mounts_file)
 
     def _h_registry_load(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
         ecosystem_dir = str(args.get("ecosystem_dir", "ecosystem"))
@@ -148,7 +160,7 @@ class KernelSystemHandlersMixin:
             self.diagnostics.record_step(phase="startup", step_id="startup.registry.internal", handler="kernel:registry.load",
                                           status="failed", error=e, meta={"ecosystem_dir": ecosystem_dir})
             _logger.error("Registry load failed", exc_info=e, ecosystem_dir=ecosystem_dir)
-            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e), "handler": "kernel:registry.load"}}
+            return _failed_step_result("kernel:registry.load", e, ecosystem_dir=ecosystem_dir)
 
     def _h_active_ecosystem_load(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
         config_file = str(args.get("config_file", "user_data/active_ecosystem.json"))
@@ -165,7 +177,7 @@ class KernelSystemHandlersMixin:
             self.diagnostics.record_step(phase="startup", step_id="startup.active_ecosystem.internal", handler="kernel:active_ecosystem.load",
                                           status="failed", error=e, meta={"config_file": config_file})
             _logger.error("Active ecosystem load failed", exc_info=e, config_file=config_file)
-            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": str(e), "handler": "kernel:active_ecosystem.load"}}
+            return _failed_step_result("kernel:active_ecosystem.load", e, config_file=config_file)
 
     def _h_interfaces_publish(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
         self.interface_registry.register("kernel.state", {"services_ready": True, "ts": self._now_ts()}, meta={"source": "kernel"})

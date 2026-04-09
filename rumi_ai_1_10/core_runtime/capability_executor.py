@@ -64,6 +64,14 @@ from .rate_limit_store import PersistentRateLimitStore
 
 from typing import Any, Dict, List, Optional
 
+try:
+    from .audit_logger import get_audit_logger
+except ImportError:
+    def get_audit_logger():
+        from .audit_logger import get_audit_logger as _get_audit_logger
+
+        return _get_audit_logger()
+
 # レスポンスサイズ上限（1MB）
 MAX_RESPONSE_SIZE = 1 * 1024 * 1024
 
@@ -1031,7 +1039,6 @@ class CapabilityExecutor:
     def _audit(self, principal_id, permission_id, handler_id, response, args, request_id,
                trusted=None, grant_allowed=None, grant_reason=None, detail_reason=None, extra_details=None):
         try:
-            from .audit_logger import get_audit_logger
             audit = get_audit_logger()
             details = {"principal_id": principal_id, "permission_id": permission_id, "handler_id": handler_id,
                         "request_id": request_id, "latency_ms": response.latency_ms, "args_summary": _summarize_args(args)}
