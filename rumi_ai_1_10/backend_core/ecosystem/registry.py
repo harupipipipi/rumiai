@@ -134,6 +134,9 @@ class Registry:
         if not self.ecosystem_dir.exists():
             print(f"[Registry] エコシステムディレクトリが存在しません: {self.ecosystem_dir}")
             return {}
+
+        global _global_registry
+        _global_registry = self
         
         print(f"\n=== Registry: Packの読み込みを開始 ===")
         

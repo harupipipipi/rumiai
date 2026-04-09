@@ -32,11 +32,11 @@ _stub_facade = types.ModuleType("core_runtime.kernel_facade")
 _stub_facade.KernelFacade = MagicMock
 
 _sys.modules.setdefault("core_runtime", types.ModuleType("core_runtime"))
-_sys.modules["core_runtime.logging_utils"] = _stub_logging
-_sys.modules["core_runtime.profiling"] = _stub_profiling
-_sys.modules["core_runtime.metrics"] = _stub_metrics
-_sys.modules["core_runtime.paths"] = _stub_paths
-_sys.modules["core_runtime.kernel_facade"] = _stub_facade
+_sys.modules.setdefault("core_runtime.logging_utils", _stub_logging)
+_sys.modules.setdefault("core_runtime.profiling", _stub_profiling)
+_sys.modules.setdefault("core_runtime.metrics", _stub_metrics)
+_sys.modules.setdefault("core_runtime.paths", _stub_paths)
+_sys.modules.setdefault("core_runtime.kernel_facade", _stub_facade)
 
 from core_runtime.kernel_flow_execution import KernelFlowExecutionMixin
 

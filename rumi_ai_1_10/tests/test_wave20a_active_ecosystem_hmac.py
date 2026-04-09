@@ -29,7 +29,7 @@ sys.modules["core_runtime"] = _cr_stub
 # core_runtime.paths スタブ
 _paths_stub = types.ModuleType("core_runtime.paths")
 _paths_stub.BASE_DIR = _ROOT
-sys.modules["core_runtime.paths"] = _paths_stub
+sys.modules.setdefault("core_runtime.paths", _paths_stub)
 
 # core_runtime.hmac_key_manager は実モジュールをロード
 _hkm_spec = importlib.util.spec_from_file_location(
@@ -38,7 +38,7 @@ _hkm_spec = importlib.util.spec_from_file_location(
 )
 _hkm = importlib.util.module_from_spec(_hkm_spec)
 _hkm.__package__ = "core_runtime"
-sys.modules["core_runtime.hmac_key_manager"] = _hkm
+sys.modules.setdefault("core_runtime.hmac_key_manager", _hkm)
 _hkm_spec.loader.exec_module(_hkm)
 
 # backend_core パッケージスタブ

@@ -58,6 +58,7 @@ except ImportError:
     FunctionEntry = None
 
 # crypto_utils: compute_file_sha256 (Phase D: D0-3 依存解消)
+# def compute_file_sha256 is provided by core_runtime.crypto_utils and re-exported here.
 from .crypto_utils import compute_file_sha256
 from .rate_limit_store import PersistentRateLimitStore
 

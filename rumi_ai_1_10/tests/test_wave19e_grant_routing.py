@@ -59,7 +59,7 @@ _dummy_paths.get_pack_lib_dirs = lambda *a, **kw: []
 _dummy_paths.get_shared_flow_dir = lambda: Path(".")
 _dummy_paths.get_shared_modifier_dir = lambda: Path(".")
 _dummy_paths.check_pack_id_mismatch = lambda *a, **kw: None
-sys.modules["core_runtime.paths"] = _dummy_paths
+sys.modules.setdefault("core_runtime.paths", _dummy_paths)
 
 # ======================================================================
 # pack_api_server.py のソースを読み込む (静的検証用)

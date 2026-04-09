@@ -682,6 +682,39 @@ class FunctionRegistry:
             return candidates[:limit]
 
 
+def handler_to_manifest_adapter(
+    handler_json: Dict[str, Any],
+    handler_dir: str,
+    pack_id: str,
+    function_id: str,
+) -> Dict[str, Any]:
+    """
+    旧 handler.json 形式を FunctionRegistry.register() 互換 kwargs に変換する。
+
+    互換テスト向けの薄い adapter で、permission_id は vocab_aliases に写像する。
+    """
+    permission_id = handler_json.get("permission_id")
+    manifest = {
+        "description": handler_json.get("description", ""),
+        "entrypoint": handler_json.get("entrypoint", "handler.py"),
+        "risk": handler_json.get("risk"),
+        "input_schema": dict(handler_json.get("input_schema") or {}),
+        "output_schema": dict(handler_json.get("output_schema") or {}),
+        "grant_config": handler_json.get("grant_config_schema"),
+        "vocab_aliases": [permission_id] if permission_id else [],
+        "runtime": "python",
+        "host_execution": True,
+        "tags": list(handler_json.get("tags") or []),
+        "requires": list(handler_json.get("requires") or []),
+    }
+    return {
+        "pack_id": pack_id,
+        "function_id": function_id,
+        "manifest": manifest,
+        "function_dir": handler_dir,
+    }
+
+
 
 # =====================================================================
 # ManifestRegistry alias (設計決定 D-6)

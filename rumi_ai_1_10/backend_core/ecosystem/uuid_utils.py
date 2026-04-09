@@ -73,6 +73,30 @@ def generate_component_uuid(
     return uuid.uuid5(pack_uuid, name)
 
 
+def generate_addon_uuid(
+    pack_uuid: Union[uuid.UUID, str],
+    addon_id: str,
+) -> uuid.UUID:
+    """
+    Addon UUIDを生成
+
+    Args:
+        pack_uuid: 親PackのUUID
+        addon_id: アドオンID
+
+    Returns:
+        決定論的に生成されたUUID v5
+    """
+    if isinstance(pack_uuid, str):
+        pack_uuid = uuid.UUID(pack_uuid)
+
+    if not addon_id or not isinstance(addon_id, str):
+        raise ValueError("addon_id must be a non-empty string")
+
+    name = f"{ADDON_PREFIX}:{addon_id}"
+    return uuid.uuid5(pack_uuid, name)
+
+
 def validate_uuid(value: str) -> bool:
     """
     文字列が有効なUUIDかどうかを検証
