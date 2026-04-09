@@ -15,6 +15,7 @@ from .api_response import APIResponse
 from .flow_handlers import FlowHandlersMixin
 from .route_handlers import RouteHandlersMixin
 from .control_panel_handlers import ControlPanelHandlersMixin
+from .defaultspack_handlers import DefaultspackHandlersMixin
 from .oauth_handlers import OAuthHandlersMixin
 from .viewer_handlers import ViewerHandlersMixin
 from .desktop_handlers import DesktopHandlersMixin
@@ -54,6 +55,7 @@ __all__ = [
     "RouteHandlersMixin",
     "PackLifecycleHandlersMixin",
     "ControlPanelHandlersMixin",
+    "DefaultspackHandlersMixin",
     "OAuthHandlersMixin",
     "ViewerHandlersMixin",
     "DesktopHandlersMixin",

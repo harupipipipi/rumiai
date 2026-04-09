@@ -1,0 +1,84 @@
+{
+  "pack_id": "defaultspack",
+  "pack_identity": "rumi:ecosystem/defaultspack",
+  "version": "2.0.0",
+  "vocabulary": {
+    "types": []
+  },
+  "metadata": {
+    "name": "Rumi Defaultspack",
+    "description": "Function-first modular default pack. Provides setup-pack install, module state management, migration helpers, and the canonical defaultspack API surface.",
+    "author": "Rumi AI Team",
+    "license": "MIT"
+  },
+  "dependencies": {},
+  "components": {},
+  "pre_auth_routes": [
+    {
+      "method": "GET",
+      "path_prefix": "/api/defaultspack/"
+    },
+    {
+      "method": "POST",
+      "path_prefix": "/api/defaultspack/"
+    }
+  ],
+  "api_routes": [
+    {
+      "method": "GET",
+      "path": "/api/defaultspack/modules",
+      "handler": "_defaultspack_list_modules"
+    },
+    {
+      "method": "GET",
+      "path_pattern": "/api/defaultspack/modules/{id}",
+      "handler": "_defaultspack_get_module"
+    },
+    {
+      "method": "POST",
+      "path_pattern": "/api/defaultspack/modules/{id}/enable",
+      "handler": "_defaultspack_enable_module"
+    },
+    {
+      "method": "POST",
+      "path_pattern": "/api/defaultspack/modules/{id}/disable",
+      "handler": "_defaultspack_disable_module"
+    },
+    {
+      "method": "POST",
+      "path_pattern": "/api/defaultspack/modules/{id}/reload",
+      "handler": "_defaultspack_reload_module"
+    },
+    {
+      "method": "POST",
+      "path_pattern": "/api/defaultspack/modules/{id}/rollback",
+      "handler": "_defaultspack_rollback_module"
+    },
+    {
+      "method": "GET",
+      "path": "/api/defaultspack/setup/packs",
+      "handler": "_defaultspack_list_setup_packs"
+    },
+    {
+      "method": "POST",
+      "path": "/api/defaultspack/setup/packs/install",
+      "handler": "_defaultspack_install_setup_pack",
+      "pass_body": true
+    },
+    {
+      "method": "POST",
+      "path_pattern": "/api/defaultspack/setup/packs/{id}/grant-all-ok",
+      "handler": "_defaultspack_grant_all_ok"
+    },
+    {
+      "method": "POST",
+      "path_pattern": "/api/defaultspack/setup/packs/{id}/revoke-all-ok",
+      "handler": "_defaultspack_revoke_all_ok"
+    },
+    {
+      "method": "GET",
+      "path": "/api/defaultspack/migration/status",
+      "handler": "_defaultspack_get_migration_status"
+    }
+  ]
+}

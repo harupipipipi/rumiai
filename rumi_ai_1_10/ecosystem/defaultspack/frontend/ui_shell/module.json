@@ -1,0 +1,12 @@
+{
+  "module_id": "ui_shell",
+  "kind": "frontend",
+  "display_name": "UI Shell",
+  "description": "Primary UI shell extension surface for the defaultspack frontend.",
+  "dependencies": [
+    "frontend_loader"
+  ],
+  "default_state": "experimental",
+  "failure_threshold": 2,
+  "experimental": true
+}

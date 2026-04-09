@@ -1,0 +1,11 @@
+{
+  "module_id": "frontend_loader",
+  "kind": "backend",
+  "display_name": "Frontend Loader",
+  "description": "Backend-side loader and routing support for defaultspack frontend surfaces.",
+  "dependencies": [
+    "plugin"
+  ],
+  "default_state": "enabled",
+  "failure_threshold": 2
+}

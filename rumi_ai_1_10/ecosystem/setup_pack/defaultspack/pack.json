@@ -1,0 +1,9 @@
+{
+  "pack_id": "defaultspack",
+  "display_name": "Defaultspack v2",
+  "description": "Recommended modular default pack with canonical /api/defaultspack routes, function-first execution, and migration support.",
+  "target_pack_id": "defaultspack",
+  "recommended": true,
+  "risk_level": "low",
+  "supports_all_ok": true
+}

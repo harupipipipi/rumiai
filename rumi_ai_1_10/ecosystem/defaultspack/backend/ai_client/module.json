@@ -1,0 +1,11 @@
+{
+  "module_id": "ai_client",
+  "kind": "backend",
+  "display_name": "AI Client",
+  "description": "Provider adapters, routing, and model-facing request handling.",
+  "dependencies": [
+    "prompt"
+  ],
+  "default_state": "enabled",
+  "failure_threshold": 3
+}

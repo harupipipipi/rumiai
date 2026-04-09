@@ -1,0 +1,9 @@
+{
+  "module_id": "memory",
+  "kind": "backend",
+  "display_name": "Memory Core",
+  "description": "Conversation, project, user, and knowledge memory surfaces.",
+  "dependencies": [],
+  "default_state": "enabled",
+  "failure_threshold": 2
+}

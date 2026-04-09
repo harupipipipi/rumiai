@@ -137,7 +137,7 @@ class Registry:
         print(f"\n=== Registry: Packの読み込みを開始 ===")
         
         # ecosystem/* を走査（特殊ディレクトリは除外）
-        _excluded = {".git", "__pycache__", "node_modules", ".venv", "packs", "flows"}
+        _excluded = {".git", "__pycache__", "node_modules", ".venv", "packs", "flows", "setup_pack"}
         
         candidates = []
         # --- W22-A: core_pack ディレクトリを先頭に走査 ---

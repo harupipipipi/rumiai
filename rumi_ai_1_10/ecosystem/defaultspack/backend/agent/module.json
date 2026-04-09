@@ -1,0 +1,15 @@
+{
+  "module_id": "agent",
+  "kind": "backend",
+  "display_name": "Agent Orchestration",
+  "description": "Agent roles and orchestration entrypoints for the default experience.",
+  "dependencies": [
+    "tool",
+    "prompt",
+    "ai_client",
+    "plugin",
+    "memory"
+  ],
+  "default_state": "enabled",
+  "failure_threshold": 2
+}

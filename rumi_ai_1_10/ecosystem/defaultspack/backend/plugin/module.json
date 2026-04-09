@@ -1,0 +1,13 @@
+{
+  "module_id": "plugin",
+  "kind": "backend",
+  "display_name": "Plugin Bundle",
+  "description": "Plugin bundle management for tool, prompt, and ai_client assets.",
+  "dependencies": [
+    "tool",
+    "prompt",
+    "ai_client"
+  ],
+  "default_state": "enabled",
+  "failure_threshold": 3
+}

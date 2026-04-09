@@ -69,6 +69,7 @@ EXCLUDED_DIRS = frozenset({
     ".eggs",
     "packs",       # legacy root — 別走査するため除外
     "flows",       # local_pack 互換用 — pack扱いしない
+    "setup_pack",  # setup-pack metadata root — runtime packではない
 })
 
 
