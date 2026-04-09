@@ -23,7 +23,11 @@
   "pre_auth_routes": [
     {
       "method": "GET",
-      "path_prefix": "/api/setup/"
+      "path": "/api/setup/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/setup/oauth/start"
     },
     {
       "method": "GET",
@@ -31,7 +35,7 @@
     },
     {
       "method": "POST",
-      "path_prefix": "/api/setup/"
+      "path": "/api/setup/complete"
     }
   ],
   "api_routes": [

@@ -120,7 +120,7 @@ class SetupPackManager:
 
             audit = get_audit_logger()
             audit.log_system_event(
-                action=action,
+                event_type=action,
                 success=success,
                 details=details or {},
                 error=error,
@@ -142,12 +142,12 @@ class SetupPackManager:
 
             audit = get_audit_logger()
             audit.log_permission_event(
-                principal_id=principal_id,
-                permission_id=permission_id,
+                pack_id=principal_id,
+                permission_type=permission_id,
                 action=action,
                 success=success,
                 details=details or {},
-                error=error,
+                rejection_reason=error,
             )
         except Exception:
             logger.debug("Failed to audit setup_pack permission event", exc_info=True)

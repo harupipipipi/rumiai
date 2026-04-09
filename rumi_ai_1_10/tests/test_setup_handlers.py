@@ -41,6 +41,42 @@ class TestSetupHandlers(unittest.TestCase):
             any(route.get("path_pattern") == "/api/setup/packs/{id}/grant-all-ok" for route in routes)
         )
 
+    def test_mutation_routes_are_not_pre_auth(self):
+        import json
+        from core_runtime.pack_api_server import PackAPIHandler
+
+        setup_ecosystem_path = (
+            Path(__file__).resolve().parent.parent
+            / "core_runtime"
+            / "core_pack"
+            / "core_setup"
+            / "ecosystem.json"
+        )
+        defaultspack_ecosystem_path = (
+            Path(__file__).resolve().parent.parent
+            / "ecosystem"
+            / "defaultspack"
+            / "ecosystem.json"
+        )
+        setup_data = json.loads(setup_ecosystem_path.read_text(encoding="utf-8"))
+        defaultspack_data = json.loads(defaultspack_ecosystem_path.read_text(encoding="utf-8"))
+
+        class _PackInfo:
+            def __init__(self, ecosystem):
+                self.ecosystem = ecosystem
+
+        class _Registry:
+            packs = {
+                "core_setup": _PackInfo(setup_data),
+                "defaultspack": _PackInfo(defaultspack_data),
+            }
+
+        PackAPIHandler.load_pre_auth_routes(_Registry())
+        handler = PackAPIHandler.__new__(PackAPIHandler)
+        self.assertFalse(handler._is_pre_auth_route("POST", "/api/setup/packs/install"))
+        self.assertFalse(handler._is_pre_auth_route("POST", "/api/defaultspack/pack-requests/request-extension"))
+        self.assertTrue(handler._is_pre_auth_route("GET", "/api/setup/status"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -318,11 +318,10 @@ class PackModificationManager:
                 "error": f"Request is not applied: {request.status}",
                 "status_code": 409,
             }
-        if not request.backup_paths:
-            return {"error": "No backup available for rollback", "status_code": 400}
 
         backup_root_resolved = self.backup_root.resolve()
         restored = []
+        removed = []
         for pack_id, backup_path in request.backup_paths.items():
             source = Path(backup_path).resolve()
             try:
@@ -343,11 +342,24 @@ class PackModificationManager:
             shutil.copytree(str(source), str(dest), symlinks=False)
             restored.append(pack_id)
 
+        newly_created = [
+            pack_id
+            for pack_id in request.applied_pack_ids
+            if pack_id not in request.backup_paths
+        ]
+        for pack_id in newly_created:
+            dest = self.ecosystem_dir / pack_id
+            if dest.exists():
+                shutil.rmtree(dest)
+            removed.append(pack_id)
+
         try:
             approval_manager = get_approval_manager()
             approval_manager.scan_packs()
             for pack_id in restored:
                 approval_manager.approve(pack_id)
+            for pack_id in removed:
+                approval_manager.remove_approval(pack_id)
         except Exception:
             logger.debug("Failed to re-approve rolled back pack request", exc_info=True)
 
@@ -362,6 +374,7 @@ class PackModificationManager:
             {
                 "request_id": request.request_id,
                 "restored_pack_ids": restored,
+                "removed_pack_ids": removed,
                 "reviewer": reviewer,
             },
         )

@@ -13,16 +13,6 @@
   },
   "dependencies": {},
   "components": {},
-  "pre_auth_routes": [
-    {
-      "method": "GET",
-      "path_prefix": "/api/defaultspack/"
-    },
-    {
-      "method": "POST",
-      "path_prefix": "/api/defaultspack/"
-    }
-  ],
   "api_routes": [
     {
       "method": "GET",

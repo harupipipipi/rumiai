@@ -33,6 +33,28 @@ class _FakeGrantManager:
         return True
 
 
+class _FakeAuditLogger:
+    def __init__(self):
+        self.system = []
+        self.permission = []
+
+    def log_system_event(self, event_type, success, details=None, error=None):
+        self.system.append((event_type, success, details, error))
+
+    def log_permission_event(
+        self,
+        pack_id,
+        permission_type,
+        action,
+        success,
+        details=None,
+        rejection_reason=None,
+    ):
+        self.permission.append(
+            (pack_id, permission_type, action, success, details, rejection_reason)
+        )
+
+
 class TestSetupPackManager(unittest.TestCase):
     def _write_pack(self, root: Path, pack_id: str, target_pack_id: str, supports_all_ok: bool) -> None:
         pack_dir = root / pack_id
@@ -104,6 +126,27 @@ class TestSetupPackManager(unittest.TestCase):
             self.assertEqual(denied["status_code"], 403)
             self.assertTrue(revoked["revoked"])
             self.assertGreater(revoked["revoked_count"], 0)
+
+    def test_audit_logging_uses_supported_signatures(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "setup_pack"
+            self._write_pack(root, "defaultspack", "defaultspack", True)
+            manager = SetupPackManager(root=root, selection_file=Path(tmp) / "selection.json")
+            audit = _FakeAuditLogger()
+            fake = _FakeGrantManager()
+
+            with patch(
+                "core_runtime.audit_logger.get_audit_logger",
+                return_value=audit,
+            ), patch(
+                "core_runtime.capability_grant_manager.get_capability_grant_manager",
+                return_value=fake,
+            ):
+                manager.grant_all_ok("defaultspack")
+
+            self.assertEqual(len(audit.permission), 1)
+            self.assertEqual(audit.permission[0][0], "defaultspack")
+            self.assertEqual(audit.permission[0][1], "*")
 
 
 if __name__ == "__main__":
