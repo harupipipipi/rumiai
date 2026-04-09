@@ -5,14 +5,14 @@ import sys
 def run(context):
     diagnostics = context.get("diagnostics")
     
-    if sys.version_info < (3, 9):
+    if sys.version_info < (3, 10):
         if diagnostics:
             diagnostics.record_step(
                 phase="bootstrap",
                 step_id="env_check.python_version",
                 handler="bootstrap:env_check",
                 status="failed",
-                error={"type": "VersionError", "message": f"Python 3.9+ required, got {sys.version}"}
+                error={"type": "VersionError", "message": f"Python 3.10+ required, got {sys.version}"}
             )
         return
     

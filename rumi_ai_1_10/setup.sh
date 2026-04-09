@@ -81,12 +81,12 @@ echo "    $($PYTHON_CMD --version 2>&1)"
 echo ""
 
 # ========================================
-# Python バージョン確認 (3.9+)
+# Python バージョン確認 (3.10+)
 # ========================================
-PY_VERSION_OK=$($PYTHON_CMD -c "import sys; print(1 if sys.version_info >= (3, 9) else 0)" 2>/dev/null)
+PY_VERSION_OK=$($PYTHON_CMD -c "import sys; print(1 if sys.version_info >= (3, 10) else 0)" 2>/dev/null)
 
 if [ "$PY_VERSION_OK" != "1" ]; then
-    echo "  ✗ Python 3.9 以上が必要です"
+    echo "  ✗ Python 3.10 以上が必要です"
     echo ""
     echo "  インストールガイドを開きます..."
     

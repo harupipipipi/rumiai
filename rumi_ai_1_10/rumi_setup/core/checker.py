@@ -100,13 +100,13 @@ class EnvironmentChecker:
             version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
             path = sys.executable
             
-            if sys.version_info < (3, 9):
+            if sys.version_info < (3, 10):
                 return CheckResult(
                     name="Python",
                     available=False,
                     version=version,
                     path=path,
-                    message="Python 3.9 以上が必要です"
+                    message="Python 3.10 以上が必要です"
                 )
             
             return CheckResult(

@@ -263,7 +263,7 @@ project_root/
 
 ### 必要条件
 
-- Python 3.9+
+- Python 3.10+
 - Docker（本番環境で必須）
 - Git
 
