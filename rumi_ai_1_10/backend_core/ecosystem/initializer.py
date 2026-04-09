@@ -95,6 +95,7 @@ class EcosystemInitializer:
         """必要なディレクトリを作成"""
         directories = [
             self.user_data_dir,
+            self.user_data_dir / "chats",
             self.user_data_dir / "settings",
             self.user_data_dir / "cache",
             self.user_data_dir / "shared",
@@ -121,8 +122,10 @@ class EcosystemInitializer:
                     # 公式は汎用マウントのみ定義
                     # 具体的なマウントはコンポーネントが自己登録する
                     "data.user": "./user_data",
+                    "data.chats": "./user_data/chats",
                     "data.settings": "./user_data/settings",
                     "data.cache": "./user_data/cache",
+                    "data.shared": "./user_data/shared",
                 }
             }
             

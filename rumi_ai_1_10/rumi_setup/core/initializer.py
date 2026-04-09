@@ -98,8 +98,10 @@ class Initializer:
         # 公式は汎用ディレクトリのみ定義
         dirs = [
             "user_data",
+            "user_data/chats",
             "user_data/settings",
             "user_data/cache",
+            "user_data/shared",
         ]
         
         for dir_path in dirs:
@@ -124,7 +126,10 @@ class Initializer:
                 # 公式は汎用マウントのみ定義
                 # 具体的なマウントはコンポーネントが自己登録する
                 "data.user": "./user_data",
+                "data.chats": "./user_data/chats",
                 "data.cache": "./user_data/cache",
+                "data.settings": "./user_data/settings",
+                "data.shared": "./user_data/shared",
             }
         }
         

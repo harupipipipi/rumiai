@@ -117,6 +117,7 @@ class Registry:
             ecosystem_dir: エコシステムディレクトリのパス
         """
         self.ecosystem_dir = Path(ecosystem_dir)
+        self._include_core_packs = str(self.ecosystem_dir.resolve()) == str(Path(_ECOSYSTEM_DIR).resolve())
         self.packs: Dict[str, PackInfo] = {}
         self._component_index: Dict[str, ComponentInfo] = {}  # uuid -> ComponentInfo
         self._type_index: Dict[str, List[ComponentInfo]] = {}  # type -> [ComponentInfo]
@@ -142,7 +143,7 @@ class Registry:
         candidates = []
         # --- W22-A: core_pack ディレクトリを先頭に走査 ---
         _core_pack_dir = Path(_CORE_PACK_DIR_PATHS)
-        if _core_pack_dir.is_dir():
+        if self._include_core_packs and _core_pack_dir.is_dir():
             try:
                 for d in sorted(_core_pack_dir.iterdir()):
                     if d.is_dir() and d.name not in _excluded and not d.name.startswith("."):
