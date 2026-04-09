@@ -41,16 +41,19 @@ class DefaultspackMigrationManager:
         if self.user_json.is_file():
             return {"migrated": False, "reason": "user_json_already_exists"}
 
-        rows = list(csv.reader(self.legacy_user_csv.read_text(encoding="utf-8").splitlines()))
+        text = self.legacy_user_csv.read_text(encoding="utf-8").strip()
+        if not text:
+            return {"migrated": False, "reason": "user_csv_empty"}
+
+        rows = list(csv.reader(text.splitlines()))
         result: Dict[str, Any] = {}
-        if rows and len(rows[0]) >= 2 and rows[0][0] != "key":
-            for row in rows:
-                if len(row) >= 2:
-                    result[row[0]] = row[1]
-        else:
-            for row in rows[1:]:
-                if len(row) >= 2:
-                    result[row[0]] = row[1]
+        start_idx = 0
+        if rows and len(rows[0]) >= 2 and rows[0][0].strip().lower() == "key":
+            start_idx = 1
+
+        for row in rows[start_idx:]:
+            if len(row) >= 2 and row[0].strip():
+                result[row[0].strip()] = row[1]
 
         self.user_json.parent.mkdir(parents=True, exist_ok=True)
         self.user_json.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

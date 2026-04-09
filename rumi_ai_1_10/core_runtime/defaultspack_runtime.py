@@ -12,6 +12,8 @@ import importlib.util
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from .paths import BASE_DIR, is_path_within
+
 
 def invoke_defaultspack_function(
     qualified_name: str,
@@ -31,6 +33,8 @@ def invoke_defaultspack_function(
     module_path = Path(entry.function_dir) / module_rel
     if not module_path.is_file():
         raise FileNotFoundError(f"Entrypoint file not found: {module_path}")
+    if not is_path_within(module_path, BASE_DIR):
+        raise PermissionError(f"Entrypoint escapes project boundary: {module_path}")
 
     spec = importlib.util.spec_from_file_location(
         f"defaultspack_runtime_{qualified_name.replace(':', '_')}",

@@ -295,10 +295,10 @@ class TestActiveEcosystemConfig:
     def test_from_dict_defaults(self):
         """辞書からの復元（デフォルト値）"""
         data = {}
-        
+
         config = ActiveEcosystemConfig.from_dict(data)
-        
-        assert config.active_pack_identity == "github:haru/default-pack"
+
+        assert config.active_pack_identity is None
         assert config.overrides == {}
         assert config.disabled_components == []
 

@@ -64,7 +64,7 @@ class TestDefaultspackRegistryIntegration(unittest.TestCase):
         self.assertEqual(component.pack_id, "defaultspack")
         self.assertEqual(component.id, "chat")
 
-    def test_defaultspack_is_primary_even_without_active_identity(self):
+    def test_defaultspack_is_not_forced_without_active_identity(self):
         function_registry = FunctionRegistry()
         with patch(
             "core_runtime.di_container.get_container",
@@ -77,7 +77,7 @@ class TestDefaultspackRegistryIntegration(unittest.TestCase):
         component = registry.resolve_component_for_type("agent", active)
 
         self.assertIsNotNone(component)
-        self.assertEqual(component.pack_id, "defaultspack")
+        self.assertEqual(component.pack_id, "defaults")
         self.assertEqual(component.id, "agent")
 
     def test_defaultspack_pack_routes_are_cloned_to_v2_prefix(self):

@@ -40,7 +40,7 @@ class ActiveEcosystemConfig:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'ActiveEcosystemConfig':
         return cls(
-            active_pack_identity=data.get('active_pack_identity', 'github:haru/default-pack'),
+            active_pack_identity=data.get('active_pack_identity'),
             overrides=data.get('overrides', {}),
             disabled_components=data.get('disabled_components', []),
             disabled_addons=data.get('disabled_addons', []),
@@ -72,7 +72,6 @@ class ActiveEcosystemManager:
             config_path: 設定ファイルのパス（省略時はuser_data/active_ecosystem.json）
             secret_key: HMAC署名鍵（省略時はファイルから読み込み）
         """
-        self._explicit_config_path = bool(config_path)
         if config_path:
             self.config_path = Path(config_path)
         else:
@@ -103,8 +102,6 @@ class ActiveEcosystemManager:
                     stored_sig = data.pop("_hmac_signature", None)
                     if not stored_sig:
                         require_hmac = os.environ.get("RUMI_REQUIRE_HMAC", _REQUIRE_HMAC_DEFAULT) == "1"
-                        if self._explicit_config_path:
-                            require_hmac = False
                         if require_hmac:
                             logger.warning(
                                 "Unsigned active_ecosystem config detected at %s, "

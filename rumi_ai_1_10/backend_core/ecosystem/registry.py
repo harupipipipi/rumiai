@@ -704,8 +704,6 @@ class Registry:
                         preferred_pack_id = active_pack.pack_id
                 except Exception:
                     preferred_pack_id = None
-        if preferred_pack_id is None and "defaultspack" in self.packs:
-            preferred_pack_id = "defaultspack"
 
         ordered_components = list(components)
         if preferred_pack_id:
