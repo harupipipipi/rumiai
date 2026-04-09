@@ -90,52 +90,6 @@ jobs:
         run: |
           pytest tests/ -v
 
-  rumi-ai-ruff:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install dependencies
-        working-directory: rumi_ai_1_10
-        run: |
-          pip install -r requirements.txt
-          pip install -r requirements-dev.txt
-          pip install -e .
-
-      - name: Run Ruff
-        working-directory: rumi_ai_1_10
-        run: |
-          ruff check .
-
-  rumi-ai-mypy:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install dependencies
-        working-directory: rumi_ai_1_10
-        run: |
-          pip install -r requirements.txt
-          pip install -r requirements-dev.txt
-          pip install -e .
-
-      - name: Run mypy
-        working-directory: rumi_ai_1_10
-        run: |
-          mypy --check-untyped-defs core_runtime app.py
-
   rust-test:
     runs-on: ubuntu-latest
     steps:

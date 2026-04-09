@@ -129,6 +129,7 @@ class KernelCore:
             )
         except Exception as e:
             self._uds_proxy_init_failed = True
+            _logger.error("UDS proxy auto init failed", exc_info=e)
             self.diagnostics.record_step(
                 phase="startup",
                 step_id="uds_proxy.init.auto",
@@ -154,11 +155,19 @@ class KernelCore:
             get_capability_executor().set_kernel(self)
         except Exception as e:
             self._capability_proxy_init_failed = True
+            _logger.error("Capability proxy auto init failed", exc_info=e)
             self.diagnostics.record_step(
                 phase="startup", step_id="capability_proxy.init.auto",
                 handler="kernel:capability_proxy.init", status="failed", error=e,
             )
         return self._capability_proxy
+
+    def reset_proxy_init(self) -> None:
+        """SV-3: proxy 遅延初期化の circuit-breaker と cached instance をリセットする。"""
+        self._capability_proxy = None
+        self._uds_proxy_manager = None
+        self._capability_proxy_init_failed = False
+        self._uds_proxy_init_failed = False
 
     # ------------------------------------------------------------------
     # Handler 解決

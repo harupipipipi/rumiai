@@ -228,7 +228,6 @@ def _sync_alias_module(alias_name: str, target_name: str) -> None:
 
 _RESTORE_REAL_MODULES = (
     "core_runtime.paths",
-    "core_runtime.di_container",
     "backend_core.ecosystem.mounts",
     "backend_core.ecosystem.registry",
     "backend_core.ecosystem.compat",
@@ -243,7 +242,6 @@ _BIND_ONLY_MODULES = (
 )
 
 _ALIAS_MODULES = (
-    ("rumi_ai_1_10.core_runtime.di_container", "core_runtime.di_container"),
     ("rumi_ai_1_10.core_runtime.health", "core_runtime.health"),
     ("rumi_ai_1_10.core_runtime.metrics", "core_runtime.metrics"),
     ("rumi_ai_1_10.core_runtime.paths", "core_runtime.paths"),
@@ -358,6 +356,11 @@ def _reset_singletons(request):
     try:
         from core_runtime.di_container import reset_container
         reset_container()
+    except Exception:
+        pass
+    try:
+        from rumi_ai_1_10.core_runtime.di_container import reset_container as _reset_pkg_container
+        _reset_pkg_container()
     except Exception:
         pass
 

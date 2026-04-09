@@ -112,6 +112,7 @@ class TestRegistryLoadHandler:
         mixin = _make_handler_mixin()
         mock_reg = MagicMock(name="registry")
         mock_reg.load_all_packs = MagicMock()
+        original_import = __import__
 
         mock_regmod = MagicMock()
         mock_Registry = MagicMock(return_value=mock_reg)
@@ -124,7 +125,7 @@ class TestRegistryLoadHandler:
             mock_regmod.Registry = mock_Registry
             # Patch the import inside the handler
             with patch("builtins.__import__", side_effect=lambda name, *a, **kw: (
-                mock_regmod if name == "backend_core.ecosystem.registry" else __import__(name, *a, **kw)
+                mock_regmod if name == "backend_core.ecosystem.registry" else original_import(name, *a, **kw)
             )):
                 # Direct approach: mock the import machinery
                 import importlib

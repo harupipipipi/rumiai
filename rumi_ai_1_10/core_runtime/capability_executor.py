@@ -28,6 +28,7 @@ import threading
 import shutil
 import uuid
 import logging
+import types
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -256,6 +257,7 @@ class CapabilityExecutor:
         self._initialized = False
         self._trust_store = None
         self._grant_manager = None
+        self._handler_registry = None  # backward-compat for legacy tests/callers
         self._rate_limit_store = PersistentRateLimitStore()
         self._secret_get_rate_limit = int(
             os.environ.get("RUMI_SECRET_GET_RATE_LIMIT",
@@ -371,6 +373,19 @@ class CapabilityExecutor:
                         request.get("args", {}), request.get("request_id", ""))
             return resp
 
+        if permission_id == SECRET_GET_PERMISSION_ID and not self._check_rate_limit(principal_id):
+            resp = CapabilityResponse(
+                success=False,
+                error="Rate limited",
+                error_type="rate_limited",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+            self._audit(
+                principal_id, permission_id, None, resp, request.get("args", {}), request.get("request_id", ""),
+                detail_reason=f"Rate limit exceeded ({self._secret_get_rate_limit}/min)",
+            )
+            return resp
+
         # FunctionRegistry で解決
         entry = self._resolve_entry(permission_id)
         if entry is not None:
@@ -396,15 +411,66 @@ class CapabilityExecutor:
     # ------------------------------------------------------------------
 
     def _resolve_entry(self, permission_id: str):
-        """FunctionRegistry の resolve_by_alias() で FunctionEntry を検索する。"""
+        """FunctionRegistry を優先し、旧 handler_registry にも後方互換フォールバックする。"""
         fr = self._function_registry
         if fr is None:
-            return None
+            registry = getattr(self, "_handler_registry", None)
+            if registry is None:
+                return None
+            try:
+                candidate = registry.get_by_permission_id(permission_id)
+                return self._coerce_legacy_entry(candidate, permission_id)
+            except Exception:
+                logger.debug("Legacy handler registry lookup failed for '%s'", permission_id, exc_info=True)
+                return None
         try:
-            return fr.resolve_by_alias(permission_id)
+            entry = fr.resolve_by_alias(permission_id)
+            if entry is not None:
+                return entry
         except Exception:
             logger.debug("FunctionRegistry lookup failed for '%s'", permission_id, exc_info=True)
+        registry = getattr(self, "_handler_registry", None)
+        if registry is not None:
+            try:
+                candidate = registry.get_by_permission_id(permission_id)
+                return self._coerce_legacy_entry(candidate, permission_id)
+            except Exception:
+                logger.debug("Legacy handler registry fallback failed for '%s'", permission_id, exc_info=True)
+        return None
+
+    def _coerce_legacy_entry(self, candidate, permission_id: str):
+        """旧 handler registry の定義を FunctionEntry 互換の最小 shape に寄せる。"""
+        if candidate is None:
             return None
+        handler_id = getattr(candidate, "handler_id", None)
+        entrypoint = getattr(candidate, "entrypoint", None)
+        if not isinstance(handler_id, str) or not isinstance(getattr(candidate, "permission_id", None), str):
+            return None
+        if entrypoint is not None and not isinstance(entrypoint, str):
+            return None
+        handler_dir = getattr(candidate, "handler_dir", None) or Path(".")
+        handler_py_path = getattr(candidate, "handler_py_path", None)
+        is_builtin = bool(getattr(candidate, "is_builtin", False))
+        pack_id = getattr(candidate, "pack_id", None)
+        if not pack_id:
+            pack_id = f"{_CORE_PACK_ID_PREFIX}legacy" if is_builtin else "legacy_pack"
+        main_py_path = getattr(candidate, "main_py_path", None) or handler_py_path
+        grant_config = getattr(candidate, "grant_config", {})
+        qualified_name = getattr(candidate, "qualified_name", None) or handler_id
+        calling_convention = getattr(candidate, "calling_convention", None)
+        function_dir = getattr(candidate, "function_dir", None) or handler_dir
+        vocab_aliases = getattr(candidate, "vocab_aliases", None) or [permission_id]
+        return types.SimpleNamespace(
+            qualified_name=qualified_name,
+            pack_id=pack_id,
+            main_py_path=main_py_path,
+            grant_config=grant_config,
+            calling_convention=calling_convention,
+            entrypoint=entrypoint,
+            function_dir=function_dir,
+            is_builtin=is_builtin,
+            vocab_aliases=vocab_aliases,
+        )
 
     # ------------------------------------------------------------------
     # _unified_execute

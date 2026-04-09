@@ -17,6 +17,7 @@ Mixin方式でKernelクラスに合成される。
 from __future__ import annotations
 
 import json
+import importlib
 import subprocess
 from pathlib import Path
 from typing import Any, Dict
@@ -147,8 +148,8 @@ class KernelSystemHandlersMixin:
     def _h_registry_load(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
         ecosystem_dir = str(args.get("ecosystem_dir", "ecosystem"))
         try:
-            import backend_core.ecosystem.registry as regmod
-            from backend_core.ecosystem.registry import Registry
+            regmod = importlib.import_module("backend_core.ecosystem.registry")
+            Registry = getattr(regmod, "Registry")
             reg = Registry(ecosystem_dir=ecosystem_dir)
             reg.load_all_packs()
             regmod._global_registry = reg
