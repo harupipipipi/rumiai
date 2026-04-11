@@ -1,0 +1,9 @@
+{
+  "module_id": "setting",
+  "kind": "frontend",
+  "display_name": "Settings Panel",
+  "description": "Settings with horizontal tabs, ESC close, injection points, commit-style history.",
+  "dependencies": [],
+  "default_state": "enabled",
+  "failure_threshold": 5
+}

@@ -1,0 +1,9 @@
+{
+  "module_id": "ai_icon",
+  "kind": "frontend",
+  "display_name": "AI Icon",
+  "description": "AI avatar/icon display in chat.",
+  "dependencies": [],
+  "default_state": "enabled",
+  "failure_threshold": 5
+}

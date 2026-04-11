@@ -1,0 +1,9 @@
+{
+  "module_id": "supporter",
+  "kind": "backend",
+  "display_name": "Supporter",
+  "description": "Support bundle metadata for plugin-like supporter packs.",
+  "dependencies": [],
+  "default_state": "enabled",
+  "failure_threshold": 2
+}

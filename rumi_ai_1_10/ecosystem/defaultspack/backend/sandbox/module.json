@@ -1,0 +1,9 @@
+{
+  "module_id": "sandbox",
+  "kind": "backend",
+  "display_name": "GUI Sandbox",
+  "description": "Linux GUI sandbox execution helpers.",
+  "dependencies": [],
+  "default_state": "enabled",
+  "failure_threshold": 2
+}

@@ -23,6 +23,7 @@ if _pack_root not in sys.path:
     sys.path.insert(0, _pack_root)
 
 from blocks._common import ok, error, timestamp, gen_id
+from bridge.block_adapter import invoke_block
 from transport.cli_formatter import (
     format_markdown,
     format_json,
@@ -100,29 +101,26 @@ class DirectBackend:
         ctx["ts"] = timestamp()
         return ctx
 
+    def _call_block(self, module_name, params):
+        return invoke_block(module_name, dict(params or {}), self._ctx())
+
     def create_conversation(self, params):
-        from blocks.chat.create_conversation import run
-        return run(params, self._ctx())
+        return self._call_block("blocks.chat.create_conversation", params)
 
     def list_conversations(self, params):
-        from blocks.chat.list_conversations import run
-        return run(params, self._ctx())
+        return self._call_block("blocks.chat.list_conversations", params)
 
     def get_conversation(self, params):
-        from blocks.chat.get_conversation import run
-        return run(params, self._ctx())
+        return self._call_block("blocks.chat.get_conversation", params)
 
     def update_conversation(self, params):
-        from blocks.chat.update_conversation import run
-        return run(params, self._ctx())
+        return self._call_block("blocks.chat.update_conversation", params)
 
     def delete_conversation(self, params):
-        from blocks.chat.delete_conversation import run
-        return run(params, self._ctx())
+        return self._call_block("blocks.chat.delete_conversation", params)
 
     def send_message(self, params):
-        from blocks.chat.send import run
-        return run(params, self._ctx())
+        return self._call_block("blocks.chat.send", params)
 
     def send_message_stream(self, conversation_id, message_content, model):
         """Send a message and stream the AI response chunk by chunk.
@@ -203,8 +201,7 @@ class DirectBackend:
         yield {"type": "stream_end", "message": assistant_msg}
 
     def list_models(self, params):
-        from blocks.ai.models import run
-        return run(params, self._ctx())
+        return self._call_block("blocks.ai.models", params)
 
     def call(self, action, params):
         """Generic dispatcher."""

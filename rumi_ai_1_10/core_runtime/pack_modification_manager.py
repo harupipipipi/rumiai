@@ -45,6 +45,8 @@ class PackModificationRequest:
     decision_notes: str = ""
     applied_pack_ids: List[str] = field(default_factory=list)
     backup_paths: Dict[str, str] = field(default_factory=dict)
+    selection_required: bool = False
+    selection_candidates: List[Dict[str, Any]] = field(default_factory=list)
     applied_at: Optional[str] = None
     reviewed_at: Optional[str] = None
     rejected_at: Optional[str] = None
@@ -120,6 +122,65 @@ class PackModificationManager:
         except Exception:
             logger.debug("Failed to audit pack modification event", exc_info=True)
 
+    @staticmethod
+    def _is_active_request(request: PackModificationRequest) -> bool:
+        return request.status in {"pending", "applied"}
+
+    def _evaluate_request_policy(
+        self,
+        *,
+        target_pack_id: str,
+        slot: str,
+        fullscreen: bool,
+        exclusive: bool,
+    ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        conflicts: List[Dict[str, Any]] = []
+        selection_candidates: List[Dict[str, Any]] = []
+        normalized_slot = slot or "default"
+
+        for existing in self._load_all():
+            if not self._is_active_request(existing):
+                continue
+
+            same_slot = existing.slot == normalized_slot
+            fullscreen_conflict = (
+                fullscreen
+                or existing.fullscreen
+                or (normalized_slot == "fullscreen" and same_slot)
+            )
+            if fullscreen_conflict:
+                conflicts.append({
+                    "request_id": existing.request_id,
+                    "target_pack_id": existing.target_pack_id,
+                    "slot": existing.slot,
+                    "status": existing.status,
+                    "reason": "fullscreen_exclusive",
+                })
+                continue
+
+            if not same_slot:
+                continue
+
+            if exclusive or existing.exclusive:
+                conflicts.append({
+                    "request_id": existing.request_id,
+                    "target_pack_id": existing.target_pack_id,
+                    "slot": existing.slot,
+                    "status": existing.status,
+                    "reason": "slot_exclusive",
+                })
+                continue
+
+            if existing.target_pack_id != target_pack_id:
+                selection_candidates.append({
+                    "request_id": existing.request_id,
+                    "target_pack_id": existing.target_pack_id,
+                    "slot": existing.slot,
+                    "status": existing.status,
+                })
+
+        return conflicts, selection_candidates
+
     def create_request(
         self,
         mode: str,
@@ -160,6 +221,36 @@ class PackModificationManager:
             str(item) for item in proposal_info.get("changed_paths", [])
             if isinstance(item, str)
         ]
+        normalized_slot = slot or "default"
+        normalized_fullscreen = bool(fullscreen or normalized_slot == "fullscreen")
+        normalized_exclusive = bool(exclusive or normalized_fullscreen)
+        conflicts, selection_candidates = self._evaluate_request_policy(
+            target_pack_id=resolved_target_pack,
+            slot=normalized_slot,
+            fullscreen=normalized_fullscreen,
+            exclusive=normalized_exclusive,
+        )
+        if conflicts:
+            self._audit(
+                "pack_modification_request_conflict",
+                False,
+                {
+                    "mode": mode,
+                    "staging_id": staging_id,
+                    "target_pack_id": resolved_target_pack,
+                    "slot": normalized_slot,
+                    "fullscreen": normalized_fullscreen,
+                    "exclusive": normalized_exclusive,
+                    "conflicts": conflicts,
+                    "error": "request_conflict",
+                },
+            )
+            return {
+                "error": "pack modification request conflicts with active request(s)",
+                "status_code": 409,
+                "conflicts": conflicts,
+            }
+
         request_id = f"{mode[:3]}_{staging_id}"
         request = PackModificationRequest(
             request_id=request_id,
@@ -172,9 +263,11 @@ class PackModificationManager:
             notes=notes,
             changed_paths=changed_paths,
             detected_pack_ids=detected_pack_ids,
-            slot=slot or "default",
-            fullscreen=bool(fullscreen),
-            exclusive=bool(exclusive or fullscreen),
+            slot=normalized_slot,
+            fullscreen=normalized_fullscreen,
+            exclusive=normalized_exclusive,
+            selection_required=bool(selection_candidates),
+            selection_candidates=selection_candidates,
         )
         self._write_request(request)
         self._audit(

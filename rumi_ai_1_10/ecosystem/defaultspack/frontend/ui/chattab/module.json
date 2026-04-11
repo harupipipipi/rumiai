@@ -1,0 +1,9 @@
+{
+  "module_id": "chattab",
+  "kind": "frontend",
+  "display_name": "Chat Tab",
+  "description": "Browser-like chat tabs with docking, split panes.",
+  "dependencies": [],
+  "default_state": "enabled",
+  "failure_threshold": 5
+}

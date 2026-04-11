@@ -1,0 +1,1 @@
+"""Task pane frontend module."""

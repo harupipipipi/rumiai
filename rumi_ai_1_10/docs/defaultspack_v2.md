@@ -8,6 +8,8 @@
 - Setup-pack discovery comes from `ecosystem/setup_pack/*/pack.json`.
 - Module state is cataloged and persisted by `core_runtime/defaultspack_manager.py`.
 - Defaultspack operations are executed through `functions/` instead of direct block imports.
+- Pack modification requests now enforce slot/fullscreen conflict rules before approval.
+- Legacy CLI/HTTP fallback transports dispatch through `bridge/block_adapter.py` instead of importing block handlers directly.
 
 ## Module model
 
@@ -54,3 +56,9 @@ Pack changes can be staged first, then submitted as either:
 - `forced_patch`
 
 Both produce an approval-backed request record before any apply occurs.
+
+Conflict policy:
+
+- fullscreen requests are exclusive across active pending/applied requests
+- exclusive requests cannot share the same slot
+- non-exclusive same-slot frontend requests are preserved, but flagged for explicit active selection

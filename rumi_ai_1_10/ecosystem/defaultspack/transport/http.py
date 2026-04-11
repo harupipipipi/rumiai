@@ -10,6 +10,8 @@ import threading
 import http.server
 import importlib
 
+from bridge.block_adapter import invoke_block
+
 
 class DefaultsHttpServer:
     def __init__(self, facade):
@@ -175,242 +177,267 @@ class DefaultsHttpServer:
             "inputs": {},
         }
 
+    def _invoke_fallback_block(self, module_name, request_data, path_params, inject=None):
+        payload = dict(request_data or {})
+        for source_key, dest_key in (inject or {}).items():
+            payload[dest_key] = path_params.get(source_key, "")
+        context = self._build_context()
+        return invoke_block(module_name, payload, context)
+
     # ---- Chat Handlers (fallback) ----
 
     def _handle_chat_send(self, request_data, path_params):
-        from blocks.chat.send import run as handler_run
-        context = self._build_context()
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block("blocks.chat.send", request_data, path_params)
 
     def _handle_chat_create(self, request_data, path_params):
-        from blocks.chat.create_conversation import run as handler_run
-        context = self._build_context()
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block("blocks.chat.create_conversation", request_data, path_params)
 
     def _handle_chat_list(self, request_data, path_params):
-        from blocks.chat.list_conversations import run as handler_run
-        context = self._build_context()
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block("blocks.chat.list_conversations", request_data, path_params)
 
     def _handle_chat_get(self, request_data, path_params):
-        from blocks.chat.get_conversation import run as handler_run
-        context = self._build_context()
-        request_data["conversation_id"] = path_params.get("id", "")
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block(
+            "blocks.chat.get_conversation",
+            request_data,
+            path_params,
+            {"id": "conversation_id"},
+        )
 
     def _handle_chat_update(self, request_data, path_params):
-        from blocks.chat.update_conversation import run as handler_run
-        context = self._build_context()
-        request_data["conversation_id"] = path_params.get("id", "")
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block(
+            "blocks.chat.update_conversation",
+            request_data,
+            path_params,
+            {"id": "conversation_id"},
+        )
 
     def _handle_chat_delete(self, request_data, path_params):
-        from blocks.chat.delete_conversation import run as handler_run
-        context = self._build_context()
-        request_data["conversation_id"] = path_params.get("id", "")
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block(
+            "blocks.chat.delete_conversation",
+            request_data,
+            path_params,
+            {"id": "conversation_id"},
+        )
 
     def _handle_chat_send_message(self, request_data, path_params):
-        from blocks.chat.send import run as handler_run
-        context = self._build_context()
-        request_data["conversation_id"] = path_params.get("id", "")
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block(
+            "blocks.chat.send",
+            request_data,
+            path_params,
+            {"id": "conversation_id"},
+        )
 
     def _handle_chat_stream(self, request_data, path_params):
-        from blocks.chat.stream import run as handler_run
-        context = self._build_context()
-        request_data["conversation_id"] = path_params.get("id", "")
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block(
+            "blocks.chat.stream",
+            request_data,
+            path_params,
+            {"id": "conversation_id"},
+        )
 
     def _handle_chat_export(self, request_data, path_params):
-        from blocks.chat.export_conversation import run as handler_run
-        context = self._build_context()
-        request_data["conversation_id"] = path_params.get("id", "")
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block(
+            "blocks.chat.export_conversation",
+            request_data,
+            path_params,
+            {"id": "conversation_id"},
+        )
 
     def _handle_chat_summarize(self, request_data, path_params):
-        from blocks.chat.summarize_and_trim import run as handler_run
-        context = self._build_context()
-        request_data["conversation_id"] = path_params.get("id", "")
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block(
+            "blocks.chat.summarize_and_trim",
+            request_data,
+            path_params,
+            {"id": "conversation_id"},
+        )
 
     def _handle_chat_auto_trim(self, request_data, path_params):
-        from blocks.chat.auto_trim import run as handler_run
-        context = self._build_context()
-        request_data["conversation_id"] = path_params.get("id", "")
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block(
+            "blocks.chat.auto_trim",
+            request_data,
+            path_params,
+            {"id": "conversation_id"},
+        )
 
     # ---- Agent Handlers (fallback) ----
 
     def _handle_agent_execute(self, request_data, path_params):
-        from blocks.agent.execute import run as handler_run
-        context = self._build_context()
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block("blocks.agent.execute", request_data, path_params)
 
     def _handle_agent_approve(self, request_data, path_params):
-        from blocks.agent.approve import run as handler_run
-        context = self._build_context()
-        request_data["execution_id"] = path_params.get("id", "")
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block(
+            "blocks.agent.approve",
+            request_data,
+            path_params,
+            {"id": "execution_id"},
+        )
 
     def _handle_agent_reject(self, request_data, path_params):
-        from blocks.agent.reject import run as handler_run
-        context = self._build_context()
-        request_data["execution_id"] = path_params.get("id", "")
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block(
+            "blocks.agent.reject",
+            request_data,
+            path_params,
+            {"id": "execution_id"},
+        )
 
     def _handle_agent_cancel(self, request_data, path_params):
-        from blocks.agent.cancel import run as handler_run
-        context = self._build_context()
-        request_data["execution_id"] = path_params.get("id", "")
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block(
+            "blocks.agent.cancel",
+            request_data,
+            path_params,
+            {"id": "execution_id"},
+        )
 
     def _handle_agent_status(self, request_data, path_params):
-        from blocks.agent.status import run as handler_run
-        context = self._build_context()
-        request_data["execution_id"] = path_params.get("id", "")
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block(
+            "blocks.agent.status",
+            request_data,
+            path_params,
+            {"id": "execution_id"},
+        )
 
     # ---- Multi-Agent Handlers (fallback, Group 8) ----
 
     def _handle_multi_execute(self, request_data, path_params):
-        from blocks.agent.multi_execute import run as handler_run
-        context = self._build_context()
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block("blocks.agent.multi_execute", request_data, path_params)
 
     def _handle_multi_status(self, request_data, path_params):
-        from blocks.agent.multi_status import run as handler_run
-        context = self._build_context()
-        request_data["session_id"] = path_params.get("id", "")
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block(
+            "blocks.agent.multi_status",
+            request_data,
+            path_params,
+            {"id": "session_id"},
+        )
 
     def _handle_multi_message(self, request_data, path_params):
-        from blocks.agent.multi_message import run as handler_run
-        context = self._build_context()
-        request_data["session_id"] = path_params.get("id", "")
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block(
+            "blocks.agent.multi_message",
+            request_data,
+            path_params,
+            {"id": "session_id"},
+        )
 
     # ---- Instruction Handler (fallback, Group 8) ----
 
     def _handle_agent_instruct(self, request_data, path_params):
-        from blocks.agent.add_instruction import run as handler_run
-        context = self._build_context()
-        request_data["execution_id"] = path_params.get("id", "")
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block(
+            "blocks.agent.add_instruction",
+            request_data,
+            path_params,
+            {"id": "execution_id"},
+        )
 
     # ---- Consent Handlers (fallback, Group 8) ----
 
     def _handle_consent_check(self, request_data, path_params):
-        from blocks.tool.consent_check import run as handler_run
-        context = self._build_context()
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block("blocks.tool.consent_check", request_data, path_params)
 
     def _handle_consent_confirm(self, request_data, path_params):
-        from blocks.tool.consent_confirm import run as handler_run
-        context = self._build_context()
-        request_data["consent_id"] = path_params.get("id", "")
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block(
+            "blocks.tool.consent_confirm",
+            request_data,
+            path_params,
+            {"id": "consent_id"},
+        )
 
     # ---- Knowledge Handlers (fallback, Group 9a) ----
 
     def _handle_knowledge_create(self, request_data, path_params):
-        from blocks.knowledge.create import run as handler_run
-        context = self._build_context()
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block("blocks.knowledge.create", request_data, path_params)
 
     def _handle_knowledge_list(self, request_data, path_params):
-        from blocks.knowledge.list import run as handler_run
-        context = self._build_context()
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block("blocks.knowledge.list", request_data, path_params)
 
     def _handle_knowledge_search(self, request_data, path_params):
-        from blocks.knowledge.search import run as handler_run
-        context = self._build_context()
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block("blocks.knowledge.search", request_data, path_params)
 
     def _handle_knowledge_get(self, request_data, path_params):
-        from blocks.knowledge.get import run as handler_run
-        context = self._build_context()
-        request_data["id"] = path_params.get("id", "")
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block(
+            "blocks.knowledge.get",
+            request_data,
+            path_params,
+            {"id": "id"},
+        )
 
     def _handle_knowledge_update(self, request_data, path_params):
-        from blocks.knowledge.update import run as handler_run
-        context = self._build_context()
-        request_data["id"] = path_params.get("id", "")
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block(
+            "blocks.knowledge.update",
+            request_data,
+            path_params,
+            {"id": "id"},
+        )
 
     def _handle_knowledge_delete(self, request_data, path_params):
-        from blocks.knowledge.delete import run as handler_run
-        context = self._build_context()
-        request_data["id"] = path_params.get("id", "")
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block(
+            "blocks.knowledge.delete",
+            request_data,
+            path_params,
+            {"id": "id"},
+        )
 
     # ---- Prompt Handlers (fallback) ----
 
     def _handle_prompt_update(self, request_data, path_params):
-        from blocks.prompt.update import run as handler_run
-        context = self._build_context()
-        request_data["name"] = path_params.get("name", "")
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block(
+            "blocks.prompt.update",
+            request_data,
+            path_params,
+            {"name": "name"},
+        )
 
     def _handle_prompt_delete(self, request_data, path_params):
-        from blocks.prompt.delete import run as handler_run
-        context = self._build_context()
-        request_data["name"] = path_params.get("name", "")
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block(
+            "blocks.prompt.delete",
+            request_data,
+            path_params,
+            {"name": "name"},
+        )
 
     def _handle_prompt_convert(self, request_data, path_params):
-        from blocks.prompt.convert import run as handler_run
-        context = self._build_context()
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block("blocks.prompt.convert", request_data, path_params)
 
     # ---- Dynamic Tool Handlers (fallback) ----
 
     def _handle_tool_create(self, request_data, path_params):
-        from blocks.tool.create import run as handler_run
-        context = self._build_context()
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block("blocks.tool.create", request_data, path_params)
 
     def _handle_tool_update(self, request_data, path_params):
-        from blocks.tool.update import run as handler_run
-        context = self._build_context()
-        request_data["name"] = path_params.get("name", "")
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block(
+            "blocks.tool.update",
+            request_data,
+            path_params,
+            {"name": "name"},
+        )
 
     def _handle_tool_delete(self, request_data, path_params):
-        from blocks.tool.delete import run as handler_run
-        context = self._build_context()
-        request_data["name"] = path_params.get("name", "")
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block(
+            "blocks.tool.delete",
+            request_data,
+            path_params,
+            {"name": "name"},
+        )
 
     def _handle_tool_export(self, request_data, path_params):
-        from blocks.tool.export import run as handler_run
-        context = self._build_context()
-        request_data["name"] = path_params.get("name", "")
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block(
+            "blocks.tool.export",
+            request_data,
+            path_params,
+            {"name": "name"},
+        )
 
     # ---- Dev Tool Handlers (fallback, P1-1) ----
 
     def _handle_dev_inspect(self, request_data, path_params):
-        from blocks.dev.inspect import run as handler_run
-        context = self._build_context()
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block("blocks.dev.inspect", request_data, path_params)
 
     def _handle_dev_prompt_history(self, request_data, path_params):
-        from blocks.dev.prompt_history import run as handler_run
-        context = self._build_context()
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block("blocks.dev.prompt_history", request_data, path_params)
 
     def _handle_dev_edit_prompt(self, request_data, path_params):
-        from blocks.dev.edit_prompt_live import run as handler_run
-        context = self._build_context()
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block("blocks.dev.edit_prompt_live", request_data, path_params)
 
     def _handle_dev_replay(self, request_data, path_params):
-        from blocks.dev.replay import run as handler_run
-        context = self._build_context()
-        return handler_run(request_data, context)
+        return self._invoke_fallback_block("blocks.dev.replay", request_data, path_params)
 
     # ---- System Handlers (fallback) ----
 

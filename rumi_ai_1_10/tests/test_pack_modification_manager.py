@@ -107,6 +107,104 @@ class TestPackModificationManager(unittest.TestCase):
             self.assertEqual(approved["status"], "applied")
             self.assertEqual(fake_approval.approved, ["targetpack"])
 
+    def test_create_request_rejects_fullscreen_conflict(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            requests_root = root / "requests"
+            staging_root = root / "staging"
+            self._write_meta(
+                staging_root,
+                "fullscreen1",
+                {
+                    "staging_id": "fullscreen1",
+                    "detected_pack_ids": ["frontpack"],
+                    "proposal_info": {"target_pack_id": "frontpack"},
+                },
+            )
+            self._write_meta(
+                staging_root,
+                "fullscreen2",
+                {
+                    "staging_id": "fullscreen2",
+                    "detected_pack_ids": ["otherpack"],
+                    "proposal_info": {"target_pack_id": "otherpack"},
+                },
+            )
+            manager = PackModificationManager(
+                requests_root=requests_root,
+                ecosystem_dir=root / "ecosystem",
+                backup_root=root / "backups",
+            )
+
+            with patch("core_runtime.pack_modification_manager.get_pack_importer") as importer:
+                importer.return_value.get_staging_meta.side_effect = lambda staging_id: json.loads(
+                    (staging_root / staging_id / "meta.json").read_text(encoding="utf-8")
+                )
+                created = manager.create_request(
+                    mode="request_extension",
+                    staging_id="fullscreen1",
+                    slot="fullscreen",
+                    fullscreen=True,
+                )
+                blocked = manager.create_request(
+                    mode="forced_patch",
+                    staging_id="fullscreen2",
+                    slot="main",
+                )
+
+            self.assertEqual(created["status"], "pending")
+            self.assertEqual(blocked["status_code"], 409)
+            self.assertEqual(blocked["conflicts"][0]["reason"], "fullscreen_exclusive")
+
+    def test_create_request_marks_same_slot_multi_frontend_for_selection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            requests_root = root / "requests"
+            staging_root = root / "staging"
+            self._write_meta(
+                staging_root,
+                "slot1",
+                {
+                    "staging_id": "slot1",
+                    "detected_pack_ids": ["frontpack"],
+                    "proposal_info": {"target_pack_id": "frontpack"},
+                },
+            )
+            self._write_meta(
+                staging_root,
+                "slot2",
+                {
+                    "staging_id": "slot2",
+                    "detected_pack_ids": ["otherpack"],
+                    "proposal_info": {"target_pack_id": "otherpack"},
+                },
+            )
+            manager = PackModificationManager(
+                requests_root=requests_root,
+                ecosystem_dir=root / "ecosystem",
+                backup_root=root / "backups",
+            )
+
+            with patch("core_runtime.pack_modification_manager.get_pack_importer") as importer:
+                importer.return_value.get_staging_meta.side_effect = lambda staging_id: json.loads(
+                    (staging_root / staging_id / "meta.json").read_text(encoding="utf-8")
+                )
+                first = manager.create_request(
+                    mode="request_extension",
+                    staging_id="slot1",
+                    slot="sidebar.right",
+                )
+                second = manager.create_request(
+                    mode="request_extension",
+                    staging_id="slot2",
+                    slot="sidebar.right",
+                )
+
+            self.assertEqual(first["status"], "pending")
+            self.assertEqual(second["status"], "pending")
+            self.assertTrue(second["selection_required"])
+            self.assertEqual(second["selection_candidates"][0]["request_id"], first["request_id"])
+
     def test_rollback_restores_backup(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
