@@ -1,10 +1,4 @@
-"""
-defaultspack_runtime.py - lightweight function-first runtime helper
-
-These helpers intentionally resolve defaultspack functions via FunctionRegistry
-so the new pack can use the same discoverable function surface as the rest of
-the runtime, while keeping the HTTP handlers in core space.
-"""
+"""Generic pack function invocation helper."""
 
 from __future__ import annotations
 
@@ -15,13 +9,17 @@ from typing import Any, Dict, Optional
 from .paths import BASE_DIR, is_path_within
 
 
-def invoke_defaultspack_function(
-    qualified_name: str,
+def invoke_pack_function(
+    pack_id: str,
+    function_id: str,
     args: Optional[Dict[str, Any]] = None,
     context: Optional[Dict[str, Any]] = None,
 ) -> Any:
     from .di_container import get_container
 
+    qualified_name = (
+        function_id if ":" in function_id else f"{pack_id}:{function_id}"
+    )
     entry = get_container().get("function_registry").get(qualified_name)
     if entry is None:
         raise KeyError(f"Function not found: {qualified_name}")
@@ -37,7 +35,7 @@ def invoke_defaultspack_function(
         raise PermissionError(f"Entrypoint escapes project boundary: {module_path}")
 
     spec = importlib.util.spec_from_file_location(
-        f"defaultspack_runtime_{qualified_name.replace(':', '_')}",
+        f"pack_function_{qualified_name.replace(':', '_')}",
         str(module_path),
     )
     if spec is None or spec.loader is None:

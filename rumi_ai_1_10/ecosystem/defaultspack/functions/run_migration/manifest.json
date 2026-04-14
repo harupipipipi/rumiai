@@ -1,0 +1,7 @@
+{
+  "name": "run_migration",
+  "description": "Run defaultspack-owned migration for legacy defaults and user data.",
+  "entrypoint": "main.py:run",
+  "tags": ["defaultspack", "migration"],
+  "vocab_aliases": ["defaultspack.run_migration"]
+}

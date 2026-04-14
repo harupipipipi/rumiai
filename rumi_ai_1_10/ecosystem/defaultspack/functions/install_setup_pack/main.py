@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from core_runtime.defaultspack_migration import get_defaultspack_migration_manager
 from core_runtime.setup_pack import get_setup_pack_manager
+from ecosystem.defaultspack.backend.migration.migrator import get_defaults_migrator
 
 
 def run(context, args):
@@ -14,11 +14,11 @@ def run(context, args):
     if "error" in result:
         return result
 
-    migration = get_defaultspack_migration_manager()
+    migration = get_defaults_migrator()
     status = migration.status()
     migration_result = None
     if status.get("needs_user_migration"):
-        migration_result = migration.migrate_user_csv()
+        migration_result = migration.migrate_all()
 
     result["migration_status"] = migration.status()
     if migration_result is not None:

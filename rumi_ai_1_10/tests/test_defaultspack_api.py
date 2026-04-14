@@ -32,25 +32,47 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
         self.assertIn(("GET", "/api/defaultspack/modules"), PackAPIHandler._api_route_exact)
         self.assertIn(("GET", "/api/defaultspack/setup/packs"), PackAPIHandler._api_route_exact)
         self.assertIn(("GET", "/api/defaultspack/pack-requests"), PackAPIHandler._api_route_exact)
+        self.assertEqual(
+            PackAPIHandler._api_route_exact[("GET", "/api/defaultspack/modules")]["function_id"],
+            "list_modules",
+        )
         self.assertEqual(len(PackAPIHandler._api_route_patterns), 11)
 
+    def test_api_route_dispatches_pack_function(self):
+        from core_runtime.pack_api_server import PackAPIHandler
 
-class TestDefaultspackHandlers(unittest.TestCase):
-    def test_handler_delegates_to_function_runtime(self):
-        from core_runtime.api.defaultspack_handlers import DefaultspackHandlersMixin
+        PackAPIHandler._api_route_exact = {
+            ("POST", "/api/example/run"): {
+                "pack_id": "example",
+                "handler": "",
+                "function_id": "run",
+                "pass_body": True,
+                "response_mode": "result",
+                "args": {"mode": "fast"},
+                "path_param_map": {},
+            }
+        }
+        PackAPIHandler._api_route_patterns = []
+        handler = PackAPIHandler.__new__(PackAPIHandler)
+        sent = []
+        handler._send_result = sent.append
 
-        class _Handler(DefaultspackHandlersMixin):
-            pass
-
-        handler = _Handler()
         with patch(
-            "core_runtime.api.defaultspack_handlers.invoke_defaultspack_function",
-            return_value={"modules": []},
+            "core_runtime.pack_function_runtime.invoke_pack_function",
+            return_value={"ok": True},
         ) as mocked:
-            result = handler._defaultspack_list_modules()
+            dispatched = handler._dispatch_api_route(
+                "POST", "/api/example/run", {"input": "hello"}
+            )
 
-        self.assertEqual(result, {"modules": []})
-        mocked.assert_called_once_with("defaultspack:list_modules")
+        self.assertTrue(dispatched)
+        mocked.assert_called_once_with(
+            "example",
+            "run",
+            {"mode": "fast", "input": "hello"},
+            {"pack_id": "example", "method": "POST", "path": "/api/example/run"},
+        )
+        self.assertEqual(sent, [{"ok": True}])
 
 
 if __name__ == "__main__":

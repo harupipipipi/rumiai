@@ -232,97 +232,114 @@
     {
       "method": "GET",
       "path": "/api/defaultspack/modules",
-      "handler": "_defaultspack_list_modules"
+      "function_id": "list_modules"
     },
     {
       "method": "GET",
       "path_pattern": "/api/defaultspack/modules/{id}",
-      "handler": "_defaultspack_get_module"
+      "function_id": "get_module",
+      "path_param_map": {"module_id": "id"}
     },
     {
       "method": "POST",
       "path_pattern": "/api/defaultspack/modules/{id}/enable",
-      "handler": "_defaultspack_enable_module"
+      "function_id": "set_module_state",
+      "args": {"state": "enabled"},
+      "path_param_map": {"module_id": "id"}
     },
     {
       "method": "POST",
       "path_pattern": "/api/defaultspack/modules/{id}/disable",
-      "handler": "_defaultspack_disable_module"
+      "function_id": "set_module_state",
+      "args": {"state": "disabled"},
+      "path_param_map": {"module_id": "id"}
     },
     {
       "method": "POST",
       "path_pattern": "/api/defaultspack/modules/{id}/reload",
-      "handler": "_defaultspack_reload_module"
+      "function_id": "set_module_state",
+      "args": {"state": "enabled", "reason": "manual_reload"},
+      "path_param_map": {"module_id": "id"}
     },
     {
       "method": "POST",
       "path_pattern": "/api/defaultspack/modules/{id}/rollback",
-      "handler": "_defaultspack_rollback_module"
+      "function_id": "set_module_state",
+      "args": {"state": "disabled", "reason": "manual_rollback"},
+      "path_param_map": {"module_id": "id"}
     },
     {
       "method": "GET",
       "path": "/api/defaultspack/setup/packs",
-      "handler": "_defaultspack_list_setup_packs"
+      "function_id": "list_setup_packs"
     },
     {
       "method": "POST",
       "path": "/api/defaultspack/setup/packs/install",
-      "handler": "_defaultspack_install_setup_pack",
+      "function_id": "install_setup_pack",
       "pass_body": true
     },
     {
       "method": "POST",
       "path_pattern": "/api/defaultspack/setup/packs/{id}/grant-all-ok",
-      "handler": "_defaultspack_grant_all_ok"
+      "function_id": "grant_all_ok",
+      "path_param_map": {"setup_pack_id": "id"}
     },
     {
       "method": "POST",
       "path_pattern": "/api/defaultspack/setup/packs/{id}/revoke-all-ok",
-      "handler": "_defaultspack_revoke_all_ok"
+      "function_id": "revoke_all_ok",
+      "path_param_map": {"setup_pack_id": "id"}
     },
     {
       "method": "GET",
       "path": "/api/defaultspack/migration/status",
-      "handler": "_defaultspack_get_migration_status"
+      "function_id": "get_migration_status"
     },
     {
       "method": "GET",
       "path": "/api/defaultspack/pack-requests",
-      "handler": "_defaultspack_list_pack_requests"
+      "function_id": "list_pack_requests"
     },
     {
       "method": "GET",
       "path_pattern": "/api/defaultspack/pack-requests/{id}",
-      "handler": "_defaultspack_get_pack_request"
+      "function_id": "get_pack_request",
+      "path_param_map": {"request_id": "id"}
     },
     {
       "method": "POST",
       "path": "/api/defaultspack/pack-requests/request-extension",
-      "handler": "_defaultspack_request_extension",
+      "function_id": "request_extension",
       "pass_body": true
     },
     {
       "method": "POST",
       "path": "/api/defaultspack/pack-requests/forced-patch",
-      "handler": "_defaultspack_forced_patch",
+      "function_id": "forced_patch",
       "pass_body": true
     },
     {
       "method": "POST",
       "path_pattern": "/api/defaultspack/pack-requests/{id}/approve",
-      "handler": "_defaultspack_approve_pack_request",
-      "pass_body": true
+      "function_id": "review_pack_request",
+      "pass_body": true,
+      "args": {"decision": "approve"},
+      "path_param_map": {"request_id": "id"}
     },
     {
       "method": "POST",
       "path_pattern": "/api/defaultspack/pack-requests/{id}/reject",
-      "handler": "_defaultspack_reject_pack_request",
-      "pass_body": true
+      "function_id": "review_pack_request",
+      "pass_body": true,
+      "args": {"decision": "reject"},
+      "path_param_map": {"request_id": "id"}
     },
     {
       "method": "POST",
       "path_pattern": "/api/defaultspack/pack-requests/{id}/rollback",
-      "handler": "_defaultspack_rollback_pack_request"
+      "function_id": "rollback_pack_request",
+      "path_param_map": {"request_id": "id"}
     }
   ]
 }

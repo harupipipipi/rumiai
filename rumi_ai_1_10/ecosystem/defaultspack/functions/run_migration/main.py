@@ -4,4 +4,4 @@ from ecosystem.defaultspack.backend.migration.migrator import get_defaults_migra
 
 
 def run(context, args):
-    return get_defaults_migrator().status()
+    return get_defaults_migrator().migrate_all()

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from ..defaultspack_migration import get_defaultspack_migration_manager
+from ..pack_function_runtime import invoke_pack_function
 from ..setup_pack import get_setup_pack_manager
 
 
@@ -22,12 +22,13 @@ class SetupHandlersMixin:
         if "error" in result:
             return result
 
-        migration = get_defaultspack_migration_manager()
-        status = migration.status()
+        status = invoke_pack_function("defaultspack", "get_migration_status")
         migration_result = None
         if status.get("needs_user_migration"):
-            migration_result = migration.migrate_user_csv()
-        result["migration_status"] = migration.status()
+            migration_result = invoke_pack_function("defaultspack", "run_migration")
+        result["migration_status"] = invoke_pack_function(
+            "defaultspack", "get_migration_status"
+        )
         if migration_result is not None:
             result["migration"] = migration_result
         return result
@@ -39,4 +40,4 @@ class SetupHandlersMixin:
         return get_setup_pack_manager().revoke_all_ok(setup_pack_id)
 
     def _setup_get_migration_status(self) -> Dict[str, Any]:
-        return get_defaultspack_migration_manager().status()
+        return invoke_pack_function("defaultspack", "get_migration_status")

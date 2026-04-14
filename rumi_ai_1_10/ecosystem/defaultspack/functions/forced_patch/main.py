@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from core_runtime.pack_modification_manager import get_pack_modification_manager
+from ecosystem.defaultspack.backend.pack_extension.extension_manager import get_extension_manager
 
 
 def run(context, args):
     payload = dict(args or {})
-    return get_pack_modification_manager().create_request(
+    return get_extension_manager().create_pack_request(
         mode="forced_patch",
         staging_id=str(payload.get("staging_id", "")).strip(),
         actor=str(context.get("pack_id", "defaultspack")),
