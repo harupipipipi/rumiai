@@ -198,6 +198,9 @@ class TestDockerExecution(unittest.TestCase):
             self.skipTest("Docker not available")
         
         executor = PythonFileExecutor()
+        mock_uds = MagicMock()
+        mock_uds.ensure_pack_socket.return_value = (True, None, None)
+        executor.set_uds_proxy_manager(mock_uds)
         
         # 承認チェックをパス
         with patch.object(executor._approval_checker, 'is_approved', return_value=(True, None)):
@@ -208,6 +211,7 @@ class TestDockerExecution(unittest.TestCase):
                 
                 try:
                     executor._path_validator.add_allowed_root(str(Path(test_file).parent))
+                    executor._path_validator.validate = MagicMock(return_value=(True, None, Path(test_file).resolve()))
                     
                     context = ExecutionContext(
                         flow_id="test_flow",

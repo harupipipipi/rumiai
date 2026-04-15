@@ -26,8 +26,19 @@ jobs:
           pip install pytest
 
       - name: Run root pytest
+        id: root_pytest
         run: |
-          pytest tests/ -v
+          set -o pipefail
+          PYTEST_LOG="${RUNNER_TEMP}/root-pytest-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-py${{ matrix.python-version }}.log"
+          pytest tests/ -v 2>&1 | tee "$PYTEST_LOG"
+
+      - name: Upload root pytest log
+        if: failure() && steps.root_pytest.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: root-pytest-${{ matrix.python-version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/root-pytest-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}-py${{ matrix.python-version }}.log
+          if-no-files-found: ignore
 
   rumi-ai-contract-checks:
     runs-on: ubuntu-latest
@@ -48,8 +59,11 @@ jobs:
           pip install -e .
 
       - name: Run contract cluster pytest
+        id: contract_pytest
         working-directory: rumi_ai_1_10
         run: |
+          set -o pipefail
+          PYTEST_LOG="${RUNNER_TEMP}/contract-pytest-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.log"
           pytest \
             tests/test_app1_permissive_guard.py \
             tests/test_bug_20260306_batch_b.py \
@@ -61,7 +75,15 @@ jobs:
             tests/test_di_phase2.py \
             tests/test_di_phase3.py \
             tests/test_di_phase4.py \
-            -v
+            -v 2>&1 | tee "$PYTEST_LOG"
+
+      - name: Upload contract pytest log
+        if: failure() && steps.contract_pytest.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: contract-pytest-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/contract-pytest-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}.log
+          if-no-files-found: ignore
 
   rumi-ai-package-pytest:
     strategy:
@@ -86,9 +108,20 @@ jobs:
           pip install -e .
 
       - name: Run package pytest
+        id: package_pytest
         working-directory: rumi_ai_1_10
         run: |
-          pytest tests/ -v
+          set -o pipefail
+          PYTEST_LOG="${RUNNER_TEMP}/package-pytest-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-py${{ matrix.python-version }}.log"
+          pytest tests/ -v 2>&1 | tee "$PYTEST_LOG"
+
+      - name: Upload package pytest log
+        if: failure() && steps.package_pytest.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-pytest-${{ matrix.python-version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/package-pytest-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}-py${{ matrix.python-version }}.log
+          if-no-files-found: ignore
 
   rust-test:
     runs-on: ubuntu-latest
