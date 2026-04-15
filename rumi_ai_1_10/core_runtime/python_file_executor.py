@@ -828,17 +828,27 @@ request = http_request
         script_file = None
         syscall_file = None
         capability_file = None
+        original_target_mode = None
 
         try:
+            try:
+                original_target_mode = file_path.stat().st_mode
+                if not (original_target_mode & 0o004):
+                    os.chmod(file_path, original_target_mode | 0o444)
+            except OSError:
+                pass
+
             # 一時ファイルに入力データを書き込み
             with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
                 json.dump({"input_data": input_data, "context": exec_context}, f, ensure_ascii=False, default=str)
                 input_file = f.name
+            os.chmod(input_file, 0o644)
 
             # rumi_syscall モジュールを一時ファイルに書き込み
             with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
                 f.write(self._get_syscall_module_content())
                 syscall_file = f.name
+            os.chmod(syscall_file, 0o644)
 
             # rumi_capability モジュールを一時ファイルに書き込み
             cap_content = self._get_capability_module_content()
@@ -846,6 +856,7 @@ request = http_request
                 with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
                     f.write(cap_content)
                     capability_file = f.name
+                os.chmod(capability_file, 0o644)
 
             # 実行スクリプトを生成
             executor_script = self._generate_executor_script(file_path.name)
@@ -853,6 +864,7 @@ request = http_request
             with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
                 f.write(executor_script)
                 script_file = f.name
+            os.chmod(script_file, 0o644)
 
             # Docker実行コマンドを構築 (DockerRunBuilder)
             builder = DockerRunBuilder(name=container_name)
@@ -984,6 +996,11 @@ request = http_request
                         os.unlink(tmp_file)
                     except Exception:
                         pass
+            if original_target_mode is not None:
+                try:
+                    os.chmod(file_path, original_target_mode)
+                except OSError:
+                    pass
 
         return result
 

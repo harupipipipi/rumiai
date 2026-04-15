@@ -106,23 +106,38 @@ def _sync_core_runtime_alias(module_name: str, module=None) -> None:
         _bind_parent_module(canonical_name, module)
 
 
-def _make_core_runtime_getattr(package_name: str, package_dir: Path):
+def _make_lazy_submodule_getattr(package_name: str, package_dir: Path):
     def _lazy_submodule_getattr(attr_name: str):
         if not _module_path_exists(package_dir, attr_name):
             raise AttributeError(f"module {package_name!r} has no attribute {attr_name!r}")
 
-        canonical_name = f"core_runtime.{attr_name}"
-        alias_name = _alias_for_module(canonical_name)
-        module = sys.modules.get(alias_name) if alias_name else None
-        if module is not None and _is_real_core_runtime_module(module):
+        module_name = f"{package_name}.{attr_name}"
+        canonical_name = _canonical_for_module(module_name)
+        alias_name = _alias_for_module(module_name)
+
+        module = None
+        if alias_name:
+            existing_alias = sys.modules.get(alias_name)
+            if existing_alias is not None and _is_real_core_runtime_module(existing_alias):
+                module = existing_alias
+        if module is None:
+            module = sys.modules.get(module_name)
+        if module is None and canonical_name:
+            module = sys.modules.get(canonical_name)
+        if module is None and alias_name:
+            module = sys.modules.get(alias_name)
+        if module is None:
+            module = importlib.import_module(module_name)
+
+        _bind_parent_module(module_name, module)
+        if canonical_name:
             sys.modules[canonical_name] = module
             _bind_parent_module(canonical_name, module)
-        else:
-            module = sys.modules.get(canonical_name)
-        if module is None:
-            module = importlib.import_module(canonical_name)
-        _bind_parent_module(canonical_name, module)
-        _sync_core_runtime_alias(canonical_name, module)
+            _sync_core_runtime_alias(canonical_name, module)
+        if alias_name:
+            sys.modules[alias_name] = module
+            _bind_parent_module(alias_name, module)
+            _sync_core_runtime_alias(module_name, module)
 
         package = sys.modules.get(package_name)
         if package is not None:
@@ -136,8 +151,7 @@ def _install_core_runtime_package_hooks(module_name: str, package_dir: Path) -> 
     pkg = sys.modules.get(module_name)
     if pkg is None:
         return
-    if module_name in {"core_runtime", _CORE_RUNTIME_ALIAS_PREFIX}:
-        pkg.__getattr__ = _make_core_runtime_getattr(module_name, package_dir)
+    pkg.__getattr__ = _make_lazy_submodule_getattr(module_name, package_dir)
 
 
 def _ensure_package_module(module_name: str, package_dir: Path) -> None:

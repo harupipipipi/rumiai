@@ -11,6 +11,8 @@ api パッケージ — PackAPIHandler のハンドラ Mixin 群
     class PackAPIHandler(PackHandlersMixin, ..., BaseHTTPRequestHandler):
         ...
 """
+import importlib
+
 from .api_response import APIResponse
 from .flow_handlers import FlowHandlersMixin
 from .route_handlers import RouteHandlersMixin
@@ -60,3 +62,24 @@ __all__ = [
     "ViewerHandlersMixin",
     "DesktopHandlersMixin",
 ]
+
+_LAZY_SUBMODULES = {
+    "control_panel_handlers",
+    "desktop_handlers",
+    "flow_handlers",
+    "lifecycle",
+    "oauth_handlers",
+    "route_handlers",
+    "secrets_handlers",
+    "setup_handlers",
+    "store",
+    "viewer_handlers",
+}
+
+
+def __getattr__(name):
+    if name in _LAZY_SUBMODULES:
+        module = importlib.import_module(f"{__name__}.{name}")
+        globals()[name] = module
+        return module
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
