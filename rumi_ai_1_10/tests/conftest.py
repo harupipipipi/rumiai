@@ -27,6 +27,118 @@ if str(_PROJECT_ROOT) not in sys.path:
 # core_runtime パッケージを __init__.py を実行せずに登録する
 # ---------------------------------------------------------------------------
 _CORE_RUNTIME_DIR = str(_PROJECT_ROOT / "core_runtime")
+_CORE_RUNTIME_PACKAGE_DIR = _PROJECT_ROOT / "core_runtime"
+_CORE_RUNTIME_ALIAS_PREFIX = "rumi_ai_1_10.core_runtime"
+
+
+def _module_path_exists(package_dir: Path, attr_name: str) -> bool:
+    if attr_name.startswith("__"):
+        return False
+    for child in package_dir.iterdir():
+        if child.is_file() and child.name == f"{attr_name}.py":
+            return True
+        if child.is_dir() and child.name == attr_name and (child / "__init__.py").is_file():
+            return True
+    return False
+
+
+def _alias_for_module(module_name: str) -> str | None:
+    if module_name == "core_runtime":
+        return _CORE_RUNTIME_ALIAS_PREFIX
+    if module_name.startswith("core_runtime."):
+        return f"{_CORE_RUNTIME_ALIAS_PREFIX}{module_name.removeprefix('core_runtime')}"
+    return None
+
+
+def _canonical_for_module(module_name: str) -> str | None:
+    if module_name == _CORE_RUNTIME_ALIAS_PREFIX:
+        return "core_runtime"
+    prefix = f"{_CORE_RUNTIME_ALIAS_PREFIX}."
+    if module_name.startswith(prefix):
+        return f"core_runtime.{module_name.removeprefix(prefix)}"
+    return None
+
+
+def _is_real_core_runtime_module(module) -> bool:
+    module_file = getattr(module, "__file__", None)
+    if not module_file:
+        return False
+    try:
+        Path(module_file).resolve().relative_to(_CORE_RUNTIME_PACKAGE_DIR.resolve())
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _bind_parent_module(module_name: str, module=None) -> None:
+    module = sys.modules.get(module_name) if module is None else module
+    if module is None or "." not in module_name:
+        return
+    parent_name, attr_name = module_name.rsplit(".", 1)
+    parent = sys.modules.get(parent_name)
+    if parent is not None:
+        setattr(parent, attr_name, module)
+
+
+def _sync_core_runtime_alias(module_name: str, module=None) -> None:
+    module = sys.modules.get(module_name) if module is None else module
+    if module is None:
+        return
+
+    alias_name = _alias_for_module(module_name)
+    canonical_name = _canonical_for_module(module_name)
+
+    if alias_name:
+        existing_alias = sys.modules.get(alias_name)
+        if (
+            existing_alias is not None
+            and existing_alias is not module
+            and _is_real_core_runtime_module(existing_alias)
+        ):
+            sys.modules[module_name] = existing_alias
+            _bind_parent_module(module_name, existing_alias)
+            module = existing_alias
+        else:
+            sys.modules[alias_name] = module
+            _bind_parent_module(alias_name, module)
+    elif canonical_name:
+        sys.modules[canonical_name] = module
+        _bind_parent_module(canonical_name, module)
+
+
+def _make_core_runtime_getattr(package_name: str, package_dir: Path):
+    def _lazy_submodule_getattr(attr_name: str):
+        if not _module_path_exists(package_dir, attr_name):
+            raise AttributeError(f"module {package_name!r} has no attribute {attr_name!r}")
+
+        canonical_name = f"core_runtime.{attr_name}"
+        alias_name = _alias_for_module(canonical_name)
+        module = sys.modules.get(alias_name) if alias_name else None
+        if module is not None and _is_real_core_runtime_module(module):
+            sys.modules[canonical_name] = module
+            _bind_parent_module(canonical_name, module)
+        else:
+            module = sys.modules.get(canonical_name)
+        if module is None:
+            module = importlib.import_module(canonical_name)
+        _bind_parent_module(canonical_name, module)
+        _sync_core_runtime_alias(canonical_name, module)
+
+        package = sys.modules.get(package_name)
+        if package is not None:
+            setattr(package, attr_name, module)
+        return module
+
+    return _lazy_submodule_getattr
+
+
+def _install_core_runtime_package_hooks(module_name: str, package_dir: Path) -> None:
+    pkg = sys.modules.get(module_name)
+    if pkg is None:
+        return
+    if module_name in {"core_runtime", _CORE_RUNTIME_ALIAS_PREFIX}:
+        pkg.__getattr__ = _make_core_runtime_getattr(module_name, package_dir)
+
 
 def _ensure_package_module(module_name: str, package_dir: Path) -> None:
     pkg = sys.modules.get(module_name)
@@ -36,6 +148,7 @@ def _ensure_package_module(module_name: str, package_dir: Path) -> None:
     pkg.__path__ = [str(package_dir)]
     pkg.__package__ = module_name
     pkg.__file__ = str(package_dir / "__init__.py")
+    _install_core_runtime_package_hooks(module_name, package_dir)
     if "." in module_name:
         parent_name, attr_name = module_name.rsplit(".", 1)
         parent = sys.modules.get(parent_name)
@@ -50,6 +163,12 @@ def _reset_package_roots() -> None:
     _ensure_package_module("rumi_ai_1_10", _PROJECT_ROOT)
     _ensure_package_module("rumi_ai_1_10.core_runtime", _PROJECT_ROOT / "core_runtime")
     _ensure_package_module("rumi_ai_1_10.backend_core", _PROJECT_ROOT / "backend_core")
+    core_pkg = sys.modules.get("core_runtime")
+    alias_pkg = sys.modules.get(_CORE_RUNTIME_ALIAS_PREFIX)
+    if core_pkg is not None and alias_pkg is not None:
+        for attr_name, value in vars(core_pkg).items():
+            if not attr_name.startswith("__"):
+                setattr(alias_pkg, attr_name, value)
 
 
 _reset_package_roots()
@@ -209,22 +328,13 @@ def _force_real_import(module_name: str) -> None:
     _bind_parent_module(module_name, module)
 
 
-def _bind_parent_module(module_name: str, module=None) -> None:
-    module = sys.modules.get(module_name) if module is None else module
-    if module is None or "." not in module_name:
-        return
-    parent_name, attr_name = module_name.rsplit(".", 1)
-    parent = sys.modules.get(parent_name)
-    if parent is not None:
-        setattr(parent, attr_name, module)
-
-
 def _sync_alias_module(alias_name: str, target_name: str) -> None:
     target_module = sys.modules.get(target_name)
     if target_module is None:
         target_module = importlib.import_module(target_name)
     sys.modules[alias_name] = target_module
     _bind_parent_module(alias_name, target_module)
+    _sync_core_runtime_alias(target_name, target_module)
 
 
 def _restore_real_di_container() -> None:
@@ -299,6 +409,22 @@ def _is_di_phase_test(nodeid: str | None) -> bool:
     return bool(nodeid) and "test_di_phase" in nodeid
 
 
+def _is_security_guard_test(nodeid: str | None) -> bool:
+    return bool(nodeid) and "test_security_guards.py" in nodeid
+
+
+def _restore_control_panel_handlers() -> None:
+    for module_name in (
+        "core_runtime.api",
+        "core_runtime.api.control_panel_handlers",
+        "rumi_ai_1_10.core_runtime.api",
+        "rumi_ai_1_10.core_runtime.api.control_panel_handlers",
+    ):
+        _remove_module_binding(module_name)
+    _force_real_import("core_runtime.api")
+    _force_real_import("core_runtime.api.control_panel_handlers")
+
+
 def _restore_test_module_mocks(test_module) -> None:
     mock_mods = getattr(test_module, "_mock_mods", None)
     if isinstance(mock_mods, dict):
@@ -364,6 +490,8 @@ def _restore_real_modules() -> None:
 def pytest_runtest_setup(item):
     _reset_package_roots()
     _restore_real_di_container()
+    if _is_security_guard_test(item.nodeid):
+        _restore_control_panel_handlers()
     if _is_di_phase_test(item.nodeid):
         setattr(item.module, "get_container", _REAL_DI_CONTAINER_MODULE.get_container)
     if _should_skip_restore(item.nodeid):
