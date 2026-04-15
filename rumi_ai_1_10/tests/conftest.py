@@ -90,11 +90,7 @@ def _sync_core_runtime_alias(module_name: str, module=None) -> None:
 
     if alias_name:
         existing_alias = sys.modules.get(alias_name)
-        if (
-            existing_alias is not None
-            and existing_alias is not module
-            and _is_real_core_runtime_module(existing_alias)
-        ):
+        if existing_alias is not None and existing_alias is not module:
             sys.modules[module_name] = existing_alias
             _bind_parent_module(module_name, existing_alias)
             module = existing_alias
@@ -391,6 +387,13 @@ _ALIAS_MODULES = (
     ("rumi_ai_1_10.core_runtime.network_grant_manager", "core_runtime.network_grant_manager"),
     ("rumi_ai_1_10.core_runtime.capability_proxy", "core_runtime.capability_proxy"),
     ("rumi_ai_1_10.core_runtime.python_file_executor", "core_runtime.python_file_executor"),
+    ("rumi_ai_1_10.core_runtime.pack_function_runtime", "core_runtime.pack_function_runtime"),
+    ("rumi_ai_1_10.core_runtime.pack_importer", "core_runtime.pack_importer"),
+    ("rumi_ai_1_10.core_runtime.pack_applier", "core_runtime.pack_applier"),
+    ("rumi_ai_1_10.core_runtime.kernel_handlers_runtime", "core_runtime.kernel_handlers_runtime"),
+    ("rumi_ai_1_10.core_runtime.flow_loader", "core_runtime.flow_loader"),
+    ("rumi_ai_1_10.core_runtime.flow_modifier", "core_runtime.flow_modifier"),
+    ("rumi_ai_1_10.core_runtime.component_lifecycle", "core_runtime.component_lifecycle"),
     ("rumi_ai_1_10.core_runtime.unit_executor", "core_runtime.unit_executor"),
     ("rumi_ai_1_10.core_runtime.approval_manager", "core_runtime.approval_manager"),
     ("rumi_ai_1_10.core_runtime.store_registry", "core_runtime.store_registry"),

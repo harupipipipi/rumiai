@@ -235,7 +235,10 @@ class TestDockerExecution(unittest.TestCase):
                             timeout_seconds=30.0
                         )
 
-                        self.assertTrue(result.success)
+                        self.assertTrue(
+                            result.success,
+                            f"Docker execution failed: {result.error_type}: {result.error}",
+                        )
                         self.assertEqual(result.execution_mode, "container")
                     finally:
                         os.unlink(test_file)
