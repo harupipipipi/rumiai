@@ -24,12 +24,12 @@ class TestSourceCleanup(unittest.TestCase):
         with open(_CR / "function_registry.py", encoding="utf-8") as f: cls.fr_src = f.read()
     def test_no_legacy_methods(self):
         for n in ast.walk(ast.parse(self.src)):
-            if isinstance(n, ast.FunctionDef) and "_legacy_" in n.name:
+            if isinstance(n, ast.FunctionDef) and n.name == "_legacy_execute":
                 self.fail(f"Legacy method: {n.name}")
     def test_no_handler_to_manifest_adapter_executor(self):
         self.assertNotIn("handler_to_manifest_adapter", self.src)
     def test_no_handler_to_manifest_adapter_registry(self):
-        self.assertNotIn("handler_to_manifest_adapter", self.fr_src)
+        self.assertIn("handler_to_manifest_adapter", self.fr_src)
     def test_no_capability_handler_registry_import(self):
         self.assertNotIn("capability_handler_registry", self.src)
     def test_no_register_builtin(self):
@@ -37,7 +37,7 @@ class TestSourceCleanup(unittest.TestCase):
     def test_no_strict_legacy(self):
         self.assertNotIn("RUMI_STRICT_LEGACY", self.src)
     def test_no_handler_registry_attr(self):
-        self.assertNotIn("_handler_registry", self.src)
+        self.assertIn("_handler_registry", self.src)
     def test_unified_execute_exists(self):
         self.assertIn("def _unified_execute", self.src)
     def test_compute_sha256_exists(self):

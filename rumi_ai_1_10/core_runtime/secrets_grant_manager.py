@@ -33,6 +33,11 @@ from .hmac_key_manager import (
 logger = logging.getLogger(__name__)
 
 
+def get_secrets_store():
+    from .secrets_store import get_secrets_store as _get
+    return _get()
+
+
 @dataclass
 class SecretGrant:
     """Secret アクセス権限 Grant"""
@@ -276,7 +281,6 @@ class SecretsGrantManager:
             return {}
 
         try:
-            from .secrets_store import get_secrets_store
             store = get_secrets_store()
         except Exception as e:
             logger.error("Failed to get SecretsStore: %s", e)

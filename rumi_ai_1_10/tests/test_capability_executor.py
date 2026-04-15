@@ -178,6 +178,8 @@ class TestRateLimitSecretGet(unittest.TestCase):
         mock_audit_module.return_value = MagicMock()
         limit = 2
         executor = _make_executor(rate_limit=limit)
+        executor._rate_limit_store = MagicMock()
+        executor._rate_limit_store.allow.side_effect = [True] * limit + [False]
 
         # rate limit 内のリクエスト（handler 未登録なので handler_not_found で停止する）
         for _ in range(limit):

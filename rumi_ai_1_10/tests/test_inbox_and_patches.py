@@ -37,21 +37,21 @@ class TestNetworkGrantManager(TestCase):
         from core_runtime.network_grant_manager import NetworkGrantManager
         return NetworkGrantManager(grants_dir=td, secret_key="test_secret")
 
-    def test_empty_domains_allows_all(self):
+    def test_empty_domains_denies_all(self):
         with tempfile.TemporaryDirectory() as td:
             ngm = self._make(td)
             ngm.grant_network_access(
                 "tp", allowed_domains=[], allowed_ports=[443], granted_by="t",
             )
-            self.assertTrue(ngm.check_access("tp", "any.example.com", 443).allowed)
+            self.assertFalse(ngm.check_access("tp", "any.example.com", 443).allowed)
 
-    def test_empty_ports_allows_all(self):
+    def test_empty_ports_denies_all(self):
         with tempfile.TemporaryDirectory() as td:
             ngm = self._make(td)
             ngm.grant_network_access(
                 "tp", allowed_domains=["example.com"], allowed_ports=[], granted_by="t",
             )
-            self.assertTrue(ngm.check_access("tp", "example.com", 9999).allowed)
+            self.assertFalse(ngm.check_access("tp", "example.com", 9999).allowed)
 
 
 class TestDiagnosticsNoPartial(TestCase):

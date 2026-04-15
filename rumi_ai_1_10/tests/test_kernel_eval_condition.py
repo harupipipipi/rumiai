@@ -1,7 +1,7 @@
 """
-test_kernel_eval_condition.py - KernelCore._eval_condition ユニットテスト
+test_kernel_eval_condition.py - Kernel._eval_condition ユニットテスト
 
-対象: core_runtime/kernel_core.py の _eval_condition メソッド
+対象: core_runtime/kernel_flow_execution.py の _eval_condition メソッド
 全テストは mock ベースで外部依存なし。
 """
 from __future__ import annotations
@@ -15,15 +15,15 @@ _project_root = Path(__file__).resolve().parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from core_runtime.kernel_core import KernelCore
+from core_runtime.kernel import Kernel
 from core_runtime.diagnostics import Diagnostics
 from core_runtime.interface_registry import InterfaceRegistry
 from core_runtime.event_bus import EventBus
 
 
-def _make_kernel() -> KernelCore:
-    """副作用を最小化した KernelCore を生成"""
-    return KernelCore(
+def _make_kernel() -> Kernel:
+    """副作用を最小化した Kernel を生成"""
+    return Kernel(
         diagnostics=Diagnostics(),
         interface_registry=InterfaceRegistry(),
         event_bus=EventBus(),

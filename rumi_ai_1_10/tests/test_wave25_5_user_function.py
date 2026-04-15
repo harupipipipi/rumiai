@@ -361,6 +361,7 @@ class TestDockerFallback(unittest.TestCase):
 
     @patch("core_runtime.capability_executor.subprocess")
     @patch("core_runtime.capability_executor.shutil")
+    @patch.dict(os.environ, {"RUMI_ALLOW_HOST_FALLBACK": "1"})
     def test_docker_unavailable_fallback(self, mock_shutil, mock_subprocess):
         """When Docker is not available, user function falls back to host subprocess."""
         mock_shutil.which.return_value = None  # Docker not available

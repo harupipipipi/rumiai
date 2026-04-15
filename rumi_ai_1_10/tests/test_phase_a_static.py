@@ -124,11 +124,11 @@ class TestServeStaticFile:
         from core_runtime.pack_api_server import PackAPIHandler
 
         source = inspect.getsource(PackAPIHandler.do_GET)
-        setup_pos = source.find('"/setup/"')
+        setup_pos = source.find('_match_web_mount(')
         if setup_pos == -1:
-            setup_pos = source.find('"/setup"')
+            setup_pos = source.find('_serve_static_file(')
         auth_pos = source.find('_check_auth()')
-        assert setup_pos != -1, "/setup path not found in do_GET"
+        assert setup_pos != -1, "pre-auth static web_mount handling not found in do_GET"
         assert auth_pos != -1, "_check_auth not found in do_GET"
         assert setup_pos < auth_pos, \
             "Static file serving must appear before _check_auth in do_GET"

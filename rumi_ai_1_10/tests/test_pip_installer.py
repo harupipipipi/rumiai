@@ -180,7 +180,10 @@ class TestApproveDockerCommand:
             MagicMock(returncode=0, stdout="", stderr=""),
             MagicMock(returncode=0, stdout="[]", stderr=""),
         ]
-        with patch("core_runtime.pip_installer.PACK_DATA_BASE_DIR", str(tmp_env["pack_data_dir"])):
+        with (
+            patch.object(PipInstaller, "_check_pack_approval", return_value=(True, None)),
+            patch("core_runtime.pip_installer.PACK_DATA_BASE_DIR", str(tmp_env["pack_data_dir"])),
+        ):
             result = installer.approve_and_install(ckey, allow_sdist=False)
         assert result.success is True
         assert result.status == STATUS_INSTALLED
@@ -210,7 +213,10 @@ class TestApproveDockerCommand:
             MagicMock(returncode=0, stdout="", stderr=""),
             MagicMock(returncode=0, stdout="[]", stderr=""),
         ]
-        with patch("core_runtime.pip_installer.PACK_DATA_BASE_DIR", str(tmp_env["pack_data_dir"])):
+        with (
+            patch.object(PipInstaller, "_check_pack_approval", return_value=(True, None)),
+            patch("core_runtime.pip_installer.PACK_DATA_BASE_DIR", str(tmp_env["pack_data_dir"])),
+        ):
             result = installer.approve_and_install(ckey, allow_sdist=True)
         dl_cmd = mock_run.call_args_list[0][0][0]
         assert "--only-binary=:all:" not in dl_cmd
@@ -229,7 +235,10 @@ class TestApproveDockerCommand:
             MagicMock(returncode=0, stdout="", stderr=""),
             MagicMock(returncode=0, stdout="[]", stderr=""),
         ]
-        with patch("core_runtime.pip_installer.PACK_DATA_BASE_DIR", str(tmp_env["pack_data_dir"])):
+        with (
+            patch.object(PipInstaller, "_check_pack_approval", return_value=(True, None)),
+            patch("core_runtime.pip_installer.PACK_DATA_BASE_DIR", str(tmp_env["pack_data_dir"])),
+        ):
             installer.approve_and_install(ckey)
         for i in range(2):
             cmd = mock_run.call_args_list[i][0][0]
@@ -287,7 +296,10 @@ class TestDockerCommandOrder:
             MagicMock(returncode=0, stdout="", stderr=""),
             MagicMock(returncode=0, stdout="[]", stderr=""),
         ]
-        with patch("core_runtime.pip_installer.PACK_DATA_BASE_DIR", str(tmp_env["pack_data_dir"])):
+        with (
+            patch.object(PipInstaller, "_check_pack_approval", return_value=(True, None)),
+            patch("core_runtime.pip_installer.PACK_DATA_BASE_DIR", str(tmp_env["pack_data_dir"])),
+        ):
             installer.approve_and_install(ckey)
         assert mock_run.call_count == 3
         assert "download" in mock_run.call_args_list[0][0][0]

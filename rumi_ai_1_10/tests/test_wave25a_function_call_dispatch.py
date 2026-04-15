@@ -26,9 +26,10 @@ if _project_root not in sys.path:
 # Stub modules that capability_executor imports at module level
 # ---------------------------------------------------------------------------
 def _ensure_stub(mod_name: str):
-    if mod_name not in sys.modules:
-        stub = ModuleType(mod_name)
-        sys.modules[mod_name] = stub
+    if mod_name == "core_runtime" and mod_name in sys.modules:
+        return sys.modules[mod_name]
+    stub = ModuleType(mod_name)
+    sys.modules[mod_name] = stub
     return sys.modules[mod_name]
 
 _ensure_stub("core_runtime")
@@ -76,6 +77,20 @@ class FunctionEntry:
 # Import after stubs are in place
 # ---------------------------------------------------------------------------
 from core_runtime.capability_executor import CapabilityExecutor, CapabilityResponse
+
+for _stub_name in (
+    "core_runtime.capability_handler_registry",
+    "core_runtime.capability_trust_store",
+    "core_runtime.capability_grant_manager",
+    "core_runtime.audit_logger",
+    "core_runtime.di_container",
+    "core_runtime.paths",
+):
+    sys.modules.pop(_stub_name, None)
+    _parent = sys.modules.get("core_runtime")
+    _attr = _stub_name.rsplit(".", 1)[1]
+    if _parent is not None and hasattr(_parent, _attr):
+        delattr(_parent, _attr)
 
 # ---------------------------------------------------------------------------
 # Helpers

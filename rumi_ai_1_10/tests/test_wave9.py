@@ -601,6 +601,9 @@ class TestExpectedHandlerKeysConsistency:
             "kernel:component.discover", "kernel:component.load",
             "kernel:emit", "kernel:startup.failed",
             "kernel:vocab.load", "kernel:noop",
+            "kernel:register_kernel_functions",
+            "kernel:universal_call",
+            "kernel:desktop.launch", "kernel:desktop.stop",
             # runtime
             "kernel:flow.load_all", "kernel:flow.execute_by_id",
             "kernel:python_file_call",

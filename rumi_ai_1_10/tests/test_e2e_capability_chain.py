@@ -71,6 +71,20 @@ def _compute_hmac(secret_key: str, data: dict) -> str:
     ).hexdigest()
 
 
+def _compute_trust_hmac(trust_dir: Path, data: dict) -> str:
+    """TrustStore と同じ鍵でテスト用 trust file に署名する。"""
+    from core_runtime.hmac_key_manager import (
+        compute_data_hmac,
+        generate_or_load_signing_key,
+    )
+
+    key = generate_or_load_signing_key(
+        trust_dir / ".secret_key",
+        env_var="RUMI_HMAC_SECRET",
+    )
+    return compute_data_hmac(key, data)
+
+
 # =========================================================================
 # E2E: Trust → Grant → Execute チェーンテスト
 # =========================================================================
@@ -130,6 +144,7 @@ class TestCapabilityChainE2E(unittest.TestCase):
             "sha256": sha256,
             "note": "test trust",
         })
+        data["_hmac_signature"] = _compute_trust_hmac(self.trust_dir, data)
 
         with open(trust_file, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)

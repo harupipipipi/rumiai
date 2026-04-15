@@ -93,6 +93,7 @@ class TestPermissionsConfigValues:
         # core_function_handlers
         assert data["core_function_handlers"] == {
             "core_docker_capability": "docker_capability_handler",
+            "core_viewer_capability": "viewer_capability_handler",
         }
 
 

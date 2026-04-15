@@ -57,6 +57,11 @@ MAX_CONTEXT_DEPTH = 10
 MAX_HOST_EXECUTION_TIMEOUT = int(os.environ.get("RUMI_HOST_EXEC_TIMEOUT", "120"))
 
 
+def get_secrets_grant_manager():
+    from .secrets_grant_manager import get_secrets_grant_manager as _get
+    return _get()
+
+
 @dataclass
 class ExecutionResult:
     """実行結果（汎用）"""
@@ -273,7 +278,6 @@ class SecureExecutor:
 
             # --- W18-A: Secret ファイル注入 ---
             try:
-                from .secrets_grant_manager import get_secrets_grant_manager
                 _sgm = get_secrets_grant_manager()
                 if _sgm:
                     _granted_secrets = _sgm.get_granted_secrets(pack_id)

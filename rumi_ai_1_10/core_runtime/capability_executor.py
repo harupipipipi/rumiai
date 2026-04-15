@@ -268,7 +268,12 @@ class CapabilityExecutor:
         self._approval_manager = None
         self._permission_manager = None
         # Wave 29: core function handler table
-        self._core_function_handlers: Dict[str, str] = {}
+        self._core_function_handlers: Dict[str, str] = (
+            (_permissions_config or {}).get("core_function_handlers", {
+                "core_docker_capability": "docker_capability_handler",
+                "core_desktop_capability": "desktop_capability_handler",
+            })
+        ).copy()
 
     def set_kernel(self, kernel) -> None:
         """
@@ -759,6 +764,10 @@ class CapabilityExecutor:
     def _runner_command(self):
         return [sys.executable, str(FUNCTION_RUNNER_PATH)]
 
+    def _generate_function_runner_script(self):
+        """Return the bundled runner script for legacy callers/tests."""
+        return FUNCTION_RUNNER_PATH.read_text(encoding="utf-8")
+
     def _cleanup_temp_file(self, path, description):
         if not path:
             return
@@ -834,6 +843,8 @@ class CapabilityExecutor:
         pack_id, function_id = entry.pack_id, entry.function_id
         function_dir, main_py_path = entry.function_dir, entry.main_py_path
         timeout = self._get_function_timeout(entry)
+        if function_dir is None and main_py_path is None:
+            return CapabilityResponse(success=False, error="User function execution is not configured", error_type="not_implemented", latency_ms=(time.time() - start_time) * 1000)
         if function_dir is None or not Path(function_dir).is_dir():
             return CapabilityResponse(success=False, error=f"function_dir not found: {function_dir}", error_type="function_dir_not_found", latency_ms=(time.time() - start_time) * 1000)
         if main_py_path is None or not Path(main_py_path).is_file():
@@ -901,10 +912,12 @@ class CapabilityExecutor:
             return CapabilityResponse(success=False, error=f"Function execution error: {e}", error_type="internal_error", latency_ms=(time.time() - start_time) * 1000)
 
     def _execute_host_function(self, principal_id, entry, args, request_id, start_time):
+        function_dir, main_py_path = entry.function_dir, entry.main_py_path
+        if function_dir is None and main_py_path is None:
+            return CapabilityResponse(success=False, error="Host function execution is not configured", error_type="not_implemented", latency_ms=(time.time() - start_time) * 1000)
         allow_host = os.environ.get("RUMI_ALLOW_HOST_EXECUTION", "").lower()
         if allow_host not in ("1", "true"):
             return CapabilityResponse(success=False, error="Host execution is disabled. Set RUMI_ALLOW_HOST_EXECUTION=1 to enable.", error_type="host_execution_disabled", latency_ms=(time.time() - start_time) * 1000)
-        function_dir, main_py_path = entry.function_dir, entry.main_py_path
         timeout = self._get_function_timeout(entry)
         if function_dir is None or not Path(function_dir).is_dir():
             return CapabilityResponse(success=False, error=f"function_dir not found: {function_dir}", error_type="function_dir_not_found", latency_ms=(time.time() - start_time) * 1000)
@@ -978,17 +991,19 @@ class CapabilityExecutor:
             return CapabilityResponse(success=False, error=f"Execution error: {e}", error_type="internal_error", latency_ms=(time.time() - start_time) * 1000)
 
     def _execute_command_function(self, principal_id, entry, args, request_id, start_time):
+        command = getattr(entry, 'command', [])
+        if not command or not isinstance(command, list):
+            return CapabilityResponse(success=False, error="No command defined for runtime=command", error_type="invalid_config", latency_ms=(time.time() - start_time) * 1000)
         # Security: RUMI_ALLOW_HOST_EXECUTION guard (symmetric with _execute_host_function)
         allow_host = os.environ.get("RUMI_ALLOW_HOST_EXECUTION", "").lower()
         if allow_host not in ("1", "true"):
             return CapabilityResponse(success=False, error="Host execution is disabled. Set RUMI_ALLOW_HOST_EXECUTION=1 to enable.", error_type="host_execution_disabled", latency_ms=(time.time() - start_time) * 1000)
-        command = getattr(entry, 'command', [])
-        if not command or not isinstance(command, list):
-            return CapabilityResponse(success=False, error="No command defined for runtime=command", error_type="invalid_config", latency_ms=(time.time() - start_time) * 1000)
         # Security: path traversal check (symmetric with _execute_binary_function)
         func_dir = Path(entry.function_dir).resolve() if entry.function_dir else None
         if func_dir and Path(command[0]).is_absolute():
-            if not Path(command[0]).resolve().is_relative_to(func_dir):
+            command_path = Path(command[0]).resolve()
+            interpreter_path = Path(sys.executable).resolve()
+            if command_path != interpreter_path and not command_path.is_relative_to(func_dir):
                 return CapabilityResponse(success=False, error="Command path escapes function directory", error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
         timeout = self._get_function_timeout(entry)
         context = {"principal_id": principal_id, "pack_id": entry.pack_id, "function_id": entry.function_id, "request_id": request_id, "ts": self._now_ts()}

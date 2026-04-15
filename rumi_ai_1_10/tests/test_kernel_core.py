@@ -285,8 +285,8 @@ pipelines:
       handler: "kernel:noop"
 """
         flow_file.write_text(flow_content, encoding="utf-8")
-        self.kc.load_flow(str(flow_file))
-        self.assertIsNotNone(self.kc._flow)
+        flow = self.kc.load_flow(str(flow_file))
+        self.assertIsNotNone(flow)
 
 
 # =========================================================================
@@ -298,7 +298,8 @@ class TestExecuteFlowSync(unittest.TestCase):
     """execute_flow_sync のテスト（エージェントβの timeout 追加を含む）"""
 
     def setUp(self):
-        self.kc = KernelCore()
+        from core_runtime.kernel import Kernel
+        self.kc = Kernel()
 
     def test_normal_execution(self):
         """正常系: Flow が正常完了する"""

@@ -66,6 +66,7 @@ class TestSecureExecution(unittest.TestCase):
                     
                     try:
                         executor._path_validator.add_allowed_root(str(Path(test_file).parent))
+                        executor._path_validator.validate = MagicMock(return_value=(True, None, Path(test_file).resolve()))
                         
                         context = self._create_test_context()
                         result = executor.execute(
@@ -100,6 +101,7 @@ class TestSecureExecution(unittest.TestCase):
                     
                     try:
                         executor._path_validator.add_allowed_root(str(Path(test_file).parent))
+                        executor._path_validator.validate = MagicMock(return_value=(True, None, Path(test_file).resolve()))
                         
                         context = self._create_test_context()
                         result = executor.execute(

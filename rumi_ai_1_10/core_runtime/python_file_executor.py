@@ -376,6 +376,20 @@ class PythonFileExecutor:
     def _now_ts(self) -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
+    def _audit(self, event_type: str, **details: Any) -> None:
+        """Compatibility audit hook for tests and legacy integrations."""
+        try:
+            from .audit_logger import get_audit_logger
+            audit = get_audit_logger()
+            audit.log_security_event(
+                event_type=event_type,
+                severity=details.pop("severity", "info"),
+                description=details.pop("description", event_type),
+                details=details,
+            )
+        except Exception:
+            pass
+
     def get_security_mode(self) -> str:
         """現在のセキュリティモードを取得"""
         return self._security_mode

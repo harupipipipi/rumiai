@@ -226,11 +226,30 @@ def _sync_alias_module(alias_name: str, target_name: str) -> None:
     sys.modules[alias_name] = target_module
     _bind_parent_module(alias_name, target_module)
 
+
+def _restore_real_di_container() -> None:
+    _REAL_DI_CONTAINER_MODULE.get_container = _REAL_GET_CONTAINER
+    sys.modules["core_runtime.di_container"] = _REAL_DI_CONTAINER_MODULE
+    _bind_parent_module("core_runtime.di_container", _REAL_DI_CONTAINER_MODULE)
+
+
 _RESTORE_REAL_MODULES = (
+    "core_runtime.deprecation",
+    "core_runtime.kernel_core",
+    "core_runtime.kernel_flow_execution",
+    "core_runtime.kernel_handlers_runtime",
+    "core_runtime.audit_logger",
+    "core_runtime.network_grant_manager",
+    "core_runtime.capability_proxy",
     "core_runtime.paths",
     "backend_core.ecosystem.mounts",
     "backend_core.ecosystem.registry",
     "backend_core.ecosystem.compat",
+    "backend_core.ecosystem.uuid_utils",
+    "backend_core.ecosystem.json_patch",
+    "backend_core.ecosystem.spec",
+    "backend_core.ecosystem.spec.schema",
+    "backend_core.ecosystem.spec.schema.validator",
 )
 
 _BIND_ONLY_MODULES = (
@@ -239,9 +258,21 @@ _BIND_ONLY_MODULES = (
     "core_runtime.container_orchestrator",
     "core_runtime.kernel_core",
     "core_runtime.kernel_handlers_system",
+    "core_runtime.python_file_executor",
+    "core_runtime.unit_executor",
 )
 
 _ALIAS_MODULES = (
+    ("rumi_ai_1_10.core_runtime.audit_logger", "core_runtime.audit_logger"),
+    ("rumi_ai_1_10.core_runtime.network_grant_manager", "core_runtime.network_grant_manager"),
+    ("rumi_ai_1_10.core_runtime.capability_proxy", "core_runtime.capability_proxy"),
+    ("rumi_ai_1_10.core_runtime.python_file_executor", "core_runtime.python_file_executor"),
+    ("rumi_ai_1_10.core_runtime.unit_executor", "core_runtime.unit_executor"),
+    ("rumi_ai_1_10.core_runtime.approval_manager", "core_runtime.approval_manager"),
+    ("rumi_ai_1_10.core_runtime.store_registry", "core_runtime.store_registry"),
+    ("rumi_ai_1_10.core_runtime.unit_registry", "core_runtime.unit_registry"),
+    ("rumi_ai_1_10.core_runtime.capability_grant_manager", "core_runtime.capability_grant_manager"),
+    ("rumi_ai_1_10.core_runtime.unit_trust_store", "core_runtime.unit_trust_store"),
     ("rumi_ai_1_10.core_runtime.health", "core_runtime.health"),
     ("rumi_ai_1_10.core_runtime.metrics", "core_runtime.metrics"),
     ("rumi_ai_1_10.core_runtime.paths", "core_runtime.paths"),
@@ -252,15 +283,20 @@ _RESTORE_SKIP_PREFIXES = (
     "tests/test_wave20a_active_ecosystem_hmac.py",
     "tests/test_wave20b_container_cleanup.py",
     "tests/test_wave21a_host_privilege_hardening.py",
+    "tests/test_wave21b_hmac_key_encryption.py",
     "tests/test_wave22c_core_pack_structure.py",
     "tests/test_wave24b_registry_function_scan.py",
+    "tests/test_wave25a_function_call_dispatch.py",
     "tests/test_wave27_flow_engine.py",
     "tests/test_function_unification/test_wave27_flow_engine.py",
 )
 
-
 def _should_skip_restore(nodeid: str | None) -> bool:
-    return bool(nodeid) and nodeid.startswith(_RESTORE_SKIP_PREFIXES)
+    return bool(nodeid) and any(prefix in nodeid for prefix in _RESTORE_SKIP_PREFIXES)
+
+
+def _is_di_phase_test(nodeid: str | None) -> bool:
+    return bool(nodeid) and "test_di_phase" in nodeid
 
 
 def _restore_test_module_mocks(test_module) -> None:
@@ -269,22 +305,70 @@ def _restore_test_module_mocks(test_module) -> None:
         for module_name, module in mock_mods.items():
             sys.modules[module_name] = module
             _bind_parent_module(module_name, module)
+    for attr_name, module_name in (
+        ("_hmac_module", "core_runtime.hmac_key_manager"),
+        ("_dummy_hmac", "core_runtime.hmac_key_manager"),
+        ("_dummy_audit", "core_runtime.audit_logger"),
+        ("_dummy_paths", "core_runtime.paths"),
+        ("_dummy_di", "core_runtime.di_container"),
+    ):
+        module = getattr(test_module, attr_name, None)
+        if module is not None:
+            sys.modules[module_name] = module
+            _bind_parent_module(module_name, module)
+    if getattr(test_module, "_mock_container", None) is not None:
+        module = types.ModuleType("core_runtime.di_container")
+        module.get_container = lambda: test_module._mock_container
+        sys.modules["core_runtime.di_container"] = module
+        _bind_parent_module("core_runtime.di_container", module)
+    if getattr(test_module, "_mock_audit_logger", None) is not None:
+        module = types.ModuleType("core_runtime.audit_logger")
+        module.get_audit_logger = lambda: test_module._mock_audit_logger
+        sys.modules["core_runtime.audit_logger"] = module
+        _bind_parent_module("core_runtime.audit_logger", module)
+    paths_prefix = getattr(test_module, "_CORE_PACK_ID_PREFIX", None)
+    if paths_prefix is None and hasattr(test_module, "_mock_container"):
+        paths_prefix = "core_"
+    if paths_prefix is not None:
+        module = types.ModuleType("core_runtime.paths")
+        module.CORE_PACK_ID_PREFIX = paths_prefix
+        sys.modules["core_runtime.paths"] = module
+        _bind_parent_module("core_runtime.paths", module)
     registry_mod = getattr(test_module, "_registry_mod", None)
     if registry_mod is not None:
         sys.modules["backend_core.ecosystem.registry"] = registry_mod
         _bind_parent_module("backend_core.ecosystem.registry", registry_mod)
 
 
-def pytest_runtest_setup(item):
-    _reset_package_roots()
-    if _should_skip_restore(item.nodeid):
-        _restore_test_module_mocks(getattr(item, "module", None))
+def _remove_module_binding(module_name: str) -> None:
+    sys.modules.pop(module_name, None)
+    if "." not in module_name:
         return
+    parent_name, attr_name = module_name.rsplit(".", 1)
+    parent = sys.modules.get(parent_name)
+    if parent is not None and getattr(parent, attr_name, None) is not None:
+        try:
+            delattr(parent, attr_name)
+        except AttributeError:
+            pass
+
+
+def _restore_real_modules() -> None:
     for _mod_name in _RESTORE_REAL_MODULES:
         try:
             _force_real_import(_mod_name)
         except Exception:
             pass
+
+
+def pytest_runtest_setup(item):
+    _reset_package_roots()
+    _restore_real_di_container()
+    if _is_di_phase_test(item.nodeid):
+        setattr(item.module, "get_container", _REAL_DI_CONTAINER_MODULE.get_container)
+    if _should_skip_restore(item.nodeid):
+        _restore_test_module_mocks(getattr(item, "module", None))
+        return
     for _mod_name in _BIND_ONLY_MODULES:
         try:
             _bind_parent_module(_mod_name)
@@ -300,12 +384,10 @@ def pytest_runtest_setup(item):
 def pytest_collectreport(report):
     _reset_package_roots()
     if _should_skip_restore(getattr(report, "nodeid", None)):
+        _restore_real_di_container()
+        _restore_real_modules()
         return
-    for _mod_name in _RESTORE_REAL_MODULES:
-        try:
-            _force_real_import(_mod_name)
-        except Exception:
-            pass
+    _restore_real_modules()
     for _mod_name in _BIND_ONLY_MODULES:
         try:
             _bind_parent_module(_mod_name)
@@ -316,9 +398,12 @@ def pytest_collectreport(report):
             _sync_alias_module(_alias_name, _target_name)
         except Exception:
             pass
+    _restore_real_di_container()
 
 
 _install_capability_handler_registry_shim()
+_REAL_DI_CONTAINER_MODULE = importlib.import_module("core_runtime.di_container")
+_REAL_GET_CONTAINER = _REAL_DI_CONTAINER_MODULE.get_container
 
 # ---------------------------------------------------------------------------
 # 共通 fixture
@@ -335,6 +420,7 @@ def _clean_env_vars(monkeypatch):
         "RUMI_HMAC_SECRET",
         "RUMI_LOCAL_PACK_MODE",
         "RUMI_HASH_CACHE_TTL_SEC",
+        "RUMI_ALLOW_WINDOWS_TCP_FALLBACK",
     ):
         monkeypatch.delenv(var, raising=False)
 
@@ -342,12 +428,24 @@ def _clean_env_vars(monkeypatch):
 @pytest.fixture(autouse=True)
 def _reset_singletons(request):
     """各テスト後にグローバルシングルトンをリセットする"""
+    skip_restore = _should_skip_restore(request.node.nodeid)
     if request.node.nodeid.endswith(
         "tests/test_function_unification/test_phase_d.py::TestFileDeletion::test_handler_registry_not_importable"
     ):
         sys.modules.pop("core_runtime.capability_handler_registry", None)
         sys.modules.pop("rumi_ai_1_10.core_runtime.capability_handler_registry", None)
     yield
+    if skip_restore:
+        _restore_real_di_container()
+        _restore_real_modules()
+        for attr_name, module_name in (
+            ("_dummy_hmac", "core_runtime.hmac_key_manager"),
+            ("_dummy_audit", "core_runtime.audit_logger"),
+            ("_dummy_paths", "core_runtime.paths"),
+            ("_dummy_di", "core_runtime.di_container"),
+        ):
+            if getattr(request.module, attr_name, None) is not None:
+                _remove_module_binding(module_name)
     _install_capability_handler_registry_shim()
 
     # ================================================================

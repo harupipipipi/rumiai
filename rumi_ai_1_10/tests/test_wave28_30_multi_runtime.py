@@ -235,13 +235,14 @@ class TestWave28B_RuntimeDispatch:
             function_dir=func_dir,
             manifest={},
         )
-        resp = executor._execute_command_function(
-            principal_id="user1",
-            entry=entry,
-            args={},
-            request_id="req1",
-            start_time=time.time(),
-        )
+        with patch.dict(os.environ, {"RUMI_ALLOW_HOST_EXECUTION": "1"}):
+            resp = executor._execute_command_function(
+                principal_id="user1",
+                entry=entry,
+                args={},
+                request_id="req1",
+                start_time=time.time(),
+            )
         assert resp.success is True
         assert resp.output["cmd_result"] == "ok"
 

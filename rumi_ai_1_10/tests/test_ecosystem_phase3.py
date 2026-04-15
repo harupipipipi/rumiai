@@ -39,21 +39,21 @@ class TestDefaultPackStructure:
     @pytest.fixture
     def ecosystem_dir(self):
         """テスト用エコシステムディレクトリ"""
-        # 実際のecosystem/defaultを使用
-        return Path("ecosystem")
+        # 実際の ecosystem/defaults を使用
+        return Path(__file__).resolve().parent.parent / "ecosystem"
     
     def test_ecosystem_json_exists(self, ecosystem_dir):
         """ecosystem.jsonが存在する"""
-        ecosystem_file = ecosystem_dir / "default" / "backend" / "ecosystem.json"
+        ecosystem_file = ecosystem_dir / "defaults" / "ecosystem.json"
         assert ecosystem_file.exists(), f"ecosystem.jsonが見つかりません: {ecosystem_file}"
     
     def test_ecosystem_json_valid(self, ecosystem_dir):
         """ecosystem.jsonが有効なJSON"""
-        ecosystem_file = ecosystem_dir / "default" / "backend" / "ecosystem.json"
+        ecosystem_file = ecosystem_dir / "defaults" / "ecosystem.json"
         with open(ecosystem_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
         
-        assert data['pack_id'] == 'default'
+        assert data['pack_id'] == 'defaults'
         assert 'pack_identity' in data
         assert 'version' in data
         assert 'vocabulary' in data
@@ -61,8 +61,8 @@ class TestDefaultPackStructure:
     
     def test_component_manifests_exist(self, ecosystem_dir):
         """すべてのコンポーネントのmanifest.jsonが存在する"""
-        components_dir = ecosystem_dir / "default" / "backend" / "components"
-        expected_components = ['chats', 'tool', 'prompt', 'supporter', 'ai_client']
+        components_dir = ecosystem_dir / "defaults" / "components"
+        expected_components = ['chat', 'tool', 'prompt', 'agent', 'ai_client']
         
         for component_name in expected_components:
             manifest_file = components_dir / component_name / "manifest.json"
@@ -70,7 +70,7 @@ class TestDefaultPackStructure:
     
     def test_component_manifests_valid(self, ecosystem_dir):
         """すべてのコンポーネントのmanifest.jsonが有効"""
-        components_dir = ecosystem_dir / "default" / "backend" / "components"
+        components_dir = ecosystem_dir / "defaults" / "components"
         
         for component_dir in components_dir.iterdir():
             if component_dir.is_dir():

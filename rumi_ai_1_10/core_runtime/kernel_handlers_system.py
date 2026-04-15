@@ -275,7 +275,7 @@ class KernelSystemHandlersMixin:
         try:
             full_path.relative_to(Path(base_path).resolve() if base_path and base_path != "." else Path(".").resolve())
         except ValueError:
-            _logger.warning("Path traversal detected: %s (base: %s)", file_arg, base_path)
+            _logger.warning(f"Path traversal detected: {file_arg} (base: {base_path})")
             return {"error": "Path traversal detected", "status": "blocked"}
         if not full_path.exists():
             return {"_kernel_step_status": "skipped", "_kernel_step_meta": {"reason": "file_not_found", "path": str(full_path)}}

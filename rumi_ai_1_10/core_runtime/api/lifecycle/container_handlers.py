@@ -19,7 +19,7 @@ class ContainerHandlersMixin:
         if self.approval_manager:
             from ...approval_manager import PackStatus
             status = self.approval_manager.get_status(pack_id)
-            if status != PackStatus.APPROVED:
+            if status not in (PackStatus.APPROVED, "approved"):
                 return {"success": False, "error": f"Pack not approved: {status}", "status_code": 403}
 
         result = self.container_orchestrator.start_container(pack_id)

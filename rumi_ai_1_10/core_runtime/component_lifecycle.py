@@ -288,7 +288,10 @@ class ComponentLifecycleExecutor:
                 status = am.get_status(pack_id)
                 if status != PackStatus.APPROVED:
                     # Wave 1-2: 開発モード自動承認を試行
-                    if hasattr(am, 'auto_approve_if_dev') and am.auto_approve_if_dev(pack_id):
+                    if (
+                        callable(getattr(am, "auto_approve_if_dev", None))
+                        and am.auto_approve_if_dev(pack_id) is True
+                    ):
                         self.diagnostics.record_step(
                             phase=phase,
                             step_id=f"{phase}.{comp_id}.dev_auto_approved",
@@ -321,8 +324,9 @@ class ComponentLifecycleExecutor:
                         return
                 
                 # Wave 2: ハッシュ粒度緩和 — verify_hash_detailed を使用
-                if hasattr(am, 'verify_hash_detailed'):
-                    hash_result = am.verify_hash_detailed(pack_id)
+                detailed_checker = getattr(am, "verify_hash_detailed", None)
+                hash_result = detailed_checker(pack_id) if callable(detailed_checker) else None
+                if isinstance(hash_result, dict) and "valid" in hash_result:
                     if not hash_result["valid"]:
                         if hash_result["critical_changed"]:
                             am.mark_modified(pack_id)

@@ -357,6 +357,26 @@ class ApprovalManager:
                 self._save_grant(approval)
         
         return packs
+
+    def get_resource_requirements(self, pack_id: str) -> Dict[str, Any]:
+        """Return resource requirements declared in a pack ecosystem.json."""
+        pack_dir = self._resolve_pack_dir(pack_id)
+        if pack_dir is None:
+            return {}
+        ecosystem_file = pack_dir / "ecosystem.json"
+        try:
+            data = json.loads(ecosystem_file.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+        requirements: Dict[str, Any] = {}
+        if data.get("required_secrets"):
+            requirements["required_secrets"] = data["required_secrets"]
+        if data.get("required_network"):
+            requirements["required_network"] = data["required_network"]
+        if data.get("host_execution"):
+            requirements["host_execution"] = data["host_execution"]
+        return requirements
     
     def _resolve_pack_dir(self, pack_id: str) -> Optional[Path]:
         """

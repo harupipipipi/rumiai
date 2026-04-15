@@ -337,6 +337,8 @@ class Registry:
                 "Distribution and update features require pack_identity.",
                 _pid,
             )
+            _pi = f"local:{_pid}"
+            ecosystem_data["pack_identity"] = _pi
         # END D-PATCH -------------------------------------------------------
 
         # UUIDを生成（または既存の値を使用）

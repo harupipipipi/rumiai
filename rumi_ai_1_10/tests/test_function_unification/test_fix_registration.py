@@ -19,6 +19,7 @@ if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
 
+@unittest.skip("Phase D removes _register_builtin_handlers; core functions are loaded through FunctionRegistry startup registration.")
 class TestRegisterBuiltinHandlers(unittest.TestCase):
     """FIX-A1: _register_builtin_handlers() のテスト"""
 

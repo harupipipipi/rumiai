@@ -24,35 +24,40 @@ _PKG = "core_runtime"
 # paths ダミー
 _dummy_paths = types.ModuleType(f"{_PKG}.paths")
 _dummy_paths.BASE_DIR = Path("/tmp/dummy_base_dir")
-sys.modules.setdefault(f"{_PKG}.paths", _dummy_paths)
+sys.modules[f"{_PKG}.paths"] = _dummy_paths
 
 # audit_logger ダミー — テスト全体で共有する MagicMock
 _dummy_audit_instance = MagicMock()
 _dummy_audit = types.ModuleType(f"{_PKG}.audit_logger")
 _dummy_audit.get_audit_logger = MagicMock(return_value=_dummy_audit_instance)
-sys.modules.setdefault(f"{_PKG}.audit_logger", _dummy_audit)
+sys.modules[f"{_PKG}.audit_logger"] = _dummy_audit
 
 # di_container ダミー
 _dummy_di = types.ModuleType(f"{_PKG}.di_container")
 _dummy_di.get_container = MagicMock(return_value=MagicMock())
-sys.modules.setdefault(f"{_PKG}.di_container", _dummy_di)
-
-# pack_api_server ダミー
-_dummy_pack_api = types.ModuleType(f"{_PKG}.pack_api_server")
-class _APIResponse:
-    def __init__(self, success, data=None, error=None):
-        self.success, self.data, self.error = success, data, error
-_dummy_pack_api.APIResponse = _APIResponse
-sys.modules.setdefault(f"{_PKG}.pack_api_server", _dummy_pack_api)
+sys.modules[f"{_PKG}.di_container"] = _dummy_di
 
 # ---------------------------------------------------------------------------
 # テスト対象のインポート
 # ---------------------------------------------------------------------------
+sys.modules.pop(f"{_PKG}.hmac_key_manager", None)
 from core_runtime.hmac_key_manager import (  # noqa: E402
     HMACKeyManager,
     HMACKey,
     _FERNET_AVAILABLE,
 )
+_hmac_module = sys.modules[f"{_PKG}.hmac_key_manager"]
+
+for _stub_name in (
+    f"{_PKG}.paths",
+    f"{_PKG}.audit_logger",
+    f"{_PKG}.di_container",
+):
+    sys.modules.pop(_stub_name, None)
+    _parent = sys.modules.get(_PKG)
+    _attr = _stub_name.rsplit(".", 1)[1]
+    if _parent is not None and hasattr(_parent, _attr):
+        delattr(_parent, _attr)
 
 # cryptography が実環境にあるか
 try:

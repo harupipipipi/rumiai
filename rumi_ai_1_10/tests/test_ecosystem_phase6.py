@@ -24,6 +24,15 @@ from backend_core.ecosystem.registry import Registry, ComponentInfo, PackInfo
 from backend_core.ecosystem.uuid_utils import generate_pack_uuid, generate_component_uuid
 
 
+def _get_addon_manager_for(registry: Registry) -> AddonManager:
+    import backend_core.ecosystem.registry as reg
+
+    reg._global_registry = registry
+    manager = get_addon_manager()
+    manager.load_from_registry(registry)
+    return manager
+
+
 @pytest.fixture(autouse=True)
 def reset_global_states():
     """各テスト前後でグローバル状態をリセット"""
@@ -116,7 +125,7 @@ class TestAddonLoading:
         registry = Registry(str(temp_pack))
         registry.load_all_packs()
         
-        manager = get_addon_manager()
+        manager = _get_addon_manager_for(registry)
         
         assert len(manager.addons) == 1
         assert "test_pack:test_addon" in manager.addons
@@ -126,7 +135,7 @@ class TestAddonLoading:
         registry = Registry(str(temp_pack))
         registry.load_all_packs()
         
-        manager = get_addon_manager()
+        manager = _get_addon_manager_for(registry)
         addon = manager.get_addon("test_pack:test_addon")
         
         assert addon is not None
@@ -240,7 +249,7 @@ class TestAddonApplication:
         registry = Registry(str(pack_with_addon))
         registry.load_all_packs()
         
-        manager = get_addon_manager()
+        manager = _get_addon_manager_for(registry)
         pack = registry.get_pack("addon_pack")
         component = registry.get_component("addon_pack", "target_type", "target_v1")
         
@@ -255,7 +264,7 @@ class TestAddonApplication:
         registry = Registry(str(pack_with_addon))
         registry.load_all_packs()
         
-        manager = get_addon_manager()
+        manager = _get_addon_manager_for(registry)
         pack = registry.get_pack("addon_pack")
         component = registry.get_component("addon_pack", "target_type", "target_v1")
         
@@ -302,7 +311,7 @@ class TestAddonApplication:
         registry = Registry(str(temp_dir))
         registry.load_all_packs()
         
-        manager = get_addon_manager()
+        manager = _get_addon_manager_for(registry)
         pack = registry.get_pack("addon_pack")
         component = registry.get_component("addon_pack", "target_type", "target_v1")
         
@@ -383,7 +392,7 @@ class TestAddonDenyAll:
         registry = Registry(str(deny_all_pack))
         registry.load_all_packs()
         
-        manager = get_addon_manager()
+        manager = _get_addon_manager_for(registry)
         pack = registry.get_pack("deny_pack")
         component = registry.get_component("deny_pack", "locked_type", "locked_v1")
         
@@ -489,7 +498,7 @@ class TestFilePatch:
         registry = Registry(str(pack_with_file))
         registry.load_all_packs()
         
-        manager = get_addon_manager()
+        manager = _get_addon_manager_for(registry)
         pack = registry.get_pack("file_pack")
         component = registry.get_component("file_pack", "file_type", "file_v1")
         
@@ -624,7 +633,7 @@ class TestAddonEnableDisable:
         registry = Registry(str(pack_with_toggleable_addon))
         registry.load_all_packs()
         
-        manager = get_addon_manager()
+        manager = _get_addon_manager_for(registry)
         pack = registry.get_pack("toggle_pack")
         component = registry.get_component("toggle_pack", "toggle_type", "toggle_v1")
         
@@ -644,7 +653,7 @@ class TestAddonEnableDisable:
         registry = Registry(str(pack_with_toggleable_addon))
         registry.load_all_packs()
         
-        manager = get_addon_manager()
+        manager = _get_addon_manager_for(registry)
         
         # 無効化してから有効化
         manager.disable_addon("toggle_pack:toggleable")
@@ -711,7 +720,7 @@ class TestGetAllAddons:
         registry = Registry(str(pack_with_multiple_addons))
         registry.load_all_packs()
         
-        manager = get_addon_manager()
+        manager = _get_addon_manager_for(registry)
         all_addons = manager.get_all_addons()
         
         assert len(all_addons) == 3
