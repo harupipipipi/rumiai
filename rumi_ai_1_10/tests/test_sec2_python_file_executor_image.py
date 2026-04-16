@@ -63,14 +63,13 @@ class TestExecutorImageEnvOverride:
         assert "python:3.11-slim@sha256:" in pfe_module.DEFAULT_EXECUTOR_IMAGE
 
     def test_executor_image_env_empty_uses_default(self, monkeypatch):
-        """RUMI_EXECUTOR_IMAGE が空文字列の場合、os.environ.get の仕様で空文字列が返る"""
+        """RUMI_EXECUTOR_IMAGE が空文字列の場合、デフォルトイメージに戻る"""
         monkeypatch.setenv("RUMI_EXECUTOR_IMAGE", "")
 
         import core_runtime.python_file_executor as pfe_module
         importlib.reload(pfe_module)
 
-        # os.environ.get は空文字列もキーが存在する扱い → 空文字列が返る
-        assert pfe_module.EXECUTOR_IMAGE == ""
+        assert pfe_module.EXECUTOR_IMAGE == pfe_module.DEFAULT_EXECUTOR_IMAGE
 
 
 class TestExecutorImageUsedInContainerCommand:
