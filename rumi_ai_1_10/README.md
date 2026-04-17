@@ -305,6 +305,8 @@ curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
 | [docs/roadmap.md](docs/roadmap.md) | ロードマップ |
 | [docs/quality_pack/philosophy_memo.md](docs/quality_pack/philosophy_memo.md) | 開発判断に使う思想メモ |
 | [docs/quality_pack/claude_desktop_quality_pack.md](docs/quality_pack/claude_desktop_quality_pack.md) | 品質保証・監査・回帰検証パック |
+| [docs/quality_pack/test_coverage_matrix.md](docs/quality_pack/test_coverage_matrix.md) | テスト分類表と未テスト領域 |
+| [docs/quality_pack/philosophy_re_evaluation_log.md](docs/quality_pack/philosophy_re_evaluation_log.md) | 作業中の思想再評価ログ |
 
 ---
 

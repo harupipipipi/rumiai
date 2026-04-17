@@ -20,9 +20,13 @@ def _assert_contains_all(text: str, needles: list[str], context: str) -> None:
 def test_quality_pack_docs_exist_and_have_required_sections():
     philosophy_memo = PACKAGE_ROOT / "docs" / "quality_pack" / "philosophy_memo.md"
     quality_pack = PACKAGE_ROOT / "docs" / "quality_pack" / "claude_desktop_quality_pack.md"
+    coverage_matrix = PACKAGE_ROOT / "docs" / "quality_pack" / "test_coverage_matrix.md"
+    re_eval_log = PACKAGE_ROOT / "docs" / "quality_pack" / "philosophy_re_evaluation_log.md"
 
     assert philosophy_memo.exists()
     assert quality_pack.exists()
+    assert coverage_matrix.exists()
+    assert re_eval_log.exists()
 
     memo_text = _read(philosophy_memo)
     pack_text = _read(quality_pack)
@@ -52,6 +56,30 @@ def test_quality_pack_docs_exist_and_have_required_sections():
             "AIエージェント運用プロンプト",
         ],
         "claude_desktop_quality_pack.md",
+    )
+
+    coverage_text = _read(coverage_matrix)
+    _assert_contains_all(
+        coverage_text,
+        [
+            "unit",
+            "integration",
+            "contract",
+            "regression",
+            "CLI/backend",
+            "frontend/UI",
+            "security/permission",
+            "failure-path",
+            "philosophy-alignment",
+        ],
+        "test_coverage_matrix.md",
+    )
+
+    re_eval_text = _read(re_eval_log)
+    _assert_contains_all(
+        re_eval_text,
+        ["テスト設計前", "大きな修正前", "PR作成前"],
+        "philosophy_re_evaluation_log.md",
     )
 
 
@@ -104,3 +132,18 @@ def test_ui_security_and_frontend_contracts():
     assert scripts["lint"] == "tsc --noEmit"
     assert "build" in scripts
     assert "vite build" in scripts["build"]
+
+
+def test_coverage_matrix_references_existing_tests():
+    matrix = _read(PACKAGE_ROOT / "docs" / "quality_pack" / "test_coverage_matrix.md")
+    expected_paths = [
+        "tests/test_unit_gate.py",
+        "tests/test_route_handlers.py",
+        "tests/test_entrypoint_contracts.py",
+        "tests/test_claude_quality_pack_contract.py",
+        "tests/test_phase_a_health.py",
+        "tests/test_security_guards.py",
+    ]
+    for rel in expected_paths:
+        assert rel in matrix
+        assert (PACKAGE_ROOT / rel).exists() or (REPO_ROOT / rel).exists()

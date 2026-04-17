@@ -21,10 +21,10 @@
 bash rumi_ai_1_10/scripts/quality_pack/run_claude_quality_pack.sh
 ```
 
-フル監査モード（既存レガシーlint負債まで含める）:
+高速モード（局所確認のみ。既定はフル監査）:
 
 ```bash
-RUMI_FULL_QUALITY=1 bash rumi_ai_1_10/scripts/quality_pack/run_claude_quality_pack.sh
+RUMI_FAST_QUALITY=1 bash rumi_ai_1_10/scripts/quality_pack/run_claude_quality_pack.sh
 ```
 
 個別実行:
@@ -69,10 +69,10 @@ cd pack-shell && cargo test && cd ..
 - root entrypoint (`rumi_ai/__main__.py`) が `rumi_ai_1_10.app` へ接続する契約
 - バージョン整合 (`rumi_ai/__init__.py` と `rumi_ai_1_10/pyproject.toml`)
 
-## 3.3 UI / Playwright相当（静的契約）
-- Tauri 設定のCSPに `localhost:8765` が含まれること
-- `connect-src` が `https://` や `*` を許可していないこと
-- frontend package に型チェック/ビルドスクリプトが存在すること
+## 3.3 UI / Playwright相当（設定・ビルド・契約）
+- frontend build/lint を実行し、型崩れ・依存崩れ・ビルド破綻を検知
+- `tests/test_frontend_build_config.py` で tsconfig / Tailwind の設定境界を検証
+- Tauri 設定のCSPに `localhost:8765` が含まれ、`connect-src` が `https://` や `*` を許可していないこと
 
 ## 3.4 設定 / 権限 / 失敗系
 - CI workflow に root pytest / package pytest / cargo test が定義されていること
@@ -186,3 +186,10 @@ PR1では品質資産のみ、PR2で実害バグを修正する。
 - ユーザー影響:
 - 思想逸脱:
 ```
+
+---
+
+## 12. 分類表・再評価ログ
+
+- テスト分類表: `docs/quality_pack/test_coverage_matrix.md`
+- 思想再評価ログ: `docs/quality_pack/philosophy_re_evaluation_log.md`
