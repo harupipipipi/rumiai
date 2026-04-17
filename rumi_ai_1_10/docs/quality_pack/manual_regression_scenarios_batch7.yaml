@@ -1,0 +1,734 @@
+version: 1
+owner: quality-pack
+description: |
+  手動回帰シナリオ台帳の第7弾。viewer 起動/失敗UX/ナビゲーション制御、
+  release パイプライン、CI 境界、監査証跡の検証を追加する。
+scenarios:
+  - id: b7-vr-001
+    layer: failure-ux
+    risk: viewer-splash-initial
+    reproduce: "viewer起動直後のsplashを確認"
+    expected: "Initializing... が表示される"
+    triage: "src-tauri/splash/index.html の初期progressを確認"
+  - id: b7-vr-002
+    layer: failure-ux
+    risk: viewer-splash-error-color
+    reproduce: "get_setup_progress が Error を返す状態にする"
+    expected: "progress が error クラスになり赤表示"
+    triage: "splashの progress.error クラス付与を確認"
+  - id: b7-vr-003
+    layer: failure-ux
+    risk: viewer-splash-ready-state
+    reproduce: "setup完了状態で splash を表示"
+    expected: "Ready 表示かつ spinner が非表示になる"
+    triage: "msg==='Ready' 分岐を確認"
+  - id: b7-vr-004
+    layer: failure-ux
+    risk: viewer-ipc-unavailable-loop
+    reproduce: "window.__TAURI__ 未定義状態を再現"
+    expected: "500ms間隔で再試行しクラッシュしない"
+    triage: "poll の early return 分岐を確認"
+  - id: b7-vr-005
+    layer: failure-ux
+    risk: viewer-ipc-error-message
+    reproduce: "invoke('get_setup_progress') で例外を発生"
+    expected: "IPC error: ... が表示される"
+    triage: "catch節の el.textContent 更新を確認"
+  - id: b7-vr-006
+    layer: security-permission
+    risk: viewer-nav-guard-external-block
+    reproduce: "viewerで https://example.com へ遷移要求"
+    expected: "nav-guard が遷移を拒否する"
+    triage: "lib.rs on_navigation allowed 判定を確認"
+  - id: b7-vr-007
+    layer: security-permission
+    risk: viewer-nav-guard-localhost-allow
+    reproduce: "http://localhost:8765/panel/ へ遷移"
+    expected: "遷移が許可される"
+    triage: "is_local_http 条件を確認"
+  - id: b7-vr-008
+    layer: security-permission
+    risk: viewer-nav-guard-127001-allow
+    reproduce: "http://127.0.0.1:8765/panel/ へ遷移"
+    expected: "遷移が許可される"
+    triage: "host == 127.0.0.1 条件を確認"
+  - id: b7-vr-009
+    layer: security-permission
+    risk: viewer-nav-guard-wrong-port-block
+    reproduce: "http://localhost:9999 へ遷移"
+    expected: "遷移が拒否される"
+    triage: "port==8765 条件を確認"
+  - id: b7-vr-010
+    layer: security-permission
+    risk: viewer-csp-connect-src-boundary
+    reproduce: "tauri.conf.json の CSP を確認"
+    expected: "connect-src が localhost と ipc のみ許可"
+    triage: "app.security.csp 文字列を確認"
+  - id: b7-vr-011
+    layer: failure-ux
+    risk: viewer-window-show-timing
+    reproduce: "app.setup 後の main window 表示を確認"
+    expected: "起動時に window が表示され白画面で止まらない"
+    triage: "lib.rs get_webview_window('main').show を確認"
+  - id: b7-vr-012
+    layer: failure-ux
+    risk: viewer-health-timeout-message
+    reproduce: "Kernel health check をタイムアウトさせる"
+    expected: "Error: Kernel health check failed が表示される"
+    triage: "wait_for_healthy error handling を確認"
+  - id: b7-vr-013
+    layer: recovery
+    risk: viewer-restart-kernel-command
+    reproduce: "invoke restart_kernel を実行"
+    expected: "Kernel restarted が返る"
+    triage: "restart_kernel command 実装を確認"
+  - id: b7-vr-014
+    layer: recovery
+    risk: viewer-kernel-auto-restart
+    reproduce: "Kernel を異常終了させる"
+    expected: "MAX_AUTO_RESTARTS 範囲で自動再起動"
+    triage: "kernel_manager restart_count 分岐を確認"
+  - id: b7-vr-015
+    layer: observability
+    risk: viewer-kernel-log-created
+    reproduce: "viewer起動後に logs/kernel.log を確認"
+    expected: "kernel.log が作成される"
+    triage: "KernelManager start の log file 作成を確認"
+  - id: b7-vr-016
+    layer: observability
+    risk: viewer-update-check-nonfatal
+    reproduce: "GitHub API 失敗を発生"
+    expected: "startup は継続し non-fatal ログのみ"
+    triage: "updater check error handling を確認"
+  - id: b7-vr-017
+    layer: observability
+    risk: viewer-blocked-nav-log
+    reproduce: "外部URL遷移を試行"
+    expected: "Blocked navigation ログが出力される"
+    triage: "warn ログ出力を確認"
+  - id: b7-vr-018
+    layer: failure-ux
+    risk: viewer-python-setup-failure-message
+    reproduce: "python_env 構築失敗を発生"
+    expected: "Error: Python setup failed を表示"
+    triage: "lib.rs ensure_python_env error handling を確認"
+  - id: b7-vr-019
+    layer: failure-ux
+    risk: viewer-kernel-start-failure-message
+    reproduce: "Kernel start を失敗させる"
+    expected: "Error: Kernel start failed を表示"
+    triage: "km.start error handling を確認"
+  - id: b7-vr-020
+    layer: compatibility
+    risk: viewer-platform-triple-supported
+    reproduce: "各OSで platform_triple を確認"
+    expected: "対応tripleが空でなく有効値"
+    triage: "config.rs platform_triple 分岐を確認"
+
+  - id: b7-vr-021
+    layer: operations-release
+    risk: release-tag-trigger
+    reproduce: "release.yml の trigger を確認"
+    expected: "v* tag push でのみ release 実行"
+    triage: ".github/workflows/release.yml on.push.tags を確認"
+  - id: b7-vr-022
+    layer: operations-release
+    risk: release-matrix-macos-arm
+    reproduce: "release matrix 設定を確認"
+    expected: "aarch64-apple-darwin が含まれる"
+    triage: "matrix.include target を確認"
+  - id: b7-vr-023
+    layer: operations-release
+    risk: release-matrix-macos-intel
+    reproduce: "release matrix 設定を確認"
+    expected: "x86_64-apple-darwin が含まれる"
+    triage: "matrix.include target を確認"
+  - id: b7-vr-024
+    layer: operations-release
+    risk: release-matrix-windows
+    reproduce: "release matrix 設定を確認"
+    expected: "x86_64-pc-windows-msvc が含まれる"
+    triage: "matrix.include target を確認"
+  - id: b7-vr-025
+    layer: operations-release
+    risk: release-matrix-linux
+    reproduce: "release matrix 設定を確認"
+    expected: "x86_64-unknown-linux-gnu が含まれる"
+    triage: "matrix.include target を確認"
+  - id: b7-vr-026
+    layer: operations-release
+    risk: release-linux-deps-install
+    reproduce: "Linux job の依存導入手順を確認"
+    expected: "webkit2gtk など必須依存を install"
+    triage: "Install Linux dependencies step を確認"
+  - id: b7-vr-027
+    layer: operations-release
+    risk: release-rust-toolchain-install
+    reproduce: "release workflow stepを確認"
+    expected: "dtolnay/rust-toolchain@stable を利用"
+    triage: "Install Rust toolchain step を確認"
+  - id: b7-vr-028
+    layer: operations-release
+    risk: release-tauri-cli-version-pin
+    reproduce: "Tauri CLI install stepを確認"
+    expected: "cargo install tauri-cli --version ^2 --locked"
+    triage: "Install Tauri CLI step を確認"
+  - id: b7-vr-029
+    layer: operations-release
+    risk: release-build-command-boundary
+    reproduce: "Build step を確認"
+    expected: "rumi_viewer で cargo tauri build 実行"
+    triage: "working-directory と command を確認"
+  - id: b7-vr-030
+    layer: operations-release
+    risk: release-artifact-dmg
+    reproduce: "artifact path 設定を確認"
+    expected: "dmg パターンを upload 対象に含む"
+    triage: "softprops/action-gh-release files を確認"
+  - id: b7-vr-031
+    layer: operations-release
+    risk: release-artifact-nsis
+    reproduce: "artifact path 設定を確認"
+    expected: "nsis exe パターンを含む"
+    triage: "release files セクションを確認"
+  - id: b7-vr-032
+    layer: operations-release
+    risk: release-artifact-deb
+    reproduce: "artifact path 設定を確認"
+    expected: "deb パターンを含む"
+    triage: "release files セクションを確認"
+  - id: b7-vr-033
+    layer: operations-release
+    risk: release-artifact-appimage
+    reproduce: "artifact path 設定を確認"
+    expected: "AppImage パターンを含む"
+    triage: "release files セクションを確認"
+  - id: b7-vr-034
+    layer: operations-release
+    risk: release-notes-generation
+    reproduce: "release action オプションを確認"
+    expected: "generate_release_notes: true"
+    triage: "action input を確認"
+  - id: b7-vr-035
+    layer: operations-release
+    risk: release-draft-flag
+    reproduce: "release action オプションを確認"
+    expected: "draft: false"
+    triage: "action input を確認"
+  - id: b7-vr-036
+    layer: operations-release
+    risk: release-permissions-contents-write
+    reproduce: "workflow permissions を確認"
+    expected: "contents: write が設定される"
+    triage: "release.yml permissions を確認"
+  - id: b7-vr-037
+    layer: operations-release
+    risk: release-runner-os-spread
+    reproduce: "matrix OS を確認"
+    expected: "macOS/windows/linux が含まれる"
+    triage: "matrix include os を確認"
+  - id: b7-vr-038
+    layer: operations-release
+    risk: viewer-bundle-target-all
+    reproduce: "tauri.conf.json bundle.targets を確認"
+    expected: "targets: all"
+    triage: "bundle.targets 値を確認"
+  - id: b7-vr-039
+    layer: operations-release
+    risk: viewer-minimum-macos-version
+    reproduce: "tauri.conf.json bundle.macOS を確認"
+    expected: "minimumSystemVersion が設定される"
+    triage: "bundle.macOS セクションを確認"
+  - id: b7-vr-040
+    layer: operations-release
+    risk: viewer-windows-install-mode
+    reproduce: "tauri.conf.json windows nsis 設定を確認"
+    expected: "installMode: currentUser"
+    triage: "bundle.windows.nsis を確認"
+
+  - id: b7-vr-041
+    layer: operations-release
+    risk: release-icon-set-completeness
+    reproduce: "tauri.conf.json icon 配列を確認"
+    expected: "png/icns/ico が含まれる"
+    triage: "bundle.icon 配列を確認"
+  - id: b7-vr-042
+    layer: operations-release
+    risk: release-frontend-dist-path
+    reproduce: "tauri.conf build.frontendDist を確認"
+    expected: "./splash が指定される"
+    triage: "tauri.conf build.frontendDist を確認"
+  - id: b7-vr-043
+    layer: operations-release
+    risk: release-main-window-hidden-initial
+    reproduce: "tauri.conf windows.main.visible を確認"
+    expected: "起動時 visible=false"
+    triage: "windows[].visible を確認"
+  - id: b7-vr-044
+    layer: operations-release
+    risk: release-main-window-min-size
+    reproduce: "tauri.conf windows.main minWidth/minHeight を確認"
+    expected: "最低サイズが設定される"
+    triage: "window bounds 設定を確認"
+  - id: b7-vr-045
+    layer: operations-release
+    risk: release-tray-icon-config
+    reproduce: "tauri.conf trayIcon 設定を確認"
+    expected: "iconPath が定義される"
+    triage: "app.trayIcon を確認"
+  - id: b7-vr-046
+    layer: operations-release
+    risk: release-viewer-crate-type
+    reproduce: "src-tauri/Cargo.toml の lib.crate-type を確認"
+    expected: "lib/cdylib/staticlib を含む"
+    triage: "Cargo.toml [lib] セクションを確認"
+  - id: b7-vr-047
+    layer: operations-release
+    risk: release-updater-endpoint
+    reproduce: "updater.rs の API endpoint を確認"
+    expected: "GitHub latest release endpoint を利用"
+    triage: "RELEASES_API 定数を確認"
+  - id: b7-vr-048
+    layer: operations-release
+    risk: release-updater-timeout
+    reproduce: "updater timeout 設定を確認"
+    expected: "timeout が固定化される"
+    triage: "TIMEOUT_SECS を確認"
+  - id: b7-vr-049
+    layer: operations-release
+    risk: release-user-agent-identifier
+    reproduce: "updater HTTP client 設定を確認"
+    expected: "rumi-viewer/<version> user_agent を設定"
+    triage: "reqwest client builder を確認"
+  - id: b7-vr-050
+    layer: operations-release
+    risk: release-page-open-command
+    reproduce: "update available 後に release page open を確認"
+    expected: "open_release_page が利用可能"
+    triage: "updater.rs open_release_page を確認"
+  - id: b7-vr-051
+    layer: audit-readiness
+    risk: release-workflow-change-review
+    reproduce: "release.yml 変更時のレビュー項目を点検"
+    expected: "trigger/target/artifact/permission がレビューされる"
+    triage: "quality checklist への記録を確認"
+  - id: b7-vr-052
+    layer: audit-readiness
+    risk: release-artifact-path-audit
+    reproduce: "artifact path を監査チェック"
+    expected: "bundle path が正しくtraceできる"
+    triage: "workflow files 記述を確認"
+  - id: b7-vr-053
+    layer: audit-readiness
+    risk: release-target-expansion-audit
+    reproduce: "target追加時の監査手順を実施"
+    expected: "CI負荷・配布整合を記録"
+    triage: "ops台帳に変更理由を記録"
+  - id: b7-vr-054
+    layer: audit-readiness
+    risk: release-rollback-note
+    reproduce: "失敗release時のロールバック記録手順を確認"
+    expected: "再発防止メモが残る"
+    triage: "debug_playbook と release checklist を照合"
+  - id: b7-vr-055
+    layer: audit-readiness
+    risk: release-permission-audit
+    reproduce: "workflow permissions 変更を監査"
+    expected: "least privilege 逸脱が検知される"
+    triage: "permissions diff を確認"
+  - id: b7-vr-056
+    layer: audit-readiness
+    risk: release-secret-usage-audit
+    reproduce: "release workflow で secret 参照を監査"
+    expected: "不要secret参照がない"
+    triage: "workflow 全stepを確認"
+  - id: b7-vr-057
+    layer: audit-readiness
+    risk: release-manual-signoff-template
+    reproduce: "release前 signoff テンプレートを確認"
+    expected: "責任者・結果・残リスクを記録"
+    triage: "quality docs のテンプレートを確認"
+  - id: b7-vr-058
+    layer: audit-readiness
+    risk: release-log-retention
+    reproduce: "releaseログ保存方針を確認"
+    expected: "追跡可能な期間と保存先が明示"
+    triage: "operations 文書を確認"
+  - id: b7-vr-059
+    layer: audit-readiness
+    risk: release-ci-failure-triage-record
+    reproduce: "release job fail時の記録手順を確認"
+    expected: "失敗層・再現コマンド・修正結果を記録"
+    triage: "debug_playbook と照合"
+  - id: b7-vr-060
+    layer: audit-readiness
+    risk: release-cross-platform-gap-record
+    reproduce: "platform別差異が出た時の記録"
+    expected: "OS別差異が追跡可能"
+    triage: "release matrix ごとの記録を確認"
+
+  - id: b7-vr-061
+    layer: observability
+    risk: viewer-progress-log-sequence
+    reproduce: "起動時 progress メッセージ推移を確認"
+    expected: "Initializing->Checking->Starting->Waiting->Ready"
+    triage: "lib.rs set_progress 呼び出し順を確認"
+  - id: b7-vr-062
+    layer: observability
+    risk: viewer-kernel-exit-log
+    reproduce: "Kernel異常終了時ログを確認"
+    expected: "exit code と restart回数が記録される"
+    triage: "kernel_manager warn/error ログを確認"
+  - id: b7-vr-063
+    layer: observability
+    risk: viewer-health-check-log
+    reproduce: "health check 成否ログを確認"
+    expected: "port と timeout が出力される"
+    triage: "health_check.rs info/bail メッセージを確認"
+  - id: b7-vr-064
+    layer: observability
+    risk: viewer-update-check-log
+    reproduce: "update check 実行時ログを確認"
+    expected: "available/up-to-date/failure が識別できる"
+    triage: "updater 呼び出し箇所を確認"
+  - id: b7-vr-065
+    layer: observability
+    risk: viewer-nav-block-log-detail
+    reproduce: "blockされたURLログの可読性を確認"
+    expected: "URL文字列がログに含まれる"
+    triage: "warn! format を確認"
+  - id: b7-vr-066
+    layer: observability
+    risk: viewer-drop-stop-log
+    reproduce: "viewer終了時の stop ログを確認"
+    expected: "dropでKernel停止処理が記録される"
+    triage: "KernelManager Drop 実装を確認"
+  - id: b7-vr-067
+    layer: observability
+    risk: viewer-log-dir-bootstrap
+    reproduce: "初回起動で log_dir/user_data_dir を確認"
+    expected: "必要ディレクトリが作成される"
+    triage: "lib.rs create_dir_all を確認"
+  - id: b7-vr-068
+    layer: observability
+    risk: viewer-progress-error-persistence
+    reproduce: "error 後の progress 表示を確認"
+    expected: "error 文言が消えず調査可能"
+    triage: "set_progress 更新タイミングを確認"
+  - id: b7-vr-069
+    layer: observability
+    risk: viewer-http-check-retry-visibility
+    reproduce: "health失敗継続時の挙動確認"
+    expected: "1秒間隔再試行が継続する"
+    triage: "wait_for_healthy loop を確認"
+  - id: b7-vr-070
+    layer: observability
+    risk: viewer-python-bin-path-visibility
+    reproduce: "platformごとの python path 解決を確認"
+    expected: "pathルールが明示される"
+    triage: "config.rs python_bin/venv_python を確認"
+
+  - id: b7-vr-071
+    layer: operations-release
+    risk: ci-root-python-matrix
+    reproduce: "test.yml root-python-tests matrixを確認"
+    expected: "3.10/3.11/3.13 を網羅"
+    triage: "matrix.python-version を確認"
+  - id: b7-vr-072
+    layer: operations-release
+    risk: ci-package-python-matrix
+    reproduce: "rumi-ai-package-pytest matrixを確認"
+    expected: "3.10/3.11/3.13 を網羅"
+    triage: "matrix.python-version を確認"
+  - id: b7-vr-073
+    layer: operations-release
+    risk: ci-rust-test-step
+    reproduce: "test.yml rust-test jobを確認"
+    expected: "cd pack-shell && cargo test を実行"
+    triage: "rust-test step を確認"
+  - id: b7-vr-074
+    layer: operations-release
+    risk: ci-contract-cluster-step
+    reproduce: "contract cluster pytest stepを確認"
+    expected: "主要契約テスト群が明示される"
+    triage: "rumi-ai-contract-checks step を確認"
+  - id: b7-vr-075
+    layer: operations-release
+    risk: ci-failure-log-upload-root
+    reproduce: "root pytest fail時のartifact uploadを確認"
+    expected: "upload-artifact step が起動"
+    triage: "if: failure 条件を確認"
+  - id: b7-vr-076
+    layer: operations-release
+    risk: ci-failure-log-upload-package
+    reproduce: "package pytest fail時のartifact uploadを確認"
+    expected: "package log を保存"
+    triage: "upload step を確認"
+  - id: b7-vr-077
+    layer: operations-release
+    risk: ci-failure-log-upload-contract
+    reproduce: "contract pytest fail時のartifact uploadを確認"
+    expected: "contract log を保存"
+    triage: "upload step を確認"
+  - id: b7-vr-078
+    layer: operations-release
+    risk: ci-checkout-version-pin
+    reproduce: "workflow action pin を確認"
+    expected: "actions/checkout@v4 を利用"
+    triage: "workflow 全jobを確認"
+  - id: b7-vr-079
+    layer: operations-release
+    risk: ci-python-setup-pin
+    reproduce: "workflow action pin を確認"
+    expected: "actions/setup-python@v5 を利用"
+    triage: "workflow 全jobを確認"
+  - id: b7-vr-080
+    layer: operations-release
+    risk: ci-rust-toolchain-pin
+    reproduce: "rust job action pin を確認"
+    expected: "dtolnay/rust-toolchain@stable を利用"
+    triage: "rust-test job を確認"
+
+  - id: b7-vr-081
+    layer: audit-readiness
+    risk: ci-quality-script-coverage
+    reproduce: "quality script が主要ゲートを叩くか確認"
+    expected: "root/package/contracts/frontend/cargo を含む"
+    triage: "run_claude_quality_pack.sh を確認"
+  - id: b7-vr-082
+    layer: audit-readiness
+    risk: ci-debug-bundle-coverage
+    reproduce: "debug bundle が再現導線を持つか確認"
+    expected: "entrypoint+contracts+frontend+cargo を含む"
+    triage: "run_debug_bundle.sh を確認"
+  - id: b7-vr-083
+    layer: audit-readiness
+    risk: ci-summary-log-required
+    reproduce: "quality log summary 出力を確認"
+    expected: "summary.txt に各ゲート結果が残る"
+    triage: "quality script summary 書き込みを確認"
+  - id: b7-vr-084
+    layer: audit-readiness
+    risk: ci-baseline-accepted-visibility
+    reproduce: "baseline accepted 出力を確認"
+    expected: "current/baseline値が記録される"
+    triage: "run_gate_with_baseline を確認"
+  - id: b7-vr-085
+    layer: audit-readiness
+    risk: ci-fail-layer-identification
+    reproduce: "意図的failで summary を確認"
+    expected: "どの gate が fail か即時識別"
+    triage: "FAILURES 配列出力を確認"
+  - id: b7-vr-086
+    layer: audit-readiness
+    risk: ci-log-dir-configurability
+    reproduce: "RUMI_QUALITY_LOG_DIR 指定で実行"
+    expected: "指定先にrun_idログが生成される"
+    triage: "LOG_ROOT_DIR 解決を確認"
+  - id: b7-vr-087
+    layer: audit-readiness
+    risk: ci-fast-quality-boundary
+    reproduce: "RUMI_FAST_QUALITY=1 実行"
+    expected: "targeted lint/typecheck を実行"
+    triage: "FAST_QUALITY 分岐を確認"
+  - id: b7-vr-088
+    layer: audit-readiness
+    risk: ci-full-quality-default
+    reproduce: "環境変数なしで quality script 実行"
+    expected: "full gate（baseline比較含む）を実行"
+    triage: "default FAST_QUALITY=0 を確認"
+  - id: b7-vr-089
+    layer: audit-readiness
+    risk: ci-entrypoint-contract-required
+    reproduce: "quality script の contract 実行を確認"
+    expected: "tests/test_entrypoint_contracts.py を実行"
+    triage: "entrypoint-contracts gate を確認"
+  - id: b7-vr-090
+    layer: audit-readiness
+    risk: ci-viewer-release-contract-required
+    reproduce: "quality script の contract 実行を確認"
+    expected: "viewer/release 契約テストが含まれる"
+    triage: "quality-contract-pytest 引数を確認"
+
+  - id: b7-vr-091
+    layer: observability
+    risk: ci-summary-overall-status
+    reproduce: "quality 実行後 summary を確認"
+    expected: "overall PASS/FAIL が出力される"
+    triage: "summary 最終行を確認"
+  - id: b7-vr-092
+    layer: observability
+    risk: ci-gate-log-per-command
+    reproduce: "log directory の内容を確認"
+    expected: "gateごとに *.log が存在"
+    triage: "run_gate out_file 命名を確認"
+  - id: b7-vr-093
+    layer: observability
+    risk: ci-contract-count-traceability
+    reproduce: "contract pytest 実行結果を確認"
+    expected: "件数が出力され監査で追跡可能"
+    triage: "pytest -v 結果を確認"
+  - id: b7-vr-094
+    layer: observability
+    risk: ci-frontend-fail-diagnosability
+    reproduce: "frontend-lint failを再現"
+    expected: "型エラー箇所が明示される"
+    triage: "frontend-lint.log を確認"
+  - id: b7-vr-095
+    layer: observability
+    risk: ci-cargo-fail-diagnosability
+    reproduce: "cargo test failを再現"
+    expected: "pack-shell-tests.log で追跡可能"
+    triage: "pack-shell-tests.log を確認"
+  - id: b7-vr-096
+    layer: observability
+    risk: ci-root-pytest-diagnosability
+    reproduce: "root pytest failを再現"
+    expected: "root-pytest.log に詳細が残る"
+    triage: "root-pytest.log を確認"
+  - id: b7-vr-097
+    layer: observability
+    risk: ci-package-pytest-diagnosability
+    reproduce: "package pytest failを再現"
+    expected: "package-pytest.log に詳細が残る"
+    triage: "package-pytest.log を確認"
+  - id: b7-vr-098
+    layer: observability
+    risk: ci-mypy-baseline-delta-visibility
+    reproduce: "mypyエラー増加ケースを再現"
+    expected: "baseline超過でFAILし差分が可視化"
+    triage: "package-mypy gate 出力を確認"
+  - id: b7-vr-099
+    layer: observability
+    risk: ci-ruff-baseline-delta-visibility
+    reproduce: "ruffエラー増加ケースを再現"
+    expected: "baseline超過でFAILし差分が可視化"
+    triage: "package-ruff gate 出力を確認"
+  - id: b7-vr-100
+    layer: observability
+    risk: ci-format-baseline-delta-visibility
+    reproduce: "format対象増加ケースを再現"
+    expected: "baseline超過でFAILし差分が可視化"
+    triage: "package-ruff-format gate 出力を確認"
+
+  - id: b7-vr-101
+    layer: failure-ux
+    risk: ci-partial-failure-nonmasked
+    reproduce: "一部gate fail の実行結果を確認"
+    expected: "他gate結果も表示され失敗が隠れない"
+    triage: "run_gate 処理順と FAILURES を確認"
+  - id: b7-vr-102
+    layer: failure-ux
+    risk: ci-debug-bundle-stop-on-first-fail
+    reproduce: "debug bundle で frontend-lint fail を再現"
+    expected: "fail層で停止し最短で原因特定"
+    triage: "run_debug_bundle.sh set -euo pipefail を確認"
+  - id: b7-vr-103
+    layer: failure-ux
+    risk: release-workflow-linux-missing-dep
+    reproduce: "Linux依存を外した想定で review"
+    expected: "dep不足がチェックリストで検知"
+    triage: "release checklist を確認"
+  - id: b7-vr-104
+    layer: failure-ux
+    risk: release-workflow-target-mismatch
+    reproduce: "target typo 想定のレビュー"
+    expected: "matrix契約で検知できる"
+    triage: "viewer/release contract test を確認"
+  - id: b7-vr-105
+    layer: failure-ux
+    risk: viewer-csp-regression
+    reproduce: "CSPにワイルドカード追加を想定"
+    expected: "契約テストが失敗して検知"
+    triage: "viewer/release contract test を確認"
+  - id: b7-vr-106
+    layer: failure-ux
+    risk: viewer-nav-guard-regression
+    reproduce: "nav guard 条件緩和を想定"
+    expected: "契約テストが失敗して検知"
+    triage: "lib.rs 署名文字列チェックを確認"
+  - id: b7-vr-107
+    layer: failure-ux
+    risk: viewer-splash-progress-regression
+    reproduce: "splash progress id 削除を想定"
+    expected: "契約テストが失敗して検知"
+    triage: "splash DOM契約チェックを確認"
+  - id: b7-vr-108
+    layer: failure-ux
+    risk: ci-job-rename-regression
+    reproduce: "test.yml job rename を想定"
+    expected: "契約テストが失敗して検知"
+    triage: "workflow必須jobチェックを確認"
+  - id: b7-vr-109
+    layer: failure-ux
+    risk: ci-release-trigger-regression
+    reproduce: "release trigger を branch push に変更想定"
+    expected: "契約テストで検知"
+    triage: "release.yml trigger チェックを確認"
+  - id: b7-vr-110
+    layer: failure-ux
+    risk: ci-artifact-path-regression
+    reproduce: "artifact path 変更を想定"
+    expected: "契約テストで検知"
+    triage: "release artifact path チェックを確認"
+
+  - id: b7-vr-111
+    layer: audit-readiness
+    risk: viewer-version-traceability
+    reproduce: "viewer version と release tag 整合確認"
+    expected: "version差異が監査で追跡可能"
+    triage: "Cargo.toml と release artifact を照合"
+  - id: b7-vr-112
+    layer: audit-readiness
+    risk: viewer-capability-file-traceability
+    reproduce: "capabilities/default.json 更新監査"
+    expected: "permission変更が記録される"
+    triage: "permission diff 監査を確認"
+  - id: b7-vr-113
+    layer: audit-readiness
+    risk: viewer-tauri-config-traceability
+    reproduce: "tauri.conf 変更監査"
+    expected: "CSP/window/bundle 変更理由が記録される"
+    triage: "change log を確認"
+  - id: b7-vr-114
+    layer: audit-readiness
+    risk: ci-workflow-traceability
+    reproduce: "workflow変更監査"
+    expected: "ジョブ・matrix・artifact変更が記録される"
+    triage: "PRテンプレート項目を確認"
+  - id: b7-vr-115
+    layer: audit-readiness
+    risk: quality-contract-traceability
+    reproduce: "契約テスト追加時の監査"
+    expected: "対象資産と狙いがPR本文で追跡可能"
+    triage: "PR本文のテスト一覧を確認"
+  - id: b7-vr-116
+    layer: audit-readiness
+    risk: manual-scenario-traceability
+    reproduce: "手動台帳のID参照を監査"
+    expected: "matrixから scenario ID が解決できる"
+    triage: "manual batch + matrix 照合を確認"
+  - id: b7-vr-117
+    layer: compatibility
+    risk: viewer-shell-permission-presence
+    reproduce: "default capability を確認"
+    expected: "shell:allow-open が残る"
+    triage: "capabilities/default.json を確認"
+  - id: b7-vr-118
+    layer: compatibility
+    risk: viewer-core-default-permission-presence
+    reproduce: "default capability を確認"
+    expected: "core:default が残る"
+    triage: "capabilities/default.json を確認"
+  - id: b7-vr-119
+    layer: compatibility
+    risk: viewer-main-window-label-presence
+    reproduce: "tauri window label を確認"
+    expected: "label=main が維持される"
+    triage: "tauri.conf windows[].label を確認"
+  - id: b7-vr-120
+    layer: recovery
+    risk: viewer-stop-on-drop-reliability
+    reproduce: "viewer終了時にKernel child残留を確認"
+    expected: "Dropでstopが呼ばれchild残留しない"
+    triage: "KernelManager Drop/stop を確認"

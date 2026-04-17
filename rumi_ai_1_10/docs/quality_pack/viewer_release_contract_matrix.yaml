@@ -1,0 +1,100 @@
+version: 1
+owner: quality-pack
+description: |
+  rumi_viewer 実行境界と release/CI 境界の契約マトリクス。
+  viewer の失敗UX・ナビゲーション制約・CSP制約・配布パイプライン・監査導線を固定化する。
+
+viewer_runtime_contracts:
+  required_files:
+    - rumi_viewer/src-tauri/src/lib.rs
+    - rumi_viewer/src-tauri/src/health_check.rs
+    - rumi_viewer/src-tauri/src/kernel_manager.rs
+    - rumi_viewer/src-tauri/src/config.rs
+    - rumi_viewer/src-tauri/splash/index.html
+  required_behaviors:
+    - splash_progress_initializing
+    - splash_error_ready_class_switch
+    - kernel_health_wait_with_timeout
+    - startup_progress_sequence
+    - kernel_restart_command_available
+    - startup_update_check_non_fatal
+  manual_scenarios:
+    - b7-vr-001
+    - b7-vr-003
+    - b7-vr-012
+    - b7-vr-013
+    - b7-vr-016
+    - b7-vr-061
+  automated_tests:
+    - rumi_ai_1_10/tests/test_viewer_release_contract_matrix_contract.py
+    - rumi_ai_1_10/tests/test_claude_quality_pack_contract.py
+
+viewer_security_contracts:
+  required_files:
+    - rumi_viewer/src-tauri/tauri.conf.json
+    - rumi_viewer/src-tauri/capabilities/default.json
+    - rumi_viewer/src-tauri/src/lib.rs
+  required_behaviors:
+    - csp_connect_src_localhost_only
+    - csp_no_https_wildcard
+    - nav_guard_blocks_external_urls
+    - nav_guard_allows_local_panel
+    - capability_core_default_present
+    - capability_shell_open_present
+  manual_scenarios:
+    - b7-vr-006
+    - b7-vr-007
+    - b7-vr-009
+    - b7-vr-010
+    - b7-vr-105
+    - b7-vr-106
+  automated_tests:
+    - rumi_ai_1_10/tests/test_viewer_release_contract_matrix_contract.py
+    - rumi_ai_1_10/tests/test_claude_quality_pack_contract.py
+
+release_pipeline_contracts:
+  required_files:
+    - .github/workflows/release.yml
+    - rumi_viewer/src-tauri/tauri.conf.json
+    - rumi_viewer/src-tauri/Cargo.toml
+    - rumi_viewer/src-tauri/src/updater.rs
+  required_clauses:
+    - release_trigger_v_tag_only
+    - matrix_targets_macos_windows_linux
+    - tauri_build_step_present
+    - artifact_upload_patterns_present
+    - tauri_cli_pinned_and_locked
+    - release_notes_generation_enabled
+  manual_scenarios:
+    - b7-vr-021
+    - b7-vr-024
+    - b7-vr-029
+    - b7-vr-033
+    - b7-vr-034
+    - b7-vr-048
+  automated_tests:
+    - rumi_ai_1_10/tests/test_viewer_release_contract_matrix_contract.py
+    - rumi_ai_1_10/tests/test_api_route_coverage_matrix_contract.py
+
+ci_boundary_contracts:
+  required_files:
+    - .github/workflows/test.yml
+    - rumi_ai_1_10/scripts/quality_pack/run_claude_quality_pack.sh
+    - rumi_ai_1_10/scripts/quality_pack/run_debug_bundle.sh
+  required_clauses:
+    - root_python_tests_job_present
+    - package_python_tests_job_present
+    - rust_tests_job_present
+    - failure_log_upload_steps_present
+    - quality_summary_file_written
+    - quality_contract_suite_included
+  manual_scenarios:
+    - b7-vr-071
+    - b7-vr-073
+    - b7-vr-081
+    - b7-vr-083
+    - b7-vr-090
+    - b7-vr-101
+  automated_tests:
+    - rumi_ai_1_10/tests/test_viewer_release_contract_matrix_contract.py
+    - rumi_ai_1_10/tests/test_quality_debug_playbook_contract.py

@@ -308,6 +308,7 @@ curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
 | [docs/quality_pack/test_coverage_matrix.md](docs/quality_pack/test_coverage_matrix.md) | テスト分類表と未テスト領域 |
 | [docs/quality_pack/api_route_coverage_matrix.yaml](docs/quality_pack/api_route_coverage_matrix.yaml) | API routeごとの回帰シナリオ・自動テスト紐付け |
 | [docs/quality_pack/frontend_ux_contract_matrix.yaml](docs/quality_pack/frontend_ux_contract_matrix.yaml) | Setup/Dashboard/Packs/Flows/Settings のUX契約マトリクス |
+| [docs/quality_pack/viewer_release_contract_matrix.yaml](docs/quality_pack/viewer_release_contract_matrix.yaml) | viewer失敗UX/CSP/nav-guard と release/CI 境界の契約マトリクス |
 | [docs/quality_pack/philosophy_re_evaluation_log.md](docs/quality_pack/philosophy_re_evaluation_log.md) | 作業中の思想再評価ログ |
 | [docs/quality_pack/debug_playbook.md](docs/quality_pack/debug_playbook.md) | 失敗時の再現・切り分け・修正確認手順 |
 | [docs/quality_pack/manual_regression_scenarios.yaml](docs/quality_pack/manual_regression_scenarios.yaml) | 手動回帰シナリオ台帳（batch1: セキュリティ/失敗系/UI） |
@@ -316,6 +317,7 @@ curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
 | [docs/quality_pack/manual_regression_scenarios_batch4.yaml](docs/quality_pack/manual_regression_scenarios_batch4.yaml) | 手動回帰シナリオ台帳（batch4: 承認/ネットワーク境界/Fail-Soft/UI操作/監査） |
 | [docs/quality_pack/manual_regression_scenarios_batch5.yaml](docs/quality_pack/manual_regression_scenarios_batch5.yaml) | 手動回帰シナリオ台帳（batch5: API route契約/認証境界/入力境界/可観測性） |
 | [docs/quality_pack/manual_regression_scenarios_batch6.yaml](docs/quality_pack/manual_regression_scenarios_batch6.yaml) | 手動回帰シナリオ台帳（batch6: frontend UX契約/導線/失敗表示/レスポンシブ） |
+| [docs/quality_pack/manual_regression_scenarios_batch7.yaml](docs/quality_pack/manual_regression_scenarios_batch7.yaml) | 手動回帰シナリオ台帳（batch7: viewer失敗UX/release監査/CI境界/観測性） |
 
 ---
 

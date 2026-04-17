@@ -52,6 +52,7 @@ def test_debug_bundle_script_covers_expected_gates():
             "tests/test_manual_regression_scenarios_contract.py",
             "tests/test_api_route_coverage_matrix_contract.py",
             "tests/test_frontend_ux_contract_matrix_contract.py",
+            "tests/test_viewer_release_contract_matrix_contract.py",
             "npm run lint",
             "npm run build",
             "cargo test",

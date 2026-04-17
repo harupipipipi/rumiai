@@ -23,6 +23,9 @@ def test_quality_pack_docs_exist_and_have_required_sections():
     coverage_matrix = PACKAGE_ROOT / "docs" / "quality_pack" / "test_coverage_matrix.md"
     api_route_matrix = PACKAGE_ROOT / "docs" / "quality_pack" / "api_route_coverage_matrix.yaml"
     frontend_ux_matrix = PACKAGE_ROOT / "docs" / "quality_pack" / "frontend_ux_contract_matrix.yaml"
+    viewer_release_matrix = (
+        PACKAGE_ROOT / "docs" / "quality_pack" / "viewer_release_contract_matrix.yaml"
+    )
     re_eval_log = PACKAGE_ROOT / "docs" / "quality_pack" / "philosophy_re_evaluation_log.md"
     debug_playbook = PACKAGE_ROOT / "docs" / "quality_pack" / "debug_playbook.md"
     manual_scenarios = PACKAGE_ROOT / "docs" / "quality_pack" / "manual_regression_scenarios.yaml"
@@ -35,10 +38,11 @@ def test_quality_pack_docs_exist_and_have_required_sections():
     assert coverage_matrix.exists()
     assert api_route_matrix.exists()
     assert frontend_ux_matrix.exists()
+    assert viewer_release_matrix.exists()
     assert re_eval_log.exists()
     assert debug_playbook.exists()
     assert manual_scenarios.exists()
-    assert len(manual_scenario_batches) >= 6
+    assert len(manual_scenario_batches) >= 7
 
     memo_text = _read(philosophy_memo)
     pack_text = _read(quality_pack)
@@ -68,6 +72,7 @@ def test_quality_pack_docs_exist_and_have_required_sections():
             "AIエージェント運用プロンプト",
             "API route coverage",
             "frontend UX contract",
+            "viewer/release contract",
         ],
         "claude_desktop_quality_pack.md",
     )
@@ -159,6 +164,7 @@ def test_coverage_matrix_references_existing_tests():
         "tests/test_manual_regression_scenarios_contract.py",
         "tests/test_api_route_coverage_matrix_contract.py",
         "tests/test_frontend_ux_contract_matrix_contract.py",
+        "tests/test_viewer_release_contract_matrix_contract.py",
         "tests/test_phase_a_health.py",
         "tests/test_security_guards.py",
     ]

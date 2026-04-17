@@ -56,3 +56,9 @@
 - README と思想メモを再読し、No Favoritism維持のため、機能実装ではなく frontend UX 契約（画面状態・導線・失敗表示）の品質資産を追加。
 - Fail-Soft維持のため、フロント失敗時にも UI が崩壊せず継続操作できることを batch6 シナリオと契約テストで監査可能化。
 - 悪意Pack前提 / 最小権限を弱めないよう、CSP・認証・承認の本体ロジックには手を入れず、観測性と再現性のみを強化。
+
+## 2026-04-18 テスト設計再評価（batch7/viewer-release contract追加前）
+
+- README と思想メモを再読し、No Favoritism維持のため、viewer/release/CI の品質契約資産のみを追加し、製品挙動は変更しない方針を再確認。
+- Fail-Soft維持のため、viewer の起動失敗・health timeout・update失敗が「停止」ではなく可視化された失敗として追跡できる監査資産を強化。
+- 悪意Pack前提 / 最小権限を弱めないため、viewer の nav-guard/CSP/capability 境界を契約テスト化し、境界緩和を検知できる形に固定。
