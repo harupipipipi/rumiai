@@ -37,6 +37,7 @@ python -m pytest tests/test_capability_trust_store.py
 - `rumi_ai_1_10/docs/quality_pack/viewer_release_contract_matrix.yaml`
 - `rumi_ai_1_10/docs/quality_pack/longrun_migration_contract_matrix.yaml`
 - `rumi_ai_1_10/docs/quality_pack/security_permission_contract_matrix.yaml`
+- `rumi_ai_1_10/docs/quality_pack/ui_viewer_recovery_contract_matrix.yaml`
 - `rumi_ai_1_10/docs/quality_pack/philosophy_re_evaluation_log.md`
 - `rumi_ai_1_10/docs/quality_pack/debug_playbook.md`
 - `rumi_ai_1_10/docs/quality_pack/manual_regression_scenarios*.yaml`

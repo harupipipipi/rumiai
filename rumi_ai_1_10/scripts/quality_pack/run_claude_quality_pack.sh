@@ -84,6 +84,7 @@ run_gate "quality-contract-pytest" python -m pytest \
   tests/test_viewer_release_contract_matrix_contract.py \
   tests/test_longrun_migration_contract_matrix_contract.py \
   tests/test_security_permission_contract_matrix_contract.py \
+  tests/test_ui_viewer_recovery_contract_matrix_contract.py \
   -v
 
 if [[ "$FAST_QUALITY" == "1" ]]; then
@@ -95,7 +96,8 @@ if [[ "$FAST_QUALITY" == "1" ]]; then
     tests/test_frontend_ux_contract_matrix_contract.py \
     tests/test_viewer_release_contract_matrix_contract.py \
     tests/test_longrun_migration_contract_matrix_contract.py \
-    tests/test_security_permission_contract_matrix_contract.py
+    tests/test_security_permission_contract_matrix_contract.py \
+    tests/test_ui_viewer_recovery_contract_matrix_contract.py
   run_gate "package-ruff-format-targeted" python -m ruff format --check \
     tests/test_claude_quality_pack_contract.py \
     tests/test_quality_debug_playbook_contract.py \
@@ -104,7 +106,8 @@ if [[ "$FAST_QUALITY" == "1" ]]; then
     tests/test_frontend_ux_contract_matrix_contract.py \
     tests/test_viewer_release_contract_matrix_contract.py \
     tests/test_longrun_migration_contract_matrix_contract.py \
-    tests/test_security_permission_contract_matrix_contract.py
+    tests/test_security_permission_contract_matrix_contract.py \
+    tests/test_ui_viewer_recovery_contract_matrix_contract.py
   run_gate "package-mypy-targeted" python -m mypy \
     tests/test_claude_quality_pack_contract.py \
     tests/test_quality_debug_playbook_contract.py \
@@ -113,7 +116,8 @@ if [[ "$FAST_QUALITY" == "1" ]]; then
     tests/test_frontend_ux_contract_matrix_contract.py \
     tests/test_viewer_release_contract_matrix_contract.py \
     tests/test_longrun_migration_contract_matrix_contract.py \
-    tests/test_security_permission_contract_matrix_contract.py
+    tests/test_security_permission_contract_matrix_contract.py \
+    tests/test_ui_viewer_recovery_contract_matrix_contract.py
 else
   run_gate_with_baseline "package-ruff" "$BASELINE_RUFF_ERRORS" "Found [0-9]+ errors\\." python -m ruff check .
   run_gate_with_baseline "package-ruff-format" "$BASELINE_RUFF_FORMAT_FILES" "[0-9]+ files would be reformatted" python -m ruff format --check .

@@ -1,0 +1,106 @@
+version: 1
+owner: quality-pack
+summary: >
+  frontend/viewer/pack-shell の操作導線・失敗UX・復旧導線を契約化し、
+  UI破綻と運用断絶を回帰検知する。
+
+frontend_interaction_contracts:
+  required_files:
+    - frontend/src/App.tsx
+    - frontend/src/pages/Flows.tsx
+    - frontend/src/pages/Packs.tsx
+    - frontend/src/pages/Settings.tsx
+    - frontend/src/components/ui/ErrorBoundary.tsx
+  required_behaviors:
+    - "BrowserRouter basename=/panel を維持する"
+    - "setup未完了時は setup route へ誘導する"
+    - "ToastContainer/DialogContainer が全画面で利用できる"
+    - "Flows で node add/connect/delete が可能である"
+    - "テーマ切替・dark mode切替が root class に反映される"
+    - "UIエラー時に ErrorBoundary fallback へ遷移できる"
+  key_manual_scenarios:
+    - b10-ui-001
+    - b10-ui-007
+    - b10-ui-016
+    - b10-ui-023
+    - b10-ui-044
+    - b10-ui-069
+  automated_tests:
+    - rumi_ai_1_10/tests/test_frontend_ux_contract_matrix_contract.py
+    - rumi_ai_1_10/tests/test_claude_quality_pack_contract.py
+    - rumi_ai_1_10/tests/test_ui_viewer_recovery_contract_matrix_contract.py
+
+viewer_recovery_contracts:
+  required_files:
+    - ../rumi_viewer/src-tauri/src/lib.rs
+    - ../rumi_viewer/src-tauri/src/kernel_manager.rs
+    - ../rumi_viewer/src-tauri/src/health_check.rs
+    - ../rumi_viewer/src-tauri/splash/index.html
+  required_behaviors:
+    - "setup progress が Initializing->Ready へ遷移する"
+    - "kernel health timeout 時にエラー進捗を表示する"
+    - "restart_kernel command が失敗時もエラーを返せる"
+    - "nav-guard は外部URLを遮断し localhost を許可する"
+    - "update check 失敗は non-fatal で起動継続する"
+    - "kernel_manager は restart(42)/auto-restart上限を維持する"
+  key_manual_scenarios:
+    - b10-ui-052
+    - b10-ui-054
+    - b10-ui-079
+    - b10-ui-082
+    - b10-ui-092
+    - b10-ui-110
+  automated_tests:
+    - rumi_ai_1_10/tests/test_viewer_release_contract_matrix_contract.py
+    - rumi_ai_1_10/tests/test_longrun_migration_contract_matrix_contract.py
+    - rumi_ai_1_10/tests/test_ui_viewer_recovery_contract_matrix_contract.py
+
+pack_shell_bootstrap_contracts:
+  required_files:
+    - ../pack-shell/src/main.rs
+    - ../pack-shell/src/client.rs
+    - ../pack-shell/src/config.rs
+    - ../pack-shell/src/kernel.rs
+  required_behaviors:
+    - "kernel 未起動時に起動と health待機を行う"
+    - "desktop token 取得に失敗した場合はエラー終了する"
+    - "RUMI_TOKEN/RUMI_PORT/RUMI_PACK_ID を子プロセスへ渡す"
+    - "command parse/spawn failure は明示エラーで終了する"
+    - "app終了コードを保持して上位へ返す"
+    - "version command が安定して返る"
+  key_manual_scenarios:
+    - b10-ui-058
+    - b10-ui-060
+    - b10-ui-084
+    - b10-ui-086
+    - b10-ui-089
+    - b10-ui-109
+  automated_tests:
+    - rumi_ai_1_10/tests/test_quality_debug_playbook_contract.py
+    - rumi_ai_1_10/tests/test_claude_quality_pack_contract.py
+    - rumi_ai_1_10/tests/test_ui_viewer_recovery_contract_matrix_contract.py
+
+ui_failure_observability_contracts:
+  required_files:
+    - docs/quality_pack/debug_playbook.md
+    - scripts/quality_pack/run_claude_quality_pack.sh
+    - scripts/quality_pack/run_debug_bundle.sh
+    - docs/quality_pack/philosophy_re_evaluation_log.md
+  required_behaviors:
+    - "quality pack summary に frontend-lint/build を含む"
+    - "debug bundle は root->contract->frontend->cargo の順で再現できる"
+    - "UI失敗時の再現コマンドが playbook に明示される"
+    - "思想再評価ログに UI/viewer 修正前の再照合記録が残る"
+    - "契約テスト群で ui/viewer/pack-shell 境界を常時検証する"
+    - "失敗層の特定に summary.txt と各gateログを利用できる"
+  key_manual_scenarios:
+    - b10-ui-096
+    - b10-ui-103
+    - b10-ui-104
+    - b10-ui-111
+    - b10-ui-119
+    - b10-ui-120
+  automated_tests:
+    - rumi_ai_1_10/tests/test_quality_debug_playbook_contract.py
+    - rumi_ai_1_10/tests/test_claude_quality_pack_contract.py
+    - rumi_ai_1_10/tests/test_ui_viewer_recovery_contract_matrix_contract.py

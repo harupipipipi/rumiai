@@ -1,0 +1,730 @@
+version: 1
+owner: quality-pack
+description: |
+  手動回帰シナリオ台帳の第10弾。frontend/viewer/pack-shell の操作導線・失敗UX・復旧導線を
+  高密度に監査し、UI破綻と運用断絶を早期検知する。
+scenarios:
+  - id: b10-ui-001
+    layer: frontend-ui
+    risk: setup-page-first-load
+    reproduce: "初回起動で /panel/setup を開く"
+    expected: "Setupページが崩れず表示される"
+    triage: "frontend/src/pages/Setup.tsx を確認"
+  - id: b10-ui-002
+    layer: frontend-ui
+    risk: setup-complete-redirect
+    reproduce: "setup完了状態で /panel/setup を開く"
+    expected: "Dashboardへ遷移する"
+    triage: "App.tsx route guard を確認"
+  - id: b10-ui-003
+    layer: frontend-ui
+    risk: dashboard-summary-render
+    reproduce: "通常起動で Dashboard を開く"
+    expected: "主要カードが欠落なく描画される"
+    triage: "pages/Dashboard.tsx を確認"
+  - id: b10-ui-004
+    layer: frontend-ui
+    risk: packs-list-render
+    reproduce: "Packs画面を開き一覧を取得"
+    expected: "pack一覧がテーブルで表示される"
+    triage: "pages/Packs.tsx を確認"
+  - id: b10-ui-005
+    layer: frontend-ui
+    risk: packs-list-filter
+    reproduce: "Packs画面でフィルタ入力"
+    expected: "一覧が条件に応じて更新される"
+    triage: "Packs filter state を確認"
+  - id: b10-ui-006
+    layer: frontend-ui
+    risk: pack-detail-navigation
+    reproduce: "Packs一覧から詳細へ遷移"
+    expected: "PackDetail画面へ遷移し情報が表示される"
+    triage: "pages/PackDetail.tsx route param を確認"
+  - id: b10-ui-007
+    layer: frontend-ui
+    risk: flows-canvas-initial-render
+    reproduce: "Flows画面を初回表示"
+    expected: "ReactFlow canvas が表示される"
+    triage: "pages/Flows.tsx 初期化処理を確認"
+  - id: b10-ui-008
+    layer: frontend-ui
+    risk: flows-add-node-basic
+    reproduce: "Flowsメニューからノード追加"
+    expected: "ノードがcanvasに追加される"
+    triage: "useFlowEditor handleAddNodeFromMenu を確認"
+  - id: b10-ui-009
+    layer: frontend-ui
+    risk: flows-connect-nodes
+    reproduce: "2ノード間を接続する"
+    expected: "エッジが生成される"
+    triage: "useFlowEditor onConnect を確認"
+  - id: b10-ui-010
+    layer: frontend-ui
+    risk: flows-delete-node
+    reproduce: "既存ノードを削除する"
+    expected: "関連エッジとともに削除される"
+    triage: "useFlowEditor delete logic を確認"
+  - id: b10-ui-011
+    layer: frontend-ui
+    risk: flows-drag-drop-node
+    reproduce: "sidebarからcanvasへdrag&drop"
+    expected: "drop位置へノード追加される"
+    triage: "useFlowDragDrop.ts を確認"
+  - id: b10-ui-012
+    layer: frontend-ui
+    risk: flows-zoom-pan
+    reproduce: "canvasでzoom/pan操作"
+    expected: "表示が破綻せず追従する"
+    triage: "ReactFlow props を確認"
+  - id: b10-ui-013
+    layer: frontend-ui
+    risk: flows-save-flow
+    reproduce: "編集後に保存操作"
+    expected: "保存成功トーストが表示される"
+    triage: "useFlowExecution save handler を確認"
+  - id: b10-ui-014
+    layer: frontend-ui
+    risk: flows-run-flow
+    reproduce: "Flow実行ボタンを押す"
+    expected: "実行ステータスが表示更新される"
+    triage: "useFlowExecution run handler を確認"
+  - id: b10-ui-015
+    layer: frontend-ui
+    risk: flows-run-button-disabled-state
+    reproduce: "実行不可条件で run 操作"
+    expected: "ボタンが無効化される"
+    triage: "Flows disabled condition を確認"
+  - id: b10-ui-016
+    layer: frontend-ui
+    risk: settings-theme-switch
+    reproduce: "Settingsでtheme切替"
+    expected: "theme class が即時反映される"
+    triage: "App.tsx theme effect を確認"
+  - id: b10-ui-017
+    layer: frontend-ui
+    risk: settings-darkmode-switch
+    reproduce: "Settingsでdark mode切替"
+    expected: "dark class が即時反映される"
+    triage: "App.tsx colorMode effect を確認"
+  - id: b10-ui-018
+    layer: frontend-ui
+    risk: sidebar-navigation-dashboard
+    reproduce: "SidebarからDashboardを選択"
+    expected: "正しい画面へ遷移"
+    triage: "components/layout/Sidebar.tsx を確認"
+  - id: b10-ui-019
+    layer: frontend-ui
+    risk: sidebar-navigation-packs
+    reproduce: "SidebarからPacksを選択"
+    expected: "Packs画面へ遷移"
+    triage: "Sidebar route link を確認"
+  - id: b10-ui-020
+    layer: frontend-ui
+    risk: sidebar-navigation-flows
+    reproduce: "SidebarからFlowsを選択"
+    expected: "Flows画面へ遷移"
+    triage: "Sidebar route link を確認"
+  - id: b10-ui-021
+    layer: frontend-ui
+    risk: toast-container-visible
+    reproduce: "成功/失敗通知を発火"
+    expected: "ToastContainerに通知が表示される"
+    triage: "components/ui/ToastContainer.tsx を確認"
+  - id: b10-ui-022
+    layer: frontend-ui
+    risk: dialog-container-open-close
+    reproduce: "確認ダイアログを開いて閉じる"
+    expected: "DialogContainerで開閉できる"
+    triage: "components/ui/DialogContainer.tsx を確認"
+  - id: b10-ui-023
+    layer: frontend-ui
+    risk: error-boundary-fallback
+    reproduce: "子コンポーネント例外を発生"
+    expected: "ErrorBoundary fallback が表示される"
+    triage: "components/ui/ErrorBoundary.tsx を確認"
+  - id: b10-ui-024
+    layer: frontend-ui
+    risk: error-boundary-reload
+    reproduce: "ErrorBoundary画面で Reload Application を押す"
+    expected: "window reload が実行される"
+    triage: "ErrorBoundary button handler を確認"
+  - id: b10-ui-025
+    layer: frontend-ui
+    risk: layout-header-render
+    reproduce: "任意ページを開く"
+    expected: "Layout header が常時表示される"
+    triage: "components/layout/Layout.tsx を確認"
+  - id: b10-ui-026
+    layer: frontend-ui
+    risk: layout-content-scroll
+    reproduce: "長いコンテンツを表示"
+    expected: "レイアウト崩れなくスクロール可能"
+    triage: "Layout CSS を確認"
+  - id: b10-ui-027
+    layer: frontend-ui
+    risk: api-loading-indicator-dashboard
+    reproduce: "API遅延時にDashboardを開く"
+    expected: "loading表示が出る"
+    triage: "Dashboard loading state を確認"
+  - id: b10-ui-028
+    layer: frontend-ui
+    risk: api-loading-indicator-packs
+    reproduce: "API遅延時にPacksを開く"
+    expected: "loading表示が出る"
+    triage: "Packs loading state を確認"
+  - id: b10-ui-029
+    layer: frontend-ui
+    risk: api-loading-indicator-flows
+    reproduce: "API遅延時にFlowsを開く"
+    expected: "loading表示が出る"
+    triage: "Flows loading state を確認"
+  - id: b10-ui-030
+    layer: frontend-ui
+    risk: dashboard-refresh-action
+    reproduce: "Dashboardの再読み込み操作"
+    expected: "最新データに更新される"
+    triage: "Dashboard refresh handler を確認"
+  - id: b10-ui-031
+    layer: frontend-ui
+    risk: packs-refresh-action
+    reproduce: "Packsの再読み込み操作"
+    expected: "一覧が更新される"
+    triage: "Packs refresh handler を確認"
+  - id: b10-ui-032
+    layer: frontend-ui
+    risk: pack-detail-refresh-action
+    reproduce: "PackDetailの再読み込み操作"
+    expected: "詳細が更新される"
+    triage: "PackDetail fetch logic を確認"
+  - id: b10-ui-033
+    layer: frontend-ui
+    risk: flows-reset-view
+    reproduce: "Flowsで視点を動かした後 reset"
+    expected: "初期ビューに戻る"
+    triage: "ReactFlow fitView/reset handler を確認"
+  - id: b10-ui-034
+    layer: frontend-ui
+    risk: flows-minimap-visible
+    reproduce: "Flows画面で mini map 表示確認"
+    expected: "mini map が表示される"
+    triage: "Flows minimap component を確認"
+  - id: b10-ui-035
+    layer: frontend-ui
+    risk: flows-controls-visible
+    reproduce: "Flows画面で controls 表示確認"
+    expected: "zoom/pan controls が表示される"
+    triage: "Flows controls component を確認"
+  - id: b10-ui-036
+    layer: frontend-ui
+    risk: flows-background-visible
+    reproduce: "Flows画面表示"
+    expected: "背景グリッドが表示される"
+    triage: "Flows background component を確認"
+  - id: b10-ui-037
+    layer: frontend-ui
+    risk: setup-form-validation-empty
+    reproduce: "Setupで必須入力を空で送信"
+    expected: "バリデーションエラー表示"
+    triage: "Setup form validation を確認"
+  - id: b10-ui-038
+    layer: frontend-ui
+    risk: setup-form-validation-invalid-url
+    reproduce: "Setupで不正URLを入力して送信"
+    expected: "URLエラー表示"
+    triage: "Setup validation rule を確認"
+  - id: b10-ui-039
+    layer: frontend-ui
+    risk: settings-form-save
+    reproduce: "Settings変更後保存"
+    expected: "保存成功通知が表示される"
+    triage: "Settings save handler を確認"
+  - id: b10-ui-040
+    layer: frontend-ui
+    risk: settings-form-cancel
+    reproduce: "Settings変更後キャンセル"
+    expected: "変更が破棄される"
+    triage: "Settings cancel flow を確認"
+  - id: b10-ui-041
+    layer: frontend-ui
+    risk: route-direct-dashboard
+    reproduce: "/panel/ を直接開く"
+    expected: "setup完了時にDashboard表示"
+    triage: "App route index を確認"
+  - id: b10-ui-042
+    layer: frontend-ui
+    risk: route-direct-packs
+    reproduce: "/panel/packs を直接開く"
+    expected: "Packs画面が表示される"
+    triage: "App route packs を確認"
+  - id: b10-ui-043
+    layer: frontend-ui
+    risk: route-direct-flows
+    reproduce: "/panel/flows を直接開く"
+    expected: "Flows画面が表示される"
+    triage: "App route flows を確認"
+  - id: b10-ui-044
+    layer: frontend-ui
+    risk: route-direct-settings
+    reproduce: "/panel/settings を直接開く"
+    expected: "Settings画面が表示される"
+    triage: "App route settings を確認"
+  - id: b10-ui-045
+    layer: frontend-ui
+    risk: route-direct-pack-detail
+    reproduce: "/panel/packs/{id} を直接開く"
+    expected: "PackDetail画面が表示される"
+    triage: "App route packs/:id を確認"
+  - id: b10-ui-046
+    layer: frontend-ui
+    risk: ui-font-contrast-dark
+    reproduce: "dark modeで主要画面を確認"
+    expected: "文字コントラストが維持される"
+    triage: "index.css theme classes を確認"
+  - id: b10-ui-047
+    layer: frontend-ui
+    risk: ui-font-contrast-light
+    reproduce: "light modeで主要画面を確認"
+    expected: "文字コントラストが維持される"
+    triage: "index.css theme classes を確認"
+  - id: b10-ui-048
+    layer: frontend-ui
+    risk: ui-button-focus-visible
+    reproduce: "キーボード操作でボタン移動"
+    expected: "focus表示が見える"
+    triage: "button focus style を確認"
+  - id: b10-ui-049
+    layer: frontend-ui
+    risk: ui-input-focus-visible
+    reproduce: "キーボード操作で入力欄移動"
+    expected: "focus表示が見える"
+    triage: "input focus style を確認"
+  - id: b10-ui-050
+    layer: frontend-ui
+    risk: ui-small-window-layout
+    reproduce: "幅<900pxで画面を表示"
+    expected: "主要要素が重ならず表示される"
+    triage: "responsive css を確認"
+  - id: b10-ui-051
+    layer: frontend-ui
+    risk: ui-large-window-layout
+    reproduce: "幅>1600pxで画面を表示"
+    expected: "余白/列幅が破綻しない"
+    triage: "responsive css を確認"
+  - id: b10-ui-052
+    layer: frontend-ui
+    risk: viewer-splash-progress-visible
+    reproduce: "rumi_viewer起動直後を確認"
+    expected: "splash progress が表示される"
+    triage: "rumi_viewer splash/index.html を確認"
+  - id: b10-ui-053
+    layer: frontend-ui
+    risk: viewer-panel-redirect
+    reproduce: "viewer起動後にpanel遷移を確認"
+    expected: "http://localhost:8765/panel へ遷移"
+    triage: "viewer lib.rs navigation を確認"
+  - id: b10-ui-054
+    layer: frontend-ui
+    risk: viewer-nav-guard-external-block
+    reproduce: "viewer内で外部URLへ遷移"
+    expected: "nav-guardでブロックされる"
+    triage: "viewer lib.rs nav-guard を確認"
+  - id: b10-ui-055
+    layer: frontend-ui
+    risk: viewer-nav-guard-local-allow
+    reproduce: "viewer内でlocalhost panelへ遷移"
+    expected: "遷移許可される"
+    triage: "viewer lib.rs nav-guard allow 条件を確認"
+  - id: b10-ui-056
+    layer: frontend-ui
+    risk: viewer-restart-kernel-command
+    reproduce: "viewer command restart_kernel を実行"
+    expected: "Kernel restarted 応答"
+    triage: "viewer lib.rs restart_kernel command を確認"
+  - id: b10-ui-057
+    layer: frontend-ui
+    risk: viewer-progress-command
+    reproduce: "viewer command get_setup_progress を実行"
+    expected: "現在進捗文字列が返る"
+    triage: "viewer lib.rs get_setup_progress を確認"
+  - id: b10-ui-058
+    layer: frontend-ui
+    risk: pack-shell-health-loop
+    reproduce: "pack-shell run で kernel health待機を確認"
+    expected: "health ready まで再試行する"
+    triage: "pack-shell client.wait_for_healthy を確認"
+  - id: b10-ui-059
+    layer: frontend-ui
+    risk: pack-shell-token-request
+    reproduce: "pack-shell run で desktop token取得"
+    expected: "token/port/expires_in を取得する"
+    triage: "pack-shell client.get_desktop_token を確認"
+  - id: b10-ui-060
+    layer: frontend-ui
+    risk: pack-shell-env-injection
+    reproduce: "pack-shell起動後の子プロセス環境を確認"
+    expected: "RUMI_TOKEN/RUMI_PORT/RUMI_PACK_ID が設定される"
+    triage: "pack-shell main.rs Command.env を確認"
+
+  - id: b10-ui-061
+    layer: failure-ux
+    risk: setup-api-failure-message
+    reproduce: "Setup APIを失敗させて画面表示"
+    expected: "利用者向けエラーメッセージが表示される"
+    triage: "Setup error handling を確認"
+  - id: b10-ui-062
+    layer: failure-ux
+    risk: dashboard-api-failure-message
+    reproduce: "Dashboard APIを失敗させる"
+    expected: "error表示と再試行導線が出る"
+    triage: "Dashboard error state を確認"
+  - id: b10-ui-063
+    layer: failure-ux
+    risk: packs-api-failure-message
+    reproduce: "Packs APIを失敗させる"
+    expected: "error表示と再試行導線が出る"
+    triage: "Packs error state を確認"
+  - id: b10-ui-064
+    layer: failure-ux
+    risk: pack-detail-api-failure-message
+    reproduce: "PackDetail APIを失敗させる"
+    expected: "error表示と戻る導線が出る"
+    triage: "PackDetail error state を確認"
+  - id: b10-ui-065
+    layer: failure-ux
+    risk: flows-api-failure-message
+    reproduce: "Flows APIを失敗させる"
+    expected: "error表示と再試行導線が出る"
+    triage: "Flows error state を確認"
+  - id: b10-ui-066
+    layer: failure-ux
+    risk: settings-save-failure-message
+    reproduce: "Settings保存APIを失敗させる"
+    expected: "失敗トーストが表示される"
+    triage: "Settings save error handling を確認"
+  - id: b10-ui-067
+    layer: failure-ux
+    risk: flow-save-failure-toast
+    reproduce: "Flow保存を失敗させる"
+    expected: "失敗トーストが表示される"
+    triage: "useFlowExecution save error path を確認"
+  - id: b10-ui-068
+    layer: failure-ux
+    risk: flow-run-failure-toast
+    reproduce: "Flow実行を失敗させる"
+    expected: "失敗トーストが表示される"
+    triage: "useFlowExecution run error path を確認"
+  - id: b10-ui-069
+    layer: failure-ux
+    risk: dialog-confirm-failure-path
+    reproduce: "破壊操作confirm後にAPI失敗"
+    expected: "失敗通知と画面状態維持"
+    triage: "Dialog + action error handling を確認"
+  - id: b10-ui-070
+    layer: failure-ux
+    risk: unauthorized-ui-message
+    reproduce: "UI経由で401を返させる"
+    expected: "Unauthorizedを隠さず表示する"
+    triage: "API error mapping を確認"
+  - id: b10-ui-071
+    layer: failure-ux
+    risk: forbidden-ui-message
+    reproduce: "UI経由で403を返させる"
+    expected: "権限不足メッセージが表示される"
+    triage: "API error mapping を確認"
+  - id: b10-ui-072
+    layer: failure-ux
+    risk: notfound-ui-message
+    reproduce: "UI経由で404を返させる"
+    expected: "対象なしメッセージが表示される"
+    triage: "API error mapping を確認"
+  - id: b10-ui-073
+    layer: failure-ux
+    risk: servererror-ui-message
+    reproduce: "UI経由で500を返させる"
+    expected: "内部エラーとして表示される"
+    triage: "API error mapping を確認"
+  - id: b10-ui-074
+    layer: failure-ux
+    risk: network-timeout-ui-message
+    reproduce: "APIタイムアウトを発生させる"
+    expected: "タイムアウト表示と再試行導線が出る"
+    triage: "frontend api timeout handling を確認"
+  - id: b10-ui-075
+    layer: failure-ux
+    risk: network-offline-ui-message
+    reproduce: "オフライン状態でAPI呼び出し"
+    expected: "offline表示と再接続導線が出る"
+    triage: "frontend api offline handling を確認"
+  - id: b10-ui-076
+    layer: failure-ux
+    risk: malformed-json-response-ui
+    reproduce: "壊れたJSON応答を返す"
+    expected: "parse失敗を表示しクラッシュしない"
+    triage: "frontend parse error handling を確認"
+  - id: b10-ui-077
+    layer: failure-ux
+    risk: error-boundary-runtime-exception
+    reproduce: "描画時例外を発生"
+    expected: "ErrorBoundary画面に遷移"
+    triage: "ErrorBoundary getDerivedStateFromError を確認"
+  - id: b10-ui-078
+    layer: failure-ux
+    risk: error-boundary-reset
+    reproduce: "ErrorBoundaryでreload後に復帰"
+    expected: "正常画面に戻れる"
+    triage: "ErrorBoundary reload flow を確認"
+  - id: b10-ui-079
+    layer: failure-ux
+    risk: viewer-health-timeout-message
+    reproduce: "viewerのhealth待機をtimeoutさせる"
+    expected: "Error: Kernel health check failed が表示"
+    triage: "viewer lib.rs health_check fail path を確認"
+  - id: b10-ui-080
+    layer: failure-ux
+    risk: viewer-python-setup-failure-message
+    reproduce: "viewer python env setup失敗を発生"
+    expected: "Error: Python setup failed が表示"
+    triage: "viewer lib.rs ensure_python_env fail path を確認"
+  - id: b10-ui-081
+    layer: failure-ux
+    risk: viewer-kernel-start-failure-message
+    reproduce: "viewer kernel start失敗を発生"
+    expected: "Error: Kernel start failed が表示"
+    triage: "viewer lib.rs km.start fail path を確認"
+  - id: b10-ui-082
+    layer: failure-ux
+    risk: viewer-update-check-nonfatal
+    reproduce: "viewer update check失敗を発生"
+    expected: "起動継続しerrorログのみ残る"
+    triage: "viewer updater non-fatal path を確認"
+  - id: b10-ui-083
+    layer: failure-ux
+    risk: viewer-blocked-navigation-feedback
+    reproduce: "外部URL遷移を試行"
+    expected: "blocked warning が残る"
+    triage: "viewer nav-guard warn log を確認"
+  - id: b10-ui-084
+    layer: failure-ux
+    risk: pack-shell-kernel-timeout-error
+    reproduce: "kernelがhealthにならない状態で pack-shell run"
+    expected: "timeout error で終了コード1"
+    triage: "pack-shell wait_for_healthy context を確認"
+  - id: b10-ui-085
+    layer: failure-ux
+    risk: pack-shell-token-request-error
+    reproduce: "token APIを失敗させて pack-shell run"
+    expected: "Failed to get desktop token で終了"
+    triage: "pack-shell get_desktop_token context を確認"
+  - id: b10-ui-086
+    layer: failure-ux
+    risk: pack-shell-command-parse-error
+    reproduce: "不正quoteを含む --command を渡す"
+    expected: "parse error で終了"
+    triage: "pack-shell shell_words::split error path を確認"
+  - id: b10-ui-087
+    layer: failure-ux
+    risk: pack-shell-empty-command-error
+    reproduce: "空 command を渡して run"
+    expected: "--command is empty で終了"
+    triage: "pack-shell empty command check を確認"
+  - id: b10-ui-088
+    layer: failure-ux
+    risk: pack-shell-spawn-error
+    reproduce: "存在しない実行ファイルで run"
+    expected: "Failed to spawn で終了"
+    triage: "pack-shell spawn context を確認"
+  - id: b10-ui-089
+    layer: failure-ux
+    risk: pack-shell-app-exit-nonzero
+    reproduce: "子プロセスが非0終了するケース"
+    expected: "exit code がログ表示される"
+    triage: "pack-shell App exited log を確認"
+  - id: b10-ui-090
+    layer: failure-ux
+    risk: pack-shell-api-unauthorized
+    reproduce: "誤tokenで token API を呼ぶ"
+    expected: "unauthorized error を返す"
+    triage: "pack-shell client error parsing を確認"
+  - id: b10-ui-091
+    layer: failure-ux
+    risk: pack-shell-invalid-json-response
+    reproduce: "token APIが不正JSONを返す"
+    expected: "parse token response failed"
+    triage: "pack-shell resp.json error path を確認"
+  - id: b10-ui-092
+    layer: failure-ux
+    risk: viewer-restart-command-lock-error
+    reproduce: "restart_kernel lock失敗を注入"
+    expected: "lock error が返る"
+    triage: "viewer restart_kernel lock handling を確認"
+  - id: b10-ui-093
+    layer: failure-ux
+    risk: viewer-restart-command-runtime-error
+    reproduce: "restart_kernel 内部失敗を注入"
+    expected: "restart error が返る"
+    triage: "viewer restart_kernel error handling を確認"
+  - id: b10-ui-094
+    layer: failure-ux
+    risk: frontend-route-missing-page
+    reproduce: "未定義 route にアクセス"
+    expected: "クラッシュせず安全な遷移"
+    triage: "router fallback behavior を確認"
+  - id: b10-ui-095
+    layer: failure-ux
+    risk: frontend-state-desync-recover
+    reproduce: "API失敗後に再試行を実行"
+    expected: "stateが復旧し表示が整合する"
+    triage: "store retry handling を確認"
+
+  - id: b10-ui-096
+    layer: operations-release
+    risk: frontend-lint-gate-stability
+    reproduce: "npm run lint を実行"
+    expected: "型契約違反を検知できる"
+    triage: "frontend tsconfig + Flows types を確認"
+  - id: b10-ui-097
+    layer: operations-release
+    risk: frontend-build-gate-stability
+    reproduce: "npm run build を実行"
+    expected: "ビルド破綻を検知できる"
+    triage: "frontend build config を確認"
+  - id: b10-ui-098
+    layer: operations-release
+    risk: viewer-release-target-matrix
+    reproduce: "release workflow matrix を確認"
+    expected: "mac/win/linux target が維持される"
+    triage: ".github/workflows/release.yml を確認"
+  - id: b10-ui-099
+    layer: operations-release
+    risk: viewer-artifact-upload
+    reproduce: "release workflow artifact 条件を確認"
+    expected: "viewer成果物が収集される"
+    triage: "release workflow upload step を確認"
+  - id: b10-ui-100
+    layer: operations-release
+    risk: pack-shell-test-gate
+    reproduce: "cd pack-shell && cargo test 実行"
+    expected: "pack-shell契約が通る"
+    triage: "pack-shell tests を確認"
+  - id: b10-ui-101
+    layer: operations-release
+    risk: root-entrypoint-gate
+    reproduce: "python -m pytest tests/test_entrypoint_contracts.py -v"
+    expected: "entrypoint契約が通る"
+    triage: "root entrypoint tests を確認"
+  - id: b10-ui-102
+    layer: operations-release
+    risk: quality-contract-gate-density
+    reproduce: "quality-contract-pytest を実行"
+    expected: "matrix群が一括で検証される"
+    triage: "run_claude_quality_pack.sh を確認"
+  - id: b10-ui-103
+    layer: operations-release
+    risk: debug-bundle-fast-repro
+    reproduce: "run_debug_bundle.sh を実行"
+    expected: "失敗層再現が短時間で可能"
+    triage: "debug bundle step順序を確認"
+  - id: b10-ui-104
+    layer: operations-release
+    risk: quality-log-summary-output
+    reproduce: "quality pack 実行後 summary を確認"
+    expected: "ゲート別結果が記録される"
+    triage: ".quality_logs summary.txt を確認"
+  - id: b10-ui-105
+    layer: operations-release
+    risk: baseline-nonregression-guard
+    reproduce: "repo-wide ruff/mypy を baseline運用で実行"
+    expected: "悪化時のみfail"
+    triage: "run_claude_quality_pack baseline logic を確認"
+
+  - id: b10-ui-106
+    layer: compatibility
+    risk: browserrouter-basename-panel
+    reproduce: "App を /panel 配下で配信"
+    expected: "すべてのrouteが正しく解決"
+    triage: "App.tsx BrowserRouter basename を確認"
+  - id: b10-ui-107
+    layer: compatibility
+    risk: viewer-localhost-port-compat
+    reproduce: "viewerが localhost:8765 へ遷移"
+    expected: "port固定契約が維持される"
+    triage: "viewer lib.rs redirect を確認"
+  - id: b10-ui-108
+    layer: compatibility
+    risk: pack-shell-env-contract
+    reproduce: "起動アプリが RUMI_TOKEN/PORT/PACK_ID を受信"
+    expected: "既存packと互換動作"
+    triage: "pack-shell env injection を確認"
+  - id: b10-ui-109
+    layer: compatibility
+    risk: pack-shell-version-command
+    reproduce: "pack-shell version を実行"
+    expected: "バージョン文字列を返す"
+    triage: "pack-shell Commands::Version を確認"
+  - id: b10-ui-110
+    layer: compatibility
+    risk: viewer-close-on-macos
+    reproduce: "macOSでウィンドウcloseイベント"
+    expected: "hide動作でアプリ継続"
+    triage: "viewer on_window_event macOS 分岐を確認"
+
+  - id: b10-ui-111
+    layer: observability
+    risk: frontend-error-toast-content
+    reproduce: "API失敗時トースト文言を確認"
+    expected: "原因が識別できるメッセージ"
+    triage: "Toast error mapping を確認"
+  - id: b10-ui-112
+    layer: observability
+    risk: frontend-success-toast-content
+    reproduce: "成功操作時トースト文言を確認"
+    expected: "操作結果が明確なメッセージ"
+    triage: "Toast success mapping を確認"
+  - id: b10-ui-113
+    layer: observability
+    risk: error-boundary-console-trace
+    reproduce: "ErrorBoundary発火時に console を確認"
+    expected: "error と errorInfo が出力される"
+    triage: "ErrorBoundary componentDidCatch を確認"
+  - id: b10-ui-114
+    layer: observability
+    risk: viewer-progress-log-sequence
+    reproduce: "viewer起動ログを確認"
+    expected: "Python->Kernel->Waiting->Ready の順で進捗が出る"
+    triage: "viewer set_progress 呼び出し順を確認"
+  - id: b10-ui-115
+    layer: observability
+    risk: viewer-update-log-severity
+    reproduce: "update check 成功/失敗ログを確認"
+    expected: "成功info/失敗errorで出る"
+    triage: "viewer updater logging を確認"
+  - id: b10-ui-116
+    layer: observability
+    risk: pack-shell-health-retry-log
+    reproduce: "kernel未起動から pack-shell run"
+    expected: "health待機とretryがログに出る"
+    triage: "pack-shell client debug log を確認"
+  - id: b10-ui-117
+    layer: observability
+    risk: pack-shell-token-acquired-log
+    reproduce: "token取得成功時ログを確認"
+    expected: "expires_in がログに出る"
+    triage: "pack-shell main.rs token log を確認"
+  - id: b10-ui-118
+    layer: observability
+    risk: pack-shell-app-exit-log
+    reproduce: "子アプリ終了後のログを確認"
+    expected: "exit code が記録される"
+    triage: "pack-shell App exited log を確認"
+  - id: b10-ui-119
+    layer: observability
+    risk: quality-contract-test-visibility
+    reproduce: "quality-contract-pytest 実行"
+    expected: "ui/viewer/pack-shell 契約テストが個別表示"
+    triage: "quality script test list を確認"
+  - id: b10-ui-120
+    layer: observability
+    risk: debug-bundle-step-visibility
+    reproduce: "run_debug_bundle.sh 実行"
+    expected: "step名ごとの進行ログが表示される"
+    triage: "debug bundle echo step を確認"
