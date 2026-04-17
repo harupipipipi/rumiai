@@ -1,0 +1,368 @@
+version: 1
+owner: quality-pack
+description: |
+  手動で維持する回帰シナリオ一覧。失敗系・権限系・UI系の再現手順を固定化し、
+  実装変更時に「どこを壊してはいけないか」を運用で追跡する。
+scenarios:
+  - id: sec-001
+    layer: security-permission
+    risk: unauthorized-access
+    reproduce: "POST /api/secrets/grants/{pack_id} without Authorization"
+    expected: "401 Unauthorized with JSON response"
+    triage: "check pack_api_server auth path and body-drain handling"
+  - id: sec-002
+    layer: security-permission
+    risk: unauthorized-access
+    reproduce: "DELETE /api/secrets/grants/{pack_id}/{key} without Authorization"
+    expected: "401 Unauthorized"
+    triage: "verify _check_auth and _drain_request_body flow"
+  - id: sec-003
+    layer: security-permission
+    risk: path-traversal
+    reproduce: "POST /api/secrets/grants/..%2F..%2Fetc with secret_keys"
+    expected: "400 Invalid pack_id"
+    triage: "validate _validate_pack_id regex and URL unquote handling"
+  - id: sec-004
+    layer: security-permission
+    risk: key-format
+    reproduce: "POST /api/secrets/grants/{pack_id} with invalid secret_keys"
+    expected: "400 invalid key format"
+    triage: "check secrets_grant_manager key validation"
+  - id: sec-005
+    layer: security-permission
+    risk: privilege-escalation
+    reproduce: "call /api/privileges/{pack}/execute/{priv} without grant"
+    expected: "403 denial and audit trail"
+    triage: "inspect host_privilege_manager decision and audit logger"
+  - id: sec-006
+    layer: security-permission
+    risk: privilege-escalation
+    reproduce: "execute blocked capability via /api/units/execute"
+    expected: "approval_denied or grant_denied"
+    triage: "check capability trust store and grants"
+  - id: sec-007
+    layer: security-permission
+    risk: malformed-body
+    reproduce: "POST API with malformed JSON body"
+    expected: "400 Invalid JSON in request body"
+    triage: "inspect _parse_body and content-length handling"
+  - id: sec-008
+    layer: security-permission
+    risk: oversized-body
+    reproduce: "send body larger than MAX_REQUEST_BODY_BYTES"
+    expected: "413 Request body too large"
+    triage: "verify _read_raw_body size guard"
+  - id: sec-009
+    layer: security-permission
+    risk: token-rotation
+    reproduce: "request with stale token after rotation"
+    expected: "401 Unauthorized"
+    triage: "inspect HMACKeyManager verify_token active key behavior"
+  - id: sec-010
+    layer: security-permission
+    risk: wildcard-csp
+    reproduce: "review viewer tauri.conf csp connect-src"
+    expected: "no wildcard and no https broad allow"
+    triage: "check rumi_viewer/src-tauri/tauri.conf.json"
+  - id: sec-011
+    layer: security-permission
+    risk: permissive-mode
+    reproduce: "start app with --permissive in production env"
+    expected: "blocked unless explicit dev policy"
+    triage: "inspect app1 permissive guard and env checks"
+  - id: sec-012
+    layer: security-permission
+    risk: unapproved-pack
+    reproduce: "try running pack in pending state"
+    expected: "execution denied"
+    triage: "check approval manager status and hash verification"
+  - id: sec-013
+    layer: security-permission
+    risk: modified-pack
+    reproduce: "tamper approved pack file and execute"
+    expected: "hash mismatch and rejection"
+    triage: "inspect verify_hash and modified mark path"
+  - id: sec-014
+    layer: security-permission
+    risk: audit-gap
+    reproduce: "grant/revoke privilege then inspect audit logs"
+    expected: "event persisted in permission audit log"
+    triage: "check audit logger wiring and file path"
+  - id: sec-015
+    layer: security-permission
+    risk: network-bypass
+    reproduce: "attempt network request without network grant"
+    expected: "denied by egress policy"
+    triage: "inspect egress proxy + network grants manager"
+  - id: sec-016
+    layer: security-permission
+    risk: grant-scope
+    reproduce: "grant only domain A, then access domain B"
+    expected: "domain B denied"
+    triage: "verify allowed_domains exact match logic"
+  - id: sec-017
+    layer: security-permission
+    risk: port-scope
+    reproduce: "grant port 443 only, request port 80"
+    expected: "port 80 denied"
+    triage: "verify allowed_ports logic and normalization"
+  - id: sec-018
+    layer: security-permission
+    risk: api-bind
+    reproduce: "set RUMI_API_BIND_ADDRESS=0.0.0.0 and boot"
+    expected: "security warning + audit event"
+    triage: "check PackAPIServer start warning and audit hook"
+  - id: sec-019
+    layer: security-permission
+    risk: pre-auth-route
+    reproduce: "access setup pre-auth routes without token"
+    expected: "only whitelisted pre-auth routes allowed"
+    triage: "inspect pre-auth route table load and matching"
+  - id: sec-020
+    layer: security-permission
+    risk: secret-leak
+    reproduce: "force capability error and inspect response body"
+    expected: "sanitized error without host paths/secrets"
+    triage: "check sanitize_error implementation and dev bypass flag"
+
+  - id: fail-001
+    layer: failure-path
+    risk: api-reset
+    reproduce: "unauthorized POST with body to secrets grant API"
+    expected: "stable 401 without connection reset"
+    triage: "verify _drain_request_body call sequence"
+  - id: fail-002
+    layer: failure-path
+    risk: parser-failure
+    reproduce: "load malformed flow YAML"
+    expected: "FlowLoadResult.success=False with parse error"
+    triage: "check flow_loader YAML exception path"
+  - id: fail-003
+    layer: failure-path
+    risk: missing-flow-id
+    reproduce: "flow file without flow_id"
+    expected: "Missing or invalid flow_id error"
+    triage: "verify required field checks in load_flow_file"
+  - id: fail-004
+    layer: failure-path
+    risk: invalid-phases
+    reproduce: "phases empty or non-string"
+    expected: "validation error and stop load"
+    triage: "inspect phase loop and type guards"
+  - id: fail-005
+    layer: failure-path
+    risk: duplicate-step-id
+    reproduce: "two steps share same id"
+    expected: "duplicate id error"
+    triage: "check _parse_steps seen_ids handling"
+  - id: fail-006
+    layer: failure-path
+    risk: missing-step-file
+    reproduce: "python_file_call without file field"
+    expected: "step validation error"
+    triage: "inspect python_file_call validation branch"
+  - id: fail-007
+    layer: failure-path
+    risk: invalid-content-length
+    reproduce: "send invalid Content-Length header"
+    expected: "400 Invalid Content-Length header"
+    triage: "check _read_raw_body header parsing path"
+  - id: fail-008
+    layer: failure-path
+    risk: unsupported-route
+    reproduce: "call unknown API path"
+    expected: "404 Not found JSON response"
+    triage: "verify unmatched route fallback branch"
+  - id: fail-009
+    layer: failure-path
+    risk: lifecycle-missing
+    reproduce: "POST /api/setup/complete without lifecycle manager"
+    expected: "500 Lifecycle manager not initialized"
+    triage: "inspect pre-auth setup complete handler"
+  - id: fail-010
+    layer: failure-path
+    risk: flow-cycle
+    reproduce: "flow depends_on cycle in same phase"
+    expected: "warning and deterministic fallback order"
+    triage: "check _sort_steps cycle detection path"
+  - id: fail-011
+    layer: failure-path
+    risk: flow-missing-dep
+    reproduce: "depends_on references unknown step"
+    expected: "warning logged, load continues"
+    triage: "inspect missing dep warning path"
+  - id: fail-012
+    layer: failure-path
+    risk: cross-phase-dep
+    reproduce: "depends_on across phases"
+    expected: "warning and phase order precedence"
+    triage: "check cross-phase warning branch"
+  - id: fail-013
+    layer: failure-path
+    risk: startup-dependency
+    reproduce: "critical dependency missing at startup"
+    expected: "degraded flow and explicit fallback logs"
+    triage: "inspect flow fallback health checks"
+  - id: fail-014
+    layer: failure-path
+    risk: rate-limit
+    reproduce: "burst requests above API rate limit"
+    expected: "rate-limit response and no crash"
+    triage: "check rate limiter state and response path"
+  - id: fail-015
+    layer: failure-path
+    risk: sqlite-lock
+    reproduce: "simulate store db lock during writes"
+    expected: "operation fails explicitly without silent corruption"
+    triage: "inspect store write error handling"
+  - id: fail-016
+    layer: failure-path
+    risk: cargo-test-noise
+    reproduce: "run cargo test and collect warnings"
+    expected: "warnings visible but test suite passes"
+    triage: "monitor warning trend and plan cleanup"
+  - id: fail-017
+    layer: failure-path
+    risk: frontend-build-warning
+    reproduce: "run vite build and inspect chunk warning"
+    expected: "build passes with warning"
+    triage: "track chunk-size optimization backlog"
+  - id: fail-018
+    layer: failure-path
+    risk: mypy-baseline
+    reproduce: "run package mypy in full quality pack"
+    expected: "baseline accepted when non-regression"
+    triage: "compare error count with baseline env var"
+  - id: fail-019
+    layer: failure-path
+    risk: ruff-baseline
+    reproduce: "run package ruff check in full quality pack"
+    expected: "baseline accepted when non-regression"
+    triage: "verify count parsing pattern and thresholds"
+  - id: fail-020
+    layer: failure-path
+    risk: quality-script-fail-visibility
+    reproduce: "trigger one gate failure intentionally"
+    expected: "summary includes failed gate names and log path"
+    triage: "verify summary.txt and terminal summary output"
+
+  - id: ui-001
+    layer: frontend-ui
+    risk: type-break
+    reproduce: "run npm run lint after ReactFlow changes"
+    expected: "tsc passes with no type errors"
+    triage: "check onInit typing and hook signatures"
+  - id: ui-002
+    layer: frontend-ui
+    risk: build-break
+    reproduce: "run npm run build after page updates"
+    expected: "vite build succeeds"
+    triage: "inspect import graph and tsconfig boundaries"
+  - id: ui-003
+    layer: frontend-ui
+    risk: config-drift
+    reproduce: "review frontend tsconfig include/exclude"
+    expected: "stable compile scope"
+    triage: "compare with test_frontend_build_config expectations"
+  - id: ui-004
+    layer: frontend-ui
+    risk: tailwind-source
+    reproduce: "check index.css for @source declarations"
+    expected: "tailwind scan covers app sources"
+    triage: "inspect css source directives and generated classes"
+  - id: ui-005
+    layer: frontend-ui
+    risk: route-transition
+    reproduce: "navigate Setup -> Dashboard -> Packs -> Flows"
+    expected: "no blank page, no uncaught errors"
+    triage: "capture console logs and route boundary state"
+  - id: ui-006
+    layer: frontend-ui
+    risk: flow-drag-drop
+    reproduce: "drag node into flow canvas"
+    expected: "node appears with stable default data"
+    triage: "inspect useFlowDragDrop and node factory"
+  - id: ui-007
+    layer: frontend-ui
+    risk: menu-node-create
+    reproduce: "add node from menu action"
+    expected: "node creation uses valid typed option payload"
+    triage: "verify handleAddNodeFromMenu input type"
+  - id: ui-008
+    layer: frontend-ui
+    risk: pack-listing
+    reproduce: "open Packs page and refresh list"
+    expected: "list renders and errors are surfaced"
+    triage: "inspect api fetch handling and fallback UI"
+  - id: ui-009
+    layer: frontend-ui
+    risk: settings-load-fail
+    reproduce: "simulate settings API failure"
+    expected: "error message visible and app remains usable"
+    triage: "check settings page error state handling"
+  - id: ui-010
+    layer: frontend-ui
+    risk: viewer-csp
+    reproduce: "open viewer panel with localhost endpoint"
+    expected: "panel renders without CSP violation"
+    triage: "inspect tauri.conf csp connect-src entries"
+  - id: ui-011
+    layer: frontend-ui
+    risk: accessibility-focus
+    reproduce: "tab through primary controls"
+    expected: "focus order is stable and visible"
+    triage: "inspect keyboard handlers and tabindex usage"
+  - id: ui-012
+    layer: frontend-ui
+    risk: api-timeout
+    reproduce: "simulate API timeout on flow list"
+    expected: "timeout error is displayed"
+    triage: "check fetch timeout and retry behavior"
+  - id: ui-013
+    layer: frontend-ui
+    risk: stale-state
+    reproduce: "rapidly switch flow tabs after update"
+    expected: "no stale node selection or crash"
+    triage: "inspect state reset path in useFlowEditor"
+  - id: ui-014
+    layer: frontend-ui
+    risk: oversize-bundle
+    reproduce: "inspect vite build chunk warning trend"
+    expected: "warning tracked and not silently ignored"
+    triage: "capture warning in release checklist"
+  - id: ui-015
+    layer: frontend-ui
+    risk: css-regression
+    reproduce: "check major layout screens after css edits"
+    expected: "no overlap/overflow regressions"
+    triage: "compare with prior screenshots/manual checklist"
+  - id: ui-016
+    layer: frontend-ui
+    risk: form-validation
+    reproduce: "submit invalid pack form inputs"
+    expected: "validation message with actionable text"
+    triage: "inspect form schema and field error mapping"
+  - id: ui-017
+    layer: frontend-ui
+    risk: error-boundary
+    reproduce: "throw rendering error in child component"
+    expected: "error boundary fallback shown"
+    triage: "verify boundary mount points and message quality"
+  - id: ui-018
+    layer: frontend-ui
+    risk: locale-fallback
+    reproduce: "set unsupported locale in setup"
+    expected: "fallback locale selected without crash"
+    triage: "inspect i18n resolver and defaults"
+  - id: ui-019
+    layer: frontend-ui
+    risk: websocket-loss
+    reproduce: "disconnect backend during live updates"
+    expected: "clear disconnected state and retry path"
+    triage: "inspect transport reconnection and toast behavior"
+  - id: ui-020
+    layer: frontend-ui
+    risk: startup-blank
+    reproduce: "launch viewer when backend is not ready"
+    expected: "recoverable error screen instead of white screen"
+    triage: "check bootstrapping health checks and fallback render"

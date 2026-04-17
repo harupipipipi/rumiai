@@ -23,12 +23,14 @@ def test_quality_pack_docs_exist_and_have_required_sections():
     coverage_matrix = PACKAGE_ROOT / "docs" / "quality_pack" / "test_coverage_matrix.md"
     re_eval_log = PACKAGE_ROOT / "docs" / "quality_pack" / "philosophy_re_evaluation_log.md"
     debug_playbook = PACKAGE_ROOT / "docs" / "quality_pack" / "debug_playbook.md"
+    manual_scenarios = PACKAGE_ROOT / "docs" / "quality_pack" / "manual_regression_scenarios.yaml"
 
     assert philosophy_memo.exists()
     assert quality_pack.exists()
     assert coverage_matrix.exists()
     assert re_eval_log.exists()
     assert debug_playbook.exists()
+    assert manual_scenarios.exists()
 
     memo_text = _read(philosophy_memo)
     pack_text = _read(quality_pack)
@@ -144,6 +146,7 @@ def test_coverage_matrix_references_existing_tests():
         "tests/test_entrypoint_contracts.py",
         "tests/test_claude_quality_pack_contract.py",
         "tests/test_quality_debug_playbook_contract.py",
+        "tests/test_manual_regression_scenarios_contract.py",
         "tests/test_phase_a_health.py",
         "tests/test_security_guards.py",
     ]
