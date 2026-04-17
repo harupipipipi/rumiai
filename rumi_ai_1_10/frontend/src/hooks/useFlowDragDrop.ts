@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import type { Node, Edge, ReactFlowInstance } from '@xyflow/react';
+import type { DragEvent, MouseEvent as ReactMouseEvent, RefObject } from 'react';
 
 interface UseFlowDragDropParams {
   nodes: Node[];
@@ -7,7 +8,7 @@ interface UseFlowDragDropParams {
   setEdges: (updater: Edge[] | ((edges: Edge[]) => Edge[])) => void;
   saveHistory: () => void;
   reactFlowInstance: ReactFlowInstance | null;
-  reactFlowWrapper: React.RefObject<HTMLDivElement | null>;
+  reactFlowWrapper: RefObject<HTMLDivElement | null>;
 }
 
 export function useFlowDragDrop({
@@ -47,7 +48,7 @@ export function useFlowDragDrop({
   }, [reactFlowWrapper]);
 
   const onNodeDragStop = useCallback(
-    (_event: React.MouseEvent, node: Node) => {
+    (_event: ReactMouseEvent, node: Node) => {
       setIsDraggingNode(false);
       setIsOverDeleteZone(false);
 
@@ -64,13 +65,13 @@ export function useFlowDragDrop({
     [reactFlowWrapper, saveHistory, setNodes, setEdges]
   );
 
-  const onDragOver = useCallback((event: React.DragEvent) => {
+  const onDragOver = useCallback((event: DragEvent) => {
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
   }, []);
 
   const onDrop = useCallback(
-    (event: React.DragEvent) => {
+    (event: DragEvent) => {
       event.preventDefault();
 
       const type = event.dataTransfer.getData('application/reactflow');

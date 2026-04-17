@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import type { Node, Edge, Connection, ReactFlowInstance } from '@xyflow/react';
 import { addEdge, reconnectEdge } from '@xyflow/react';
+import type { MouseEvent as ReactMouseEvent, RefObject } from 'react';
 
 interface UseFlowEditorParams {
   nodes: Node[];
@@ -9,7 +10,7 @@ interface UseFlowEditorParams {
   setEdges: (updater: Edge[] | ((edges: Edge[]) => Edge[])) => void;
   saveHistory: () => void;
   reactFlowInstance: ReactFlowInstance | null;
-  pressedKeys: React.RefObject<Set<string>>;
+  pressedKeys: RefObject<Set<string>>;
 }
 
 export function useFlowEditor({
@@ -34,11 +35,11 @@ export function useFlowEditor({
     [setEdges, saveHistory],
   );
 
-  const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
+  const onNodeClick = useCallback((_: ReactMouseEvent, node: Node) => {
     setSelectedNode(node);
   }, []);
 
-  const onPaneClick = useCallback((event: React.MouseEvent) => {
+  const onPaneClick = useCallback((event: ReactMouseEvent) => {
     setSelectedNode(null);
     setMenuPos(null);
 
@@ -85,7 +86,7 @@ export function useFlowEditor({
     }
   }, [reactFlowInstance, setNodes, saveHistory, pressedKeys]);
 
-  const onPaneContextMenu = useCallback((event: React.MouseEvent) => {
+  const onPaneContextMenu = useCallback((event: ReactMouseEvent) => {
     event.preventDefault();
     setMenuPos({ x: event.clientX, y: event.clientY });
     setPendingConnection(null);
@@ -102,7 +103,7 @@ export function useFlowEditor({
     []
   );
 
-  const onEdgeClick = useCallback((event: React.MouseEvent, edge: Edge) => {
+  const onEdgeClick = useCallback((event: ReactMouseEvent, edge: Edge) => {
     if (event.altKey) {
       saveHistory();
       setEdges(eds => eds.filter(e => e.id !== edge.id));
@@ -118,7 +119,7 @@ export function useFlowEditor({
     [setEdges, saveHistory]
   );
 
-  const onEdgeDoubleClick = useCallback((event: React.MouseEvent, edge: Edge) => {
+  const onEdgeDoubleClick = useCallback((event: ReactMouseEvent, edge: Edge) => {
     if (!reactFlowInstance) return;
     saveHistory();
 

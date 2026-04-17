@@ -1,4 +1,8 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
+import type {
+  DragEvent as ReactDragEvent,
+  MouseEvent as ReactMouseEvent,
+} from 'react';
 import { useAppStore } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
 import { cn } from '@/src/lib/utils';
@@ -63,7 +67,7 @@ function FlowEditorInner() {
 
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
+  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance<Node, Edge> | null>(null);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
 
   const selectedFlow = flows.find(f => f.id === selectedFlowId);
@@ -220,7 +224,11 @@ function FlowEditorInner() {
     }
   };
 
-  const onDragStart = (event: React.DragEvent, nodeType: string, stepId: string) => {
+  const onDragStart = (
+    event: ReactDragEvent,
+    nodeType: string,
+    stepId: string,
+  ) => {
     const ghost = new Image();
     ghost.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
     event.dataTransfer.setDragImage(ghost, 0, 0);
@@ -230,7 +238,7 @@ function FlowEditorInner() {
   };
 
   const handleStepMiddleClick = useCallback(
-    (event: React.MouseEvent, step: AvailableStep) => {
+    (event: ReactMouseEvent, step: AvailableStep) => {
       if (event.button !== 1) return;
       event.preventDefault();
       if (!reactFlowInstance) return;
@@ -389,7 +397,9 @@ function FlowEditorInner() {
                   onEdgeDoubleClick={editorHook.onEdgeDoubleClick}
                   onNodesDelete={editorHook.onNodesDelete}
                   onEdgesDelete={editorHook.onEdgesDelete}
-                  onInit={setReactFlowInstance}
+                  onInit={(instance) =>
+                    setReactFlowInstance(instance as ReactFlowInstance<Node, Edge>)
+                  }
                   onDrop={dragDrop.onDrop}
                   onDragOver={dragDrop.onDragOver}
                   nodeTypes={nodeTypes}
@@ -458,7 +468,9 @@ function FlowEditorInner() {
                       <div
                         key={name}
                         className="px-2 py-1.5 hover:bg-bg-hover cursor-pointer text-sm rounded flex flex-col border-t border-border mt-1"
-                        onClick={() => editorHook.handleAddNodeFromMenu({ id: name.toLowerCase(), name, description: `Basic ${name} node` })}
+                        onClick={() =>
+                          editorHook.handleAddNodeFromMenu({ id: name.toLowerCase() })
+                        }
                       >
                         <span className="font-medium text-accent">{name}</span>
                       </div>

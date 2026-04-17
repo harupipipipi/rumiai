@@ -34,11 +34,6 @@ export function Packs() {
 
   const filteredPacks = packs.filter(pack => pack.name.toLowerCase().includes(search.toLowerCase()));
 
-  const handleToggle = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    togglePack(id);
-  };
-
   return (
     <div className="flex-1 overflow-y-auto p-8 flex flex-col gap-8 animate-in fade-in slide-in-from-bottom-4">
       <div className="flex items-center justify-between">
@@ -78,7 +73,10 @@ export function Packs() {
                 <p className="text-sm text-text-muted">{pack.description}</p>
               </div>
               <div onClick={(e) => e.stopPropagation()}>
-                <Switch checked={pack.enabled} onCheckedChange={() => handleToggle(pack.id, { stopPropagation: () => {} } as React.MouseEvent)} />
+                <Switch
+                  checked={pack.enabled}
+                  onCheckedChange={() => togglePack(pack.id)}
+                />
               </div>
             </div>
           ))

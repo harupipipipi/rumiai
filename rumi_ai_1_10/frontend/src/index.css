@@ -1,5 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;500&display=swap');
 @import "tailwindcss";
+@source "./**/*.{ts,tsx,js,jsx,html}";
 
 @theme {
   --color-bg-main: var(--bg-main);
