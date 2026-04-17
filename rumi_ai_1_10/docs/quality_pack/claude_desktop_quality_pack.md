@@ -87,6 +87,7 @@ cd pack-shell && cargo test && cd ..
 ## 3.1 思想適合チェック
 - 思想メモと品質パック文書の必須セクション存在チェック
 - README/CI定義の契約が崩れていないかを静的検証
+- 手動回帰台帳を契約テストで検査し、必須レイヤー・最小件数・ID一意性を継続検証
 
 ## 3.2 CLI / バックエンド契約
 - root entrypoint (`rumi_ai/__main__.py`) が `rumi_ai_1_10.app` へ接続する契約
@@ -220,3 +221,4 @@ PR1では品質資産のみ、PR2で実害バグを修正する。
   - `docs/quality_pack/manual_regression_scenarios.yaml`
   - `docs/quality_pack/manual_regression_scenarios_batch2.yaml`
   - `docs/quality_pack/manual_regression_scenarios_batch3.yaml`
+  - `docs/quality_pack/manual_regression_scenarios_batch4.yaml`

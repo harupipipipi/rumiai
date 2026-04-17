@@ -1,0 +1,610 @@
+version: 1
+owner: quality-pack
+description: |
+  手動回帰シナリオ台帳の第4弾。承認境界・ネットワーク境界・Fail-Soft・UI操作性・監査追跡性を
+  細粒度で固定化し、品質ゲートの失敗を現場で即切り分けできる状態を維持する。
+scenarios:
+  - id: b4-al-001
+    layer: security-permission
+    risk: approval-status-race
+    reproduce: "pending packを一覧表示中に別端末でapproveして再実行"
+    expected: "最終状態がapprovedへ収束し矛盾しない"
+    triage: "approval managerの読み込み順と再取得処理を確認"
+  - id: b4-al-002
+    layer: security-permission
+    risk: approval-reject-race
+    reproduce: "approve直後にrejectを実行して状態を確認"
+    expected: "最終操作に一致した単一状態"
+    triage: "状態遷移の排他制御と永続化順序を確認"
+  - id: b4-al-003
+    layer: security-permission
+    risk: approve-without-hash
+    reproduce: "ハッシュ未計算のpackをapproveしようとする"
+    expected: "承認拒否または事前検証エラー"
+    triage: "approve前検証フックを確認"
+  - id: b4-al-004
+    layer: security-permission
+    risk: modified-pack-reapproval-gap
+    reproduce: "modified判定後に再承認せず実行"
+    expected: "実行拒否と再承認要求"
+    triage: "modified statusと実行ガード条件を確認"
+  - id: b4-al-005
+    layer: security-permission
+    risk: approval-log-missing-actor
+    reproduce: "承認操作後に監査ログのactor項目を確認"
+    expected: "実行主体が監査ログに残る"
+    triage: "audit payloadのactor設定を確認"
+  - id: b4-al-006
+    layer: security-permission
+    risk: approval-log-missing-target
+    reproduce: "承認操作後にtarget pack_idの有無を確認"
+    expected: "対象packが監査ログで追跡可能"
+    triage: "event payloadのtargetを確認"
+  - id: b4-al-007
+    layer: security-permission
+    risk: stale-approved-cache
+    reproduce: "承認直後に実行して古いpending情報が使われる"
+    expected: "最新承認状態で判定"
+    triage: "承認キャッシュ無効化の実装を確認"
+  - id: b4-al-008
+    layer: security-permission
+    risk: stale-rejected-cache
+    reproduce: "reject直後に実行要求"
+    expected: "拒否状態が即時反映される"
+    triage: "status cache再読み込みを確認"
+  - id: b4-al-009
+    layer: security-permission
+    risk: preauth-approve-leak
+    reproduce: "pre-auth経路から承認操作を試みる"
+    expected: "未認証では承認不可"
+    triage: "pre-auth route tableに承認系が含まれないことを確認"
+  - id: b4-al-010
+    layer: security-permission
+    risk: malformed-pack-id-on-approve
+    reproduce: "承認APIに不正pack_idを渡す"
+    expected: "400で拒否"
+    triage: "pack_id validationの共通経路を確認"
+  - id: b4-al-011
+    layer: security-permission
+    risk: uppercase-pack-id-compat
+    reproduce: "大文字混在pack_idで承認/拒否"
+    expected: "規約に沿って拒否または正規化"
+    triage: "ID正規化ルールを確認"
+  - id: b4-al-012
+    layer: security-permission
+    risk: unicode-pack-id
+    reproduce: "非ASCII pack_idで承認操作"
+    expected: "許可仕様外なら明示的に拒否"
+    triage: "バリデーションの文字種制限を確認"
+  - id: b4-al-013
+    layer: security-permission
+    risk: reapprove-without-diff-review
+    reproduce: "modified packを差分確認なしで再承認"
+    expected: "運用チェックでブロック"
+    triage: "manual checklistの再承認項目を確認"
+  - id: b4-al-014
+    layer: security-permission
+    risk: bulk-approve-mixed-state
+    reproduce: "pendingとmodifiedを混在させた一括承認"
+    expected: "状態ごとの安全判定が維持される"
+    triage: "一括処理で個別判定が行われるか確認"
+  - id: b4-al-015
+    layer: security-permission
+    risk: approve-while-scan-running
+    reproduce: "pack scan中に承認操作"
+    expected: "scan結果と承認結果の整合が崩れない"
+    triage: "scan/approval競合時のロックを確認"
+  - id: b4-al-016
+    layer: security-permission
+    risk: reject-with-stale-hash
+    reproduce: "古いhash情報を持ったままreject"
+    expected: "状態破損なくrejectが反映"
+    triage: "状態更新時の最新読込を確認"
+  - id: b4-al-017
+    layer: security-permission
+    risk: approval-comment-loss
+    reproduce: "承認理由コメントを付与して保存"
+    expected: "監査に必要な文脈が保存される"
+    triage: "approval metadataの保存経路を確認"
+  - id: b4-al-018
+    layer: security-permission
+    risk: reject-reason-empty
+    reproduce: "reject理由空欄で操作"
+    expected: "運用上必須なら入力要求"
+    triage: "reject validationポリシーを確認"
+  - id: b4-al-019
+    layer: security-permission
+    risk: approval-timezone-skew
+    reproduce: "異なるtimezone環境で承認履歴を確認"
+    expected: "ISO8601で一貫表示"
+    triage: "timestamp生成のtimezone処理を確認"
+  - id: b4-al-020
+    layer: security-permission
+    risk: approval-audit-order
+    reproduce: "連続承認時に監査ログ順序を確認"
+    expected: "時系列で追跡可能"
+    triage: "audit writerのflush順序を確認"
+
+  - id: b4-nb-001
+    layer: security-permission
+    risk: domain-exact-match
+    reproduce: "grant domain=api.example.comでsubdomainへ接続"
+    expected: "仕様どおり許可/拒否が明確"
+    triage: "domain matchingルールを確認"
+  - id: b4-nb-002
+    layer: security-permission
+    risk: domain-case-normalization
+    reproduce: "大文字ドメインでgrantし接続"
+    expected: "ケース差による判定崩れなし"
+    triage: "lowercase正規化の有無を確認"
+  - id: b4-nb-003
+    layer: security-permission
+    risk: trailing-dot-domain
+    reproduce: "末尾ドット付きFQDNで接続"
+    expected: "正規化ルールで判定一貫"
+    triage: "FQDN正規化処理を確認"
+  - id: b4-nb-004
+    layer: security-permission
+    risk: ipv6-domain-policy
+    reproduce: "IPv6 literalでの接続試行"
+    expected: "許可範囲外なら拒否"
+    triage: "IP表記のバリデーションを確認"
+  - id: b4-nb-005
+    layer: security-permission
+    risk: wildcard-domain-overgrant
+    reproduce: "広すぎるワイルドカードgrantを申請"
+    expected: "最小権限方針で却下"
+    triage: "grant審査基準を確認"
+  - id: b4-nb-006
+    layer: security-permission
+    risk: scheme-confusion
+    reproduce: "https限定grantでhttpアクセス"
+    expected: "ポリシーに従い拒否"
+    triage: "scheme判定有無を確認"
+  - id: b4-nb-007
+    layer: security-permission
+    risk: port-default-implicit
+    reproduce: "port未指定時の443/80既定扱いを確認"
+    expected: "暗黙許可が過剰にならない"
+    triage: "port解決ルールを確認"
+  - id: b4-nb-008
+    layer: security-permission
+    risk: mixed-port-list
+    reproduce: "許可portリストに異常値混在"
+    expected: "不正値は拒否または除外"
+    triage: "port validationを確認"
+  - id: b4-nb-009
+    layer: security-permission
+    risk: localhost-bypass
+    reproduce: "localhostへの暗黙許可の有無を確認"
+    expected: "仕様外の自動許可なし"
+    triage: "localhost特例ロジックを確認"
+  - id: b4-nb-010
+    layer: security-permission
+    risk: loopback-range-bypass
+    reproduce: "127.0.0.0/8範囲アクセス"
+    expected: "grantなし拒否"
+    triage: "IP range判定を確認"
+  - id: b4-nb-011
+    layer: security-permission
+    risk: dns-rebind-risk
+    reproduce: "許可ドメインが内部IPへ解決されるケース"
+    expected: "危険経路は拒否または監査警告"
+    triage: "DNS解決後のIP検証を確認"
+  - id: b4-nb-012
+    layer: security-permission
+    risk: proxy-env-bypass
+    reproduce: "HTTP_PROXY経由で未許可先へ接続"
+    expected: "egress policyで拒否"
+    triage: "proxy経由通信も同一判定か確認"
+  - id: b4-nb-013
+    layer: security-permission
+    risk: ws-scheme-gap
+    reproduce: "ws/wss接続時のgrant判定"
+    expected: "HTTP系と同等の最小権限"
+    triage: "websocket接続経路の判定を確認"
+  - id: b4-nb-014
+    layer: security-permission
+    risk: redirect-to-ungranted
+    reproduce: "許可先から未許可先へリダイレクト"
+    expected: "遷移先で再判定して拒否"
+    triage: "redirect追従時の再評価を確認"
+  - id: b4-nb-015
+    layer: security-permission
+    risk: revoked-grant-stale
+    reproduce: "revoke直後の接続試行"
+    expected: "即時拒否"
+    triage: "grant cache invalidateを確認"
+  - id: b4-nb-016
+    layer: security-permission
+    risk: concurrent-grant-write
+    reproduce: "複数プロセスでgrant更新"
+    expected: "破損なく最終状態整合"
+    triage: "grant保存時の排他制御を確認"
+  - id: b4-nb-017
+    layer: security-permission
+    risk: malformed-domain-entry
+    reproduce: "空白・制御文字入りdomainをgrant"
+    expected: "バリデーションで拒否"
+    triage: "domain sanitizerを確認"
+  - id: b4-nb-018
+    layer: security-permission
+    risk: too-many-domains
+    reproduce: "過剰件数のdomain grant申請"
+    expected: "運用上限で制御"
+    triage: "件数制限ポリシーを確認"
+  - id: b4-nb-019
+    layer: security-permission
+    risk: network-audit-missing-domain
+    reproduce: "network grant監査イベントのdomain欠落"
+    expected: "対象domainが監査で追跡可能"
+    triage: "network audit payloadを確認"
+  - id: b4-nb-020
+    layer: security-permission
+    risk: network-audit-missing-action
+    reproduce: "grant/revoke区別なく同一イベントで記録"
+    expected: "操作種別が明示される"
+    triage: "action fieldの記録を確認"
+
+  - id: b4-fsr-001
+    layer: failure-path
+    risk: startup-partial-dependency-fail
+    reproduce: "一部依存サービスを停止して起動"
+    expected: "Fail-Softで縮退起動しクラッシュしない"
+    triage: "startup degradation pathを確認"
+  - id: b4-fsr-002
+    layer: failure-path
+    risk: startup-all-dependency-fail
+    reproduce: "必須依存が全停止で起動"
+    expected: "安全停止し原因を明示"
+    triage: "fatal dependency判定を確認"
+  - id: b4-fsr-003
+    layer: failure-path
+    risk: reload-route-file-missing
+    reproduce: "route定義ファイルを削除してreload"
+    expected: "旧状態維持または安全エラー"
+    triage: "reload失敗時rollbackを確認"
+  - id: b4-fsr-004
+    layer: failure-path
+    risk: reload-route-file-malformed
+    reproduce: "route YAMLを壊してreload"
+    expected: "不正設定の反映拒否"
+    triage: "parser error handlingを確認"
+  - id: b4-fsr-005
+    layer: failure-path
+    risk: auth-header-empty
+    reproduce: "Authorization: Bearer だけを送信"
+    expected: "401で拒否"
+    triage: "token抽出ロジックを確認"
+  - id: b4-fsr-006
+    layer: failure-path
+    risk: auth-header-multi-space
+    reproduce: "Bearer前後に異常空白を含むヘッダ"
+    expected: "曖昧な認証を拒否"
+    triage: "header split処理を確認"
+  - id: b4-fsr-007
+    layer: failure-path
+    risk: content-length-negative
+    reproduce: "負のContent-Length送信"
+    expected: "400で拒否"
+    triage: "Content-Length境界チェックを確認"
+  - id: b4-fsr-008
+    layer: failure-path
+    risk: content-length-overflow
+    reproduce: "巨大Content-Lengthで接続"
+    expected: "413または早期拒否"
+    triage: "MAX_REQUEST_BODY_BYTES比較を確認"
+  - id: b4-fsr-009
+    layer: failure-path
+    risk: socket-close-mid-body
+    reproduce: "ボディ送信途中でクライアント切断"
+    expected: "サーバ側が異常終了しない"
+    triage: "read loopの例外処理を確認"
+  - id: b4-fsr-010
+    layer: failure-path
+    risk: non-json-content-type
+    reproduce: "Content-Type text/plainでJSON相当API呼び出し"
+    expected: "明示エラーまたは安全な拒否"
+    triage: "content type判定方針を確認"
+  - id: b4-fsr-011
+    layer: failure-path
+    risk: missing-required-field
+    reproduce: "必須フィールド欠落JSON送信"
+    expected: "400と不足項目情報"
+    triage: "payload validationメッセージを確認"
+  - id: b4-fsr-012
+    layer: failure-path
+    risk: null-required-field
+    reproduce: "必須フィールドにnull送信"
+    expected: "型不一致として拒否"
+    triage: "schema/type guardを確認"
+  - id: b4-fsr-013
+    layer: failure-path
+    risk: duplicate-request-replay
+    reproduce: "同一更新リクエストを短時間連打"
+    expected: "状態破損しない"
+    triage: "idempotency要件と実装差分を確認"
+  - id: b4-fsr-014
+    layer: failure-path
+    risk: stale-frontend-config
+    reproduce: "古いfrontend build成果物で起動"
+    expected: "不整合を検知し再build案内"
+    triage: "artifact同期手順を確認"
+  - id: b4-fsr-015
+    layer: failure-path
+    risk: strict-mode-without-docker
+    reproduce: "strict modeでdocker未起動"
+    expected: "実行拒否と明示メッセージ"
+    triage: "strict mode prerequisite checkを確認"
+  - id: b4-fsr-016
+    layer: failure-path
+    risk: permissive-mode-unintended
+    reproduce: "想定外環境でpermissiveが有効"
+    expected: "運用チェックで検知"
+    triage: "起動引数と環境条件を確認"
+  - id: b4-fsr-017
+    layer: failure-path
+    risk: invalid-yaml-encoding
+    reproduce: "UTF-8以外エンコードのflow YAML"
+    expected: "安全にエラー扱い"
+    triage: "read_textエンコード例外処理を確認"
+  - id: b4-fsr-018
+    layer: failure-path
+    risk: flow-size-near-limit
+    reproduce: "上限直下サイズのflow読み込み"
+    expected: "境界値で正しく許可"
+    triage: "size checkの>=条件を確認"
+  - id: b4-fsr-019
+    layer: failure-path
+    risk: flow-size-over-limit
+    reproduce: "上限+1バイトのflow読み込み"
+    expected: "明示拒否"
+    triage: "エラーメッセージの可読性を確認"
+  - id: b4-fsr-020
+    layer: failure-path
+    risk: fallback-path-hidden
+    reproduce: "fallback実行時にログ不足"
+    expected: "fallback理由が診断可能"
+    triage: "fallback log messageを確認"
+
+  - id: b4-uio-001
+    layer: frontend-ui
+    risk: setup-first-render
+    reproduce: "初回起動直後のSetup画面表示"
+    expected: "白画面なしで必要入力が表示"
+    triage: "初期データフェッチ失敗時の分岐を確認"
+  - id: b4-uio-002
+    layer: frontend-ui
+    risk: setup-submit-invalid
+    reproduce: "必須項目未入力でSetup submit"
+    expected: "フィールドごとにエラー表示"
+    triage: "フォームバリデーションを確認"
+  - id: b4-uio-003
+    layer: frontend-ui
+    risk: setup-submit-api-fail
+    reproduce: "setup APIを500にしてsubmit"
+    expected: "再試行可能なエラー表示"
+    triage: "API失敗時のメッセージマッピングを確認"
+  - id: b4-uio-004
+    layer: frontend-ui
+    risk: dashboard-load-fail
+    reproduce: "dashboard API失敗時の画面表示"
+    expected: "クラッシュせずエラー説明を表示"
+    triage: "error boundaryとfallback UIを確認"
+  - id: b4-uio-005
+    layer: frontend-ui
+    risk: packs-page-empty
+    reproduce: "pack一覧が空の状態で表示"
+    expected: "空状態メッセージと次アクション導線"
+    triage: "empty state UIの品質を確認"
+  - id: b4-uio-006
+    layer: frontend-ui
+    risk: packs-page-api-timeout
+    reproduce: "一覧取得をタイムアウト"
+    expected: "loading解除とtimeout表示"
+    triage: "timeout後のstate更新を確認"
+  - id: b4-uio-007
+    layer: frontend-ui
+    risk: flows-page-initialization
+    reproduce: "Flows画面初期化時にnode/edge未定義"
+    expected: "安全な初期値で表示継続"
+    triage: "useFlowEditor初期stateを確認"
+  - id: b4-uio-008
+    layer: frontend-ui
+    risk: flows-node-add-menu
+    reproduce: "メニューからnode連続追加"
+    expected: "重複や型崩れなく追加"
+    triage: "node factoryとid生成を確認"
+  - id: b4-uio-009
+    layer: frontend-ui
+    risk: flows-drag-cancel
+    reproduce: "drag開始後キャンセル"
+    expected: "中間stateが残らない"
+    triage: "drag start/endイベント処理を確認"
+  - id: b4-uio-010
+    layer: frontend-ui
+    risk: flows-invalid-drop-payload
+    reproduce: "不正payloadでdrop"
+    expected: "例外なく無視または安全エラー"
+    triage: "drop payload guardを確認"
+  - id: b4-uio-011
+    layer: frontend-ui
+    risk: keyboard-navigation-main
+    reproduce: "主要画面をTab/Shift+Tabで操作"
+    expected: "フォーカス順が破綻しない"
+    triage: "フォーカス可能要素の順序を確認"
+  - id: b4-uio-012
+    layer: frontend-ui
+    risk: keyboard-enter-submit
+    reproduce: "フォームでEnter送信"
+    expected: "意図しない多重送信なし"
+    triage: "submitハンドラの二重実行防止を確認"
+  - id: b4-uio-013
+    layer: frontend-ui
+    risk: keyboard-esc-close-dialog
+    reproduce: "ダイアログ表示中にEsc"
+    expected: "閉じる動作が一貫"
+    triage: "dialog key handlerを確認"
+  - id: b4-uio-014
+    layer: frontend-ui
+    risk: mobile-layout-overflow
+    reproduce: "狭幅画面で主要ページ表示"
+    expected: "横スクロール暴走なし"
+    triage: "CSS overflowとbreakpointを確認"
+  - id: b4-uio-015
+    layer: frontend-ui
+    risk: long-text-wrap
+    reproduce: "長いpack名/エラー文を表示"
+    expected: "レイアウト崩壊せず折返し"
+    triage: "text wrapping classを確認"
+  - id: b4-uio-016
+    layer: frontend-ui
+    risk: toast-duplication
+    reproduce: "同一失敗を短時間連続発生"
+    expected: "重複toast抑制"
+    triage: "toast keyとdebounceを確認"
+  - id: b4-uio-017
+    layer: frontend-ui
+    risk: stale-loading-flag
+    reproduce: "API失敗後に再試行してloading状態確認"
+    expected: "状態が正しく遷移"
+    triage: "finallyでloading解除されるか確認"
+  - id: b4-uio-018
+    layer: frontend-ui
+    risk: route-back-navigation
+    reproduce: "エラー画面から戻る操作"
+    expected: "復帰可能でループしない"
+    triage: "router遷移ガードを確認"
+  - id: b4-uio-019
+    layer: frontend-ui
+    risk: css-source-drift
+    reproduce: "index.cssの@source設定を変更"
+    expected: "必要クラスがビルドに残る"
+    triage: "tailwind source範囲を確認"
+  - id: b4-uio-020
+    layer: frontend-ui
+    risk: frontend-console-error
+    reproduce: "主要遷移中のconsole error収集"
+    expected: "重大エラーが発生しない"
+    triage: "エラー発生コンポーネントを特定して修正"
+
+  - id: b4-at-001
+    layer: audit-readiness
+    risk: missing-command-evidence
+    reproduce: "PR本文に実行コマンドを省略"
+    expected: "レビューで差し戻し"
+    triage: "検証コマンド一覧を必須化"
+  - id: b4-at-002
+    layer: audit-readiness
+    risk: missing-result-evidence
+    reproduce: "コマンド結果の成功/失敗を曖昧記載"
+    expected: "各結果を明示"
+    triage: "結果テンプレートを使用"
+  - id: b4-at-003
+    layer: audit-readiness
+    risk: mismatch-log-and-claim
+    reproduce: "summary.txtと報告内容が不一致"
+    expected: "証跡に整合する記述のみ"
+    triage: "報告前にsummaryを再照合"
+  - id: b4-at-004
+    layer: audit-readiness
+    risk: no-philosophy-crosscheck-entry
+    reproduce: "思想再評価ログ未更新で大変更"
+    expected: "再評価ログへ必ず追記"
+    triage: "作業節目でログ更新"
+  - id: b4-at-005
+    layer: audit-readiness
+    risk: pr-scope-mix
+    reproduce: "PR1に本体バグ修正が混入"
+    expected: "責務分離ルール違反として分離"
+    triage: "変更ファイルの責務分類を確認"
+  - id: b4-at-006
+    layer: audit-readiness
+    risk: no-self-review-proof
+    reproduce: "セルフレビュー観点が未記録"
+    expected: "観点別レビュー結果を記録"
+    triage: "self-reviewチェック項目を埋める"
+  - id: b4-at-007
+    layer: audit-readiness
+    risk: hidden-known-risk
+    reproduce: "既知の重大リスクを本文に書かない"
+    expected: "残リスク欄で明示"
+    triage: "未解決事項を列挙"
+  - id: b4-at-008
+    layer: audit-readiness
+    risk: linecount-claim-without-proof
+    reproduce: "総行数主張に実測コマンドなし"
+    expected: "実測値と計測コマンドを提示"
+    triage: "linecount計測を定期実施"
+  - id: b4-at-009
+    layer: audit-readiness
+    risk: stale-pr-body
+    reproduce: "差分更新後にPR本文を更新しない"
+    expected: "本文を最新差分に同期"
+    triage: "push後にPR本文を再編集"
+  - id: b4-at-010
+    layer: audit-readiness
+    risk: cleanup-proof-missing
+    reproduce: "生成物除去証跡なし"
+    expected: "不要ファイル未追跡を確認"
+    triage: "git status監査を記録"
+  - id: b4-at-011
+    layer: audit-readiness
+    risk: inconsistent-branch-base
+    reproduce: "PR2がPR1最新に追従せず検証"
+    expected: "rebase後に再検証"
+    triage: "base整合と再実行ログを確認"
+  - id: b4-at-012
+    layer: audit-readiness
+    risk: flaky-run-without-repeat
+    reproduce: "不安定失敗を単発実行のみで判断"
+    expected: "多回実行で再現性を確認"
+    triage: "stress run件数を記録"
+  - id: b4-at-013
+    layer: audit-readiness
+    risk: omitted-skip-reason
+    reproduce: "未実行コマンドの理由を未記載"
+    expected: "skip理由を明記"
+    triage: "結果表にskip列を設ける"
+  - id: b4-at-014
+    layer: audit-readiness
+    risk: unclassified-bug-candidate
+    reproduce: "PR1で見つけた問題をPR2候補に残さない"
+    expected: "候補一覧に記録"
+    triage: "候補管理表を更新"
+  - id: b4-at-015
+    layer: audit-readiness
+    risk: bug-priority-missing
+    reproduce: "PR2で優先順位なく修正着手"
+    expected: "重大度/再現性/影響で優先付け"
+    triage: "優先基準に基づき記録"
+  - id: b4-at-016
+    layer: audit-readiness
+    risk: no-before-after-evidence
+    reproduce: "修正前後差を示さず報告"
+    expected: "再現→修正→再現不可の証跡"
+    triage: "before/afterコマンド結果を整理"
+  - id: b4-at-017
+    layer: audit-readiness
+    risk: no-risk-owner
+    reproduce: "残リスクの担当/次アクション不明"
+    expected: "人間確認ポイントを明示"
+    triage: "残リスクごとに次確認を紐付け"
+  - id: b4-at-018
+    layer: audit-readiness
+    risk: no-audit-log-pointer
+    reproduce: "品質ログの保存先が報告にない"
+    expected: "ログパスを記載"
+    triage: "RUMI_QUALITY_LOG_DIRとrun_idを記録"
+  - id: b4-at-019
+    layer: audit-readiness
+    risk: no-test-classification-summary
+    reproduce: "追加テスト分類と件数を未記載"
+    expected: "分類別件数を報告"
+    triage: "coverage matrixと整合を確認"
+  - id: b4-at-020
+    layer: audit-readiness
+    risk: release-impact-not-reviewed
+    reproduce: "CI/リリース影響を未評価でマージ要求"
+    expected: "影響評価を明示"
+    triage: "release影響観点をセルフレビューに含める"

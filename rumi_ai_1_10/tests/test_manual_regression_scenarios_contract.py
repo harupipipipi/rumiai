@@ -25,12 +25,12 @@ def _load_all_scenarios() -> list[dict]:
 
 
 def test_manual_regression_scenario_files_exist():
-    assert len(SCENARIO_FILES) >= 3
+    assert len(SCENARIO_FILES) >= 4
 
 
 def test_manual_regression_scenarios_have_required_fields_and_minimum_count():
     scenarios = _load_all_scenarios()
-    assert len(scenarios) >= 140
+    assert len(scenarios) >= 240
 
     required = {"id", "layer", "risk", "reproduce", "expected", "triage"}
     for scenario in scenarios:
@@ -45,6 +45,31 @@ def test_manual_regression_scenario_ids_are_unique():
     assert len(ids) == len(set(ids))
 
 
-def test_manual_regression_scenarios_cover_three_layers():
+def test_manual_regression_scenarios_cover_required_layers():
     layers = {s["layer"] for s in _load_all_scenarios()}
-    assert {"security-permission", "failure-path", "frontend-ui"}.issubset(layers)
+    assert {
+        "security-permission",
+        "failure-path",
+        "frontend-ui",
+        "operations-release",
+        "data-integrity",
+        "observability",
+        "recovery",
+        "compatibility",
+        "performance",
+        "user-data-protection",
+        "failure-ux",
+        "audit-readiness",
+    }.issubset(layers)
+
+
+def test_manual_regression_scenarios_have_layer_minimums():
+    counts: dict[str, int] = {}
+    for scenario in _load_all_scenarios():
+        layer = scenario["layer"]
+        counts[layer] = counts.get(layer, 0) + 1
+
+    assert counts.get("security-permission", 0) >= 40
+    assert counts.get("failure-path", 0) >= 30
+    assert counts.get("frontend-ui", 0) >= 30
+    assert counts.get("audit-readiness", 0) >= 20
