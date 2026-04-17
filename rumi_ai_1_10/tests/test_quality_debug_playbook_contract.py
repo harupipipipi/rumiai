@@ -30,6 +30,8 @@ def test_debug_playbook_contains_required_debug_sections():
             "典型デバッグ（Python lint/type）",
             "セキュリティ/監査系の確認",
             "修正完了条件",
+            ".quality_logs",
+            "summary.txt",
         ],
         "debug_playbook.md",
     )

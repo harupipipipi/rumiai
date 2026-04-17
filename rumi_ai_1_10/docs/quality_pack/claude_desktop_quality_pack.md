@@ -43,6 +43,13 @@ RUMI_BASELINE_MYPY_ERRORS=660 \
 bash rumi_ai_1_10/scripts/quality_pack/run_claude_quality_pack.sh
 ```
 
+実行ログの保存先を変更する場合:
+
+```bash
+RUMI_QUALITY_LOG_DIR=/tmp/rumi_quality_logs \
+bash rumi_ai_1_10/scripts/quality_pack/run_claude_quality_pack.sh
+```
+
 個別実行:
 
 ```bash
@@ -162,6 +169,7 @@ cd pack-shell && cargo test && cd ..
 
 1. どのゲートで失敗したか分類
    - root pytest / package pytest / ruff / mypy / frontend lint-build / cargo test
+   - 実行ログ: `rumi_ai_1_10/.quality_logs/<run_id>/summary.txt` と各 `*.log`
 2. 最小再現
    - 単一テストファイルや単一コマンドに縮小
 3. 原因分類

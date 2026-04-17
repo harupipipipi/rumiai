@@ -6,7 +6,8 @@
 
 1. `bash rumi_ai_1_10/scripts/quality_pack/run_claude_quality_pack.sh` を実行。
 2. `Quality gate summary` の失敗ゲート名を記録。
-3. ゲート名ごとに以下の再現コマンドへ移る。
+3. `rumi_ai_1_10/.quality_logs/<run_id>/summary.txt` と該当 `*.log` を確認。
+4. ゲート名ごとに以下の再現コマンドへ移る。
 
 ## 2. ゲート別の最小再現コマンド
 
