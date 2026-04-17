@@ -25,6 +25,14 @@ cd rumi_ai_1_10
 python -m pytest tests/test_capability_trust_store.py
 ```
 
+## Quality Pack
+
+継続開発・監査・回帰確認の運用パックは以下を参照:
+
+- `rumi_ai_1_10/docs/quality_pack/philosophy_memo.md`
+- `rumi_ai_1_10/docs/quality_pack/claude_desktop_quality_pack.md`
+- `rumi_ai_1_10/scripts/quality_pack/run_claude_quality_pack.sh`
+
 ## HMAC Migration
 
 ```bash
