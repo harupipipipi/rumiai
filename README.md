@@ -33,7 +33,9 @@ python -m pytest tests/test_capability_trust_store.py
 - `rumi_ai_1_10/docs/quality_pack/claude_desktop_quality_pack.md`
 - `rumi_ai_1_10/docs/quality_pack/test_coverage_matrix.md`
 - `rumi_ai_1_10/docs/quality_pack/philosophy_re_evaluation_log.md`
+- `rumi_ai_1_10/docs/quality_pack/debug_playbook.md`
 - `rumi_ai_1_10/scripts/quality_pack/run_claude_quality_pack.sh`
+- `rumi_ai_1_10/scripts/quality_pack/run_debug_bundle.sh`
 
 ## HMAC Migration
 
