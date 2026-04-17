@@ -1,0 +1,244 @@
+version: 1
+owner: quality-pack
+description: |
+  Control Panel frontend の主要 UX 契約マトリクス。
+  画面状態・導線・失敗時可視化・レイアウト整合を、手動回帰シナリオと自動契約テストに紐付ける。
+app_shell_contracts:
+  required_components:
+    - frontend/src/App.tsx
+    - frontend/src/components/ui/ToastContainer.tsx
+    - frontend/src/components/ui/DialogContainer.tsx
+    - frontend/src/components/layout/Layout.tsx
+  required_behaviors:
+    - router.basename_is_panel
+    - setup_redirect_guard
+    - theme_class_switch
+    - dark_mode_class_switch
+    - toast_container_available
+    - dialog_container_available
+  manual_scenarios:
+    - b6-ui-076
+    - b6-ui-077
+    - b6-ui-082
+    - b6-ui-083
+    - b6-ui-084
+    - b6-ui-085
+  automated_tests:
+    - rumi_ai_1_10/tests/test_frontend_ux_contract_matrix_contract.py
+    - rumi_ai_1_10/tests/test_claude_quality_pack_contract.py
+
+pages:
+  - page: setup
+    app_route: /setup
+    component: frontend/src/pages/Setup.tsx
+    required_states:
+      - initial_render
+      - connect_loading
+      - connect_error_toast
+      - skip_navigation
+      - linked_redirect
+      - oauth_error_message
+    dom_contracts:
+      - setup.title_visible
+      - setup.connect_button_visible
+      - setup.skip_button_visible
+      - setup.loading_disables_connect
+      - setup.oauth_error_toast_visible
+      - setup.skip_reaches_dashboard
+    manual_scenarios:
+      - b6-ui-001
+      - b6-ui-002
+      - b6-ui-003
+      - b6-ui-004
+      - b6-ui-005
+      - b6-ui-006
+      - b6-ui-007
+      - b6-ui-008
+      - b6-ui-009
+      - b6-ui-010
+    automated_tests:
+      - rumi_ai_1_10/tests/test_frontend_ux_contract_matrix_contract.py
+      - rumi_ai_1_10/tests/test_claude_quality_pack_contract.py
+
+  - page: dashboard
+    app_route: /
+    component: frontend/src/pages/Dashboard.tsx
+    required_states:
+      - loading
+      - cards_rendered
+      - activities_empty_state
+      - activities_expand_collapse
+      - restart_dialog_open
+      - unknown_activity_fallback
+    dom_contracts:
+      - dashboard.loading_spinner_visible
+      - dashboard.status_cards_visible
+      - dashboard.empty_activity_message_visible
+      - dashboard.show_more_toggle_visible
+      - dashboard.restart_dialog_available
+      - dashboard.activity_icon_fallback_safe
+    manual_scenarios:
+      - b6-ui-011
+      - b6-ui-012
+      - b6-ui-013
+      - b6-ui-014
+      - b6-ui-015
+      - b6-ui-016
+      - b6-ui-017
+      - b6-ui-018
+      - b6-ui-019
+      - b6-ui-020
+    automated_tests:
+      - rumi_ai_1_10/tests/test_frontend_ux_contract_matrix_contract.py
+      - rumi_ai_1_10/tests/test_api_route_coverage_matrix_contract.py
+
+  - page: packs
+    app_route: packs
+    component: frontend/src/pages/Packs.tsx
+    required_states:
+      - list_loading
+      - list_loaded
+      - search_filtered
+      - search_empty_state
+      - toggle_without_navigation
+      - toggle_failure_feedback
+    dom_contracts:
+      - packs.search_input_visible
+      - packs.list_row_visible
+      - packs.detail_navigation_clickable
+      - packs.toggle_prevents_row_navigation
+      - packs.empty_search_message_visible
+      - packs.toggle_error_toast_visible
+    manual_scenarios:
+      - b6-ui-021
+      - b6-ui-022
+      - b6-ui-023
+      - b6-ui-024
+      - b6-ui-025
+      - b6-ui-026
+      - b6-ui-027
+      - b6-ui-028
+      - b6-ui-029
+      - b6-ui-030
+    automated_tests:
+      - rumi_ai_1_10/tests/test_frontend_ux_contract_matrix_contract.py
+      - rumi_ai_1_10/tests/test_api_route_coverage_matrix_contract.py
+
+  - page: pack_detail
+    app_route: packs/:id
+    component: frontend/src/pages/PackDetail.tsx
+    required_states:
+      - detail_loading
+      - detail_not_found
+      - back_navigation
+      - toggle_enabled
+      - empty_capability_state
+      - run_flow_navigation
+    dom_contracts:
+      - pack_detail.header_visible
+      - pack_detail.back_button_visible
+      - pack_detail.toggle_visible
+      - pack_detail.empty_state_visible
+      - pack_detail.run_flow_button_visible
+      - pack_detail.toggle_failure_toast_visible
+    manual_scenarios:
+      - b6-ui-031
+      - b6-ui-032
+      - b6-ui-033
+      - b6-ui-034
+      - b6-ui-035
+      - b6-ui-036
+      - b6-ui-037
+      - b6-ui-038
+      - b6-ui-039
+      - b6-ui-040
+    automated_tests:
+      - rumi_ai_1_10/tests/test_frontend_ux_contract_matrix_contract.py
+      - rumi_ai_1_10/tests/test_api_route_coverage_matrix_contract.py
+
+  - page: flows
+    app_route: flows
+    component: frontend/src/pages/Flows.tsx
+    required_states:
+      - layout_ready
+      - first_flow_auto_select
+      - create_mode
+      - save_validation
+      - execute_result_tab
+      - keyboard_shortcuts_active
+      - yaml_tab_rendered
+      - execute_failure_feedback
+    dom_contracts:
+      - flows.sidebar_visible
+      - flows.canvas_visible
+      - flows.right_panel_visible
+      - flows.create_button_visible
+      - flows.execute_button_visible
+      - flows.result_tab_visible
+      - flows.yaml_tab_visible
+      - flows.error_toast_visible_on_failure
+    manual_scenarios:
+      - b6-ui-041
+      - b6-ui-042
+      - b6-ui-043
+      - b6-ui-044
+      - b6-ui-045
+      - b6-ui-046
+      - b6-ui-047
+      - b6-ui-048
+      - b6-ui-049
+      - b6-ui-050
+      - b6-ui-051
+      - b6-ui-052
+      - b6-ui-053
+      - b6-ui-054
+      - b6-ui-055
+      - b6-ui-056
+      - b6-ui-057
+      - b6-ui-058
+      - b6-ui-059
+      - b6-ui-060
+    automated_tests:
+      - rumi_ai_1_10/tests/test_frontend_ux_contract_matrix_contract.py
+      - rumi_ai_1_10/tests/test_api_route_coverage_matrix_contract.py
+
+  - page: settings
+    app_route: settings
+    component: frontend/src/pages/Settings.tsx
+    required_states:
+      - profile_tab_loaded
+      - version_tab_loaded
+      - connect_failure_feedback
+      - avatar_picker_toggle
+      - profile_save_success
+      - profile_save_failure
+      - color_mode_switch
+      - theme_switch
+    dom_contracts:
+      - settings.profile_tab_visible
+      - settings.version_tab_visible
+      - settings.connect_button_visible
+      - settings.avatar_picker_visible
+      - settings.save_button_visible
+      - settings.theme_toggle_buttons_visible
+      - settings.color_mode_buttons_visible
+      - settings.error_toast_visible_on_failure
+    manual_scenarios:
+      - b6-ui-061
+      - b6-ui-062
+      - b6-ui-063
+      - b6-ui-064
+      - b6-ui-065
+      - b6-ui-066
+      - b6-ui-067
+      - b6-ui-068
+      - b6-ui-069
+      - b6-ui-070
+      - b6-ui-071
+      - b6-ui-072
+      - b6-ui-073
+      - b6-ui-074
+      - b6-ui-075
+    automated_tests:
+      - rumi_ai_1_10/tests/test_frontend_ux_contract_matrix_contract.py
+      - rumi_ai_1_10/tests/test_api_route_coverage_matrix_contract.py

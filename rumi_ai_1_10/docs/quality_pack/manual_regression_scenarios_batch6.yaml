@@ -1,0 +1,675 @@
+version: 1
+owner: quality-pack
+description: |
+  手動回帰シナリオ台帳の第6弾。frontend UX 契約（Setup/Dashboard/Packs/PackDetail/Flows/Settings）を
+  画面状態・導線・失敗表示・操作継続性の観点で固定化する。
+scenarios:
+  - id: b6-ui-001
+    layer: frontend-ui
+    risk: setup-initial-render
+    reproduce: "初回表示で /panel/setup を開く"
+    expected: "タイトル・接続ボタン・スキップボタンが表示される"
+    triage: "Setup.tsx の初期レンダリング条件を確認"
+  - id: b6-ui-002
+    layer: frontend-ui
+    risk: setup-connect-loading
+    reproduce: "connect 実行中のボタン状態を確認"
+    expected: "Loading表示が出て二重押下できない"
+    triage: "loading state と Button disabled を確認"
+  - id: b6-ui-003
+    layer: failure-ux
+    risk: setup-connect-error-toast
+    reproduce: "connectAccount を失敗させる"
+    expected: "Failed to connect トーストが表示される"
+    triage: "catch節の addToast 呼び出しを確認"
+  - id: b6-ui-004
+    layer: frontend-ui
+    risk: setup-skip-navigation
+    reproduce: "Skip を押す"
+    expected: "isSetupDone=true になり /panel へ遷移"
+    triage: "handleSkip の store 更新と navigate を確認"
+  - id: b6-ui-005
+    layer: frontend-ui
+    risk: setup-linked-redirect
+    reproduce: "/panel/setup?linked=true を開く"
+    expected: "linked表示後ダッシュボードへ自動遷移"
+    triage: "searchParams linked 分岐と timer を確認"
+  - id: b6-ui-006
+    layer: failure-ux
+    risk: setup-oauth-error-toast
+    reproduce: "/panel/setup?error=access_denied を開く"
+    expected: "OAuth error トーストを表示し画面は継続"
+    triage: "error param 分岐を確認"
+  - id: b6-ui-007
+    layer: frontend-ui
+    risk: setup-logo-layout-break
+    reproduce: "狭幅画面で setup を表示"
+    expected: "ロゴと見出しが崩れず中央揃え"
+    triage: "container class のレスポンシブ挙動を確認"
+  - id: b6-ui-008
+    layer: frontend-ui
+    risk: setup-theme-switch
+    reproduce: "light/dark 切替後に setup 表示"
+    expected: "背景/文字色が可読性を維持"
+    triage: "テーマクラス適用時の contrast を確認"
+  - id: b6-ui-009
+    layer: frontend-ui
+    risk: setup-keyboard-focus-order
+    reproduce: "Tab で setup 操作"
+    expected: "Connect -> Skip の順でフォーカス移動"
+    triage: "フォーカス可能要素の順序を確認"
+  - id: b6-ui-010
+    layer: failure-ux
+    risk: setup-double-toast
+    reproduce: "同一error queryを連続で与える"
+    expected: "トースト重複が過剰発火しない"
+    triage: "effect実行条件とトースト重複制御を確認"
+
+  - id: b6-ui-011
+    layer: frontend-ui
+    risk: dashboard-loading-state
+    reproduce: "dashboard load中に画面を表示"
+    expected: "スピナーと loading 文言が表示される"
+    triage: "Dashboard.tsx isLoading 分岐を確認"
+  - id: b6-ui-012
+    layer: frontend-ui
+    risk: dashboard-status-cards
+    reproduce: "dashboard data 取得後表示"
+    expected: "kernel/uptime/packs/flows カードが表示"
+    triage: "status card セクションを確認"
+  - id: b6-ui-013
+    layer: failure-ux
+    risk: dashboard-empty-activity
+    reproduce: "activities=[] で表示"
+    expected: "No recent activity が表示される"
+    triage: "empty-state 分岐を確認"
+  - id: b6-ui-014
+    layer: frontend-ui
+    risk: dashboard-show-more-toggle
+    reproduce: "活動件数 > 3 の状態で show more を押す"
+    expected: "一覧展開/折りたたみが正しく切替"
+    triage: "showAllActivities state を確認"
+  - id: b6-ui-015
+    layer: frontend-ui
+    risk: dashboard-restart-dialog
+    reproduce: "Restart Kernel ボタンを押す"
+    expected: "確認ダイアログが表示される"
+    triage: "showDialog 呼び出しを確認"
+  - id: b6-ui-016
+    layer: failure-ux
+    risk: dashboard-restart-failure-toast
+    reproduce: "restartKernel 失敗を発生"
+    expected: "失敗時の通知が可読で操作継続可能"
+    triage: "restartKernel 結果 handling を確認"
+  - id: b6-ui-017
+    layer: frontend-ui
+    risk: dashboard-activity-icon-mapping
+    reproduce: "type=kernel_start/flow_fail/error の活動を表示"
+    expected: "種別ごとに期待アイコンが表示"
+    triage: "getActivityIcon mapping を確認"
+  - id: b6-ui-018
+    layer: frontend-ui
+    risk: dashboard-timeline-layout
+    reproduce: "活動5件でtimeline表示"
+    expected: "縦線とカードが重ならない"
+    triage: "timeline class と z-index を確認"
+  - id: b6-ui-019
+    layer: frontend-ui
+    risk: dashboard-small-screen-overflow
+    reproduce: "小画面で dashboard を表示"
+    expected: "カードが横はみ出ししない"
+    triage: "grid breakpoints を確認"
+  - id: b6-ui-020
+    layer: failure-ux
+    risk: dashboard-unexpected-type
+    reproduce: "未知の activity type を表示"
+    expected: "fallback icon で表示継続"
+    triage: "default icon 分岐を確認"
+
+  - id: b6-ui-021
+    layer: frontend-ui
+    risk: packs-loading-empty
+    reproduce: "isLoading=true && packs=[] で Packs表示"
+    expected: "ローディング画面が表示される"
+    triage: "Packs.tsx loading 分岐を確認"
+  - id: b6-ui-022
+    layer: frontend-ui
+    risk: packs-search-filter
+    reproduce: "検索語を入力して一覧を絞り込む"
+    expected: "name の部分一致でフィルタされる"
+    triage: "filteredPacks 計算式を確認"
+  - id: b6-ui-023
+    layer: failure-ux
+    risk: packs-empty-search-result
+    reproduce: "該当なし検索語を入力"
+    expected: "not found メッセージが表示"
+    triage: "empty search UI 分岐を確認"
+  - id: b6-ui-024
+    layer: frontend-ui
+    risk: packs-row-click-navigation
+    reproduce: "pack row をクリック"
+    expected: "/panel/packs/{id} に遷移"
+    triage: "navigate ハンドラを確認"
+  - id: b6-ui-025
+    layer: frontend-ui
+    risk: packs-toggle-stop-propagation
+    reproduce: "switch をクリック"
+    expected: "詳細遷移せず toggle のみ実行"
+    triage: "stopPropagation の経路を確認"
+  - id: b6-ui-026
+    layer: frontend-ui
+    risk: packs-badge-consistency
+    reproduce: "core/custom pack を表示"
+    expected: "type badge が一貫表示"
+    triage: "Badge variant 分岐を確認"
+  - id: b6-ui-027
+    layer: failure-ux
+    risk: packs-toggle-error-feedback
+    reproduce: "toggle API 失敗時"
+    expected: "失敗通知が表示される"
+    triage: "store.togglePack の error handling を確認"
+  - id: b6-ui-028
+    layer: frontend-ui
+    risk: packs-search-case-insensitive
+    reproduce: "大文字小文字を変えて検索"
+    expected: "同じ結果になる"
+    triage: "toLowerCase 使用を確認"
+  - id: b6-ui-029
+    layer: frontend-ui
+    risk: packs-card-layout
+    reproduce: "長い説明文を含む pack を表示"
+    expected: "カード崩れなく表示"
+    triage: "description 行の折り返しを確認"
+  - id: b6-ui-030
+    layer: failure-ux
+    risk: packs-api-timeout-ui
+    reproduce: "loadPacks timeout"
+    expected: "ローディング解除と操作継続性を維持"
+    triage: "timeout後 state 更新を確認"
+
+  - id: b6-ui-031
+    layer: frontend-ui
+    risk: pack-detail-loading
+    reproduce: "packs未ロード状態で detail 表示"
+    expected: "loading 表示後に内容表示"
+    triage: "PackDetail loading 分岐を確認"
+  - id: b6-ui-032
+    layer: failure-ux
+    risk: pack-detail-not-found
+    reproduce: "存在しない id で detail 表示"
+    expected: "Pack not found が表示"
+    triage: "pack null 分岐を確認"
+  - id: b6-ui-033
+    layer: frontend-ui
+    risk: pack-detail-back-navigation
+    reproduce: "Back ボタン押下"
+    expected: "/panel/packs に戻る"
+    triage: "navigate('/panel/packs') を確認"
+  - id: b6-ui-034
+    layer: frontend-ui
+    risk: pack-detail-toggle
+    reproduce: "detail 画面で enabled switch 切替"
+    expected: "状態が切り替わりトースト表示"
+    triage: "handleToggle の toast key を確認"
+  - id: b6-ui-035
+    layer: frontend-ui
+    risk: pack-detail-capability-empty
+    reproduce: "capabilities=[] で detail 表示"
+    expected: "No data available を表示"
+    triage: "empty-state 分岐を確認"
+  - id: b6-ui-036
+    layer: frontend-ui
+    risk: pack-detail-flows-empty
+    reproduce: "flows=[] で detail 表示"
+    expected: "No data available を表示"
+    triage: "empty-state 分岐を確認"
+  - id: b6-ui-037
+    layer: frontend-ui
+    risk: pack-detail-run-flow-navigation
+    reproduce: "flow の Run ボタンを押す"
+    expected: "短時間後に /panel/flows へ遷移"
+    triage: "setTimeout navigate 分岐を確認"
+  - id: b6-ui-038
+    layer: frontend-ui
+    risk: pack-detail-dependencies-empty
+    reproduce: "dependencies=[] の detail 表示"
+    expected: "No data available を表示"
+    triage: "dependencies empty-state を確認"
+  - id: b6-ui-039
+    layer: frontend-ui
+    risk: pack-detail-badge-layout
+    reproduce: "長い version/type を持つ pack 表示"
+    expected: "badge が折返し崩壊しない"
+    triage: "header layout class を確認"
+  - id: b6-ui-040
+    layer: failure-ux
+    risk: pack-detail-toggle-failure
+    reproduce: "toggle API失敗時に detail 画面を確認"
+    expected: "誤成功表示せず失敗通知"
+    triage: "store 側エラー反映を確認"
+
+  - id: b6-ui-041
+    layer: frontend-ui
+    risk: flows-first-load
+    reproduce: "flows 画面初回表示"
+    expected: "左リスト/中央キャンバス/右ペインが表示"
+    triage: "Flows.tsx 初期レイアウトを確認"
+  - id: b6-ui-042
+    layer: frontend-ui
+    risk: flows-first-auto-select
+    reproduce: "flows配列ありで selectedFlowId=null"
+    expected: "先頭flowが自動選択される"
+    triage: "auto-select effect を確認"
+  - id: b6-ui-043
+    layer: failure-ux
+    risk: flows-detail-fetch-fail
+    reproduce: "fetchFlowDetail を失敗させる"
+    expected: "fallback content を表示し error toast"
+    triage: "catch 節 fallback を確認"
+  - id: b6-ui-044
+    layer: frontend-ui
+    risk: flows-create-new-mode
+    reproduce: "Create New を押す"
+    expected: "isCreating=true で end node 初期化"
+    triage: "handleCreateNew の setNodes を確認"
+  - id: b6-ui-045
+    layer: failure-ux
+    risk: flows-save-without-name
+    reproduce: "isCreating=true かつ name 空で Save"
+    expected: "name required toast"
+    triage: "handleSave validation を確認"
+  - id: b6-ui-046
+    layer: frontend-ui
+    risk: flows-save-create-path
+    reproduce: "新規flowを作成して Save"
+    expected: "addFlow 実行後に新規flowが選択"
+    triage: "created flow 選択ロジックを確認"
+  - id: b6-ui-047
+    layer: frontend-ui
+    risk: flows-save-update-path
+    reproduce: "既存flowを更新して Save"
+    expected: "updateFlow 実行と saved toast"
+    triage: "selectedFlowId 分岐を確認"
+  - id: b6-ui-048
+    layer: frontend-ui
+    risk: flows-delete-confirm-dialog
+    reproduce: "Delete 操作で確認ダイアログを開く"
+    expected: "確認後削除される"
+    triage: "showDialog onConfirm 分岐を確認"
+  - id: b6-ui-049
+    layer: frontend-ui
+    risk: flows-execute-tab-switch
+    reproduce: "Execute を押す"
+    expected: "resultタブへ切替え実行結果表示"
+    triage: "handleExecute と activeTab を確認"
+  - id: b6-ui-050
+    layer: failure-ux
+    risk: flows-execute-error-toast
+    reproduce: "execute 失敗ケースを発生"
+    expected: "error toast と画面継続"
+    triage: "execution.execute 結果分岐を確認"
+  - id: b6-ui-051
+    layer: frontend-ui
+    risk: flows-drag-start-data
+    reproduce: "step をドラッグ開始"
+    expected: "dataTransfer に type/stepId が設定される"
+    triage: "onDragStart 実装を確認"
+  - id: b6-ui-052
+    layer: frontend-ui
+    risk: flows-middle-click-add
+    reproduce: "step を中クリック"
+    expected: "キャンバス中央に node 追加"
+    triage: "handleStepMiddleClick を確認"
+  - id: b6-ui-053
+    layer: failure-ux
+    risk: flows-middle-click-without-instance
+    reproduce: "reactFlowInstance null で中クリック"
+    expected: "例外なく無視される"
+    triage: "guard clause を確認"
+  - id: b6-ui-054
+    layer: frontend-ui
+    risk: flows-keyboard-undo-redo
+    reproduce: "編集後に Cmd/Ctrl+Z, Shift+Cmd/Ctrl+Z"
+    expected: "undo/redo が履歴どおり動作"
+    triage: "useFlowKeyboard と history 統合を確認"
+  - id: b6-ui-055
+    layer: frontend-ui
+    risk: flows-keyboard-delete
+    reproduce: "node選択で Delete キー入力"
+    expected: "node/edge が削除される"
+    triage: "keyboard handler と selected node を確認"
+  - id: b6-ui-056
+    layer: frontend-ui
+    risk: flows-menu-position
+    reproduce: "右クリックメニュー位置を確認"
+    expected: "カーソル位置近傍で表示"
+    triage: "menuPos state と pointer tracking を確認"
+  - id: b6-ui-057
+    layer: failure-ux
+    risk: flows-menu-close-leak
+    reproduce: "メニュー開閉を連続実行"
+    expected: "閉じ忘れや stale state なし"
+    triage: "setMenuPos(null) 経路を確認"
+  - id: b6-ui-058
+    layer: frontend-ui
+    risk: flows-pack-filter
+    reproduce: "step pack filter を切替"
+    expected: "対象pack stepのみ表示"
+    triage: "filteredSteps 計算を確認"
+  - id: b6-ui-059
+    layer: frontend-ui
+    risk: flows-yaml-tab-render
+    reproduce: "yaml タブを表示"
+    expected: "生成yamlが表示される"
+    triage: "nodesToYaml 結果表示を確認"
+  - id: b6-ui-060
+    layer: failure-ux
+    risk: flows-invalid-yaml-view
+    reproduce: "不正flow内容をロード"
+    expected: "クラッシュせずエラー表示"
+    triage: "yamlToNodes 失敗時ハンドリングを確認"
+
+  - id: b6-ui-061
+    layer: frontend-ui
+    risk: settings-tab-switch
+    reproduce: "profile/version タブ切替"
+    expected: "タブ内容が即時切替"
+    triage: "activeTab state を確認"
+  - id: b6-ui-062
+    layer: frontend-ui
+    risk: settings-load-profile-version
+    reproduce: "Settings 初回表示"
+    expected: "loadProfile/loadVersion が呼ばれる"
+    triage: "初期effect を確認"
+  - id: b6-ui-063
+    layer: failure-ux
+    risk: settings-connect-failure
+    reproduce: "connectAccount 失敗"
+    expected: "connect failed toast"
+    triage: "handleConnect catch を確認"
+  - id: b6-ui-064
+    layer: frontend-ui
+    risk: settings-avatar-picker-toggle
+    reproduce: "Change icon ボタンで picker 開閉"
+    expected: "開閉状態が正しく切替"
+    triage: "showAvatarPicker state を確認"
+  - id: b6-ui-065
+    layer: frontend-ui
+    risk: settings-avatar-select
+    reproduce: "avatar を選択"
+    expected: "formData.avatar が更新され picker閉じる"
+    triage: "onClick の setFormData を確認"
+  - id: b6-ui-066
+    layer: frontend-ui
+    risk: settings-username-edit
+    reproduce: "username 入力を変更"
+    expected: "formData.username に反映"
+    triage: "Input onChange を確認"
+  - id: b6-ui-067
+    layer: frontend-ui
+    risk: settings-language-select
+    reproduce: "言語選択を変更"
+    expected: "formData.language が更新"
+    triage: "select onChange を確認"
+  - id: b6-ui-068
+    layer: frontend-ui
+    risk: settings-job-edit
+    reproduce: "job 入力変更"
+    expected: "formData.job が更新"
+    triage: "Input onChange を確認"
+  - id: b6-ui-069
+    layer: frontend-ui
+    risk: settings-save-profile
+    reproduce: "保存ボタン押下"
+    expected: "updateProfile 実行と success toast"
+    triage: "handleSave を確認"
+  - id: b6-ui-070
+    layer: failure-ux
+    risk: settings-save-failure
+    reproduce: "updateProfile 失敗を発生"
+    expected: "誤成功通知を出さず失敗可視化"
+    triage: "updateProfile error handling を確認"
+  - id: b6-ui-071
+    layer: frontend-ui
+    risk: settings-color-mode-toggle
+    reproduce: "Light/Dark 切替ボタン押下"
+    expected: "colorMode が切替わる"
+    triage: "setColorMode 呼び出しを確認"
+  - id: b6-ui-072
+    layer: frontend-ui
+    risk: settings-theme-toggle
+    reproduce: "Rumi/Minimal/Standard/Rounded 切替"
+    expected: "theme が切替わりボタン状態反映"
+    triage: "setTheme と variant 分岐を確認"
+  - id: b6-ui-073
+    layer: frontend-ui
+    risk: settings-connected-card
+    reproduce: "connected=true の profile表示"
+    expected: "接続済みカードと reconnect ボタン表示"
+    triage: "profile.connected 分岐を確認"
+  - id: b6-ui-074
+    layer: frontend-ui
+    risk: settings-disconnected-card
+    reproduce: "connected=false の profile表示"
+    expected: "ログイン要求カードが表示"
+    triage: "profile.connected false 分岐を確認"
+  - id: b6-ui-075
+    layer: failure-ux
+    risk: settings-version-tab-empty
+    reproduce: "version API失敗で versionタブ表示"
+    expected: "空でも崩壊せず fallback 表示"
+    triage: "version section fallback を確認"
+
+  - id: b6-ui-076
+    layer: frontend-ui
+    risk: app-route-setup
+    reproduce: "isSetupDone=false で /panel/ を開く"
+    expected: "/panel/setup へ redirect"
+    triage: "App.tsx Navigate 条件を確認"
+  - id: b6-ui-077
+    layer: frontend-ui
+    risk: app-route-dashboard
+    reproduce: "isSetupDone=true で /panel/ を開く"
+    expected: "Dashboard が表示される"
+    triage: "Route index 要素を確認"
+  - id: b6-ui-078
+    layer: frontend-ui
+    risk: app-route-packs
+    reproduce: "/panel/packs に遷移"
+    expected: "Packs 画面表示"
+    triage: "Route path='packs' を確認"
+  - id: b6-ui-079
+    layer: frontend-ui
+    risk: app-route-pack-detail
+    reproduce: "/panel/packs/:id に遷移"
+    expected: "PackDetail 画面表示"
+    triage: "Route path='packs/:id' を確認"
+  - id: b6-ui-080
+    layer: frontend-ui
+    risk: app-route-flows
+    reproduce: "/panel/flows に遷移"
+    expected: "Flows 画面表示"
+    triage: "Route path='flows' を確認"
+  - id: b6-ui-081
+    layer: frontend-ui
+    risk: app-route-settings
+    reproduce: "/panel/settings に遷移"
+    expected: "Settings 画面表示"
+    triage: "Route path='settings' を確認"
+  - id: b6-ui-082
+    layer: failure-ux
+    risk: app-route-unknown
+    reproduce: "/panel/unknown を開く"
+    expected: "白画面や無限ループにならない"
+    triage: "router fallback 挙動を確認"
+  - id: b6-ui-083
+    layer: frontend-ui
+    risk: app-toast-container
+    reproduce: "任意画面で toast 発火"
+    expected: "ToastContainer が表示できる"
+    triage: "App.tsx ToastContainer を確認"
+  - id: b6-ui-084
+    layer: frontend-ui
+    risk: app-dialog-container
+    reproduce: "confirm dialog 発火"
+    expected: "DialogContainer で表示"
+    triage: "App.tsx DialogContainer を確認"
+  - id: b6-ui-085
+    layer: failure-ux
+    risk: app-theme-class-apply-fail
+    reproduce: "theme 切替を高速連続実行"
+    expected: "class重複や不整合なし"
+    triage: "theme class remove/add effect を確認"
+
+  - id: b6-ui-086
+    layer: frontend-ui
+    risk: accessibility-focus-setup
+    reproduce: "Setup 画面をキーボードのみ操作"
+    expected: "フォーカス可視性が維持される"
+    triage: "focus outline と tab order を確認"
+  - id: b6-ui-087
+    layer: frontend-ui
+    risk: accessibility-focus-dashboard
+    reproduce: "Dashboard 主要ボタンをTab操作"
+    expected: "再起動ボタンへ到達可能"
+    triage: "button focus style を確認"
+  - id: b6-ui-088
+    layer: frontend-ui
+    risk: accessibility-focus-packs
+    reproduce: "Packs 検索・switch 操作をTabで実施"
+    expected: "入力とswitchが操作可能"
+    triage: "interactive要素の順序を確認"
+  - id: b6-ui-089
+    layer: frontend-ui
+    risk: accessibility-focus-flows
+    reproduce: "Flows で主要操作をキーボード実行"
+    expected: "保存/実行導線が操作可能"
+    triage: "shortcut と focus 管理を確認"
+  - id: b6-ui-090
+    layer: failure-ux
+    risk: accessibility-dialog-escape
+    reproduce: "確認ダイアログで ESC キー"
+    expected: "安全に閉じる"
+    triage: "dialog key handling を確認"
+
+  - id: b6-ui-091
+    layer: frontend-ui
+    risk: responsive-dashboard-mobile
+    reproduce: "幅360pxで Dashboard 表示"
+    expected: "カードが縦積みで崩れない"
+    triage: "grid class の md/lg 分岐を確認"
+  - id: b6-ui-092
+    layer: frontend-ui
+    risk: responsive-packs-mobile
+    reproduce: "幅360pxで Packs 表示"
+    expected: "カード内容が重ならない"
+    triage: "pack row layout を確認"
+  - id: b6-ui-093
+    layer: frontend-ui
+    risk: responsive-pack-detail-mobile
+    reproduce: "幅360pxで PackDetail 表示"
+    expected: "2カラムが1カラム化し可読"
+    triage: "md:grid-cols-2 分岐を確認"
+  - id: b6-ui-094
+    layer: frontend-ui
+    risk: responsive-settings-mobile
+    reproduce: "幅360pxで Settings 表示"
+    expected: "フォーム要素がはみ出さない"
+    triage: "grid と form class を確認"
+  - id: b6-ui-095
+    layer: failure-ux
+    risk: responsive-flows-overflow
+    reproduce: "幅360pxで Flows 表示"
+    expected: "主要操作が到達不能にならない"
+    triage: "overflow と panel width を確認"
+
+  - id: b6-ui-096
+    layer: frontend-ui
+    risk: visual-consistency-buttons
+    reproduce: "主要画面の primary/secondary button を比較"
+    expected: "サイズ・余白・hoverが一貫"
+    triage: "Button variant 定義と利用箇所を確認"
+  - id: b6-ui-097
+    layer: frontend-ui
+    risk: visual-consistency-badges
+    reproduce: "pack type/version badge を比較"
+    expected: "色と境界が一貫"
+    triage: "Badge variant 使用方針を確認"
+  - id: b6-ui-098
+    layer: failure-ux
+    risk: visual-loading-stuck
+    reproduce: "API失敗後に loading が解除されるか確認"
+    expected: "永続ローディングにならない"
+    triage: "finally 解除経路を確認"
+  - id: b6-ui-099
+    layer: frontend-ui
+    risk: visual-toast-theme
+    reproduce: "light/dark で toast を表示"
+    expected: "背景/文字コントラストが確保される"
+    triage: "ToastContainer theme class を確認"
+  - id: b6-ui-100
+    layer: failure-ux
+    risk: visual-error-message-truncation
+    reproduce: "長文エラーを表示"
+    expected: "途中切れず読める"
+    triage: "text wrapping と max width を確認"
+  - id: b6-ui-101
+    layer: frontend-ui
+    risk: setup-back-forward-stability
+    reproduce: "setup->dashboard->browser back を実行"
+    expected: "遷移が破綻せず setup 条件に従う"
+    triage: "router history と setup guard を確認"
+  - id: b6-ui-102
+    layer: frontend-ui
+    risk: dashboard-reload-state
+    reproduce: "dashboard でリロード"
+    expected: "主要カードが再描画される"
+    triage: "初期loadと render 条件を確認"
+  - id: b6-ui-103
+    layer: frontend-ui
+    risk: packs-reload-state
+    reproduce: "packs でリロード"
+    expected: "検索入力と一覧が正常表示"
+    triage: "初期state と loadPacks を確認"
+  - id: b6-ui-104
+    layer: frontend-ui
+    risk: pack-detail-reload-state
+    reproduce: "pack detail でリロード"
+    expected: "対象 pack を解決し表示"
+    triage: "useParams と pack lookup を確認"
+  - id: b6-ui-105
+    layer: frontend-ui
+    risk: flows-reload-state
+    reproduce: "flows でリロード"
+    expected: "flow一覧とcanvasが再構成される"
+    triage: "loadFlows と selectedFlowId再計算を確認"
+  - id: b6-ui-106
+    layer: frontend-ui
+    risk: settings-reload-state
+    reproduce: "settings でリロード"
+    expected: "profile/versionが再読込される"
+    triage: "loadProfile/loadVersion effect を確認"
+  - id: b6-ui-107
+    layer: frontend-ui
+    risk: app-theme-persistence-ui
+    reproduce: "theme変更後に画面遷移"
+    expected: "全ページで同一テーマ維持"
+    triage: "theme store と root class を確認"
+  - id: b6-ui-108
+    layer: frontend-ui
+    risk: app-darkmode-persistence-ui
+    reproduce: "dark mode変更後に画面遷移"
+    expected: "全ページでdark class維持"
+    triage: "colorMode effect を確認"
+  - id: b6-ui-109
+    layer: frontend-ui
+    risk: flows-panel-resize-usability
+    reproduce: "flowsで左右パネルを狭幅表示"
+    expected: "主要ボタンが隠れず操作可能"
+    triage: "panel width と overflow 設定を確認"
+  - id: b6-ui-110
+    layer: frontend-ui
+    risk: settings-form-input-visibility
+    reproduce: "settingsで長文入力を実施"
+    expected: "入力欄が崩れず内容を確認できる"
+    triage: "input style と overflow を確認"

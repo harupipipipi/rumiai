@@ -89,6 +89,7 @@ cd pack-shell && cargo test && cd ..
 - README/CI定義の契約が崩れていないかを静的検証
 - 手動回帰台帳を契約テストで検査し、必須レイヤー・最小件数・ID一意性を継続検証
 - API route coverage matrix で route ごとの手動回帰・自動テスト紐付けを契約検証
+- frontend UX contract matrix で Setup/Dashboard/Packs/PackDetail/Flows/Settings の状態遷移・DOM契約を検証
 
 ## 3.2 CLI / バックエンド契約
 - root entrypoint (`rumi_ai/__main__.py`) が `rumi_ai_1_10.app` へ接続する契約
@@ -96,7 +97,7 @@ cd pack-shell && cargo test && cd ..
 
 ## 3.3 UI / Playwright相当（設定・ビルド・契約）
 - frontend build/lint を実行し、型崩れ・依存崩れ・ビルド破綻を検知
-- `tests/test_frontend_build_config.py` で tsconfig / Tailwind の設定境界を検証
+- `docs/quality_pack/frontend_ux_contract_matrix.yaml` と `tests/test_frontend_ux_contract_matrix_contract.py` で主要画面契約を検証
 - Tauri 設定のCSPに `localhost:8765` が含まれ、`connect-src` が `https://` や `*` を許可していないこと
 
 ## 3.4 設定 / 権限 / 失敗系
@@ -224,5 +225,8 @@ PR1では品質資産のみ、PR2で実害バグを修正する。
   - `docs/quality_pack/manual_regression_scenarios_batch3.yaml`
   - `docs/quality_pack/manual_regression_scenarios_batch4.yaml`
   - `docs/quality_pack/manual_regression_scenarios_batch5.yaml`
+  - `docs/quality_pack/manual_regression_scenarios_batch6.yaml`
 - API route coverage:
   - `docs/quality_pack/api_route_coverage_matrix.yaml`
+- frontend UX contract:
+  - `docs/quality_pack/frontend_ux_contract_matrix.yaml`

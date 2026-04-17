@@ -15,6 +15,7 @@ python -m pytest \
   tests/test_quality_debug_playbook_contract.py \
   tests/test_manual_regression_scenarios_contract.py \
   tests/test_api_route_coverage_matrix_contract.py \
+  tests/test_frontend_ux_contract_matrix_contract.py \
   -v
 
 echo
