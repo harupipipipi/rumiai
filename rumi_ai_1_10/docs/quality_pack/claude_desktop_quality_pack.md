@@ -91,6 +91,7 @@ cd pack-shell && cargo test && cd ..
 - API route coverage matrix で route ごとの手動回帰・自動テスト紐付けを契約検証
 - frontend UX contract matrix で Setup/Dashboard/Packs/PackDetail/Flows/Settings の状態遷移・DOM契約を検証
 - viewer/release contract matrix で Tauri viewer の失敗UX・CSP・ナビゲーション制約と release/CI 境界を検証
+- longrun/migration contract matrix で migrate-hmac / store migration / startup fail-soft / CLI互換を検証
 
 ## 3.2 CLI / バックエンド契約
 - root entrypoint (`rumi_ai/__main__.py`) が `rumi_ai_1_10.app` へ接続する契約
@@ -229,9 +230,12 @@ PR1では品質資産のみ、PR2で実害バグを修正する。
   - `docs/quality_pack/manual_regression_scenarios_batch5.yaml`
   - `docs/quality_pack/manual_regression_scenarios_batch6.yaml`
   - `docs/quality_pack/manual_regression_scenarios_batch7.yaml`
+  - `docs/quality_pack/manual_regression_scenarios_batch8.yaml`
 - API route coverage:
   - `docs/quality_pack/api_route_coverage_matrix.yaml`
 - frontend UX contract:
   - `docs/quality_pack/frontend_ux_contract_matrix.yaml`
 - viewer/release contract:
   - `docs/quality_pack/viewer_release_contract_matrix.yaml`
+- longrun/migration contract:
+  - `docs/quality_pack/longrun_migration_contract_matrix.yaml`

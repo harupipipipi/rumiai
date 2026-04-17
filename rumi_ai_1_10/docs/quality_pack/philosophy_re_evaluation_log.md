@@ -62,3 +62,9 @@
 - README と思想メモを再読し、No Favoritism維持のため、viewer/release/CI の品質契約資産のみを追加し、製品挙動は変更しない方針を再確認。
 - Fail-Soft維持のため、viewer の起動失敗・health timeout・update失敗が「停止」ではなく可視化された失敗として追跡できる監査資産を強化。
 - 悪意Pack前提 / 最小権限を弱めないため、viewer の nav-guard/CSP/capability 境界を契約テスト化し、境界緩和を検知できる形に固定。
+
+## 2026-04-18 テスト設計再評価（batch8/longrun-migration contract追加前）
+
+- README と思想メモを再読し、No Favoritism維持のため、ランタイム本体の機能追加ではなく「長時間運用・移行安全性」の品質契約資産のみ追加する方針を再確認。
+- Fail-Soft維持のため、起動時フォールバック、proxy初期化失敗、部分移行失敗が停止ではなく監査可能な継続動作になることを台帳・契約テストで固定化。
+- 悪意Pack前提 / 最小権限を弱めないため、permissive昇格ガード、HMAC改ざん検知、env tamper復元、module shadow防御の境界を追加契約で監査可能化。

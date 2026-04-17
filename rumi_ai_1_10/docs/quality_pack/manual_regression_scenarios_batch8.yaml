@@ -1,0 +1,611 @@
+version: 1
+owner: quality-pack
+description: |
+  手動回帰シナリオ台帳の第8弾。長時間運用の Fail-Soft、HMAC 移行、Store 移行、
+  互換CLI、監査可観測性を強化する。
+scenarios:
+  - id: b8-lr-001
+    layer: data-integrity
+    risk: hmac-migration-command-path
+    reproduce: "python -m rumi_ai migrate-hmac を実行"
+    expected: "各対象ファイルの migrated/already_signed/failed が出力される"
+    triage: "app.py _run_hmac_migration の集計ロジックを確認"
+  - id: b8-lr-002
+    layer: data-integrity
+    risk: hmac-migration-failed-exit
+    reproduce: "migrate-hmac で1件 failed を発生させる"
+    expected: "終了コード1で終了する"
+    triage: "result_counts['failed'] > 0 分岐を確認"
+  - id: b8-lr-003
+    layer: data-integrity
+    risk: trust-store-hmac-status-missing
+    reproduce: "trusted_handlers.json 署名なし状態を作る"
+    expected: "hmac_status が missing を返す"
+    triage: "capability_trust_store.hmac_status を確認"
+  - id: b8-lr-004
+    layer: data-integrity
+    risk: trust-store-hmac-status-invalid
+    reproduce: "trusted_handlers.json の署名改ざん状態を作る"
+    expected: "hmac_status が invalid を返す"
+    triage: "verify_data_hmac 分岐を確認"
+  - id: b8-lr-005
+    layer: data-integrity
+    risk: trust-store-migrate-legacy
+    reproduce: "署名なし trusted_handlers.json を migrate_hmac_signature 実行"
+    expected: "migrated になる"
+    triage: "migrate_legacy_file 呼び出しを確認"
+  - id: b8-lr-006
+    layer: data-integrity
+    risk: store-sharing-hmac-status-missing
+    reproduce: "sharing index の署名を除去"
+    expected: "hmac_status が missing を返す"
+    triage: "store_sharing_manager.hmac_status を確認"
+  - id: b8-lr-007
+    layer: data-integrity
+    risk: store-sharing-migrate-sign
+    reproduce: "署名なし sharing index で migrate_hmac_signature 実行"
+    expected: "migrated を返して署名付き保存"
+    triage: "_save() が _hmac_signature を付与することを確認"
+  - id: b8-lr-008
+    layer: data-integrity
+    risk: capability-installer-index-migrate
+    reproduce: "capability index の署名なし状態で migrate_hmac_signatures 実行"
+    expected: "index が migrated"
+    triage: "capability_installer migrate_hmac_signatures index 分岐を確認"
+  - id: b8-lr-009
+    layer: data-integrity
+    risk: capability-installer-blocked-migrate
+    reproduce: "blocked.json 署名なし状態で migrate_hmac_signatures 実行"
+    expected: "blocked が migrated"
+    triage: "blocked 分岐と _save_blocked を確認"
+  - id: b8-lr-010
+    layer: data-integrity
+    risk: active-ecosystem-migrate
+    reproduce: "active_ecosystem.json 署名なし状態で migrate_hmac_signature 実行"
+    expected: "migrated を返す"
+    triage: "active_ecosystem.migrate_hmac_signature を確認"
+  - id: b8-lr-011
+    layer: data-integrity
+    risk: active-ecosystem-invalid-signature
+    reproduce: "active_ecosystem.json の署名改ざん"
+    expected: "migrate_hmac_signature が failed を返す"
+    triage: "hmac_status invalid 分岐を確認"
+  - id: b8-lr-012
+    layer: data-integrity
+    risk: store-migration-skip-existing-db
+    reproduce: "stores.db 既存状態で migrate_json_to_sqlite 実行"
+    expected: "False でスキップ"
+    triage: "db_path.exists 分岐を確認"
+  - id: b8-lr-013
+    layer: data-integrity
+    risk: store-migration-skip-no-index
+    reproduce: "index.json 不在状態で migrate_json_to_sqlite 実行"
+    expected: "False でスキップ"
+    triage: "index_path.exists 分岐を確認"
+  - id: b8-lr-014
+    layer: data-integrity
+    risk: store-migration-atomic-rename
+    reproduce: "migration 成功時のファイル生成を確認"
+    expected: "stores.db.tmp から os.replace で原子的に切替"
+    triage: "store_migration os.replace を確認"
+  - id: b8-lr-015
+    layer: data-integrity
+    risk: store-migration-keeps-json
+    reproduce: "migration 後 index.json の扱いを確認"
+    expected: "json は削除されずロールバック用途で残る"
+    triage: "store_migration コメントと処理を確認"
+  - id: b8-lr-016
+    layer: data-integrity
+    risk: store-migration-user-version
+    reproduce: "migration 成功後の user_version を確認"
+    expected: "PRAGMA user_version=1"
+    triage: "conn.execute user_version 設定を確認"
+  - id: b8-lr-017
+    layer: data-integrity
+    risk: store-migration-bad-json-file
+    reproduce: "不正JSONデータファイルを混在させる"
+    expected: "warning を出して他キー移行を継続"
+    triage: "json.JSONDecodeError handling を確認"
+  - id: b8-lr-018
+    layer: data-integrity
+    risk: store-migration-failure-cleanup
+    reproduce: "migration 中に例外を発生"
+    expected: "tmp が削除され False を返す"
+    triage: "except 節の tmp_path.unlink を確認"
+  - id: b8-lr-019
+    layer: data-integrity
+    risk: cleanup-stale-tmp
+    reproduce: "stores.db.tmp が残った状態で cleanup_stale_tmp 実行"
+    expected: "stale tmp が削除される"
+    triage: "cleanup_stale_tmp の unlink を確認"
+  - id: b8-lr-020
+    layer: data-integrity
+    risk: cleanup-stale-tmp-fail-soft
+    reproduce: "unlink 失敗を発生"
+    expected: "warning ログで継続"
+    triage: "cleanup_stale_tmp OSError handling を確認"
+  - id: b8-lr-021
+    layer: data-integrity
+    risk: shared-dict-snapshot-journal-consistency
+    reproduce: "shared_dict snapshot/journal を連続更新"
+    expected: "不整合なく読み戻せる"
+    triage: "shared_dict snapshot/journal/resolver の整合を確認"
+  - id: b8-lr-022
+    layer: data-integrity
+    risk: secrets-grant-file-hmac
+    reproduce: "secrets grant ファイルの署名状態を確認"
+    expected: "署名検証失敗時は fail-safe 側に倒れる"
+    triage: "secrets_grant_manager の検証経路を確認"
+  - id: b8-lr-023
+    layer: data-integrity
+    risk: capability-trust-file-absent
+    reproduce: "trust file 不在状態"
+    expected: "hmac_status=absent"
+    triage: "trust_store hmac_status absent 分岐を確認"
+  - id: b8-lr-024
+    layer: data-integrity
+    risk: capability-trust-signed-state
+    reproduce: "正常署名済み trust file を読み込み"
+    expected: "hmac_status=signed"
+    triage: "verify_data_hmac 成功分岐を確認"
+  - id: b8-lr-025
+    layer: data-integrity
+    risk: migrate-hmac-summary-accuracy
+    reproduce: "各ステータス混在で migrate-hmac 実行"
+    expected: "summary 数値が実測と一致"
+    triage: "result_counts 加算ロジックを確認"
+
+  - id: b8-lr-026
+    layer: recovery
+    risk: startup-no-http-fallback
+    reproduce: "io.http.server 未登録状態で app 起動"
+    expected: "fallback メッセージを出して待機継続"
+    triage: "app.py no_http 分岐を確認"
+  - id: b8-lr-027
+    layer: recovery
+    risk: startup-pack-api-fallback
+    reproduce: "pack_api_server が先行起動済みの状態"
+    expected: "http://host:port 表示で待機継続"
+    triage: "get_pack_api_server fallback を確認"
+  - id: b8-lr-028
+    layer: recovery
+    risk: startup-validate-host-execution-guard-soft
+    reproduce: "preflight validate_host_execution で例外発生"
+    expected: "debug ログのみで起動継続"
+    triage: "except Exception の継続分岐を確認"
+  - id: b8-lr-029
+    layer: recovery
+    risk: startup-mark-ecosystem-init-soft
+    reproduce: "mark_ecosystem_initialized 失敗を発生"
+    expected: "debug ログで継続"
+    triage: "app.py try/except を確認"
+  - id: b8-lr-030
+    layer: recovery
+    risk: startup-restart-request-exit42
+    reproduce: "control panel から restart request を送る"
+    expected: "SystemExit(42) で再起動要求"
+    triage: "_wait_for_signal と _RESTART_EXIT_CODE を確認"
+  - id: b8-lr-031
+    layer: recovery
+    risk: permissive-warning-loop
+    reproduce: "--permissive で起動"
+    expected: "30秒間隔 warning を継続出力"
+    triage: "_start_permissive_warning_loop を確認"
+  - id: b8-lr-032
+    layer: recovery
+    risk: health-mode-early-exit
+    reproduce: "--health 実行"
+    expected: "aggregate_health を出力して終了"
+    triage: "args.health early exit 分岐を確認"
+  - id: b8-lr-033
+    layer: recovery
+    risk: validate-mode-early-exit
+    reproduce: "--validate 実行"
+    expected: "validate report 出力して終了"
+    triage: "args.validate early exit 分岐を確認"
+  - id: b8-lr-034
+    layer: recovery
+    risk: migrate-mode-early-exit
+    reproduce: "migrate-hmac 実行"
+    expected: "migration 完了後に通常起動へ進まない"
+    triage: "args.command migrate-hmac 分岐を確認"
+  - id: b8-lr-035
+    layer: recovery
+    risk: missing-critical-dependency-stop
+    reproduce: "yaml/cryptography 片方不在にして起動"
+    expected: "FATAL 表示して即終了"
+    triage: "_check_critical_dependencies を確認"
+  - id: b8-lr-036
+    layer: recovery
+    risk: fallback-http-inspection-fail-soft
+    reproduce: "pack_api_server fallback inspection で例外発生"
+    expected: "debug ログで no_http メッセージへフォールバック"
+    triage: "fallback inspection except 節を確認"
+  - id: b8-lr-037
+    layer: recovery
+    risk: store-migration-partial-read-fail-soft
+    reproduce: "store_root 配下の一部ファイル読み取り失敗"
+    expected: "warning でスキップし他データ移行継続"
+    triage: "store_migration continue 分岐を確認"
+  - id: b8-lr-038
+    layer: recovery
+    risk: capability-proxy-init-fail-soft
+    reproduce: "capability proxy 初期化失敗を発生"
+    expected: "診断記録して起動継続"
+    triage: "kernel_core _get_capability_proxy except を確認"
+  - id: b8-lr-039
+    layer: recovery
+    risk: uds-proxy-init-fail-soft
+    reproduce: "uds proxy 初期化失敗を発生"
+    expected: "診断記録して起動継続"
+    triage: "kernel_core _get_uds_proxy_manager except を確認"
+  - id: b8-lr-040
+    layer: recovery
+    risk: env-tamper-restore
+    reproduce: "component 実行中に RUMI_SECURITY_MODE 改ざん"
+    expected: "警告ログと復元が行われる"
+    triage: "component_lifecycle _restore_env を確認"
+  - id: b8-lr-041
+    layer: recovery
+    risk: syspath-shadow-block-recovery
+    reproduce: "component path に os.py を置く"
+    expected: "sys.path追加を拒否し他処理継続"
+    triage: "_has_shadow_module と security audit を確認"
+  - id: b8-lr-042
+    layer: recovery
+    risk: component-reload-in-use-guard
+    reproduce: "使用中 component の reload を実行"
+    expected: "failed を返し無理にreloadしない"
+    triage: "reload_component usage guard を確認"
+  - id: b8-lr-043
+    layer: recovery
+    risk: component-drain-timeout
+    reproduce: "drain timeout ケースを発生"
+    expected: "False を返しハングしない"
+    triage: "drain timeout loop を確認"
+  - id: b8-lr-044
+    layer: recovery
+    risk: active-ecosystem-atomic-fallback
+    reproduce: "atomic write 失敗を発生"
+    expected: "direct write fallback で保存継続"
+    triage: "active_ecosystem _save_config_internal を確認"
+  - id: b8-lr-045
+    layer: recovery
+    risk: hmac-invalid-stop-migration
+    reproduce: "invalid 署名ファイルで migrate 実行"
+    expected: "failed として扱い安全側で停止"
+    triage: "migrate_hmac_signature invalid 分岐を確認"
+
+  - id: b8-lr-046
+    layer: observability
+    risk: startup-warning-banner-permissive
+    reproduce: "--permissive 起動ログを確認"
+    expected: "WARNING banner が明示される"
+    triage: "app.py print WARNING ブロックを確認"
+  - id: b8-lr-047
+    layer: observability
+    risk: health-output-structure
+    reproduce: "--health 出力JSONを確認"
+    expected: "status を含む構造で返る"
+    triage: "aggregate_health 結果出力を確認"
+  - id: b8-lr-048
+    layer: observability
+    risk: validate-output-summary
+    reproduce: "--validate 実行出力を確認"
+    expected: "packs scanned/valid/warnings/errors が出る"
+    triage: "_run_validation summary 文字列を確認"
+  - id: b8-lr-049
+    layer: observability
+    risk: migrate-output-detail-lines
+    reproduce: "migrate-hmac 実行出力を確認"
+    expected: "trust_store/store_sharing/capability_index/active_ecosystem が出る"
+    triage: "_run_hmac_migration detailed 出力を確認"
+  - id: b8-lr-050
+    layer: observability
+    risk: store-migration-start-log
+    reproduce: "store migration 実行時ログを確認"
+    expected: "Starting JSON -> SQLite migration ログが出る"
+    triage: "store_migration logger.info を確認"
+  - id: b8-lr-051
+    layer: observability
+    risk: store-migration-complete-log
+    reproduce: "store migration 成功時ログを確認"
+    expected: "migrated stores/keys 件数が出る"
+    triage: "logger.info completion を確認"
+  - id: b8-lr-052
+    layer: observability
+    risk: store-migration-fail-log
+    reproduce: "migration 失敗ケース"
+    expected: "Migration failed が stacktrace付きで出る"
+    triage: "logger.error(exc_info=True) を確認"
+  - id: b8-lr-053
+    layer: observability
+    risk: proxy-init-failure-diagnostics
+    reproduce: "uds/capability init fail を発生"
+    expected: "diagnostics に failed step が記録される"
+    triage: "kernel_core diagnostics.record_step を確認"
+  - id: b8-lr-054
+    layer: observability
+    risk: env-tamper-audit-event
+    reproduce: "env tamper を発生"
+    expected: "env_var_tamper_detected 監査イベントが記録される"
+    triage: "component_lifecycle audit_logger 呼び出しを確認"
+  - id: b8-lr-055
+    layer: observability
+    risk: shadow-module-audit-event
+    reproduce: "module shadow を発生"
+    expected: "syspath_shadow_blocked 監査イベントが記録される"
+    triage: "component_lifecycle get_audit_logger 呼び出しを確認"
+  - id: b8-lr-056
+    layer: observability
+    risk: no-http-guidance-message
+    reproduce: "http server 不在起動"
+    expected: "install_http_pack ガイダンスが表示される"
+    triage: "startup no_http メッセージを確認"
+  - id: b8-lr-057
+    layer: observability
+    risk: fallback-api-running-message
+    reproduce: "pack_api_server 起動済みで起動"
+    expected: "Pack API server running on ... が表示される"
+    triage: "fallback print を確認"
+  - id: b8-lr-058
+    layer: observability
+    risk: startup-success-message
+    reproduce: "通常起動成功"
+    expected: "startup.success メッセージが表示される"
+    triage: "app.py startup success 出力を確認"
+  - id: b8-lr-059
+    layer: observability
+    risk: shutdown-starting-message
+    reproduce: "Ctrl+C または restart で停止"
+    expected: "shutdown.starting メッセージが出る"
+    triage: "KeyboardInterrupt/_wait_for_signal 分岐を確認"
+  - id: b8-lr-060
+    layer: observability
+    risk: health-exit-code-trace
+    reproduce: "--health で失敗statusを返すケース"
+    expected: "exit code 1"
+    triage: "sys.exit(0 if status == UP else 1) を確認"
+
+  - id: b8-lr-061
+    layer: compatibility
+    risk: cli-migrate-command-compat
+    reproduce: "python -m rumi_ai migrate-hmac を実行"
+    expected: "現行エントリポイント経由で app.main が処理"
+    triage: "rumi_ai/__main__.py と app.py 分岐を確認"
+  - id: b8-lr-062
+    layer: compatibility
+    risk: cli-health-command-compat
+    reproduce: "python -m rumi_ai --health 実行"
+    expected: "互換エントリポイントで health mode が動作"
+    triage: "root entrypoint -> app.main 経路を確認"
+  - id: b8-lr-063
+    layer: compatibility
+    risk: cli-validate-command-compat
+    reproduce: "python -m rumi_ai --validate 実行"
+    expected: "validate mode が動作"
+    triage: "args.validate 分岐を確認"
+  - id: b8-lr-064
+    layer: compatibility
+    risk: migrate-flag-compat
+    reproduce: "--migrate-trust-store-hmac 実行"
+    expected: "migrate-hmac と同等に処理される"
+    triage: "args.migrate_trust_store_hmac 分岐を確認"
+  - id: b8-lr-065
+    layer: compatibility
+    risk: security-mode-default-strict
+    reproduce: "環境変数なし通常起動"
+    expected: "RUMI_SECURITY_MODE が strict"
+    triage: "os.environ.setdefault('RUMI_SECURITY_MODE','strict') を確認"
+  - id: b8-lr-066
+    layer: compatibility
+    risk: permissive-env-optin-compat
+    reproduce: "RUMI_ENVIRONMENT=development + permissive.lock で --permissive"
+    expected: "起動許可される"
+    triage: "_check_permissive_production_guard 条件を確認"
+  - id: b8-lr-067
+    layer: compatibility
+    risk: permissive-optin-reject-compat
+    reproduce: "opt-inなしで --permissive"
+    expected: "FATAL で拒否"
+    triage: "_check_permissive_production_guard env 条件を確認"
+  - id: b8-lr-068
+    layer: compatibility
+    risk: permissive-lockfile-reject-compat
+    reproduce: "env opt-inありだが lockfile 無しで --permissive"
+    expected: "FATAL lockfile required で拒否"
+    triage: "lockfile is_file 分岐を確認"
+  - id: b8-lr-069
+    layer: compatibility
+    risk: health-disk-path-windows-compat
+    reproduce: "Windows相当環境で --health"
+    expected: "SystemDrive を使用して probe"
+    triage: "os.name == nt 分岐を確認"
+  - id: b8-lr-070
+    layer: compatibility
+    risk: health-disk-path-unix-compat
+    reproduce: "Unix相当環境で --health"
+    expected: "disk path '/' を使用"
+    triage: "else 分岐を確認"
+
+  - id: b8-lr-071
+    layer: failure-path
+    risk: trust-file-parse-failure
+    reproduce: "trust file を壊れたJSONにする"
+    expected: "load_error 設定で拒否"
+    triage: "capability_trust_store parse error handling を確認"
+  - id: b8-lr-072
+    layer: failure-path
+    risk: trust-file-object-type-check
+    reproduce: "trust file に list を保存"
+    expected: "Trust file must be JSON object で拒否"
+    triage: "isinstance(data, dict) 分岐を確認"
+  - id: b8-lr-073
+    layer: failure-path
+    risk: trust-file-hmac-verification-fail
+    reproduce: "署名付きtrust fileの payload を改ざん"
+    expected: "HMAC verification failed で拒否"
+    triage: "verify_data_hmac 失敗分岐を確認"
+  - id: b8-lr-074
+    layer: failure-path
+    risk: store-sharing-load-invalid-signature
+    reproduce: "sharing index 署名を改ざん"
+    expected: "invalid 扱いで安全側動作"
+    triage: "store_sharing_manager hmac_status を確認"
+  - id: b8-lr-075
+    layer: failure-path
+    risk: capability-installer-index-invalid
+    reproduce: "capability index 署名改ざん"
+    expected: "migrate_hmac_signatures index=failed"
+    triage: "_hmac_file_status invalid 分岐を確認"
+  - id: b8-lr-076
+    layer: failure-path
+    risk: capability-installer-blocked-invalid
+    reproduce: "blocked file 署名改ざん"
+    expected: "blocked=failed"
+    triage: "_hmac_file_status blocked 分岐を確認"
+  - id: b8-lr-077
+    layer: failure-path
+    risk: active-ecosystem-load-invalid
+    reproduce: "active_ecosystem.json 署名改ざん"
+    expected: "hmac_status invalid"
+    triage: "active_ecosystem hmac_status を確認"
+  - id: b8-lr-078
+    layer: failure-path
+    risk: startup-kernel-construction-fail
+    reproduce: "Kernel() 初期化例外を発生"
+    expected: "startup.failed 出力で終了コード1"
+    triage: "main except Exception 分岐を確認"
+  - id: b8-lr-079
+    layer: failure-path
+    risk: startup-http-server-override-lookup-fail
+    reproduce: "get_interface_override 例外を発生"
+    expected: "debug ログで継続"
+    triage: "override lookup except 節を確認"
+  - id: b8-lr-080
+    layer: failure-path
+    risk: startup-http-server-handler-fail
+    reproduce: "http_server callable 内で例外発生"
+    expected: "startup.failed 経路で終了"
+    triage: "main 全体 except を確認"
+  - id: b8-lr-081
+    layer: failure-path
+    risk: health-probe-writable-fail
+    reproduce: "tmp 書き込み不可環境で --health"
+    expected: "writable probe failure が反映される"
+    triage: "probe_file_writable 登録を確認"
+  - id: b8-lr-082
+    layer: failure-path
+    risk: migration-import-normalize-fail
+    reproduce: "store_registry import 失敗を発生"
+    expected: "migration failed で False"
+    triage: "delayed import の例外処理を確認"
+  - id: b8-lr-083
+    layer: failure-path
+    risk: migration-db-connect-fail
+    reproduce: "sqlite connect 失敗を発生"
+    expected: "migration failed で False"
+    triage: "connect 例外経路を確認"
+  - id: b8-lr-084
+    layer: failure-path
+    risk: migration-atomic-replace-fail
+    reproduce: "os.replace 失敗を発生"
+    expected: "migration failed で False と tmp cleanup"
+    triage: "except cleanup 分岐を確認"
+  - id: b8-lr-085
+    layer: failure-path
+    risk: component-shadow-audit-fail-soft
+    reproduce: "audit logger 呼び出しが失敗する状況"
+    expected: "例外を握りつぶして本処理継続"
+    triage: "component_lifecycle except Exception: pass を確認"
+
+  - id: b8-lr-086
+    layer: security-permission
+    risk: permissive-requires-explicit-optin
+    reproduce: "--permissive 起動 with no env opt-in"
+    expected: "明示opt-in要求で拒否"
+    triage: "_check_permissive_production_guard を確認"
+  - id: b8-lr-087
+    layer: security-permission
+    risk: permissive-requires-lockfile
+    reproduce: "--permissive 起動 with env opt-in only"
+    expected: "permissive.lock 必須で拒否"
+    triage: "lockfile check を確認"
+  - id: b8-lr-088
+    layer: security-permission
+    risk: host-execution-preflight-block
+    reproduce: "未許可 host_execution pack を配置"
+    expected: "startup aborted で終了"
+    triage: "validate_host_execution_single 分岐を確認"
+  - id: b8-lr-089
+    layer: security-permission
+    risk: host-execution-env-override-scope
+    reproduce: "RUMI_ALLOW_HOST_EXECUTION 未設定状態を確認"
+    expected: "host_execution が許可されない"
+    triage: "startup guard 文言と分岐を確認"
+  - id: b8-lr-090
+    layer: security-permission
+    risk: env-critical-restore
+    reproduce: "componentで RUMI_SECURITY_MODE 改ざん"
+    expected: "実行後に元値へ復元"
+    triage: "component_lifecycle _snapshot_env/_restore_env を確認"
+  - id: b8-lr-091
+    layer: security-permission
+    risk: syspath-shadow-protection
+    reproduce: "pack component path に標準ライブラリ名moduleを置く"
+    expected: "sys.path 汚染が拒否される"
+    triage: "_DANGEROUS_MODULE_NAMES と _has_shadow_module を確認"
+  - id: b8-lr-092
+    layer: security-permission
+    risk: hmac-require-mode-block
+    reproduce: "RUMI_REQUIRE_HMAC=1 で署名なし blocked list を読む"
+    expected: "blocked list を空扱いにして拒否側"
+    triage: "capability_installer require_hmac 分岐を確認"
+  - id: b8-lr-093
+    layer: security-permission
+    risk: trust-store-invalid-signature-block
+    reproduce: "invalid trust signature で起動"
+    expected: "trusted handlers をロードしない"
+    triage: "trust_store load path を確認"
+  - id: b8-lr-094
+    layer: security-permission
+    risk: sharing-index-invalid-signature-block
+    reproduce: "sharing index invalid signature"
+    expected: "共有権限を安全側で無効扱い"
+    triage: "store_sharing_manager load path を確認"
+  - id: b8-lr-095
+    layer: security-permission
+    risk: active-ecosystem-invalid-signature-block
+    reproduce: "active_ecosystem invalid signature"
+    expected: "invalid 扱いで自動補正しない"
+    triage: "active_ecosystem hmac_status/migrate 分岐を確認"
+  - id: b8-lr-096
+    layer: security-permission
+    risk: migrate-summary-failed-nonzero-exit
+    reproduce: "failed を含む migrate-hmac 実行"
+    expected: "exit code 1 でCIが検知可能"
+    triage: "app.py _run_hmac_migration sys.exit(1) を確認"
+  - id: b8-lr-097
+    layer: security-permission
+    risk: strict-default-enforcement
+    reproduce: "通常起動時の RUMI_SECURITY_MODE を確認"
+    expected: "strict がデフォルト"
+    triage: "setdefault strict 分岐を確認"
+  - id: b8-lr-098
+    layer: security-permission
+    risk: no-silent-permissive-escalation
+    reproduce: "外部環境変数だけで permissive 化を試みる"
+    expected: "--permissive 指定なしでは permissive にならない"
+    triage: "args.permissive 条件を確認"
+  - id: b8-lr-099
+    layer: security-permission
+    risk: health-mode-no-unsafe-sideeffects
+    reproduce: "--health 実行でファイル操作有無を確認"
+    expected: "診断のみで危険操作を行わない"
+    triage: "health mode 実装を確認"
+  - id: b8-lr-100
+    layer: security-permission
+    risk: validate-mode-no-runtime-start
+    reproduce: "--validate 実行でruntime起動確認"
+    expected: "Kernel起動せず検証のみ"
+    triage: "validate early exit を確認"

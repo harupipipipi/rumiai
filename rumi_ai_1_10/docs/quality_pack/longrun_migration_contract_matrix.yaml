@@ -1,0 +1,95 @@
+version: 1
+owner: quality-pack
+summary: >
+  長時間運用・移行安全性・CLI互換の契約。Fail-Soft を維持しつつ、
+  HMAC 移行とデータ移行の監査可能性を固定化する。
+
+hmac_migration_contracts:
+  required_files:
+    - core_runtime/capability_trust_store.py
+    - core_runtime/store_sharing_manager.py
+    - core_runtime/capability_installer.py
+    - backend_core/ecosystem/active_ecosystem.py
+  required_behaviors:
+    - "各ストアの hmac_status は missing/signed/invalid/absent を判定できる"
+    - "署名なし legacy は migrate_hmac_signature(s) で migrated できる"
+    - "invalid 署名は failed として扱い安全側に倒す"
+    - "migrate-hmac の集計は対象ごとの結果と summary を出力する"
+  key_manual_scenarios:
+    - b8-lr-001
+    - b8-lr-004
+    - b8-lr-008
+    - b8-lr-010
+    - b8-lr-025
+    - b8-lr-096
+  automated_tests:
+    - rumi_ai_1_10/tests/test_capability_trust_store.py
+    - rumi_ai_1_10/tests/test_capability_installer.py
+    - rumi_ai_1_10/tests/test_wave20a_active_ecosystem_hmac.py
+
+store_migration_contracts:
+  required_files:
+    - core_runtime/store_migration.py
+    - core_runtime/store_registry.py
+  required_behaviors:
+    - "stores.db が既存なら migration は skip する"
+    - "index.json が無ければ migration は skip する"
+    - "tmp DB 書き込み後に atomic replace する"
+    - "データファイルの部分失敗は warning で継続する"
+    - "失敗時は tmp を cleanup して False を返す"
+  key_manual_scenarios:
+    - b8-lr-012
+    - b8-lr-014
+    - b8-lr-017
+    - b8-lr-018
+    - b8-lr-019
+    - b8-lr-084
+  automated_tests:
+    - rumi_ai_1_10/tests/test_store_registry.py
+    - rumi_ai_1_10/tests/test_store_sqlite.py
+    - rumi_ai_1_10/tests/test_store_sdist.py
+
+startup_failsoft_contracts:
+  required_files:
+    - app.py
+    - core_runtime/kernel_core.py
+    - core_runtime/component_lifecycle.py
+  required_behaviors:
+    - "startup preflight 失敗の一部は fail-soft で継続する"
+    - "危険な条件（依存欠落、host_execution未許可）は fail-safe で停止する"
+    - "http server 不在時は代替導線メッセージを提示して継続する"
+    - "proxy 初期化失敗は diagnostics 記録のうえ継続する"
+    - "env tamper / module shadow は監査イベントを記録して安全側に倒す"
+  key_manual_scenarios:
+    - b8-lr-026
+    - b8-lr-028
+    - b8-lr-035
+    - b8-lr-038
+    - b8-lr-041
+    - b8-lr-054
+  automated_tests:
+    - rumi_ai_1_10/tests/test_wave15f_app.py
+    - rumi_ai_1_10/tests/test_app1_permissive_guard.py
+    - rumi_ai_1_10/tests/test_wave19d_host_execution.py
+
+compatibility_cli_contracts:
+  required_files:
+    - rumi_ai/__main__.py
+    - app.py
+    - scripts/quality_pack/run_claude_quality_pack.sh
+  required_behaviors:
+    - "python -m rumi_ai の互換エントリポイントは維持される"
+    - "--health / --validate / migrate-hmac のCLI経路が壊れない"
+    - "quality pack は longrun/migration 契約テストをデフォルト実行する"
+    - "失敗時に層別で原因が追跡できるログとexit codeを返す"
+  key_manual_scenarios:
+    - b8-lr-061
+    - b8-lr-062
+    - b8-lr-063
+    - b8-lr-064
+    - b8-lr-070
+    - b8-lr-100
+  automated_tests:
+    - tests/test_entrypoint_contracts.py
+    - rumi_ai_1_10/tests/test_claude_quality_pack_contract.py
+    - rumi_ai_1_10/tests/test_longrun_migration_contract_matrix_contract.py
