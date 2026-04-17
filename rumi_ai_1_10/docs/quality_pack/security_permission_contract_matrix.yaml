@@ -1,0 +1,103 @@
+version: 1
+owner: quality-pack
+summary: >
+  認証境界・権限境界・承認整合・監査追跡を固定化し、
+  No Favoritism / Fail-Soft / 悪意Pack前提 / 最小権限の逸脱を検知する契約マトリクス。
+
+auth_boundary_contracts:
+  required_files:
+    - core_runtime/pack_api_server.py
+    - app.py
+    - core_runtime/pack_validator.py
+  required_behaviors:
+    - "pre-auth ルート以外は _check_auth で 401 拒否される"
+    - "GET/POST/PUT/DELETE の認証境界で Unauthorized 応答が一貫する"
+    - "strict がデフォルトで permissive 昇格は明示 opt-in が必要"
+    - "host_execution は preflight で検査される"
+    - "危険条件では fail-safe 停止し、非致命条件は fail-soft 継続する"
+    - "migrate-hmac / validate / health は CLI 経路で独立実行できる"
+  key_manual_scenarios:
+    - b9-sp-001
+    - b9-sp-003
+    - b9-sp-009
+    - b9-sp-012
+    - b9-sp-069
+    - b9-sp-110
+  automated_tests:
+    - rumi_ai_1_10/tests/test_wave19d_host_execution.py
+    - rumi_ai_1_10/tests/test_wave19b_production_guard.py
+    - rumi_ai_1_10/tests/test_security_permission_contract_matrix_contract.py
+
+grant_boundary_contracts:
+  required_files:
+    - core_runtime/network_grant_manager.py
+    - core_runtime/capability_grant_manager.py
+    - core_runtime/secrets_store.py
+    - core_runtime/store_sharing_manager.py
+  required_behaviors:
+    - "network grant は未付与時拒否、付与時許可、revoke後再拒否を満たす"
+    - "capability grant は grant/revoke/revoke_all を監査付きで反映する"
+    - "tamper 検知時は security audit を記録し安全側に倒す"
+    - "secret grant は pack境界を越えた参照を拒否する"
+    - "store sharing は provider/consumer 境界と監査記録を維持する"
+    - "権限ファイル破損時は fail-soft で無制限許可に倒れない"
+  key_manual_scenarios:
+    - b9-sp-018
+    - b9-sp-024
+    - b9-sp-025
+    - b9-sp-036
+    - b9-sp-051
+    - b9-sp-093
+  automated_tests:
+    - rumi_ai_1_10/tests/test_wave19e_grant_routing.py
+    - rumi_ai_1_10/tests/test_wave19b_secret_grant_routing.py
+    - rumi_ai_1_10/tests/test_security_permission_contract_matrix_contract.py
+
+approval_integrity_contracts:
+  required_files:
+    - core_runtime/approval_manager.py
+    - core_runtime/pack_importer.py
+    - core_runtime/pack_applier.py
+  required_behaviors:
+    - "未承認 pack は pending のまま実行されない"
+    - "承認後の改変は modified として検知される"
+    - "sha256 ベースの整合検査を維持する"
+    - "invalid pack は import/apply 段階で拒否する"
+    - "status API で pending/approved/modified が追跡できる"
+    - "approval/reject/modified が監査証跡に残る"
+  key_manual_scenarios:
+    - b9-sp-014
+    - b9-sp-015
+    - b9-sp-047
+    - b9-sp-065
+    - b9-sp-088
+    - b9-sp-117
+  automated_tests:
+    - rumi_ai_1_10/tests/test_approval_manager.py
+    - rumi_ai_1_10/tests/test_pack_importer_validation.py
+    - rumi_ai_1_10/tests/test_security_permission_contract_matrix_contract.py
+
+audit_traceability_contracts:
+  required_files:
+    - core_runtime/audit_logger.py
+    - docs/quality_pack/debug_playbook.md
+    - scripts/quality_pack/run_claude_quality_pack.sh
+    - scripts/quality_pack/run_debug_bundle.sh
+  required_behaviors:
+    - "security/network/permission の監査ログが日次 jsonl で残る"
+    - "quality pack は層別ゲートの結果を summary.txt に保存する"
+    - "debug bundle で失敗層の再現経路を短縮できる"
+    - "env tamper と syspath shadow の security event を追跡できる"
+    - "migrate-hmac の対象別結果と summary を記録できる"
+    - "思想再評価ログで設計判断の再照合を残す"
+  key_manual_scenarios:
+    - b9-sp-094
+    - b9-sp-095
+    - b9-sp-098
+    - b9-sp-099
+    - b9-sp-100
+    - b9-sp-120
+  automated_tests:
+    - rumi_ai_1_10/tests/test_quality_debug_playbook_contract.py
+    - rumi_ai_1_10/tests/test_claude_quality_pack_contract.py
+    - rumi_ai_1_10/tests/test_security_permission_contract_matrix_contract.py

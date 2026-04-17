@@ -68,3 +68,9 @@
 - README と思想メモを再読し、No Favoritism維持のため、ランタイム本体の機能追加ではなく「長時間運用・移行安全性」の品質契約資産のみ追加する方針を再確認。
 - Fail-Soft維持のため、起動時フォールバック、proxy初期化失敗、部分移行失敗が停止ではなく監査可能な継続動作になることを台帳・契約テストで固定化。
 - 悪意Pack前提 / 最小権限を弱めないため、permissive昇格ガード、HMAC改ざん検知、env tamper復元、module shadow防御の境界を追加契約で監査可能化。
+
+## 2026-04-18 テスト設計再評価（batch9/security-permission contract追加前）
+
+- README と思想メモを再読し、No Favoritism維持のため、ドメイン機能追加ではなく認証・権限・監査境界の品質資産のみを拡張する方針を再確認。
+- Fail-Soft維持のため、認証失敗・grantファイル破損・起動前検査失敗時の挙動を「停止条件」と「継続条件」に分離して回帰台帳へ固定化。
+- 悪意Pack前提 / 最小権限を弱めないため、未承認実行拒否・改変検知・grant境界・監査証跡を security_permission_contract_matrix で契約化。

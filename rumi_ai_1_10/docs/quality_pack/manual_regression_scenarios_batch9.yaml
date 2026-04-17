@@ -1,0 +1,729 @@
+version: 1
+owner: quality-pack
+description: |
+  手動回帰シナリオ台帳の第9弾。認証境界・権限境界・承認整合・監査追跡を重点化し、
+  悪意Pack前提と最小権限の逸脱を早期検知する。
+scenarios:
+  - id: b9-sp-001
+    layer: security-permission
+    risk: preauth-health-only
+    reproduce: "認証なしで GET /health を実行する"
+    expected: "200 で health 応答、認証要求されない"
+    triage: "pack_api_server do_GET pre-auth ルートを確認"
+  - id: b9-sp-002
+    layer: security-permission
+    risk: unauthorized-get-deny
+    reproduce: "認証なしで GET /api/packs を実行する"
+    expected: "401 Unauthorized"
+    triage: "pack_api_server do_GET _check_auth 分岐を確認"
+  - id: b9-sp-003
+    layer: security-permission
+    risk: unauthorized-post-deny
+    reproduce: "認証なしで POST /api/packs/scan を実行する"
+    expected: "401 Unauthorized"
+    triage: "pack_api_server do_POST _check_auth 分岐を確認"
+  - id: b9-sp-004
+    layer: security-permission
+    risk: unauthorized-put-deny
+    reproduce: "認証なしで PUT /api/secrets/... を実行する"
+    expected: "401 Unauthorized"
+    triage: "pack_api_server do_PUT _check_auth 分岐を確認"
+  - id: b9-sp-005
+    layer: security-permission
+    risk: unauthorized-delete-deny
+    reproduce: "認証なしで DELETE /api/packs/{id} を実行する"
+    expected: "401 Unauthorized"
+    triage: "pack_api_server do_DELETE _check_auth 分岐を確認"
+  - id: b9-sp-006
+    layer: security-permission
+    risk: setup-status-preauth-only
+    reproduce: "認証なしで GET /api/setup/status を実行する"
+    expected: "200でsetup状態を返す"
+    triage: "pre-auth route テーブル定義を確認"
+  - id: b9-sp-007
+    layer: security-permission
+    risk: oauth-start-preauth
+    reproduce: "認証なしで GET /api/setup/oauth/start を実行する"
+    expected: "認証不要で開始できる"
+    triage: "oauth_start の pre-auth 例外扱いを確認"
+  - id: b9-sp-008
+    layer: security-permission
+    risk: oauth-callback-preauth
+    reproduce: "認証なしで GET /callback を実行する"
+    expected: "認証不要で callback 処理される"
+    triage: "oauth_callback 分岐を確認"
+  - id: b9-sp-009
+    layer: security-permission
+    risk: permissive-without-optin
+    reproduce: "opt-in環境無しで --permissive 起動する"
+    expected: "起動拒否される"
+    triage: "app._check_permissive_production_guard を確認"
+  - id: b9-sp-010
+    layer: security-permission
+    risk: permissive-without-lockfile
+    reproduce: "opt-in環境のみで lockfile無し --permissive を実行"
+    expected: "起動拒否される"
+    triage: "permissive lockfile check を確認"
+  - id: b9-sp-011
+    layer: security-permission
+    risk: strict-default-mode
+    reproduce: "引数なしで app.py 起動する"
+    expected: "RUMI_SECURITY_MODE=strict で動作する"
+    triage: "app.py setdefault 分岐を確認"
+  - id: b9-sp-012
+    layer: security-permission
+    risk: host-execution-preflight
+    reproduce: "未許可 host_execution pack を含む状態で起動"
+    expected: "startup aborted になる"
+    triage: "validate_host_execution_single 分岐を確認"
+  - id: b9-sp-013
+    layer: security-permission
+    risk: host-execution-env-bypass
+    reproduce: "RUMI_ALLOW_HOST_EXECUTION 未設定で host_execution 実行を試す"
+    expected: "許可されない"
+    triage: "pack_validator 境界を確認"
+  - id: b9-sp-014
+    layer: security-permission
+    risk: approval-required-before-exec
+    reproduce: "未承認 pack をscan後に実行導線へ進む"
+    expected: "pending のまま実行不可"
+    triage: "approval_manager status 判定を確認"
+  - id: b9-sp-015
+    layer: security-permission
+    risk: hash-mismatch-auto-modified
+    reproduce: "承認後 pack ファイルを改変して再評価する"
+    expected: "modified 状態へ遷移する"
+    triage: "approval_manager verify/hash 分岐を確認"
+  - id: b9-sp-016
+    layer: security-permission
+    risk: modified-pack-block
+    reproduce: "modified 状態 pack を実行する"
+    expected: "再承認なしでは実行されない"
+    triage: "approval_manager / executor 側の拒否経路を確認"
+  - id: b9-sp-017
+    layer: security-permission
+    risk: network-grant-required
+    reproduce: "network grantなしで外部アクセスを実行"
+    expected: "拒否される"
+    triage: "network_grant_manager 判定を確認"
+  - id: b9-sp-018
+    layer: security-permission
+    risk: network-grant-allow
+    reproduce: "grant_network_access 後に外部アクセスを実行"
+    expected: "許可される"
+    triage: "grant file と check 分岐を確認"
+  - id: b9-sp-019
+    layer: security-permission
+    risk: network-grant-revoke
+    reproduce: "revoke_network_access 後に外部アクセスを再実行"
+    expected: "再び拒否される"
+    triage: "revoke 書き込みと再読込を確認"
+  - id: b9-sp-020
+    layer: security-permission
+    risk: network-grant-scope-host-port
+    reproduce: "許可した host:port 以外にアクセスする"
+    expected: "拒否される"
+    triage: "grant スコープ照合ロジックを確認"
+  - id: b9-sp-021
+    layer: security-permission
+    risk: capability-grant-required
+    reproduce: "grantなしで capability 実行を呼ぶ"
+    expected: "拒否される"
+    triage: "capability_grant_manager 判定を確認"
+  - id: b9-sp-022
+    layer: security-permission
+    risk: capability-grant-allow
+    reproduce: "grant_permission 後に capability 実行を呼ぶ"
+    expected: "許可される"
+    triage: "grant_permission 経路を確認"
+  - id: b9-sp-023
+    layer: security-permission
+    risk: capability-grant-revoke
+    reproduce: "revoke_permission 後に capability 実行を呼ぶ"
+    expected: "拒否される"
+    triage: "revoke_permission 経路を確認"
+  - id: b9-sp-024
+    layer: security-permission
+    risk: capability-revoke-all
+    reproduce: "revoke_all 実行後に複数 capability 呼び出し"
+    expected: "全権限が失効して拒否される"
+    triage: "revoke_all と grant file を確認"
+  - id: b9-sp-025
+    layer: security-permission
+    risk: capability-grant-tamper-detect
+    reproduce: "grant ファイルを改ざんして再ロード"
+    expected: "tamper が監査記録される"
+    triage: "_audit_tamper 呼び出しを確認"
+  - id: b9-sp-026
+    layer: security-permission
+    risk: trust-store-missing-entry-deny
+    reproduce: "trustに無い handler を呼び出す"
+    expected: "trusted=False で拒否"
+    triage: "capability_trust_store.is_trusted を確認"
+  - id: b9-sp-027
+    layer: security-permission
+    risk: trust-store-sha-mismatch-deny
+    reproduce: "trust entry と異なる sha256 で実行"
+    expected: "SHA mismatch で拒否"
+    triage: "expected_sha256 比較分岐を確認"
+  - id: b9-sp-028
+    layer: security-permission
+    risk: trust-store-signed-allow
+    reproduce: "署名済み trust file の一致shaで実行"
+    expected: "trusted=True になる"
+    triage: "verify_data_hmac + is_trusted を確認"
+  - id: b9-sp-029
+    layer: security-permission
+    risk: sharing-approve-required-fields
+    reproduce: "provider/consumer/store_id の一部欠落で approve"
+    expected: "success=False で拒否"
+    triage: "store_sharing_manager.approve_sharing を確認"
+  - id: b9-sp-030
+    layer: security-permission
+    risk: sharing-self-reference-deny
+    reproduce: "provider=consumer で approve"
+    expected: "拒否される"
+    triage: "provider==consumer 分岐を確認"
+  - id: b9-sp-031
+    layer: security-permission
+    risk: sharing-approve-audit
+    reproduce: "正常 approve を実行"
+    expected: "store_sharing_approved 監査が残る"
+    triage: "_audit 呼び出しを確認"
+  - id: b9-sp-032
+    layer: security-permission
+    risk: sharing-revoke-audit
+    reproduce: "既存 sharing を revoke する"
+    expected: "revoke 成功と監査が残る"
+    triage: "revoke_sharing を確認"
+  - id: b9-sp-033
+    layer: security-permission
+    risk: sharing-revoke-missing
+    reproduce: "存在しない sharing を revoke"
+    expected: "success=False error を返す"
+    triage: "key not found 分岐を確認"
+  - id: b9-sp-034
+    layer: security-permission
+    risk: secrets-set-authorization
+    reproduce: "権限不足主体で secret set API を呼ぶ"
+    expected: "拒否される"
+    triage: "secrets_store.set_secret の権限判定を確認"
+  - id: b9-sp-035
+    layer: security-permission
+    risk: secrets-delete-authorization
+    reproduce: "権限不足主体で secret delete API を呼ぶ"
+    expected: "拒否される"
+    triage: "secrets_store.delete_secret 判定を確認"
+  - id: b9-sp-036
+    layer: security-permission
+    risk: secrets-grant-per-pack
+    reproduce: "pack別 grant を設定して cross-pack 参照"
+    expected: "他packからは参照不可"
+    triage: "secret grants lookup を確認"
+  - id: b9-sp-037
+    layer: security-permission
+    risk: secrets-grant-revoke
+    reproduce: "grant 付与後 revoke して再参照"
+    expected: "参照不可に戻る"
+    triage: "grant revoke path を確認"
+  - id: b9-sp-038
+    layer: security-permission
+    risk: pip-candidate-approve-boundary
+    reproduce: "未スキャン candidate を approve API で指定"
+    expected: "拒否される"
+    triage: "pip candidate existence check を確認"
+  - id: b9-sp-039
+    layer: security-permission
+    risk: capability-candidate-approve-boundary
+    reproduce: "未スキャン candidate を capability approve API で指定"
+    expected: "拒否される"
+    triage: "capability candidate existence check を確認"
+  - id: b9-sp-040
+    layer: security-permission
+    risk: blocked-candidate-unblock-boundary
+    reproduce: "存在しない blocked candidate を unblock"
+    expected: "安全に失敗する"
+    triage: "unblock handler の not found 経路を確認"
+  - id: b9-sp-041
+    layer: security-permission
+    risk: rate-limit-unauth-flood
+    reproduce: "無認証で連続リクエストを送る"
+    expected: "rate limit が効く"
+    triage: "pack_api_server rate-limit を確認"
+  - id: b9-sp-042
+    layer: security-permission
+    risk: cors-allowlist-localhost
+    reproduce: "許可Origin(localhost)でリクエスト"
+    expected: "CORSヘッダが付く"
+    triage: "_get_cors_origin を確認"
+  - id: b9-sp-043
+    layer: security-permission
+    risk: cors-deny-untrusted-origin
+    reproduce: "未許可Originでリクエスト"
+    expected: "CORSヘッダ無し"
+    triage: "_get_cors_origin no-match 分岐を確認"
+  - id: b9-sp-044
+    layer: security-permission
+    risk: auth-token-missing
+    reproduce: "Authorization ヘッダ無しで protected route へアクセス"
+    expected: "401"
+    triage: "_check_auth token parsing を確認"
+  - id: b9-sp-045
+    layer: security-permission
+    risk: auth-token-invalid
+    reproduce: "不正tokenで protected route へアクセス"
+    expected: "401"
+    triage: "_check_auth verify path を確認"
+
+  - id: b9-sp-046
+    layer: failure-path
+    risk: invalid-pack-id-400
+    reproduce: "不正pack_id形式で /api/packs/{id}/status へアクセス"
+    expected: "400 Invalid pack_id"
+    triage: "_validate_pack_id 分岐を確認"
+  - id: b9-sp-047
+    layer: failure-path
+    risk: pack-not-found-404
+    reproduce: "存在しない pack_id の status を参照"
+    expected: "404 Pack not found"
+    triage: "_get_pack_status none 分岐を確認"
+  - id: b9-sp-048
+    layer: failure-path
+    risk: oauth-start-exception-mask
+    reproduce: "oauth_start で例外発生させる"
+    expected: "500 safe error で返る"
+    triage: "oauth_start exception handling を確認"
+  - id: b9-sp-049
+    layer: failure-path
+    risk: oauth-callback-exception-redirect
+    reproduce: "oauth_callback で例外発生"
+    expected: "/setup?error=internal_error へ遷移"
+    triage: "oauth_callback exception handling を確認"
+  - id: b9-sp-050
+    layer: failure-path
+    risk: route-dispatch-fallback
+    reproduce: "api_routes テーブル不一致のGETを送る"
+    expected: "既存 if/elif 経路へフォールバック"
+    triage: "_dispatch_api_route 戻り値分岐を確認"
+  - id: b9-sp-051
+    layer: failure-path
+    risk: network-grant-file-corrupt
+    reproduce: "network grant file を壊した状態で起動"
+    expected: "安全側で空grant扱い"
+    triage: "network_grant_manager load error handling を確認"
+  - id: b9-sp-052
+    layer: failure-path
+    risk: capability-grant-file-corrupt
+    reproduce: "capability grant file を壊した状態で起動"
+    expected: "安全側で拒否"
+    triage: "capability_grant_manager load error handling を確認"
+  - id: b9-sp-053
+    layer: failure-path
+    risk: approval-db-corrupt
+    reproduce: "approval metadata破損状態で status 参照"
+    expected: "fail-soft で degraded扱い"
+    triage: "approval_manager load/status 経路を確認"
+  - id: b9-sp-054
+    layer: failure-path
+    risk: trust-file-invalid-json
+    reproduce: "trusted_handlers.json を不正JSON化"
+    expected: "trust store load失敗で拒否"
+    triage: "capability_trust_store parse error を確認"
+  - id: b9-sp-055
+    layer: failure-path
+    risk: trust-file-invalid-signature
+    reproduce: "trusted_handlers.json 署名改ざん"
+    expected: "HMAC verification failed"
+    triage: "verify_data_hmac fail 分岐を確認"
+  - id: b9-sp-056
+    layer: failure-path
+    risk: sharing-index-invalid-signature
+    reproduce: "sharing index 署名改ざん"
+    expected: "invalid 扱いで安全側"
+    triage: "store_sharing_manager hmac_status を確認"
+  - id: b9-sp-057
+    layer: failure-path
+    risk: capability-index-invalid-signature
+    reproduce: "capability index 署名改ざん"
+    expected: "migrate_hmac_signatures index=failed"
+    triage: "capability_installer _hmac_file_status を確認"
+  - id: b9-sp-058
+    layer: failure-path
+    risk: blocked-list-invalid-signature
+    reproduce: "blocked list 署名改ざん"
+    expected: "blocked=failed または空扱い"
+    triage: "capability_installer blocked load path を確認"
+  - id: b9-sp-059
+    layer: failure-path
+    risk: active-ecosystem-invalid-signature
+    reproduce: "active_ecosystem.json 署名改ざん"
+    expected: "hmac_status invalid"
+    triage: "active_ecosystem hmac_status を確認"
+  - id: b9-sp-060
+    layer: failure-path
+    risk: active-ecosystem-save-atomic-fallback
+    reproduce: "atomic write 失敗を発生"
+    expected: "direct write fallback で継続"
+    triage: "active_ecosystem _save_config_internal を確認"
+  - id: b9-sp-061
+    layer: failure-path
+    risk: secrets-store-write-fail
+    reproduce: "secret保存先を書込不可にして set_secret"
+    expected: "安全に失敗し例外漏洩しない"
+    triage: "secrets_store write error handling を確認"
+  - id: b9-sp-062
+    layer: failure-path
+    risk: secrets-store-delete-missing
+    reproduce: "存在しない secret を delete"
+    expected: "安全に失敗する"
+    triage: "delete_secret not-found 分岐を確認"
+  - id: b9-sp-063
+    layer: failure-path
+    risk: grant-revoke-nonexistent
+    reproduce: "存在しない capability grant を revoke"
+    expected: "安全に失敗する"
+    triage: "revoke_permission false 分岐を確認"
+  - id: b9-sp-064
+    layer: failure-path
+    risk: network-revoke-nonexistent
+    reproduce: "存在しない network grant を revoke"
+    expected: "安全に失敗する"
+    triage: "revoke_network_access false 分岐を確認"
+  - id: b9-sp-065
+    layer: failure-path
+    risk: pack-import-invalid-archive
+    reproduce: "破損zipを import する"
+    expected: "失敗理由を返して停止しない"
+    triage: "pack_importer error handling を確認"
+  - id: b9-sp-066
+    layer: failure-path
+    risk: pack-apply-invalid-ecosystem
+    reproduce: "必須キー欠落の ecosystem.json を apply"
+    expected: "拒否して整合維持"
+    triage: "pack_applier validation を確認"
+  - id: b9-sp-067
+    layer: failure-path
+    risk: flow-run-missing-id
+    reproduce: "存在しない flow_id で /api/flows/{id}/run"
+    expected: "安全に失敗する"
+    triage: "flow run handler not-found を確認"
+  - id: b9-sp-068
+    layer: failure-path
+    risk: routes-reload-invalid-source
+    reproduce: "壊れた routes 設定で reload"
+    expected: "エラーを返し既存経路を維持"
+    triage: "routes reload fail-soft を確認"
+  - id: b9-sp-069
+    layer: failure-path
+    risk: startup-missing-critical-lib
+    reproduce: "critical dependency 欠落で起動"
+    expected: "FATAL で停止"
+    triage: "_check_critical_dependencies を確認"
+  - id: b9-sp-070
+    layer: failure-path
+    risk: startup-kernel-init-fail
+    reproduce: "Kernel初期化例外を注入"
+    expected: "startup.failed と終了コード1"
+    triage: "app main exception handling を確認"
+  - id: b9-sp-071
+    layer: failure-path
+    risk: startup-http-fallback-exception
+    reproduce: "pack_api_server fallback introspection で例外"
+    expected: "debugログのみで継続"
+    triage: "app fallback exception handling を確認"
+  - id: b9-sp-072
+    layer: failure-path
+    risk: startup-mark-init-failure
+    reproduce: "mark_ecosystem_initialized 失敗"
+    expected: "debugログのみで継続"
+    triage: "app mark init try/except を確認"
+  - id: b9-sp-073
+    layer: failure-path
+    risk: uds-proxy-init-failure
+    reproduce: "UDS proxy 初期化失敗を注入"
+    expected: "diagnostics failed記録で継続"
+    triage: "kernel_core _get_uds_proxy_manager except を確認"
+  - id: b9-sp-074
+    layer: failure-path
+    risk: capability-proxy-init-failure
+    reproduce: "Capability proxy 初期化失敗を注入"
+    expected: "diagnostics failed記録で継続"
+    triage: "kernel_core _get_capability_proxy except を確認"
+  - id: b9-sp-075
+    layer: failure-path
+    risk: syspath-shadow-detected
+    reproduce: "component path に os.py を置いて実行"
+    expected: "sys.path追加拒否で継続"
+    triage: "component_lifecycle _has_shadow_module を確認"
+  - id: b9-sp-076
+    layer: failure-path
+    risk: env-var-tamper-detected
+    reproduce: "component内で RUMI_SECURITY_MODE を改ざん"
+    expected: "警告+監査+復元される"
+    triage: "component_lifecycle _restore_env を確認"
+  - id: b9-sp-077
+    layer: failure-path
+    risk: health-probe-disk-fail
+    reproduce: "disk書込不可環境で --health"
+    expected: "status劣化を返し異常検知できる"
+    triage: "health probe_file_writable を確認"
+  - id: b9-sp-078
+    layer: failure-path
+    risk: validate-report-has-errors
+    reproduce: "壊れた pack で --validate 実行"
+    expected: "errors>0 を報告して終了"
+    triage: "_run_validation summary を確認"
+  - id: b9-sp-079
+    layer: failure-path
+    risk: migrate-hmac-failed-exit
+    reproduce: "invalid署名を含む状態で migrate-hmac 実行"
+    expected: "exit code 1"
+    triage: "_run_hmac_migration result_counts を確認"
+  - id: b9-sp-080
+    layer: failure-path
+    risk: migrate-hmac-partial-fail-report
+    reproduce: "migrated と failed が混在する状態で migrate-hmac"
+    expected: "詳細行と summary が両方出る"
+    triage: "_run_hmac_migration 出力フォーマットを確認"
+  - id: b9-sp-081
+    layer: failure-path
+    risk: store-migration-bad-json-continue
+    reproduce: "storeデータに壊れた json を混在"
+    expected: "warningでskipし継続"
+    triage: "store_migration exception continue を確認"
+  - id: b9-sp-082
+    layer: failure-path
+    risk: store-migration-connect-failure
+    reproduce: "sqlite connect 失敗を注入"
+    expected: "False で終了し tmp cleanup"
+    triage: "store_migration except cleanup を確認"
+  - id: b9-sp-083
+    layer: failure-path
+    risk: store-migration-replace-failure
+    reproduce: "os.replace 失敗を注入"
+    expected: "False で終了し tmp cleanup"
+    triage: "store_migration replace error handling を確認"
+  - id: b9-sp-084
+    layer: failure-path
+    risk: store-cleanup-stale-tmp-fail
+    reproduce: "stale tmp unlink 失敗を発生"
+    expected: "warningログで継続"
+    triage: "cleanup_stale_tmp OSError handling を確認"
+  - id: b9-sp-085
+    layer: failure-path
+    risk: api-unknown-route-not-found
+    reproduce: "未定義 API route にアクセス"
+    expected: "404/適切エラー"
+    triage: "pack_api_server route fallback を確認"
+
+  - id: b9-sp-086
+    layer: audit-readiness
+    risk: approval-audit-on-approve
+    reproduce: "pack approve を実行"
+    expected: "permission/security audit が記録される"
+    triage: "approval_manager audit write を確認"
+  - id: b9-sp-087
+    layer: audit-readiness
+    risk: approval-audit-on-reject
+    reproduce: "pack reject を実行"
+    expected: "rejectイベントが監査記録される"
+    triage: "approval_manager reject audit を確認"
+  - id: b9-sp-088
+    layer: audit-readiness
+    risk: modified-detection-audit
+    reproduce: "approved pack を改変して status更新"
+    expected: "modified 監査イベントが残る"
+    triage: "approval_manager update_modified を確認"
+  - id: b9-sp-089
+    layer: audit-readiness
+    risk: network-grant-audit-on-grant
+    reproduce: "network grant を追加"
+    expected: "permission/network audit が残る"
+    triage: "network_grant_manager _audit_grant/_audit_request を確認"
+  - id: b9-sp-090
+    layer: audit-readiness
+    risk: network-grant-audit-on-revoke
+    reproduce: "network grant を revoke"
+    expected: "revoke監査が残る"
+    triage: "network_grant_manager revoke audit を確認"
+  - id: b9-sp-091
+    layer: audit-readiness
+    risk: capability-grant-audit-on-grant
+    reproduce: "capability grant_permission を実行"
+    expected: "permission audit が残る"
+    triage: "capability_grant_manager _audit_grant_event を確認"
+  - id: b9-sp-092
+    layer: audit-readiness
+    risk: capability-grant-audit-on-revoke
+    reproduce: "capability revoke_permission を実行"
+    expected: "revoke audit が残る"
+    triage: "capability_grant_manager _audit_grant_event を確認"
+  - id: b9-sp-093
+    layer: audit-readiness
+    risk: capability-tamper-audit
+    reproduce: "grantファイル改ざんを検出させる"
+    expected: "security audit tamper が残る"
+    triage: "_audit_tamper を確認"
+  - id: b9-sp-094
+    layer: audit-readiness
+    risk: env-tamper-audit
+    reproduce: "componentでsecurity env改ざん"
+    expected: "env_var_tamper_detected が記録される"
+    triage: "component_lifecycle audit 呼び出しを確認"
+  - id: b9-sp-095
+    layer: audit-readiness
+    risk: shadow-module-audit
+    reproduce: "module shadow を検出"
+    expected: "syspath_shadow_blocked が記録される"
+    triage: "component_lifecycle audit 呼び出しを確認"
+  - id: b9-sp-096
+    layer: audit-readiness
+    risk: sharing-approve-audit-trace
+    reproduce: "sharing approve 後に audit log を確認"
+    expected: "provider/consumer/store_id が記録される"
+    triage: "store_sharing_manager _audit を確認"
+  - id: b9-sp-097
+    layer: audit-readiness
+    risk: sharing-revoke-audit-trace
+    reproduce: "sharing revoke 後に audit log を確認"
+    expected: "revoke trace が記録される"
+    triage: "store_sharing_manager revoke 経路を確認"
+  - id: b9-sp-098
+    layer: audit-readiness
+    risk: migrate-hmac-report-trace
+    reproduce: "migrate-hmac 実行ログを保存する"
+    expected: "対象別結果と summary が追跡可能"
+    triage: "_run_hmac_migration output を確認"
+  - id: b9-sp-099
+    layer: audit-readiness
+    risk: quality-gate-summary-trace
+    reproduce: "run_claude_quality_pack.sh を実行"
+    expected: ".quality_logs/.../summary.txt に層別結果が残る"
+    triage: "quality script summary 出力を確認"
+  - id: b9-sp-100
+    layer: audit-readiness
+    risk: debug-bundle-traceability
+    reproduce: "run_debug_bundle.sh を実行"
+    expected: "失敗層が再現コマンド単位で追跡できる"
+    triage: "debug_playbook と script 対応を確認"
+
+  - id: b9-sp-101
+    layer: observability
+    risk: unauthorized-message-consistency-get
+    reproduce: "無認証GETで401応答本文を確認"
+    expected: "Unauthorized メッセージが一貫する"
+    triage: "pack_api_server do_GET 401 応答を確認"
+  - id: b9-sp-102
+    layer: observability
+    risk: unauthorized-message-consistency-post
+    reproduce: "無認証POSTで401応答本文を確認"
+    expected: "Unauthorized メッセージが一貫する"
+    triage: "pack_api_server do_POST 401 応答を確認"
+  - id: b9-sp-103
+    layer: observability
+    risk: unauthorized-message-consistency-put
+    reproduce: "無認証PUTで401応答本文を確認"
+    expected: "Unauthorized メッセージが一貫する"
+    triage: "pack_api_server do_PUT 401 応答を確認"
+  - id: b9-sp-104
+    layer: observability
+    risk: unauthorized-message-consistency-delete
+    reproduce: "無認証DELETEで401応答本文を確認"
+    expected: "Unauthorized メッセージが一貫する"
+    triage: "pack_api_server do_DELETE 401 応答を確認"
+  - id: b9-sp-105
+    layer: observability
+    risk: startup-no-http-guidance
+    reproduce: "io.http.server 未登録で起動"
+    expected: "install_http_pack 導線を表示"
+    triage: "app startup no_http 文言を確認"
+  - id: b9-sp-106
+    layer: observability
+    risk: startup-fallback-running-message
+    reproduce: "pack_api_server fallback 起動済みで起動"
+    expected: "running on http://... が表示される"
+    triage: "fallback print を確認"
+  - id: b9-sp-107
+    layer: observability
+    risk: permissive-warning-banner-visible
+    reproduce: "--permissive で起動"
+    expected: "WARNING banner が表示される"
+    triage: "app.py permissive banner を確認"
+  - id: b9-sp-108
+    layer: observability
+    risk: health-json-shape-visible
+    reproduce: "--health の標準出力を確認"
+    expected: "jsonで status を含む"
+    triage: "health mode output を確認"
+  - id: b9-sp-109
+    layer: observability
+    risk: validate-summary-visible
+    reproduce: "--validate の標準出力を確認"
+    expected: "scanned/valid/warnings/errors が表示される"
+    triage: "_run_validation output を確認"
+  - id: b9-sp-110
+    layer: observability
+    risk: migrate-detail-visible
+    reproduce: "migrate-hmac 出力を確認"
+    expected: "各対象の migrated/already/failed を表示"
+    triage: "_run_hmac_migration detail を確認"
+  - id: b9-sp-111
+    layer: observability
+    risk: migrate-summary-visible
+    reproduce: "migrate-hmac 出力末尾を確認"
+    expected: "summary migrated/already/failed が表示される"
+    triage: "_run_hmac_migration summary を確認"
+  - id: b9-sp-112
+    layer: observability
+    risk: store-migration-start-log-visible
+    reproduce: "JSON->SQLite migration を実行"
+    expected: "Starting migration ログが見える"
+    triage: "store_migration logger.info を確認"
+  - id: b9-sp-113
+    layer: observability
+    risk: store-migration-complete-log-visible
+    reproduce: "migration 成功時ログを確認"
+    expected: "stores/keys migrated 件数が見える"
+    triage: "store_migration completion log を確認"
+  - id: b9-sp-114
+    layer: observability
+    risk: store-migration-failure-log-visible
+    reproduce: "migration 失敗時ログを確認"
+    expected: "failed + stacktrace が見える"
+    triage: "store_migration logger.error(exc_info) を確認"
+  - id: b9-sp-115
+    layer: observability
+    risk: proxy-init-failure-step-visible
+    reproduce: "uds/capability init failure を注入"
+    expected: "diagnostics failed step が見える"
+    triage: "kernel_core diagnostics.record_step を確認"
+  - id: b9-sp-116
+    layer: observability
+    risk: route-reload-response-visibility
+    reproduce: "/api/routes/reload 実行結果を確認"
+    expected: "成功/失敗理由がAPI応答で確認できる"
+    triage: "route reload handler response を確認"
+  - id: b9-sp-117
+    layer: observability
+    risk: approval-status-visibility
+    reproduce: "/api/packs/{id}/status を参照"
+    expected: "pending/approved/modified 等が可視化される"
+    triage: "approval status API を確認"
+  - id: b9-sp-118
+    layer: observability
+    risk: grant-list-visibility
+    reproduce: "/api/capability/grants と /api/network/list を参照"
+    expected: "grant状態が可視化される"
+    triage: "route handler 出力を確認"
+  - id: b9-sp-119
+    layer: observability
+    risk: secrets-grants-visibility
+    reproduce: "/api/secrets/grants 系を参照"
+    expected: "pack別grant状態が可視化される"
+    triage: "secrets grants route を確認"
+  - id: b9-sp-120
+    layer: observability
+    risk: quality-contract-suite-visibility
+    reproduce: "quality-contract-pytest を実行"
+    expected: "security/permission 契約が個別に表示される"
+    triage: "run_claude_quality_pack.sh quality-contract-pytest を確認"
