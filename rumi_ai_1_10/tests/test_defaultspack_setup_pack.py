@@ -101,10 +101,11 @@ class TestSetupPackManager(unittest.TestCase):
         fake_approval = SimpleNamespace(_initialized=False)
         if fake_grants is None:
             fake_grants = _FakeGrantManager()
+        setup_pack_module = sys.modules[SetupPackManager.__module__]
         return (
             fake_active,
             fake_grants,
-            patch("core_runtime.setup_pack.discover_pack_locations", return_value=targets),
+            patch.object(setup_pack_module, "discover_pack_locations", return_value=targets),
             patch(
                 "backend_core.ecosystem.active_ecosystem.get_active_ecosystem_manager",
                 return_value=fake_active,
