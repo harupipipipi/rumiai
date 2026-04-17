@@ -504,6 +504,21 @@ class PackAPIHandler(
             return False
         
         return hmac.compare_digest(token, self.internal_token)
+
+    def _drain_request_body(self) -> None:
+        """未認証時などにリクエストボディを読み捨てて接続リセットを防ぐ。"""
+        raw_cl = self.headers.get('Content-Length', '0')
+        try:
+            content_length = int(raw_cl)
+        except (ValueError, TypeError):
+            return
+        if content_length <= 0:
+            return
+        try:
+            self.rfile.read(content_length)
+        except Exception:
+            # 読み捨てに失敗しても、認証エラー応答は継続する。
+            pass
     
     def _read_raw_body(self) -> Optional[bytes]:
         """リクエストボディを読み取り、インスタンスに保持して返す。
@@ -950,6 +965,7 @@ class PackAPIHandler(
 
         # --- 認証チェック（pre-auth ルート以外）---
         if not _is_pre_auth_post and not self._check_auth():
+            self._drain_request_body()
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return
         
@@ -1371,6 +1387,7 @@ class PackAPIHandler(
         # --- テーブル駆動: 認証チェック ---
         _pre_auth_path_put = urlparse(self.path).path
         if not self._is_pre_auth_route("PUT", _pre_auth_path_put) and not self._check_auth():
+            self._drain_request_body()
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return
 
@@ -1400,6 +1417,7 @@ class PackAPIHandler(
         # --- テーブル駆動: 認証チェック ---
         _pre_auth_path_del = urlparse(self.path).path
         if not self._is_pre_auth_route("DELETE", _pre_auth_path_del) and not self._check_auth():
+            self._drain_request_body()
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return
         
