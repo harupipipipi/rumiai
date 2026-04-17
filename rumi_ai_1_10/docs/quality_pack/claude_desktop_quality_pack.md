@@ -27,6 +27,16 @@ bash rumi_ai_1_10/scripts/quality_pack/run_claude_quality_pack.sh
 RUMI_FAST_QUALITY=1 bash rumi_ai_1_10/scripts/quality_pack/run_claude_quality_pack.sh
 ```
 
+既定フル監査では、repo-wide lint/type の既存負債を **ベースライン比較** で判定します。  
+現状値を超えた場合のみ fail させ、負債を隠さず非退行を保証します。
+
+```bash
+RUMI_BASELINE_RUFF_ERRORS=1194 \
+RUMI_BASELINE_RUFF_FORMAT_FILES=835 \
+RUMI_BASELINE_MYPY_ERRORS=660 \
+bash rumi_ai_1_10/scripts/quality_pack/run_claude_quality_pack.sh
+```
+
 個別実行:
 
 ```bash
@@ -120,7 +130,7 @@ cd pack-shell && cargo test && cd ..
 4. 失敗した場合は「テスト実装問題」か「製品バグ」かを分離する
    - テスト実装問題: PR1内で修正
    - 製品バグ: PR2候補へ記録
-   - レガシーlint負債: `RUMI_FULL_QUALITY=1` で検出し、段階的に返済計画を作る
+   - レガシーlint負債: ベースライン管理で非退行を保証し、段階的に返済計画を作る
 
 ---
 

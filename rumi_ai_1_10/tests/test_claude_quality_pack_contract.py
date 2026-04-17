@@ -147,3 +147,19 @@ def test_coverage_matrix_references_existing_tests():
     for rel in expected_paths:
         assert rel in matrix
         assert (PACKAGE_ROOT / rel).exists() or (REPO_ROOT / rel).exists()
+
+
+def test_quality_script_uses_non_regression_baselines():
+    script_text = _read(
+        PACKAGE_ROOT / "scripts" / "quality_pack" / "run_claude_quality_pack.sh"
+    )
+    _assert_contains_all(
+        script_text,
+        [
+            "RUMI_BASELINE_RUFF_ERRORS",
+            "RUMI_BASELINE_RUFF_FORMAT_FILES",
+            "RUMI_BASELINE_MYPY_ERRORS",
+            "BASELINE-ACCEPTED",
+        ],
+        "run_claude_quality_pack.sh",
+    )
