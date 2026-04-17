@@ -24,6 +24,9 @@ def test_quality_pack_docs_exist_and_have_required_sections():
     re_eval_log = PACKAGE_ROOT / "docs" / "quality_pack" / "philosophy_re_evaluation_log.md"
     debug_playbook = PACKAGE_ROOT / "docs" / "quality_pack" / "debug_playbook.md"
     manual_scenarios = PACKAGE_ROOT / "docs" / "quality_pack" / "manual_regression_scenarios.yaml"
+    manual_scenario_batches = sorted(
+        (PACKAGE_ROOT / "docs" / "quality_pack").glob("manual_regression_scenarios*.yaml")
+    )
 
     assert philosophy_memo.exists()
     assert quality_pack.exists()
@@ -31,6 +34,7 @@ def test_quality_pack_docs_exist_and_have_required_sections():
     assert re_eval_log.exists()
     assert debug_playbook.exists()
     assert manual_scenarios.exists()
+    assert len(manual_scenario_batches) >= 3
 
     memo_text = _read(philosophy_memo)
     pack_text = _read(quality_pack)

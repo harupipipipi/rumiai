@@ -49,4 +49,4 @@
 2. `run_claude_quality_pack.sh` の同一ゲートが pass。
 3. 変更に応じた回帰テストを追加済み。
 4. PR本文に再現方法、修正理由、残リスクを記載済み。
-5. `manual_regression_scenarios.yaml` の該当シナリオを更新済み。
+5. `manual_regression_scenarios*.yaml` の該当シナリオを更新済み。

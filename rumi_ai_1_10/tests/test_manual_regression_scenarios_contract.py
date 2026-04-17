@@ -7,20 +7,30 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_ROOT = REPO_ROOT / "rumi_ai_1_10"
-SCENARIO_FILE = PACKAGE_ROOT / "docs" / "quality_pack" / "manual_regression_scenarios.yaml"
+SCENARIO_FILES = sorted(
+    (PACKAGE_ROOT / "docs" / "quality_pack").glob("manual_regression_scenarios*.yaml")
+)
 
 
-def test_manual_regression_scenarios_file_exists():
-    assert SCENARIO_FILE.exists()
+def _load_all_scenarios() -> list[dict]:
+    all_scenarios: list[dict] = []
+    for scenario_file in SCENARIO_FILES:
+        data = yaml.safe_load(scenario_file.read_text(encoding="utf-8"))
+        assert isinstance(data, dict)
+        assert data.get("version") == 1
+        scenarios = data.get("scenarios")
+        assert isinstance(scenarios, list)
+        all_scenarios.extend(scenarios)
+    return all_scenarios
+
+
+def test_manual_regression_scenario_files_exist():
+    assert len(SCENARIO_FILES) >= 3
 
 
 def test_manual_regression_scenarios_have_required_fields_and_minimum_count():
-    data = yaml.safe_load(SCENARIO_FILE.read_text(encoding="utf-8"))
-    assert isinstance(data, dict)
-    assert data.get("version") == 1
-    scenarios = data.get("scenarios")
-    assert isinstance(scenarios, list)
-    assert len(scenarios) >= 60
+    scenarios = _load_all_scenarios()
+    assert len(scenarios) >= 140
 
     required = {"id", "layer", "risk", "reproduce", "expected", "triage"}
     for scenario in scenarios:
@@ -30,13 +40,11 @@ def test_manual_regression_scenarios_have_required_fields_and_minimum_count():
 
 
 def test_manual_regression_scenario_ids_are_unique():
-    data = yaml.safe_load(SCENARIO_FILE.read_text(encoding="utf-8"))
-    scenarios = data["scenarios"]
+    scenarios = _load_all_scenarios()
     ids = [s["id"] for s in scenarios]
     assert len(ids) == len(set(ids))
 
 
 def test_manual_regression_scenarios_cover_three_layers():
-    data = yaml.safe_load(SCENARIO_FILE.read_text(encoding="utf-8"))
-    layers = {s["layer"] for s in data["scenarios"]}
+    layers = {s["layer"] for s in _load_all_scenarios()}
     assert {"security-permission", "failure-path", "frontend-ui"}.issubset(layers)

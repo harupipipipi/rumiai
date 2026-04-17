@@ -1,0 +1,309 @@
+version: 1
+owner: quality-pack
+description: |
+  手動回帰シナリオ台帳の第3弾。互換性・パフォーマンス・ユーザーデータ保護を重点化する。
+scenarios:
+  - id: compat-001
+    layer: compatibility
+    risk: python-version-drift
+    reproduce: "Python minor version更新後にquality pack実行"
+    expected: "主要テストとlint/type結果が再現可能"
+    triage: "pyprojectとCI python-version設定を照合"
+  - id: compat-002
+    layer: compatibility
+    risk: node-version-drift
+    reproduce: "Node version更新後にfrontend lint/build実行"
+    expected: "lint/buildが安定pass"
+    triage: "frontend package engine要件とlockfile整合を確認"
+  - id: compat-003
+    layer: compatibility
+    risk: cargo-version-drift
+    reproduce: "Rust toolchain更新後にcargo test実行"
+    expected: "pack-shell testがpass"
+    triage: "Cargo.toml依存バージョン差分を確認"
+  - id: compat-004
+    layer: compatibility
+    risk: api-contract-drift
+    reproduce: "APIレスポンスschemaを変更"
+    expected: "contractテストまたはUIで不整合検知"
+    triage: "api handlersとfrontend呼び出しを突合"
+  - id: compat-005
+    layer: compatibility
+    risk: entrypoint-drift
+    reproduce: "rumi_ai/__main__.pyのターゲットを変更"
+    expected: "entrypoint contract testで検知"
+    triage: "test_entrypoint_contracts.py を実行"
+  - id: compat-006
+    layer: compatibility
+    risk: pyproject-version-mismatch
+    reproduce: "__init__.__version__ と pyproject version不一致"
+    expected: "contract test fail"
+    triage: "version contractを同期"
+  - id: compat-007
+    layer: compatibility
+    risk: tauri-capability-drift
+    reproduce: "viewer capabilityから core:default を除外"
+    expected: "contract test fail"
+    triage: "default capability設定を復元"
+  - id: compat-008
+    layer: compatibility
+    risk: tauri-csp-drift
+    reproduce: "cspにワイルドカードを追加"
+    expected: "contract test fail"
+    triage: "csp strictルールを再適用"
+  - id: compat-009
+    layer: compatibility
+    risk: tsconfig-scope-drift
+    reproduce: "frontend tsconfig include/excludeを広げ過ぎる"
+    expected: "lint時間増大/型崩れ検知"
+    triage: "test_frontend_build_config.pyで境界確認"
+  - id: compat-010
+    layer: compatibility
+    risk: route-method-drift
+    reproduce: "同一路径のHTTP methodを変更"
+    expected: "既存クライアントが失敗し検知"
+    triage: "api route tableと利用側を同期"
+
+  - id: perf-001
+    layer: performance
+    risk: quality-run-timeout
+    reproduce: "quality pack全体が異常に長時間化"
+    expected: "主要ゲートが一定範囲内で終了"
+    triage: "遅延ゲートのログを分析"
+  - id: perf-002
+    layer: performance
+    risk: pytest-slowdown
+    reproduce: "package pytest時間が急増"
+    expected: "増加要因が特定できる"
+    triage: "失敗/遅延テストを抽出し分割実行"
+  - id: perf-003
+    layer: performance
+    risk: lint-slowdown
+    reproduce: "frontend lint時間が急増"
+    expected: "型定義増加や対象範囲拡大が説明可能"
+    triage: "tsconfig範囲と型依存差分を確認"
+  - id: perf-004
+    layer: performance
+    risk: build-slowdown
+    reproduce: "vite build時間が急増"
+    expected: "chunk構成変更の影響を把握"
+    triage: "bundle分析とmanualChunks検討"
+  - id: perf-005
+    layer: performance
+    risk: api-latency-spike
+    reproduce: "secrets grant API連打で遅延増加"
+    expected: "機能維持とレート制御"
+    triage: "handler pathとIO待ち時間を分析"
+  - id: perf-006
+    layer: performance
+    risk: db-io-regression
+    reproduce: "store更新処理でI/O待ち増加"
+    expected: "タイムアウトや破損なく完了"
+    triage: "store write pathのロック時間を点検"
+  - id: perf-007
+    layer: performance
+    risk: log-bloat
+    reproduce: "quality logsが過剰肥大化"
+    expected: "必要十分なログ粒度"
+    triage: "不要な冗長ログを見直し"
+  - id: perf-008
+    layer: performance
+    risk: event-loop-block
+    reproduce: "API handler内で重い同期処理"
+    expected: "応答性を維持"
+    triage: "重い処理の分離を検討"
+  - id: perf-009
+    layer: performance
+    risk: repeated-container-start
+    reproduce: "同一packのstart/stop連打"
+    expected: "リークやハングなし"
+    triage: "container state遷移を監視"
+  - id: perf-010
+    layer: performance
+    risk: flow-loader-complexity
+    reproduce: "大規模flow読み込みで遅延"
+    expected: "complexity checkで制限"
+    triage: "RUMI_MAX_FLOW_FILE_BYTES と構造検査を確認"
+
+  - id: data-protect-001
+    layer: user-data-protection
+    risk: secret-in-log
+    reproduce: "失敗時ログにsecret key名/値が露出"
+    expected: "機密値はマスクまたは非表示"
+    triage: "sanitize_error と logging payloadを確認"
+  - id: data-protect-002
+    layer: user-data-protection
+    risk: token-in-log
+    reproduce: "API token全文がログ出力される"
+    expected: "prefixのみ表示"
+    triage: "token loggingルールを確認"
+  - id: data-protect-003
+    layer: user-data-protection
+    risk: path-leak
+    reproduce: "内部絶対パスがAPIレスポンスに露出"
+    expected: "safe errorへ置換"
+    triage: "sanitize path処理を確認"
+  - id: data-protect-004
+    layer: user-data-protection
+    risk: env-leak
+    reproduce: "例外メッセージに環境変数が混入"
+    expected: "レスポンスから除去"
+    triage: "error sanitizer確認"
+  - id: data-protect-005
+    layer: user-data-protection
+    risk: audit-pii-overlog
+    reproduce: "監査ログへ不要PIIを書き込み"
+    expected: "最小限情報のみ記録"
+    triage: "audit event payloadを精査"
+  - id: data-protect-006
+    layer: user-data-protection
+    risk: grant-file-permission
+    reproduce: "grantファイル権限が過剰"
+    expected: "必要最小権限"
+    triage: "ファイル作成モードを確認"
+  - id: data-protect-007
+    layer: user-data-protection
+    risk: db-file-permission
+    reproduce: "stores.db権限が広すぎる"
+    expected: "ローカル利用前提の安全権限"
+    triage: "DB生成時のpermission設定を確認"
+  - id: data-protect-008
+    layer: user-data-protection
+    risk: backup-leak
+    reproduce: "バックアップファイルに機密が平文"
+    expected: "取り扱い手順で管理"
+    triage: "backupポリシー文書を確認"
+  - id: data-protect-009
+    layer: user-data-protection
+    risk: test-fixture-secret
+    reproduce: "テストfixtureに実キー混入"
+    expected: "ダミー値のみ"
+    triage: "fixtureファイルを監査"
+  - id: data-protect-010
+    layer: user-data-protection
+    risk: network-domain-overgrant
+    reproduce: "不要ドメインをallow"
+    expected: "最小ドメインのみ"
+    triage: "grant申請レビューを確認"
+
+  - id: ux-failure-001
+    layer: failure-ux
+    risk: opaque-error-message
+    reproduce: "frontendでAPI失敗時に不明瞭メッセージ"
+    expected: "行動可能なエラーメッセージ"
+    triage: "UI error mappingを改善"
+  - id: ux-failure-002
+    layer: failure-ux
+    risk: retry-without-guidance
+    reproduce: "再試行可否が不明なエラー表示"
+    expected: "再試行/中断の導線明示"
+    triage: "error UIのCTA見直し"
+  - id: ux-failure-003
+    layer: failure-ux
+    risk: silent-failure
+    reproduce: "ユーザー操作が失敗しても無表示"
+    expected: "明示通知"
+    triage: "toast/alert発火条件を確認"
+  - id: ux-failure-004
+    layer: failure-ux
+    risk: stale-loader
+    reproduce: "失敗後にloading表示が解除されない"
+    expected: "error stateへ遷移"
+    triage: "finally処理でloading解除確認"
+  - id: ux-failure-005
+    layer: failure-ux
+    risk: broken-nav-after-error
+    reproduce: "エラー画面から戻る導線がない"
+    expected: "主要画面へ戻れる"
+    triage: "fallback UIにnavigation追加"
+  - id: ux-failure-006
+    layer: failure-ux
+    risk: keyboard-trap
+    reproduce: "エラーダイアログでフォーカス閉じ込め失敗"
+    expected: "キーボードで脱出可能"
+    triage: "focus trap実装を確認"
+  - id: ux-failure-007
+    layer: failure-ux
+    risk: localization-missing-error
+    reproduce: "一部エラーメッセージが未翻訳"
+    expected: "統一言語で表示"
+    triage: "i18n辞書を更新"
+  - id: ux-failure-008
+    layer: failure-ux
+    risk: error-code-hidden
+    reproduce: "運用連携に必要なerror codeが表示されない"
+    expected: "必要な識別子を表示"
+    triage: "support向けコード表示方針を確認"
+  - id: ux-failure-009
+    layer: failure-ux
+    risk: unreadable-error-layout
+    reproduce: "小画面でエラーメッセージが崩れる"
+    expected: "可読性維持"
+    triage: "レスポンシブレイアウト確認"
+  - id: ux-failure-010
+    layer: failure-ux
+    risk: repeated-toast-spam
+    reproduce: "同一失敗でtoastが連発"
+    expected: "重複抑制"
+    triage: "通知デバウンス制御を確認"
+
+  - id: op-audit-001
+    layer: audit-readiness
+    risk: missing-command-log
+    reproduce: "最終報告で実行コマンド不足"
+    expected: "実行コマンドと結果を網羅"
+    triage: "report templateを強化"
+  - id: op-audit-002
+    layer: audit-readiness
+    risk: mismatch-pr-body
+    reproduce: "PR本文と実際の差分が不一致"
+    expected: "本文を実差分に同期"
+    triage: "PR更新前に diff 再読"
+  - id: op-audit-003
+    layer: audit-readiness
+    risk: no-self-review-note
+    reproduce: "セルフレビュー結果未記載"
+    expected: "観点別レビュー結果を記録"
+    triage: "観点チェックリストを利用"
+  - id: op-audit-004
+    layer: audit-readiness
+    risk: unresolved-critical-bug-hidden
+    reproduce: "重大未解決を報告しない"
+    expected: "残リスクへ明示"
+    triage: "重大度分類を必須化"
+  - id: op-audit-005
+    layer: audit-readiness
+    risk: flaky-evidence-missing
+    reproduce: "不安定事象の再現回数記録なし"
+    expected: "stress結果を件数付きで記録"
+    triage: "再現ログ保存と添付"
+  - id: op-audit-006
+    layer: audit-readiness
+    risk: no-philosophy-crosscheck
+    reproduce: "思想メモ照合記録なし"
+    expected: "再評価ログへ記録"
+    triage: "philosophy_re_evaluation_log更新"
+  - id: op-audit-007
+    layer: audit-readiness
+    risk: missing-boundary-justification
+    reproduce: "PR1/PR2責務分離の根拠が不明"
+    expected: "本文で明示"
+    triage: "修正理由をPR本文へ追記"
+  - id: op-audit-008
+    layer: audit-readiness
+    risk: no-cleanup-proof
+    reproduce: "生成物除去の証跡なし"
+    expected: "cleanup実行を記録"
+    triage: "git status cleanの証跡を残す"
+  - id: op-audit-009
+    layer: audit-readiness
+    risk: untracked-secret-file
+    reproduce: "機密関連ファイルが追跡対象に混入"
+    expected: "コミット対象外"
+    triage: "status監査と除外設定確認"
+  - id: op-audit-010
+    layer: audit-readiness
+    risk: no-linecount-proof
+    reproduce: "行数主張に実測コマンド無し"
+    expected: "実測コマンド結果を添付"
+    triage: "linecount monitoringを定期実行"

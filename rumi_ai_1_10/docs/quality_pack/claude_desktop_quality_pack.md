@@ -216,4 +216,7 @@ PR1では品質資産のみ、PR2で実害バグを修正する。
 - テスト分類表: `docs/quality_pack/test_coverage_matrix.md`
 - 思想再評価ログ: `docs/quality_pack/philosophy_re_evaluation_log.md`
 - デバッグ手順: `docs/quality_pack/debug_playbook.md`
-- 手動回帰台帳: `docs/quality_pack/manual_regression_scenarios.yaml`
+- 手動回帰台帳:
+  - `docs/quality_pack/manual_regression_scenarios.yaml`
+  - `docs/quality_pack/manual_regression_scenarios_batch2.yaml`
+  - `docs/quality_pack/manual_regression_scenarios_batch3.yaml`

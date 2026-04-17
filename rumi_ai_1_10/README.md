@@ -308,7 +308,9 @@ curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
 | [docs/quality_pack/test_coverage_matrix.md](docs/quality_pack/test_coverage_matrix.md) | テスト分類表と未テスト領域 |
 | [docs/quality_pack/philosophy_re_evaluation_log.md](docs/quality_pack/philosophy_re_evaluation_log.md) | 作業中の思想再評価ログ |
 | [docs/quality_pack/debug_playbook.md](docs/quality_pack/debug_playbook.md) | 失敗時の再現・切り分け・修正確認手順 |
-| [docs/quality_pack/manual_regression_scenarios.yaml](docs/quality_pack/manual_regression_scenarios.yaml) | 手動回帰シナリオ台帳（セキュリティ/失敗系/UI） |
+| [docs/quality_pack/manual_regression_scenarios.yaml](docs/quality_pack/manual_regression_scenarios.yaml) | 手動回帰シナリオ台帳（batch1: セキュリティ/失敗系/UI） |
+| [docs/quality_pack/manual_regression_scenarios_batch2.yaml](docs/quality_pack/manual_regression_scenarios_batch2.yaml) | 手動回帰シナリオ台帳（batch2: 運用/データ整合/観測性/復旧） |
+| [docs/quality_pack/manual_regression_scenarios_batch3.yaml](docs/quality_pack/manual_regression_scenarios_batch3.yaml) | 手動回帰シナリオ台帳（batch3: 互換性/性能/データ保護/失敗UX） |
 
 ---
 

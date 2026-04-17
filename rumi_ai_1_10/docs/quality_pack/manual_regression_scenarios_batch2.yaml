@@ -1,0 +1,493 @@
+version: 1
+owner: quality-pack
+description: |
+  手動回帰シナリオ台帳の第2弾。運用・リリース・データ整合・観測性を重点化する。
+  batch1（security/failure/ui）に対して、運用での壊れやすい境界を拡張する。
+scenarios:
+  - id: ops-001
+    layer: operations-release
+    risk: release-gate-drift
+    reproduce: "release前に run_claude_quality_pack.sh を実行しないままtag作成"
+    expected: "運用手順違反としてリリース停止"
+    triage: "release checklist に quality gate 実行結果を必須化"
+  - id: ops-002
+    layer: operations-release
+    risk: release-tag-mismatch
+    reproduce: "release workflow 対象外のタグ形式でリリース実行"
+    expected: "workflowが起動しないか fail-fast"
+    triage: "release.yml の tags ルールを確認"
+  - id: ops-003
+    layer: operations-release
+    risk: release-no-audit-review
+    reproduce: "監査ログ未確認でリリース承認"
+    expected: "承認前チェックでブロック"
+    triage: "debug_playbook と release checklist を照合"
+  - id: ops-004
+    layer: operations-release
+    risk: stale-branch-release
+    reproduce: "base未同期ブランチからリリース作業"
+    expected: "差分確認で中断"
+    triage: "PR差分とhead/base整合を再確認"
+  - id: ops-005
+    layer: operations-release
+    risk: ci-scope-regression
+    reproduce: "test.yml から cargo test 行が消えた状態でPR作成"
+    expected: "contract testで検知"
+    triage: "test_claude_quality_pack_contract.py のCI契約を確認"
+  - id: ops-006
+    layer: operations-release
+    risk: quality-script-bypass
+    reproduce: "個別テストのみpassでフルquality未実行"
+    expected: "運用規約違反として差し戻し"
+    triage: "PR本文の実行コマンド一覧を監査"
+  - id: ops-007
+    layer: operations-release
+    risk: baseline-hidden-regression
+    reproduce: "baseline値を無根拠に引き上げる"
+    expected: "レビューで拒否"
+    triage: "baseline更新理由と実測ログを照合"
+  - id: ops-008
+    layer: operations-release
+    risk: missing-summary-log
+    reproduce: "quality実行後にsummary.txtが残らない"
+    expected: "切り分け不能としてfail"
+    triage: "run_claude_quality_pack.sh のログ保存設定を点検"
+  - id: ops-009
+    layer: operations-release
+    risk: debug-bundle-stale
+    reproduce: "run_debug_bundle.sh が実際の失敗層を再現できない"
+    expected: "契約テストまたは手動検証で検知"
+    triage: "debug_playbookの最小再現コマンドを更新"
+  - id: ops-010
+    layer: operations-release
+    risk: undocumented-failure
+    reproduce: "quality失敗の原因と修正理由をPR本文に記載しない"
+    expected: "レビューで差し戻し"
+    triage: "PRテンプレートの必須項目を確認"
+
+  - id: ops-011
+    layer: operations-release
+    risk: patch-scope-mix
+    reproduce: "PR1にプロダクト挙動修正を混在"
+    expected: "責務分離違反として修正要求"
+    triage: "変更ファイルをquality資産/製品修正で分類"
+  - id: ops-012
+    layer: operations-release
+    risk: patch-scope-mix
+    reproduce: "PR2に品質ドキュメントのみ変更を混在"
+    expected: "責務分離違反として修正要求"
+    triage: "PR1へ移送または分離PR化"
+  - id: ops-013
+    layer: operations-release
+    risk: missing-repro-step
+    reproduce: "不具合修正PRで再現手順未記載"
+    expected: "修正妥当性が証明できず差し戻し"
+    triage: "再現->修正->再検証の3点セット記載"
+  - id: ops-014
+    layer: operations-release
+    risk: missing-risk-note
+    reproduce: "残リスクを空欄のままマージ要求"
+    expected: "監査観点で差し戻し"
+    triage: "残リスク欄に未解決事項を明記"
+  - id: ops-015
+    layer: operations-release
+    risk: stale-doc-link
+    reproduce: "READMEのquality packリンクが切れている"
+    expected: "contractテストで検知"
+    triage: "README と実ファイルパスを照合"
+  - id: ops-016
+    layer: operations-release
+    risk: missing-philosophy-log
+    reproduce: "思想再評価ログを更新せずに大規模変更"
+    expected: "レビューで運用違反として指摘"
+    triage: "philosophy_re_evaluation_log.md を更新"
+  - id: ops-017
+    layer: operations-release
+    risk: unsupported-shell
+    reproduce: "quality script を bash 以外で実行"
+    expected: "手順書でbash実行が明示される"
+    triage: "docsの実行例を確認"
+  - id: ops-018
+    layer: operations-release
+    risk: non-utf8-log
+    reproduce: "ログに非UTF8断片が混入して解析不能"
+    expected: "原因レイヤー切り分けで別ログ保存"
+    triage: "ツール出力を別ファイルへ退避"
+  - id: ops-019
+    layer: operations-release
+    risk: release-no-self-review
+    reproduce: "PR差分セルフレビューを省略"
+    expected: "レビュー品質不足で差し戻し"
+    triage: "差分観点チェックを記録"
+  - id: ops-020
+    layer: operations-release
+    risk: release-with-dirty-tree
+    reproduce: "生成物差分を残したままpush"
+    expected: "不要差分検知で修正"
+    triage: "build生成物クリーンアップを徹底"
+
+  - id: data-001
+    layer: data-integrity
+    risk: store-db-wal-leftover
+    reproduce: "テスト後に stores.db-wal が残留"
+    expected: "不要生成物として除去"
+    triage: "cleanup手順をスクリプト化"
+  - id: data-002
+    layer: data-integrity
+    risk: store-db-shm-leftover
+    reproduce: "stores.db-shm 残留のままコミット"
+    expected: "レビューでreject"
+    triage: "git status監視と自動除去"
+  - id: data-003
+    layer: data-integrity
+    risk: hmac-key-drift
+    reproduce: "テスト中にhmac keyが想定外に更新"
+    expected: "テスト隔離で本番キーに影響しない"
+    triage: "tmp path利用とDI差し替えを確認"
+  - id: data-004
+    layer: data-integrity
+    risk: grant-file-corruption
+    reproduce: "grantファイル改変後にロード"
+    expected: "tamper検知して拒否"
+    triage: "grant HMAC検証テストを確認"
+  - id: data-005
+    layer: data-integrity
+    risk: unsigned-grant-load
+    reproduce: "signatureなしgrantをロード"
+    expected: "検証失敗で拒否"
+    triage: "approval/securityテストの通過確認"
+  - id: data-006
+    layer: data-integrity
+    risk: flow-yaml-over-limit
+    reproduce: "RUMI_MAX_FLOW_FILE_BYTES超過YAMLを読み込み"
+    expected: "size limitエラー"
+    triage: "flow_loader size check を点検"
+  - id: data-007
+    layer: data-integrity
+    risk: invalid-json-size-check
+    reproduce: "registry json size上限超過"
+    expected: "読み込み拒否"
+    triage: "_check_json_file_size 経路を確認"
+  - id: data-008
+    layer: data-integrity
+    risk: duplicate-flow-step-id
+    reproduce: "同一flow内でstep id重複"
+    expected: "validation error"
+    triage: "_parse_steps seen_ids ロジック確認"
+  - id: data-009
+    layer: data-integrity
+    risk: invalid-phase-reference
+    reproduce: "step.phase が phases 未定義"
+    expected: "phase not in phases list エラー"
+    triage: "phase validation 経路を確認"
+  - id: data-010
+    layer: data-integrity
+    risk: malformed-defaults
+    reproduce: "defaultsに非objectを設定"
+    expected: "safe defaultへフォールバック"
+    triage: "flow defaults補正を確認"
+
+  - id: data-011
+    layer: data-integrity
+    risk: route-table-inconsistency
+    reproduce: "api_routes と handler実装の不一致"
+    expected: "404またはdispatchエラーで検知"
+    triage: "route table buildテストを確認"
+  - id: data-012
+    layer: data-integrity
+    risk: trust-store-missing
+    reproduce: "capability trust storeファイル欠落"
+    expected: "初期化で再作成または明示エラー"
+    triage: "trust store bootstrap経路を確認"
+  - id: data-013
+    layer: data-integrity
+    risk: pending-pack-mislabel
+    reproduce: "pending状態packがapprovedと誤表示"
+    expected: "pendingのまま表示"
+    triage: "approval status取得経路を確認"
+  - id: data-014
+    layer: data-integrity
+    risk: modified-pack-not-flagged
+    reproduce: "承認後ファイル改変してもmodifiedにならない"
+    expected: "modifiedへ遷移"
+    triage: "hash verify/mark modified経路点検"
+  - id: data-015
+    layer: data-integrity
+    risk: grant-revoke-race
+    reproduce: "grant/revokeを短時間連続発行"
+    expected: "最終状態整合"
+    triage: "secrets_grant_manager 保存順序を確認"
+  - id: data-016
+    layer: data-integrity
+    risk: stale-cache-read
+    reproduce: "更新直後に古いgrantを参照"
+    expected: "更新後状態が読み出される"
+    triage: "キャッシュ利用箇所とinvalidate確認"
+  - id: data-017
+    layer: data-integrity
+    risk: timezone-drift
+    reproduce: "approved_at のtimezone混在"
+    expected: "一貫したISO8601"
+    triage: "timestamp生成箇所確認"
+  - id: data-018
+    layer: data-integrity
+    risk: null-byte-path
+    reproduce: "path paramへnull byte注入"
+    expected: "拒否"
+    triage: "path safety test経路を確認"
+  - id: data-019
+    layer: data-integrity
+    risk: traversal-in-import
+    reproduce: "pack import path に traversal"
+    expected: "ecosystem外を拒否"
+    triage: "import path resolve/relative_to検証"
+  - id: data-020
+    layer: data-integrity
+    risk: stale-container-state
+    reproduce: "container start/stop失敗後状態不整合"
+    expected: "状態がfalse-positiveにならない"
+    triage: "container orchestrator response確認"
+
+  - id: obs-001
+    layer: observability
+    risk: missing-quality-summary
+    reproduce: "quality実行後 summary.txt が空"
+    expected: "各ゲート結果とoverallが記録される"
+    triage: "run_claude_quality_pack.sh summary出力確認"
+  - id: obs-002
+    layer: observability
+    risk: missing-gate-log
+    reproduce: "失敗ゲートの .log が存在しない"
+    expected: "ゲート別ログが残る"
+    triage: "RUN_LOG_DIR配下のファイル生成確認"
+  - id: obs-003
+    layer: observability
+    risk: no-failure-context
+    reproduce: "失敗時にレイヤー情報が不明"
+    expected: "summaryにfailed gate名が列挙"
+    triage: "terminal summaryとsummary.txt一致確認"
+  - id: obs-004
+    layer: observability
+    risk: audit-log-gap
+    reproduce: "permission操作後にauditが空"
+    expected: "permission auditログにイベント記録"
+    triage: "audit logger DI設定確認"
+  - id: obs-005
+    layer: observability
+    risk: security-log-gap
+    reproduce: "security異常検知後にsecurity logへ記録なし"
+    expected: "security_*.jsonl に記録"
+    triage: "security event発火箇所確認"
+  - id: obs-006
+    layer: observability
+    risk: network-log-gap
+    reproduce: "network grant/revoke後にnetwork log記録なし"
+    expected: "network_*.jsonl に記録"
+    triage: "network manager の監査連携確認"
+  - id: obs-007
+    layer: observability
+    risk: opaque-500
+    reproduce: "内部例外時レスポンスが曖昧"
+    expected: "safe error + internal log"
+    triage: "_log_internal_error 呼び出し経路を確認"
+  - id: obs-008
+    layer: observability
+    risk: silent-deny
+    reproduce: "権限拒否時に理由未記録"
+    expected: "deny reasonを構造化出力"
+    triage: "capability executor deny path確認"
+  - id: obs-009
+    layer: observability
+    risk: startup-warning-missed
+    reproduce: "0.0.0.0 bind warningがログに出ない"
+    expected: "warning + audit event"
+    triage: "PackAPIServer start branch確認"
+  - id: obs-010
+    layer: observability
+    risk: flaky-test-undetected
+    reproduce: "同一テストを多回実行で不安定"
+    expected: "stress runで再現と修正"
+    triage: "debug playbookへstress手順追記"
+
+  - id: obs-011
+    layer: observability
+    risk: untracked-warning-growth
+    reproduce: "pack-shell warning件数が増加"
+    expected: "warningトレンドを監視"
+    triage: "quality run結果を定期比較"
+  - id: obs-012
+    layer: observability
+    risk: hidden-build-warning
+    reproduce: "vite chunk warningが無視される"
+    expected: "release前に確認記録"
+    triage: "manual scenario台帳で追跡"
+  - id: obs-013
+    layer: observability
+    risk: missing-root-pytest-log
+    reproduce: "root-pytest失敗時ログが残らない"
+    expected: "root-pytest.log が保存される"
+    triage: "run_gateログ出力を確認"
+  - id: obs-014
+    layer: observability
+    risk: missing-package-pytest-log
+    reproduce: "package-pytest失敗時ログ欠落"
+    expected: "package-pytest.log が保存される"
+    triage: "RUN_LOG_DIR権限と作成順を確認"
+  - id: obs-015
+    layer: observability
+    risk: missing-frontend-lint-log
+    reproduce: "frontend-lint失敗でログなし"
+    expected: "frontend-lint.logにtsc出力"
+    triage: "npm command wrapper経路確認"
+  - id: obs-016
+    layer: observability
+    risk: missing-pack-shell-log
+    reproduce: "cargo test失敗時ログ欠落"
+    expected: "pack-shell-tests.logが残る"
+    triage: "run_gate log path 確認"
+  - id: obs-017
+    layer: observability
+    risk: baseline-parse-failure
+    reproduce: "ruff/mypy出力形式変更で件数抽出失敗"
+    expected: "抽出失敗時はFAILで停止"
+    triage: "parse pattern の保守点検"
+  - id: obs-018
+    layer: observability
+    risk: stale-log-retention
+    reproduce: "古い .quality_logs が肥大化"
+    expected: "運用で定期クリーンアップ"
+    triage: "cleanup手順をrelease前チェックへ追加"
+  - id: obs-019
+    layer: observability
+    risk: overwritten-run-id
+    reproduce: "同時実行でrun_id衝突"
+    expected: "衝突時もログ欠損しない"
+    triage: "run_id生成粒度を確認"
+  - id: obs-020
+    layer: observability
+    risk: missing-overall-status
+    reproduce: "summary.txt に overall が無い"
+    expected: "overall PASS/FAIL が必ず記録"
+    triage: "summary finalization分岐を確認"
+
+  - id: rec-001
+    layer: recovery
+    risk: partial-failure-restart
+    reproduce: "一部コンポーネント失敗後に再起動"
+    expected: "Fail-Softで主要機能復帰"
+    triage: "startup phase順序とfallbackを確認"
+  - id: rec-002
+    layer: recovery
+    risk: route-reload-after-error
+    reproduce: "routes reload失敗後の再試行"
+    expected: "再試行で復旧可能"
+    triage: "load_pack_routesの例外処理確認"
+  - id: rec-003
+    layer: recovery
+    risk: registry-reload-failure
+    reproduce: "registry loadで一時失敗"
+    expected: "次回ロードで復旧"
+    triage: "registry loader のretry戦略確認"
+  - id: rec-004
+    layer: recovery
+    risk: audit-path-unavailable
+    reproduce: "audit出力先不可時"
+    expected: "本体処理は継続し警告記録"
+    triage: "audit logger 例外処理確認"
+  - id: rec-005
+    layer: recovery
+    risk: viewer-backend-late
+    reproduce: "viewer起動時backend未準備"
+    expected: "再接続導線で回復"
+    triage: "viewer boot fallback確認"
+  - id: rec-006
+    layer: recovery
+    risk: capability-proxy-init-fail
+    reproduce: "capability proxy初期化失敗"
+    expected: "flag管理で無限再試行を防止"
+    triage: "wave bugfix test経路確認"
+  - id: rec-007
+    layer: recovery
+    risk: uds-proxy-init-fail
+    reproduce: "uds proxy初期化失敗"
+    expected: "再試行制御で安定"
+    triage: "reset proxy init経路確認"
+  - id: rec-008
+    layer: recovery
+    risk: flow-fallback-degraded
+    reproduce: "critical dependency欠落でdegraded flow"
+    expected: "明示ログ + 代替フロー"
+    triage: "flow fallback test群を確認"
+  - id: rec-009
+    layer: recovery
+    risk: permission-db-open-fail
+    reproduce: "permission store open失敗"
+    expected: "明示エラーと安全停止"
+    triage: "db初期化例外処理確認"
+  - id: rec-010
+    layer: recovery
+    risk: cleanup-after-failed-build
+    reproduce: "frontend build失敗後に中間成果物残留"
+    expected: "次回run前に安全クリーン"
+    triage: "cleanup手順をdebug playbookで徹底"
+
+  - id: rec-011
+    layer: recovery
+    risk: startup-config-missing
+    reproduce: "必須config欠落状態で起動"
+    expected: "分かりやすいエラーで停止"
+    triage: "config loader validationを確認"
+  - id: rec-012
+    layer: recovery
+    risk: malformed-pack-manifest
+    reproduce: "manifest不正packをscan"
+    expected: "pending/blocked分類で隔離"
+    triage: "scan result分類ロジック確認"
+  - id: rec-013
+    layer: recovery
+    risk: stale-pending-state
+    reproduce: "reject後にpendingが残る"
+    expected: "状態遷移が一貫"
+    triage: "approval manager state update確認"
+  - id: rec-014
+    layer: recovery
+    risk: failed-uninstall-residue
+    reproduce: "pack uninstall失敗後に半端な残骸"
+    expected: "再試行可能な状態を維持"
+    triage: "uninstall rollback/cleanupを点検"
+  - id: rec-015
+    layer: recovery
+    risk: restart-token-invalid
+    reproduce: "再起動後に旧token利用"
+    expected: "401で拒否"
+    triage: "token rotationとverify_token確認"
+  - id: rec-016
+    layer: recovery
+    risk: stale-web-mount
+    reproduce: "web mount再読み込み後に古いマウント残留"
+    expected: "最新マウントテーブル反映"
+    triage: "load_web_mounts再構築処理確認"
+  - id: rec-017
+    layer: recovery
+    risk: stale-pre-auth-table
+    reproduce: "pre_auth_routes変更後に古いエントリが残る"
+    expected: "再ロードで同期"
+    triage: "pre-auth table更新経路確認"
+  - id: rec-018
+    layer: recovery
+    risk: stale-api-routes
+    reproduce: "api_routes更新後にディスパッチ不整合"
+    expected: "reloadで反映"
+    triage: "load_api_routesとdispatchを点検"
+  - id: rec-019
+    layer: recovery
+    risk: degraded-mode-without-notice
+    reproduce: "degraded継続中に通知不足"
+    expected: "warningログで可観測"
+    triage: "diagnostics出力とログ粒度確認"
+  - id: rec-020
+    layer: recovery
+    risk: silent-recovery-failure
+    reproduce: "復旧処理失敗時に成功扱い"
+    expected: "success=falseで明示"
+    triage: "result構造体のsuccess設定を確認"

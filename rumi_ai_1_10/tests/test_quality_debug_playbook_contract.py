@@ -32,7 +32,7 @@ def test_debug_playbook_contains_required_debug_sections():
             "修正完了条件",
             ".quality_logs",
             "summary.txt",
-            "manual_regression_scenarios.yaml",
+            "manual_regression_scenarios*.yaml",
         ],
         "debug_playbook.md",
     )
