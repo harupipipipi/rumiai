@@ -141,6 +141,8 @@ def test_coverage_matrix_references_existing_tests():
         "tests/test_route_handlers.py",
         "tests/test_entrypoint_contracts.py",
         "tests/test_claude_quality_pack_contract.py",
+        "tests/test_flow_corpus_regression.py",
+        "tests/flow_corpus",
         "tests/test_phase_a_health.py",
         "tests/test_security_guards.py",
     ]
@@ -150,9 +152,7 @@ def test_coverage_matrix_references_existing_tests():
 
 
 def test_quality_script_uses_non_regression_baselines():
-    script_text = _read(
-        PACKAGE_ROOT / "scripts" / "quality_pack" / "run_claude_quality_pack.sh"
-    )
+    script_text = _read(PACKAGE_ROOT / "scripts" / "quality_pack" / "run_claude_quality_pack.sh")
     _assert_contains_all(
         script_text,
         [

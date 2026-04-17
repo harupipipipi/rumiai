@@ -1,0 +1,409 @@
+flow_id: corpus.valid.00309
+inputs:
+  user_id: string
+  request_id: string
+  session_id: string
+outputs:
+  status: string
+  result: object
+  metrics: object
+phases:
+- init
+- main
+- cleanup
+defaults:
+  fail_soft: true
+  on_missing_step: skip
+  max_retries: 3
+  batch_window_ms: 250
+schedule:
+  enabled: false
+  interval_seconds: 309
+steps:
+- id: step_00309_00
+  phase: init
+  type: action
+  priority: 119
+  input:
+    case: 309
+    step: 0
+    phase: init
+    payload:
+      feature_flag: flag_3
+      retry: 1
+      timeout_ms: 1900
+  output: out_step_00309_00
+  when: 'true'
+- id: step_00309_01
+  phase: init
+  type: action
+  priority: 126
+  input:
+    case: 309
+    step: 1
+    phase: init
+    payload:
+      feature_flag: flag_4
+      retry: 2
+      timeout_ms: 2000
+  output: out_step_00309_01
+  when: context.user.enabled
+  depends_on:
+  - step_00309_00
+- id: step_00309_02
+  phase: init
+  type: action
+  priority: 53
+  input:
+    case: 309
+    step: 2
+    phase: init
+    payload:
+      feature_flag: flag_5
+      retry: 3
+      timeout_ms: 2100
+  output: out_step_00309_02
+  when: 'true'
+  depends_on:
+  - step_00309_01
+- id: step_00309_03
+  phase: init
+  type: action
+  priority: 60
+  input:
+    case: 309
+    step: 3
+    phase: init
+    payload:
+      feature_flag: flag_6
+      retry: 1
+      timeout_ms: 2200
+  output: out_step_00309_03
+  when: 'true'
+  depends_on:
+  - step_00309_02
+- id: step_00309_04
+  phase: init
+  type: python_file_call
+  priority: 67
+  input:
+    case: 309
+    step: 4
+    phase: init
+    payload:
+      feature_flag: flag_7
+      retry: 2
+      timeout_ms: 2300
+  output: out_step_00309_04
+  when: 'true'
+  depends_on:
+  - step_00309_03
+  - step_00309_01
+  owner_pack: defaults
+  file: workers/default_worker.py
+  timeout_seconds: 50.0
+  principal_id: principal_00309
+- id: step_00309_05
+  phase: init
+  type: action
+  priority: 74
+  input:
+    case: 309
+    step: 5
+    phase: init
+    payload:
+      feature_flag: flag_8
+      retry: 3
+      timeout_ms: 2400
+  output: out_step_00309_05
+  when: 'true'
+  depends_on:
+  - step_00309_04
+- id: step_00309_06
+  phase: init
+  type: action
+  priority: 81
+  input:
+    case: 309
+    step: 6
+    phase: init
+    payload:
+      feature_flag: flag_9
+      retry: 1
+      timeout_ms: 2500
+  output: out_step_00309_06
+  when: context.user.enabled
+  depends_on:
+  - step_00309_05
+- id: step_00309_07
+  phase: main
+  type: action
+  priority: 88
+  input:
+    case: 309
+    step: 7
+    phase: main
+    payload:
+      feature_flag: flag_10
+      retry: 2
+      timeout_ms: 2600
+  output: out_step_00309_07
+  when: 'true'
+  depends_on:
+  - step_00309_06
+- id: step_00309_08
+  phase: main
+  type: action
+  priority: 95
+  input:
+    case: 309
+    step: 8
+    phase: main
+    payload:
+      feature_flag: flag_11
+      retry: 3
+      timeout_ms: 2700
+  output: out_step_00309_08
+  when: 'true'
+  depends_on:
+  - step_00309_07
+  - step_00309_05
+- id: step_00309_09
+  phase: main
+  type: python_file_call
+  priority: 102
+  input:
+    case: 309
+    step: 9
+    phase: main
+    payload:
+      feature_flag: flag_12
+      retry: 1
+      timeout_ms: 2800
+  output: out_step_00309_09
+  when: 'true'
+  depends_on:
+  - step_00309_08
+  owner_pack: defaults
+  file: workers/default_worker.py
+  timeout_seconds: 50.0
+  principal_id: principal_00309
+- id: step_00309_10
+  phase: main
+  type: action
+  priority: 109
+  input:
+    case: 309
+    step: 10
+    phase: main
+    payload:
+      feature_flag: flag_13
+      retry: 2
+      timeout_ms: 2900
+  output: out_step_00309_10
+  when: 'true'
+  depends_on:
+  - step_00309_09
+- id: step_00309_11
+  phase: main
+  type: action
+  priority: 116
+  input:
+    case: 309
+    step: 11
+    phase: main
+    payload:
+      feature_flag: flag_14
+      retry: 3
+      timeout_ms: 1000
+  output: out_step_00309_11
+  when: context.user.enabled
+  depends_on:
+  - step_00309_10
+- id: step_00309_12
+  phase: main
+  type: action
+  priority: 123
+  input:
+    case: 309
+    step: 12
+    phase: main
+    payload:
+      feature_flag: flag_15
+      retry: 1
+      timeout_ms: 1100
+  output: out_step_00309_12
+  when: 'true'
+  depends_on:
+  - step_00309_11
+  - step_00309_09
+- id: step_00309_13
+  phase: main
+  type: action
+  priority: 50
+  input:
+    case: 309
+    step: 13
+    phase: main
+    payload:
+      feature_flag: flag_16
+      retry: 2
+      timeout_ms: 1200
+  output: out_step_00309_13
+  when: 'true'
+  depends_on:
+  - step_00309_12
+- id: step_00309_14
+  phase: cleanup
+  type: python_file_call
+  priority: 57
+  input:
+    case: 309
+    step: 14
+    phase: cleanup
+    payload:
+      feature_flag: flag_0
+      retry: 3
+      timeout_ms: 1300
+  output: out_step_00309_14
+  when: 'true'
+  depends_on:
+  - step_00309_13
+  owner_pack: defaults
+  file: workers/default_worker.py
+  timeout_seconds: 50.0
+  principal_id: principal_00309
+- id: step_00309_15
+  phase: cleanup
+  type: action
+  priority: 64
+  input:
+    case: 309
+    step: 15
+    phase: cleanup
+    payload:
+      feature_flag: flag_1
+      retry: 1
+      timeout_ms: 1400
+  output: out_step_00309_15
+  when: 'true'
+  depends_on:
+  - step_00309_14
+- id: step_00309_16
+  phase: cleanup
+  type: action
+  priority: 71
+  input:
+    case: 309
+    step: 16
+    phase: cleanup
+    payload:
+      feature_flag: flag_2
+      retry: 2
+      timeout_ms: 1500
+  output: out_step_00309_16
+  when: context.user.enabled
+  depends_on:
+  - step_00309_15
+  - step_00309_13
+- id: step_00309_17
+  phase: cleanup
+  type: action
+  priority: 78
+  input:
+    case: 309
+    step: 17
+    phase: cleanup
+    payload:
+      feature_flag: flag_3
+      retry: 3
+      timeout_ms: 1600
+  output: out_step_00309_17
+  when: 'true'
+  depends_on:
+  - step_00309_16
+- id: step_00309_18
+  phase: cleanup
+  type: action
+  priority: 85
+  input:
+    case: 309
+    step: 18
+    phase: cleanup
+    payload:
+      feature_flag: flag_4
+      retry: 1
+      timeout_ms: 1700
+  output: out_step_00309_18
+  when: 'true'
+  depends_on:
+  - step_00309_17
+- id: step_00309_19
+  phase: cleanup
+  type: python_file_call
+  priority: 92
+  input:
+    case: 309
+    step: 19
+    phase: cleanup
+    payload:
+      feature_flag: flag_5
+      retry: 2
+      timeout_ms: 1800
+  output: out_step_00309_19
+  when: 'true'
+  depends_on:
+  - step_00309_18
+  owner_pack: defaults
+  file: workers/default_worker.py
+  timeout_seconds: 50.0
+  principal_id: principal_00309
+- id: step_00309_20
+  phase: cleanup
+  type: action
+  priority: 99
+  input:
+    case: 309
+    step: 20
+    phase: cleanup
+    payload:
+      feature_flag: flag_6
+      retry: 3
+      timeout_ms: 1900
+  output: out_step_00309_20
+  when: 'true'
+  depends_on:
+  - step_00309_19
+  - step_00309_17
+- id: step_00309_21
+  phase: cleanup
+  type: action
+  priority: 106
+  input:
+    case: 309
+    step: 21
+    phase: cleanup
+    payload:
+      feature_flag: flag_7
+      retry: 1
+      timeout_ms: 2000
+  output: out_step_00309_21
+  when: context.user.enabled
+  depends_on:
+  - step_00309_20
+- id: step_00309_22
+  phase: cleanup
+  type: action
+  priority: 113
+  input:
+    case: 309
+    step: 22
+    phase: cleanup
+    payload:
+      feature_flag: flag_8
+      retry: 2
+      timeout_ms: 2100
+  output: out_step_00309_22
+  when: 'true'
+  depends_on:
+  - step_00309_21

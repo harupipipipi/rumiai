@@ -7,12 +7,18 @@ rumi_ai の主要テストを運用観点で分類し、どの境界をどこで
 | unit | `tests/test_unit_gate.py` ほか | 低レベル関数や境界条件の壊れを早期検知 |
 | integration | `tests/test_route_handlers.py`, `tests/test_egress_proxy.py` | 複数モジュール連携とAPI動作の整合を検証 |
 | contract | `tests/test_entrypoint_contracts.py`, `tests/test_claude_quality_pack_contract.py` | README/CI/entrypoint/public契約の破壊を検知 |
-| regression | `tests/test_wave*.py` 群 | 過去修正の再発を抑止 |
+| regression | `tests/test_wave*.py` 群, `tests/test_flow_corpus_regression.py`, `tests/flow_corpus/*.flow.yaml` | 過去修正の再発と flow loader の大規模入力境界を抑止 |
 | CLI/backend | `tests/test_health.py`, `tests/test_phase_a_health.py` | 起動・ヘルス・CLI経路の運用継続性を検証 |
 | frontend/UI | `tests/test_claude_quality_pack_contract.py`, `frontend lint/build` 実行 | 設定境界・ビルド破綻・型崩れの回帰検知 |
 | security/permission | `tests/test_security_guards.py`, `tests/test_capability_*` | 最小権限・承認・ガード・能力境界の破壊を検知 |
 | failure-path | `tests/test_wave20d_rate_limit.py`, `tests/test_security_guards.py` | 外部失敗・ガード失敗時の挙動を検証 |
 | philosophy-alignment | `tests/test_claude_quality_pack_contract.py` | No Favoritism / Fail-Soft / 悪意Pack前提 / 最小権限を契約として維持 |
+
+## flow corpus 規模
+
+- valid: 1300 cases
+- invalid: 1000 cases
+- corpus fixture total: 2300 YAML files (`tests/flow_corpus`)
 
 ## 未テスト・薄い領域（優先順）
 

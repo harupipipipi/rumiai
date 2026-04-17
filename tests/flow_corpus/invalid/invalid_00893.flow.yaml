@@ -1,0 +1,23 @@
+flow_id: corpus.invalid.02193
+inputs:
+  user_id: string
+  request_id: string
+  session_id: string
+outputs:
+  status: string
+  result: object
+  metrics: object
+phases:
+- init
+- main
+- cleanup
+defaults:
+  fail_soft: true
+  on_missing_step: skip
+  max_retries: 3
+  batch_window_ms: 250
+schedule:
+  enabled: false
+  interval_seconds: 333
+steps:
+  not: an-array

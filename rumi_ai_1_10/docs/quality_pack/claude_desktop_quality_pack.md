@@ -49,8 +49,12 @@ python -m pytest tests -v
 
 # 追加した品質契約テストのみ
 python -m pytest tests/test_claude_quality_pack_contract.py -v
+python -m pytest tests/test_flow_corpus_regression.py -v
 cd ..
 python -m pytest tests/test_entrypoint_contracts.py -v
+
+# Flow loader corpus（再生成）
+python rumi_ai_1_10/scripts/quality_pack/generate_flow_corpus.py
 
 # Python 品質ゲート
 cd rumi_ai_1_10
@@ -87,6 +91,12 @@ cd pack-shell && cargo test && cd ..
 ## 3.4 設定 / 権限 / 失敗系
 - CI workflow に root pytest / package pytest / cargo test が定義されていること
 - release workflow が `v*` tag trigger と `cargo tauri build` を持つこと
+
+## 3.5 大規模 regression corpus（flow loader）
+- `tests/flow_corpus/manifest.json` で有効/無効 flow ケースを管理
+- `tests/flow_corpus/valid/*.flow.yaml` は大規模な成功ケース（多phase・depends_on・python_file_call混在）
+- `tests/flow_corpus/invalid/*.flow.yaml` は失敗系ケース（必須欠落・型不正・phase不整合・duplicate id など）
+- `tests/test_flow_corpus_regression.py` で成功/失敗契約を一括検証
 
 ---
 
