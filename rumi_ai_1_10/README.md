@@ -312,6 +312,7 @@ curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
 | [docs/quality_pack/longrun_migration_contract_matrix.yaml](docs/quality_pack/longrun_migration_contract_matrix.yaml) | migrate-hmac/store migration/startup fail-soft/CLI互換の契約マトリクス |
 | [docs/quality_pack/security_permission_contract_matrix.yaml](docs/quality_pack/security_permission_contract_matrix.yaml) | 認証境界/grant境界/承認整合/監査追跡の契約マトリクス |
 | [docs/quality_pack/ui_viewer_recovery_contract_matrix.yaml](docs/quality_pack/ui_viewer_recovery_contract_matrix.yaml) | frontend/viewer/pack-shell の操作導線/失敗UX/復旧導線の契約マトリクス |
+| [docs/quality_pack/runtime_boundary_contract_matrix.yaml](docs/quality_pack/runtime_boundary_contract_matrix.yaml) | pack_api/egress/capability/startup/active ecosystem の境界契約マトリクス |
 | [docs/quality_pack/philosophy_re_evaluation_log.md](docs/quality_pack/philosophy_re_evaluation_log.md) | 作業中の思想再評価ログ |
 | [docs/quality_pack/debug_playbook.md](docs/quality_pack/debug_playbook.md) | 失敗時の再現・切り分け・修正確認手順 |
 | [docs/quality_pack/manual_regression_scenarios.yaml](docs/quality_pack/manual_regression_scenarios.yaml) | 手動回帰シナリオ台帳（batch1: セキュリティ/失敗系/UI） |
@@ -324,6 +325,7 @@ curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
 | [docs/quality_pack/manual_regression_scenarios_batch8.yaml](docs/quality_pack/manual_regression_scenarios_batch8.yaml) | 手動回帰シナリオ台帳（batch8: 長時間運用/移行安全性/fail-soft/互換CLI） |
 | [docs/quality_pack/manual_regression_scenarios_batch9.yaml](docs/quality_pack/manual_regression_scenarios_batch9.yaml) | 手動回帰シナリオ台帳（batch9: 認証境界/権限境界/承認整合/監査追跡） |
 | [docs/quality_pack/manual_regression_scenarios_batch10.yaml](docs/quality_pack/manual_regression_scenarios_batch10.yaml) | 手動回帰シナリオ台帳（batch10: frontend/viewer/pack-shell の操作導線/失敗UX/復旧導線） |
+| [docs/quality_pack/manual_regression_scenarios_batch11.yaml](docs/quality_pack/manual_regression_scenarios_batch11.yaml) | 手動回帰シナリオ台帳（batch11: runtime境界の失敗系/観測性/復旧/監査） |
 
 ---
 

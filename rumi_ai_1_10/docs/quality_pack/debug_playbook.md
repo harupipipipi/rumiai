@@ -22,7 +22,7 @@
 - entrypoint contract
   - `python -m pytest tests/test_entrypoint_contracts.py -v`
 - quality contracts（matrix系）
-  - `cd rumi_ai_1_10 && python -m pytest tests/test_claude_quality_pack_contract.py tests/test_manual_regression_scenarios_contract.py tests/test_api_route_coverage_matrix_contract.py tests/test_frontend_ux_contract_matrix_contract.py tests/test_viewer_release_contract_matrix_contract.py tests/test_longrun_migration_contract_matrix_contract.py tests/test_security_permission_contract_matrix_contract.py tests/test_ui_viewer_recovery_contract_matrix_contract.py -v`
+  - `cd rumi_ai_1_10 && python -m pytest tests/test_claude_quality_pack_contract.py tests/test_manual_regression_scenarios_contract.py tests/test_api_route_coverage_matrix_contract.py tests/test_frontend_ux_contract_matrix_contract.py tests/test_viewer_release_contract_matrix_contract.py tests/test_longrun_migration_contract_matrix_contract.py tests/test_security_permission_contract_matrix_contract.py tests/test_ui_viewer_recovery_contract_matrix_contract.py tests/test_runtime_boundary_contract_matrix_contract.py -v`
 - viewer/release契約
   - `cd rumi_ai_1_10 && python -m pytest tests/test_viewer_release_contract_matrix_contract.py -v`
 - longrun/migration契約
@@ -31,6 +31,8 @@
   - `cd rumi_ai_1_10 && python -m pytest tests/test_security_permission_contract_matrix_contract.py -v`
 - ui/viewer recovery契約
   - `cd rumi_ai_1_10 && python -m pytest tests/test_ui_viewer_recovery_contract_matrix_contract.py -v`
+- runtime boundary契約
+  - `cd rumi_ai_1_10 && python -m pytest tests/test_runtime_boundary_contract_matrix_contract.py -v`
 
 ## 3. 典型デバッグ（frontend-lint）
 

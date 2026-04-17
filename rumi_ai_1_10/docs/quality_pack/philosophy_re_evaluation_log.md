@@ -80,3 +80,9 @@
 - README と思想メモを再読し、No Favoritism維持のため、機能追加ではなく frontend/viewer/pack-shell の回帰検知資産のみを追加する方針を再確認。
 - Fail-Soft維持のため、UI崩壊・viewer再起動失敗・pack-shell bootstrap失敗を「復旧可能な失敗」として追跡できる契約に固定化する方針を採用。
 - 悪意Pack前提 / 最小権限を弱めないため、viewer nav-guard/CSP、desktop token取得、環境変数伝播境界をテストで監査し、本体権限ロジックには手を入れない。
+
+## 2026-04-18 テスト設計再評価（batch11/runtime-boundary contract追加前）
+
+- README と思想メモを再読し、No Favoritism維持のため、機能追加ではなく runtime 境界（pack_api/egress/capability/startup/active ecosystem）の品質資産のみを拡張する方針を再確認。
+- Fail-Soft維持のため、未認証境界・通信拒否・HMAC不整合・起動フォールバックの各失敗系を「停止ではなく診断可能な失敗」として契約化する方針を採用。
+- 悪意Pack前提 / 最小権限を弱めないため、pre-auth 境界・socket permission・internal IP block・strict default を検証で固定し、本体の権限判定ロジック変更は行わない。

@@ -56,6 +56,7 @@ def test_debug_bundle_script_covers_expected_gates():
             "tests/test_longrun_migration_contract_matrix_contract.py",
             "tests/test_security_permission_contract_matrix_contract.py",
             "tests/test_ui_viewer_recovery_contract_matrix_contract.py",
+            "tests/test_runtime_boundary_contract_matrix_contract.py",
             "npm run lint",
             "npm run build",
             "cargo test",

@@ -35,6 +35,9 @@ def test_quality_pack_docs_exist_and_have_required_sections():
     ui_viewer_recovery_matrix = (
         PACKAGE_ROOT / "docs" / "quality_pack" / "ui_viewer_recovery_contract_matrix.yaml"
     )
+    runtime_boundary_matrix = (
+        PACKAGE_ROOT / "docs" / "quality_pack" / "runtime_boundary_contract_matrix.yaml"
+    )
     re_eval_log = PACKAGE_ROOT / "docs" / "quality_pack" / "philosophy_re_evaluation_log.md"
     debug_playbook = PACKAGE_ROOT / "docs" / "quality_pack" / "debug_playbook.md"
     manual_scenarios = PACKAGE_ROOT / "docs" / "quality_pack" / "manual_regression_scenarios.yaml"
@@ -51,10 +54,11 @@ def test_quality_pack_docs_exist_and_have_required_sections():
     assert longrun_migration_matrix.exists()
     assert security_permission_matrix.exists()
     assert ui_viewer_recovery_matrix.exists()
+    assert runtime_boundary_matrix.exists()
     assert re_eval_log.exists()
     assert debug_playbook.exists()
     assert manual_scenarios.exists()
-    assert len(manual_scenario_batches) >= 10
+    assert len(manual_scenario_batches) >= 11
 
     memo_text = _read(philosophy_memo)
     pack_text = _read(quality_pack)
@@ -88,6 +92,7 @@ def test_quality_pack_docs_exist_and_have_required_sections():
             "longrun/migration contract",
             "security permission contract",
             "ui/viewer recovery contract",
+            "runtime boundary contract",
         ],
         "claude_desktop_quality_pack.md",
     )
@@ -183,6 +188,7 @@ def test_coverage_matrix_references_existing_tests():
         "tests/test_longrun_migration_contract_matrix_contract.py",
         "tests/test_security_permission_contract_matrix_contract.py",
         "tests/test_ui_viewer_recovery_contract_matrix_contract.py",
+        "tests/test_runtime_boundary_contract_matrix_contract.py",
         "tests/test_phase_a_health.py",
         "tests/test_security_guards.py",
     ]

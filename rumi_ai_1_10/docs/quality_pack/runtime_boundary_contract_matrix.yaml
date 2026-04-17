@@ -1,0 +1,130 @@
+version: 1
+owner: quality-pack
+summary: >
+  pack_api/egress/capability/startup/active ecosystem の runtime 境界を契約化し、
+  失敗系・観測性・復旧導線・最小権限の逸脱を回帰検知する。
+
+pack_api_boundary_contracts:
+  required_files:
+    - core_runtime/pack_api_server.py
+    - tests/test_wave19b_secret_grant_routing.py
+    - tests/test_route_handlers.py
+    - tests/test_phase_a_health.py
+  required_behaviors:
+    - "pre-auth POST は setup complete のみに限定する"
+    - "non-pre-auth POST/PUT/DELETE は認証境界を維持する"
+    - "未認証時は 401 で応答し接続リセットを起こさない"
+    - "rate limit による fail-soft 制御を行う"
+    - "未定義 route は Not found で返す"
+    - "invalid pack_id/欠損入力は 400 で拒否する"
+  key_manual_scenarios:
+    - b11-rt-001
+    - b11-rt-002
+    - b11-rt-005
+    - b11-rt-008
+    - b11-rt-010
+    - b11-rt-081
+  automated_tests:
+    - rumi_ai_1_10/tests/test_wave19b_secret_grant_routing.py
+    - rumi_ai_1_10/tests/test_claude_quality_pack_contract.py
+    - rumi_ai_1_10/tests/test_runtime_boundary_contract_matrix_contract.py
+
+egress_boundary_contracts:
+  required_files:
+    - core_runtime/egress_proxy.py
+    - core_runtime/egress_protocol.py
+    - core_runtime/egress_rate_limiter.py
+    - tests/test_egress_proxy.py
+  required_behaviors:
+    - "内部IP/private subnet 宛て通信を拒否する"
+    - "DNS rebinding を拒否する"
+    - "リダイレクト上限を強制する"
+    - "request/response サイズ制限を強制する"
+    - "method/header 制限を強制する"
+    - "pack 単位のレート制限を強制する"
+  key_manual_scenarios:
+    - b11-rt-011
+    - b11-rt-013
+    - b11-rt-014
+    - b11-rt-019
+    - b11-rt-022
+    - b11-rt-083
+  automated_tests:
+    - rumi_ai_1_10/tests/test_egress_proxy.py
+    - rumi_ai_1_10/tests/test_security_permission_contract_matrix_contract.py
+    - rumi_ai_1_10/tests/test_runtime_boundary_contract_matrix_contract.py
+
+capability_proxy_boundary_contracts:
+  required_files:
+    - core_runtime/capability_proxy.py
+    - core_runtime/ipc_auth.py
+    - core_runtime/capability_executor.py
+    - tests/test_capability_system.py
+  required_behaviors:
+    - "principal は socket 由来で確定し payload を信用しない"
+    - "request サイズ上限を超える payload を拒否する"
+    - "socket permission 適用失敗を握りつぶし監査に記録する"
+    - "0666 緩和は明示 opt-in のみ許可する"
+    - "Windows fallback は IPC auth で保護する"
+    - "stop_principal/stop_all 後に再起動可能である"
+  key_manual_scenarios:
+    - b11-rt-024
+    - b11-rt-026
+    - b11-rt-039
+    - b11-rt-060
+    - b11-rt-093
+    - b11-rt-095
+  automated_tests:
+    - rumi_ai_1_10/tests/test_capability_system.py
+    - rumi_ai_1_10/tests/test_security_guards.py
+    - rumi_ai_1_10/tests/test_runtime_boundary_contract_matrix_contract.py
+
+startup_active_ecosystem_contracts:
+  required_files:
+    - app.py
+    - backend_core/ecosystem/active_ecosystem.py
+    - tests/test_health.py
+    - tests/test_wave20a_active_ecosystem_hmac.py
+  required_behaviors:
+    - "default security mode を strict に固定する"
+    - "--permissive は production guard で制御する"
+    - "health mode は集約JSONを返して終了する"
+    - "http override lookup 失敗時も fallback 継続する"
+    - "active ecosystem HMAC不整合時は default へ fail-soft する"
+    - "migrate-hmac で unsigned config を署名付きへ移行する"
+  key_manual_scenarios:
+    - b11-rt-031
+    - b11-rt-032
+    - b11-rt-064
+    - b11-rt-073
+    - b11-rt-088
+    - b11-rt-092
+  automated_tests:
+    - rumi_ai_1_10/tests/test_wave20a_active_ecosystem_hmac.py
+    - rumi_ai_1_10/tests/test_health.py
+    - rumi_ai_1_10/tests/test_runtime_boundary_contract_matrix_contract.py
+
+runtime_observability_contracts:
+  required_files:
+    - docs/quality_pack/debug_playbook.md
+    - scripts/quality_pack/run_claude_quality_pack.sh
+    - scripts/quality_pack/run_debug_bundle.sh
+    - docs/quality_pack/philosophy_re_evaluation_log.md
+  required_behaviors:
+    - "quality summary で失敗層を即時特定できる"
+    - "fast quality で targeted static gates を実行する"
+    - "debug bundle で root->contract->frontend/cargo を追跡できる"
+    - "思想再評価ログに runtime 境界追加前の照合記録を残す"
+    - "manual scenario と matrix/test の対応が追跡可能である"
+    - "PR1/PR2 責務分離を監査可能な証跡で維持する"
+  key_manual_scenarios:
+    - b11-rt-042
+    - b11-rt-048
+    - b11-rt-103
+    - b11-rt-109
+    - b11-rt-116
+    - b11-rt-120
+  automated_tests:
+    - rumi_ai_1_10/tests/test_quality_debug_playbook_contract.py
+    - rumi_ai_1_10/tests/test_manual_regression_scenarios_contract.py
+    - rumi_ai_1_10/tests/test_runtime_boundary_contract_matrix_contract.py

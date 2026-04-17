@@ -1,0 +1,730 @@
+version: 1
+owner: quality-pack
+description: |
+  手動回帰シナリオ台帳の第11弾。runtime 境界（pack_api/egress/capability/startup/active ecosystem）
+  の失敗系・観測性・復旧導線を高密度に監査し、Fail-Soft と最小権限の回帰を検知する。
+scenarios:
+  - id: b11-rt-001
+    layer: failure-path
+    risk: pack-api-preauth-body-parse-fail
+    reproduce: "POST /api/setup/complete に不正JSONを送る"
+    expected: "400 で安全に失敗し、サーバープロセスは継続する"
+    triage: "core_runtime/pack_api_server.py do_POST/_parse_body を確認"
+  - id: b11-rt-002
+    layer: failure-path
+    risk: pack-api-unauthorized-post
+    reproduce: "認証ヘッダなしで保護POST APIへアクセス"
+    expected: "401 を返し接続が不安定化しない"
+    triage: "core_runtime/pack_api_server.py _check_auth と do_POST を確認"
+  - id: b11-rt-003
+    layer: failure-path
+    risk: pack-api-unauthorized-put
+    reproduce: "認証ヘッダなしで保護PUT APIへアクセス"
+    expected: "401 を返しプロセス継続"
+    triage: "pack_api_server.py do_PUT を確認"
+  - id: b11-rt-004
+    layer: failure-path
+    risk: pack-api-unauthorized-delete
+    reproduce: "認証ヘッダなしで保護DELETE APIへアクセス"
+    expected: "401 を返しプロセス継続"
+    triage: "pack_api_server.py do_DELETE を確認"
+  - id: b11-rt-005
+    layer: failure-path
+    risk: pack-api-rate-limit-throttle
+    reproduce: "短時間に連続リクエストを送信"
+    expected: "rate limit 応答となりサーバー停止しない"
+    triage: "pack_api_server.py _check_rate_limit を確認"
+  - id: b11-rt-006
+    layer: failure-path
+    risk: pack-api-invalid-pack-id
+    reproduce: "grant APIへ不正 pack_id を送信"
+    expected: "400 Invalid pack_id"
+    triage: "pack_api_server.py _validate_pack_id を確認"
+  - id: b11-rt-007
+    layer: failure-path
+    risk: pack-api-missing-required-field
+    reproduce: "必須フィールド欠落で POST /api/network/grant"
+    expected: "400 を返し監査記録可能"
+    triage: "pack_api_server.py _network_grant path を確認"
+  - id: b11-rt-008
+    layer: failure-path
+    risk: pack-api-unmatched-route-get
+    reproduce: "未定義 GET ルートへアクセス"
+    expected: "404 Not found"
+    triage: "pack_api_server.py do_GET unmatched path 処理を確認"
+  - id: b11-rt-009
+    layer: failure-path
+    risk: pack-api-unmatched-route-post
+    reproduce: "未定義 POST ルートへアクセス"
+    expected: "404 か明示エラーを返す"
+    triage: "pack_api_server.py _dispatch_api_route を確認"
+  - id: b11-rt-010
+    layer: failure-path
+    risk: pack-api-large-body-limit
+    reproduce: "制限超過サイズの body を送信"
+    expected: "413/400で拒否しメモリ圧迫しない"
+    triage: "pack_api_server.py _parse_body 制限を確認"
+  - id: b11-rt-011
+    layer: failure-path
+    risk: egress-internal-ip-block
+    reproduce: "egress で 127.0.0.1 宛て通信を要求"
+    expected: "security policy で拒否"
+    triage: "core_runtime/egress_proxy.py is_internal_ip 経路を確認"
+  - id: b11-rt-012
+    layer: failure-path
+    risk: egress-private-network-block
+    reproduce: "egress で private subnet 宛て通信を要求"
+    expected: "拒否され audit に理由が残る"
+    triage: "egress_proxy.py BLOCKED_IPV4_NETWORKS を確認"
+  - id: b11-rt-013
+    layer: failure-path
+    risk: egress-dns-rebinding-block
+    reproduce: "外部ドメインが内部IPへ解決されるケースを再現"
+    expected: "DNS rebinding 対策で拒否"
+    triage: "egress_proxy.py resolve_and_check_ip を確認"
+  - id: b11-rt-014
+    layer: failure-path
+    risk: egress-redirect-over-limit
+    reproduce: "4hop以上の redirect を返す先へ通信"
+    expected: "redirect 上限で失敗"
+    triage: "egress_proxy.py MAX_REDIRECTS を確認"
+  - id: b11-rt-015
+    layer: failure-path
+    risk: egress-method-not-allowed
+    reproduce: "許可されない HTTP method で要求"
+    expected: "method 制限で拒否"
+    triage: "egress_protocol.py ALLOWED_METHODS を確認"
+  - id: b11-rt-016
+    layer: failure-path
+    risk: egress-header-count-over
+    reproduce: "ヘッダ数超過の要求を送る"
+    expected: "request validation で拒否"
+    triage: "egress_protocol.py MAX_HEADER_COUNT を確認"
+  - id: b11-rt-017
+    layer: failure-path
+    risk: egress-header-name-too-long
+    reproduce: "過長ヘッダ名を送る"
+    expected: "validation error"
+    triage: "egress_protocol.py MAX_HEADER_NAME_LENGTH を確認"
+  - id: b11-rt-018
+    layer: failure-path
+    risk: egress-header-value-too-long
+    reproduce: "過長ヘッダ値を送る"
+    expected: "validation error"
+    triage: "egress_protocol.py MAX_HEADER_VALUE_LENGTH を確認"
+  - id: b11-rt-019
+    layer: failure-path
+    risk: egress-response-size-limit
+    reproduce: "巨大レスポンスを返す先へ通信"
+    expected: "サイズ制限で失敗しOOMしない"
+    triage: "egress_proxy.py MAX_RESPONSE_SIZE を確認"
+  - id: b11-rt-020
+    layer: failure-path
+    risk: egress-connect-timeout
+    reproduce: "接続不能先へ通信し timeout を誘発"
+    expected: "timeout で失敗しプロキシ継続"
+    triage: "egress_proxy.py DEFAULT_CONNECT_TIMEOUT を確認"
+  - id: b11-rt-021
+    layer: failure-path
+    risk: egress-read-timeout
+    reproduce: "応答遅延先へ通信し read timeout を誘発"
+    expected: "timeout で失敗し継続"
+    triage: "egress_proxy.py DEFAULT_READ_TIMEOUT を確認"
+  - id: b11-rt-022
+    layer: failure-path
+    risk: egress-rate-limit-per-pack
+    reproduce: "単一packで連続大量送信"
+    expected: "レート制限で抑止"
+    triage: "egress_rate_limiter.py PackRateLimiter を確認"
+  - id: b11-rt-023
+    layer: failure-path
+    risk: egress-domain-blacklist
+    reproduce: "blacklist対象ドメインへ通信"
+    expected: "deny 応答"
+    triage: "egress_domain_controller.py を確認"
+  - id: b11-rt-024
+    layer: failure-path
+    risk: capability-invalid-json-request
+    reproduce: "capability proxy に壊れたJSONを送信"
+    expected: "Invalid request 応答"
+    triage: "capability_proxy.py _PrincipalHandler.handle を確認"
+  - id: b11-rt-025
+    layer: failure-path
+    risk: capability-request-too-large
+    reproduce: "MAX_REQUEST_SIZE超過 payload を送る"
+    expected: "受理拒否される"
+    triage: "capability_proxy.py _read_length_prefixed を確認"
+  - id: b11-rt-026
+    layer: failure-path
+    risk: capability-socket-permission-failure
+    reproduce: "chmod/chown 失敗環境で proxy 起動"
+    expected: "例外を握りつぶし warning audit のみ"
+    triage: "capability_proxy.py _apply_socket_permissions を確認"
+  - id: b11-rt-027
+    layer: failure-path
+    risk: startup-http-override-lookup-fail
+    reproduce: "interface override lookup で例外を発生"
+    expected: "debug log のみで通常取得へフォールバック"
+    triage: "app.py HTTP server override block を確認"
+  - id: b11-rt-028
+    layer: failure-path
+    risk: startup-pack-api-fallback-fail
+    reproduce: "pack_api_server fallback inspection で例外"
+    expected: "no_http メッセージ表示で待機継続"
+    triage: "app.py fallback inspection block を確認"
+  - id: b11-rt-029
+    layer: failure-path
+    risk: active-ecosystem-invalid-json
+    reproduce: "active_ecosystem.json を壊して起動"
+    expected: "default config へフォールバック"
+    triage: "active_ecosystem.py _load_config を確認"
+  - id: b11-rt-030
+    layer: failure-path
+    risk: active-ecosystem-invalid-hmac
+    reproduce: "HMAC不一致の active_ecosystem.json で起動"
+    expected: "warning 出力と default fallback"
+    triage: "active_ecosystem.py verify_data_hmac 分岐を確認"
+
+  - id: b11-rt-031
+    layer: observability
+    risk: startup-health-json-output
+    reproduce: "--health で起動"
+    expected: "health aggregate JSON が出力される"
+    triage: "app.py health mode を確認"
+  - id: b11-rt-032
+    layer: observability
+    risk: startup-permissive-warning-banner
+    reproduce: "--permissive で起動"
+    expected: "警告バナーが明示表示される"
+    triage: "app.py permissive warning を確認"
+  - id: b11-rt-033
+    layer: observability
+    risk: startup-success-log
+    reproduce: "通常起動"
+    expected: "startup success メッセージを出す"
+    triage: "app.py startup.success を確認"
+  - id: b11-rt-034
+    layer: observability
+    risk: startup-failed-log
+    reproduce: "Kernel初期化で例外を起こす"
+    expected: "startup.failed と traceback が出る"
+    triage: "app.py except Exception as e を確認"
+  - id: b11-rt-035
+    layer: observability
+    risk: pack-api-unmatched-get-debug-log
+    reproduce: "未定義 GET を叩く"
+    expected: "Unmatched GET path debug が出る"
+    triage: "pack_api_server.py do_GET logger.debug を確認"
+  - id: b11-rt-036
+    layer: observability
+    risk: egress-blocked-event-log
+    reproduce: "内部IP宛通信を拒否"
+    expected: "network audit に block event が残る"
+    triage: "egress_protocol.py _log_network_event を確認"
+  - id: b11-rt-037
+    layer: observability
+    risk: egress-relaxed-socket-warning
+    reproduce: "RUMI_EGRESS_SOCKET_MODE=0666 で起動"
+    expected: "security warning が監査に残る"
+    triage: "egress_proxy.py _apply_egress_socket_permissions を確認"
+  - id: b11-rt-038
+    layer: observability
+    risk: capability-relaxed-socket-warning
+    reproduce: "RUMI_CAPABILITY_SOCKET_MODE=0666 で起動"
+    expected: "relaxed mode 警告が監査に残る"
+    triage: "capability_proxy.py _apply_socket_permissions を確認"
+  - id: b11-rt-039
+    layer: observability
+    risk: capability-transport-warning-audit
+    reproduce: "transport異常を発生"
+    expected: "capability transport warning が security audit に記録"
+    triage: "capability_proxy.py _audit_transport_warning を確認"
+  - id: b11-rt-040
+    layer: observability
+    risk: active-ecosystem-unsigned-warning
+    reproduce: "署名無し active_ecosystem.json をロード"
+    expected: "unsigned warning を出す"
+    triage: "active_ecosystem.py require_hmac 分岐を確認"
+  - id: b11-rt-041
+    layer: observability
+    risk: active-ecosystem-atomic-fallback-error
+    reproduce: "atomic write 失敗を発生させる"
+    expected: "fallback direct write error log が出る"
+    triage: "active_ecosystem.py _save_config_internal を確認"
+  - id: b11-rt-042
+    layer: observability
+    risk: quality-summary-layer-identification
+    reproduce: "quality pack を実行して特定ゲートを失敗させる"
+    expected: "summary.txt で失敗層を特定できる"
+    triage: "scripts/quality_pack/run_claude_quality_pack.sh を確認"
+  - id: b11-rt-043
+    layer: observability
+    risk: debug-bundle-layer-identification
+    reproduce: "debug bundle 実行時に frontend lint を失敗させる"
+    expected: "どの層で失敗したか即時把握できる"
+    triage: "scripts/quality_pack/run_debug_bundle.sh を確認"
+  - id: b11-rt-044
+    layer: observability
+    risk: contract-matrix-missing-file-detection
+    reproduce: "matrix required_files の1つを一時欠落させる"
+    expected: "契約テストで missing required file を検知"
+    triage: "contract matrix pytest を確認"
+  - id: b11-rt-045
+    layer: observability
+    risk: contract-matrix-missing-scenario-detection
+    reproduce: "matrix key_manual_scenarios に未定義IDを入れる"
+    expected: "契約テストで unknown scenario id を検知"
+    triage: "contract matrix pytest を確認"
+  - id: b11-rt-046
+    layer: observability
+    risk: contract-matrix-signature-drift-detection
+    reproduce: "runtimeシグネチャ文字列を意図的に変更"
+    expected: "契約テストが差分を検知"
+    triage: "test_runtime_boundary_contract_matrix_contract.py を確認"
+  - id: b11-rt-047
+    layer: observability
+    risk: baseline-accepted-reporting
+    reproduce: "repo-wide lint を baseline 内失敗にする"
+    expected: "BASELINE-ACCEPTED と current/baseline が出る"
+    triage: "run_claude_quality_pack.sh run_gate_with_baseline を確認"
+  - id: b11-rt-048
+    layer: observability
+    risk: fast-quality-targeted-reporting
+    reproduce: "RUMI_FAST_QUALITY=1 で quality 実行"
+    expected: "targeted ruff/format/mypy の結果が summary に出る"
+    triage: "run_claude_quality_pack.sh FAST_QUALITY 分岐を確認"
+  - id: b11-rt-049
+    layer: observability
+    risk: startup-http-fallback-log
+    reproduce: "http interface 不在状態で起動"
+    expected: "install_http_pack 案内が出る"
+    triage: "app.py no_http 案内出力を確認"
+  - id: b11-rt-050
+    layer: observability
+    risk: keyboard-interrupt-shutdown-log
+    reproduce: "起動中に Ctrl-C"
+    expected: "shutdown.starting が表示される"
+    triage: "app.py except KeyboardInterrupt を確認"
+  - id: b11-rt-051
+    layer: observability
+    risk: restart-exit-code-signal-log
+    reproduce: "restart request を発火"
+    expected: "restart exit code で SystemExit する"
+    triage: "app.py _wait_for_signal を確認"
+  - id: b11-rt-052
+    layer: observability
+    risk: capability-invalid-request-log
+    reproduce: "capability proxy に不正フォーマットを送る"
+    expected: "error response と debug log が得られる"
+    triage: "capability_proxy.py _PrincipalHandler を確認"
+  - id: b11-rt-053
+    layer: observability
+    risk: egress-timeout-log
+    reproduce: "egress timeout を誘発"
+    expected: "timeout reason が監査ログに残る"
+    triage: "egress_protocol.py/_log_network_event を確認"
+  - id: b11-rt-054
+    layer: observability
+    risk: active-ecosystem-hmac-status-report
+    reproduce: "hmac_status を signed/missing/invalid で確認"
+    expected: "状態値が正しく返る"
+    triage: "active_ecosystem.py hmac_status を確認"
+  - id: b11-rt-055
+    layer: observability
+    risk: startup-validation-mode-output
+    reproduce: "--validate モードで起動"
+    expected: "検証結果が明示出力される"
+    triage: "app.py _run_validation を確認"
+
+  - id: b11-rt-056
+    layer: recovery
+    risk: setup-preauth-recovery
+    reproduce: "setup complete 失敗後に正しい payload で再試行"
+    expected: "再試行で成功へ回復"
+    triage: "pack_api_server.py /api/setup/complete を確認"
+  - id: b11-rt-057
+    layer: recovery
+    risk: unauthorized-after-auth-retry
+    reproduce: "401 の後に有効トークンで再送"
+    expected: "正常応答へ回復"
+    triage: "pack_api_server.py auth flow を確認"
+  - id: b11-rt-058
+    layer: recovery
+    risk: egress-temporary-dns-failure-retry
+    reproduce: "一時DNS失敗後に再送"
+    expected: "環境復旧後は成功"
+    triage: "egress_proxy.py resolve path を確認"
+  - id: b11-rt-059
+    layer: recovery
+    risk: egress-rate-limit-window-reset
+    reproduce: "rate limit hit 後に window 経過待ち"
+    expected: "時間経過で再送成功"
+    triage: "egress_rate_limiter.py window 処理を確認"
+  - id: b11-rt-060
+    layer: recovery
+    risk: capability-proxy-principal-restart
+    reproduce: "principal socket 異常後に stop/start"
+    expected: "socket 再作成で復旧"
+    triage: "capability_proxy.py stop_principal/ensure_principal_socket を確認"
+  - id: b11-rt-061
+    layer: recovery
+    risk: capability-proxy-stop-all-restart
+    reproduce: "stop_all 後に再起動"
+    expected: "全principalが再接続可能"
+    triage: "capability_proxy.py stop_all を確認"
+  - id: b11-rt-062
+    layer: recovery
+    risk: active-ecosystem-migrate-missing-signature
+    reproduce: "署名無し設定に migrate-hmac 実行"
+    expected: "migrated が返り署名付きへ回復"
+    triage: "active_ecosystem.py migrate_hmac_signature を確認"
+  - id: b11-rt-063
+    layer: recovery
+    risk: active-ecosystem-restore-after-invalid
+    reproduce: "invalid 状態の設定を正しい内容で上書き"
+    expected: "signed 状態へ回復"
+    triage: "active_ecosystem.py _save_config_internal を確認"
+  - id: b11-rt-064
+    layer: recovery
+    risk: startup-http-server-override-fallback
+    reproduce: "override 無効時に通常 route へフォールバック"
+    expected: "io.http.server が通常取得され起動継続"
+    triage: "app.py override fallback を確認"
+  - id: b11-rt-065
+    layer: recovery
+    risk: startup-pack-api-fallback-recovery
+    reproduce: "http interface 不在だが pack_api_server は稼働"
+    expected: "fallback で API サーバー待機へ移行"
+    triage: "app.py get_pack_api_server fallback を確認"
+  - id: b11-rt-066
+    layer: recovery
+    risk: quality-gate-rerun-after-fix
+    reproduce: "失敗修正後に quality pack 再実行"
+    expected: "同ゲートが PASS になる"
+    triage: "debug_playbook.md 修正完了条件を確認"
+  - id: b11-rt-067
+    layer: recovery
+    risk: debug-bundle-rerun-after-fix
+    reproduce: "最小再現修正後に debug bundle 再実行"
+    expected: "該当層が再現不能になり回復"
+    triage: "run_debug_bundle.sh を確認"
+  - id: b11-rt-068
+    layer: recovery
+    risk: front-lint-fix-rerun
+    reproduce: "frontend lint 失敗修正後に再実行"
+    expected: "lint/build が連続PASS"
+    triage: "frontend lint/build パスを確認"
+  - id: b11-rt-069
+    layer: recovery
+    risk: entrypoint-contract-rerun
+    reproduce: "entrypoint 契約失敗修正後に再実行"
+    expected: "root contract が PASS"
+    triage: "tests/test_entrypoint_contracts.py を確認"
+  - id: b11-rt-070
+    layer: recovery
+    risk: contract-suite-rerun
+    reproduce: "matrix更新後に契約テスト再実行"
+    expected: "全契約PASSで同期状態"
+    triage: "quality-contract-pytest の一覧を確認"
+  - id: b11-rt-071
+    layer: recovery
+    risk: egress-socket-permission-reset
+    reproduce: "ソケット権限破損後に再起動"
+    expected: "起動時に再適用され通信回復"
+    triage: "egress_proxy.py _apply_egress_socket_permissions を確認"
+  - id: b11-rt-072
+    layer: recovery
+    risk: capability-socket-permission-reset
+    reproduce: "capability ソケット権限破損後に再起動"
+    expected: "再適用で通信回復"
+    triage: "capability_proxy.py _apply_socket_permissions を確認"
+  - id: b11-rt-073
+    layer: recovery
+    risk: active-ecosystem-default-regeneration
+    reproduce: "config削除後に起動"
+    expected: "default config が再生成される"
+    triage: "active_ecosystem.py _create_default_config を確認"
+  - id: b11-rt-074
+    layer: recovery
+    risk: permissive-guard-recovery
+    reproduce: "production guard で拒否後に strict 起動"
+    expected: "strict 起動は成功"
+    triage: "app.py _check_permissive_production_guard を確認"
+  - id: b11-rt-075
+    layer: recovery
+    risk: startup-validation-retry
+    reproduce: "validate 失敗要因修正後に再実行"
+    expected: "検証通過"
+    triage: "pack_validator 経路を確認"
+  - id: b11-rt-076
+    layer: recovery
+    risk: health-probe-recovery
+    reproduce: "disk/writable probe 失敗要因を修正し再実行"
+    expected: "health status が UP へ回復"
+    triage: "core_runtime/health probes を確認"
+  - id: b11-rt-077
+    layer: recovery
+    risk: network-grant-reapply-recovery
+    reproduce: "grant破損後に再付与"
+    expected: "egress 要求が許可側へ回復"
+    triage: "network_grant_manager 経路を確認"
+  - id: b11-rt-078
+    layer: recovery
+    risk: capability-grant-reapply-recovery
+    reproduce: "capability grant 破損後に再承認"
+    expected: "capability 実行が復旧"
+    triage: "capability_grant_manager 経路を確認"
+  - id: b11-rt-079
+    layer: recovery
+    risk: approval-reapply-recovery
+    reproduce: "approval 状態不整合を修復"
+    expected: "pack 実行可能状態へ回復"
+    triage: "approval_manager 経路を確認"
+  - id: b11-rt-080
+    layer: recovery
+    risk: quality-log-dir-recovery
+    reproduce: "ログディレクトリ欠落状態で quality 実行"
+    expected: "ログディレクトリ再作成して継続"
+    triage: "run_claude_quality_pack.sh mkdir -p を確認"
+
+  - id: b11-rt-081
+    layer: security-permission
+    risk: pack-api-auth-boundary-non-preauth
+    reproduce: "non-preauth POST へ認証なしアクセス"
+    expected: "401 で境界維持"
+    triage: "pack_api_server.py _is_pre_auth_route/_check_auth を確認"
+  - id: b11-rt-082
+    layer: security-permission
+    risk: pack-api-preauth-boundary-setup-only
+    reproduce: "preauthに未登録 path へアクセス"
+    expected: "auth required となる"
+    triage: "pack_api_server.py pre-auth routing table を確認"
+  - id: b11-rt-083
+    layer: security-permission
+    risk: egress-security-policy-message
+    reproduce: "禁止通信を実行"
+    expected: "generic security block message のみ返る"
+    triage: "egress_proxy.py GENERIC_SECURITY_BLOCK_MESSAGE を確認"
+  - id: b11-rt-084
+    layer: security-permission
+    risk: egress-socket-mode-default-0660
+    reproduce: "環境変数未設定で egress 起動"
+    expected: "socket mode 0660"
+    triage: "egress_proxy.py _get_egress_socket_mode を確認"
+  - id: b11-rt-085
+    layer: security-permission
+    risk: capability-socket-mode-default-0660
+    reproduce: "環境変数未設定で capability proxy 起動"
+    expected: "socket mode 0660"
+    triage: "capability_proxy.py _get_socket_mode を確認"
+  - id: b11-rt-086
+    layer: security-permission
+    risk: capability-relaxed-mode-explicit-optin
+    reproduce: "RUMI_CAPABILITY_SOCKET_MODE=0666 を明示設定"
+    expected: "opt-in時のみ緩和される"
+    triage: "capability_proxy.py _RELAXED_SOCKET_MODE 分岐を確認"
+  - id: b11-rt-087
+    layer: security-permission
+    risk: egress-relaxed-mode-explicit-optin
+    reproduce: "RUMI_EGRESS_SOCKET_MODE=0666 を明示設定"
+    expected: "opt-in時のみ緩和される"
+    triage: "egress_proxy.py _EGRESS_RELAXED_SOCKET_MODE 分岐を確認"
+  - id: b11-rt-088
+    layer: security-permission
+    risk: active-ecosystem-require-hmac-enforced
+    reproduce: "RUMI_REQUIRE_HMAC=1 で unsigned config を読む"
+    expected: "defaults fallback し unsigned を受容しない"
+    triage: "active_ecosystem.py require_hmac 分岐を確認"
+  - id: b11-rt-089
+    layer: security-permission
+    risk: active-ecosystem-unsigned-allowed-non-strict
+    reproduce: "RUMI_REQUIRE_HMAC=0 で unsigned config を読む"
+    expected: "warning付きで読み込み、次回保存で署名付与"
+    triage: "active_ecosystem.py unsigned re-sign path を確認"
+  - id: b11-rt-090
+    layer: security-permission
+    risk: startup-permissive-production-guard
+    reproduce: "production 判定下で --permissive 起動"
+    expected: "起動拒否"
+    triage: "app.py _check_permissive_production_guard を確認"
+  - id: b11-rt-091
+    layer: security-permission
+    risk: startup-strict-default
+    reproduce: "引数なし起動時の env を確認"
+    expected: "RUMI_SECURITY_MODE=strict が既定"
+    triage: "app.py os.environ.setdefault を確認"
+  - id: b11-rt-092
+    layer: security-permission
+    risk: host-execution-guard-block
+    reproduce: "host_execution pack を許可なしで起動"
+    expected: "BLOCKED され startup aborted"
+    triage: "app.py host_execution validation block を確認"
+  - id: b11-rt-093
+    layer: security-permission
+    risk: capability-principal-binding
+    reproduce: "payload 側 principal 改ざん試行"
+    expected: "socket由来 principal のみ使用される"
+    triage: "capability_proxy.py principal binding を確認"
+  - id: b11-rt-094
+    layer: security-permission
+    risk: egress-pack-id-binding
+    reproduce: "payload 側 pack_id 改ざん試行"
+    expected: "socket由来 pack_id 優先で境界維持"
+    triage: "egress proxy auth/binding 実装を確認"
+  - id: b11-rt-095
+    layer: security-permission
+    risk: windows-tcp-fallback-auth-required
+    reproduce: "Windows fallback 有効時に認証なし接続"
+    expected: "perform_server_auth で拒否"
+    triage: "capability_proxy.py perform_server_auth を確認"
+  - id: b11-rt-096
+    layer: security-permission
+    risk: capability-request-size-limit
+    reproduce: "境界超過 request"
+    expected: "Message too large で拒否"
+    triage: "capability_proxy.py MAX_REQUEST_SIZE を確認"
+  - id: b11-rt-097
+    layer: security-permission
+    risk: egress-request-size-limit
+    reproduce: "境界超過 request"
+    expected: "validation error で拒否"
+    triage: "egress_proxy.py MAX_REQUEST_SIZE を確認"
+  - id: b11-rt-098
+    layer: security-permission
+    risk: egress-response-read-chunk-limit
+    reproduce: "巨大 chunk を返す応答を処理"
+    expected: "chunk limit を超えず安全に処理"
+    triage: "egress_protocol.py MAX_RESPONSE_READ_CHUNK を確認"
+  - id: b11-rt-099
+    layer: security-permission
+    risk: preauth-route-scope-regression
+    reproduce: "preauth に accidental route 追加を差分監査"
+    expected: "setup以外の認証境界が緩まない"
+    triage: "pack_api_server.py pre-auth API definitions を確認"
+  - id: b11-rt-100
+    layer: security-permission
+    risk: audit-visibility-on-deny
+    reproduce: "deny 系 API/egress/capability を連続実行"
+    expected: "security/network/permission audit に追跡可能"
+    triage: "audit logger 出力を確認"
+
+  - id: b11-rt-101
+    layer: audit-readiness
+    risk: quality-command-evidence-record
+    reproduce: "quality pack 実行後にコマンドと結果を台帳へ記録"
+    expected: "実行証跡が再現可能形式で残る"
+    triage: "claude_desktop_quality_pack.md 実行コマンド節を確認"
+  - id: b11-rt-102
+    layer: audit-readiness
+    risk: debug-playbook-evidence-record
+    reproduce: "debug bundle 実行後に失敗層とログパスを記録"
+    expected: "summary/log への参照が残る"
+    triage: "debug_playbook.md を確認"
+  - id: b11-rt-103
+    layer: audit-readiness
+    risk: philosophy-recheck-log-required
+    reproduce: "batch追加前に思想再評価ログを更新"
+    expected: "再評価記録が欠落しない"
+    triage: "philosophy_re_evaluation_log.md を確認"
+  - id: b11-rt-104
+    layer: audit-readiness
+    risk: matrix-to-scenario-traceability
+    reproduce: "matrix key_manual_scenarios と台帳IDを突合"
+    expected: "全IDが有効で追跡可能"
+    triage: "matrix契約テストを確認"
+  - id: b11-rt-105
+    layer: audit-readiness
+    risk: matrix-to-test-traceability
+    reproduce: "matrix automated_tests と実ファイルを突合"
+    expected: "参照切れなし"
+    triage: "matrix契約テストを確認"
+  - id: b11-rt-106
+    layer: audit-readiness
+    risk: gate-summary-completeness
+    reproduce: "quality summary で全ゲート名確認"
+    expected: "root/package/contract/frontend/cargo が列挙される"
+    triage: "run_claude_quality_pack.sh summary 出力を確認"
+  - id: b11-rt-107
+    layer: audit-readiness
+    risk: baseline-parameter-auditability
+    reproduce: "baseline env 値を指定して実行"
+    expected: "summary に baseline 判定が記録される"
+    triage: "run_gate_with_baseline ログを確認"
+  - id: b11-rt-108
+    layer: audit-readiness
+    risk: fast-quality-parameter-auditability
+    reproduce: "RUMI_FAST_QUALITY=1 で実行"
+    expected: "fast_quality=1 が summary に記録される"
+    triage: "summary.txt fast_quality 行を確認"
+  - id: b11-rt-109
+    layer: audit-readiness
+    risk: pr1-pr2-separation-audit
+    reproduce: "PR1/PR2 差分を再読"
+    expected: "PR1に挙動修正が混入していない"
+    triage: "PR diff self-review を確認"
+  - id: b11-rt-110
+    layer: audit-readiness
+    risk: bugfix-candidate-tracking
+    reproduce: "PR1失敗をPR2候補へ転記"
+    expected: "候補理由と再現が残る"
+    triage: "PR本文 bugfix 候補節を確認"
+  - id: b11-rt-111
+    layer: audit-readiness
+    risk: command-result-honesty
+    reproduce: "失敗コマンドをそのまま記録"
+    expected: "成功偽装がない"
+    triage: "PR本文の結果一覧を確認"
+  - id: b11-rt-112
+    layer: audit-readiness
+    risk: linecount-evidence-integrity
+    reproduce: "git ls-files -z | xargs -0 wc -l 実行値を記録"
+    expected: "算出コマンドと値の対応が一致"
+    triage: "作業ログの line count 記録を確認"
+  - id: b11-rt-113
+    layer: audit-readiness
+    risk: generated-artifact-cleanup
+    reproduce: "quality 実行後の生成物を確認"
+    expected: "コミット前に .quality_logs 等を除去"
+    triage: "git status クリーンアップ手順を確認"
+  - id: b11-rt-114
+    layer: audit-readiness
+    risk: release-impact-audit
+    reproduce: "release workflow の境界を再確認"
+    expected: "品質変更が release トリガーを壊していない"
+    triage: ".github/workflows/release.yml 契約を確認"
+  - id: b11-rt-115
+    layer: audit-readiness
+    risk: ci-impact-audit
+    reproduce: "test workflow の必須ゲートを再確認"
+    expected: "root/package/rust gate が保持される"
+    triage: "test_claude_quality_pack_contract.py CI検証を確認"
+  - id: b11-rt-116
+    layer: audit-readiness
+    risk: quality-doc-sync-audit
+    reproduce: "scripts/coverage/readme の参照整合を確認"
+    expected: "新matrix/testの記載漏れなし"
+    triage: "README/test_coverage_matrix/quality_pack doc を確認"
+  - id: b11-rt-117
+    layer: audit-readiness
+    risk: scenario-id-uniqueness-audit
+    reproduce: "全manual_regression_scenarios*.yaml のID重複確認"
+    expected: "重複なし"
+    triage: "test_manual_regression_scenarios_contract.py を確認"
+  - id: b11-rt-118
+    layer: audit-readiness
+    risk: layer-density-audit
+    reproduce: "layerごとの最小件数を検証"
+    expected: "frontend/security/failure/audit 等の密度維持"
+    triage: "manual scenario contract の閾値を確認"
+  - id: b11-rt-119
+    layer: audit-readiness
+    risk: philosophy-alignment-audit
+    reproduce: "No Favoritism/Fail-Soft/最小権限への影響を点検"
+    expected: "思想逸脱なし"
+    triage: "philosophy memo と再評価ログを確認"
+  - id: b11-rt-120
+    layer: audit-readiness
+    risk: handoff-audit-completeness
+    reproduce: "最終報告テンプレート項目を埋める"
+    expected: "PR URL/検証結果/残リスク/限界が欠落しない"
+    triage: "最終報告フォーマットを確認"

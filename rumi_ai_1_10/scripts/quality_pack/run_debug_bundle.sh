@@ -20,6 +20,7 @@ python -m pytest \
   tests/test_longrun_migration_contract_matrix_contract.py \
   tests/test_security_permission_contract_matrix_contract.py \
   tests/test_ui_viewer_recovery_contract_matrix_contract.py \
+  tests/test_runtime_boundary_contract_matrix_contract.py \
   -v
 
 echo
