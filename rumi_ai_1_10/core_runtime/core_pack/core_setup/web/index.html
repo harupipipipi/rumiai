@@ -149,12 +149,15 @@
 <body>
   <main>
     <section class="hero">
-      <h1>Choose your default pack.</h1>
-      <p>Setup now knows about modular setup packs, migration status, and defaultspack-only all-OK grants.</p>
+      <h1>Choose setup packs.</h1>
+      <p>Checked setup packs are installed together and receive all OK permissions.</p>
     </section>
     <section class="grid">
       <div class="panel">
         <h2>Available Setup Packs</h2>
+        <div class="actions">
+          <button id="install-selected">Install checked packs</button>
+        </div>
         <div id="pack-list" class="pack-list"></div>
       </div>
       <div class="panel">
@@ -189,32 +192,30 @@
       return data.data || data;
     }
 
-    async function installPack(setupPackId) {
+    async function installSelectedPacks() {
+      const selected = Array.from(listEl.querySelectorAll("[data-select-pack]:checked"))
+        .map((input) => input.dataset.selectPack);
+      if (!selected.length) {
+        setStatus("No setup packs checked", {});
+        return;
+      }
       const data = await getJson("/api/setup/packs/install", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ setup_pack_id: setupPackId })
+        body: JSON.stringify({ setup_pack_ids: selected })
       });
-      setStatus("Pack installed", data);
-      await load();
-    }
-
-    async function grantAllOk(setupPackId, revoke = false) {
-      const suffix = revoke ? "revoke-all-ok" : "grant-all-ok";
-      const data = await getJson(`/api/setup/packs/${encodeURIComponent(setupPackId)}/${suffix}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" }
-      });
-      setStatus(revoke ? "All OK revoked" : "All OK granted", data);
+      setStatus("Setup packs installed", data);
       await load();
     }
 
     function renderPacks(payload) {
       listEl.innerHTML = "";
+      const hasSelection = Boolean((payload.selected_setup_pack_ids || []).length);
       for (const pack of payload.packs || []) {
         const card = document.createElement("article");
         card.className = "pack" + (pack.selected ? " selected" : "");
         const riskClass = pack.risk_level === "high" ? "danger" : "";
+        const checked = pack.selected || (!hasSelection && pack.recommended);
         card.innerHTML = `
           <header>
             <div>
@@ -226,21 +227,14 @@
             </div>
           </header>
           <div class="mini-actions">
-            <button data-install="${pack.pack_id}">Install</button>
-            ${pack.supports_all_ok ? `<button class="secondary" data-grant="${pack.pack_id}">Grant all OK</button><button class="secondary" data-revoke="${pack.pack_id}">Revoke all OK</button>` : ""}
+            <label>
+              <input type="checkbox" data-select-pack="${pack.pack_id}" ${checked ? "checked" : ""}>
+              Include in setup
+            </label>
           </div>
         `;
         listEl.appendChild(card);
       }
-      listEl.querySelectorAll("[data-install]").forEach((button) => {
-        button.addEventListener("click", () => installPack(button.dataset.install));
-      });
-      listEl.querySelectorAll("[data-grant]").forEach((button) => {
-        button.addEventListener("click", () => grantAllOk(button.dataset.grant));
-      });
-      listEl.querySelectorAll("[data-revoke]").forEach((button) => {
-        button.addEventListener("click", () => grantAllOk(button.dataset.revoke, true));
-      });
     }
 
     async function load() {
@@ -248,7 +242,7 @@
         const packs = await getJson("/api/setup/packs");
         const migration = await getJson("/api/setup/migration/status");
         renderPacks(packs);
-        selectionEl.textContent = packs.selected_setup_pack_id || "none";
+        selectionEl.textContent = (packs.selected_setup_pack_ids || []).join(", ") || "none";
         migrationEl.textContent = migration.needs_user_migration ? "user.csv migration pending" : "ready";
         setStatus("Setup loaded", { packs, migration });
       } catch (error) {
@@ -257,6 +251,7 @@
     }
 
     document.getElementById("refresh").addEventListener("click", load);
+    document.getElementById("install-selected").addEventListener("click", installSelectedPacks);
     load();
   </script>
 </body>

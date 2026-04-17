@@ -23,6 +23,60 @@ class TestSetupHandlers(unittest.TestCase):
             result = handler._setup_list_packs()
         self.assertEqual(result, {"packs": []})
 
+    def test_setup_handler_accepts_multiple_setup_pack_ids(self):
+        from core_runtime.api.setup_handlers import SetupHandlersMixin
+
+        class _Handler(SetupHandlersMixin):
+            pass
+
+        handler = _Handler()
+        install_result = {
+            "success": True,
+            "active_target_pack_id": "otherpack",
+            "installed_setup_pack_ids": ["alpha", "beta"],
+        }
+        with patch(
+            "core_runtime.api.setup_handlers.get_setup_pack_manager"
+        ) as mocked, patch(
+            "core_runtime.api.setup_handlers.invoke_pack_function"
+        ) as invoke:
+            mocked.return_value.install.return_value = install_result
+            result = handler._setup_install_pack({"setup_pack_ids": ["alpha", "beta"]})
+
+        mocked.return_value.install.assert_called_once_with(["alpha", "beta"])
+        invoke.assert_not_called()
+        self.assertEqual(result, install_result)
+
+    def test_setup_handler_runs_defaultspack_migration_only_for_active_defaultspack(self):
+        from core_runtime.api.setup_handlers import SetupHandlersMixin
+
+        class _Handler(SetupHandlersMixin):
+            pass
+
+        handler = _Handler()
+        install_result = {
+            "success": True,
+            "active_target_pack_id": "defaultspack",
+            "installed_setup_pack_ids": ["defaultspack"],
+        }
+        with patch(
+            "core_runtime.api.setup_handlers.get_setup_pack_manager"
+        ) as mocked, patch(
+            "core_runtime.api.setup_handlers.invoke_pack_function",
+            side_effect=[
+                {"needs_user_migration": True},
+                {"migrated": True},
+                {"needs_user_migration": False},
+            ],
+        ) as invoke:
+            mocked.return_value.install.return_value = install_result
+            result = handler._setup_install_pack({"setup_pack_id": "defaultspack"})
+
+        mocked.return_value.install.assert_called_once_with("defaultspack")
+        self.assertEqual(invoke.call_count, 3)
+        self.assertEqual(result["migration"], {"migrated": True})
+        self.assertEqual(result["migration_status"], {"needs_user_migration": False})
+
     def test_core_setup_routes_are_declared(self):
         ecosystem_path = (
             Path(__file__).resolve().parent.parent

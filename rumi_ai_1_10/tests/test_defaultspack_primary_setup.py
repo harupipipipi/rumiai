@@ -13,7 +13,7 @@ from rumi_setup.core.initializer import Initializer
 
 
 class TestDefaultspackPrimarySetup(unittest.TestCase):
-    def test_backend_initializer_seeds_defaultspack_as_primary(self):
+    def test_backend_initializer_leaves_active_pack_unselected(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             initializer = EcosystemInitializer(
@@ -26,10 +26,10 @@ class TestDefaultspackPrimarySetup(unittest.TestCase):
             self.assertTrue(result["success"])
             active_path = base / "user_data" / "active_ecosystem.json"
             data = json.loads(active_path.read_text(encoding="utf-8"))
-            self.assertEqual(data["active_pack_identity"], "rumi:ecosystem/defaultspack")
-            self.assertEqual(data["metadata"]["primary_pack_id"], "defaultspack")
+            self.assertIsNone(data["active_pack_identity"])
+            self.assertEqual(data["metadata"], {})
 
-    def test_rumi_setup_initializer_seeds_defaultspack_as_primary(self):
+    def test_rumi_setup_initializer_leaves_active_pack_unselected(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             initializer = Initializer(base_dir=str(base))
@@ -41,8 +41,8 @@ class TestDefaultspackPrimarySetup(unittest.TestCase):
             self.assertEqual(active_relpath, "user_data/active_ecosystem.json")
             active_path = base / "user_data" / "active_ecosystem.json"
             data = json.loads(active_path.read_text(encoding="utf-8"))
-            self.assertEqual(data["active_pack_identity"], "rumi:ecosystem/defaultspack")
-            self.assertEqual(data["metadata"]["primary_pack_id"], "defaultspack")
+            self.assertIsNone(data["active_pack_identity"])
+            self.assertEqual(data["metadata"], {})
 
 
 if __name__ == "__main__":

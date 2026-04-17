@@ -168,7 +168,7 @@ def cmd_init():
     print("  以下を作成します:")
     print("    - user_data/ ディレクトリ構造")
     print("    - 設定ファイル")
-    print("    - default pack（オプション）")
+    print("    - setup pack target（オプション）")
     print("")
     
     if not confirm("続行しますか？"):
