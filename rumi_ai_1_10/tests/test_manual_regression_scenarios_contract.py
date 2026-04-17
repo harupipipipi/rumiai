@@ -25,12 +25,12 @@ def _load_all_scenarios() -> list[dict]:
 
 
 def test_manual_regression_scenario_files_exist():
-    assert len(SCENARIO_FILES) >= 4
+    assert len(SCENARIO_FILES) >= 5
 
 
 def test_manual_regression_scenarios_have_required_fields_and_minimum_count():
     scenarios = _load_all_scenarios()
-    assert len(scenarios) >= 240
+    assert len(scenarios) >= 390
 
     required = {"id", "layer", "risk", "reproduce", "expected", "triage"}
     for scenario in scenarios:
@@ -69,7 +69,8 @@ def test_manual_regression_scenarios_have_layer_minimums():
         layer = scenario["layer"]
         counts[layer] = counts.get(layer, 0) + 1
 
-    assert counts.get("security-permission", 0) >= 40
-    assert counts.get("failure-path", 0) >= 30
-    assert counts.get("frontend-ui", 0) >= 30
-    assert counts.get("audit-readiness", 0) >= 20
+    assert counts.get("security-permission", 0) >= 90
+    assert counts.get("failure-path", 0) >= 90
+    assert counts.get("frontend-ui", 0) >= 40
+    assert counts.get("audit-readiness", 0) >= 30
+    assert counts.get("observability", 0) >= 30

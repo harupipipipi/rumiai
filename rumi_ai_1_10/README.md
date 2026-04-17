@@ -306,11 +306,14 @@ curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
 | [docs/quality_pack/philosophy_memo.md](docs/quality_pack/philosophy_memo.md) | 開発判断に使う思想メモ |
 | [docs/quality_pack/claude_desktop_quality_pack.md](docs/quality_pack/claude_desktop_quality_pack.md) | 品質保証・監査・回帰検証パック |
 | [docs/quality_pack/test_coverage_matrix.md](docs/quality_pack/test_coverage_matrix.md) | テスト分類表と未テスト領域 |
+| [docs/quality_pack/api_route_coverage_matrix.yaml](docs/quality_pack/api_route_coverage_matrix.yaml) | API routeごとの回帰シナリオ・自動テスト紐付け |
 | [docs/quality_pack/philosophy_re_evaluation_log.md](docs/quality_pack/philosophy_re_evaluation_log.md) | 作業中の思想再評価ログ |
 | [docs/quality_pack/debug_playbook.md](docs/quality_pack/debug_playbook.md) | 失敗時の再現・切り分け・修正確認手順 |
 | [docs/quality_pack/manual_regression_scenarios.yaml](docs/quality_pack/manual_regression_scenarios.yaml) | 手動回帰シナリオ台帳（batch1: セキュリティ/失敗系/UI） |
 | [docs/quality_pack/manual_regression_scenarios_batch2.yaml](docs/quality_pack/manual_regression_scenarios_batch2.yaml) | 手動回帰シナリオ台帳（batch2: 運用/データ整合/観測性/復旧） |
 | [docs/quality_pack/manual_regression_scenarios_batch3.yaml](docs/quality_pack/manual_regression_scenarios_batch3.yaml) | 手動回帰シナリオ台帳（batch3: 互換性/性能/データ保護/失敗UX） |
+| [docs/quality_pack/manual_regression_scenarios_batch4.yaml](docs/quality_pack/manual_regression_scenarios_batch4.yaml) | 手動回帰シナリオ台帳（batch4: 承認/ネットワーク境界/Fail-Soft/UI操作/監査） |
+| [docs/quality_pack/manual_regression_scenarios_batch5.yaml](docs/quality_pack/manual_regression_scenarios_batch5.yaml) | 手動回帰シナリオ台帳（batch5: API route契約/認証境界/入力境界/可観測性） |
 
 ---
 

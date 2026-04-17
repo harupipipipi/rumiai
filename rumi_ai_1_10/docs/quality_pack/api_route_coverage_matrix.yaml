@@ -1,0 +1,437 @@
+version: 1
+owner: quality-pack
+description: |
+  Pack API の主要ルートを手動回帰シナリオと自動テストへ結びつけた網羅マトリクス。
+  変更時に「どの route がどの監視で守られているか」を追跡する。
+routes:
+  - method: GET
+    route: /health
+    source: pack_api_server.system
+    manual_scenarios: [b5-get-001, b5-get-002]
+    automated_tests: [rumi_ai_1_10/tests/test_health.py]
+  - method: GET
+    route: /api/setup/status
+    source: core_setup.pre_auth_routes
+    manual_scenarios: [b5-get-003, b5-get-004]
+    automated_tests: [rumi_ai_1_10/tests/test_setup_handlers.py, rumi_ai_1_10/tests/test_phase_a_setup_api.py]
+  - method: GET
+    route: /api/setup/oauth/start
+    source: core_setup.pre_auth_routes
+    manual_scenarios: [b5-get-005, b5-get-006]
+    automated_tests: [rumi_ai_1_10/tests/test_oauth_handlers.py]
+  - method: POST
+    route: /api/setup/complete
+    source: core_setup.pre_auth_routes
+    manual_scenarios: [b5-post-001, b5-post-003]
+    automated_tests: [rumi_ai_1_10/tests/test_setup_handlers.py, rumi_ai_1_10/tests/test_phase_a_setup_api.py]
+  - method: GET
+    route: /api/packs
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-get-009, b5-get-032]
+    automated_tests: [rumi_ai_1_10/tests/test_api_routes.py, rumi_ai_1_10/tests/test_wave17b_auth_hardening.py]
+  - method: GET
+    route: /api/packs/pending
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-get-009, rec-013]
+    automated_tests: [rumi_ai_1_10/tests/test_api_routes.py, rumi_ai_1_10/tests/test_pack_update.py]
+  - method: GET
+    route: /api/packs/{pack_id}/status
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-get-010, b5-get-011]
+    automated_tests: [rumi_ai_1_10/tests/test_api_routes.py]
+  - method: GET
+    route: /api/packs/{pack_id}/dependencies
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-get-012, data-011]
+    automated_tests: [rumi_ai_1_10/tests/test_api_routes.py, rumi_ai_1_10/tests/test_dependency_resolver.py]
+  - method: POST
+    route: /api/packs/scan
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-012, rec-012]
+    automated_tests: [rumi_ai_1_10/tests/test_defaultspack_registry_integration.py]
+  - method: POST
+    route: /api/packs/import
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-013, b5-post-014]
+    automated_tests: [rumi_ai_1_10/tests/test_pack_scaffold.py, rumi_ai_1_10/tests/test_defaultspack_setup_pack.py]
+  - method: POST
+    route: /api/packs/apply
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-015, b5-post-016]
+    automated_tests: [rumi_ai_1_10/tests/test_pack_update.py]
+  - method: POST
+    route: /api/packs/{pack_id}/approve
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-039, b4-al-001]
+    automated_tests: [rumi_ai_1_10/tests/test_wave17b_auth_hardening.py, rumi_ai_1_10/tests/test_permissions_config.py]
+  - method: POST
+    route: /api/packs/{pack_id}/approve-rule
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-040, b4-al-013]
+    automated_tests: [rumi_ai_1_10/tests/test_wave17b_auth_hardening.py]
+  - method: POST
+    route: /api/packs/{pack_id}/reject
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-041, b4-al-018]
+    automated_tests: [rumi_ai_1_10/tests/test_wave17b_auth_hardening.py]
+  - method: DELETE
+    route: /api/packs/{pack_id}
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-delete-001, b5-delete-005]
+    automated_tests: [rumi_ai_1_10/tests/test_pack_update.py]
+
+  - method: GET
+    route: /api/runtime/available
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-get-013, rec-001]
+    automated_tests: [rumi_ai_1_10/tests/test_health.py]
+  - method: GET
+    route: /api/containers
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-get-014, rec-020]
+    automated_tests: [rumi_ai_1_10/tests/test_api_routes.py]
+  - method: GET
+    route: /api/privileges
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-get-015, sec-005]
+    automated_tests: [rumi_ai_1_10/tests/test_api_routes.py, rumi_ai_1_10/tests/test_capability_executor_security.py]
+  - method: POST
+    route: /api/containers/{pack_id}/start
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-042, perf-009]
+    automated_tests: [rumi_ai_1_10/tests/test_wave22d_docker_capability.py, rumi_ai_1_10/tests/test_wave23a_docker_capability_extended.py]
+  - method: POST
+    route: /api/containers/{pack_id}/stop
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-043, rec-020]
+    automated_tests: [rumi_ai_1_10/tests/test_wave22d_docker_capability.py]
+  - method: POST
+    route: /api/privileges/{pack_id}/grant/{privilege_id}
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-044, sec-005]
+    automated_tests: [rumi_ai_1_10/tests/test_capability_executor_security.py]
+  - method: POST
+    route: /api/privileges/{pack_id}/execute/{privilege_id}
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-045, sec-005]
+    automated_tests: [rumi_ai_1_10/tests/test_capability_executor_security.py]
+  - method: DELETE
+    route: /api/containers/{pack_id}
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-delete-004, rec-014]
+    automated_tests: [rumi_ai_1_10/tests/test_api_routes.py]
+  - method: GET
+    route: /api/docker/status
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-get-016, rec-001]
+    automated_tests: [rumi_ai_1_10/tests/test_wave22d_docker_capability.py]
+
+  - method: GET
+    route: /api/network/list
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-get-017, b4-nb-019]
+    automated_tests: [rumi_ai_1_10/tests/test_permissions_config.py]
+  - method: POST
+    route: /api/network/grant
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-004, b5-post-007]
+    automated_tests: [rumi_ai_1_10/tests/test_permissions_config.py, rumi_ai_1_10/tests/test_egress_audit.py]
+  - method: POST
+    route: /api/network/revoke
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-008, b5-post-009]
+    automated_tests: [rumi_ai_1_10/tests/test_permissions_config.py, rumi_ai_1_10/tests/test_egress_audit.py]
+  - method: POST
+    route: /api/network/check
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-010, b5-post-011]
+    automated_tests: [rumi_ai_1_10/tests/test_permissions_config.py]
+
+  - method: GET
+    route: /api/secrets
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-get-018, data-protect-001]
+    automated_tests: [rumi_ai_1_10/tests/test_wave20c_secrets_plaintext.py]
+  - method: POST
+    route: /api/secrets/set
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-017, data-protect-001]
+    automated_tests: [rumi_ai_1_10/tests/test_wave20c_secrets_plaintext.py, rumi_ai_1_10/tests/test_wave19fix_secrets_handlers.py]
+  - method: POST
+    route: /api/secrets/delete
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-018, data-protect-001]
+    automated_tests: [rumi_ai_1_10/tests/test_wave19fix_secrets_handlers.py]
+  - method: GET
+    route: /api/secrets/grants
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-get-019, sec-014]
+    automated_tests: [rumi_ai_1_10/tests/test_wave19b_secret_grant_routing.py]
+  - method: GET
+    route: /api/secrets/grants/{pack_id}
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-get-020, sec-001]
+    automated_tests: [rumi_ai_1_10/tests/test_wave19b_secret_grant_routing.py]
+  - method: POST
+    route: /api/secrets/grants/{pack_id}
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-019, b5-obs-010]
+    automated_tests: [rumi_ai_1_10/tests/test_wave19b_secret_grant_routing.py]
+  - method: DELETE
+    route: /api/secrets/grants/{pack_id}
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-delete-001, b5-delete-003]
+    automated_tests: [rumi_ai_1_10/tests/test_wave19b_secret_grant_routing.py]
+  - method: DELETE
+    route: /api/secrets/grants/{pack_id}/{secret_key}
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-delete-002, b5-delete-003]
+    automated_tests: [rumi_ai_1_10/tests/test_wave19b_secret_grant_routing.py]
+
+  - method: GET
+    route: /api/stores
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-get-022, data-001]
+    automated_tests: [rumi_ai_1_10/tests/test_store_sqlite.py]
+  - method: POST
+    route: /api/stores/create
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-022, data-006]
+    automated_tests: [rumi_ai_1_10/tests/test_store_sqlite.py]
+  - method: GET
+    route: /api/stores/shared
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-get-023, data-020]
+    automated_tests: [rumi_ai_1_10/tests/test_store_sqlite.py]
+  - method: POST
+    route: /api/stores/shared/approve
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-035, data-020]
+    automated_tests: [rumi_ai_1_10/tests/test_store_sqlite.py]
+  - method: POST
+    route: /api/stores/shared/revoke
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-036, data-020]
+    automated_tests: [rumi_ai_1_10/tests/test_store_sqlite.py]
+
+  - method: GET
+    route: /api/units
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-get-024, data-016]
+    automated_tests: [rumi_ai_1_10/tests/test_unit_executor_security.py]
+  - method: POST
+    route: /api/units/publish
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-023, data-016]
+    automated_tests: [rumi_ai_1_10/tests/test_unit_executor_security.py]
+  - method: POST
+    route: /api/units/execute
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-024, b5-post-025]
+    automated_tests: [rumi_ai_1_10/tests/test_unit_executor_security.py, rumi_ai_1_10/tests/test_capability_executor_security.py]
+
+  - method: GET
+    route: /api/capability/blocked
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-get-025, sec-005]
+    automated_tests: [rumi_ai_1_10/tests/test_capability_executor_security.py]
+  - method: GET
+    route: /api/capability/grants
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-get-026, b4-nb-015]
+    automated_tests: [rumi_ai_1_10/tests/test_capability_trust_store.py]
+  - method: GET
+    route: /api/capability/requests
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-get-027, sec-006]
+    automated_tests: [rumi_ai_1_10/tests/test_capability_system.py]
+  - method: POST
+    route: /api/capability/candidates/scan
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-030, obs-008]
+    automated_tests: [rumi_ai_1_10/tests/test_capability_installer.py]
+  - method: POST
+    route: /api/capability/requests/{candidate_key}/approve
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-031, sec-006]
+    automated_tests: [rumi_ai_1_10/tests/test_capability_installer.py]
+  - method: POST
+    route: /api/capability/requests/{candidate_key}/reject
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-032, sec-006]
+    automated_tests: [rumi_ai_1_10/tests/test_capability_installer.py]
+  - method: POST
+    route: /api/capability/blocked/{candidate_key}/unblock
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-033, sec-006]
+    automated_tests: [rumi_ai_1_10/tests/test_capability_installer.py]
+  - method: POST
+    route: /api/capability/grants/batch
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-034, b4-at-015]
+    automated_tests: [rumi_ai_1_10/tests/test_capability_executor.py]
+  - method: POST
+    route: /api/capability/grants/grant
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-037, sec-006]
+    automated_tests: [rumi_ai_1_10/tests/test_capability_executor.py]
+  - method: POST
+    route: /api/capability/grants/revoke
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-038, sec-006]
+    automated_tests: [rumi_ai_1_10/tests/test_capability_executor.py]
+
+  - method: GET
+    route: /api/pip/blocked
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-get-028, data-protect-009]
+    automated_tests: [rumi_ai_1_10/tests/test_permissions_config.py]
+  - method: GET
+    route: /api/pip/requests
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-get-029, b5-obs-002]
+    automated_tests: [rumi_ai_1_10/tests/test_permissions_config.py]
+  - method: POST
+    route: /api/pip/candidates/scan
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-026, b5-obs-002]
+    automated_tests: [rumi_ai_1_10/tests/test_permissions_config.py]
+  - method: POST
+    route: /api/pip/requests/{candidate_key}/approve
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-027, sec-006]
+    automated_tests: [rumi_ai_1_10/tests/test_permissions_config.py]
+  - method: POST
+    route: /api/pip/requests/{candidate_key}/reject
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-028, sec-006]
+    automated_tests: [rumi_ai_1_10/tests/test_permissions_config.py]
+  - method: POST
+    route: /api/pip/blocked/{candidate_key}/unblock
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-029, sec-006]
+    automated_tests: [rumi_ai_1_10/tests/test_permissions_config.py]
+
+  - method: GET
+    route: /api/flows
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-get-030, fail-002]
+    automated_tests: [rumi_ai_1_10/tests/test_flow_handlers.py]
+  - method: POST
+    route: /api/flows/{flow_id}/run
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-047, b5-obs-004]
+    automated_tests: [rumi_ai_1_10/tests/test_flow_handlers.py, rumi_ai_1_10/tests/test_flow_modifier_regression.py]
+  - method: GET
+    route: /api/routes
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-get-031, b5-obs-005]
+    automated_tests: [rumi_ai_1_10/tests/test_api_routes.py]
+  - method: POST
+    route: /api/routes/reload
+    source: pack_api_server.hardcoded
+    manual_scenarios: [b5-post-046, b5-obs-003]
+    automated_tests: [rumi_ai_1_10/tests/test_api_routes.py]
+
+  - method: GET
+    route: /api/panel/dashboard
+    source: core_control_panel.api_routes
+    manual_scenarios: [b5-get-033, ui-005]
+    automated_tests: [rumi_ai_1_10/tests/test_control_panel_handlers.py, rumi_ai_1_10/tests/test_api_routes.py]
+  - method: GET
+    route: /api/panel/packs
+    source: core_control_panel.api_routes
+    manual_scenarios: [b5-get-033, ui-008]
+    automated_tests: [rumi_ai_1_10/tests/test_control_panel_handlers.py]
+  - method: GET
+    route: /api/panel/flows
+    source: core_control_panel.api_routes
+    manual_scenarios: [b5-get-033, ui-013]
+    automated_tests: [rumi_ai_1_10/tests/test_control_panel_handlers.py]
+  - method: GET
+    route: /api/panel/flows/{id}
+    source: core_control_panel.api_routes
+    manual_scenarios: [b5-get-034, b5-get-035]
+    automated_tests: [rumi_ai_1_10/tests/test_api_routes.py, rumi_ai_1_10/tests/test_control_panel_handlers.py]
+  - method: POST
+    route: /api/panel/flows
+    source: core_control_panel.api_routes
+    manual_scenarios: [ui-016, b5-put-002]
+    automated_tests: [rumi_ai_1_10/tests/test_control_panel_handlers.py]
+  - method: PUT
+    route: /api/panel/flows/{id}
+    source: core_control_panel.api_routes
+    manual_scenarios: [b5-put-004, b5-put-003]
+    automated_tests: [rumi_ai_1_10/tests/test_api_routes.py, rumi_ai_1_10/tests/test_control_panel_handlers.py]
+  - method: DELETE
+    route: /api/panel/flows/{id}
+    source: core_control_panel.api_routes
+    manual_scenarios: [b5-delete-007, b5-delete-008]
+    automated_tests: [rumi_ai_1_10/tests/test_control_panel_handlers.py]
+  - method: GET
+    route: /api/panel/settings/profile
+    source: core_control_panel.api_routes
+    manual_scenarios: [ui-009, b5-put-001]
+    automated_tests: [rumi_ai_1_10/tests/test_control_panel_handlers.py]
+  - method: PUT
+    route: /api/panel/settings/profile
+    source: core_control_panel.api_routes
+    manual_scenarios: [b5-put-001, b5-put-002]
+    automated_tests: [rumi_ai_1_10/tests/test_control_panel_handlers.py]
+  - method: GET
+    route: /api/panel/version
+    source: core_control_panel.api_routes
+    manual_scenarios: [compat-006, b5-obs-005]
+    automated_tests: [rumi_ai_1_10/tests/test_control_panel_handlers.py]
+  - method: POST
+    route: /api/panel/packs/{id}/enable
+    source: core_control_panel.api_routes
+    manual_scenarios: [ops-011, b5-post-039]
+    automated_tests: [rumi_ai_1_10/tests/test_api_routes.py]
+  - method: POST
+    route: /api/panel/packs/{id}/disable
+    source: core_control_panel.api_routes
+    manual_scenarios: [ops-011, b5-post-041]
+    automated_tests: [rumi_ai_1_10/tests/test_api_routes.py]
+  - method: POST
+    route: /api/panel/kernel/restart
+    source: core_control_panel.api_routes
+    manual_scenarios: [rec-001, b5-obs-003]
+    automated_tests: [rumi_ai_1_10/tests/test_api_routes.py]
+
+  - method: GET
+    route: /api/setup/packs
+    source: core_setup.api_routes
+    manual_scenarios: [ops-001, b5-get-003]
+    automated_tests: [rumi_ai_1_10/tests/test_setup_handlers.py]
+  - method: GET
+    route: /api/setup/migration/status
+    source: core_setup.api_routes
+    manual_scenarios: [compat-006, ops-001]
+    automated_tests: [rumi_ai_1_10/tests/test_setup_handlers.py]
+  - method: POST
+    route: /api/setup/packs/install
+    source: core_setup.api_routes
+    manual_scenarios: [b5-post-050, ops-001]
+    automated_tests: [rumi_ai_1_10/tests/test_setup_handlers.py]
+  - method: POST
+    route: /api/setup/packs/{id}/grant-all-ok
+    source: core_setup.api_routes
+    manual_scenarios: [b4-al-001, b5-post-050]
+    automated_tests: [rumi_ai_1_10/tests/test_setup_handlers.py]
+  - method: POST
+    route: /api/setup/packs/{id}/revoke-all-ok
+    source: core_setup.api_routes
+    manual_scenarios: [b4-al-008, b5-post-050]
+    automated_tests: [rumi_ai_1_10/tests/test_setup_handlers.py]
+
+  - method: POST
+    route: /api/desktop/token
+    source: core_desktop_capability.api_routes
+    manual_scenarios: [b5-post-048, data-protect-002]
+    automated_tests: [rumi_ai_1_10/tests/test_wave15f_app.py]
+  - method: POST
+    route: /api/viewer/token
+    source: core_viewer_capability.api_routes
+    manual_scenarios: [b5-post-049, ui-010]
+    automated_tests: [rumi_ai_1_10/tests/test_wave15f_app.py]

@@ -1,0 +1,659 @@
+version: 1
+owner: quality-pack
+description: |
+  手動回帰シナリオ台帳の第5弾。Pack API の主要GET/POST/PUT/DELETE経路と
+  pre-auth境界、承認境界、ルート再読込、Flow実行、監査可観測性を重点化する。
+  ルート単位の「認証」「入力境界」「失敗時UX」「監査追跡」を固定化する。
+scenarios:
+  - id: b5-get-001
+    layer: security-permission
+    risk: health-route-regression
+    reproduce: "GET /health"
+    expected: "200 と health payload を返す"
+    triage: "app_lifecycle_manager 不在時フォールバックを確認"
+  - id: b5-get-002
+    layer: failure-path
+    risk: health-route-degraded
+    reproduce: "lifecycle manager を無効化して GET /health"
+    expected: "needs_setup を含む fail-soft payload"
+    triage: "health branch の fallback 内容を確認"
+  - id: b5-get-003
+    layer: security-permission
+    risk: setup-status-preauth
+    reproduce: "Authorization なしで GET /api/setup/status"
+    expected: "401 ではなく setup status を返す"
+    triage: "pre_auth_routes と do_GET pre-auth 分岐を確認"
+  - id: b5-get-004
+    layer: failure-path
+    risk: setup-status-missing-lifecycle
+    reproduce: "lifecycle manager なしで GET /api/setup/status"
+    expected: "needs_setup=true の安全応答"
+    triage: "check_setup_status fallback を確認"
+  - id: b5-get-005
+    layer: security-permission
+    risk: setup-oauth-start-preauth
+    reproduce: "Authorization なしで GET /api/setup/oauth/start"
+    expected: "認証なしで開始できる"
+    triage: "oauth_start pre-auth 経路を確認"
+  - id: b5-get-006
+    layer: failure-path
+    risk: setup-oauth-start-exception
+    reproduce: "oauth start 内部例外を発生"
+    expected: "500 safe error"
+    triage: "_log_internal_error(oauth_start) の記録を確認"
+  - id: b5-get-007
+    layer: security-permission
+    risk: callback-preauth
+    reproduce: "Authorization なしで GET /callback?code=x&state=y"
+    expected: "setup へ redirect"
+    triage: "callback pre-auth 分岐と redirect 処理を確認"
+  - id: b5-get-008
+    layer: failure-path
+    risk: callback-exception
+    reproduce: "callback 内部例外を発生"
+    expected: "/setup?error=internal_error へ redirect"
+    triage: "_oauth_send_redirect fallback を確認"
+  - id: b5-get-009
+    layer: security-permission
+    risk: packs-list-auth
+    reproduce: "Authorization なしで GET /api/packs"
+    expected: "401 Unauthorized"
+    triage: "_check_auth 分岐を確認"
+  - id: b5-get-010
+    layer: failure-path
+    risk: packs-status-invalid-pack-id
+    reproduce: "GET /api/packs/../../status"
+    expected: "400 Invalid pack_id"
+    triage: "_validate_pack_id を確認"
+  - id: b5-get-011
+    layer: failure-path
+    risk: packs-status-not-found
+    reproduce: "存在しない pack_id で GET /api/packs/{id}/status"
+    expected: "404 Pack not found"
+    triage: "_get_pack_status の not-found 経路を確認"
+  - id: b5-get-012
+    layer: security-permission
+    risk: packs-dependencies-invalid-id
+    reproduce: "GET /api/packs/%2e%2e/dependencies"
+    expected: "400 Invalid pack_id"
+    triage: "path parameter unquote 後検証を確認"
+  - id: b5-get-013
+    layer: failure-path
+    risk: runtime-available-exception
+    reproduce: "GET /api/runtime/available で内部例外"
+    expected: "500 safe error"
+    triage: "_log_internal_error(do_GET) の記録を確認"
+  - id: b5-get-014
+    layer: security-permission
+    risk: containers-list-auth
+    reproduce: "Authorization なしで GET /api/containers"
+    expected: "401"
+    triage: "認証必須経路であることを確認"
+  - id: b5-get-015
+    layer: security-permission
+    risk: privileges-list-auth
+    reproduce: "Authorization なしで GET /api/privileges"
+    expected: "401"
+    triage: "認証ガードを確認"
+  - id: b5-get-016
+    layer: failure-path
+    risk: docker-status-provider-down
+    reproduce: "docker status provider 停止状態で GET /api/docker/status"
+    expected: "失敗しても safe response"
+    triage: "_get_docker_status の失敗ハンドリングを確認"
+  - id: b5-get-017
+    layer: security-permission
+    risk: network-list-auth
+    reproduce: "Authorization なしで GET /api/network/list"
+    expected: "401"
+    triage: "network list の認証境界を確認"
+  - id: b5-get-018
+    layer: security-permission
+    risk: secrets-list-auth
+    reproduce: "Authorization なしで GET /api/secrets"
+    expected: "401"
+    triage: "secrets list が pre-auth でないことを確認"
+  - id: b5-get-019
+    layer: security-permission
+    risk: secret-grants-list-auth
+    reproduce: "Authorization なしで GET /api/secrets/grants"
+    expected: "401"
+    triage: "_check_auth の適用範囲を確認"
+  - id: b5-get-020
+    layer: failure-path
+    risk: secret-grants-get-invalid-pack-id
+    reproduce: "GET /api/secrets/grants/..%2f.."
+    expected: "400 Invalid pack_id"
+    triage: "pack_id validation を確認"
+  - id: b5-get-021
+    layer: failure-path
+    risk: secret-grants-get-not-found-shape
+    reproduce: "GET /api/secrets/grants/a/b"
+    expected: "404 Not found"
+    triage: "parts length 判定を確認"
+  - id: b5-get-022
+    layer: security-permission
+    risk: stores-list-auth
+    reproduce: "Authorization なしで GET /api/stores"
+    expected: "401"
+    triage: "stores list 認証境界を確認"
+  - id: b5-get-023
+    layer: security-permission
+    risk: stores-shared-auth
+    reproduce: "Authorization なしで GET /api/stores/shared"
+    expected: "401"
+    triage: "stores shared list 認証境界を確認"
+  - id: b5-get-024
+    layer: failure-path
+    risk: units-list-invalid-query
+    reproduce: "GET /api/units?store_id=%00"
+    expected: "安全に失敗または空結果"
+    triage: "_units_list query handling を確認"
+  - id: b5-get-025
+    layer: security-permission
+    risk: capability-blocked-auth
+    reproduce: "Authorization なしで GET /api/capability/blocked"
+    expected: "401"
+    triage: "capability blocked list 認証境界を確認"
+  - id: b5-get-026
+    layer: failure-path
+    risk: capability-grants-invalid-principal
+    reproduce: "GET /api/capability/grants?principal_id="
+    expected: "safe response または validation error"
+    triage: "_capability_grants_list 引数処理を確認"
+  - id: b5-get-027
+    layer: failure-path
+    risk: capability-requests-invalid-status
+    reproduce: "GET /api/capability/requests?status=unknown"
+    expected: "all 扱いまたは validation error"
+    triage: "status_filter の取り扱いを確認"
+  - id: b5-get-028
+    layer: security-permission
+    risk: pip-blocked-auth
+    reproduce: "Authorization なしで GET /api/pip/blocked"
+    expected: "401"
+    triage: "pip blocked list 認証境界を確認"
+  - id: b5-get-029
+    layer: failure-path
+    risk: pip-requests-invalid-status
+    reproduce: "GET /api/pip/requests?status=bad"
+    expected: "safe response"
+    triage: "_pip_list_requests status handling を確認"
+  - id: b5-get-030
+    layer: security-permission
+    risk: flows-list-auth
+    reproduce: "Authorization なしで GET /api/flows"
+    expected: "401"
+    triage: "flow list 認証境界を確認"
+  - id: b5-get-031
+    layer: security-permission
+    risk: routes-list-auth
+    reproduce: "Authorization なしで GET /api/routes"
+    expected: "401"
+    triage: "routes list 認証境界を確認"
+  - id: b5-get-032
+    layer: failure-path
+    risk: unknown-get-route
+    reproduce: "GET /api/unknown-route"
+    expected: "404 Not found"
+    triage: "unmatched GET fallback を確認"
+  - id: b5-get-033
+    layer: security-permission
+    risk: panel-dashboard-preauth
+    reproduce: "Authorization なしで GET /api/panel/dashboard"
+    expected: "core_control_panel pre-auth により到達"
+    triage: "pre_auth path_prefix /api/panel/ を確認"
+  - id: b5-get-034
+    layer: failure-path
+    risk: panel-flow-detail-invalid-id
+    reproduce: "GET /api/panel/flows/../../etc"
+    expected: "path param validation で拒否"
+    triage: "route_handlers path safety を確認"
+  - id: b5-get-035
+    layer: failure-path
+    risk: panel-route-template-miss
+    reproduce: "GET /api/panel/flows/a/b"
+    expected: "template route 非一致で 404"
+    triage: "_compile_template_path マッチ条件を確認"
+
+  - id: b5-post-001
+    layer: security-permission
+    risk: setup-complete-preauth
+    reproduce: "Authorization なしで POST /api/setup/complete"
+    expected: "pre-auth 経由で setup 完了処理へ到達"
+    triage: "do_POST pre-auth 分岐を確認"
+  - id: b5-post-002
+    layer: failure-path
+    risk: setup-complete-invalid-json
+    reproduce: "POST /api/setup/complete に不正JSON"
+    expected: "400 Invalid JSON in request body"
+    triage: "_parse_body のエラー分岐を確認"
+  - id: b5-post-003
+    layer: failure-path
+    risk: setup-complete-missing-lifecycle
+    reproduce: "lifecycle manager なしで POST /api/setup/complete"
+    expected: "500 Lifecycle manager not initialized"
+    triage: "_alm None 分岐を確認"
+  - id: b5-post-004
+    layer: security-permission
+    risk: network-grant-auth
+    reproduce: "Authorization なしで POST /api/network/grant"
+    expected: "401"
+    triage: "network grant 認証境界を確認"
+  - id: b5-post-005
+    layer: failure-path
+    risk: network-grant-missing-pack-id
+    reproduce: "POST /api/network/grant with empty pack_id"
+    expected: "400 Missing pack_id"
+    triage: "入力必須チェックを確認"
+  - id: b5-post-006
+    layer: failure-path
+    risk: network-grant-empty-scope
+    reproduce: "allowed_domains と allowed_ports を空で grant"
+    expected: "400 Must specify allowed_domains or allowed_ports"
+    triage: "scope 必須条件を確認"
+  - id: b5-post-007
+    layer: failure-path
+    risk: network-grant-invalid-pack-id
+    reproduce: "pack_id=../../evil で POST /api/network/grant"
+    expected: "400 Invalid pack_id"
+    triage: "pack_id validation を確認"
+  - id: b5-post-008
+    layer: security-permission
+    risk: network-revoke-auth
+    reproduce: "Authorization なしで POST /api/network/revoke"
+    expected: "401"
+    triage: "network revoke 認証境界を確認"
+  - id: b5-post-009
+    layer: failure-path
+    risk: network-revoke-missing-pack-id
+    reproduce: "pack_idなしで POST /api/network/revoke"
+    expected: "400 Missing pack_id"
+    triage: "入力必須チェックを確認"
+  - id: b5-post-010
+    layer: security-permission
+    risk: network-check-auth
+    reproduce: "Authorization なしで POST /api/network/check"
+    expected: "401"
+    triage: "network check 認証境界を確認"
+  - id: b5-post-011
+    layer: failure-path
+    risk: network-check-missing-fields
+    reproduce: "POST /api/network/check with missing domain/port"
+    expected: "400 Missing pack_id, domain, or port"
+    triage: "入力必須チェックを確認"
+  - id: b5-post-012
+    layer: failure-path
+    risk: packs-scan-auth
+    reproduce: "Authorization なしで POST /api/packs/scan"
+    expected: "401"
+    triage: "scan 認証境界を確認"
+  - id: b5-post-013
+    layer: failure-path
+    risk: packs-import-missing-path
+    reproduce: "POST /api/packs/import with empty path"
+    expected: "400 Missing 'path'"
+    triage: "path 必須チェックを確認"
+  - id: b5-post-014
+    layer: security-permission
+    risk: packs-import-path-traversal
+    reproduce: "ecosystem 外パスで POST /api/packs/import"
+    expected: "400 Path must be within ecosystem directory"
+    triage: "relative_to ガードを確認"
+  - id: b5-post-015
+    layer: failure-path
+    risk: packs-apply-missing-staging-id
+    reproduce: "POST /api/packs/apply with empty staging_id"
+    expected: "400 Missing 'staging_id'"
+    triage: "staging_id 必須チェックを確認"
+  - id: b5-post-016
+    layer: failure-path
+    risk: packs-apply-invalid-staging-id
+    reproduce: "POST /api/packs/apply staging_id=../x"
+    expected: "400 Invalid staging_id"
+    triage: "_is_safe_id を確認"
+  - id: b5-post-017
+    layer: security-permission
+    risk: secrets-set-auth
+    reproduce: "Authorization なしで POST /api/secrets/set"
+    expected: "401"
+    triage: "secrets set 認証境界を確認"
+  - id: b5-post-018
+    layer: security-permission
+    risk: secrets-delete-auth
+    reproduce: "Authorization なしで POST /api/secrets/delete"
+    expected: "401"
+    triage: "secrets delete 認証境界を確認"
+  - id: b5-post-019
+    layer: security-permission
+    risk: secret-grant-post-auth
+    reproduce: "Authorization なしで POST /api/secrets/grants/{pack_id}"
+    expected: "401 (connection reset なし)"
+    triage: "_drain_request_body の有効性を確認"
+  - id: b5-post-020
+    layer: failure-path
+    risk: secret-grant-post-invalid-pack-id
+    reproduce: "POST /api/secrets/grants/../evil"
+    expected: "400 Invalid pack_id"
+    triage: "pack_id validation を確認"
+  - id: b5-post-021
+    layer: failure-path
+    risk: secret-grant-post-not-found-shape
+    reproduce: "POST /api/secrets/grants/a/b"
+    expected: "404 Not found"
+    triage: "parts length 判定を確認"
+  - id: b5-post-022
+    layer: security-permission
+    risk: stores-create-auth
+    reproduce: "Authorization なしで POST /api/stores/create"
+    expected: "401"
+    triage: "stores create 認証境界を確認"
+  - id: b5-post-023
+    layer: security-permission
+    risk: units-publish-auth
+    reproduce: "Authorization なしで POST /api/units/publish"
+    expected: "401"
+    triage: "units publish 認証境界を確認"
+  - id: b5-post-024
+    layer: security-permission
+    risk: units-execute-auth
+    reproduce: "Authorization なしで POST /api/units/execute"
+    expected: "401"
+    triage: "units execute 認証境界を確認"
+  - id: b5-post-025
+    layer: failure-path
+    risk: units-execute-denial-surface
+    reproduce: "grantなしで POST /api/units/execute"
+    expected: "403 approval_denied/grant_denied/trust_denied"
+    triage: "status_code 分岐を確認"
+  - id: b5-post-026
+    layer: security-permission
+    risk: pip-scan-auth
+    reproduce: "Authorization なしで POST /api/pip/candidates/scan"
+    expected: "401"
+    triage: "pip scan 認証境界を確認"
+  - id: b5-post-027
+    layer: failure-path
+    risk: pip-approve-invalid-candidate
+    reproduce: "POST /api/pip/requests/../approve"
+    expected: "400 Invalid candidate_key"
+    triage: "_extract_capability_key と _is_safe_id を確認"
+  - id: b5-post-028
+    layer: failure-path
+    risk: pip-reject-invalid-candidate
+    reproduce: "POST /api/pip/requests/../reject"
+    expected: "400 Invalid candidate_key"
+    triage: "candidate_key バリデーションを確認"
+  - id: b5-post-029
+    layer: failure-path
+    risk: pip-unblock-invalid-candidate
+    reproduce: "POST /api/pip/blocked/../unblock"
+    expected: "400 Invalid candidate_key"
+    triage: "candidate_key バリデーションを確認"
+  - id: b5-post-030
+    layer: security-permission
+    risk: capability-scan-auth
+    reproduce: "Authorization なしで POST /api/capability/candidates/scan"
+    expected: "401"
+    triage: "capability scan 認証境界を確認"
+  - id: b5-post-031
+    layer: failure-path
+    risk: capability-approve-invalid-candidate
+    reproduce: "POST /api/capability/requests/../approve"
+    expected: "400 Invalid candidate_key"
+    triage: "candidate_key バリデーションを確認"
+  - id: b5-post-032
+    layer: failure-path
+    risk: capability-reject-invalid-candidate
+    reproduce: "POST /api/capability/requests/../reject"
+    expected: "400 Invalid candidate_key"
+    triage: "candidate_key バリデーションを確認"
+  - id: b5-post-033
+    layer: failure-path
+    risk: capability-unblock-invalid-candidate
+    reproduce: "POST /api/capability/blocked/../unblock"
+    expected: "400 Invalid candidate_key"
+    triage: "candidate_key バリデーションを確認"
+  - id: b5-post-034
+    layer: failure-path
+    risk: capability-grants-batch-shape
+    reproduce: "POST /api/capability/grants/batch with invalid grants payload"
+    expected: "400 Batch grant failed"
+    triage: "_capability_grants_batch 失敗応答を確認"
+  - id: b5-post-035
+    layer: failure-path
+    risk: stores-shared-approve-missing-fields
+    reproduce: "POST /api/stores/shared/approve with missing ids"
+    expected: "400 Approve failed"
+    triage: "provider/consumer/store の入力検証を確認"
+  - id: b5-post-036
+    layer: failure-path
+    risk: stores-shared-revoke-missing-fields
+    reproduce: "POST /api/stores/shared/revoke with missing ids"
+    expected: "400 Revoke failed"
+    triage: "provider/consumer/store の入力検証を確認"
+  - id: b5-post-037
+    layer: failure-path
+    risk: capability-grant-missing-ids
+    reproduce: "POST /api/capability/grants/grant with missing principal_id"
+    expected: "400 Missing principal_id or permission_id"
+    triage: "必須フィールド検証を確認"
+  - id: b5-post-038
+    layer: failure-path
+    risk: capability-revoke-missing-ids
+    reproduce: "POST /api/capability/grants/revoke with missing permission_id"
+    expected: "400 Missing principal_id or permission_id"
+    triage: "必須フィールド検証を確認"
+  - id: b5-post-039
+    layer: failure-path
+    risk: pack-approve-invalid-id
+    reproduce: "POST /api/packs/../approve"
+    expected: "400 Invalid pack_id"
+    triage: "pack_id validation を確認"
+  - id: b5-post-040
+    layer: failure-path
+    risk: pack-approve-rule-invalid-id
+    reproduce: "POST /api/packs/../approve-rule"
+    expected: "400 Invalid pack_id"
+    triage: "pack_id validation を確認"
+  - id: b5-post-041
+    layer: failure-path
+    risk: pack-reject-invalid-id
+    reproduce: "POST /api/packs/../reject"
+    expected: "400 Invalid pack_id"
+    triage: "pack_id validation を確認"
+  - id: b5-post-042
+    layer: failure-path
+    risk: container-start-invalid-id
+    reproduce: "POST /api/containers/../start"
+    expected: "400 Invalid pack_id"
+    triage: "pack_id validation を確認"
+  - id: b5-post-043
+    layer: failure-path
+    risk: container-stop-invalid-id
+    reproduce: "POST /api/containers/../stop"
+    expected: "400 Invalid pack_id"
+    triage: "pack_id validation を確認"
+  - id: b5-post-044
+    layer: failure-path
+    risk: privilege-grant-invalid-privilege-id
+    reproduce: "POST /api/privileges/{pack}/grant/../../x"
+    expected: "400 Invalid privilege_id"
+    triage: "_is_safe_id(privilege_id) を確認"
+  - id: b5-post-045
+    layer: failure-path
+    risk: privilege-execute-invalid-privilege-id
+    reproduce: "POST /api/privileges/{pack}/execute/../../x"
+    expected: "400 Invalid privilege_id"
+    triage: "_is_safe_id(privilege_id) を確認"
+  - id: b5-post-046
+    layer: failure-path
+    risk: routes-reload-auth
+    reproduce: "Authorization なしで POST /api/routes/reload"
+    expected: "401"
+    triage: "route reload 認証境界を確認"
+  - id: b5-post-047
+    layer: failure-path
+    risk: flow-run-invalid-flow-id
+    reproduce: "POST /api/flows/../../run"
+    expected: "400 Invalid flow_id"
+    triage: "flow_id validation を確認"
+  - id: b5-post-048
+    layer: security-permission
+    risk: desktop-token-auth
+    reproduce: "Authorization なしで POST /api/desktop/token"
+    expected: "401 または route policyに従う拒否"
+    triage: "api_routes dispatch と認証境界を確認"
+  - id: b5-post-049
+    layer: security-permission
+    risk: viewer-token-auth
+    reproduce: "Authorization なしで POST /api/viewer/token"
+    expected: "401 または route policyに従う拒否"
+    triage: "api_routes dispatch と認証境界を確認"
+  - id: b5-post-050
+    layer: security-permission
+    risk: setup-install-pack-preauth
+    reproduce: "Authorization なしで POST /api/setup/packs/install"
+    expected: "pre-auth 外なら 401"
+    triage: "setup api_routes の auth_required を確認"
+
+  - id: b5-put-001
+    layer: security-permission
+    risk: put-auth-required
+    reproduce: "Authorization なしで PUT /api/panel/settings/profile"
+    expected: "panel pre-auth 設定に従った結果"
+    triage: "pre_auth_routes PUT path_prefix を確認"
+  - id: b5-put-002
+    layer: failure-path
+    risk: put-invalid-json
+    reproduce: "PUT /api/panel/settings/profile with malformed JSON"
+    expected: "400 Invalid JSON in request body"
+    triage: "_parse_body エラー分岐を確認"
+  - id: b5-put-003
+    layer: failure-path
+    risk: put-unknown-route
+    reproduce: "PUT /api/panel/unknown/path"
+    expected: "404 Not found"
+    triage: "unmatched PUT fallback を確認"
+  - id: b5-put-004
+    layer: failure-path
+    risk: put-flow-invalid-id
+    reproduce: "PUT /api/panel/flows/../../x"
+    expected: "path param validation で拒否"
+    triage: "template route handler の path safety を確認"
+  - id: b5-put-005
+    layer: observability
+    risk: put-internal-error-logging
+    reproduce: "PUT handler 内部例外を発生"
+    expected: "500 safe error + internal log"
+    triage: "_log_internal_error(do_PUT) を確認"
+
+  - id: b5-delete-001
+    layer: security-permission
+    risk: delete-auth-required
+    reproduce: "Authorization なしで DELETE /api/packs/{id}"
+    expected: "401（pre-auth でなければ）"
+    triage: "DELETE 認証境界を確認"
+  - id: b5-delete-002
+    layer: failure-path
+    risk: delete-secret-grant-invalid-pack-id
+    reproduce: "DELETE /api/secrets/grants/../key"
+    expected: "400 Invalid pack_id"
+    triage: "pack_id validation を確認"
+  - id: b5-delete-003
+    layer: failure-path
+    risk: delete-secret-grant-not-found-shape
+    reproduce: "DELETE /api/secrets/grants/a/b/c"
+    expected: "404 Not found"
+    triage: "parts length 判定を確認"
+  - id: b5-delete-004
+    layer: failure-path
+    risk: delete-container-invalid-pack-id
+    reproduce: "DELETE /api/containers/../x"
+    expected: "400 Invalid pack_id"
+    triage: "pack_id validation を確認"
+  - id: b5-delete-005
+    layer: failure-path
+    risk: delete-pack-invalid-pack-id
+    reproduce: "DELETE /api/packs/../x"
+    expected: "400 Invalid pack_id"
+    triage: "pack_id validation を確認"
+  - id: b5-delete-006
+    layer: failure-path
+    risk: delete-pack-route-shape
+    reproduce: "DELETE /api/packs/a/b"
+    expected: "404 Not found"
+    triage: "DELETE pack route segment length 判定を確認"
+  - id: b5-delete-007
+    layer: failure-path
+    risk: delete-unknown-route
+    reproduce: "DELETE /api/unknown/delete"
+    expected: "404 Not found"
+    triage: "unmatched DELETE fallback を確認"
+  - id: b5-delete-008
+    layer: observability
+    risk: delete-internal-error-logging
+    reproduce: "DELETE handler 内部例外を発生"
+    expected: "500 safe error + internal log"
+    triage: "_log_internal_error(do_DELETE) を確認"
+
+  - id: b5-obs-001
+    layer: observability
+    risk: unauthorized-401-log-presence
+    reproduce: "401 を返す複数APIを実行後にログ確認"
+    expected: "401の層別切り分けが可能"
+    triage: "quality logs と APIログ粒度を確認"
+  - id: b5-obs-002
+    layer: observability
+    risk: malformed-json-log-presence
+    reproduce: "不正JSONで400を複数発生"
+    expected: "失敗理由の追跡が可能"
+    triage: "error message と internal log の整合を確認"
+  - id: b5-obs-003
+    layer: observability
+    risk: route-reload-audit-gap
+    reproduce: "POST /api/routes/reload 実行後に監査記録確認"
+    expected: "再読込結果が追跡可能"
+    triage: "reload経路の記録有無を確認"
+  - id: b5-obs-004
+    layer: observability
+    risk: flow-run-error-traceability
+    reproduce: "POST /api/flows/{id}/run 失敗時のログ確認"
+    expected: "原因特定可能な粒度"
+    triage: "flow handler log context を確認"
+  - id: b5-obs-005
+    layer: observability
+    risk: panel-route-404-traceability
+    reproduce: "存在しない /api/panel/* へアクセス"
+    expected: "404が追跡可能"
+    triage: "unmatched path debug log を確認"
+  - id: b5-obs-006
+    layer: observability
+    risk: rate-limit-visibility
+    reproduce: "短時間大量アクセスで rate limit を誘発"
+    expected: "429 判定が追跡可能"
+    triage: "_RateLimiter 判定とログを確認"
+  - id: b5-obs-007
+    layer: observability
+    risk: auth-bypass-attempt-visibility
+    reproduce: "pre-auth 以外の経路へ認証なしアクセス"
+    expected: "Unauthorized が明示される"
+    triage: "認証失敗ログの粒度を確認"
+  - id: b5-obs-008
+    layer: observability
+    risk: large-body-reject-visibility
+    reproduce: "上限超過ボディ送信で413"
+    expected: "Request body too large を確認"
+    triage: "_read_raw_body 境界判定ログを確認"
+  - id: b5-obs-009
+    layer: observability
+    risk: content-length-invalid-visibility
+    reproduce: "不正 Content-Length で400"
+    expected: "Invalid Content-Length header を確認"
+    triage: "ヘッダ解析失敗時の応答を確認"
+  - id: b5-obs-010
+    layer: observability
+    risk: post-unauthorized-drain-stability
+    reproduce: "未認証POSTを連続実行し接続安定性確認"
+    expected: "ConnectionResetError なしで 401"
+    triage: "_drain_request_body と socket 挙動を確認"

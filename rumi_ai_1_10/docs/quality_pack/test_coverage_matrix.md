@@ -6,7 +6,7 @@ rumi_ai の主要テストを運用観点で分類し、どの境界をどこで
 |---|---|---|
 | unit | `tests/test_unit_gate.py` ほか | 低レベル関数や境界条件の壊れを早期検知 |
 | integration | `tests/test_route_handlers.py`, `tests/test_egress_proxy.py` | 複数モジュール連携とAPI動作の整合を検証 |
-| contract | `tests/test_entrypoint_contracts.py`, `tests/test_claude_quality_pack_contract.py`, `tests/test_quality_debug_playbook_contract.py`, `tests/test_manual_regression_scenarios_contract.py` | README/CI/entrypoint/デバッグ手順/手動回帰台帳の契約破壊を検知 |
+| contract | `tests/test_entrypoint_contracts.py`, `tests/test_claude_quality_pack_contract.py`, `tests/test_quality_debug_playbook_contract.py`, `tests/test_manual_regression_scenarios_contract.py`, `tests/test_api_route_coverage_matrix_contract.py` | README/CI/entrypoint/デバッグ手順/手動回帰台帳/API route網羅契約の破壊を検知 |
 | regression | `tests/test_wave*.py` 群 | 過去修正の再発を抑止 |
 | CLI/backend | `tests/test_health.py`, `tests/test_phase_a_health.py` | 起動・ヘルス・CLI経路の運用継続性を検証 |
 | frontend/UI | `tests/test_claude_quality_pack_contract.py`, `frontend lint/build` 実行 | 設定境界・ビルド破綻・型崩れの回帰検知 |
