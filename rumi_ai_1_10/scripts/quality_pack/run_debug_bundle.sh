@@ -10,7 +10,12 @@ python -m pytest tests/test_entrypoint_contracts.py -v
 echo
 echo "==> [debug] package quality contracts"
 cd "$ROOT_DIR/rumi_ai_1_10"
-python -m pytest tests/test_claude_quality_pack_contract.py -v
+python -m pytest \
+  tests/test_claude_quality_pack_contract.py \
+  tests/test_quality_debug_playbook_contract.py \
+  tests/test_manual_regression_scenarios_contract.py \
+  tests/test_api_route_coverage_matrix_contract.py \
+  -v
 
 echo
 echo "==> [debug] frontend lint/build"

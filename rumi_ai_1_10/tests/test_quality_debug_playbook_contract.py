@@ -48,6 +48,9 @@ def test_debug_bundle_script_covers_expected_gates():
         [
             "tests/test_entrypoint_contracts.py",
             "tests/test_claude_quality_pack_contract.py",
+            "tests/test_quality_debug_playbook_contract.py",
+            "tests/test_manual_regression_scenarios_contract.py",
+            "tests/test_api_route_coverage_matrix_contract.py",
             "npm run lint",
             "npm run build",
             "cargo test",
