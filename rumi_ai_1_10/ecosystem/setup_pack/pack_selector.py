@@ -34,38 +34,61 @@ class PackCandidate:
 
 
 class PackSelector:
-    def __init__(self, ecosystem_dir: Optional[Path] = None) -> None:
-        self._ecosystem_dir = ecosystem_dir
+    def __init__(self, setup_pack_dir: Optional[Path] = None) -> None:
+        self._setup_pack_dir = setup_pack_dir
         self._audit_log: List[Dict[str, Any]] = []
+
+    def _resolve_setup_pack_root(self) -> Optional[Path]:
+        if not self._setup_pack_dir:
+            return None
+        if not self._setup_pack_dir.exists():
+            return None
+        # 互換: ecosystem/ を渡された場合は ecosystem/setup_pack を優先
+        nested = self._setup_pack_dir / "setup_pack"
+        if nested.is_dir():
+            return nested
+        return self._setup_pack_dir
+
+    @staticmethod
+    def _read_pack_identity(ecosystem_root: Path, target_pack_id: str) -> str:
+        if not target_pack_id:
+            return ""
+        ecosystem_json = ecosystem_root / target_pack_id / "ecosystem.json"
+        if not ecosystem_json.is_file():
+            return ""
+        try:
+            data = json.loads(ecosystem_json.read_text(encoding="utf-8"))
+        except Exception:
+            return ""
+        return str(data.get("pack_identity", ""))
 
     def scan_candidates(self) -> List[PackCandidate]:
         candidates: List[PackCandidate] = []
-        if not self._ecosystem_dir or not self._ecosystem_dir.exists():
+        setup_pack_root = self._resolve_setup_pack_root()
+        if setup_pack_root is None:
             return candidates
-        for child in sorted(self._ecosystem_dir.iterdir()):
-            if not child.is_dir() or child.name.startswith("."):
-                continue
-            eco_json = child / "ecosystem.json"
-            if not eco_json.is_file():
-                continue
+        ecosystem_root = setup_pack_root.parent
+        for pack_json in sorted(setup_pack_root.glob("*/pack.json")):
             try:
-                data = json.loads(eco_json.read_text(encoding="utf-8"))
+                data = json.loads(pack_json.read_text(encoding="utf-8"))
             except Exception:
                 continue
-            identity = str(data.get("pack_identity", ""))
+            setup_pack_id = str(data.get("pack_id") or pack_json.parent.name)
+            target_pack_id = str(data.get("target_pack_id") or setup_pack_id)
+            identity = self._read_pack_identity(ecosystem_root, target_pack_id)
             candidates.append(
                 PackCandidate(
-                    pack_id=str(data.get("pack_id", child.name)),
+                    pack_id=setup_pack_id,
                     pack_identity=identity,
-                    display_name=str(data.get("display_name", data.get("pack_id", child.name))),
+                    display_name=str(data.get("display_name", setup_pack_id)),
                     description=str(data.get("description", "")),
                     version=str(data.get("version", "")),
                     recommended=bool(data.get("recommended", False)),
-                    risk_level=str(data.get("risk_level", "normal")),
+                    risk_level=str(data.get("risk_level", "medium")),
                     all_ok_eligible=bool(
                         data.get(
-                            "all_ok_eligible",
-                            data.get("supports_all_ok", False),
+                            "supports_all_ok",
+                            data.get("all_ok_eligible", False),
                         )
                     ),
                 )

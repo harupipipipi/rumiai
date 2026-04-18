@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 from typing import Dict, Any, Optional, Callable
 
+from core_runtime.setup_pack import get_setup_pack_manager
 from .state import get_state
 
 
@@ -59,6 +60,24 @@ class Initializer:
                     errors.extend(default_result["errors"])
                 if default_result.get("skipped"):
                     self.state.log_info("setup pack の準備をスキップしました")
+                else:
+                    selected_setup_pack_ids = list(default_result.get("selected_setup_pack_ids") or [])
+                    if selected_setup_pack_ids:
+                        install_result = get_setup_pack_manager().install(selected_setup_pack_ids)
+                        default_result["install_result"] = install_result
+                        if install_result.get("error") or not install_result.get("installed"):
+                            errors.append({
+                                "stage": "setup_pack_install",
+                                "selected_setup_pack_ids": selected_setup_pack_ids,
+                                "result": install_result,
+                            })
+                        else:
+                            self.state.log_success(
+                                "setup pack をインストールしました",
+                                f"対象: {', '.join(selected_setup_pack_ids)}"
+                            )
+                    else:
+                        self.state.log_info("選択された setup pack がないため install をスキップしました")
             
             summary = {
                 "success": len(errors) == 0,
@@ -192,7 +211,15 @@ class Initializer:
                 "setup_pack/ が見つかりません",
                 f"パス: {setup_pack_root}"
             )
-            return {"created": [], "errors": [], "skipped": True}
+            return {
+                "created": [],
+                "errors": [],
+                "skipped": True,
+                "available": [],
+                "available_setup_pack_ids": [],
+                "selected_setup_pack_ids": [],
+                "missing": [],
+            }
 
         available = []
         available_setup_pack_ids = []
@@ -229,7 +256,15 @@ class Initializer:
                 )
 
         if not available:
-            return {"created": [], "errors": [], "skipped": True, "missing": missing}
+            return {
+                "created": [],
+                "errors": [],
+                "skipped": True,
+                "available": [],
+                "available_setup_pack_ids": [],
+                "selected_setup_pack_ids": [],
+                "missing": missing,
+            }
 
         seen_setup_pack_ids = set()
         normalized_setup_pack_ids = []
@@ -239,26 +274,24 @@ class Initializer:
             normalized_setup_pack_ids.append(setup_pack_id)
             seen_setup_pack_ids.add(setup_pack_id)
 
+        selected_setup_pack_ids = list(normalized_setup_pack_ids)
         if confirm_callback is not None:
-            setup_pack_label = ", ".join(normalized_setup_pack_ids) or ", ".join(available)
-            should_include = confirm_callback(
-                f"setup pack ({setup_pack_label}) を初期セットアップに含めますか？"
-            )
-            if not should_include:
-                return {
-                    "created": [],
-                    "errors": [],
-                    "skipped": True,
-                    "available": available,
-                    "available_setup_pack_ids": normalized_setup_pack_ids,
-                    "missing": missing,
-                }
+            selected_setup_pack_ids = []
+            for setup_pack_id in normalized_setup_pack_ids:
+                should_include = confirm_callback(
+                    f"setup pack ({setup_pack_id}) を初期セットアップに含めますか？"
+                )
+                if should_include:
+                    selected_setup_pack_ids.append(setup_pack_id)
+                else:
+                    self.state.log_info(f"setup pack をスキップ: {setup_pack_id}")
 
         return {
             "created": [],
             "errors": [],
-            "skipped": False,
+            "skipped": len(selected_setup_pack_ids) == 0,
             "available": available,
             "available_setup_pack_ids": normalized_setup_pack_ids,
+            "selected_setup_pack_ids": selected_setup_pack_ids,
             "missing": missing,
         }

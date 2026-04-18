@@ -281,11 +281,10 @@ class SetupPackManager:
             loc.pack_id: loc for loc in discover_pack_locations()
         }
 
-        requested = set(requested_ids)
         ordered_definitions = [
             definitions[pack_id]
-            for pack_id in sorted(definitions)
-            if pack_id in requested
+            for pack_id in requested_ids
+            if pack_id in definitions
         ]
         errors: List[Dict[str, Any]] = []
 
@@ -326,20 +325,32 @@ class SetupPackManager:
 
         installed_definitions: List[SetupPackDefinition] = []
         granted_targets: List[str] = []
+        skipped_all_ok_setup_pack_ids: List[str] = []
         for definition in installable_definitions:
-            grant_result = self._grant_all_ok_for_definition(definition)
-            if not grant_result.get("granted"):
-                errors.append({
-                    "setup_pack_id": definition.pack_id,
-                    "target_pack_id": definition.target_pack_id,
-                    "error": "Failed to grant all OK permissions",
-                    "reason": "all_ok_grant_failed",
-                    "grant": grant_result,
-                })
-                continue
+            if definition.supports_all_ok:
+                grant_result = self._grant_all_ok_for_definition(definition)
+                if not grant_result.get("granted"):
+                    errors.append({
+                        "setup_pack_id": definition.pack_id,
+                        "target_pack_id": definition.target_pack_id,
+                        "error": "Failed to grant all OK permissions",
+                        "reason": "all_ok_grant_failed",
+                        "grant": grant_result,
+                    })
+                    continue
+                if definition.target_pack_id not in granted_targets:
+                    granted_targets.append(definition.target_pack_id)
+            else:
+                skipped_all_ok_setup_pack_ids.append(definition.pack_id)
+                self._log_permission_event(
+                    "grant_all_ok",
+                    False,
+                    principal_id=definition.target_pack_id,
+                    permission_id="*",
+                    details={"setup_pack_id": definition.pack_id},
+                    error="unsupported_all_ok",
+                )
             installed_definitions.append(definition)
-            if definition.target_pack_id not in granted_targets:
-                granted_targets.append(definition.target_pack_id)
             self._approve_target_pack(definition.target_pack_id)
 
         if not installed_definitions:
@@ -347,7 +358,10 @@ class SetupPackManager:
                 "success": False,
                 "installed": False,
                 "installed_setup_pack_ids": [],
+                "installed_target_pack_ids": [],
+                "installed_setup_target_map": {},
                 "granted_all_ok_target_pack_ids": [],
+                "skipped_all_ok_setup_pack_ids": [],
                 "active_setup_pack_id": None,
                 "active_target_pack_id": None,
                 "selection": {},
@@ -383,10 +397,15 @@ class SetupPackManager:
         return {
             "success": not errors,
             "installed": True,
-            "setup_pack_id": active_definition.pack_id,
-            "target_pack_id": active_definition.target_pack_id,
             "installed_setup_pack_ids": [definition.pack_id for definition in installed_definitions],
+            "installed_target_pack_ids": [
+                definition.target_pack_id for definition in installed_definitions
+            ],
+            "installed_setup_target_map": {
+                definition.pack_id: definition.target_pack_id for definition in installed_definitions
+            },
             "granted_all_ok_target_pack_ids": granted_targets,
+            "skipped_all_ok_setup_pack_ids": skipped_all_ok_setup_pack_ids,
             "active_setup_pack_id": active_definition.pack_id,
             "active_target_pack_id": active_definition.target_pack_id,
             "active_pack_identity": active_pack_identity,
@@ -407,6 +426,20 @@ class SetupPackManager:
                 error="unknown_setup_pack",
             )
             return {"error": f"Unknown setup_pack: {setup_pack_id}", "status_code": 404}
+        if not definition.supports_all_ok:
+            self._log_permission_event(
+                "grant_all_ok",
+                False,
+                principal_id=definition.target_pack_id,
+                permission_id="*",
+                details={"setup_pack_id": setup_pack_id},
+                error="unsupported_all_ok",
+            )
+            return {
+                "error": f"setup_pack does not support all_ok: {setup_pack_id}",
+                "status_code": 400,
+                "reason": "unsupported_all_ok",
+            }
         return self._grant_all_ok_for_definition(definition)
 
     def revoke_all_ok(self, setup_pack_id: str) -> Dict[str, Any]:
@@ -422,6 +455,20 @@ class SetupPackManager:
                 error="unknown_setup_pack",
             )
             return {"error": f"Unknown setup_pack: {setup_pack_id}", "status_code": 404}
+        if not definition.supports_all_ok:
+            self._log_permission_event(
+                "revoke_all_ok",
+                False,
+                principal_id=definition.target_pack_id,
+                permission_id="*",
+                details={"setup_pack_id": setup_pack_id},
+                error="unsupported_all_ok",
+            )
+            return {
+                "error": f"setup_pack does not support all_ok: {setup_pack_id}",
+                "status_code": 400,
+                "reason": "unsupported_all_ok",
+            }
         from .capability_grant_manager import get_capability_grant_manager
 
         gm = get_capability_grant_manager()

@@ -136,9 +136,12 @@ class TestSetupPackManager(unittest.TestCase):
                 result = manager.install("defaultspack")
 
             self.assertTrue(result["success"])
-            self.assertEqual(result["setup_pack_id"], "defaultspack")
+            self.assertEqual(result["active_setup_pack_id"], "defaultspack")
             self.assertEqual(result["installed_setup_pack_ids"], ["defaultspack"])
+            self.assertEqual(result["installed_target_pack_ids"], ["defaultspack"])
+            self.assertEqual(result["installed_setup_target_map"], {"defaultspack": "defaultspack"})
             self.assertEqual(result["granted_all_ok_target_pack_ids"], ["defaultspack"])
+            self.assertEqual(result["skipped_all_ok_setup_pack_ids"], [])
             self.assertEqual(fake_active.active_pack_identity, "rumi:ecosystem/defaultspack")
             self.assertEqual(len(fake_grants.batch_calls), 1)
 
@@ -149,7 +152,7 @@ class TestSetupPackManager(unittest.TestCase):
             self.assertEqual(listed["selected_setup_pack_ids"], ["defaultspack"])
             self.assertTrue(listed["packs"][0]["selected"])
 
-    def test_multiple_install_grants_all_checked_setup_packs_even_without_support_flag(self):
+    def test_multiple_install_skips_all_ok_for_unsupported_setup_pack(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             root = base / "setup_pack"
@@ -169,12 +172,15 @@ class TestSetupPackManager(unittest.TestCase):
                 result = manager.install(["otherpack", "defaultspack"])
 
             self.assertTrue(result["success"])
-            self.assertEqual(result["installed_setup_pack_ids"], ["defaultspack", "otherpack"])
+            self.assertEqual(result["installed_setup_pack_ids"], ["otherpack", "defaultspack"])
+            self.assertEqual(result["installed_target_pack_ids"], ["otherpack", "defaultspack"])
             self.assertEqual(result["active_setup_pack_id"], "defaultspack")
             self.assertEqual(result["active_target_pack_id"], "defaultspack")
-            self.assertEqual(len(fake_grants.batch_calls), 2)
+            self.assertEqual(result["granted_all_ok_target_pack_ids"], ["defaultspack"])
+            self.assertEqual(result["skipped_all_ok_setup_pack_ids"], ["otherpack"])
+            self.assertEqual(len(fake_grants.batch_calls), 1)
             principals = [call[0]["principal_id"] for call in fake_grants.batch_calls]
-            self.assertEqual(principals, ["defaultspack", "otherpack"])
+            self.assertEqual(principals, ["defaultspack"])
 
     def test_recommended_selected_pack_becomes_active(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -219,10 +225,10 @@ class TestSetupPackManager(unittest.TestCase):
                 result = manager.install(["beta", "alpha"])
 
             self.assertTrue(result["success"])
-            self.assertEqual(result["active_setup_pack_id"], "alpha")
-            self.assertEqual(fake_active.active_pack_identity, "rumi:ecosystem/alpha")
+            self.assertEqual(result["active_setup_pack_id"], "beta")
+            self.assertEqual(fake_active.active_pack_identity, "rumi:ecosystem/beta")
 
-    def test_grant_and_revoke_all_ok_are_generic_for_setup_pack_entries(self):
+    def test_grant_and_revoke_all_ok_reject_unsupported_setup_pack_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             root = base / "setup_pack"
@@ -237,10 +243,12 @@ class TestSetupPackManager(unittest.TestCase):
                 granted = manager.grant_all_ok("otherpack")
                 revoked = manager.revoke_all_ok("otherpack")
 
-            self.assertTrue(granted["granted"])
-            self.assertEqual(granted["principal_id"], "otherpack")
-            self.assertTrue(revoked["revoked"])
-            self.assertGreater(revoked["revoked_count"], 0)
+            self.assertEqual(granted["status_code"], 400)
+            self.assertEqual(granted["reason"], "unsupported_all_ok")
+            self.assertEqual(revoked["status_code"], 400)
+            self.assertEqual(revoked["reason"], "unsupported_all_ok")
+            self.assertEqual(fake.batch_calls, [])
+            self.assertEqual(fake.revocations, [])
 
     def test_audit_logging_uses_supported_signatures(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -262,6 +270,24 @@ class TestSetupPackManager(unittest.TestCase):
             self.assertEqual(len(audit.permission), 1)
             self.assertEqual(audit.permission[0][0], "defaultspack")
             self.assertEqual(audit.permission[0][1], "*")
+
+    def test_audit_logging_marks_unsupported_all_ok_rejection_reason(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "setup_pack"
+            self._write_pack(root, "otherpack", "otherpack", False)
+            manager = SetupPackManager(root=root, selection_file=Path(tmp) / "selection.json")
+            audit = _FakeAuditLogger()
+
+            with patch(
+                "core_runtime.audit_logger.get_audit_logger",
+                return_value=audit,
+            ):
+                manager.grant_all_ok("otherpack")
+                manager.revoke_all_ok("otherpack")
+
+            self.assertEqual(len(audit.permission), 2)
+            self.assertEqual(audit.permission[0][5], "unsupported_all_ok")
+            self.assertEqual(audit.permission[1][5], "unsupported_all_ok")
 
 
 if __name__ == "__main__":

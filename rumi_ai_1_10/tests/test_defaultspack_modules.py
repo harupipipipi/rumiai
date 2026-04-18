@@ -87,13 +87,19 @@ def test_ai_prompt_tool_plugin_and_more(tmp_path):
 def test_setup_pack_selector(tmp_path):
     eco = tmp_path / "eco"
     eco.mkdir()
-    dp = eco / "defaultspack"
-    dp.mkdir()
-    (dp / "ecosystem.json").write_text(
-        '{"pack_id":"defaultspack","pack_identity":"rumi.defaults","all_ok_eligible":true}',
+    setup_pack = eco / "setup_pack" / "defaultspack"
+    setup_pack.mkdir(parents=True)
+    (setup_pack / "pack.json").write_text(
+        '{"pack_id":"defaultspack","target_pack_id":"defaultspack","supports_all_ok":true}',
         encoding="utf-8",
     )
-    selector = PackSelector(eco)
+    target = eco / "defaultspack"
+    target.mkdir()
+    (target / "ecosystem.json").write_text(
+        '{"pack_identity":"rumi.defaults"}',
+        encoding="utf-8",
+    )
+    selector = PackSelector(eco / "setup_pack")
     assert selector.scan_candidates()[0].all_ok_eligible
 
 
