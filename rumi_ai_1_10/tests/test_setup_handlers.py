@@ -9,6 +9,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 class TestSetupHandlers(unittest.TestCase):
+    class _FakeFunctionRegistry:
+        def __init__(self, registered=None):
+            self._registered = set(registered or [])
+
+        def get(self, qualified_name):
+            return object() if qualified_name in self._registered else None
+
+    class _FakeContainer:
+        def __init__(self, function_registry=None):
+            self._function_registry = function_registry
+
+        def get_or_none(self, name):
+            if name == "function_registry":
+                return self._function_registry
+            return None
+
     def test_setup_handler_lists_packs(self):
         from core_runtime.api.setup_handlers import SetupHandlersMixin
 
@@ -39,7 +55,10 @@ class TestSetupHandlers(unittest.TestCase):
             "core_runtime.api.setup_handlers.get_setup_pack_manager"
         ) as mocked, patch(
             "core_runtime.api.setup_handlers.invoke_pack_function"
-        ) as invoke:
+        ) as invoke, patch(
+            "core_runtime.api.setup_handlers.get_container",
+            return_value=self._FakeContainer(),
+        ):
             mocked.return_value.install.return_value = install_result
             result = handler._setup_install_pack({"setup_pack_ids": ["alpha", "beta"]})
 
@@ -47,7 +66,7 @@ class TestSetupHandlers(unittest.TestCase):
         invoke.assert_not_called()
         self.assertEqual(result, install_result)
 
-    def test_setup_handler_runs_defaultspack_migration_only_for_active_defaultspack(self):
+    def test_setup_handler_runs_migration_for_active_setup_target_when_supported(self):
         from core_runtime.api.setup_handlers import SetupHandlersMixin
 
         class _Handler(SetupHandlersMixin):
@@ -56,9 +75,12 @@ class TestSetupHandlers(unittest.TestCase):
         handler = _Handler()
         install_result = {
             "success": True,
-            "active_target_pack_id": "defaultspack",
-            "installed_setup_pack_ids": ["defaultspack"],
+            "active_target_pack_id": "alpha",
+            "installed_setup_pack_ids": ["alpha"],
         }
+        registry = self._FakeFunctionRegistry(
+            {"alpha:get_migration_status", "alpha:run_migration"}
+        )
         with patch(
             "core_runtime.api.setup_handlers.get_setup_pack_manager"
         ) as mocked, patch(
@@ -70,12 +92,76 @@ class TestSetupHandlers(unittest.TestCase):
             ],
         ) as invoke:
             mocked.return_value.install.return_value = install_result
-            result = handler._setup_install_pack({"setup_pack_id": "defaultspack"})
+            with patch(
+                "core_runtime.api.setup_handlers.get_container",
+                return_value=self._FakeContainer(registry),
+            ):
+                result = handler._setup_install_pack({"setup_pack_id": "alpha"})
 
-        mocked.return_value.install.assert_called_once_with("defaultspack")
+        mocked.return_value.install.assert_called_once_with("alpha")
         self.assertEqual(invoke.call_count, 3)
+        self.assertEqual(result["migration_pack_id"], "alpha")
         self.assertEqual(result["migration"], {"migrated": True})
-        self.assertEqual(result["migration_status"], {"needs_user_migration": False})
+        self.assertEqual(
+            result["migration_status"],
+            {
+                "pack_id": "alpha",
+                "available": True,
+                "needs_user_migration": False,
+            },
+        )
+
+    def test_setup_get_migration_status_uses_active_setup_target(self):
+        from core_runtime.api.setup_handlers import SetupHandlersMixin
+
+        class _Handler(SetupHandlersMixin):
+            pass
+
+        handler = _Handler()
+        registry = self._FakeFunctionRegistry({"alpha:get_migration_status"})
+        with patch(
+            "core_runtime.api.setup_handlers.get_setup_pack_manager"
+        ) as mocked, patch(
+            "core_runtime.api.setup_handlers.get_container",
+            return_value=self._FakeContainer(registry),
+        ), patch(
+            "core_runtime.api.setup_handlers.invoke_pack_function",
+            return_value={"needs_user_migration": False},
+        ) as invoke:
+            mocked.return_value.get_selection.return_value = {"active_target_pack_id": "alpha"}
+            result = handler._setup_get_migration_status()
+
+        invoke.assert_called_once_with("alpha", "get_migration_status")
+        self.assertEqual(
+            result,
+            {
+                "pack_id": "alpha",
+                "available": True,
+                "needs_user_migration": False,
+            },
+        )
+
+    def test_setup_get_migration_status_returns_unavailable_without_active_target(self):
+        from core_runtime.api.setup_handlers import SetupHandlersMixin
+
+        class _Handler(SetupHandlersMixin):
+            pass
+
+        handler = _Handler()
+        with patch(
+            "core_runtime.api.setup_handlers.get_setup_pack_manager"
+        ) as mocked:
+            mocked.return_value.get_selection.return_value = {}
+            result = handler._setup_get_migration_status()
+
+        self.assertEqual(
+            result,
+            {
+                "pack_id": None,
+                "available": False,
+                "needs_user_migration": False,
+            },
+        )
 
     def test_core_setup_routes_are_declared(self):
         ecosystem_path = (

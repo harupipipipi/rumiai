@@ -1,6 +1,6 @@
 {
   "function_id": "revoke_all_ok",
-  "description": "Revoke the bounded all OK permission bundle for defaultspack.",
+  "description": "Revoke the bounded all OK permission bundle for the selected setup pack.",
   "requires": [],
   "caller_requires": [],
   "host_execution": true,

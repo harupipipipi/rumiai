@@ -53,7 +53,6 @@ class PackSelector:
             except Exception:
                 continue
             identity = str(data.get("pack_identity", ""))
-            is_defaults = identity == DEFAULTSPACK_IDENTITY
             candidates.append(
                 PackCandidate(
                     pack_id=str(data.get("pack_id", child.name)),
@@ -61,9 +60,14 @@ class PackSelector:
                     display_name=str(data.get("display_name", data.get("pack_id", child.name))),
                     description=str(data.get("description", "")),
                     version=str(data.get("version", "")),
-                    recommended=is_defaults,
-                    risk_level="safe" if is_defaults else "normal",
-                    all_ok_eligible=is_defaults,
+                    recommended=bool(data.get("recommended", False)),
+                    risk_level=str(data.get("risk_level", "normal")),
+                    all_ok_eligible=bool(
+                        data.get(
+                            "all_ok_eligible",
+                            data.get("supports_all_ok", False),
+                        )
+                    ),
                 )
             )
         return candidates

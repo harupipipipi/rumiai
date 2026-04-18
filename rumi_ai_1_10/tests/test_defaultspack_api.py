@@ -28,15 +28,14 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
             packs = {"defaultspack": _PackInfo()}
 
         count = PackAPIHandler.load_api_routes(_Registry())
-        self.assertEqual(count, 18)
+        self.assertEqual(count, 14)
         self.assertIn(("GET", "/api/defaultspack/modules"), PackAPIHandler._api_route_exact)
-        self.assertIn(("GET", "/api/defaultspack/setup/packs"), PackAPIHandler._api_route_exact)
         self.assertIn(("GET", "/api/defaultspack/pack-requests"), PackAPIHandler._api_route_exact)
         self.assertEqual(
             PackAPIHandler._api_route_exact[("GET", "/api/defaultspack/modules")]["function_id"],
             "list_modules",
         )
-        self.assertEqual(len(PackAPIHandler._api_route_patterns), 11)
+        self.assertEqual(len(PackAPIHandler._api_route_patterns), 9)
 
     def test_api_route_dispatches_pack_function(self):
         from core_runtime.pack_api_server import PackAPIHandler

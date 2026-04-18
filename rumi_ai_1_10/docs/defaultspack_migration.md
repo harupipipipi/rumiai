@@ -9,7 +9,7 @@
 ## Rollback
 
 - Use module `rollback` or `disable` to isolate a failing module.
-- Revoke `all OK` with `POST /api/defaultspack/setup/packs/defaultspack/revoke-all-ok`.
+- Revoke `all OK` with `POST /api/setup/packs/{setup_pack_id}/revoke-all-ok`.
 - Remove `user_data/settings/setup_pack_selection.json` to clear setup-pack selection if manual recovery is required.
 
 ## Deprecation path

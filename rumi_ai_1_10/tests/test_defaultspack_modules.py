@@ -89,7 +89,10 @@ def test_setup_pack_selector(tmp_path):
     eco.mkdir()
     dp = eco / "defaultspack"
     dp.mkdir()
-    (dp / "ecosystem.json").write_text('{"pack_id":"defaultspack","pack_identity":"rumi.defaults"}', encoding="utf-8")
+    (dp / "ecosystem.json").write_text(
+        '{"pack_id":"defaultspack","pack_identity":"rumi.defaults","all_ok_eligible":true}',
+        encoding="utf-8",
+    )
     selector = PackSelector(eco)
     assert selector.scan_candidates()[0].all_ok_eligible
 

@@ -44,6 +44,59 @@ class TestDefaultspackPrimarySetup(unittest.TestCase):
             self.assertIsNone(data["active_pack_identity"])
             self.assertEqual(data["metadata"], {})
 
+    def test_prepare_setup_pack_targets_requests_confirmation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            setup_pack_dir = base / "ecosystem" / "setup_pack" / "defaultspack"
+            setup_pack_dir.mkdir(parents=True, exist_ok=True)
+            (setup_pack_dir / "pack.json").write_text(
+                json.dumps(
+                    {
+                        "pack_id": "defaultspack",
+                        "target_pack_id": "defaultspack",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (base / "ecosystem" / "defaultspack").mkdir(parents=True, exist_ok=True)
+            initializer = Initializer(base_dir=str(base))
+            prompts = []
+
+            def _deny(message: str) -> bool:
+                prompts.append(message)
+                return False
+
+            result = initializer._prepare_setup_pack_targets(confirm_callback=_deny)
+
+            self.assertTrue(prompts)
+            self.assertTrue(result["skipped"])
+            self.assertEqual(result["available_setup_pack_ids"], ["defaultspack"])
+
+    def test_prepare_setup_pack_targets_returns_available_when_confirmed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            setup_pack_dir = base / "ecosystem" / "setup_pack" / "defaultspack"
+            setup_pack_dir.mkdir(parents=True, exist_ok=True)
+            (setup_pack_dir / "pack.json").write_text(
+                json.dumps(
+                    {
+                        "pack_id": "defaultspack",
+                        "target_pack_id": "defaultspack",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (base / "ecosystem" / "defaultspack").mkdir(parents=True, exist_ok=True)
+            initializer = Initializer(base_dir=str(base))
+
+            result = initializer._prepare_setup_pack_targets(confirm_callback=lambda _: True)
+
+            self.assertFalse(result["skipped"])
+            self.assertEqual(result["available_setup_pack_ids"], ["defaultspack"])
+            self.assertEqual(result["available"], ["ecosystem/defaultspack"])
+
 
 if __name__ == "__main__":
     unittest.main()

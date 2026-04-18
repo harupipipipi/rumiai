@@ -1,6 +1,6 @@
 {
   "function_id": "grant_all_ok",
-  "description": "Grant the bounded all OK permission bundle, only for the defaultspack setup pack.",
+  "description": "Grant the bounded all OK permission bundle for the selected setup pack.",
   "requires": [],
   "caller_requires": [],
   "host_execution": true,

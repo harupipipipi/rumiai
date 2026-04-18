@@ -4,5 +4,5 @@ This branch adds the defaultspack v2 compatibility surface.
 
 - module state and catalog helpers
 - backend/frontend loaders
-- setup pack selection
+- setup pack selection (startup include prompt + initial all-OK grant)
 - thin adapters for AI client, prompt, tool, plugin, chat, memory, agent, sandbox, migration

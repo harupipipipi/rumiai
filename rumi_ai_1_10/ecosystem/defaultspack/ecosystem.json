@@ -270,29 +270,6 @@
     },
     {
       "method": "GET",
-      "path": "/api/defaultspack/setup/packs",
-      "function_id": "list_setup_packs"
-    },
-    {
-      "method": "POST",
-      "path": "/api/defaultspack/setup/packs/install",
-      "function_id": "install_setup_pack",
-      "pass_body": true
-    },
-    {
-      "method": "POST",
-      "path_pattern": "/api/defaultspack/setup/packs/{id}/grant-all-ok",
-      "function_id": "grant_all_ok",
-      "path_param_map": {"setup_pack_id": "id"}
-    },
-    {
-      "method": "POST",
-      "path_pattern": "/api/defaultspack/setup/packs/{id}/revoke-all-ok",
-      "function_id": "revoke_all_ok",
-      "path_param_map": {"setup_pack_id": "id"}
-    },
-    {
-      "method": "GET",
       "path": "/api/defaultspack/migration/status",
       "function_id": "get_migration_status"
     },

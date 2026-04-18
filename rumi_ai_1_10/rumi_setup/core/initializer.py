@@ -195,6 +195,7 @@ class Initializer:
             return {"created": [], "errors": [], "skipped": True}
 
         available = []
+        available_setup_pack_ids = []
         missing = []
         for pack_json in sorted(setup_pack_root.glob("*/pack.json")):
             try:
@@ -206,6 +207,7 @@ class Initializer:
                 )
                 continue
 
+            setup_pack_id = str(data.get("pack_id") or pack_json.parent.name).strip()
             target_pack_id = str(
                 data.get("target_pack_id") or data.get("pack_id") or pack_json.parent.name
             ).strip()
@@ -216,6 +218,8 @@ class Initializer:
             target_rel = f"ecosystem/{target_pack_id}"
             if target_path.exists():
                 available.append(target_rel)
+                if setup_pack_id:
+                    available_setup_pack_ids.append(setup_pack_id)
                 self.state.log_info(f"setup pack target を確認: {target_rel}")
             else:
                 missing.append(target_rel)
@@ -227,10 +231,34 @@ class Initializer:
         if not available:
             return {"created": [], "errors": [], "skipped": True, "missing": missing}
 
+        seen_setup_pack_ids = set()
+        normalized_setup_pack_ids = []
+        for setup_pack_id in available_setup_pack_ids:
+            if setup_pack_id in seen_setup_pack_ids:
+                continue
+            normalized_setup_pack_ids.append(setup_pack_id)
+            seen_setup_pack_ids.add(setup_pack_id)
+
+        if confirm_callback is not None:
+            setup_pack_label = ", ".join(normalized_setup_pack_ids) or ", ".join(available)
+            should_include = confirm_callback(
+                f"setup pack ({setup_pack_label}) を初期セットアップに含めますか？"
+            )
+            if not should_include:
+                return {
+                    "created": [],
+                    "errors": [],
+                    "skipped": True,
+                    "available": available,
+                    "available_setup_pack_ids": normalized_setup_pack_ids,
+                    "missing": missing,
+                }
+
         return {
             "created": [],
             "errors": [],
             "skipped": False,
             "available": available,
+            "available_setup_pack_ids": normalized_setup_pack_ids,
             "missing": missing,
         }

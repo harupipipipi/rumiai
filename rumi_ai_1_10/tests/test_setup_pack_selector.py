@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from ecosystem.setup_pack.pack_selector import PackSelector, DEFAULTSPACK_IDENTITY
+from ecosystem.setup_pack.pack_selector import PackSelector
 
 
 def test_scan_and_grant(tmp_path):
@@ -10,7 +10,13 @@ def test_scan_and_grant(tmp_path):
     pack = ecosystem / "defaultspack"
     pack.mkdir()
     (pack / "ecosystem.json").write_text(
-        json.dumps({"pack_id": "defaultspack", "pack_identity": DEFAULTSPACK_IDENTITY}),
+        json.dumps(
+            {
+                "pack_id": "defaultspack",
+                "pack_identity": "rumi.defaults",
+                "all_ok_eligible": True,
+            }
+        ),
         encoding="utf-8",
     )
     selector = PackSelector(ecosystem)

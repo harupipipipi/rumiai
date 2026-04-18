@@ -6,7 +6,7 @@
 
 - Canonical backend API paths now live under `/api/defaultspack/*`.
 - Setup-pack discovery comes from `ecosystem/setup_pack/*/pack.json`.
-- Module state is cataloged and persisted by `core_runtime/defaultspack_manager.py`.
+- Module state is cataloged and persisted by defaultspack backend module helpers.
 - Defaultspack operations are executed through `functions/` instead of direct block imports.
 - Pack modification requests now enforce slot/fullscreen conflict rules before approval.
 - Legacy CLI/HTTP fallback transports dispatch through `bridge/block_adapter.py` instead of importing block handlers directly.
@@ -31,11 +31,11 @@ Dependency failures degrade dependents without taking down the whole pack.
 - `POST /api/defaultspack/modules/{id}/disable`
 - `POST /api/defaultspack/modules/{id}/reload`
 - `POST /api/defaultspack/modules/{id}/rollback`
-- `GET /api/defaultspack/setup/packs`
-- `POST /api/defaultspack/setup/packs/install`
-- `POST /api/defaultspack/setup/packs/{id}/grant-all-ok`
-- `POST /api/defaultspack/setup/packs/{id}/revoke-all-ok`
-- `GET /api/defaultspack/migration/status`
+- `GET /api/setup/packs`
+- `POST /api/setup/packs/install`
+- `POST /api/setup/packs/{id}/grant-all-ok`
+- `POST /api/setup/packs/{id}/revoke-all-ok`
+- `GET /api/setup/migration/status`
 - `GET /api/defaultspack/pack-requests`
 - `POST /api/defaultspack/pack-requests/request-extension`
 - `POST /api/defaultspack/pack-requests/forced-patch`
@@ -45,8 +45,8 @@ Dependency failures degrade dependents without taking down the whole pack.
 
 ## Setup flow
 
-The setup UI under `/setup` now lists discovered setup packs, installs one directly,
-shows migration state, and exposes defaultspack-only `all OK` grant and revoke actions.
+The setup UI under `/setup` asks whether each discovered setup pack should be included at startup.
+Selected setup packs are installed together and receive `all OK` grants from setup.
 
 ## Pack modification flow
 
