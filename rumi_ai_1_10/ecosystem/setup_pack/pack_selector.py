@@ -6,8 +6,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-DEFAULTSPACK_IDENTITY = "rumi.defaults"
-
 
 @dataclass
 class PackCandidate:
