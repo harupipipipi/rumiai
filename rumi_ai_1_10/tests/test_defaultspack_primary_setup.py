@@ -5,11 +5,14 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from backend_core.ecosystem.initializer import EcosystemInitializer
+from core_runtime import setup_pack as setup_pack_module
+from core_runtime.paths import PackLocation
 from rumi_setup.core.initializer import Initializer
 
 
@@ -145,23 +148,55 @@ class TestDefaultspackPrimarySetup(unittest.TestCase):
                     + "\n",
                     encoding="utf-8",
                 )
-                (base / "ecosystem" / setup_pack_id).mkdir(parents=True, exist_ok=True)
+                target_dir = base / "ecosystem" / setup_pack_id
+                target_dir.mkdir(parents=True, exist_ok=True)
+                (target_dir / "ecosystem.json").write_text(
+                    json.dumps({"pack_identity": f"rumi:ecosystem/{setup_pack_id}"}) + "\n",
+                    encoding="utf-8",
+                )
 
             initializer = Initializer(base_dir=str(base))
+            discover_calls = []
 
-            with patch("rumi_setup.core.initializer.get_setup_pack_manager") as mocked:
-                mocked.return_value.install.return_value = {
-                    "installed": True,
-                    "success": True,
-                    "installed_setup_pack_ids": ["defaultspack"],
-                }
+            def _discover(ecosystem_dir=None):
+                discover_calls.append(ecosystem_dir)
+                self.assertEqual(Path(ecosystem_dir), base / "ecosystem")
+                return [
+                    PackLocation(
+                        pack_dir=base / "ecosystem" / setup_pack_id,
+                        pack_id=setup_pack_id,
+                        ecosystem_json_path=(
+                            base / "ecosystem" / setup_pack_id / "ecosystem.json"
+                        ),
+                        pack_subdir=base / "ecosystem" / setup_pack_id,
+                    )
+                    for setup_pack_id in ("defaultspack", "otherpack")
+                ]
+
+            with patch.object(
+                setup_pack_module,
+                "discover_pack_locations",
+                side_effect=_discover,
+            ), patch(
+                "backend_core.ecosystem.active_ecosystem.get_active_ecosystem_manager",
+                return_value=SimpleNamespace(active_pack_identity=None),
+            ), patch(
+                "core_runtime.approval_manager.get_approval_manager",
+                return_value=SimpleNamespace(_initialized=False),
+            ):
                 summary = initializer.initialize(
                     install_default=True,
                     confirm_callback=lambda message: "defaultspack" in message,
                 )
 
-            mocked.return_value.install.assert_called_once_with(["defaultspack"])
             self.assertTrue(summary["success"])
+            self.assertEqual(discover_calls, [str(base / "ecosystem")])
+            selection_path = base / "user_data" / "settings" / "setup_pack_selection.json"
+            self.assertTrue(selection_path.is_file())
+            selection = json.loads(selection_path.read_text(encoding="utf-8"))
+            self.assertEqual(selection["setup_pack_ids"], ["defaultspack"])
+            self.assertEqual(selection["target_pack_ids"], ["defaultspack"])
+            self.assertEqual(selection["active_setup_pack_id"], "defaultspack")
 
     def test_initialize_skips_install_when_all_setup_packs_denied(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -182,13 +217,13 @@ class TestDefaultspackPrimarySetup(unittest.TestCase):
                 (base / "ecosystem" / setup_pack_id).mkdir(parents=True, exist_ok=True)
 
             initializer = Initializer(base_dir=str(base))
-            with patch("rumi_setup.core.initializer.get_setup_pack_manager") as mocked:
+            with patch.object(Initializer, "_create_setup_pack_manager") as mocked:
                 summary = initializer.initialize(
                     install_default=True,
                     confirm_callback=lambda _message: False,
                 )
 
-            mocked.return_value.install.assert_not_called()
+            mocked.assert_not_called()
             self.assertTrue(summary["success"])
 
 

@@ -204,6 +204,10 @@ class TestSetupPackManager(unittest.TestCase):
             self.assertTrue(result["success"])
             self.assertEqual(result["active_setup_pack_id"], "zeta")
             self.assertEqual(fake_active.active_pack_identity, "rumi:ecosystem/zeta")
+            listed = manager.list_packs()
+            self.assertEqual(listed["selected_setup_pack_ids"], ["alpha", "zeta"])
+            self.assertEqual(listed["active_setup_pack_id"], "zeta")
+            self.assertEqual(listed["active_target_pack_id"], "zeta")
 
     def test_display_order_first_selected_pack_becomes_active_without_recommended(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -227,6 +231,10 @@ class TestSetupPackManager(unittest.TestCase):
             self.assertTrue(result["success"])
             self.assertEqual(result["active_setup_pack_id"], "beta")
             self.assertEqual(fake_active.active_pack_identity, "rumi:ecosystem/beta")
+            listed = manager.list_packs()
+            self.assertEqual(listed["selected_setup_pack_ids"], ["beta", "alpha"])
+            self.assertEqual(listed["active_setup_pack_id"], "beta")
+            self.assertEqual(listed["active_target_pack_id"], "beta")
 
     def test_grant_and_revoke_all_ok_reject_unsupported_setup_pack_entries(self):
         with tempfile.TemporaryDirectory() as tmp:

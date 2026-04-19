@@ -45,9 +45,11 @@ class SetupPackManager:
         self,
         root: Path | None = None,
         selection_file: Path | None = None,
+        ecosystem_dir: Path | None = None,
     ) -> None:
         self.root = Path(root or SETUP_PACK_ROOT)
         self.selection_file = Path(selection_file or SETUP_PACK_SELECTION_FILE)
+        self.ecosystem_dir = Path(ecosystem_dir) if ecosystem_dir is not None else self.root.parent
 
     def _definition_files(self) -> List[Path]:
         if not self.root.is_dir():
@@ -78,9 +80,18 @@ class SetupPackManager:
     def list_packs(self) -> Dict[str, Any]:
         definitions = self._load_definitions()
         selection = self.get_selection()
-        selected_ids = set(selection.get("setup_pack_ids") or [])
+        selected_setup_pack_ids: List[str] = []
+        selected_ids = set()
+        for setup_pack_id in selection.get("setup_pack_ids") or []:
+            normalized = str(setup_pack_id)
+            if normalized not in selected_ids:
+                selected_setup_pack_ids.append(normalized)
+                selected_ids.add(normalized)
         if selection.get("setup_pack_id"):
-            selected_ids.add(str(selection["setup_pack_id"]))
+            legacy_setup_pack_id = str(selection["setup_pack_id"])
+            if legacy_setup_pack_id not in selected_ids:
+                selected_setup_pack_ids.append(legacy_setup_pack_id)
+                selected_ids.add(legacy_setup_pack_id)
         packs = []
         for pack_id in sorted(definitions):
             item = definitions[pack_id]
@@ -99,7 +110,7 @@ class SetupPackManager:
             "packs": packs,
             "count": len(packs),
             "selected_setup_pack_id": selection.get("setup_pack_id"),
-            "selected_setup_pack_ids": sorted(selected_ids),
+            "selected_setup_pack_ids": selected_setup_pack_ids,
             "active_setup_pack_id": selection.get("active_setup_pack_id"),
             "active_target_pack_id": selection.get("active_target_pack_id"),
         }
@@ -278,7 +289,7 @@ class SetupPackManager:
             }
 
         locations = {
-            loc.pack_id: loc for loc in discover_pack_locations()
+            loc.pack_id: loc for loc in discover_pack_locations(str(self.ecosystem_dir))
         }
 
         ordered_definitions = [

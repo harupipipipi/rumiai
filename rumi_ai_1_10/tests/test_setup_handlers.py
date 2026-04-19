@@ -338,6 +338,15 @@ class TestSetupHandlers(unittest.TestCase):
         self.assertIn("/api/setup/packs/install", source)
         self.assertIn("/api/setup/migration/status", source)
         self.assertNotIn("/api/defaultspack/setup", source)
+        self.assertNotIn(
+            "Checked setup packs are installed together and receive all OK permissions.",
+            source,
+        )
+        self.assertIn(
+            "all OK permissions are granted only to setup packs that explicitly support all OK",
+            source,
+        )
+        self.assertIn("Installs without all OK grants", source)
 
 
 if __name__ == "__main__":

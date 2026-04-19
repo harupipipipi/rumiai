@@ -150,7 +150,7 @@
   <main>
     <section class="hero">
       <h1>Choose setup packs.</h1>
-      <p>Checked setup packs are installed together and receive all OK permissions.</p>
+      <p>Checked setup packs are installed together. all OK permissions are granted only to setup packs that explicitly support all OK.</p>
     </section>
     <section class="grid">
       <div class="panel">
@@ -216,11 +216,15 @@
         card.className = "pack" + (pack.selected ? " selected" : "");
         const riskClass = pack.risk_level === "high" ? "danger" : "";
         const checked = pack.selected || (!hasSelection && pack.recommended);
+        const allOkText = pack.supports_all_ok
+          ? "Supports selective all OK grants"
+          : "Installs without all OK grants";
         card.innerHTML = `
           <header>
             <div>
               <strong>${pack.display_name}</strong>
               <div>${pack.description || ""}</div>
+              <div>${allOkText}</div>
             </div>
             <div class="pill ${pack.recommended ? "recommended" : riskClass}">
               ${pack.recommended ? "Recommended" : "Risk: " + pack.risk_level}

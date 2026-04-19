@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Dict, Any, Optional, Callable
 
-from core_runtime.setup_pack import get_setup_pack_manager
+from core_runtime.setup_pack import SetupPackManager
 from .state import get_state
 
 
@@ -63,7 +63,7 @@ class Initializer:
                 else:
                     selected_setup_pack_ids = list(default_result.get("selected_setup_pack_ids") or [])
                     if selected_setup_pack_ids:
-                        install_result = get_setup_pack_manager().install(selected_setup_pack_ids)
+                        install_result = self._create_setup_pack_manager().install(selected_setup_pack_ids)
                         default_result["install_result"] = install_result
                         if install_result.get("error") or not install_result.get("installed"):
                             errors.append({
@@ -295,3 +295,15 @@ class Initializer:
             "selected_setup_pack_ids": selected_setup_pack_ids,
             "missing": missing,
         }
+
+    def _create_setup_pack_manager(self) -> SetupPackManager:
+        return SetupPackManager(
+            root=self.base_dir / "ecosystem" / "setup_pack",
+            selection_file=(
+                self.base_dir
+                / "user_data"
+                / "settings"
+                / "setup_pack_selection.json"
+            ),
+            ecosystem_dir=self.base_dir / "ecosystem",
+        )
