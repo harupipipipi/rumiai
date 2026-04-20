@@ -405,9 +405,10 @@ class PackAPIHandler(
             if entry.get("function_id"):
                 from .pack_function_runtime import invoke_pack_function
 
-                call_args = dict(entry.get("args") or {})
-                if pass_body:
-                    call_args.update(body if body is not None else {})
+                call_args = dict(body if pass_body and body is not None else {})
+                # Route-level args define the contract for fixed endpoints such as
+                # /approve and /reject, so body values must not override them.
+                call_args.update(entry.get("args") or {})
                 param_map = entry.get("path_param_map") or {}
                 if param_map:
                     for target_key, source_key in param_map.items():

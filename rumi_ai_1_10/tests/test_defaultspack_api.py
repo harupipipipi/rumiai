@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -72,6 +73,60 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
             {"pack_id": "example", "method": "POST", "path": "/api/example/run"},
         )
         self.assertEqual(sent, [{"ok": True}])
+
+    def test_api_route_keeps_route_args_over_body(self):
+        from core_runtime.pack_api_server import PackAPIHandler
+
+        route_entry = {
+            "pack_id": "defaultspack",
+            "handler": "",
+            "function_id": "review_pack_request",
+            "pass_body": True,
+            "response_mode": "result",
+            "args": {"decision": "approve"},
+            "path_param_map": {"request_id": "id"},
+        }
+        PackAPIHandler._api_route_exact = {}
+        PackAPIHandler._api_route_patterns = [
+            (
+                "POST",
+                re.compile(r"^/api/defaultspack/pack-requests/(?P<id>[^/]+)/approve$"),
+                ["id"],
+                route_entry,
+            )
+        ]
+        handler = PackAPIHandler.__new__(PackAPIHandler)
+        handler._send_result = lambda result: None
+
+        with patch(
+            "core_runtime.pack_function_runtime.invoke_pack_function",
+            return_value={"ok": True},
+        ) as mocked:
+            dispatched = handler._dispatch_api_route(
+                "POST",
+                "/api/defaultspack/pack-requests/123/approve",
+                {
+                    "decision": "reject",
+                    "decision_notes": "nope",
+                    "request_id": "body-value",
+                },
+            )
+
+        self.assertTrue(dispatched)
+        mocked.assert_called_once_with(
+            "defaultspack",
+            "review_pack_request",
+            {
+                "decision": "approve",
+                "decision_notes": "nope",
+                "request_id": "123",
+            },
+            {
+                "pack_id": "defaultspack",
+                "method": "POST",
+                "path": "/api/defaultspack/pack-requests/123/approve",
+            },
+        )
 
 
 if __name__ == "__main__":
