@@ -18,6 +18,50 @@ import type {
 
 // Base URL: empty string means relative path (works with Vite proxy)
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
+const API_TOKEN_STORAGE_KEY = 'rumi-api-token';
+const API_TOKEN_QUERY_KEY = 'token';
+
+function consumeTokenFromLocation(): string | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    const url = new URL(window.location.href);
+    const token = url.searchParams.get(API_TOKEN_QUERY_KEY)?.trim();
+    if (!token) {
+      return null;
+    }
+
+    localStorage.setItem(API_TOKEN_STORAGE_KEY, token);
+    url.searchParams.delete(API_TOKEN_QUERY_KEY);
+    window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
+    return token;
+  } catch {
+    return null;
+  }
+}
+
+export function bootstrapApiTokenFromLocation(): void {
+  consumeTokenFromLocation();
+}
+
+function getAccessToken(): string | null {
+  const tokenFromLocation = consumeTokenFromLocation();
+  if (tokenFromLocation) {
+    return tokenFromLocation;
+  }
+
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    return localStorage.getItem(API_TOKEN_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Common fetch wrapper for API calls.
@@ -38,11 +82,10 @@ export async function apiFetch<T>(
     ...(options.headers as Record<string, string> | undefined),
   };
 
-  // TODO: OAuth token injection (Phase D)
-  // const token = getAccessToken();
-  // if (token) {
-  //   headers['Authorization'] = `Bearer ${token}`;
-  // }
+  const token = getAccessToken();
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
 
   const response = await fetch(url, {
     ...options,

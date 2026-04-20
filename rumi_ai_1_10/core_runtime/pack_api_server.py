@@ -339,6 +339,8 @@ class PackAPIHandler(
     def _is_pre_auth_route(self, method: str, path: str) -> bool:
         """method + path が pre_auth_table にマッチするか判定する。"""
         method_upper = method.upper()
+        if path.startswith("/api/panel/"):
+            return True
         for entry in self._pre_auth_table:
             if entry["method"] != method_upper:
                 continue
@@ -703,6 +705,12 @@ class PackAPIHandler(
 
         # --- システムルート（テーブル化対象外）---
         _pre_auth_path = urlparse(self.path).path
+        if _pre_auth_path in ("", "/"):
+            self.send_response(302)
+            self.send_header("Location", "/panel/")
+            self.end_headers()
+            return
+
         if _pre_auth_path == "/health":
             _alm = self.__class__.app_lifecycle_manager
             if _alm is not None:
@@ -763,6 +771,12 @@ class PackAPIHandler(
 
         # --- 認証チェック（pre-auth ルート以外）---
         if not _is_pre_auth and not self._check_auth():
+            accept_header = self.headers.get("Accept", "")
+            if "text/html" in accept_header:
+                self.send_response(302)
+                self.send_header("Location", "/panel/")
+                self.end_headers()
+                return
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return
         

@@ -9,6 +9,9 @@ mod python_env;
 mod tray;
 mod updater;
 
+use anyhow::{bail, Context, Result};
+use env_logger::Env;
+use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 use log::{error, info};
@@ -20,10 +23,24 @@ use kernel_manager::KernelManager;
 /// Wrapper around a shared progress string, managed as Tauri State.
 pub struct SetupProgress(pub Arc<Mutex<String>>);
 
+/// URL that the splash screen should open once setup is ready.
+pub struct PanelUrl(pub Arc<Mutex<Option<String>>>);
+
 /// Returns the current setup progress message.
 #[tauri::command]
 fn get_setup_progress(state: tauri::State<'_, SetupProgress>) -> String {
     state.0.lock().unwrap().clone()
+}
+
+/// Returns the panel URL after the Kernel is ready.
+#[tauri::command]
+fn get_panel_url(state: tauri::State<'_, PanelUrl>) -> Option<String> {
+    let url = state.0.lock().unwrap().clone();
+    match &url {
+        Some(value) => info!("get_panel_url called; returning {}", redact_token(value)),
+        None => info!("get_panel_url called; URL is not ready yet"),
+    }
+    url
 }
 
 /// Restart the Kernel process.
@@ -34,8 +51,116 @@ fn restart_kernel(state: tauri::State<'_, Arc<Mutex<KernelManager>>>) -> Result<
     Ok("Kernel restarted".into())
 }
 
+fn read_kernel_token(config: &AppConfig) -> Result<String> {
+    let script = r#"
+import os
+import sys
+
+sys.path.insert(0, os.environ["RUMI_HOME"])
+
+from core_runtime.hmac_key_manager import HMACKeyManager
+
+print(HMACKeyManager().get_active_key())
+"#;
+
+    let output = Command::new(config.venv_python())
+        .args(["-c", script])
+        .current_dir(&config.rumi_home)
+        .env("RUMI_HOME", &config.rumi_home)
+        .env("RUMI_USER_DATA", &config.user_data_dir)
+        .output()
+        .context("failed to execute token helper")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!(
+            "token helper exited with {}: {}",
+            output.status,
+            stderr.trim()
+        );
+    }
+
+    let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if token.is_empty() {
+        bail!("token helper returned an empty token");
+    }
+
+    Ok(token)
+}
+
+fn redact_token(url: &str) -> String {
+    match url.split_once("token=") {
+        Some((prefix, rest)) => {
+            let suffix_start = rest.find('&').unwrap_or(rest.len());
+            let suffix = &rest[suffix_start..];
+            format!("{prefix}token=<redacted>{suffix}")
+        }
+        None => url.to_string(),
+    }
+}
+
+fn open_panel_window(handle: &tauri::AppHandle, panel_url: &str) -> Result<()> {
+    info!("Opening panel at {}", redact_token(panel_url));
+
+    let parsed_url = panel_url
+        .parse()
+        .context("panel URL could not be parsed")?;
+
+    if let Some(main) = handle.get_webview_window("main") {
+        info!("Navigating main window to panel");
+        main
+            .navigate(parsed_url)
+            .context("failed to navigate main window to panel")?;
+        let _ = main.show();
+        let _ = main.set_focus();
+        info!("Main window navigated to panel successfully");
+        return Ok(());
+    }
+
+    if let Some(existing) = handle.get_webview_window("panel") {
+        info!("Panel window already exists; focusing it");
+        let _ = existing.show();
+        let _ = existing.set_focus();
+        if let Some(splash) = handle.get_webview_window("main") {
+            let _ = splash.hide();
+        }
+        return Ok(());
+    }
+
+    let panel = tauri::WebviewWindowBuilder::new(
+        handle,
+        "panel",
+        tauri::WebviewUrl::External(parsed_url),
+    )
+    .title("Rumi AI")
+    .inner_size(1280.0, 800.0)
+    .min_inner_size(960.0, 640.0)
+    .center()
+    .focused(true)
+    .visible(true)
+    .on_page_load(|_window, payload| {
+        let phase = match payload.event() {
+            tauri::webview::PageLoadEvent::Started => "started",
+            tauri::webview::PageLoadEvent::Finished => "finished",
+        };
+        info!("Panel page load {phase}: {}", redact_token(payload.url().as_str()));
+    })
+    .build()
+    .context("failed to build panel window")?;
+
+    let _ = panel.show();
+    let _ = panel.set_focus();
+
+    if let Some(splash) = handle.get_webview_window("main") {
+        let _ = splash.hide();
+    }
+
+    info!("Panel window opened successfully");
+    Ok(())
+}
+
 pub fn run() {
-    env_logger::init();
+    env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -53,7 +178,9 @@ pub fn run() {
 
                     let allowed = is_tauri || is_local_http;
 
-                    if !allowed {
+                    if allowed {
+                        info!("Allowed navigation to: {}", redact_token(url.as_str()));
+                    } else {
                         log::warn!("Blocked navigation to: {url}");
                     }
                     allowed
@@ -72,15 +199,19 @@ pub fn run() {
 
             let config = AppConfig::detect_for_tauri(resource_dir, app_data_dir)
                 .expect("failed to build AppConfig");
+            info!("Resolved app_dir={}", config.app_dir.display());
+            info!("Resolved user_data_dir={}", config.user_data_dir.display());
 
             std::fs::create_dir_all(&config.log_dir).ok();
             std::fs::create_dir_all(&config.user_data_dir).ok();
 
-            let progress = SetupProgress(Arc::new(Mutex::new(
-                "Initializing...".to_string(),
-            )));
+            let progress = SetupProgress(Arc::new(Mutex::new("Initializing...".to_string())));
             let progress_arc = progress.0.clone();
             app.manage(progress);
+
+            let panel_url = PanelUrl(Arc::new(Mutex::new(None)));
+            let panel_url_arc = panel_url.0.clone();
+            app.manage(panel_url);
 
             let km = Arc::new(Mutex::new(KernelManager::new(&config)));
             let km_for_thread = km.clone();
@@ -130,15 +261,45 @@ pub fn run() {
                     return;
                 }
 
+                set_progress("Authorizing panel...");
+                let token = match read_kernel_token(&config) {
+                    Ok(token) => token,
+                    Err(e) => {
+                        let msg = format!("Error: Panel authorization failed — {e}");
+                        error!("{msg}");
+                        set_progress(&msg);
+                        return;
+                    }
+                };
+
+                let cache_bust = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|duration| duration.as_secs())
+                    .unwrap_or(0);
+                let panel_url =
+                    format!("http://127.0.0.1:{port}/panel/?token={token}&v={cache_bust}");
+                info!("Prepared panel URL {}", redact_token(&panel_url));
+
+                if let Ok(mut target) = panel_url_arc.lock() {
+                    *target = Some(panel_url.clone());
+                    info!("Stored panel URL for splash navigation");
+                } else {
+                    let msg = "Error: Panel URL state lock failed";
+                    error!("{msg}");
+                    set_progress(msg);
+                    return;
+                }
+
                 set_progress("Ready");
 
-                if let Some(win) = handle.get_webview_window("main") {
-                    let js = format!(
-                        "window.location.replace('http://localhost:{port}/panel/')"
-                    );
-                    if let Err(e) = win.eval(&js) {
-                        error!("Failed to navigate to panel: {e}");
+                let handle_for_panel = handle.clone();
+                let panel_url_for_window = panel_url.clone();
+                if let Err(e) = handle.run_on_main_thread(move || {
+                    if let Err(e) = open_panel_window(&handle_for_panel, &panel_url_for_window) {
+                        error!("Failed to open panel window: {e}");
                     }
+                }) {
+                    error!("Failed to schedule panel window open: {e}");
                 }
 
                 // Background update check — log only, never interrupt startup.
@@ -169,7 +330,11 @@ pub fn run() {
                 let _ = window.hide();
             }
         })
-        .invoke_handler(tauri::generate_handler![get_setup_progress, restart_kernel])
+        .invoke_handler(tauri::generate_handler![
+            get_setup_progress,
+            get_panel_url,
+            restart_kernel
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
