@@ -325,6 +325,39 @@ class TestSetupHandlers(unittest.TestCase):
         self.assertFalse(handler._is_pre_auth_route("POST", "/api/defaultspack/pack-requests/request-extension"))
         self.assertTrue(handler._is_pre_auth_route("GET", "/api/setup/status"))
 
+    def test_panel_pre_auth_routes_come_from_ecosystem(self):
+        import json
+        from core_runtime.pack_api_server import PackAPIHandler
+
+        control_panel_ecosystem_path = (
+            Path(__file__).resolve().parent.parent
+            / "core_runtime"
+            / "core_pack"
+            / "core_control_panel"
+            / "ecosystem.json"
+        )
+        control_panel_data = json.loads(control_panel_ecosystem_path.read_text(encoding="utf-8"))
+
+        class _PackInfo:
+            def __init__(self, ecosystem):
+                self.ecosystem = ecosystem
+
+        class _ControlPanelRegistry:
+            packs = {
+                "core_control_panel": _PackInfo(control_panel_data),
+            }
+
+        class _EmptyRegistry:
+            packs = {}
+
+        handler = PackAPIHandler.__new__(PackAPIHandler)
+
+        PackAPIHandler.load_pre_auth_routes(_ControlPanelRegistry())
+        self.assertTrue(handler._is_pre_auth_route("GET", "/api/panel/dashboard"))
+
+        PackAPIHandler.load_pre_auth_routes(_EmptyRegistry())
+        self.assertFalse(handler._is_pre_auth_route("GET", "/api/panel/dashboard"))
+
     def test_core_setup_web_uses_moved_setup_routes_only(self):
         web_path = (
             Path(__file__).resolve().parent.parent
