@@ -1,0 +1,9 @@
+{
+  "module_id": "frontend_support",
+  "kind": "backend",
+  "display_name": "Frontend Support",
+  "description": "Layout engine, button system, and settings injection support.",
+  "dependencies": [],
+  "default_state": "enabled",
+  "failure_threshold": 2
+}

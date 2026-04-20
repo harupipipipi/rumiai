@@ -1,0 +1,94 @@
+{
+  "routes": [
+    {
+      "method": "POST",
+      "path": "/api/packs/defaultspack/chat/conversations",
+      "flow_id": "simple_chat",
+      "description": "Create conversation and optionally send first message"
+    },
+    {
+      "method": "GET",
+      "path": "/api/packs/defaultspack/chat/conversations",
+      "flow_id": "simple_chat",
+      "description": "List conversations"
+    },
+    {
+      "method": "GET",
+      "path": "/api/packs/defaultspack/chat/conversations/{id}",
+      "flow_id": "simple_chat",
+      "description": "Get conversation by ID"
+    },
+    {
+      "method": "PUT",
+      "path": "/api/packs/defaultspack/chat/conversations/{id}",
+      "flow_id": "simple_chat",
+      "description": "Update conversation"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/packs/defaultspack/chat/conversations/{id}",
+      "flow_id": "simple_chat",
+      "description": "Delete conversation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/packs/defaultspack/chat/conversations/{id}/messages",
+      "flow_id": "simple_chat",
+      "description": "Send message to conversation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/packs/defaultspack/chat/conversations/{id}/stream",
+      "flow_id": "simple_chat",
+      "description": "Send message with streaming response"
+    },
+    {
+      "method": "POST",
+      "path": "/api/packs/defaultspack/chat/conversations/{id}/export",
+      "flow_id": "simple_chat",
+      "description": "Export conversation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/packs/defaultspack/agent/execute",
+      "flow_id": "agent_chat",
+      "description": "Execute agent task"
+    },
+    {
+      "method": "POST",
+      "path": "/api/packs/defaultspack/agent/{id}/approve",
+      "flow_id": "agent_chat",
+      "description": "Approve agent action"
+    },
+    {
+      "method": "POST",
+      "path": "/api/packs/defaultspack/agent/{id}/reject",
+      "flow_id": "agent_chat",
+      "description": "Reject agent action"
+    },
+    {
+      "method": "POST",
+      "path": "/api/packs/defaultspack/agent/{id}/cancel",
+      "flow_id": "agent_chat",
+      "description": "Cancel agent execution"
+    },
+    {
+      "method": "GET",
+      "path": "/api/packs/defaultspack/agent/{id}/status",
+      "flow_id": "agent_chat",
+      "description": "Get agent execution status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/packs/defaultspack/planning/execute",
+      "flow_id": "planning_agent",
+      "description": "Execute planning agent"
+    },
+    {
+      "method": "GET",
+      "path": "/api/packs/defaultspack/planning/{id}/status",
+      "flow_id": "planning_agent",
+      "description": "Get planning agent status"
+    }
+  ]
+}

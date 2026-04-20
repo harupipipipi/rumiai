@@ -37,5 +37,33 @@
       "method": "POST",
       "path": "/api/setup/complete"
     }
+  ],
+  "api_routes": [
+    {
+      "method": "GET",
+      "path": "/api/setup/packs",
+      "handler": "_setup_list_packs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/setup/migration/status",
+      "handler": "_setup_get_migration_status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/setup/packs/install",
+      "handler": "_setup_install_pack",
+      "pass_body": true
+    },
+    {
+      "method": "POST",
+      "path_pattern": "/api/setup/packs/{id}/grant-all-ok",
+      "handler": "_setup_grant_all_ok"
+    },
+    {
+      "method": "POST",
+      "path_pattern": "/api/setup/packs/{id}/revoke-all-ok",
+      "handler": "_setup_revoke_all_ok"
+    }
   ]
 }

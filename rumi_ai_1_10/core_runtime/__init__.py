@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import importlib
 import warnings
-from typing import Dict, Tuple
+from types import ModuleType
+from typing import Dict, Tuple, Union
 
 
 _ExportTarget = Tuple[str, str]
+_ModuleExportTarget = str
+_LegacyExportTarget = Union[_ExportTarget, _ModuleExportTarget]
 
 
 _PUBLIC_EXPORTS: Dict[str, _ExportTarget] = {
@@ -34,7 +37,10 @@ _PUBLIC_EXPORTS: Dict[str, _ExportTarget] = {
 }
 
 
-_LEGACY_EXPORTS: Dict[str, _ExportTarget] = {
+_LEGACY_EXPORTS: Dict[str, _LegacyExportTarget] = {
+    "pip_installer": ".pip_installer",
+    "ds_container": ".ds_container",
+    "capability_proxy": ".capability_proxy",
     "InstallJournal": (".install_journal", "InstallJournal"),
     "InstallJournalConfig": (".install_journal", "InstallJournalConfig"),
     "InterfaceRegistry": (".interface_registry", "InterfaceRegistry"),
@@ -140,7 +146,19 @@ def _load_export(name: str, target: _ExportTarget):
     return value
 
 
-def _deprecation_message(name: str, target: _ExportTarget) -> str:
+def _load_module_export(name: str, module_name: str) -> ModuleType:
+    module = importlib.import_module(module_name, __name__)
+    globals()[name] = module
+    return module
+
+
+def _deprecation_message(name: str, target: _LegacyExportTarget) -> str:
+    if isinstance(target, str):
+        clean_module = target.removeprefix(".")
+        return (
+            f"core_runtime.{name} is deprecated as a top-level module alias. "
+            f"Use import core_runtime.{clean_module} instead."
+        )
     module_name, attr_name = target
     clean_module = module_name.removeprefix(".")
     return (
@@ -158,7 +176,10 @@ def __getattr__(name: str):
             DeprecationWarning,
             stacklevel=2,
         )
-        return _load_export(name, _LEGACY_EXPORTS[name])
+        target = _LEGACY_EXPORTS[name]
+        if isinstance(target, str):
+            return _load_module_export(name, target)
+        return _load_export(name, target)
     if name in {"rumi_syscall", "syscall"}:
         module = importlib.import_module(f".{name}", __name__)
         globals()[name] = module

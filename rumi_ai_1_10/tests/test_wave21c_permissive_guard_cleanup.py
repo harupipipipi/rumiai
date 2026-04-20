@@ -59,15 +59,19 @@ class TestCheckPermissiveProductionGuard:
             _app._check_permissive_production_guard()
         assert exc_info.value.code == 1
 
-    def test_development_does_not_exit(self, monkeypatch):
+    def test_development_does_not_exit(self, monkeypatch, tmp_path):
         """テスト4: RUMI_ENVIRONMENT=development → exit しない"""
         monkeypatch.setenv("RUMI_ENVIRONMENT", "development")
+        (tmp_path / "permissive.lock").touch()
+        monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path))
         _app._check_permissive_production_guard()
 
     def test_unset_does_not_exit(self, monkeypatch):
-        """テスト5: RUMI_ENVIRONMENT 未設定 → exit しない"""
+        """テスト5: RUMI_ENVIRONMENT 未設定 → opt-in 不足で exit する"""
         monkeypatch.delenv("RUMI_ENVIRONMENT", raising=False)
-        _app._check_permissive_production_guard()
+        with pytest.raises(SystemExit) as exc_info:
+            _app._check_permissive_production_guard()
+        assert exc_info.value.code == 1
 
     def test_guard_calls_sys_exit_1(self, monkeypatch):
         """テスト7: sys.exit(1) が呼ばれることの直接テスト"""
@@ -85,7 +89,6 @@ class TestCheckPermissiveProductionGuard:
         captured = capsys.readouterr()
         assert "FATAL" in captured.err
         assert "--permissive" in captured.err
-        assert "production" in captured.err.lower()
 
 
 # =========================================================================
@@ -131,9 +134,11 @@ class TestMainPermissiveFlow:
             f"{env_check_lines}"
         )
 
-    def test_permissive_sets_security_mode(self, monkeypatch):
+    def test_permissive_sets_security_mode(self, monkeypatch, tmp_path):
         """テスト10: permissive + 非 production → RUMI_SECURITY_MODE=permissive"""
         monkeypatch.setenv("RUMI_ENVIRONMENT", "development")
+        (tmp_path / "permissive.lock").touch()
+        monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path))
         monkeypatch.delenv("RUMI_SECURITY_MODE", raising=False)
         monkeypatch.setattr(sys, "argv", ["app.py", "--permissive"])
         try:

@@ -108,24 +108,27 @@ class TestKernelContextBuilder:
         assert "packs" in ctx["_disabled_targets"]
         assert "components" in ctx["_disabled_targets"]
 
-    def test_m7_null_safety_mount_manager(self):
+    def test_m7_null_safety_mount_manager(self, monkeypatch):
         """M-7: mount_manager が取得できなくても NullService になること"""
+        monkeypatch.setattr(KernelContextBuilder, "_import_mount_manager", staticmethod(lambda: None))
         builder = self._make_builder()
         ctx = builder.build()
         mm = ctx["mount_manager"]
         result = mm.get_mount("test")
         assert result is None
 
-    def test_m7_null_safety_registry(self):
+    def test_m7_null_safety_registry(self, monkeypatch):
         """M-7: registry が NullService でも壊れないこと"""
+        monkeypatch.setattr(KernelContextBuilder, "_import_registry", staticmethod(lambda: None))
         builder = self._make_builder()
         ctx = builder.build()
         reg = ctx["registry"]
         result = reg.get_all_components()
         assert result is None
 
-    def test_m7_null_safety_active_ecosystem(self):
+    def test_m7_null_safety_active_ecosystem(self, monkeypatch):
         """M-7: active_ecosystem が NullService でも壊れないこと"""
+        monkeypatch.setattr(KernelContextBuilder, "_import_active_ecosystem", staticmethod(lambda: None))
         builder = self._make_builder()
         ctx = builder.build()
         ae = ctx["active_ecosystem"]

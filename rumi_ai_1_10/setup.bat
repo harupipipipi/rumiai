@@ -70,11 +70,11 @@ for /f "tokens=*" %%i in ('%PYTHON_CMD% --version 2^>^&1') do echo     %%i
 echo.
 
 REM ========================================
-REM Python バージョン確認 (3.9+)
+REM Python バージョン確認 (3.10+)
 REM ========================================
-for /f %%i in ('%PYTHON_CMD% -c "import sys; print(1 if sys.version_info >= (3, 9) else 0)" 2^>nul') do set "PY_OK=%%i"
+for /f %%i in ('%PYTHON_CMD% -c "import sys; print(1 if sys.version_info >= (3, 10) else 0)" 2^>nul') do set "PY_OK=%%i"
 if not "%PY_OK%"=="1" (
-    echo   ✗ Python 3.9 以上が必要です
+    echo   ✗ Python 3.10 以上が必要です
     echo.
     echo   インストールガイドを開きます...
     if exist "%GUIDE_DIR%\python.html" (

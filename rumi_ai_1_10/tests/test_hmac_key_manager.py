@@ -454,7 +454,7 @@ class TestRotate:
     def test_rotate_key_alias(self, tmp_path):
         """rotate_key が rotate のエイリアスであること"""
         mgr = HMACKeyManager(keys_path=str(tmp_path / "k.json"))
-        assert mgr.rotate_key is mgr.rotate
+        assert mgr.rotate_key.__func__ is mgr.rotate.__func__
 
     def test_multiple_rotations(self, tmp_path):
         """複数回ローテーションしても正常に動作すること"""
@@ -548,8 +548,11 @@ class TestSecurityProperties:
         with open(keys_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         assert "version" in data
-        assert "keys" in data
-        assert isinstance(data["keys"], list)
+        if data.get("encryption") == "fernet":
+            assert "payload" in data
+        else:
+            assert "keys" in data
+            assert isinstance(data["keys"], list)
 
     def test_default_grace_period(self, tmp_path):
         """デフォルトグレースピリオドが 86400 秒であること"""

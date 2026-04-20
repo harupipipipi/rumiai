@@ -97,10 +97,17 @@ def _make_registry(routes_by_pack: dict) -> MagicMock:
 @pytest.fixture(autouse=True)
 def _reset_routes():
     """各テスト後に classvar ルーティングテーブルをリセット"""
+    def _clear_route_state():
+        RouteHandlersMixin._pack_routes = {}
+        RouteHandlersMixin._exact_routes = {}
+        RouteHandlersMixin._template_routes = []
+        for name in ("_pack_routes", "_exact_routes", "_template_routes"):
+            if name in StubRouteHandler.__dict__:
+                delattr(StubRouteHandler, name)
+
+    _clear_route_state()
     yield
-    RouteHandlersMixin._pack_routes = {}
-    RouteHandlersMixin._exact_routes = {}
-    RouteHandlersMixin._template_routes = []
+    _clear_route_state()
 
 
 # ======================================================================
@@ -595,6 +602,8 @@ class TestReloadPackRoutes:
         # backend_core が import できない場合
         with patch.dict(sys.modules, {
             "backend_core": None,
+            "backend_core.ecosystem": None,
+            "backend_core.ecosystem.registry": None,
         }):
             result = handler._reload_pack_routes()
         assert result["reloaded"] is False

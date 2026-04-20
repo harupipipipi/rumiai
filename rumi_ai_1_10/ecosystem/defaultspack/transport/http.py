@@ -1,0 +1,635 @@
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from blocks._common import ok, error, not_implemented, timestamp, gen_id
+
+import json
+import re
+import signal
+import threading
+import http.server
+import importlib
+
+from bridge.block_adapter import invoke_block
+
+
+class DefaultsHttpServer:
+    def __init__(self, facade):
+        self.facade = facade
+        self.host = os.environ.get("DEFAULTS_HTTP_HOST", "127.0.0.1")
+        self.port = int(os.environ.get("DEFAULTS_HTTP_PORT", "8766"))
+        self._server = None
+        self._thread = None
+        self._routes = []
+        self._setup_routes()
+
+    def _setup_routes(self):
+        """Build the route table.
+
+        If the kernel facade is available and components have registered
+        ``io.http.route`` entries via InterfaceRegistry, those are used.
+        Otherwise the hard-coded fallback list is used for backward
+        compatibility.
+
+        Each entry in ``self._routes`` is a 5-tuple:
+            (method, compiled_regex, handler, source, path_inject)
+
+        *source* is ``"registry"`` or ``"fallback"``.
+        *path_inject* is a dict mapping URL param names to request_data keys
+        (only meaningful for registry routes).
+        """
+        registry_routes = []
+
+        # ---- Attempt to collect routes from InterfaceRegistry ----
+        if self.facade is not None:
+            try:
+                raw = self.facade.get_interface("io.http.route", strategy="all")
+                if raw and isinstance(raw, list):
+                    for entry in raw:
+                        if not isinstance(entry, dict):
+                            continue
+                        method = entry.get("method")
+                        pattern = entry.get("pattern")
+                        handler = entry.get("handler")
+                        path_inject = entry.get("path_inject", {})
+                        if method and pattern and callable(handler):
+                            regex_pattern = re.sub(
+                                r"\{(\w+)\}", r"(?P<\1>[^/]+)", pattern
+                            )
+                            regex_pattern = "^" + regex_pattern + "$"
+                            compiled = re.compile(regex_pattern)
+                            registry_routes.append(
+                                (method, compiled, handler, "registry", path_inject)
+                            )
+            except Exception as exc:
+                print(
+                    "[defaults] WARNING: failed to collect io.http.route from "
+                    "InterfaceRegistry – " + str(exc)
+                )
+
+        if registry_routes:
+            self._routes = registry_routes
+            print(
+                "[defaults] Route registry: loaded "
+                + str(len(registry_routes))
+                + " routes from InterfaceRegistry"
+            )
+            return
+
+        # ---- Fallback: hard-coded route list (backward compatibility) ----
+        print("[defaults] Route registry: no routes found, using fallback")
+        fallback = [
+            ("POST", "/v1/chat/completions", self._handle_chat_send),
+            ("POST", "/api/chat/conversations", self._handle_chat_create),
+            ("GET", "/api/chat/conversations", self._handle_chat_list),
+            ("GET", "/api/chat/conversations/{id}", self._handle_chat_get),
+            ("PUT", "/api/chat/conversations/{id}", self._handle_chat_update),
+            ("DELETE", "/api/chat/conversations/{id}", self._handle_chat_delete),
+            ("POST", "/api/chat/conversations/{id}/messages", self._handle_chat_send_message),
+            ("POST", "/api/chat/conversations/{id}/stream", self._handle_chat_stream),
+            ("POST", "/api/chat/conversations/{id}/export", self._handle_chat_export),
+            ("POST", "/api/chat/conversations/{id}/summarize", self._handle_chat_summarize),
+            ("POST", "/api/chat/conversations/{id}/auto-trim", self._handle_chat_auto_trim),
+            # ---- Agent routes ----
+            ("POST", "/api/agent/execute", self._handle_agent_execute),
+            ("POST", "/api/agent/{id}/approve", self._handle_agent_approve),
+            ("POST", "/api/agent/{id}/reject", self._handle_agent_reject),
+            ("POST", "/api/agent/{id}/cancel", self._handle_agent_cancel),
+            ("GET", "/api/agent/{id}/status", self._handle_agent_status),
+            # ---- Multi-Agent routes (Group 8) ----
+            ("POST", "/api/agent/multi/execute", self._handle_multi_execute),
+            ("GET", "/api/agent/multi/{id}/status", self._handle_multi_status),
+            ("POST", "/api/agent/multi/{id}/message", self._handle_multi_message),
+            # ---- Instruction route (Group 8) ----
+            ("POST", "/api/agent/{id}/instruct", self._handle_agent_instruct),
+            # ---- Consent routes (Group 8) ----
+            ("POST", "/api/consent/check", self._handle_consent_check),
+            ("POST", "/api/consent/{id}/confirm", self._handle_consent_confirm),
+            # ---- Knowledge routes (Group 9a) ----
+            ("POST", "/api/packs/defaultspack/knowledge", self._handle_knowledge_create),
+            ("GET", "/api/packs/defaultspack/knowledge", self._handle_knowledge_list),
+            ("POST", "/api/packs/defaultspack/knowledge/search", self._handle_knowledge_search),
+            ("GET", "/api/packs/defaultspack/knowledge/{id}", self._handle_knowledge_get),
+            ("PUT", "/api/packs/defaultspack/knowledge/{id}", self._handle_knowledge_update),
+            ("DELETE", "/api/packs/defaultspack/knowledge/{id}", self._handle_knowledge_delete),
+            # ---- Prompt routes ----
+            ("PUT", "/api/prompts/{name}", self._handle_prompt_update),
+            ("DELETE", "/api/prompts/{name}", self._handle_prompt_delete),
+            ("POST", "/api/prompts/convert", self._handle_prompt_convert),
+            # ---- Dynamic Tool routes ----
+            ("POST", "/api/tools/create", self._handle_tool_create),
+            ("PUT", "/api/tools/{name}", self._handle_tool_update),
+            ("DELETE", "/api/tools/{name}", self._handle_tool_delete),
+            ("GET", "/api/tools/{name}/export", self._handle_tool_export),
+            # ---- Dev Tool routes (P1-1) ----
+            ("GET", "/api/dev/inspect", self._handle_dev_inspect),
+            ("GET", "/api/dev/prompt-history", self._handle_dev_prompt_history),
+            ("POST", "/api/dev/edit-prompt", self._handle_dev_edit_prompt),
+            ("POST", "/api/dev/replay", self._handle_dev_replay),
+            # ---- System routes ----
+            ("GET", "/api/health", self._handle_health),
+            ("GET", "/api/context", self._handle_context_info),
+            ("GET", "/", self._handle_static),
+            ("GET", "/static/{path}", self._handle_static_file),
+        ]
+        for method, pattern, handler in fallback:
+            regex_pattern = re.sub(r"\{(\w+)\}", r"(?P<\1>[^/]+)", pattern)
+            regex_pattern = "^" + regex_pattern + "$"
+            compiled = re.compile(regex_pattern)
+            self._routes.append((method, compiled, handler, "fallback", {}))
+
+    def start(self):
+        _RequestHandler.server_ref = self
+        self._server = http.server.ThreadingHTTPServer(
+            (self.host, self.port), _RequestHandler
+        )
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=False)
+        self._thread.start()
+        print("[defaults] HTTP server started on " + self.host + ":" + str(self.port))
+
+    def stop(self):
+        if self._server is not None:
+            self._server.shutdown()
+            self._server = None
+            self._thread = None
+
+    def _match_route(self, method, path):
+        """Match *method* + *path* against the route table.
+
+        Returns ``(handler, path_params, source, path_inject)`` or
+        ``(None, None, None, None)`` when nothing matches.
+        """
+        for route_method, compiled, handler, source, path_inject in self._routes:
+            if route_method != method:
+                continue
+            m = compiled.match(path)
+            if m is not None:
+                return handler, m.groupdict(), source, path_inject
+        return None, None, None, None
+
+    def _build_context(self):
+        return {
+            "flow_id": "transport_direct",
+            "step_id": "http_request",
+            "phase": "execute",
+            "ts": timestamp(),
+            "owner_pack": "defaultspack",
+            "inputs": {},
+        }
+
+    def _invoke_fallback_block(self, module_name, request_data, path_params, inject=None):
+        payload = dict(request_data or {})
+        for source_key, dest_key in (inject or {}).items():
+            payload[dest_key] = path_params.get(source_key, "")
+        context = self._build_context()
+        return invoke_block(module_name, payload, context)
+
+    # ---- Chat Handlers (fallback) ----
+
+    def _handle_chat_send(self, request_data, path_params):
+        return self._invoke_fallback_block("blocks.chat.send", request_data, path_params)
+
+    def _handle_chat_create(self, request_data, path_params):
+        return self._invoke_fallback_block("blocks.chat.create_conversation", request_data, path_params)
+
+    def _handle_chat_list(self, request_data, path_params):
+        return self._invoke_fallback_block("blocks.chat.list_conversations", request_data, path_params)
+
+    def _handle_chat_get(self, request_data, path_params):
+        return self._invoke_fallback_block(
+            "blocks.chat.get_conversation",
+            request_data,
+            path_params,
+            {"id": "conversation_id"},
+        )
+
+    def _handle_chat_update(self, request_data, path_params):
+        return self._invoke_fallback_block(
+            "blocks.chat.update_conversation",
+            request_data,
+            path_params,
+            {"id": "conversation_id"},
+        )
+
+    def _handle_chat_delete(self, request_data, path_params):
+        return self._invoke_fallback_block(
+            "blocks.chat.delete_conversation",
+            request_data,
+            path_params,
+            {"id": "conversation_id"},
+        )
+
+    def _handle_chat_send_message(self, request_data, path_params):
+        return self._invoke_fallback_block(
+            "blocks.chat.send",
+            request_data,
+            path_params,
+            {"id": "conversation_id"},
+        )
+
+    def _handle_chat_stream(self, request_data, path_params):
+        return self._invoke_fallback_block(
+            "blocks.chat.stream",
+            request_data,
+            path_params,
+            {"id": "conversation_id"},
+        )
+
+    def _handle_chat_export(self, request_data, path_params):
+        return self._invoke_fallback_block(
+            "blocks.chat.export_conversation",
+            request_data,
+            path_params,
+            {"id": "conversation_id"},
+        )
+
+    def _handle_chat_summarize(self, request_data, path_params):
+        return self._invoke_fallback_block(
+            "blocks.chat.summarize_and_trim",
+            request_data,
+            path_params,
+            {"id": "conversation_id"},
+        )
+
+    def _handle_chat_auto_trim(self, request_data, path_params):
+        return self._invoke_fallback_block(
+            "blocks.chat.auto_trim",
+            request_data,
+            path_params,
+            {"id": "conversation_id"},
+        )
+
+    # ---- Agent Handlers (fallback) ----
+
+    def _handle_agent_execute(self, request_data, path_params):
+        return self._invoke_fallback_block("blocks.agent.execute", request_data, path_params)
+
+    def _handle_agent_approve(self, request_data, path_params):
+        return self._invoke_fallback_block(
+            "blocks.agent.approve",
+            request_data,
+            path_params,
+            {"id": "execution_id"},
+        )
+
+    def _handle_agent_reject(self, request_data, path_params):
+        return self._invoke_fallback_block(
+            "blocks.agent.reject",
+            request_data,
+            path_params,
+            {"id": "execution_id"},
+        )
+
+    def _handle_agent_cancel(self, request_data, path_params):
+        return self._invoke_fallback_block(
+            "blocks.agent.cancel",
+            request_data,
+            path_params,
+            {"id": "execution_id"},
+        )
+
+    def _handle_agent_status(self, request_data, path_params):
+        return self._invoke_fallback_block(
+            "blocks.agent.status",
+            request_data,
+            path_params,
+            {"id": "execution_id"},
+        )
+
+    # ---- Multi-Agent Handlers (fallback, Group 8) ----
+
+    def _handle_multi_execute(self, request_data, path_params):
+        return self._invoke_fallback_block("blocks.agent.multi_execute", request_data, path_params)
+
+    def _handle_multi_status(self, request_data, path_params):
+        return self._invoke_fallback_block(
+            "blocks.agent.multi_status",
+            request_data,
+            path_params,
+            {"id": "session_id"},
+        )
+
+    def _handle_multi_message(self, request_data, path_params):
+        return self._invoke_fallback_block(
+            "blocks.agent.multi_message",
+            request_data,
+            path_params,
+            {"id": "session_id"},
+        )
+
+    # ---- Instruction Handler (fallback, Group 8) ----
+
+    def _handle_agent_instruct(self, request_data, path_params):
+        return self._invoke_fallback_block(
+            "blocks.agent.add_instruction",
+            request_data,
+            path_params,
+            {"id": "execution_id"},
+        )
+
+    # ---- Consent Handlers (fallback, Group 8) ----
+
+    def _handle_consent_check(self, request_data, path_params):
+        return self._invoke_fallback_block("blocks.tool.consent_check", request_data, path_params)
+
+    def _handle_consent_confirm(self, request_data, path_params):
+        return self._invoke_fallback_block(
+            "blocks.tool.consent_confirm",
+            request_data,
+            path_params,
+            {"id": "consent_id"},
+        )
+
+    # ---- Knowledge Handlers (fallback, Group 9a) ----
+
+    def _handle_knowledge_create(self, request_data, path_params):
+        return self._invoke_fallback_block("blocks.knowledge.create", request_data, path_params)
+
+    def _handle_knowledge_list(self, request_data, path_params):
+        return self._invoke_fallback_block("blocks.knowledge.list", request_data, path_params)
+
+    def _handle_knowledge_search(self, request_data, path_params):
+        return self._invoke_fallback_block("blocks.knowledge.search", request_data, path_params)
+
+    def _handle_knowledge_get(self, request_data, path_params):
+        return self._invoke_fallback_block(
+            "blocks.knowledge.get",
+            request_data,
+            path_params,
+            {"id": "id"},
+        )
+
+    def _handle_knowledge_update(self, request_data, path_params):
+        return self._invoke_fallback_block(
+            "blocks.knowledge.update",
+            request_data,
+            path_params,
+            {"id": "id"},
+        )
+
+    def _handle_knowledge_delete(self, request_data, path_params):
+        return self._invoke_fallback_block(
+            "blocks.knowledge.delete",
+            request_data,
+            path_params,
+            {"id": "id"},
+        )
+
+    # ---- Prompt Handlers (fallback) ----
+
+    def _handle_prompt_update(self, request_data, path_params):
+        return self._invoke_fallback_block(
+            "blocks.prompt.update",
+            request_data,
+            path_params,
+            {"name": "name"},
+        )
+
+    def _handle_prompt_delete(self, request_data, path_params):
+        return self._invoke_fallback_block(
+            "blocks.prompt.delete",
+            request_data,
+            path_params,
+            {"name": "name"},
+        )
+
+    def _handle_prompt_convert(self, request_data, path_params):
+        return self._invoke_fallback_block("blocks.prompt.convert", request_data, path_params)
+
+    # ---- Dynamic Tool Handlers (fallback) ----
+
+    def _handle_tool_create(self, request_data, path_params):
+        return self._invoke_fallback_block("blocks.tool.create", request_data, path_params)
+
+    def _handle_tool_update(self, request_data, path_params):
+        return self._invoke_fallback_block(
+            "blocks.tool.update",
+            request_data,
+            path_params,
+            {"name": "name"},
+        )
+
+    def _handle_tool_delete(self, request_data, path_params):
+        return self._invoke_fallback_block(
+            "blocks.tool.delete",
+            request_data,
+            path_params,
+            {"name": "name"},
+        )
+
+    def _handle_tool_export(self, request_data, path_params):
+        return self._invoke_fallback_block(
+            "blocks.tool.export",
+            request_data,
+            path_params,
+            {"name": "name"},
+        )
+
+    # ---- Dev Tool Handlers (fallback, P1-1) ----
+
+    def _handle_dev_inspect(self, request_data, path_params):
+        return self._invoke_fallback_block("blocks.dev.inspect", request_data, path_params)
+
+    def _handle_dev_prompt_history(self, request_data, path_params):
+        return self._invoke_fallback_block("blocks.dev.prompt_history", request_data, path_params)
+
+    def _handle_dev_edit_prompt(self, request_data, path_params):
+        return self._invoke_fallback_block("blocks.dev.edit_prompt_live", request_data, path_params)
+
+    def _handle_dev_replay(self, request_data, path_params):
+        return self._invoke_fallback_block("blocks.dev.replay", request_data, path_params)
+
+    # ---- System Handlers (fallback) ----
+
+    def _handle_health(self, request_data, path_params):
+        return ok({
+            "status": "healthy",
+            "pack": "defaultspack",
+            "ts": timestamp(),
+        })
+
+    def _handle_context_info(self, request_data, path_params):
+        interfaces = {}
+        if self.facade is not None:
+            try:
+                interfaces = self.facade.list_interfaces()
+            except Exception:
+                interfaces = {}
+        return ok({
+            "pack": "defaultspack",
+            "interfaces": interfaces,
+            "ts": timestamp(),
+        })
+
+    # ---- Static Handlers (fallback) ----
+
+    def _handle_static(self, request_data, path_params):
+        shell_path = os.path.join(
+            os.path.dirname(__file__), "..", "ui", "shell.html"
+        )
+        if os.path.isfile(shell_path):
+            with open(shell_path, "r", encoding="utf-8") as f:
+                body = f.read()
+            return {"_static": True, "content_type": "text/html; charset=utf-8", "body": body}
+        return {"_static": True, "content_type": "text/html; charset=utf-8",
+                "body": "<!DOCTYPE html><html><body><h1>defaults pack</h1><p>shell.html not found</p></body></html>"}
+
+    def _handle_static_file(self, request_data, path_params):
+        rel_path = path_params.get("path", "")
+        safe_path = os.path.normpath(rel_path)
+        if safe_path.startswith("..") or os.path.isabs(safe_path):
+            return error("invalid path")
+        file_path = os.path.join(
+            os.path.dirname(__file__), "..", "ui", safe_path
+        )
+        if not os.path.isfile(file_path):
+            return error("file not found: " + rel_path)
+        ext = os.path.splitext(file_path)[1].lower()
+        content_types = {
+            ".html": "text/html; charset=utf-8",
+            ".css": "text/css; charset=utf-8",
+            ".js": "application/javascript; charset=utf-8",
+            ".json": "application/json; charset=utf-8",
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".gif": "image/gif",
+            ".svg": "image/svg+xml",
+            ".ico": "image/x-icon",
+        }
+        ct = content_types.get(ext, "application/octet-stream")
+        if ct.startswith("text/") or ct.startswith("application/j"):
+            with open(file_path, "r", encoding="utf-8") as f:
+                body = f.read()
+        else:
+            import base64
+            with open(file_path, "rb") as f:
+                body = base64.b64encode(f.read()).decode("ascii")
+            ct = ct + "; _base64=true"
+        return {"_static": True, "content_type": ct, "body": body}
+
+
+class _RequestHandler(http.server.BaseHTTPRequestHandler):
+    server_ref = None
+    protocol_version = "HTTP/1.1"
+
+    def do_GET(self):
+        self._handle_request("GET")
+
+    def do_POST(self):
+        self._handle_request("POST")
+
+    def do_PUT(self):
+        self._handle_request("PUT")
+
+    def do_DELETE(self):
+        self._handle_request("DELETE")
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self._send_cors_headers()
+        self.end_headers()
+
+    def _handle_request(self, method):
+        try:
+            path = self.path.split("?")[0]
+            handler, path_params, source, path_inject = self.server_ref._match_route(method, path)
+            if handler is None:
+                self._send_json(404, error("not found: " + method + " " + path))
+                return
+            request_data = {}
+            if method in ("POST", "PUT"):
+                content_length = int(self.headers.get("Content-Length", 0))
+                if content_length > 0:
+                    raw_body = self.rfile.read(content_length)
+                    try:
+                        request_data = json.loads(raw_body.decode("utf-8"))
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        self._send_json(400, error("invalid JSON body"))
+                        return
+
+            if source == "registry":
+                # Inject path parameters into request_data per route config
+                if path_inject and path_params:
+                    for url_param, data_key in path_inject.items():
+                        request_data[data_key] = path_params.get(url_param, "")
+                context = self.server_ref._build_context()
+                context["_facade"] = self.server_ref.facade
+                result = handler(request_data, context)
+            else:
+                # Fallback: original handler signature (request_data, path_params)
+                result = handler(request_data, path_params)
+
+            if isinstance(result, dict) and result.get("_static"):
+                self._send_static(200, result.get("content_type", "text/html"), result.get("body", ""))
+            else:
+                status_code = 200
+                if isinstance(result, dict) and result.get("status") == "error":
+                    status_code = 400
+                self._send_json(status_code, result)
+        except Exception as exc:
+            self._send_json(500, error("internal server error: " + str(exc)))
+
+    def _send_json(self, status_code, data):
+        body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        self.send_response(status_code)
+        self._send_cors_headers()
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_static(self, status_code, content_type, body):
+        if isinstance(body, str):
+            body_bytes = body.encode("utf-8")
+        else:
+            body_bytes = body
+        self.send_response(status_code)
+        self._send_cors_headers()
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body_bytes)))
+        self.end_headers()
+        self.wfile.write(body_bytes)
+
+    def _send_cors_headers(self):
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+    def log_message(self, format, *args):
+        pass
+
+
+def _wait_for_signal():
+    """Block the main thread until interrupted (cross-platform)."""
+    try:
+        signal.pause()
+    except AttributeError:
+        # Windows does not have signal.pause(); poll instead.
+        import time
+        while True:
+            time.sleep(86400)
+
+
+def start_http_server(facade):
+    """Start the HTTP transport and block until interrupted.
+
+    The kernel's app.py calls ``http_server(facade)`` and then returns from
+    ``main()``.  If we don't block here the process exits immediately because
+    there would be no non-daemon threads keeping it alive.
+
+    Strategy:
+      * The server thread is started as **non-daemon** so the process stays
+        alive even if main() returns without blocking.
+      * We additionally call ``_wait_for_signal()`` so that Ctrl-C is caught
+        cleanly and the server is shut down in an orderly fashion.
+    """
+    server = DefaultsHttpServer(facade)
+    server.start()
+    try:
+        _wait_for_signal()
+    except KeyboardInterrupt:
+        print("\n[defaults] Shutting down HTTP server...")
+    finally:
+        server.stop()
+    return server

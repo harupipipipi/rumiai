@@ -16,6 +16,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+pytestmark = pytest.mark.contract
+
 # ---------------------------------------------------------------------------
 # core_runtime 等の外部依存を一括モック
 # ---------------------------------------------------------------------------
@@ -136,24 +138,30 @@ class TestPermissiveGuardStrengthened:
             })
         assert exc.value.code == 1
 
-    def test_permissive_allowed_with_explicit_flag(self):
+    def test_permissive_allowed_with_explicit_flag(self, tmp_path):
         """RUMI_ALLOW_PERMISSIVE=true → 許可"""
+        (tmp_path / "permissive.lock").touch()
         _run_main("--permissive", "--headless", env={
             "RUMI_ALLOW_PERMISSIVE": "true",
+            "RUMI_USER_DATA": str(tmp_path),
         })
 
-    def test_permissive_allowed_in_dev_environment(self):
+    def test_permissive_allowed_in_dev_environment(self, tmp_path):
         """RUMI_ENVIRONMENT=development → 許可"""
+        (tmp_path / "permissive.lock").touch()
         _run_main("--permissive", "--headless", env={
             "RUMI_ENVIRONMENT": "development",
             "RUMI_ALLOW_PERMISSIVE": None,
+            "RUMI_USER_DATA": str(tmp_path),
         })
 
-    def test_permissive_allowed_in_dev_short(self):
+    def test_permissive_allowed_in_dev_short(self, tmp_path):
         """RUMI_ENVIRONMENT=dev → 許可"""
+        (tmp_path / "permissive.lock").touch()
         _run_main("--permissive", "--headless", env={
             "RUMI_ENVIRONMENT": "dev",
             "RUMI_ALLOW_PERMISSIVE": None,
+            "RUMI_USER_DATA": str(tmp_path),
         })
 
 

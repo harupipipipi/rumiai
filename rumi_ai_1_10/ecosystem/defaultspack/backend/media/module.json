@@ -1,0 +1,11 @@
+{
+  "module_id": "media",
+  "kind": "backend",
+  "display_name": "Media Core",
+  "description": "Image, document, clipboard, and screenshot primitives cloned from defaults for defaultspack v2.",
+  "dependencies": [
+    "tool"
+  ],
+  "default_state": "enabled",
+  "failure_threshold": 3
+}

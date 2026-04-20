@@ -1,3 +1,262 @@
 <!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Rumi AI Setup</title></head>
-<body><h1>Setup</h1><p>OAuth setup page.</p></body></html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rumi AI Setup</title>
+  <style>
+    :root {
+      --bg: linear-gradient(140deg, #f5efe2 0%, #d9e5db 55%, #c6d6df 100%);
+      --ink: #1b2a2f;
+      --muted: #56666b;
+      --card: rgba(255, 252, 245, 0.88);
+      --line: rgba(27, 42, 47, 0.12);
+      --accent: #1f6d57;
+      --accent-2: #be6b3a;
+      --shadow: 0 20px 50px rgba(27, 42, 47, 0.12);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Avenir Next", "Helvetica Neue", sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+    main {
+      width: min(980px, 100%);
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      backdrop-filter: blur(16px);
+    }
+    .hero {
+      padding: 28px 28px 12px;
+      border-bottom: 1px solid var(--line);
+      background:
+        radial-gradient(circle at top right, rgba(190, 107, 58, 0.16), transparent 32%),
+        radial-gradient(circle at left center, rgba(31, 109, 87, 0.14), transparent 28%);
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(32px, 5vw, 54px);
+      line-height: 0.95;
+      letter-spacing: -0.04em;
+    }
+    p { margin: 0; color: var(--muted); }
+    .grid {
+      display: grid;
+      gap: 18px;
+      grid-template-columns: 1.4fr 0.9fr;
+      padding: 24px 28px 28px;
+    }
+    .panel {
+      background: rgba(255,255,255,0.66);
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      padding: 18px;
+    }
+    .panel h2 {
+      margin: 0 0 12px;
+      font-size: 18px;
+      letter-spacing: -0.02em;
+    }
+    .pack-list {
+      display: grid;
+      gap: 12px;
+    }
+    .pack {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 14px;
+      background: rgba(255,255,255,0.7);
+    }
+    .pack.selected {
+      border-color: rgba(31,109,87,0.42);
+      box-shadow: inset 0 0 0 1px rgba(31,109,87,0.2);
+    }
+    .pack header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .pill {
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 12px;
+      border: 1px solid var(--line);
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .recommended { color: var(--accent); border-color: rgba(31,109,87,0.25); }
+    .danger { color: var(--accent-2); border-color: rgba(190,107,58,0.25); }
+    .actions, .mini-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+    button {
+      border: 0;
+      border-radius: 999px;
+      padding: 10px 16px;
+      font: inherit;
+      cursor: pointer;
+      color: white;
+      background: var(--accent);
+    }
+    button.secondary {
+      color: var(--ink);
+      background: rgba(27, 42, 47, 0.08);
+    }
+    button.warn { background: var(--accent-2); }
+    button:disabled { opacity: 0.55; cursor: default; }
+    .status {
+      white-space: pre-wrap;
+      font-size: 13px;
+      line-height: 1.45;
+      color: var(--muted);
+      background: rgba(27,42,47,0.04);
+      border-radius: 16px;
+      padding: 14px;
+      min-height: 140px;
+    }
+    .meta {
+      display: grid;
+      gap: 10px;
+      font-size: 14px;
+    }
+    .meta strong {
+      display: block;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 3px;
+    }
+    @media (max-width: 820px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="hero">
+      <h1>Choose setup packs.</h1>
+      <p>Checked setup packs are installed together. all OK permissions are granted only to setup packs that explicitly support all OK.</p>
+    </section>
+    <section class="grid">
+      <div class="panel">
+        <h2>Available Setup Packs</h2>
+        <div class="actions">
+          <button id="install-selected">Install checked packs</button>
+        </div>
+        <div id="pack-list" class="pack-list"></div>
+      </div>
+      <div class="panel">
+        <h2>Setup State</h2>
+        <div class="meta">
+          <div><strong>Selection</strong><span id="selection">Loading…</span></div>
+          <div><strong>Migration</strong><span id="migration">Loading…</span></div>
+        </div>
+        <div class="actions">
+          <button id="refresh" class="secondary">Refresh</button>
+        </div>
+        <div id="status" class="status"></div>
+      </div>
+    </section>
+  </main>
+  <script>
+    const statusEl = document.getElementById("status");
+    const selectionEl = document.getElementById("selection");
+    const migrationEl = document.getElementById("migration");
+    const listEl = document.getElementById("pack-list");
+
+    function setStatus(label, payload) {
+      statusEl.textContent = label + "\n\n" + JSON.stringify(payload, null, 2);
+    }
+
+    async function getJson(url, options) {
+      const res = await fetch(url, options);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.success === false) {
+        throw new Error(data.error || res.statusText || "request failed");
+      }
+      return data.data || data;
+    }
+
+    async function installSelectedPacks() {
+      const selected = Array.from(listEl.querySelectorAll("[data-select-pack]:checked"))
+        .map((input) => input.dataset.selectPack);
+      if (!selected.length) {
+        setStatus("No setup packs checked", {});
+        return;
+      }
+      const data = await getJson("/api/setup/packs/install", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ setup_pack_ids: selected })
+      });
+      setStatus("Setup packs installed", data);
+      await load();
+    }
+
+    function renderPacks(payload) {
+      listEl.innerHTML = "";
+      const hasSelection = Boolean((payload.selected_setup_pack_ids || []).length);
+      for (const pack of payload.packs || []) {
+        const card = document.createElement("article");
+        card.className = "pack" + (pack.selected ? " selected" : "");
+        const riskClass = pack.risk_level === "high" ? "danger" : "";
+        const checked = pack.selected || (!hasSelection && pack.recommended);
+        const allOkText = pack.supports_all_ok
+          ? "Supports selective all OK grants"
+          : "Installs without all OK grants";
+        card.innerHTML = `
+          <header>
+            <div>
+              <strong>${pack.display_name}</strong>
+              <div>${pack.description || ""}</div>
+              <div>${allOkText}</div>
+            </div>
+            <div class="pill ${pack.recommended ? "recommended" : riskClass}">
+              ${pack.recommended ? "Recommended" : "Risk: " + pack.risk_level}
+            </div>
+          </header>
+          <div class="mini-actions">
+            <label>
+              <input type="checkbox" data-select-pack="${pack.pack_id}" ${checked ? "checked" : ""}>
+              Include in setup
+            </label>
+          </div>
+        `;
+        listEl.appendChild(card);
+      }
+    }
+
+    async function load() {
+      try {
+        const packs = await getJson("/api/setup/packs");
+        const migration = await getJson("/api/setup/migration/status");
+        renderPacks(packs);
+        selectionEl.textContent = (packs.selected_setup_pack_ids || []).join(", ") || "none";
+        migrationEl.textContent = migration.needs_user_migration ? "user.csv migration pending" : "ready";
+        setStatus("Setup loaded", { packs, migration });
+      } catch (error) {
+        setStatus("Setup failed", { error: error.message });
+      }
+    }
+
+    document.getElementById("refresh").addEventListener("click", load);
+    document.getElementById("install-selected").addEventListener("click", installSelectedPacks);
+    load();
+  </script>
+</body>
+</html>

@@ -19,6 +19,18 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger("rumi.kernel.context")
 
 
+class _ReadOnlyDiagnostics:
+    """Read-only proxy used by safe pack contexts."""
+
+    def __init__(self, diagnostics):
+        self._diagnostics = diagnostics
+
+    def __getattr__(self, name):
+        if name.startswith(("record_", "set_", "clear_", "reset_")):
+            raise AttributeError(name)
+        return getattr(self._diagnostics, name)
+
+
 # ------------------------------------------------------------------
 # M-7: NullService sentinel
 # ------------------------------------------------------------------

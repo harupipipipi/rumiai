@@ -55,13 +55,13 @@ sys.modules["core_runtime.audit_logger"] = _dummy_audit
 # paths ダミー
 _dummy_paths = types.ModuleType("core_runtime.paths")
 _dummy_paths.BASE_DIR = Path("/tmp/dummy_base_dir_w21a")
-sys.modules.setdefault("core_runtime.paths", _dummy_paths)
+sys.modules["core_runtime.paths"] = _dummy_paths
 
 # di_container ダミー
 _dummy_di = types.ModuleType("core_runtime.di_container")
 _dummy_container = MagicMock()
 _dummy_di.get_container = MagicMock(return_value=_dummy_container)
-sys.modules.setdefault("core_runtime.di_container", _dummy_di)
+sys.modules["core_runtime.di_container"] = _dummy_di
 
 # ---------------------------------------------------------------------------
 # テスト対象のインポート (ダミー設定後にインポート)
@@ -74,6 +74,18 @@ from core_runtime.host_privilege_manager import (
     HostPrivilegeManager,
     PrivilegeResult,
 )
+
+for _stub_name in (
+    "core_runtime.hmac_key_manager",
+    "core_runtime.audit_logger",
+    "core_runtime.paths",
+    "core_runtime.di_container",
+):
+    sys.modules.pop(_stub_name, None)
+    _parent = sys.modules.get("core_runtime")
+    _attr = _stub_name.rsplit(".", 1)[1]
+    if _parent is not None and hasattr(_parent, _attr):
+        delattr(_parent, _attr)
 
 
 # ---------------------------------------------------------------------------

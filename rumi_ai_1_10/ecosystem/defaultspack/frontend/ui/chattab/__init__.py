@@ -1,0 +1,1 @@
+"""Chat tab frontend module."""

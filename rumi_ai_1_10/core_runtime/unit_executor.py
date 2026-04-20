@@ -321,7 +321,7 @@ class UnitExecutor:
         # 4.5. kind ホワイトリスト (I-02)
         if unit_meta.kind not in ALLOWED_KINDS:
             return self._denied(
-                "Unknown kind",
+                f"Unknown kind: {unit_meta.kind}",
                 "unknown_kind",
                 start_time, mode, principal_id, unit_ref,
                 internal_detail=f"Unknown kind: {unit_meta.kind}",
@@ -473,19 +473,28 @@ class UnitExecutor:
         verified_content: Optional[bytes] = None,
     ) -> UnitExecutionResult:
         ep_path = unit_meta.unit_dir / unit_meta.entrypoint
-        if not ep_path.exists():
+        try:
+            if not ep_path.exists():
+                return UnitExecutionResult(
+                    success=False,
+                    error="Entrypoint not found",
+                    error_type="entrypoint_not_found",
+                    execution_mode="host_capability",
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+            if ep_path.is_symlink():
+                return UnitExecutionResult(
+                    success=False,
+                    error="Symlink entrypoint not allowed",
+                    error_type="symlink_denied",
+                    execution_mode="host_capability",
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+        except OSError:
             return UnitExecutionResult(
                 success=False,
-                error="Entrypoint not found",
-                error_type="entrypoint_not_found",
-                execution_mode="host_capability",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-        if ep_path.is_symlink():
-            return UnitExecutionResult(
-                success=False,
-                error="Symlink entrypoint not allowed",
-                error_type="symlink_denied",
+                error="Failed to stat entrypoint for security check",
+                error_type="internal_error",
                 execution_mode="host_capability",
                 latency_ms=(time.time() - start_time) * 1000,
             )
@@ -625,19 +634,28 @@ class UnitExecutor:
         verified_content: Optional[bytes] = None,
     ) -> UnitExecutionResult:
         ep_path = unit_meta.unit_dir / unit_meta.entrypoint
-        if not ep_path.exists():
+        try:
+            if not ep_path.exists():
+                return UnitExecutionResult(
+                    success=False,
+                    error="Entrypoint not found",
+                    error_type="entrypoint_not_found",
+                    execution_mode="host_capability",
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+            if ep_path.is_symlink():
+                return UnitExecutionResult(
+                    success=False,
+                    error="Symlink entrypoint not allowed",
+                    error_type="symlink_denied",
+                    execution_mode="host_capability",
+                    latency_ms=(time.time() - start_time) * 1000,
+                )
+        except OSError:
             return UnitExecutionResult(
                 success=False,
-                error="Entrypoint not found",
-                error_type="entrypoint_not_found",
-                execution_mode="host_capability",
-                latency_ms=(time.time() - start_time) * 1000,
-            )
-        if ep_path.is_symlink():
-            return UnitExecutionResult(
-                success=False,
-                error="Symlink entrypoint not allowed",
-                error_type="symlink_denied",
+                error="Failed to stat entrypoint for security check",
+                error_type="internal_error",
                 execution_mode="host_capability",
                 latency_ms=(time.time() - start_time) * 1000,
             )

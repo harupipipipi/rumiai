@@ -66,8 +66,8 @@ MAX_HOST_EXECUTION_TIMEOUT: int = int(os.environ.get("RUMI_HOST_EXEC_TIMEOUT", "
 MAX_STDOUT_SIZE: int = 4 * 1024 * 1024  # 4MB (#14)
 _DOCKER_CHECK_CACHE_TTL: float = float(os.environ.get("RUMI_DOCKER_CHECK_CACHE_TTL", "60"))
 # SEC-2: Docker image ダイジェスト固定
-DEFAULT_EXECUTOR_IMAGE: str = "python:3.11-slim@sha256:d6e4d224f70f9e0172a06a3a2eba2f768eb146811a349278b38fff3a36463b47"
-EXECUTOR_IMAGE: str = os.environ.get("RUMI_EXECUTOR_IMAGE", DEFAULT_EXECUTOR_IMAGE)
+DEFAULT_EXECUTOR_IMAGE: str = "python:3.11-slim@sha256:233de06753d30d120b1a3ce359d8d3be8bda78524cd8f520c99883bfe33964cf"
+EXECUTOR_IMAGE: str = os.environ.get("RUMI_EXECUTOR_IMAGE") or DEFAULT_EXECUTOR_IMAGE
 
 
 
@@ -375,6 +375,20 @@ class PythonFileExecutor:
 
     def _now_ts(self) -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    def _audit(self, event_type: str, **details: Any) -> None:
+        """Compatibility audit hook for tests and legacy integrations."""
+        try:
+            from .audit_logger import get_audit_logger
+            audit = get_audit_logger()
+            audit.log_security_event(
+                event_type=event_type,
+                severity=details.pop("severity", "info"),
+                description=details.pop("description", event_type),
+                details=details,
+            )
+        except Exception:
+            pass
 
     def get_security_mode(self) -> str:
         """現在のセキュリティモードを取得"""
@@ -814,17 +828,27 @@ request = http_request
         script_file = None
         syscall_file = None
         capability_file = None
+        original_target_mode = None
 
         try:
+            try:
+                original_target_mode = file_path.stat().st_mode
+                if not (original_target_mode & 0o004):
+                    os.chmod(file_path, original_target_mode | 0o444)
+            except OSError:
+                pass
+
             # 一時ファイルに入力データを書き込み
             with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
                 json.dump({"input_data": input_data, "context": exec_context}, f, ensure_ascii=False, default=str)
                 input_file = f.name
+            os.chmod(input_file, 0o644)
 
             # rumi_syscall モジュールを一時ファイルに書き込み
             with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
                 f.write(self._get_syscall_module_content())
                 syscall_file = f.name
+            os.chmod(syscall_file, 0o644)
 
             # rumi_capability モジュールを一時ファイルに書き込み
             cap_content = self._get_capability_module_content()
@@ -832,6 +856,7 @@ request = http_request
                 with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
                     f.write(cap_content)
                     capability_file = f.name
+                os.chmod(capability_file, 0o644)
 
             # 実行スクリプトを生成
             executor_script = self._generate_executor_script(file_path.name)
@@ -839,6 +864,7 @@ request = http_request
             with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
                 f.write(executor_script)
                 script_file = f.name
+            os.chmod(script_file, 0o644)
 
             # Docker実行コマンドを構築 (DockerRunBuilder)
             builder = DockerRunBuilder(name=container_name)
@@ -970,6 +996,11 @@ request = http_request
                         os.unlink(tmp_file)
                     except Exception:
                         pass
+            if original_target_mode is not None:
+                try:
+                    os.chmod(file_path, original_target_mode)
+                except OSError:
+                    pass
 
         return result
 

@@ -119,8 +119,11 @@ def _make_kernel(flow_ids=None, execute_return=None, execute_side_effect=None):
 @pytest.fixture(autouse=True)
 def _reset_semaphore():
     """各テスト後に classvar セマフォをリセット"""
+    FlowHandlersMixin._flow_semaphore = None
+    StubHandler._flow_semaphore = None
     yield
     FlowHandlersMixin._flow_semaphore = None
+    StubHandler._flow_semaphore = None
 
 
 # ======================================================================

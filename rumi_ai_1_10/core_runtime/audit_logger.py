@@ -41,6 +41,17 @@ AuditCategory = Literal[
 AuditSeverity = Literal["info", "warning", "error", "critical"]
 
 
+def _json_safe(value: Any) -> Any:
+    """Return a JSON-serializable representation for audit log payloads."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(v) for v in value]
+    return str(value)
+
+
 @dataclass
 class AuditEntry:
     """監査ログエントリ"""
@@ -69,7 +80,7 @@ class AuditEntry:
     def to_dict(self) -> Dict[str, Any]:
         """辞書に変換(None値は除外)"""
         d = asdict(self)
-        return {k: v for k, v in d.items() if v is not None}
+        return {k: _json_safe(v) for k, v in d.items() if v is not None}
     
     def to_json(self) -> str:
         """JSON文字列に変換 (VULN-H05: ensure_ascii=True)"""

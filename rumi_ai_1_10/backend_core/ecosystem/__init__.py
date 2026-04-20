@@ -13,6 +13,8 @@ backend_core.ecosystem - 最小インフラ
 - アドオン管理（コンポーネント側の責務）
 """
 
+import importlib
+
 from .mounts import (
     MountManager,
     get_mount_manager,
@@ -71,4 +73,15 @@ __all__ = [
     "generate_component_uuid",
     "validate_uuid",
     "parse_uuid",
+
+    # submodules
+    "active_ecosystem",
 ]
+
+
+def __getattr__(name):
+    if name == "active_ecosystem":
+        module = importlib.import_module(f"{__name__}.active_ecosystem")
+        globals()[name] = module
+        return module
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

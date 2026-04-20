@@ -28,6 +28,9 @@ DEFAULT_MOUNTS = {
     "data.user": "./user_data",
     "data.settings": "./user_data/settings",
     "data.cache": "./user_data/cache",
+    # Legacy compatibility mounts kept for migration-safe upgrades.
+    "data.chats": "./user_data/chats",
+    "data.shared": "./user_data/shared",
 }
 
 # グローバルインスタンス（遅延初期化）

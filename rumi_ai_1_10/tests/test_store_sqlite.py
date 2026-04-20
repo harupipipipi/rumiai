@@ -140,8 +140,8 @@ class TestStoreCRUD(_TempDirMixin, TestCase):
         reg = self._make_registry()
         root = self._store_root("casc")
         reg.create_store("casc", root)
-        reg.cas("casc", "k1", None, {"v": 1})
-        reg.cas("casc", "k2", None, {"v": 2})
+        reg.cas("casc", "k1", new_value={"v": 1})
+        reg.cas("casc", "k2", new_value={"v": 2})
         reg.delete_store("casc")
         # DB に store_data が残っていないことを確認
         conn = reg._get_conn()
@@ -186,7 +186,7 @@ class TestCAS(_TempDirMixin, TestCase):
     def test_cas_create(self) -> None:
         reg = self._make_registry()
         self._setup_store(reg)
-        result = reg.cas("s", "key1", None, {"hello": "world"})
+        result = reg.cas("s", "key1", new_value={"hello": "world"})
         self.assertTrue(result["success"])
         self.assertEqual(result["store_id"], "s")
         self.assertEqual(result["key"], "key1")
@@ -195,7 +195,7 @@ class TestCAS(_TempDirMixin, TestCase):
     def test_cas_update(self) -> None:
         reg = self._make_registry()
         self._setup_store(reg)
-        reg.cas("s", "k", None, "v1")
+        reg.cas("s", "k", new_value="v1")
         result = reg.cas("s", "k", "v1", "v2")
         self.assertTrue(result["success"])
         reg.close()
@@ -203,7 +203,7 @@ class TestCAS(_TempDirMixin, TestCase):
     def test_cas_conflict_value_mismatch(self) -> None:
         reg = self._make_registry()
         self._setup_store(reg)
-        reg.cas("s", "k", None, "v1")
+        reg.cas("s", "k", new_value="v1")
         result = reg.cas("s", "k", "wrong", "v2")
         self.assertFalse(result["success"])
         self.assertEqual(result["error_type"], "conflict")
@@ -213,8 +213,8 @@ class TestCAS(_TempDirMixin, TestCase):
     def test_cas_conflict_key_exists_expected_none(self) -> None:
         reg = self._make_registry()
         self._setup_store(reg)
-        reg.cas("s", "k", None, "v1")
-        result = reg.cas("s", "k", None, "v2")
+        reg.cas("s", "k", new_value="v1")
+        result = reg.cas("s", "k", new_value="v2")
         self.assertFalse(result["success"])
         self.assertEqual(result["error_type"], "conflict")
         self.assertEqual(result["current_value"], "v1")
@@ -231,7 +231,7 @@ class TestCAS(_TempDirMixin, TestCase):
 
     def test_cas_store_not_found(self) -> None:
         reg = self._make_registry()
-        result = reg.cas("ghost", "k", None, "v")
+        result = reg.cas("ghost", "k", new_value="v")
         self.assertFalse(result["success"])
         self.assertEqual(result["error_type"], "store_not_found")
         reg.close()
@@ -240,7 +240,7 @@ class TestCAS(_TempDirMixin, TestCase):
         reg = self._make_registry()
         self._setup_store(reg)
         big = "x" * (2 * 1024 * 1024)
-        result = reg.cas("s", "k", None, big)
+        result = reg.cas("s", "k", new_value=big)
         self.assertFalse(result["success"])
         self.assertEqual(result["error_type"], "payload_too_large")
         reg.close()
@@ -248,7 +248,7 @@ class TestCAS(_TempDirMixin, TestCase):
     def test_cas_not_serializable(self) -> None:
         reg = self._make_registry()
         self._setup_store(reg)
-        result = reg.cas("s", "k", None, object())
+        result = reg.cas("s", "k", new_value=object())
         self.assertFalse(result["success"])
         self.assertEqual(result["error_type"], "validation_error")
         reg.close()
@@ -257,22 +257,20 @@ class TestCAS(_TempDirMixin, TestCase):
         """None (JSON null) を値として CAS できる。"""
         reg = self._make_registry()
         self._setup_store(reg)
-        r1 = reg.cas("s", "k", None, None)
-        # expected_value=None は「キーが存在しないことを期待」の意味
-        # new_value=None は JSON null を書き込む
-        # ここで expected_value=None かつキーが存在しないので create 成功
+        r1 = reg.cas("s", "k", new_value=None)
+        # expected_value 省略は「キーが存在しないことを期待」の意味。
+        # new_value=None は JSON null を書き込む。
         self.assertTrue(r1["success"])
-        # 次に expected_value=None（キー無し期待）で上書き → conflict
+        # 次に expected_value=None（現在値が JSON null）で上書き → success
         r2 = reg.cas("s", "k", None, "x")
-        self.assertFalse(r2["success"])
-        self.assertEqual(r2["error_type"], "conflict")
+        self.assertTrue(r2["success"])
         reg.close()
 
     def test_cas_concurrent(self) -> None:
         """複数スレッドからの同時 CAS で競合が正しく検出される。"""
         reg = self._make_registry()
         self._setup_store(reg)
-        reg.cas("s", "counter", None, 0)
+        reg.cas("s", "counter", new_value=0)
 
         results: List[Dict[str, Any]] = []
         lock = threading.Lock()
@@ -305,7 +303,7 @@ class TestListKeys(_TempDirMixin, TestCase):
     def _populate(self, reg: StoreRegistry, sid: str, keys: List[str]) -> None:
         reg.create_store(sid, self._store_root(sid))
         for k in keys:
-            reg.cas(sid, k, None, f"val_{k}")
+            reg.cas(sid, k, new_value=f"val_{k}")
 
     def test_list_all(self) -> None:
         reg = self._make_registry()
@@ -388,8 +386,8 @@ class TestBatchGet(_TempDirMixin, TestCase):
     def test_batch_basic(self) -> None:
         reg = self._make_registry()
         reg.create_store("s", self._store_root("s"))
-        reg.cas("s", "k1", None, {"a": 1})
-        reg.cas("s", "k2", None, {"b": 2})
+        reg.cas("s", "k1", new_value={"a": 1})
+        reg.cas("s", "k2", new_value={"b": 2})
         result = reg.batch_get("s", ["k1", "k2", "k3"])
         self.assertTrue(result["success"])
         self.assertEqual(result["found"], 2)
@@ -421,7 +419,7 @@ class TestBatchGet(_TempDirMixin, TestCase):
     def test_batch_warnings_field(self) -> None:
         reg = self._make_registry()
         reg.create_store("s", self._store_root("s"))
-        reg.cas("s", "k1", None, "small")
+        reg.cas("s", "k1", new_value="small")
         result = reg.batch_get("s", ["k1"])
         self.assertIn("warnings", result)
         self.assertIsInstance(result["warnings"], list)
@@ -436,7 +434,7 @@ class TestBatchGet(_TempDirMixin, TestCase):
         # 各キーに ~100KB のデータを書き込み（10件で ~1000KB > 900KB）
         chunk = "x" * (100 * 1024)
         for i in range(10):
-            reg.cas("s", f"big{i:02d}", None, chunk)
+            reg.cas("s", f"big{i:02d}", new_value=chunk)
 
         keys = [f"big{i:02d}" for i in range(10)]
         result = reg.batch_get("s", keys)
@@ -740,7 +738,7 @@ class TestThreadSafety(_TempDirMixin, TestCase):
         reg = self._make_registry()
         reg.create_store("bg", self._store_root("bg"))
         for i in range(20):
-            reg.cas("bg", f"k{i}", None, i)
+            reg.cas("bg", f"k{i}", new_value=i)
 
         results: List[Dict[str, Any]] = []
         lock = threading.Lock()

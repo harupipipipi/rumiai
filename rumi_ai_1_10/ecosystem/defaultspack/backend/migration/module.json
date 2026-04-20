@@ -1,0 +1,9 @@
+{
+  "module_id": "migration",
+  "kind": "backend",
+  "display_name": "Migration",
+  "description": "Old defaults data migration and compatibility shims.",
+  "dependencies": [],
+  "default_state": "enabled",
+  "failure_threshold": 2
+}

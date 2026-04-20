@@ -1,0 +1,9 @@
+{
+  "module_id": "wallpaper",
+  "kind": "frontend",
+  "display_name": "Background / Wallpaper",
+  "description": "Background / wallpaper customization.",
+  "dependencies": [],
+  "default_state": "enabled",
+  "failure_threshold": 5
+}

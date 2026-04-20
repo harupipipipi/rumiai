@@ -66,6 +66,7 @@ class TestSecureExecution(unittest.TestCase):
                     
                     try:
                         executor._path_validator.add_allowed_root(str(Path(test_file).parent))
+                        executor._path_validator.validate = MagicMock(return_value=(True, None, Path(test_file).resolve()))
                         
                         context = self._create_test_context()
                         result = executor.execute(
@@ -100,6 +101,7 @@ class TestSecureExecution(unittest.TestCase):
                     
                     try:
                         executor._path_validator.add_allowed_root(str(Path(test_file).parent))
+                        executor._path_validator.validate = MagicMock(return_value=(True, None, Path(test_file).resolve()))
                         
                         context = self._create_test_context()
                         result = executor.execute(
@@ -196,38 +198,50 @@ class TestDockerExecution(unittest.TestCase):
             self.skipTest("Docker not available")
         
         executor = PythonFileExecutor()
-        
-        # 承認チェックをパス
-        with patch.object(executor._approval_checker, 'is_approved', return_value=(True, None)):
-            with patch.object(executor._approval_checker, 'verify_hash', return_value=(True, None)):
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-                    f.write("def run(input_data, context=None): return {'result': 'docker_test'}")
-                    test_file = f.name
-                
-                try:
-                    executor._path_validator.add_allowed_root(str(Path(test_file).parent))
-                    
-                    context = ExecutionContext(
-                        flow_id="test_flow",
-                        step_id="test_step",
-                        phase="test",
-                        ts="2024-01-01T00:00:00Z",
-                        owner_pack="test_pack",
-                        inputs={},
-                    )
-                    
-                    result = executor.execute(
-                        file_path=test_file,
-                        owner_pack="test_pack",
-                        input_data={"key": "value"},
-                        context=context,
-                        timeout_seconds=30.0
-                    )
-                    
-                    self.assertTrue(result.success)
-                    self.assertEqual(result.execution_mode, "container")
-                finally:
-                    os.unlink(test_file)
+
+        with tempfile.TemporaryDirectory() as uds_dir:
+            uds_sock = Path(uds_dir) / "egress.sock"
+            uds_sock.touch()
+
+            mock_uds = MagicMock()
+            mock_uds.ensure_pack_socket.return_value = (True, None, uds_sock)
+            executor.set_uds_proxy_manager(mock_uds)
+
+            # 承認チェックをパス
+            with patch.object(executor._approval_checker, 'is_approved', return_value=(True, None)):
+                with patch.object(executor._approval_checker, 'verify_hash', return_value=(True, None)):
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+                        f.write("def run(input_data, context=None): return {'result': 'docker_test'}")
+                        test_file = f.name
+
+                    try:
+                        executor._path_validator.add_allowed_root(str(Path(test_file).parent))
+                        executor._path_validator.validate = MagicMock(return_value=(True, None, Path(test_file).resolve()))
+
+                        context = ExecutionContext(
+                            flow_id="test_flow",
+                            step_id="test_step",
+                            phase="test",
+                            ts="2024-01-01T00:00:00Z",
+                            owner_pack="test_pack",
+                            inputs={},
+                        )
+
+                        result = executor.execute(
+                            file_path=test_file,
+                            owner_pack="test_pack",
+                            input_data={"key": "value"},
+                            context=context,
+                            timeout_seconds=30.0
+                        )
+
+                        self.assertTrue(
+                            result.success,
+                            f"Docker execution failed: {result.error_type}: {result.error}",
+                        )
+                        self.assertEqual(result.execution_mode, "container")
+                    finally:
+                        os.unlink(test_file)
 
 
 if __name__ == "__main__":

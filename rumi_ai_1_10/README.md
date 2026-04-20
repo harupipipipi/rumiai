@@ -263,7 +263,7 @@ project_root/
 
 ### 必要条件
 
-- Python 3.9+
+- Python 3.10+
 - Docker（本番環境で必須）
 - Git
 
@@ -303,6 +303,8 @@ curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
 | [docs/pack-development-guide.md](docs/pack-development-guide.md) | Pack 開発クイックスタート |
 | [docs/operations.md](docs/operations.md) | 運用ガイド |
 | [docs/roadmap.md](docs/roadmap.md) | ロードマップ |
+| [docs/quality_pack/philosophy_memo.md](docs/quality_pack/philosophy_memo.md) | 開発判断に使う思想メモ |
+| [docs/quality_pack/claude_desktop_quality_pack.md](docs/quality_pack/claude_desktop_quality_pack.md) | 品質保証・監査・回帰検証パック |
 
 ---
 

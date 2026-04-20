@@ -1,0 +1,12 @@
+{
+  "module_id": "dev",
+  "kind": "backend",
+  "display_name": "Dev Core",
+  "description": "Developer inspection, replay, and prompt tooling cloned from defaults for defaultspack v2.",
+  "dependencies": [
+    "prompt",
+    "tool"
+  ],
+  "default_state": "enabled",
+  "failure_threshold": 3
+}

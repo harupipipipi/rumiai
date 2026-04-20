@@ -47,7 +47,7 @@ class TestVerifyHashDetailed(unittest.TestCase):
                     file_hashes=dict(stored_hashes),
                 )
 
-            am._resolve_pack_dir = MagicMock(return_value=Path("/fake/pack"))
+            am._resolve_pack_dir = MagicMock(return_value=Path(__file__).resolve().parent)
             am._compute_pack_hashes = MagicMock(return_value=dict(current_hashes))
             am._compute_pack_hashes_nocache = MagicMock(return_value=dict(current_hashes))
             am._is_core_pack = lambda pid: pid.startswith("__core__")

@@ -33,6 +33,48 @@ def get_user_data_dir() -> Path:
     return Path('user_data')
 
 
+def get_chats_dir() -> Path:
+    """Legacy chats directory shim."""
+    return get_mount_path_safe("data.chats", "chats")
+
+
+def get_settings_dir() -> Path:
+    """Settings directory shim."""
+    return get_mount_path_safe("data.settings", "user_data/settings")
+
+
+def get_tools_dir() -> Path:
+    """Legacy tools directory shim."""
+    return Path("tool")
+
+
+def get_prompts_dir() -> Path:
+    """Legacy prompts directory shim."""
+    return Path("prompt")
+
+
+def get_supporters_dir() -> Path:
+    """Legacy supporters directory shim."""
+    return Path("supporter")
+
+
+def get_ai_clients_dir() -> Path:
+    """Legacy AI client directory shim."""
+    return Path("ai_client")
+
+
+def get_component_path(component_type: str) -> Optional[Path]:
+    """Resolve legacy component directory names used by older loaders."""
+    mapping = {
+        "chats": get_chats_dir(),
+        "tool_pack": get_tools_dir(),
+        "prompt_pack": get_prompts_dir(),
+        "supporter_pack": get_supporters_dir(),
+        "ai_client": get_ai_clients_dir(),
+    }
+    return mapping.get(component_type)
+
+
 def get_mount_path_safe(mount_key: str, fallback: str) -> Path:
     """
     マウントパスを安全に取得（汎用）

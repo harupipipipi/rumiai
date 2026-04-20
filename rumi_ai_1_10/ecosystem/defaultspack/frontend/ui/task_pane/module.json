@@ -1,0 +1,9 @@
+{
+  "module_id": "task_pane",
+  "kind": "frontend",
+  "display_name": "Task Pane",
+  "description": "Running tasks expand, completed tasks collapse.",
+  "dependencies": [],
+  "default_state": "enabled",
+  "failure_threshold": 5
+}

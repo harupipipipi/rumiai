@@ -1,0 +1,24 @@
+{
+  "function_id": "forced_patch",
+  "description": "Create a pending forced_patch approval request for a staged pack change.",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": true,
+  "tags": ["defaultspack", "pack", "patch"],
+  "vocab_aliases": ["defaultspack.forced_patch"],
+  "risk": "high",
+  "input_schema": {
+    "type": "object",
+    "required": ["staging_id"],
+    "properties": {
+      "staging_id": {"type": "string"},
+      "target_pack_id": {"type": "string"},
+      "notes": {"type": "string"},
+      "slot": {"type": "string"},
+      "fullscreen": {"type": "boolean"},
+      "exclusive": {"type": "boolean"}
+    }
+  },
+  "output_schema": {"type": "object"},
+  "calling_convention": "block"
+}

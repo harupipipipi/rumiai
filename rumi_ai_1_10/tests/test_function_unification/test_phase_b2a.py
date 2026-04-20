@@ -190,10 +190,10 @@ class TestKernelHandlerManifests:
             )
 
     def test_kernel_handler_manifests_count(self) -> None:
-        """エントリ数が 70 であること (system 29 + runtime 41)"""
+        """エントリ数が 74 であること (system 29 + runtime 45)"""
         manifests = _get_kernel_handler_manifests()
-        assert len(manifests) == 70, (
-            f"Expected 70 manifests, got {len(manifests)}"
+        assert len(manifests) == 74, (
+            f"Expected 74 manifests, got {len(manifests)}"
         )
 
     def test_kernel_handler_manifests_system_tags(self) -> None:
@@ -222,15 +222,15 @@ class TestKernelHandlerManifests:
 
 
 class TestStartupFlowFunctionRegistryStep:
-    """Phase B-2a: 00_startup.flow.yaml function_registry_load step tests."""
+    """Phase B-2a: 00_startup.flow.yaml kernel_functions_register step tests."""
 
     def test_startup_flow_has_function_registry_load_step(self) -> None:
-        """00_startup.flow.yaml に function_registry_load step が存在すること"""
+        """00_startup.flow.yaml に kernel_functions_register step が存在すること"""
         flow = _load_startup_flow()
         steps = flow.get("steps", [])
         step_ids = [s.get("id") for s in steps]
-        assert "function_registry_load" in step_ids, (
-            f"Step 'function_registry_load' not found in startup flow. "
+        assert "kernel_functions_register" in step_ids, (
+            f"Step 'kernel_functions_register' not found in startup flow. "
             f"Found steps: {step_ids}"
         )
 
@@ -240,14 +240,14 @@ class TestStartupFlowFunctionRegistryStep:
         steps = flow.get("steps", [])
         target_step = None
         for step in steps:
-            if step.get("id") == "function_registry_load":
+            if step.get("id") == "kernel_functions_register":
                 target_step = step
                 break
         assert target_step is not None, (
-            "Step 'function_registry_load' not found in startup flow"
+            "Step 'kernel_functions_register' not found in startup flow"
         )
         assert target_step.get("priority") == 15, (
-            f"Expected priority 15 for function_registry_load, "
+            f"Expected priority 15 for kernel_functions_register, "
             f"got {target_step.get('priority')}"
         )
         assert target_step.get("phase") == "ecosystem", (

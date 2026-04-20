@@ -66,7 +66,9 @@ def test_capability_trust_store_save_uses_atomic_replace(tmp_path):
 
 
 def test_windows_capability_tcp_fallback_defaults_to_deny(monkeypatch):
-    monkeypatch.setattr("core_runtime.capability_proxy._IS_WINDOWS", True)
+    cp_globals = HostCapabilityProxyServer.ensure_principal_socket.__globals__
+    monkeypatch.setitem(cp_globals, "_IS_WINDOWS", True)
+    monkeypatch.setitem(cp_globals, "_windows_tcp_fallback_enabled", lambda: False)
     monkeypatch.delenv("RUMI_ALLOW_WINDOWS_TCP_FALLBACK", raising=False)
 
     server = HostCapabilityProxyServer()

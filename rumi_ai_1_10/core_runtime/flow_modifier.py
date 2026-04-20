@@ -528,32 +528,34 @@ _modifier_applier_lock = threading.Lock()
 
 
 def get_modifier_loader() -> FlowModifierLoader:
+    from .di_container import get_container
     global _global_modifier_loader
-    if _global_modifier_loader is None:
-        with _modifier_loader_lock:
-            if _global_modifier_loader is None:
-                _global_modifier_loader = FlowModifierLoader()
-    return _global_modifier_loader
+    loader = get_container().get("modifier_loader")
+    _global_modifier_loader = loader
+    return loader
 
 
 def get_modifier_applier() -> FlowModifierApplier:
+    from .di_container import get_container
     global _global_modifier_applier
-    if _global_modifier_applier is None:
-        with _modifier_applier_lock:
-            if _global_modifier_applier is None:
-                _global_modifier_applier = FlowModifierApplier()
-    return _global_modifier_applier
+    applier = get_container().get("modifier_applier")
+    _global_modifier_applier = applier
+    return applier
 
 
 def reset_modifier_loader() -> FlowModifierLoader:
+    from .di_container import get_container
     global _global_modifier_loader
     with _modifier_loader_lock:
         _global_modifier_loader = FlowModifierLoader()
+    get_container().set_instance("modifier_loader", _global_modifier_loader)
     return _global_modifier_loader
 
 
 def reset_modifier_applier() -> FlowModifierApplier:
+    from .di_container import get_container
     global _global_modifier_applier
     with _modifier_applier_lock:
         _global_modifier_applier = FlowModifierApplier()
+    get_container().set_instance("modifier_applier", _global_modifier_applier)
     return _global_modifier_applier

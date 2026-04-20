@@ -15,6 +15,10 @@ from unittest.mock import patch, MagicMock, PropertyMock
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+import pytest
+
+pytestmark = pytest.mark.contract
+
 _project_root = Path(__file__).resolve().parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
@@ -178,6 +182,8 @@ class TestRateLimitSecretGet(unittest.TestCase):
         mock_audit_module.return_value = MagicMock()
         limit = 2
         executor = _make_executor(rate_limit=limit)
+        executor._rate_limit_store = MagicMock()
+        executor._rate_limit_store.allow.side_effect = [True] * limit + [False]
 
         # rate limit 内のリクエスト（handler 未登録なので handler_not_found で停止する）
         for _ in range(limit):

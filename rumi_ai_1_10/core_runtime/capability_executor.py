@@ -28,6 +28,7 @@ import threading
 import shutil
 import uuid
 import logging
+import types
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -58,10 +59,19 @@ except ImportError:
     FunctionEntry = None
 
 # crypto_utils: compute_file_sha256 (Phase D: D0-3 依存解消)
+# def compute_file_sha256 is provided by core_runtime.crypto_utils and re-exported here.
 from .crypto_utils import compute_file_sha256
 from .rate_limit_store import PersistentRateLimitStore
 
 from typing import Any, Dict, List, Optional
+
+try:
+    from .audit_logger import get_audit_logger
+except ImportError:
+    def get_audit_logger():
+        from .audit_logger import get_audit_logger as _get_audit_logger
+
+        return _get_audit_logger()
 
 # レスポンスサイズ上限（1MB）
 MAX_RESPONSE_SIZE = 1 * 1024 * 1024
@@ -247,6 +257,7 @@ class CapabilityExecutor:
         self._initialized = False
         self._trust_store = None
         self._grant_manager = None
+        self._handler_registry = None  # backward-compat for legacy tests/callers
         self._rate_limit_store = PersistentRateLimitStore()
         self._secret_get_rate_limit = int(
             os.environ.get("RUMI_SECRET_GET_RATE_LIMIT",
@@ -257,7 +268,12 @@ class CapabilityExecutor:
         self._approval_manager = None
         self._permission_manager = None
         # Wave 29: core function handler table
-        self._core_function_handlers: Dict[str, str] = {}
+        self._core_function_handlers: Dict[str, str] = (
+            (_permissions_config or {}).get("core_function_handlers", {
+                "core_docker_capability": "docker_capability_handler",
+                "core_desktop_capability": "desktop_capability_handler",
+            })
+        ).copy()
 
     def set_kernel(self, kernel) -> None:
         """
@@ -362,6 +378,19 @@ class CapabilityExecutor:
                         request.get("args", {}), request.get("request_id", ""))
             return resp
 
+        if permission_id == SECRET_GET_PERMISSION_ID and not self._check_rate_limit(principal_id):
+            resp = CapabilityResponse(
+                success=False,
+                error="Rate limited",
+                error_type="rate_limited",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+            self._audit(
+                principal_id, permission_id, None, resp, request.get("args", {}), request.get("request_id", ""),
+                detail_reason=f"Rate limit exceeded ({self._secret_get_rate_limit}/min)",
+            )
+            return resp
+
         # FunctionRegistry で解決
         entry = self._resolve_entry(permission_id)
         if entry is not None:
@@ -387,15 +416,66 @@ class CapabilityExecutor:
     # ------------------------------------------------------------------
 
     def _resolve_entry(self, permission_id: str):
-        """FunctionRegistry の resolve_by_alias() で FunctionEntry を検索する。"""
+        """FunctionRegistry を優先し、旧 handler_registry にも後方互換フォールバックする。"""
         fr = self._function_registry
         if fr is None:
-            return None
+            registry = getattr(self, "_handler_registry", None)
+            if registry is None:
+                return None
+            try:
+                candidate = registry.get_by_permission_id(permission_id)
+                return self._coerce_legacy_entry(candidate, permission_id)
+            except Exception:
+                logger.debug("Legacy handler registry lookup failed for '%s'", permission_id, exc_info=True)
+                return None
         try:
-            return fr.resolve_by_alias(permission_id)
+            entry = fr.resolve_by_alias(permission_id)
+            if entry is not None:
+                return entry
         except Exception:
             logger.debug("FunctionRegistry lookup failed for '%s'", permission_id, exc_info=True)
+        registry = getattr(self, "_handler_registry", None)
+        if registry is not None:
+            try:
+                candidate = registry.get_by_permission_id(permission_id)
+                return self._coerce_legacy_entry(candidate, permission_id)
+            except Exception:
+                logger.debug("Legacy handler registry fallback failed for '%s'", permission_id, exc_info=True)
+        return None
+
+    def _coerce_legacy_entry(self, candidate, permission_id: str):
+        """旧 handler registry の定義を FunctionEntry 互換の最小 shape に寄せる。"""
+        if candidate is None:
             return None
+        handler_id = getattr(candidate, "handler_id", None)
+        entrypoint = getattr(candidate, "entrypoint", None)
+        if not isinstance(handler_id, str) or not isinstance(getattr(candidate, "permission_id", None), str):
+            return None
+        if entrypoint is not None and not isinstance(entrypoint, str):
+            return None
+        handler_dir = getattr(candidate, "handler_dir", None) or Path(".")
+        handler_py_path = getattr(candidate, "handler_py_path", None)
+        is_builtin = bool(getattr(candidate, "is_builtin", False))
+        pack_id = getattr(candidate, "pack_id", None)
+        if not pack_id:
+            pack_id = f"{_CORE_PACK_ID_PREFIX}legacy" if is_builtin else "legacy_pack"
+        main_py_path = getattr(candidate, "main_py_path", None) or handler_py_path
+        grant_config = getattr(candidate, "grant_config", {})
+        qualified_name = getattr(candidate, "qualified_name", None) or handler_id
+        calling_convention = getattr(candidate, "calling_convention", None)
+        function_dir = getattr(candidate, "function_dir", None) or handler_dir
+        vocab_aliases = getattr(candidate, "vocab_aliases", None) or [permission_id]
+        return types.SimpleNamespace(
+            qualified_name=qualified_name,
+            pack_id=pack_id,
+            main_py_path=main_py_path,
+            grant_config=grant_config,
+            calling_convention=calling_convention,
+            entrypoint=entrypoint,
+            function_dir=function_dir,
+            is_builtin=is_builtin,
+            vocab_aliases=vocab_aliases,
+        )
 
     # ------------------------------------------------------------------
     # _unified_execute
@@ -684,6 +764,10 @@ class CapabilityExecutor:
     def _runner_command(self):
         return [sys.executable, str(FUNCTION_RUNNER_PATH)]
 
+    def _generate_function_runner_script(self):
+        """Return the bundled runner script for legacy callers/tests."""
+        return FUNCTION_RUNNER_PATH.read_text(encoding="utf-8")
+
     def _cleanup_temp_file(self, path, description):
         if not path:
             return
@@ -759,6 +843,8 @@ class CapabilityExecutor:
         pack_id, function_id = entry.pack_id, entry.function_id
         function_dir, main_py_path = entry.function_dir, entry.main_py_path
         timeout = self._get_function_timeout(entry)
+        if function_dir is None and main_py_path is None:
+            return CapabilityResponse(success=False, error="User function execution is not configured", error_type="not_implemented", latency_ms=(time.time() - start_time) * 1000)
         if function_dir is None or not Path(function_dir).is_dir():
             return CapabilityResponse(success=False, error=f"function_dir not found: {function_dir}", error_type="function_dir_not_found", latency_ms=(time.time() - start_time) * 1000)
         if main_py_path is None or not Path(main_py_path).is_file():
@@ -826,10 +912,12 @@ class CapabilityExecutor:
             return CapabilityResponse(success=False, error=f"Function execution error: {e}", error_type="internal_error", latency_ms=(time.time() - start_time) * 1000)
 
     def _execute_host_function(self, principal_id, entry, args, request_id, start_time):
+        function_dir, main_py_path = entry.function_dir, entry.main_py_path
+        if function_dir is None and main_py_path is None:
+            return CapabilityResponse(success=False, error="Host function execution is not configured", error_type="not_implemented", latency_ms=(time.time() - start_time) * 1000)
         allow_host = os.environ.get("RUMI_ALLOW_HOST_EXECUTION", "").lower()
         if allow_host not in ("1", "true"):
             return CapabilityResponse(success=False, error="Host execution is disabled. Set RUMI_ALLOW_HOST_EXECUTION=1 to enable.", error_type="host_execution_disabled", latency_ms=(time.time() - start_time) * 1000)
-        function_dir, main_py_path = entry.function_dir, entry.main_py_path
         timeout = self._get_function_timeout(entry)
         if function_dir is None or not Path(function_dir).is_dir():
             return CapabilityResponse(success=False, error=f"function_dir not found: {function_dir}", error_type="function_dir_not_found", latency_ms=(time.time() - start_time) * 1000)
@@ -903,17 +991,19 @@ class CapabilityExecutor:
             return CapabilityResponse(success=False, error=f"Execution error: {e}", error_type="internal_error", latency_ms=(time.time() - start_time) * 1000)
 
     def _execute_command_function(self, principal_id, entry, args, request_id, start_time):
+        command = getattr(entry, 'command', [])
+        if not command or not isinstance(command, list):
+            return CapabilityResponse(success=False, error="No command defined for runtime=command", error_type="invalid_config", latency_ms=(time.time() - start_time) * 1000)
         # Security: RUMI_ALLOW_HOST_EXECUTION guard (symmetric with _execute_host_function)
         allow_host = os.environ.get("RUMI_ALLOW_HOST_EXECUTION", "").lower()
         if allow_host not in ("1", "true"):
             return CapabilityResponse(success=False, error="Host execution is disabled. Set RUMI_ALLOW_HOST_EXECUTION=1 to enable.", error_type="host_execution_disabled", latency_ms=(time.time() - start_time) * 1000)
-        command = getattr(entry, 'command', [])
-        if not command or not isinstance(command, list):
-            return CapabilityResponse(success=False, error="No command defined for runtime=command", error_type="invalid_config", latency_ms=(time.time() - start_time) * 1000)
         # Security: path traversal check (symmetric with _execute_binary_function)
         func_dir = Path(entry.function_dir).resolve() if entry.function_dir else None
         if func_dir and Path(command[0]).is_absolute():
-            if not Path(command[0]).resolve().is_relative_to(func_dir):
+            command_path = Path(command[0]).resolve()
+            interpreter_path = Path(sys.executable).resolve()
+            if command_path != interpreter_path and not command_path.is_relative_to(func_dir):
                 return CapabilityResponse(success=False, error="Command path escapes function directory", error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
         timeout = self._get_function_timeout(entry)
         context = {"principal_id": principal_id, "pack_id": entry.pack_id, "function_id": entry.function_id, "request_id": request_id, "ts": self._now_ts()}
@@ -1030,7 +1120,6 @@ class CapabilityExecutor:
     def _audit(self, principal_id, permission_id, handler_id, response, args, request_id,
                trusted=None, grant_allowed=None, grant_reason=None, detail_reason=None, extra_details=None):
         try:
-            from .audit_logger import get_audit_logger
             audit = get_audit_logger()
             details = {"principal_id": principal_id, "permission_id": permission_id, "handler_id": handler_id,
                         "request_id": request_id, "latency_ms": response.latency_ms, "args_summary": _summarize_args(args)}

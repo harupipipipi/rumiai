@@ -1,0 +1,12 @@
+{
+  "module_id": "cli",
+  "kind": "backend",
+  "display_name": "CLI Interface",
+  "description": "CLI interface sharing session/task/history with frontend UI.",
+  "dependencies": ["chat", "tool", "prompt", "ai_client"],
+  "default_state": "enabled",
+  "failure_threshold": 3,
+  "experimental": false,
+  "version": "2.0.0",
+  "uuid": "cli-00000000-0000-0000-0000-000000000009"
+}

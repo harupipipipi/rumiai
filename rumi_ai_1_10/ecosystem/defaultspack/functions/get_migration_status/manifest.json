@@ -1,0 +1,23 @@
+{
+  "function_id": "get_migration_status",
+  "description": "Report defaultspack migration status for legacy defaults and user data.",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": true,
+  "tags": [
+    "defaultspack",
+    "migration"
+  ],
+  "vocab_aliases": [
+    "defaultspack.get_migration_status"
+  ],
+  "risk": "low",
+  "input_schema": {
+    "type": "object",
+    "properties": {}
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "calling_convention": "block"
+}

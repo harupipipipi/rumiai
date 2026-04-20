@@ -61,9 +61,9 @@ function FlowEditorInner() {
   const [selectedPack, setSelectedPack] = useState<string>('all');
   const [flowLoading, setFlowLoading] = useState(false);
 
-  const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance | null>(null);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance<Node, Edge> | null>(null);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
 
   const selectedFlow = flows.find(f => f.id === selectedFlowId);
@@ -371,7 +371,7 @@ function FlowEditorInner() {
                   <Loader2 className="w-6 h-6 animate-spin text-accent" />
                 </div>
               ) : (
-                <ReactFlow
+                <ReactFlow<Node, Edge>
                   nodes={nodes}
                   edges={edges}
                   onNodesChange={onNodesChange}
@@ -389,7 +389,7 @@ function FlowEditorInner() {
                   onEdgeDoubleClick={editorHook.onEdgeDoubleClick}
                   onNodesDelete={editorHook.onNodesDelete}
                   onEdgesDelete={editorHook.onEdgesDelete}
-                  onInit={setReactFlowInstance}
+                  onInit={(instance) => setReactFlowInstance(instance)}
                   onDrop={dragDrop.onDrop}
                   onDragOver={dragDrop.onDragOver}
                   nodeTypes={nodeTypes}
@@ -458,7 +458,7 @@ function FlowEditorInner() {
                       <div
                         key={name}
                         className="px-2 py-1.5 hover:bg-bg-hover cursor-pointer text-sm rounded flex flex-col border-t border-border mt-1"
-                        onClick={() => editorHook.handleAddNodeFromMenu({ id: name.toLowerCase(), name, description: `Basic ${name} node` })}
+                        onClick={() => editorHook.handleAddNodeFromMenu({ id: name.toLowerCase() })}
                       >
                         <span className="font-medium text-accent">{name}</span>
                       </div>

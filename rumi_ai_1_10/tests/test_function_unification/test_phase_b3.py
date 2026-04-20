@@ -371,6 +371,7 @@ class TestUnifiedExecuteSubprocessDispatch(unittest.TestCase):
 # _legacy_execute tests
 # =====================================================================
 
+@unittest.skip("Phase D removes _legacy_execute.")
 class TestLegacyExecuteWarningLog(unittest.TestCase):
     """test 10: _legacy_execute が警告ログを出力すること"""
 
@@ -396,6 +397,7 @@ class TestLegacyExecuteWarningLog(unittest.TestCase):
         self.assertIn("Legacy handler path used", warning_call_args[0][0])
 
 
+@unittest.skip("Phase D removes _legacy_execute and RUMI_STRICT_LEGACY.")
 class TestLegacyExecuteStrictModeRejects(unittest.TestCase):
     """test 11: RUMI_STRICT_LEGACY=1 でエラーが返ること"""
 
@@ -416,6 +418,7 @@ class TestLegacyExecuteStrictModeRejects(unittest.TestCase):
         self.assertEqual(resp.error_type, "legacy_path_disabled")
 
 
+@unittest.skip("Phase D removes _legacy_execute.")
 class TestLegacyExecuteNormalModePasses(unittest.TestCase):
     """test 12: RUMI_STRICT_LEGACY=0（デフォルト）で既存処理が実行されること"""
 
@@ -500,7 +503,7 @@ class TestExecuteResolvedEntryUsesUnified(unittest.TestCase):
 
 
 class TestExecuteUnresolvedFallsBackToLegacy(unittest.TestCase):
-    """test 15: permission_id が解決できない場合に _legacy_execute が使われること"""
+    """test 15: permission_id が解決できない場合に handler_not_found が返ること"""
 
     @patch("core_runtime.capability_executor.get_audit_logger", new_callable=MagicMock)
     def test_execute_unresolved_falls_back_to_legacy(self, mock_audit_module):
@@ -511,19 +514,13 @@ class TestExecuteUnresolvedFallsBackToLegacy(unittest.TestCase):
 
         executor = _make_executor(function_registry=fr)
 
-        # Mock _legacy_execute to verify it's called
-        mock_legacy = MagicMock(
-            return_value=CapabilityResponse(success=False, error="legacy", error_type="handler_not_found")
-        )
-        executor._legacy_execute = mock_legacy
-
         resp = executor.execute(
             "principal_a",
             {"permission_id": "unknown.perm", "args": {}},
         )
 
         self.assertFalse(resp.success)
-        mock_legacy.assert_called_once()
+        self.assertEqual(resp.error_type, "handler_not_found")
 
 
 if __name__ == "__main__":

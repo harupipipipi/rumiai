@@ -5,10 +5,10 @@ user_data, ecosystem の初期構造を作成
 """
 
 import json
-import shutil
 from pathlib import Path
 from typing import Dict, Any, Optional, Callable
 
+from core_runtime.setup_pack import SetupPackManager
 from .state import get_state
 
 
@@ -52,14 +52,32 @@ class Initializer:
             self._check_flow_dir()
             
             if install_default:
-                self.state.update_progress(80, "default pack を確認中...")
-                default_result = self._install_default_pack(confirm_callback)
+                self.state.update_progress(80, "setup pack を確認中...")
+                default_result = self._prepare_setup_pack_targets(confirm_callback)
                 if default_result.get("created"):
                     created.extend(default_result["created"])
                 if default_result.get("errors"):
                     errors.extend(default_result["errors"])
                 if default_result.get("skipped"):
-                    self.state.log_info("default pack のインストールをスキップしました")
+                    self.state.log_info("setup pack の準備をスキップしました")
+                else:
+                    selected_setup_pack_ids = list(default_result.get("selected_setup_pack_ids") or [])
+                    if selected_setup_pack_ids:
+                        install_result = self._create_setup_pack_manager().install(selected_setup_pack_ids)
+                        default_result["install_result"] = install_result
+                        if install_result.get("error") or not install_result.get("installed"):
+                            errors.append({
+                                "stage": "setup_pack_install",
+                                "selected_setup_pack_ids": selected_setup_pack_ids,
+                                "result": install_result,
+                            })
+                        else:
+                            self.state.log_success(
+                                "setup pack をインストールしました",
+                                f"対象: {', '.join(selected_setup_pack_ids)}"
+                            )
+                    else:
+                        self.state.log_info("選択された setup pack がないため install をスキップしました")
             
             summary = {
                 "success": len(errors) == 0,
@@ -96,8 +114,10 @@ class Initializer:
         # 公式は汎用ディレクトリのみ定義
         dirs = [
             "user_data",
+            "user_data/chats",
             "user_data/settings",
             "user_data/cache",
+            "user_data/shared",
         ]
         
         for dir_path in dirs:
@@ -122,7 +142,10 @@ class Initializer:
                 # 公式は汎用マウントのみ定義
                 # 具体的なマウントはコンポーネントが自己登録する
                 "data.user": "./user_data",
+                "data.chats": "./user_data/chats",
                 "data.cache": "./user_data/cache",
+                "data.settings": "./user_data/settings",
+                "data.shared": "./user_data/shared",
             }
         }
         
@@ -178,42 +201,109 @@ class Initializer:
         else:
             self.state.log_warn("flow/ が存在しません")
     
-    def _install_default_pack(
+    def _prepare_setup_pack_targets(
         self,
         confirm_callback: Callable[[str], bool] = None
     ) -> Dict[str, Any]:
-        default_dest = self.base_dir / "ecosystem" / "default"
-        
-        try:
-            from ..defaults import get_default_pack_path
-            default_src = get_default_pack_path()
-        except ImportError:
-            default_src = Path(__file__).parent.parent / "defaults" / "default"
-        
-        if not default_src.exists():
+        setup_pack_root = self.base_dir / "ecosystem" / "setup_pack"
+        if not setup_pack_root.exists():
             self.state.log_warn(
-                "default pack のテンプレートが見つかりません",
-                f"パス: {default_src}"
+                "setup_pack/ が見つかりません",
+                f"パス: {setup_pack_root}"
             )
-            return {"created": [], "errors": [], "skipped": True}
-        
-        if default_dest.exists():
-            if confirm_callback:
-                if not confirm_callback("ecosystem/default は既に存在します。上書きしますか？"):
-                    return {"created": [], "errors": [], "skipped": True}
-                shutil.rmtree(default_dest)
+            return {
+                "created": [],
+                "errors": [],
+                "skipped": True,
+                "available": [],
+                "available_setup_pack_ids": [],
+                "selected_setup_pack_ids": [],
+                "missing": [],
+            }
+
+        available = []
+        available_setup_pack_ids = []
+        missing = []
+        for pack_json in sorted(setup_pack_root.glob("*/pack.json")):
+            try:
+                data = json.loads(pack_json.read_text(encoding="utf-8"))
+            except Exception as e:
+                self.state.log_warn(
+                    "setup pack 定義を読み込めません",
+                    f"パス: {pack_json} / {e}"
+                )
+                continue
+
+            setup_pack_id = str(data.get("pack_id") or pack_json.parent.name).strip()
+            target_pack_id = str(
+                data.get("target_pack_id") or data.get("pack_id") or pack_json.parent.name
+            ).strip()
+            if not target_pack_id:
+                continue
+
+            target_path = self.base_dir / "ecosystem" / target_pack_id
+            target_rel = f"ecosystem/{target_pack_id}"
+            if target_path.exists():
+                available.append(target_rel)
+                if setup_pack_id:
+                    available_setup_pack_ids.append(setup_pack_id)
+                self.state.log_info(f"setup pack target を確認: {target_rel}")
             else:
-                self.state.log_info("ecosystem/default は既に存在します")
-                return {"created": [], "errors": [], "skipped": True}
-        else:
-            if confirm_callback:
-                if not confirm_callback("default pack をインストールしますか？"):
-                    return {"created": [], "errors": [], "skipped": True}
-        
-        try:
-            shutil.copytree(default_src, default_dest)
-            self.state.log_success("インストール: ecosystem/default")
-            return {"created": ["ecosystem/default"], "errors": [], "skipped": False}
-        except Exception as e:
-            self.state.log_error(f"default pack のインストールに失敗: {e}")
-            return {"created": [], "errors": [str(e)], "skipped": False}
+                missing.append(target_rel)
+                self.state.log_warn(
+                    "setup pack target が見つかりません",
+                    f"パス: {target_path}"
+                )
+
+        if not available:
+            return {
+                "created": [],
+                "errors": [],
+                "skipped": True,
+                "available": [],
+                "available_setup_pack_ids": [],
+                "selected_setup_pack_ids": [],
+                "missing": missing,
+            }
+
+        seen_setup_pack_ids = set()
+        normalized_setup_pack_ids = []
+        for setup_pack_id in available_setup_pack_ids:
+            if setup_pack_id in seen_setup_pack_ids:
+                continue
+            normalized_setup_pack_ids.append(setup_pack_id)
+            seen_setup_pack_ids.add(setup_pack_id)
+
+        selected_setup_pack_ids = list(normalized_setup_pack_ids)
+        if confirm_callback is not None:
+            selected_setup_pack_ids = []
+            for setup_pack_id in normalized_setup_pack_ids:
+                should_include = confirm_callback(
+                    f"setup pack ({setup_pack_id}) を初期セットアップに含めますか？"
+                )
+                if should_include:
+                    selected_setup_pack_ids.append(setup_pack_id)
+                else:
+                    self.state.log_info(f"setup pack をスキップ: {setup_pack_id}")
+
+        return {
+            "created": [],
+            "errors": [],
+            "skipped": len(selected_setup_pack_ids) == 0,
+            "available": available,
+            "available_setup_pack_ids": normalized_setup_pack_ids,
+            "selected_setup_pack_ids": selected_setup_pack_ids,
+            "missing": missing,
+        }
+
+    def _create_setup_pack_manager(self) -> SetupPackManager:
+        return SetupPackManager(
+            root=self.base_dir / "ecosystem" / "setup_pack",
+            selection_file=(
+                self.base_dir
+                / "user_data"
+                / "settings"
+                / "setup_pack_selection.json"
+            ),
+            ecosystem_dir=self.base_dir / "ecosystem",
+        )

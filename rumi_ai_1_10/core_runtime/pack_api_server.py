@@ -53,6 +53,7 @@ from .api import (
     RouteHandlersMixin,
     PackLifecycleHandlersMixin,
     ControlPanelHandlersMixin,
+    SetupHandlersMixin,
     OAuthHandlersMixin,
     ViewerHandlersMixin,
     DesktopHandlersMixin,
@@ -161,6 +162,7 @@ class PackAPIHandler(
     RouteHandlersMixin,
     PackLifecycleHandlersMixin,
     ControlPanelHandlersMixin,
+    SetupHandlersMixin,
     OAuthHandlersMixin,
     ViewerHandlersMixin,
     DesktopHandlersMixin,
@@ -305,16 +307,20 @@ class PackAPIHandler(
                     continue
                 method = route.get("method", "").upper()
                 handler_name = route.get("handler", "")
-                if not method or not handler_name:
+                function_id = route.get("function_id", route.get("function", ""))
+                if not method or not (handler_name or function_id):
                     continue
-                if not HANDLER_NAME_RE.match(handler_name):
+                if handler_name and not HANDLER_NAME_RE.match(handler_name):
                     logger.warning("Invalid handler name in api_routes: %s", handler_name)
                     continue
                 entry = {
                     "handler": handler_name,
+                    "function_id": function_id,
                     "pack_id": pack_id,
                     "pass_body": route.get("pass_body", False),
                     "response_mode": route.get("response_mode", "result"),
+                    "args": dict(route.get("args") or {}),
+                    "path_param_map": dict(route.get("path_param_map") or {}),
                 }
                 if "path_pattern" in route:
                     compiled = _compile_template_path(route["path_pattern"])
@@ -386,13 +392,6 @@ class PackAPIHandler(
         pass_body = entry.get("pass_body", False)
         response_mode = entry.get("response_mode", "result")
 
-        # ハンドラの存在確認
-        handler = getattr(self, handler_name, None)
-        if handler is None:
-            logger.error("api_route handler not found: %s", handler_name)
-            self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
-            return True
-
         # パスパラメータのバリデーション
         for param_val in path_params.values():
             if not self._is_safe_id(param_val):
@@ -403,14 +402,42 @@ class PackAPIHandler(
 
         # ハンドラ呼び出し
         try:
-            args = []
-            if path_params:
-                first_param = next(iter(path_params.values()))
-                args.append(first_param)
-            if pass_body:
-                args.append(body if body is not None else {})
+            if entry.get("function_id"):
+                from .pack_function_runtime import invoke_pack_function
 
-            result = handler(*args)
+                call_args = dict(body if pass_body and body is not None else {})
+                # Route-level args define the contract for fixed endpoints such as
+                # /approve and /reject, so body values must not override them.
+                call_args.update(entry.get("args") or {})
+                param_map = entry.get("path_param_map") or {}
+                if param_map:
+                    for target_key, source_key in param_map.items():
+                        if source_key in path_params:
+                            call_args[target_key] = path_params[source_key]
+                else:
+                    call_args.update(path_params)
+                result = invoke_pack_function(
+                    entry["pack_id"],
+                    entry["function_id"],
+                    call_args,
+                    {"pack_id": entry["pack_id"], "method": method_upper, "path": path},
+                )
+            else:
+                # ハンドラの存在確認
+                handler = getattr(self, handler_name, None)
+                if handler is None:
+                    logger.error("api_route handler not found: %s", handler_name)
+                    self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
+                    return True
+
+                args = []
+                if path_params:
+                    first_param = next(iter(path_params.values()))
+                    args.append(first_param)
+                if pass_body:
+                    args.append(body if body is not None else {})
+
+                result = handler(*args)
 
             if response_mode == "raw":
                 self._send_response(APIResponse(True, data=result))

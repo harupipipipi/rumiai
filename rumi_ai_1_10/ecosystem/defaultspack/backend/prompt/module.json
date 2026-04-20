@@ -1,0 +1,12 @@
+{
+  "module_id": "prompt",
+  "kind": "backend",
+  "display_name": "Prompt Manager",
+  "description": "Prompt CRUD, mix, variables, templates, UUID-fixed, icon support, Python-based prompts.",
+  "dependencies": [],
+  "default_state": "enabled",
+  "failure_threshold": 3,
+  "experimental": false,
+  "version": "2.0.0",
+  "uuid": "prompt-00000000-0000-0000-0000-000000000002"
+}

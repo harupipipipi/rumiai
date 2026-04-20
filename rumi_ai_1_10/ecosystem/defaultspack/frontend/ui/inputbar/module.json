@@ -1,0 +1,9 @@
+{
+  "module_id": "inputbar",
+  "kind": "frontend",
+  "display_name": "Input Bar",
+  "description": "Message input bar with button slots (left/right), send shortcut config.",
+  "dependencies": ["button"],
+  "default_state": "enabled",
+  "failure_threshold": 5
+}

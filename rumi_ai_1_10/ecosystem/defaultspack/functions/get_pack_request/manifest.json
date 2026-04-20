@@ -1,0 +1,19 @@
+{
+  "function_id": "get_pack_request",
+  "description": "Get one pack modification request by ID.",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": true,
+  "tags": ["defaultspack", "pack", "request"],
+  "vocab_aliases": ["defaultspack.get_pack_request"],
+  "risk": "low",
+  "input_schema": {
+    "type": "object",
+    "required": ["request_id"],
+    "properties": {
+      "request_id": {"type": "string"}
+    }
+  },
+  "output_schema": {"type": "object"},
+  "calling_convention": "block"
+}

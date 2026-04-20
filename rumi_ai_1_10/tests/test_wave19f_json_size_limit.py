@@ -96,17 +96,17 @@ def _make_file(tmp_path: Path, size: int) -> Path:
 class TestCheckJsonFileSize:
 
     def test_normal_size_allows_load(self, tmp_path):
-        """TC-1: Normal-size file -> skip=False (load OK)."""
+        """TC-1: Normal-size file -> True (load OK)."""
         fp = _make_file(tmp_path, 1024)
-        assert _reg._check_json_file_size(fp) is False
+        assert _reg._check_json_file_size(fp) is True
 
     def test_oversized_warns_and_skips(self, tmp_path, caplog):
-        """TC-2: Oversized file -> WARNING + skip=True."""
+        """TC-2: Oversized file -> WARNING + False."""
         fp = _make_file(tmp_path, 600)
         with caplog.at_level(logging.WARNING):
             result = _reg._check_json_file_size(fp, max_bytes=500)
-        assert result is True
-        assert "exceeds limit" in caplog.text
+        assert result is False
+        assert "too large" in caplog.text
 
     def test_custom_env_var(self, tmp_path, monkeypatch):
         """TC-3: Custom RUMI_MAX_JSON_FILE_BYTES env var is respected."""
@@ -115,38 +115,38 @@ class TestCheckJsonFileSize:
         assert mod.RUMI_MAX_JSON_FILE_BYTES == 256
 
         fp_ok = _make_file(tmp_path, 256)
-        assert mod._check_json_file_size(fp_ok) is False
+        assert mod._check_json_file_size(fp_ok) is True
 
         sub = tmp_path / "over"
         sub.mkdir()
         fp_ng = _make_file(sub, 257)
-        assert mod._check_json_file_size(fp_ng) is True
+        assert mod._check_json_file_size(fp_ng) is False
 
     def test_zero_byte_file(self, tmp_path, caplog):
-        """TC-4: 0-byte file -> size check passes (skip=False)."""
+        """TC-4: 0-byte file -> size check passes."""
         fp = _make_file(tmp_path, 0)
         with caplog.at_level(logging.WARNING):
             result = _reg._check_json_file_size(fp)
-        assert result is False
+        assert result is True
         assert "exceeds limit" not in caplog.text
 
     def test_exact_limit_allows_load(self, tmp_path):
-        """TC-5: File size == limit -> skip=False (boundary OK)."""
+        """TC-5: File size == limit -> True (boundary OK)."""
         fp = _make_file(tmp_path, 2048)
-        assert _reg._check_json_file_size(fp, max_bytes=2048) is False
+        assert _reg._check_json_file_size(fp, max_bytes=2048) is True
 
     def test_nonexistent_file_skips(self, tmp_path, caplog):
-        """TC-6: Non-existent file -> skip=True + WARNING."""
+        """TC-6: Non-existent file -> False + WARNING."""
         fp = tmp_path / "ghost.json"
         with caplog.at_level(logging.WARNING):
             result = _reg._check_json_file_size(fp)
-        assert result is True
+        assert result is False
         assert "Cannot stat" in caplog.text
 
     def test_one_byte_over(self, tmp_path):
-        """TC-7: limit + 1 byte -> skip=True."""
+        """TC-7: limit + 1 byte -> False."""
         fp = _make_file(tmp_path, 1001)
-        assert _reg._check_json_file_size(fp, max_bytes=1000) is True
+        assert _reg._check_json_file_size(fp, max_bytes=1000) is False
 
     def test_default_limit_is_2mb(self):
         """TC-8: Default limit = 2 097 152 (2 MB)."""

@@ -46,6 +46,9 @@ def _mock_deps():
         elif name == "core_runtime.lang":
             mod.L = lambda key, **kw: key
             mod.load_system_lang = MagicMock()
+        elif name == "core_runtime.pack_validator":
+            mod.validate_host_execution = MagicMock()
+            mod.validate_host_execution_single = MagicMock(return_value=(True, ""))
         elif name == "core_runtime.kernel_facade":
             mod.KernelFacade = MagicMock()
         elif name == "backend_core.ecosystem.compat":
@@ -103,15 +106,18 @@ class TestProductionGuard:
             _run_main("--permissive", env={"RUMI_ENVIRONMENT": "production"})
         assert exc.value.code == 1
 
-    def test_development_permissive_allowed(self):
-        """RUMI_ENVIRONMENT=development + --permissive -> 起動許可"""
+    def test_development_permissive_allowed(self, tmp_path):
+        """RUMI_ENVIRONMENT=development + lockfile + --permissive -> 起動許可"""
+        (tmp_path / "permissive.lock").touch()
         _run_main("--permissive", "--headless",
-                  env={"RUMI_ENVIRONMENT": "development"})
+                  env={"RUMI_ENVIRONMENT": "development", "RUMI_USER_DATA": str(tmp_path)})
 
     def test_unset_env_permissive_allowed(self):
-        """RUMI_ENVIRONMENT 未設定 + --permissive -> 起動許可"""
-        _run_main("--permissive", "--headless",
-                  env={"RUMI_ENVIRONMENT": None})
+        """RUMI_ENVIRONMENT 未設定 + --permissive -> opt-in 不足で拒否"""
+        with pytest.raises(SystemExit) as exc:
+            _run_main("--permissive", "--headless",
+                      env={"RUMI_ENVIRONMENT": None, "RUMI_ALLOW_PERMISSIVE": None})
+        assert exc.value.code == 1
 
     def test_production_uppercase_permissive_rejected(self):
         """RUMI_ENVIRONMENT=PRODUCTION (大文字) + --permissive -> SystemExit(1)"""

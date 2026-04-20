@@ -1,0 +1,9 @@
+{
+  "module_id": "right_bar",
+  "kind": "frontend",
+  "display_name": "Right Info Bar",
+  "description": "Right-side info bar with extension points for injected content.",
+  "dependencies": [],
+  "default_state": "enabled",
+  "failure_threshold": 5
+}

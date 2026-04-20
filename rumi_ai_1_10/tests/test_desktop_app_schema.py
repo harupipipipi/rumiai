@@ -13,6 +13,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.contract
+
 # Ensure rumi_ai_1_10/ is on sys.path so 'core_runtime' is importable
 _THIS_DIR = Path(__file__).resolve().parent          # tests/
 _REPO_DIR = _THIS_DIR.parent                         # rumi_ai_1_10/

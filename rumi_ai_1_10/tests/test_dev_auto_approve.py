@@ -46,7 +46,9 @@ class TestAutoApproveIfDev(unittest.TestCase):
                 file_hashes={"blocks/main.py": "sha256:aaa"},
             )
 
-            am._resolve_pack_dir = MagicMock(return_value=Path("/fake/pack"))
+            fake_pack_dir = MagicMock()
+            fake_pack_dir.exists.return_value = True
+            am._resolve_pack_dir = MagicMock(return_value=fake_pack_dir)
             am._compute_pack_hashes = MagicMock(return_value={"blocks/main.py": "sha256:aaa"})
             am._is_core_pack = lambda pid: pid.startswith("__core__")
             am._invalidate_hash_cache = MagicMock()

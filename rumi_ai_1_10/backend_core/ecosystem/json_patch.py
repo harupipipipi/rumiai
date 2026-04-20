@@ -105,7 +105,7 @@ def _get_by_pointer(doc: Any, pointer: str) -> Any:
     return current
 
 
-def _set_by_pointer(doc: Any, pointer: str, value: Any) -> Any:
+def _set_by_pointer(doc: Any, pointer: str, value: Any, *, replace: bool = False) -> Any:
     """
     JSON Pointerで指定された位置に値を設定
     
@@ -159,6 +159,8 @@ def _set_by_pointer(doc: Any, pointer: str, value: Any) -> Any:
         current[last_part] = value
     elif isinstance(current, list):
         if last_part == "-":
+            if replace:
+                raise JsonPatchError("replace 操作で '-' は使用できません")
             # 配列の末尾に追加
             current.append(value)
         else:
@@ -169,7 +171,11 @@ def _set_by_pointer(doc: Any, pointer: str, value: Any) -> Any:
                 if index > len(current):
                     raise JsonPatchError(f"インデックスが範囲外: {last_part}")
                 if index == len(current):
+                    if replace:
+                        raise JsonPatchError(f"インデックスが範囲外: {last_part}")
                     current.append(value)
+                elif replace:
+                    current[index] = value
                 else:
                     current.insert(index, value)
             except ValueError:
@@ -276,7 +282,7 @@ def _apply_single_operation(doc: Any, operation: Dict[str, Any]) -> Any:
             raise JsonPatchError("'replace' 操作に 'value' フィールドがありません")
         # replaceは既存の値がある場合のみ有効
         _get_by_pointer(doc, path)  # 存在確認
-        return _set_by_pointer(doc, path, operation["value"])
+        return _set_by_pointer(doc, path, operation["value"], replace=True)
     
     elif op == "test":
         if "value" not in operation:
@@ -342,6 +348,8 @@ def apply_patch(
     for i, operation in enumerate(patch):
         try:
             doc = _apply_single_operation(doc, operation)
+        except (JsonPatchTestError, JsonPatchForbiddenError):
+            raise
         except JsonPatchError as e:
             raise JsonPatchError(f"操作 {i} でエラー: {e}")
     

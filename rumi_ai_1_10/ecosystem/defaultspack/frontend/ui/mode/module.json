@@ -1,0 +1,9 @@
+{
+  "module_id": "mode",
+  "kind": "frontend",
+  "display_name": "Mode Switcher",
+  "description": "Mode switching: coding, normal chat, agent, max, HTML preview, file pane, VSCode-style.",
+  "dependencies": ["layout"],
+  "default_state": "enabled",
+  "failure_threshold": 5
+}

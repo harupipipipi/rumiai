@@ -310,6 +310,7 @@ class PackImporter:
             return False, msg, None
 
         # --- desktop_app section (optional) ---
+        pack_id = str(data.get("pack_id", "<unknown-pack>"))
         desktop_app = data.get("desktop_app")
         if desktop_app is not None:
             if not isinstance(desktop_app, dict):

@@ -1,0 +1,30 @@
+{
+  "function_id": "get_module",
+  "description": "Get a single defaultspack module record.",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": true,
+  "tags": [
+    "defaultspack",
+    "module"
+  ],
+  "vocab_aliases": [
+    "defaultspack.get_module"
+  ],
+  "risk": "low",
+  "input_schema": {
+    "type": "object",
+    "required": [
+      "module_id"
+    ],
+    "properties": {
+      "module_id": {
+        "type": "string"
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "calling_convention": "block"
+}

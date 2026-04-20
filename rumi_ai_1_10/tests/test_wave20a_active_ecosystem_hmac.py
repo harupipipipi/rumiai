@@ -29,7 +29,7 @@ sys.modules["core_runtime"] = _cr_stub
 # core_runtime.paths スタブ
 _paths_stub = types.ModuleType("core_runtime.paths")
 _paths_stub.BASE_DIR = _ROOT
-sys.modules["core_runtime.paths"] = _paths_stub
+sys.modules.setdefault("core_runtime.paths", _paths_stub)
 
 # core_runtime.hmac_key_manager は実モジュールをロード
 _hkm_spec = importlib.util.spec_from_file_location(
@@ -38,7 +38,7 @@ _hkm_spec = importlib.util.spec_from_file_location(
 )
 _hkm = importlib.util.module_from_spec(_hkm_spec)
 _hkm.__package__ = "core_runtime"
-sys.modules["core_runtime.hmac_key_manager"] = _hkm
+sys.modules.setdefault("core_runtime.hmac_key_manager", _hkm)
 _hkm_spec.loader.exec_module(_hkm)
 
 # backend_core パッケージスタブ
@@ -146,6 +146,28 @@ class TestActiveEcosystemHMAC:
         assert "Unsigned active_ecosystem config detected" in caplog.text
         assert mgr.active_pack_identity == "legacy_pack"
         assert mgr.get_override("comp") == "override_val"
+
+    def test_explicit_config_path_does_not_bypass_hmac(self, tmp_path, caplog):
+        """config_path を明示しても HMAC 必須設定は維持される"""
+        cfg_file = tmp_path / "active_ecosystem.json"
+        cfg_file.write_text(
+            json.dumps(
+                {
+                    "active_pack_identity": "legacy_pack",
+                    "overrides": {"comp": "override_val"},
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+
+        with mock.patch.dict(os.environ, {"RUMI_REQUIRE_HMAC": "1"}):
+            with caplog.at_level(logging.WARNING):
+                mgr = _make_manager(tmp_path)
+
+        assert "falling back to defaults because HMAC is required" in caplog.text
+        assert mgr.active_pack_identity is None
+        assert mgr.get_override("comp") is None
 
     def test_roundtrip_integrity(self, tmp_path):
         """保存 → 読み込みの往復で整合性が保たれる"""

@@ -16,6 +16,7 @@ flow.iranai
 .backup_dead_code_removal/
 .env.local
 deploy.py
+todo.md
 
 # Frontend build artifacts (配布に必要なので除外しない)
 !core_runtime/core_pack/*/web/

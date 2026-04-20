@@ -1,0 +1,12 @@
+{
+  "module_id": "ai_client",
+  "kind": "backend",
+  "display_name": "AI Client",
+  "description": "Multi-provider AI client with profile, token counting, retry/failover, and model routing.",
+  "dependencies": [],
+  "default_state": "enabled",
+  "failure_threshold": 3,
+  "experimental": false,
+  "version": "2.0.0",
+  "uuid": "ai_client-00000000-0000-0000-0000-000000000001"
+}

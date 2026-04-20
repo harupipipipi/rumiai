@@ -64,6 +64,8 @@ class KernelFacade:
 
     def __getattr__(self, name: str) -> Any:
         """未定義属性へのアクセスを遮断する。"""
+        if name.startswith("__") and name.endswith("__"):
+            raise AttributeError(name)
         raise KernelSecurityError(
             f"Access to '{name}' is not permitted through KernelFacade. "
             f"Only get_interface(), list_interfaces(), and emit() are available."

@@ -121,7 +121,6 @@ class TestKernelInternalPrefixExclusion:
         "_principal_id",
         "_flow_control",
         "_flow_control_goto",
-        "_error",
         "_error_detail",
         "_flow_defaults",
         "_flow_defaults_timeout",

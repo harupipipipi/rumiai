@@ -37,6 +37,8 @@ sys.modules.setdefault("rumi_ai_1_10.core_runtime.pack_api_server", _dummy_pack_
 # paths (capability_installer_handlers / pip_handlers / unit_handlers がトップレベル import)
 _dummy_paths = types.ModuleType("rumi_ai_1_10.core_runtime.paths")
 _dummy_paths.is_path_within = MagicMock(return_value=True)
+_dummy_paths.BASE_DIR = Path("/tmp")
+_dummy_paths.discover_pack_locations = MagicMock(return_value=[])
 _dummy_paths.ECOSYSTEM_DIR = "/tmp/ecosystem"
 sys.modules.setdefault("rumi_ai_1_10.core_runtime.paths", _dummy_paths)
 

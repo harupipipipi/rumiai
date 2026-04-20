@@ -5,6 +5,7 @@ import importlib.util
 import json
 import pathlib
 import sys
+from unittest.mock import MagicMock
 
 # ---- AuditEntry を単独ロード (パッケージ __init__.py を回避) ----
 _MOD_PATH = (
@@ -88,3 +89,21 @@ def test_unicode_paragraph_separator_escaped():
     assert "\\u2029" in j
     parsed = json.loads(j)
     assert parsed["error"] == "msg\u2029end"
+
+
+def test_non_json_details_are_stringified():
+    """MagicMock などの非 JSON 値が監査ログ書き込みを壊さないこと"""
+    mock_value = MagicMock(name="audit_dependency")
+    entry = _make_entry(
+        details={
+            "dependency": mock_value,
+            "nested": {"items": [mock_value, {"ok": True}]},
+            "set_value": {"a", "b"},
+        },
+    )
+    parsed = json.loads(entry.to_json())
+    assert isinstance(parsed["details"]["dependency"], str)
+    assert "audit_dependency" in parsed["details"]["dependency"]
+    assert isinstance(parsed["details"]["nested"]["items"][0], str)
+    assert parsed["details"]["nested"]["items"][1]["ok"] is True
+    assert sorted(parsed["details"]["set_value"]) == ["a", "b"]

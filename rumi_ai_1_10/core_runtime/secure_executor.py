@@ -46,8 +46,8 @@ PACK_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]+$')
 SAFE_FILENAME_PATTERN = re.compile(r'^[a-zA-Z0-9_.-]+$')
 
 # SEC-1 Wave 1: Docker image ダイジェスト固定 + 環境変数上書き
-DEFAULT_EXECUTOR_IMAGE = "python:3.11-slim@sha256:d6e4d224f70f9e0172a06a3a2eba2f768eb146811a349278b38fff3a36463b47"
-EXECUTOR_IMAGE = os.environ.get("RUMI_EXECUTOR_IMAGE", DEFAULT_EXECUTOR_IMAGE)
+DEFAULT_EXECUTOR_IMAGE = "python:3.11-slim@sha256:233de06753d30d120b1a3ce359d8d3be8bda78524cd8f520c99883bfe33964cf"
+EXECUTOR_IMAGE = os.environ.get("RUMI_EXECUTOR_IMAGE") or DEFAULT_EXECUTOR_IMAGE
 
 # SEC-1 Wave 2: payload サニタイズ制限
 MAX_CONTEXT_PAYLOAD_SIZE = 1 * 1024 * 1024  # 1 MB
@@ -55,6 +55,11 @@ MAX_CONTEXT_DEPTH = 10
 
 # SEC-1 Wave 4: ホスト実行タイムアウト
 MAX_HOST_EXECUTION_TIMEOUT = int(os.environ.get("RUMI_HOST_EXEC_TIMEOUT", "120"))
+
+
+def get_secrets_grant_manager():
+    from .secrets_grant_manager import get_secrets_grant_manager as _get
+    return _get()
 
 
 @dataclass
@@ -273,7 +278,6 @@ class SecureExecutor:
 
             # --- W18-A: Secret ファイル注入 ---
             try:
-                from .secrets_grant_manager import get_secrets_grant_manager
                 _sgm = get_secrets_grant_manager()
                 if _sgm:
                     _granted_secrets = _sgm.get_granted_secrets(pack_id)

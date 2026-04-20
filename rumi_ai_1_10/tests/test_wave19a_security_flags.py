@@ -150,23 +150,28 @@ class TestVulnC01ProductionPermissiveGuard:
                 _check_permissive_production_guard()
             assert exc_info.value.code == 1
 
-    def test_development_permissive_allowed(self):
-        """RUMI_ENVIRONMENT=development → 正常（exit しない）"""
-        with patch.dict(os.environ, {"RUMI_ENVIRONMENT": "development"}, clear=False):
+    def test_development_permissive_allowed(self, tmp_path):
+        """RUMI_ENVIRONMENT=development + lockfile → 正常（exit しない）"""
+        (tmp_path / "permissive.lock").touch()
+        with patch.dict(os.environ, {"RUMI_ENVIRONMENT": "development", "RUMI_USER_DATA": str(tmp_path)}, clear=False):
             # 例外が発生しないことを確認
             _check_permissive_production_guard()
 
     def test_no_environment_permissive_allowed(self):
-        """RUMI_ENVIRONMENT 未設定 → 正常（exit しない）"""
+        """RUMI_ENVIRONMENT 未設定 → opt-in 不足で SystemExit"""
         clean_env = {k: v for k, v in os.environ.items()
-                     if k != "RUMI_ENVIRONMENT"}
+                     if k not in ("RUMI_ENVIRONMENT", "RUMI_ALLOW_PERMISSIVE", "RUMI_USER_DATA")}
         with patch.dict(os.environ, clean_env, clear=True):
-            _check_permissive_production_guard()
+            with pytest.raises(SystemExit) as exc_info:
+                _check_permissive_production_guard()
+            assert exc_info.value.code == 1
 
     def test_staging_environment_permissive_allowed(self):
-        """RUMI_ENVIRONMENT=staging → 正常（exit しない）"""
+        """RUMI_ENVIRONMENT=staging → opt-in 対象外なので SystemExit"""
         with patch.dict(os.environ, {"RUMI_ENVIRONMENT": "staging"}, clear=False):
-            _check_permissive_production_guard()
+            with pytest.raises(SystemExit) as exc_info:
+                _check_permissive_production_guard()
+            assert exc_info.value.code == 1
 
 
 # ======================================================================

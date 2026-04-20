@@ -1,0 +1,9 @@
+{
+  "module_id": "button",
+  "kind": "frontend",
+  "display_name": "Button System",
+  "description": "Configurable button system: position, on/off, model search, tool limit, prompt switch, thinking toggle.",
+  "dependencies": [],
+  "default_state": "enabled",
+  "failure_threshold": 5
+}
