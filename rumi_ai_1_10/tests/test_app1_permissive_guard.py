@@ -16,6 +16,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+pytestmark = pytest.mark.contract
+
 # ---------------------------------------------------------------------------
 # core_runtime 等の外部依存を一括モック
 # ---------------------------------------------------------------------------

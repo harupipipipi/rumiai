@@ -48,6 +48,12 @@ Dependency failures degrade dependents without taking down the whole pack.
 The setup UI under `/setup` asks whether each discovered setup pack should be included at startup.
 Selected setup packs are installed together and receive `all OK` grants from setup.
 
+`supports_all_ok` is repository-managed trusted setup-pack metadata under
+`ecosystem/setup_pack/*`. Upstream treats only maintainer-reviewed setup pack
+definitions as trusted. Forks may add their own setup packs, but doing so is the
+same as modifying trusted source in that fork; it is not a separate runtime
+vulnerability boundary.
+
 ## Pack modification flow
 
 Pack changes can be staged first, then submitted as either:

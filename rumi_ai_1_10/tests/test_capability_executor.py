@@ -15,6 +15,10 @@ from unittest.mock import patch, MagicMock, PropertyMock
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+import pytest
+
+pytestmark = pytest.mark.contract
+
 _project_root = Path(__file__).resolve().parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))

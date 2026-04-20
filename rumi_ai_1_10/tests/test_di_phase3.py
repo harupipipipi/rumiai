@@ -15,6 +15,8 @@ import pytest
 
 from core_runtime.di_container import get_container
 
+pytestmark = pytest.mark.contract
+
 
 # ===================================================================
 # register_defaults — 7 サービス全登録確認

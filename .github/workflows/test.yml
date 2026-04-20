@@ -58,24 +58,33 @@ jobs:
           pip install -r requirements-dev.txt
           pip install -e .
 
+      - name: Guard contract marker coverage
+        working-directory: rumi_ai_1_10
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          missing = [
+              str(path)
+              for path in Path("tests").glob("test_*contract*.py")
+              if "pytest.mark.contract" not in path.read_text(encoding="utf-8")
+          ]
+          if missing:
+              raise SystemExit(
+                  "Contract-named tests must opt into the contract marker: "
+                  + ", ".join(missing)
+              )
+          PY
+
+      # Contract tests are marker-discovered. Add pytest.mark.contract to any
+      # new test that belongs in this CI cluster instead of editing this workflow.
       - name: Run contract cluster pytest
         id: contract_pytest
         working-directory: rumi_ai_1_10
         run: |
           set -o pipefail
           PYTEST_LOG="${RUNNER_TEMP}/contract-pytest-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.log"
-          pytest \
-            tests/test_app1_permissive_guard.py \
-            tests/test_bug_20260306_batch_b.py \
-            tests/test_capability_executor.py \
-            tests/test_capability_executor_security.py \
-            tests/test_capability_proxy.py \
-            tests/test_desktop_app_schema.py \
-            tests/test_di_container.py \
-            tests/test_di_phase2.py \
-            tests/test_di_phase3.py \
-            tests/test_di_phase4.py \
-            -v 2>&1 | tee "$PYTEST_LOG"
+          pytest -m contract -v 2>&1 | tee "$PYTEST_LOG"
 
       - name: Upload contract pytest log
         if: failure() && steps.contract_pytest.outcome == 'failure'
@@ -84,6 +93,38 @@ jobs:
           name: contract-pytest-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/contract-pytest-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}.log
           if-no-files-found: ignore
+
+  rumi-ai-static-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        working-directory: rumi_ai_1_10
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          pip install -e .
+
+      - name: Run Ruff/mypy non-regression guard
+        run: |
+          BASE_REF="${GITHUB_BASE_REF:-master}"
+          git fetch origin "$BASE_REF" --depth=1
+          python .github/scripts/quality_gate_nonregression.py \
+            --base-ref "origin/${BASE_REF}" \
+            --package-dir rumi_ai_1_10 \
+            --ruff-target core_runtime \
+            --ruff-target app.py \
+            --mypy-target core_runtime \
+            --mypy-target app.py
 
   rumi-ai-package-pytest:
     strategy:

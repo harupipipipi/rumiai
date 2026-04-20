@@ -10,6 +10,8 @@ import types
 from unittest.mock import MagicMock, patch, PropertyMock
 import pytest
 
+pytestmark = pytest.mark.contract
+
 
 # ======================================================================
 # Helpers: lightweight stub for KernelSystemHandlersMixin

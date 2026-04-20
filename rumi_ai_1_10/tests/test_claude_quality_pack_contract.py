@@ -3,6 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.contract
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_ROOT = REPO_ROOT / "rumi_ai_1_10"
@@ -64,9 +68,12 @@ def test_ci_workflows_keep_required_quality_gates():
         [
             "root-python-tests",
             "rumi-ai-contract-checks",
+            "rumi-ai-static-checks",
             "rumi-ai-package-pytest",
             "rust-test",
             "pytest tests/ -v",
+            "pytest -m contract -v",
+            "Run Ruff/mypy non-regression guard",
             "cd pack-shell && cargo test",
         ],
         ".github/workflows/test.yml",

@@ -36,6 +36,10 @@ class SetupPackDefinition:
     target_pack_id: str
     recommended: bool = False
     risk_level: str = "medium"
+    # supports_all_ok is trusted repository metadata. Upstream only treats
+    # maintainer-reviewed ecosystem/setup_pack/* definitions as trusted; forks
+    # may add their own definitions, which is equivalent to changing trusted
+    # source in that fork rather than crossing a runtime trust boundary.
     supports_all_ok: bool = False
     source_path: str = ""
 
