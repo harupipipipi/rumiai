@@ -63,82 +63,27 @@
     .progress.ready {
       color: #69db7c;
     }
-
-    .debug {
-      margin-top: 1rem;
-      max-width: 720px;
-      padding: 0 2rem;
-      color: #8d93b5;
-      font-size: 0.78rem;
-      line-height: 1.5;
-      text-align: center;
-      word-break: break-all;
-    }
-
-    .debug-log {
-      margin-top: 0.75rem;
-      max-height: 8rem;
-      overflow: hidden;
-      text-align: left;
-      white-space: pre-wrap;
-    }
   </style>
 </head>
 <body>
   <div class="title">Rumi AI</div>
   <div class="spinner" id="spinner"></div>
   <div class="progress" id="progress">Initializing...</div>
-  <div class="debug" id="debug">splash-debug v2026-04-20-02</div>
-  <div class="debug debug-log" id="debug-log"></div>
 
   <script>
     document.addEventListener('DOMContentLoaded', function () {
       var el = document.getElementById('progress');
       var spinner = document.getElementById('spinner');
-      var debug = document.getElementById('debug');
-      var debugLog = document.getElementById('debug-log');
-      var didReportReady = false;
-      var debugLines = [];
-
-      function setDebug(msg) {
-        debug.textContent = msg;
-        debugLines.push(new Date().toLocaleTimeString() + ' ' + msg);
-        debugLines = debugLines.slice(-8);
-        debugLog.textContent = debugLines.join('\n');
-        console.log('[rumi-viewer splash]', msg);
-      }
-
-      function sanitizeUrl(url) {
-        try {
-          var parsed = new URL(url);
-          if (parsed.searchParams.has('token')) {
-            var token = parsed.searchParams.get('token') || '';
-            parsed.searchParams.set('token', token.slice(0, 8) + '...');
-          }
-          return parsed.toString();
-        } catch (_) {
-          return String(url);
-        }
-      }
-
-      setDebug('splash loaded; waiting for Tauri IPC');
 
       function poll() {
         // Wait until Tauri IPC is available
         if (!window.__TAURI__ || !window.__TAURI__.core) {
-          setDebug('Tauri IPC not available yet');
           setTimeout(poll, 500);
           return;
         }
 
-        if (!didReportReady) {
-          setDebug('polling get_setup_progress');
-        }
         window.__TAURI__.core.invoke('get_setup_progress')
           .then(function (msg) {
-            if (!didReportReady || msg !== 'Ready') {
-              setDebug('progress=' + msg);
-            }
             el.textContent = msg;
             el.className = 'progress';
 
@@ -148,28 +93,6 @@
             } else if (msg === 'Ready') {
               el.className = 'progress ready';
               spinner.style.display = 'none';
-
-              if (!didReportReady) {
-                didReportReady = true;
-                setDebug('Ready detected; requesting panel URL');
-                window.__TAURI__.core.invoke('get_panel_url')
-                  .then(function (url) {
-                    setDebug('panel URL result=' + sanitizeUrl(url));
-                    if (url) {
-                      setDebug('navigating splash to panel');
-                      window.location.replace(url);
-                      setTimeout(function () {
-                        setDebug('still on splash after navigation attempt: ' + location.href);
-                      }, 1500);
-                    } else {
-                      setDebug('panel URL is empty; staying on splash');
-                    }
-                  })
-                  .catch(function (err) {
-                    el.textContent = 'Navigation error: ' + err;
-                    el.className = 'progress error';
-                  });
-              }
             }
           })
           .catch(function (err) {
