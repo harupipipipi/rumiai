@@ -19,10 +19,12 @@ import time
 import collections
 from pathlib import Path
 from typing import Any, Optional
+from http import cookies
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, unquote
 
 from .hmac_key_manager import get_hmac_key_manager, HMACKeyManager
+from .panel_auth import get_panel_auth_manager, PanelAuthManager
 
 from .validation import (
     validate_pack_id as _v_validate_pack_id,
@@ -175,6 +177,7 @@ class PackAPIHandler(
     _allowed_origins: list = None
     _allowed_origins_from_env: bool = False
     _hmac_key_manager: HMACKeyManager = None
+    _panel_auth_manager: PanelAuthManager = None
     kernel = None  # Kernel インスタンス参照（Flow実行API用）
     app_lifecycle_manager = None  # AppLifecycleManager インスタンス参照（Phase A）
     _web_mounts: list = []           # web_mount テーブル（テーブル駆動静的配信）
@@ -183,7 +186,22 @@ class PackAPIHandler(
     _api_route_patterns: list = []   # api_routes パターンテーブル [(METHOD, regex, params, entry)]
     
     def log_message(self, format: str, *args) -> None:
-        logger.info(f"API: {args[0]}")
+        sanitized_args = tuple(self._redact_log_value(arg) for arg in args)
+        try:
+            message = format % sanitized_args if sanitized_args else format
+        except Exception:
+            message = " ".join(sanitized_args) if sanitized_args else format
+        logger.info("API: %s", message)
+
+    @staticmethod
+    def _redact_log_value(value: object) -> str:
+        text = "" if value is None else str(value)
+        return re.sub(
+            r"([?&](?:token|code)=)[^&\s\"]+",
+            r"\1[REDACTED]",
+            text,
+            flags=re.IGNORECASE,
+        )
 
     @staticmethod
     def _validate_pack_id(pack_id: str) -> bool:
@@ -449,13 +467,20 @@ class PackAPIHandler(
 
         return True
 
-    def _send_response(self, response: APIResponse, status: int = 200) -> None:
+    def _send_response(
+        self,
+        response: APIResponse,
+        status: int = 200,
+        extra_headers: Optional[list[tuple[str, str]]] = None,
+    ) -> None:
         self.send_response(status)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         origin = self._get_cors_origin(self.headers.get('Origin', ''))
         if origin:
             self.send_header('Access-Control-Allow-Origin', origin)
             self.send_header('Vary', 'Origin')
+        for header_name, header_value in extra_headers or []:
+            self.send_header(header_name, header_value)
         self.end_headers()
         self.wfile.write(response.to_json().encode('utf-8'))
 
@@ -484,27 +509,258 @@ class PackAPIHandler(
             return False
         return True
 
-    def _check_auth(self) -> bool:
+    def _check_bearer_auth(self) -> bool:
         auth_header = self.headers.get('Authorization', '')
-        
+
         if not auth_header:
             return False
-        
+
         # Bearer プレフィックスを除去
         if not auth_header.startswith("Bearer "):
             return False
         token = auth_header[7:]  # len("Bearer ") == 7
-        
+
         # 1. HMACKeyManager 経由で検証（ローテーション対応）
         if self._hmac_key_manager is not None:
             return self._hmac_key_manager.verify_token(token)
-        
+
         # 2. フォールバック: 従来の internal_token での検証（後方互換）
         if not self.internal_token:
             logger.error("API token not configured - rejecting request")
             return False
-        
+
         return hmac.compare_digest(token, self.internal_token)
+
+    def _parse_cookie_header(self) -> dict[str, str]:
+        raw_cookie = self.headers.get("Cookie", "")
+        if not raw_cookie:
+            return {}
+        jar = cookies.SimpleCookie()
+        try:
+            jar.load(raw_cookie)
+        except cookies.CookieError:
+            return {}
+        return {key: morsel.value for key, morsel in jar.items()}
+
+    @staticmethod
+    def _build_set_cookie(
+        name: str,
+        value: str,
+        *,
+        path: str,
+        max_age: int,
+        http_only: bool,
+        same_site: str = "Strict",
+    ) -> str:
+        jar = cookies.SimpleCookie()
+        jar[name] = value
+        morsel = jar[name]
+        morsel["path"] = path
+        morsel["max-age"] = str(max_age)
+        morsel["samesite"] = same_site
+        if http_only:
+            morsel["httponly"] = True
+        return morsel.OutputString()
+
+    def _check_panel_origin(self) -> bool:
+        origin = self.headers.get("Origin", "")
+        return bool(self._get_cors_origin(origin))
+
+    def _check_panel_session(self, method: str) -> bool:
+        if self._panel_auth_manager is None:
+            return False
+        cookies_map = self._parse_cookie_header()
+        session_id = cookies_map.get("rumi_panel_session", "")
+        session = self._panel_auth_manager.verify_session(session_id)
+        if session is None:
+            return False
+
+        if method.upper() in {"POST", "PUT", "DELETE"}:
+            if not self._check_panel_origin():
+                return False
+            csrf_header = self.headers.get("X-Rumi-CSRF", "")
+            session_csrf = session.get("csrf_token", "")
+            if not csrf_header or not hmac.compare_digest(csrf_header, session_csrf):
+                return False
+
+        self._panel_session = session
+        return True
+
+    def _check_auth(self, method: str, path: str) -> bool:
+        if self._check_bearer_auth():
+            self._request_auth_mode = "bearer"
+            return True
+
+        if path.startswith("/api/panel/") and self._check_panel_session(method):
+            self._request_auth_mode = "panel_session"
+            return True
+
+        self._request_auth_mode = None
+        return False
+
+    def _check_web_mount_auth(self, method: str, web_mount: dict[str, Any]) -> bool:
+        if self._check_bearer_auth():
+            self._request_auth_mode = "bearer"
+            return True
+
+        if web_mount.get("pack_id") == "core_control_panel" and self._check_panel_session(method):
+            self._request_auth_mode = "panel_session"
+            return True
+
+        self._request_auth_mode = None
+        return False
+
+    @staticmethod
+    def _allows_public_bootstrap_page(request_path: str, web_mount: dict[str, Any]) -> bool:
+        if web_mount.get("pack_id") != "core_control_panel":
+            return False
+        prefix = web_mount.get("path_prefix", "")
+        if not prefix:
+            return False
+        return request_path in {prefix, f"{prefix}/", f"{prefix}/index.html"}
+
+    def _serve_panel_bootstrap_page(self) -> None:
+        html = """<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Rumi AI</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #0f172a;
+        color: #e2e8f0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      main {
+        width: min(32rem, calc(100vw - 2rem));
+        padding: 2rem;
+        border-radius: 1rem;
+        background: rgba(15, 23, 42, 0.92);
+        box-shadow: 0 20px 45px rgba(15, 23, 42, 0.35);
+      }
+      h1 {
+        margin: 0 0 0.75rem;
+        font-size: 1.25rem;
+      }
+      p {
+        margin: 0;
+        line-height: 1.5;
+        color: #cbd5e1;
+      }
+      .error {
+        color: #fca5a5;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1 id="title">Starting Rumi AI…</h1>
+      <p id="message">Exchanging your one-time desktop login code.</p>
+    </main>
+    <script>
+      (async () => {
+        const title = document.getElementById('title');
+        const message = document.getElementById('message');
+        const PANEL_CSRF_STORAGE_KEY = 'rumi-panel-csrf';
+        const url = new URL(window.location.href);
+        const code = url.searchParams.get('code');
+
+        const fail = (text) => {
+          title.textContent = 'Panel sign-in failed';
+          message.textContent = text;
+          message.classList.add('error');
+        };
+
+        if (!code) {
+          fail('This panel launch is missing a valid one-time login code.');
+          return;
+        }
+
+        try {
+          const response = await fetch('/api/panel/auth/exchange', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code }),
+          });
+
+          const envelope = await response.json().catch(() => ({}));
+          if (!response.ok || !envelope.success || !envelope.data || !envelope.data.csrf_token) {
+            throw new Error(envelope.error || `Panel bootstrap failed: ${response.status}`);
+          }
+
+          sessionStorage.setItem(PANEL_CSRF_STORAGE_KEY, envelope.data.csrf_token);
+          url.searchParams.delete('code');
+          window.location.replace(url.pathname + url.search + url.hash);
+        } catch (error) {
+          fail(error instanceof Error ? error.message : 'Panel bootstrap failed.');
+        }
+      })();
+    </script>
+  </body>
+</html>
+"""
+        data = html.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        origin = self._get_cors_origin(self.headers.get("Origin", ""))
+        if origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _handle_panel_bootstrap(self) -> None:
+        if self._panel_auth_manager is None:
+            self._send_response(APIResponse(False, error="Panel auth unavailable"), 503)
+            return
+
+        bootstrap_secret = self.headers.get("X-Rumi-Desktop-Bootstrap", "")
+        if not self._panel_auth_manager.validate_bootstrap_secret(bootstrap_secret):
+            self._send_response(APIResponse(False, error="Unauthorized"), 401)
+            return
+
+        payload = self._panel_auth_manager.issue_login_code()
+        self._send_response(APIResponse(True, data=payload))
+
+    def _handle_panel_exchange(self, body: dict[str, Any]) -> None:
+        if self._panel_auth_manager is None:
+            self._send_response(APIResponse(False, error="Panel auth unavailable"), 503)
+            return
+        if not self._check_panel_origin():
+            self._send_response(APIResponse(False, error="Forbidden origin"), 403)
+            return
+
+        code = str(body.get("code", "")).strip()
+        exchange = self._panel_auth_manager.exchange_code(code)
+        if exchange is None:
+            self._send_response(APIResponse(False, error="Invalid or expired code"), 401)
+            return
+
+        session_cookie = self._build_set_cookie(
+            "rumi_panel_session",
+            exchange["session_id"],
+            path="/",
+            max_age=int(exchange["expires_in"]),
+            http_only=True,
+        )
+        self._send_response(
+            APIResponse(
+                True,
+                data={
+                    "csrf_token": exchange["csrf_token"],
+                    "expires_in": exchange["expires_in"],
+                },
+            ),
+            extra_headers=[("Set-Cookie", session_cookie)],
+        )
     
     def _read_raw_body(self) -> Optional[bytes]:
         """リクエストボディを読み取り、インスタンスに保持して返す。
@@ -644,7 +900,7 @@ class PackAPIHandler(
             self.send_header('Access-Control-Allow-Origin', origin)
             self.send_header('Vary', 'Origin')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Authorization, Content-Type')
+        self.send_header('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Rumi-CSRF, X-Rumi-Desktop-Bootstrap')
         self.end_headers()
 
     @classmethod
@@ -700,15 +956,11 @@ class PackAPIHandler(
     def do_GET(self) -> None:
         if not self._check_rate_limit():
             return
+        self._request_auth_mode = None
+        self._panel_session = None
 
         # --- システムルート（テーブル化対象外）---
         _pre_auth_path = urlparse(self.path).path
-        if _pre_auth_path in ("", "/"):
-            self.send_response(302)
-            self.send_header("Location", "/panel/")
-            self.end_headers()
-            return
-
         if _pre_auth_path == "/health":
             _alm = self.__class__.app_lifecycle_manager
             if _alm is not None:
@@ -721,6 +973,15 @@ class PackAPIHandler(
         # --- テーブル駆動: 静的配信 (web_mount) ---
         _wm = self._match_web_mount(_pre_auth_path)
         if _wm is not None:
+            if _wm.get("auth_required", True):
+                if self._check_web_mount_auth("GET", _wm):
+                    self._serve_static_file(_pre_auth_path, _wm)
+                    return
+                if self._allows_public_bootstrap_page(_pre_auth_path, _wm):
+                    self._serve_panel_bootstrap_page()
+                    return
+                self._send_response(APIResponse(False, error="Unauthorized"), 401)
+                return
             self._serve_static_file(_pre_auth_path, _wm)
             return
 
@@ -755,26 +1016,20 @@ class PackAPIHandler(
                     _cb_query = _parse_qs(_urlparse(self.path).query)
                     result = self._oauth_callback(_cb_query)
                     if result is None:
-                        self._oauth_send_redirect("/setup?linked=true")
+                        self._oauth_send_redirect("/panel/setup?linked=true")
                     else:
                         _err_msg = result.get("error", "unknown_error")
-                        self._oauth_send_redirect("/setup?error=" + _err_msg)
+                        self._oauth_send_redirect("/panel/setup?error=" + _err_msg)
                 except Exception as e:
                     _log_internal_error("oauth_callback", e)
-                    self._oauth_send_redirect("/setup?error=internal_error")
+                    self._oauth_send_redirect("/panel/setup?error=internal_error")
                 return
 
             # pre-auth テーブルにマッチしたが上記に該当しない場合
             # → 認証スキップして通常ルーティングへ通過
 
         # --- 認証チェック（pre-auth ルート以外）---
-        if not _is_pre_auth and not self._check_auth():
-            accept_header = self.headers.get("Accept", "")
-            if "text/html" in accept_header:
-                self.send_response(302)
-                self.send_header("Location", "/panel/")
-                self.end_headers()
-                return
+        if not _is_pre_auth and not self._check_auth("GET", _pre_auth_path):
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return
         
@@ -926,6 +1181,8 @@ class PackAPIHandler(
     def do_POST(self) -> None:
         if not self._check_rate_limit():
             return
+        self._request_auth_mode = None
+        self._panel_session = None
 
         # --- テーブル駆動: pre-auth API ルート ---
         _pre_auth_path_post = urlparse(self.path).path
@@ -933,6 +1190,17 @@ class PackAPIHandler(
 
         if _is_pre_auth_post:
             # 認証不要ルート: ビジネスロジックはここで処理
+            if _pre_auth_path_post == "/api/panel/auth/bootstrap":
+                self._handle_panel_bootstrap()
+                return
+
+            if _pre_auth_path_post == "/api/panel/auth/exchange":
+                _body_exchange = self._parse_body()
+                if _body_exchange is None:
+                    return
+                self._handle_panel_exchange(_body_exchange)
+                return
+
             if _pre_auth_path_post == "/api/setup/complete":
                 _body_setup = self._parse_body()
                 if _body_setup is None:
@@ -962,7 +1230,7 @@ class PackAPIHandler(
             # → 認証スキップして通常ルーティングへ通過
 
         # --- 認証チェック（pre-auth ルート以外）---
-        if not _is_pre_auth_post and not self._check_auth():
+        if not _is_pre_auth_post and not self._check_auth("POST", _pre_auth_path_post):
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return
         
@@ -1381,9 +1649,11 @@ class PackAPIHandler(
         """PUT メソッド — Panel API + Pack独自ルート"""
         if not self._check_rate_limit():
             return
+        self._request_auth_mode = None
+        self._panel_session = None
         # --- テーブル駆動: 認証チェック ---
         _pre_auth_path_put = urlparse(self.path).path
-        if not self._is_pre_auth_route("PUT", _pre_auth_path_put) and not self._check_auth():
+        if not self._is_pre_auth_route("PUT", _pre_auth_path_put) and not self._check_auth("PUT", _pre_auth_path_put):
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return
 
@@ -1410,9 +1680,11 @@ class PackAPIHandler(
     def do_DELETE(self) -> None:
         if not self._check_rate_limit():
             return
+        self._request_auth_mode = None
+        self._panel_session = None
         # --- テーブル駆動: 認証チェック ---
         _pre_auth_path_del = urlparse(self.path).path
-        if not self._is_pre_auth_route("DELETE", _pre_auth_path_del) and not self._check_auth():
+        if not self._is_pre_auth_route("DELETE", _pre_auth_path_del) and not self._check_auth("DELETE", _pre_auth_path_del):
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return
         
@@ -1522,6 +1794,7 @@ class PackAPIServer:
         
         # HMAC鍵管理: HMACKeyManager を使用
         self._hmac_key_manager = get_hmac_key_manager()
+        self._panel_auth_manager = get_panel_auth_manager()
         
         if internal_token is None:
             # HMACKeyManager からアクティブ鍵を取得
@@ -1544,6 +1817,7 @@ class PackAPIServer:
         PackAPIHandler.host_privilege_manager = self.host_privilege_manager
         PackAPIHandler.internal_token = self.internal_token
         PackAPIHandler._hmac_key_manager = self._hmac_key_manager
+        PackAPIHandler._panel_auth_manager = self._panel_auth_manager
         PackAPIHandler.kernel = self.kernel
         PackAPIHandler.app_lifecycle_manager = self.app_lifecycle_manager
 

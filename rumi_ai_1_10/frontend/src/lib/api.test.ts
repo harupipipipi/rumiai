@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {beforeEach, test} from 'node:test';
 
-import {apiFetch, bootstrapApiTokenFromLocation} from './api.ts';
+import {apiFetch, bootstrapPanelSession} from './api.ts';
 
 class MemoryStorage {
   private readonly values = new Map<string, string>();
@@ -26,12 +26,11 @@ class MemoryStorage {
 type TestGlobals = typeof globalThis & {
   document?: {title: string};
   fetch?: typeof fetch;
-  localStorage?: MemoryStorage;
+  sessionStorage?: MemoryStorage;
   window?: {
     history: {
       replaceState: (_state: unknown, _title: string, url?: string | URL | null) => void;
     };
-    localStorage: MemoryStorage;
     location: {
       href: string;
     };
@@ -43,6 +42,7 @@ const globals = globalThis as TestGlobals;
 let lastFetchInit: RequestInit | undefined;
 let lastFetchUrl = '';
 let lastReplacedUrl = '';
+let sessionStorageRef: MemoryStorage;
 
 function installBrowser(href: string): MemoryStorage {
   const storage = new MemoryStorage();
@@ -54,22 +54,35 @@ function installBrowser(href: string): MemoryStorage {
         window.location.href = new URL(nextUrl, window.location.href).toString();
       },
     },
-    localStorage: storage,
     location: {
       href,
     },
   };
 
   globals.document = {title: 'Rumi AI'};
-  globals.localStorage = storage;
+  globals.sessionStorage = storage;
   globals.window = window;
+  sessionStorageRef = storage;
   return storage;
 }
 
-function installFetchResponse(): void {
+function installFetchMock(): void {
   globals.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     lastFetchUrl = String(input);
     lastFetchInit = init;
+
+    if (lastFetchUrl === '/api/panel/auth/exchange') {
+      return new Response(
+        JSON.stringify({
+          data: {csrf_token: 'csrf-from-server'},
+          success: true,
+        }),
+        {
+          headers: {'Content-Type': 'application/json'},
+          status: 200,
+        },
+      );
+    }
 
     return new Response(
       JSON.stringify({
@@ -89,41 +102,44 @@ beforeEach(() => {
   lastFetchUrl = '';
   lastReplacedUrl = '';
   installBrowser('http://127.0.0.1:8765/panel/');
-  installFetchResponse();
+  installFetchMock();
 });
 
-test('bootstrapApiTokenFromLocation persists token and strips it from the URL', () => {
-  const storage = installBrowser('http://127.0.0.1:8765/panel/?token=panel-secret&v=42#ready');
+test('bootstrapPanelSession exchanges code and strips it from the URL', async () => {
+  const storage = installBrowser('http://127.0.0.1:8765/panel/?code=one-time-code&v=42#ready');
 
-  bootstrapApiTokenFromLocation();
+  await bootstrapPanelSession();
 
-  assert.equal(storage.getItem('rumi-api-token'), 'panel-secret');
+  assert.equal(lastFetchUrl, '/api/panel/auth/exchange');
+  assert.equal((lastFetchInit?.credentials as string | undefined), 'same-origin');
+  assert.equal(storage.getItem('rumi-panel-csrf'), 'csrf-from-server');
   assert.equal(lastReplacedUrl, '/panel/?v=42#ready');
   assert.equal(globals.window?.location.href, 'http://127.0.0.1:8765/panel/?v=42#ready');
 });
 
-test('apiFetch injects an Authorization header from stored token state', async () => {
-  const storage = installBrowser('http://127.0.0.1:8765/panel/?v=42');
-  storage.setItem('rumi-api-token', 'persisted-token');
+test('apiFetch adds the panel CSRF header for unsafe methods', async () => {
+  installBrowser('http://127.0.0.1:8765/panel/?v=42');
+  sessionStorageRef.setItem('rumi-panel-csrf', 'persisted-csrf');
+
+  await apiFetch<{ok: boolean}>('/api/panel/flows', {method: 'POST', body: '{}'});
+
+  assert.equal(lastFetchUrl, '/api/panel/flows');
+  assert.equal(
+    (lastFetchInit?.headers as Record<string, string>)?.['X-Rumi-CSRF'],
+    'persisted-csrf',
+  );
+  assert.equal((lastFetchInit?.credentials as string | undefined), 'same-origin');
+});
+
+test('apiFetch leaves GET requests free of CSRF headers', async () => {
+  installBrowser('http://127.0.0.1:8765/panel/?v=42');
+  sessionStorageRef.setItem('rumi-panel-csrf', 'persisted-csrf');
 
   await apiFetch<{ok: boolean}>('/api/panel/dashboard');
 
   assert.equal(lastFetchUrl, '/api/panel/dashboard');
   assert.equal(
-    (lastFetchInit?.headers as Record<string, string>)?.Authorization,
-    'Bearer persisted-token',
-  );
-});
-
-test('apiFetch consumes a token directly from the current panel URL on first request', async () => {
-  const storage = installBrowser('http://127.0.0.1:8765/panel/?token=fresh-token&v=77');
-
-  await apiFetch<{ok: boolean}>('/api/panel/dashboard');
-
-  assert.equal(storage.getItem('rumi-api-token'), 'fresh-token');
-  assert.equal(lastReplacedUrl, '/panel/?v=77');
-  assert.equal(
-    (lastFetchInit?.headers as Record<string, string>)?.Authorization,
-    'Bearer fresh-token',
+    (lastFetchInit?.headers as Record<string, string>)?.['X-Rumi-CSRF'],
+    undefined,
   );
 });

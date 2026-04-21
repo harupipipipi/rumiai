@@ -19,49 +19,61 @@ import type {
 // Base URL: empty string means relative path (works with Vite proxy)
 const API_BASE_URL =
   (import.meta as ImportMeta & {env?: Record<string, string>}).env?.VITE_API_BASE_URL ?? '';
-const API_TOKEN_STORAGE_KEY = 'rumi-api-token';
-const API_TOKEN_QUERY_KEY = 'token';
+const PANEL_CSRF_STORAGE_KEY = 'rumi-panel-csrf';
 
-function consumeTokenFromLocation(): string | null {
-  if (typeof window === 'undefined') {
-    return null;
+function getStoredPanelCsrfToken(): string {
+  return sessionStorage.getItem(PANEL_CSRF_STORAGE_KEY) || '';
+}
+
+function setStoredPanelCsrfToken(token: string): void {
+  if (!token) {
+    sessionStorage.removeItem(PANEL_CSRF_STORAGE_KEY);
+    return;
+  }
+  sessionStorage.setItem(PANEL_CSRF_STORAGE_KEY, token);
+}
+
+function isUnsafeMethod(method: string): boolean {
+  return method === 'POST' || method === 'PUT' || method === 'DELETE' || method === 'PATCH';
+}
+
+export async function bootstrapPanelSession(): Promise<void> {
+  const url = new URL(window.location.href);
+  const code = url.searchParams.get('code');
+  if (!code) {
+    return;
   }
 
-  try {
-    const url = new URL(window.location.href);
-    const token = url.searchParams.get(API_TOKEN_QUERY_KEY)?.trim();
-    if (!token) {
-      return null;
+  const response = await fetch(`${API_BASE_URL}/api/panel/auth/exchange`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ code }),
+  });
+
+  if (!response.ok) {
+    let errorMessage = `Panel bootstrap failed: ${response.status} ${response.statusText}`;
+    try {
+      const errorBody: ApiResponse<unknown> = await response.json();
+      if (errorBody.error) {
+        errorMessage = errorBody.error;
+      }
+    } catch {
+      // fall back to default message
     }
-
-    localStorage.setItem(API_TOKEN_STORAGE_KEY, token);
-    url.searchParams.delete(API_TOKEN_QUERY_KEY);
-    window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
-    return token;
-  } catch {
-    return null;
-  }
-}
-
-export function bootstrapApiTokenFromLocation(): void {
-  consumeTokenFromLocation();
-}
-
-function getAccessToken(): string | null {
-  const tokenFromLocation = consumeTokenFromLocation();
-  if (tokenFromLocation) {
-    return tokenFromLocation;
+    throw new Error(errorMessage);
   }
 
-  if (typeof window === 'undefined') {
-    return null;
+  const envelope: ApiResponse<{ csrf_token: string }> = await response.json();
+  if (!envelope.success || !envelope.data?.csrf_token) {
+    throw new Error(envelope.error || 'Panel bootstrap failed');
   }
 
-  try {
-    return localStorage.getItem(API_TOKEN_STORAGE_KEY);
-  } catch {
-    return null;
-  }
+  setStoredPanelCsrfToken(envelope.data.csrf_token);
+  url.searchParams.delete('code');
+  window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
 }
 
 /**
@@ -77,19 +89,24 @@ export async function apiFetch<T>(
   options: RequestInit = {},
 ): Promise<T> {
   const url = `${API_BASE_URL}${path}`;
+  const method = (options.method || 'GET').toUpperCase();
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string> | undefined),
   };
 
-  const token = getAccessToken();
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+  if (isUnsafeMethod(method)) {
+    const csrfToken = getStoredPanelCsrfToken();
+    if (csrfToken) {
+      headers['X-Rumi-CSRF'] = csrfToken;
+    }
   }
 
   const response = await fetch(url, {
     ...options,
+    method,
+    credentials: 'same-origin',
     headers,
   });
 

@@ -18,24 +18,16 @@
     "path_prefix": "/panel",
     "static_root": "web",
     "spa_fallback": true,
-    "auth_required": false
+    "auth_required": true
   },
   "pre_auth_routes": [
     {
-      "method": "GET",
-      "path_prefix": "/api/panel/"
+      "method": "POST",
+      "path": "/api/panel/auth/bootstrap"
     },
     {
       "method": "POST",
-      "path_prefix": "/api/panel/"
-    },
-    {
-      "method": "PUT",
-      "path_prefix": "/api/panel/"
-    },
-    {
-      "method": "DELETE",
-      "path_prefix": "/api/panel/"
+      "path": "/api/panel/auth/exchange"
     }
   ],
   "api_routes": [

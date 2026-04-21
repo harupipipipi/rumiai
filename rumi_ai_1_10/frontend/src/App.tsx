@@ -10,11 +10,13 @@ import { Flows } from '@/src/pages/Flows';
 import { Settings } from '@/src/pages/Settings';
 import { ToastContainer } from '@/src/components/ui/ToastContainer';
 import { DialogContainer } from '@/src/components/ui/DialogContainer';
+import { bootstrapPanelSession } from '@/src/lib/api';
 
 export default function App() {
   const theme = useAppStore(state => state.theme);
   const colorMode = useAppStore(state => state.colorMode);
   const isSetupDone = useAppStore(state => state.isSetupDone);
+  const addToast = useAppStore(state => state.addToast);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -31,13 +33,19 @@ export default function App() {
     }
   }, [colorMode]);
 
+  useEffect(() => {
+    bootstrapPanelSession().catch((error) => {
+      const message = error instanceof Error ? error.message : 'Panel bootstrap failed';
+      addToast(message, 'error');
+    });
+  }, [addToast]);
+
   return (
     <BrowserRouter basename="/panel">
       <Routes>
-        <Route path="/" element={<Navigate to={isSetupDone ? "/" : "/setup"} replace />} />
         <Route path="/setup" element={<Setup />} />
-        
-        <Route path="/" element={<Layout />}>
+
+        <Route path="/" element={isSetupDone ? <Layout /> : <Navigate to="/setup" replace />}>
           <Route index element={<Dashboard />} />
           <Route path="packs" element={<Packs />} />
           <Route path="packs/:id" element={<PackDetail />} />

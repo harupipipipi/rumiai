@@ -27,6 +27,7 @@ const KILL_TIMEOUT_SECS: u64 = 5;
 pub struct KernelManager {
     child: Option<Child>,
     config: AppConfig,
+    panel_bootstrap_secret: String,
     /// Stores the exit code from the most recent child exit.
     last_exit_code: Option<i32>,
     /// Counter for consecutive non-42 restarts.
@@ -34,10 +35,11 @@ pub struct KernelManager {
 }
 
 impl KernelManager {
-    pub fn new(config: &AppConfig) -> Self {
+    pub fn new(config: &AppConfig, panel_bootstrap_secret: String) -> Self {
         Self {
             child: None,
             config: config.clone(),
+            panel_bootstrap_secret,
             last_exit_code: None,
             restart_count: 0,
         }
@@ -88,6 +90,7 @@ impl KernelManager {
             .env("RUMI_USER_DATA", &self.config.user_data_dir)
             .env("RUMI_LOG_DIR", &self.config.log_dir)
             .env("RUMI_PORT", self.config.kernel_port.to_string())
+            .env("RUMI_PANEL_BOOTSTRAP_SECRET", &self.panel_bootstrap_secret)
             .stdout(Stdio::from(log_file))
             .stderr(Stdio::from(log_stderr))
             .spawn()
@@ -243,21 +246,21 @@ mod tests {
     #[test]
     fn is_running_default_false() {
         let config = test_config();
-        let mut km = KernelManager::new(&config);
+        let mut km = KernelManager::new(&config, "test-bootstrap".into());
         assert!(!km.is_running());
     }
 
     #[test]
     fn stop_without_start_is_ok() {
         let config = test_config();
-        let mut km = KernelManager::new(&config);
+        let mut km = KernelManager::new(&config, "test-bootstrap".into());
         assert!(km.stop().is_ok());
     }
 
     #[test]
     fn wait_and_handle_restart_no_child() {
         let config = test_config();
-        let mut km = KernelManager::new(&config);
+        let mut km = KernelManager::new(&config, "test-bootstrap".into());
         let result = km.wait_and_handle_restart().unwrap();
         assert!(!result);
     }
