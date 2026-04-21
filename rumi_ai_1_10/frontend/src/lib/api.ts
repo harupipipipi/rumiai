@@ -17,7 +17,64 @@ import type {
 } from './apiTypes';
 
 // Base URL: empty string means relative path (works with Vite proxy)
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
+const API_BASE_URL =
+  (import.meta as ImportMeta & {env?: Record<string, string>}).env?.VITE_API_BASE_URL ?? '';
+const PANEL_CSRF_STORAGE_KEY = 'rumi-panel-csrf';
+
+function getStoredPanelCsrfToken(): string {
+  return sessionStorage.getItem(PANEL_CSRF_STORAGE_KEY) || '';
+}
+
+function setStoredPanelCsrfToken(token: string): void {
+  if (!token) {
+    sessionStorage.removeItem(PANEL_CSRF_STORAGE_KEY);
+    return;
+  }
+  sessionStorage.setItem(PANEL_CSRF_STORAGE_KEY, token);
+}
+
+function isUnsafeMethod(method: string): boolean {
+  return method === 'POST' || method === 'PUT' || method === 'DELETE' || method === 'PATCH';
+}
+
+export async function bootstrapPanelSession(): Promise<void> {
+  const url = new URL(window.location.href);
+  const code = url.searchParams.get('code');
+  if (!code) {
+    return;
+  }
+
+  const response = await fetch(`${API_BASE_URL}/api/panel/auth/exchange`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ code }),
+  });
+
+  if (!response.ok) {
+    let errorMessage = `Panel bootstrap failed: ${response.status} ${response.statusText}`;
+    try {
+      const errorBody: ApiResponse<unknown> = await response.json();
+      if (errorBody.error) {
+        errorMessage = errorBody.error;
+      }
+    } catch {
+      // fall back to default message
+    }
+    throw new Error(errorMessage);
+  }
+
+  const envelope: ApiResponse<{ csrf_token: string }> = await response.json();
+  if (!envelope.success || !envelope.data?.csrf_token) {
+    throw new Error(envelope.error || 'Panel bootstrap failed');
+  }
+
+  setStoredPanelCsrfToken(envelope.data.csrf_token);
+  url.searchParams.delete('code');
+  window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
+}
 
 /**
  * Common fetch wrapper for API calls.
@@ -32,20 +89,24 @@ export async function apiFetch<T>(
   options: RequestInit = {},
 ): Promise<T> {
   const url = `${API_BASE_URL}${path}`;
+  const method = (options.method || 'GET').toUpperCase();
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string> | undefined),
   };
 
-  // TODO: OAuth token injection (Phase D)
-  // const token = getAccessToken();
-  // if (token) {
-  //   headers['Authorization'] = `Bearer ${token}`;
-  // }
+  if (isUnsafeMethod(method)) {
+    const csrfToken = getStoredPanelCsrfToken();
+    if (csrfToken) {
+      headers['X-Rumi-CSRF'] = csrfToken;
+    }
+  }
 
   const response = await fetch(url, {
     ...options,
+    method,
+    credentials: 'same-origin',
     headers,
   });
 

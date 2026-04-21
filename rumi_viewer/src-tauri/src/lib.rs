@@ -10,8 +10,12 @@ mod tray;
 mod updater;
 
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
+use anyhow::{bail, Context, Result as AnyResult};
 use log::{error, info};
+use rand::{distributions::Alphanumeric, Rng};
+use serde::Deserialize;
 use tauri::Manager;
 
 use config::AppConfig;
@@ -19,6 +23,18 @@ use kernel_manager::KernelManager;
 
 /// Wrapper around a shared progress string, managed as Tauri State.
 pub struct SetupProgress(pub Arc<Mutex<String>>);
+
+#[derive(Debug, Deserialize)]
+struct PanelBootstrapPayload {
+    code: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApiEnvelope<T> {
+    success: bool,
+    data: Option<T>,
+    error: Option<String>,
+}
 
 /// Returns the current setup progress message.
 #[tauri::command]
@@ -34,11 +50,52 @@ fn restart_kernel(state: tauri::State<'_, Arc<Mutex<KernelManager>>>) -> Result<
     Ok("Kernel restarted".into())
 }
 
+fn generate_panel_bootstrap_secret() -> String {
+    rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(64)
+        .map(char::from)
+        .collect()
+}
+
+fn request_panel_bootstrap_code(port: u16, bootstrap_secret: &str) -> AnyResult<String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .context("failed to build bootstrap HTTP client")?;
+    let url = format!("http://127.0.0.1:{port}/api/panel/auth/bootstrap");
+    let response = client
+        .post(url)
+        .header("X-Rumi-Desktop-Bootstrap", bootstrap_secret)
+        .send()
+        .context("panel bootstrap request failed")?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().unwrap_or_default();
+        bail!("panel bootstrap returned {status}: {body}");
+    }
+
+    let envelope: ApiEnvelope<PanelBootstrapPayload> = response
+        .json()
+        .context("failed to decode panel bootstrap response")?;
+    if !envelope.success {
+        bail!(envelope.error.unwrap_or_else(|| "panel bootstrap failed".into()));
+    }
+
+    let payload = envelope
+        .data
+        .context("panel bootstrap response missing payload")?;
+    if payload.code.is_empty() {
+        bail!("panel bootstrap response missing code");
+    }
+    Ok(payload.code)
+}
+
 pub fn run() {
     env_logger::init();
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
         .plugin(
             tauri::plugin::Builder::<tauri::Wry, ()>::new("nav-guard")
                 .on_navigation(|_webview, url| {
@@ -82,7 +139,11 @@ pub fn run() {
             let progress_arc = progress.0.clone();
             app.manage(progress);
 
-            let km = Arc::new(Mutex::new(KernelManager::new(&config)));
+            let panel_bootstrap_secret = generate_panel_bootstrap_secret();
+            let km = Arc::new(Mutex::new(KernelManager::new(
+                &config,
+                panel_bootstrap_secret.clone(),
+            )));
             let km_for_thread = km.clone();
             app.manage(km);
 
@@ -132,9 +193,20 @@ pub fn run() {
 
                 set_progress("Ready");
 
+                let panel_code = match request_panel_bootstrap_code(port, &panel_bootstrap_secret)
+                {
+                    Ok(code) => code,
+                    Err(e) => {
+                        let msg = format!("Error: Panel bootstrap failed — {e}");
+                        error!("{msg}");
+                        set_progress(&msg);
+                        return;
+                    }
+                };
+
                 if let Some(win) = handle.get_webview_window("main") {
                     let js = format!(
-                        "window.location.replace('http://localhost:{port}/panel/')"
+                        "window.location.replace('http://127.0.0.1:{port}/panel/?code={panel_code}')"
                     );
                     if let Err(e) = win.eval(&js) {
                         error!("Failed to navigate to panel: {e}");

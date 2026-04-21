@@ -17,13 +17,36 @@ fn get_km(app: &tauri::AppHandle) -> Arc<Mutex<KernelManager>> {
     Arc::clone(app.state::<Arc<Mutex<KernelManager>>>().inner())
 }
 
+fn primary_window_label(has_panel: bool, has_main: bool) -> Option<&'static str> {
+    if has_panel {
+        Some("panel")
+    } else if has_main {
+        Some("main")
+    } else {
+        None
+    }
+}
+
+fn show_primary_window(app: &tauri::AppHandle) {
+    let target = primary_window_label(
+        app.get_webview_window("panel").is_some(),
+        app.get_webview_window("main").is_some(),
+    );
+
+    if let Some(label) = target {
+        if let Some(win) = app.get_webview_window(label) {
+            let _ = win.unminimize();
+            let _ = win.show();
+            let _ = win.set_focus();
+        }
+    }
+}
+
 /// Build and register the system-tray icon with Open / Restart Kernel / Quit.
 pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let open_i = MenuItem::with_id(app, "open", "Open", true, None::<&str>)?;
-    let restart_i =
-        MenuItem::with_id(app, "restart_kernel", "Restart Kernel", true, None::<&str>)?;
-    let update_i =
-        MenuItem::with_id(app, "check_update", "Check for Updates", true, None::<&str>)?;
+    let restart_i = MenuItem::with_id(app, "restart_kernel", "Restart Kernel", true, None::<&str>)?;
+    let update_i = MenuItem::with_id(app, "check_update", "Check for Updates", true, None::<&str>)?;
     let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
 
     let menu = Menu::with_items(app, &[&open_i, &restart_i, &update_i, &quit_i])?;
@@ -35,11 +58,7 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open" => {
-                if let Some(win) = app.get_webview_window("main") {
-                    let _ = win.unminimize();
-                    let _ = win.show();
-                    let _ = win.set_focus();
-                }
+                show_primary_window(app);
             }
             "restart_kernel" => {
                 let km = get_km(app);
@@ -49,23 +68,21 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             "check_update" => {
-                std::thread::spawn(|| {
-                    match updater::check_for_update() {
-                        Ok(Some(info)) => {
-                            info!(
-                                "Update available: {} -> {}",
-                                info.current_version, info.latest_version
-                            );
-                            if let Err(e) = updater::open_release_page(&info) {
-                                error!("Failed to open release page: {e}");
-                            }
+                std::thread::spawn(|| match updater::check_for_update() {
+                    Ok(Some(info)) => {
+                        info!(
+                            "Update available: {} -> {}",
+                            info.current_version, info.latest_version
+                        );
+                        if let Err(e) = updater::open_release_page(&info) {
+                            error!("Failed to open release page: {e}");
                         }
-                        Ok(None) => {
-                            info!("Rumi AI is up to date.");
-                        }
-                        Err(e) => {
-                            error!("Update check failed: {e}");
-                        }
+                    }
+                    Ok(None) => {
+                        info!("Rumi AI is up to date.");
+                    }
+                    Err(e) => {
+                        error!("Update check failed: {e}");
                     }
                 });
             }
@@ -87,14 +104,30 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             } = event
             {
                 let app = tray.app_handle();
-                if let Some(win) = app.get_webview_window("main") {
-                    let _ = win.unminimize();
-                    let _ = win.show();
-                    let _ = win.set_focus();
-                }
+                show_primary_window(&app);
             }
         })
         .build(app)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::primary_window_label;
+
+    #[test]
+    fn prefers_panel_window_when_available() {
+        assert_eq!(primary_window_label(true, true), Some("panel"));
+    }
+
+    #[test]
+    fn falls_back_to_main_window_before_panel_exists() {
+        assert_eq!(primary_window_label(false, true), Some("main"));
+    }
+
+    #[test]
+    fn returns_none_when_no_window_exists() {
+        assert_eq!(primary_window_label(false, false), None);
+    }
 }

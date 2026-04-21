@@ -24,6 +24,7 @@ from core_runtime.pack_api_server import (
     THREAD_JOIN_TIMEOUT_SECONDS,
 )
 from core_runtime.api.api_response import APIResponse
+from core_runtime.panel_auth import PanelAuthManager, reset_panel_auth_manager_for_tests
 
 
 # ---------------------------------------------------------------------------
@@ -135,20 +136,20 @@ class TestCheckAuth:
             headers=_make_headers(Authorization="Bearer my-secret-token"),
             _hmac_key_manager=mock_mgr,
         )
-        assert handler._check_auth() is True
+        assert handler._check_auth("GET", "/api/packs") is True
         mock_mgr.verify_token.assert_called_once_with("my-secret-token")
 
     def test_auth_failure_no_header(self) -> None:
         """Authorization ヘッダーなし → 認証失敗"""
         handler = _make_handler(headers=_make_headers())
-        assert handler._check_auth() is False
+        assert handler._check_auth("GET", "/api/packs") is False
 
     def test_auth_failure_no_bearer_prefix(self) -> None:
         """Bearer プレフィックスなし → 認証失敗"""
         handler = _make_handler(
             headers=_make_headers(Authorization="Basic abc123"),
         )
-        assert handler._check_auth() is False
+        assert handler._check_auth("GET", "/api/packs") is False
 
     def test_auth_fallback_internal_token_success(self) -> None:
         """HMACKeyManager=None, internal_token で一致 → 成功"""
@@ -157,7 +158,7 @@ class TestCheckAuth:
             _hmac_key_manager=None,
             internal_token="fallback-token",
         )
-        assert handler._check_auth() is True
+        assert handler._check_auth("GET", "/api/packs") is True
 
     def test_auth_fallback_internal_token_mismatch(self) -> None:
         """HMACKeyManager=None, internal_token 不一致 → 失敗"""
@@ -166,7 +167,7 @@ class TestCheckAuth:
             _hmac_key_manager=None,
             internal_token="correct-token",
         )
-        assert handler._check_auth() is False
+        assert handler._check_auth("GET", "/api/packs") is False
 
     def test_auth_fallback_no_internal_token_configured(self) -> None:
         """HMACKeyManager=None, internal_token="" → 失敗"""
@@ -175,7 +176,100 @@ class TestCheckAuth:
             _hmac_key_manager=None,
             internal_token="",
         )
-        assert handler._check_auth() is False
+        assert handler._check_auth("GET", "/api/packs") is False
+
+    def test_panel_session_auth_success_for_get(self) -> None:
+        panel_mgr = PanelAuthManager(bootstrap_secret="bootstrap")
+        reset_panel_auth_manager_for_tests(panel_mgr)
+        issue = panel_mgr.issue_login_code()
+        exchange = panel_mgr.exchange_code(issue["code"])
+        assert exchange is not None
+
+        handler = _make_handler(
+            headers=_make_headers(Cookie=f"rumi_panel_session={exchange['session_id']}"),
+            _panel_auth_manager=panel_mgr,
+        )
+
+        assert handler._check_auth("GET", "/api/panel/dashboard") is True
+        assert handler._request_auth_mode == "panel_session"
+
+    def test_panel_session_mutation_requires_csrf_and_origin(self) -> None:
+        panel_mgr = PanelAuthManager(bootstrap_secret="bootstrap")
+        reset_panel_auth_manager_for_tests(panel_mgr)
+        issue = panel_mgr.issue_login_code()
+        exchange = panel_mgr.exchange_code(issue["code"])
+        assert exchange is not None
+
+        handler = _make_handler(
+            headers=_make_headers(
+                Cookie=f"rumi_panel_session={exchange['session_id']}",
+                Origin="http://127.0.0.1:8765",
+                X_Rumi_Csrf=exchange["csrf_token"],
+            ),
+            _panel_auth_manager=panel_mgr,
+        )
+
+        assert handler._check_auth("POST", "/api/panel/kernel/restart") is True
+
+    def test_panel_session_mutation_rejects_missing_csrf(self) -> None:
+        panel_mgr = PanelAuthManager(bootstrap_secret="bootstrap")
+        reset_panel_auth_manager_for_tests(panel_mgr)
+        issue = panel_mgr.issue_login_code()
+        exchange = panel_mgr.exchange_code(issue["code"])
+        assert exchange is not None
+
+        handler = _make_handler(
+            headers=_make_headers(
+                Cookie=f"rumi_panel_session={exchange['session_id']}",
+                Origin="http://127.0.0.1:8765",
+            ),
+            _panel_auth_manager=panel_mgr,
+        )
+
+        assert handler._check_auth("POST", "/api/panel/kernel/restart") is False
+
+    def test_web_mount_auth_uses_panel_session_for_control_panel(self) -> None:
+        panel_mgr = PanelAuthManager(bootstrap_secret="bootstrap")
+        reset_panel_auth_manager_for_tests(panel_mgr)
+        issue = panel_mgr.issue_login_code()
+        exchange = panel_mgr.exchange_code(issue["code"])
+        assert exchange is not None
+
+        handler = _make_handler(
+            headers=_make_headers(Cookie=f"rumi_panel_session={exchange['session_id']}"),
+            _panel_auth_manager=panel_mgr,
+        )
+
+        assert handler._check_web_mount_auth(
+            "GET",
+            {"pack_id": "core_control_panel", "path_prefix": "/panel"},
+        ) is True
+        assert handler._request_auth_mode == "panel_session"
+
+    def test_public_panel_bootstrap_page_is_only_allowed_for_root_document(self) -> None:
+        web_mount = {"pack_id": "core_control_panel", "path_prefix": "/panel"}
+
+        assert PackAPIHandler._allows_public_bootstrap_page("/panel", web_mount) is True
+        assert PackAPIHandler._allows_public_bootstrap_page("/panel/", web_mount) is True
+        assert PackAPIHandler._allows_public_bootstrap_page("/panel/index.html", web_mount) is True
+        assert PackAPIHandler._allows_public_bootstrap_page("/panel/assets/app.js", web_mount) is False
+
+    def test_log_message_redacts_sensitive_query_params(self) -> None:
+        handler = _make_handler()
+
+        with patch("core_runtime.pack_api_server.logger.info") as mocked:
+            handler.log_message(
+                '"%s" %s %s',
+                "GET /panel/?code=secret-code&token=secret-token HTTP/1.1",
+                "200",
+                "123",
+            )
+
+        mocked.assert_called_once()
+        logged_message = mocked.call_args.args[1]
+        assert "[REDACTED]" in logged_message
+        assert "secret-code" not in logged_message
+        assert "secret-token" not in logged_message
 
 
 # ---------------------------------------------------------------------------

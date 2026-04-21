@@ -325,6 +325,44 @@ class TestSetupHandlers(unittest.TestCase):
         self.assertFalse(handler._is_pre_auth_route("POST", "/api/defaultspack/pack-requests/request-extension"))
         self.assertTrue(handler._is_pre_auth_route("GET", "/api/setup/status"))
 
+    def test_control_panel_requires_session_except_bootstrap_exchange(self):
+        import json
+        from core_runtime.pack_api_server import PackAPIHandler
+
+        control_panel_ecosystem_path = (
+            Path(__file__).resolve().parent.parent
+            / "core_runtime"
+            / "core_pack"
+            / "core_control_panel"
+            / "ecosystem.json"
+        )
+        control_panel_data = json.loads(control_panel_ecosystem_path.read_text(encoding="utf-8"))
+
+        self.assertTrue(control_panel_data["web_mount"]["auth_required"])
+        self.assertEqual(
+            control_panel_data["pre_auth_routes"],
+            [
+                {"method": "POST", "path": "/api/panel/auth/bootstrap"},
+                {"method": "POST", "path": "/api/panel/auth/exchange"},
+            ],
+        )
+
+        class _PackInfo:
+            def __init__(self, ecosystem):
+                self.ecosystem = ecosystem
+
+        class _Registry:
+            packs = {
+                "core_control_panel": _PackInfo(control_panel_data),
+            }
+
+        PackAPIHandler.load_pre_auth_routes(_Registry())
+        handler = PackAPIHandler.__new__(PackAPIHandler)
+        self.assertTrue(handler._is_pre_auth_route("POST", "/api/panel/auth/bootstrap"))
+        self.assertTrue(handler._is_pre_auth_route("POST", "/api/panel/auth/exchange"))
+        self.assertFalse(handler._is_pre_auth_route("GET", "/api/panel/dashboard"))
+        self.assertFalse(handler._is_pre_auth_route("POST", "/api/panel/flows"))
+
     def test_core_setup_web_uses_moved_setup_routes_only(self):
         web_path = (
             Path(__file__).resolve().parent.parent

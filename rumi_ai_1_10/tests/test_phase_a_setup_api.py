@@ -130,7 +130,7 @@ class TestCompleteSetup:
 
         source = inspect.getsource(PackAPIHandler.do_GET)
         setup_pos = source.find('"/api/setup/status"')
-        auth_pos = source.find('_check_auth()')
+        auth_pos = source.find('_check_auth("GET", _pre_auth_path)')
         assert setup_pos != -1, "/api/setup/status not found in do_GET"
         assert setup_pos < auth_pos, "/api/setup/status must appear before _check_auth"
 
@@ -141,6 +141,6 @@ class TestCompleteSetup:
 
         source = inspect.getsource(PackAPIHandler.do_POST)
         complete_pos = source.find('"/api/setup/complete"')
-        auth_pos = source.find('_check_auth()')
+        auth_pos = source.find('_check_auth("POST", _pre_auth_path_post)')
         assert complete_pos != -1, "/api/setup/complete not found in do_POST"
         assert complete_pos < auth_pos, "/api/setup/complete must appear before _check_auth"
