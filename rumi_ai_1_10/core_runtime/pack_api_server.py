@@ -174,16 +174,18 @@ class PackAPIHandler(
     container_orchestrator = None
     host_privilege_manager = None
     internal_token: str = ""
-    _allowed_origins: list = None
+    _allowed_origins: Optional[list[str]] = None
     _allowed_origins_from_env: bool = False
-    _hmac_key_manager: HMACKeyManager = None
-    _panel_auth_manager: PanelAuthManager = None
+    _hmac_key_manager: Optional[HMACKeyManager] = None
+    _panel_auth_manager: Optional[PanelAuthManager] = None
     kernel = None  # Kernel インスタンス参照（Flow実行API用）
     app_lifecycle_manager = None  # AppLifecycleManager インスタンス参照（Phase A）
-    _web_mounts: list = []           # web_mount テーブル（テーブル駆動静的配信）
-    _pre_auth_table: list = []       # pre_auth_routes テーブル（テーブル駆動認証バイパス）
-    _api_route_exact: dict = {}      # api_routes 完全一致テーブル {(METHOD, path): entry}
-    _api_route_patterns: list = []   # api_routes パターンテーブル [(METHOD, regex, params, entry)]
+    _request_auth_mode: Optional[str] = None
+    _panel_session: Optional[dict[str, Any]] = None
+    _web_mounts: list[dict[str, Any]] = []           # web_mount テーブル（テーブル駆動静的配信）
+    _pre_auth_table: list[dict[str, Any]] = []       # pre_auth_routes テーブル（テーブル駆動認証バイパス）
+    _api_route_exact: dict[tuple[str, str], dict[str, Any]] = {}      # api_routes 完全一致テーブル {(METHOD, path): entry}
+    _api_route_patterns: list[tuple[Any, Any, Any, dict[str, Any]]] = []   # api_routes パターンテーブル [(METHOD, regex, params, entry)]
     
     def log_message(self, format: str, *args) -> None:
         sanitized_args = tuple(self._redact_log_value(arg) for arg in args)
@@ -367,7 +369,12 @@ class PackAPIHandler(
         return False
 
 
-    def _dispatch_api_route(self, method: str, path: str, body: dict = None) -> bool:
+    def _dispatch_api_route(
+        self,
+        method: str,
+        path: str,
+        body: Optional[dict[str, Any]] = None,
+    ) -> bool:
         """api_routes テーブルからルートをディスパッチする。
 
         マッチした場合はレスポンスを送信して True を返す。
@@ -448,7 +455,7 @@ class PackAPIHandler(
                     self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
                     return True
 
-                args = []
+                args: list[Any] = []
                 if path_params:
                     first_param = next(iter(path_params.values()))
                     args.append(first_param)
@@ -836,7 +843,11 @@ class PackAPIHandler(
         ".map": "application/json",
     }
 
-    def _serve_static_file(self, request_path: str, _wm: dict = None) -> None:
+    def _serve_static_file(
+        self,
+        request_path: str,
+        _wm: Optional[dict[str, Any]] = None,
+    ) -> None:
         """Pack が提供する Web UI の静的ファイルを配信する（認証不要）。
 
         パストラバーサル防止: Path.resolve() + relative_to() で web_root 内に制限。
@@ -1002,8 +1013,8 @@ class PackAPIHandler(
             # --- OAuth 2.1: 認可開始 (認証不要) ---
             if _pre_auth_path == "/api/setup/oauth/start":
                 try:
-                    result = self._oauth_start()
-                    self._send_response(APIResponse(True, data=result))
+                    oauth_start_result = self._oauth_start()
+                    self._send_response(APIResponse(True, data=oauth_start_result))
                 except Exception as e:
                     _log_internal_error("oauth_start", e)
                     self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
@@ -1014,11 +1025,11 @@ class PackAPIHandler(
                 try:
                     from urllib.parse import urlparse as _urlparse, parse_qs as _parse_qs
                     _cb_query = _parse_qs(_urlparse(self.path).query)
-                    result = self._oauth_callback(_cb_query)
-                    if result is None:
+                    callback_result = self._oauth_callback(_cb_query)
+                    if callback_result is None:
                         self._oauth_send_redirect("/panel/setup?linked=true")
                     else:
-                        _err_msg = result.get("error", "unknown_error")
+                        _err_msg = callback_result.get("error", "unknown_error")
                         self._oauth_send_redirect("/panel/setup?error=" + _err_msg)
                 except Exception as e:
                     _log_internal_error("oauth_callback", e)
@@ -1035,6 +1046,7 @@ class PackAPIHandler(
         
         parsed = urlparse(self.path)
         path = parsed.path
+        result: Any = None
         
         try:
             # --- api_routes テーブルディスパッチ (施策3) ---
@@ -1123,7 +1135,7 @@ class PackAPIHandler(
 
             elif path == "/api/units":
                 query = parse_qs(urlparse(self.path).query)
-                store_id = query.get("store_id", [None])[0]
+                store_id = query.get("store_id", [""])[0]
                 result = self._units_list(store_id)
                 self._send_result(result)
 
@@ -1134,7 +1146,7 @@ class PackAPIHandler(
             elif path == "/api/capability/grants":
                 # GET /api/capability/grants?principal_id=xxx
                 query = parse_qs(urlparse(self.path).query)
-                principal_id = query.get("principal_id", [None])[0]
+                principal_id = query.get("principal_id", [""])[0]
                 result = self._capability_grants_list(principal_id)
                 self._send_result(result)
 
@@ -1183,6 +1195,7 @@ class PackAPIHandler(
             return
         self._request_auth_mode = None
         self._panel_session = None
+        result: Any = None
 
         # --- テーブル駆動: pre-auth API ルート ---
         _pre_auth_path_post = urlparse(self.path).path
@@ -1651,6 +1664,7 @@ class PackAPIHandler(
             return
         self._request_auth_mode = None
         self._panel_session = None
+        result: Any = None
         # --- テーブル駆動: 認証チェック ---
         _pre_auth_path_put = urlparse(self.path).path
         if not self._is_pre_auth_route("PUT", _pre_auth_path_put) and not self._check_auth("PUT", _pre_auth_path_put):
@@ -1682,6 +1696,7 @@ class PackAPIHandler(
             return
         self._request_auth_mode = None
         self._panel_session = None
+        result: Any = None
         # --- テーブル駆動: 認証チェック ---
         _pre_auth_path_del = urlparse(self.path).path
         if not self._is_pre_auth_route("DELETE", _pre_auth_path_del) and not self._check_auth("DELETE", _pre_auth_path_del):
@@ -1763,7 +1778,7 @@ class PackAPIServer:
         approval_manager = None,
         container_orchestrator = None,
         host_privilege_manager = None,
-        internal_token: str = None,
+        internal_token: Optional[str] = None,
         kernel = None,
         app_lifecycle_manager = None
     ):
@@ -1898,7 +1913,7 @@ def initialize_pack_api_server(
     approval_manager = None,
     container_orchestrator = None,
     host_privilege_manager = None,
-    internal_token: str = None,
+    internal_token: Optional[str] = None,
     kernel = None,
     app_lifecycle_manager = None
 ) -> PackAPIServer:

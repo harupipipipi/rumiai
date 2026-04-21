@@ -70,7 +70,7 @@ class TestAppLifecycleManagerHealth:
     def test_health_no_auth_required(self):
         """/health は認証ヘッダーなしでもアクセス可能であること（設計確認）。
 
-        PackAPIHandler の do_GET で _check_auth() の前に分岐されることを
+        PackAPIHandler の do_GET で _check_auth(...) の前に分岐されることを
         コードレベルで検証する。
         """
         import inspect
@@ -79,7 +79,7 @@ class TestAppLifecycleManagerHealth:
         source = inspect.getsource(PackAPIHandler.do_GET)
         # /health の分岐が _check_auth の前にあることを確認
         health_pos = source.find('"/health"')
-        auth_pos = source.find('_check_auth()')
+        auth_pos = source.find('_check_auth("GET", _pre_auth_path)')
         assert health_pos != -1, "/health endpoint not found in do_GET"
         assert auth_pos != -1, "_check_auth not found in do_GET"
         assert health_pos < auth_pos, "/health must appear before _check_auth in do_GET"
