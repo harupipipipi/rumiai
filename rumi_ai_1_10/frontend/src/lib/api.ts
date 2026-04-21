@@ -17,7 +17,8 @@ import type {
 } from './apiTypes';
 
 // Base URL: empty string means relative path (works with Vite proxy)
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
+const API_BASE_URL =
+  (import.meta as ImportMeta & {env?: Record<string, string>}).env?.VITE_API_BASE_URL ?? '';
 const API_TOKEN_STORAGE_KEY = 'rumi-api-token';
 const API_TOKEN_QUERY_KEY = 'token';
 

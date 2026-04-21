@@ -17,14 +17,28 @@ fn get_km(app: &tauri::AppHandle) -> Arc<Mutex<KernelManager>> {
     Arc::clone(app.state::<Arc<Mutex<KernelManager>>>().inner())
 }
 
+fn primary_window_label(has_panel: bool, has_main: bool) -> Option<&'static str> {
+    if has_panel {
+        Some("panel")
+    } else if has_main {
+        Some("main")
+    } else {
+        None
+    }
+}
+
 fn show_primary_window(app: &tauri::AppHandle) {
-    if let Some(win) = app
-        .get_webview_window("panel")
-        .or_else(|| app.get_webview_window("main"))
-    {
-        let _ = win.unminimize();
-        let _ = win.show();
-        let _ = win.set_focus();
+    let target = primary_window_label(
+        app.get_webview_window("panel").is_some(),
+        app.get_webview_window("main").is_some(),
+    );
+
+    if let Some(label) = target {
+        if let Some(win) = app.get_webview_window(label) {
+            let _ = win.unminimize();
+            let _ = win.show();
+            let _ = win.set_focus();
+        }
     }
 }
 
@@ -96,4 +110,24 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         .build(app)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::primary_window_label;
+
+    #[test]
+    fn prefers_panel_window_when_available() {
+        assert_eq!(primary_window_label(true, true), Some("panel"));
+    }
+
+    #[test]
+    fn falls_back_to_main_window_before_panel_exists() {
+        assert_eq!(primary_window_label(false, true), Some("main"));
+    }
+
+    #[test]
+    fn returns_none_when_no_window_exists() {
+        assert_eq!(primary_window_label(false, false), None);
+    }
 }

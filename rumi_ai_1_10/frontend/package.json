@@ -8,7 +8,8 @@
     "build": "vite build && cp -r dist/ ../core_runtime/core_pack/core_control_panel/web/",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "node --import tsx --test src/lib/api.test.ts"
   },
   "dependencies": {
     "@codemirror/lang-yaml": "^6.1.2",

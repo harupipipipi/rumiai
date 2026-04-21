@@ -85,6 +85,24 @@ fn redact_token(url: &str) -> String {
     }
 }
 
+fn build_panel_url(port: u16, token: &str, cache_bust: u64) -> String {
+    format!("http://127.0.0.1:{port}/panel/?token={token}&v={cache_bust}")
+}
+
+fn is_allowed_navigation_target(
+    scheme: &str,
+    host: Option<&str>,
+    port: Option<u16>,
+    allow_any_local_port: bool,
+) -> bool {
+    let is_tauri = scheme == "tauri";
+    let is_local_http = scheme == "http"
+        && matches!(host, Some("localhost" | "127.0.0.1"))
+        && (port == Some(8765) || allow_any_local_port);
+
+    is_tauri || is_local_http
+}
+
 fn open_panel_window(handle: &tauri::AppHandle, panel_url: &str) -> Result<()> {
     info!("Opening panel at {}", redact_token(panel_url));
 
@@ -141,16 +159,12 @@ pub fn run() {
         .plugin(
             tauri::plugin::Builder::<tauri::Wry, ()>::new("nav-guard")
                 .on_navigation(|_webview, url| {
-                    let scheme = url.scheme();
-                    let host = url.host_str().unwrap_or("");
-                    let port = url.port();
-
-                    let is_tauri = scheme == "tauri";
-                    let is_local_http = scheme == "http"
-                        && (host == "localhost" || host == "127.0.0.1")
-                        && (port == Some(8765) || cfg!(debug_assertions));
-
-                    let allowed = is_tauri || is_local_http;
+                    let allowed = is_allowed_navigation_target(
+                        url.scheme(),
+                        url.host_str(),
+                        url.port(),
+                        cfg!(debug_assertions),
+                    );
 
                     if allowed {
                         info!("Allowed navigation to: {}", redact_token(url.as_str()));
@@ -246,8 +260,7 @@ pub fn run() {
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|duration| duration.as_secs())
                     .unwrap_or(0);
-                let panel_url =
-                    format!("http://127.0.0.1:{port}/panel/?token={token}&v={cache_bust}");
+                let panel_url = build_panel_url(port, &token, cache_bust);
                 info!("Prepared panel URL {}", redact_token(&panel_url));
 
                 set_progress("Ready");
@@ -293,4 +306,85 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![get_setup_progress, restart_kernel])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn redact_token_masks_token_value_and_preserves_other_query_params() {
+        let url = "http://127.0.0.1:8765/panel/?token=secret-value&v=123";
+        assert_eq!(
+            redact_token(url),
+            "http://127.0.0.1:8765/panel/?token=<redacted>&v=123"
+        );
+    }
+
+    #[test]
+    fn redact_token_leaves_tokenless_url_unchanged() {
+        let url = "http://127.0.0.1:8765/panel/?v=123";
+        assert_eq!(redact_token(url), url);
+    }
+
+    #[test]
+    fn build_panel_url_targets_pre_auth_panel_route() {
+        assert_eq!(
+            build_panel_url(8765, "abc123", 42),
+            "http://127.0.0.1:8765/panel/?token=abc123&v=42"
+        );
+    }
+
+    #[test]
+    fn navigation_guard_allows_panel_routes_on_kernel_port() {
+        assert!(is_allowed_navigation_target(
+            "http",
+            Some("127.0.0.1"),
+            Some(8765),
+            false
+        ));
+        assert!(is_allowed_navigation_target(
+            "http",
+            Some("localhost"),
+            Some(8765),
+            false
+        ));
+    }
+
+    #[test]
+    fn navigation_guard_blocks_non_loopback_or_wrong_scheme_routes() {
+        assert!(!is_allowed_navigation_target(
+            "https",
+            Some("127.0.0.1"),
+            Some(8765),
+            false
+        ));
+        assert!(!is_allowed_navigation_target(
+            "http",
+            Some("example.com"),
+            Some(8765),
+            false
+        ));
+        assert!(!is_allowed_navigation_target(
+            "http",
+            Some("127.0.0.1"),
+            Some(3000),
+            false
+        ));
+    }
+
+    #[test]
+    fn navigation_guard_debug_mode_allows_local_dev_port() {
+        assert!(is_allowed_navigation_target(
+            "http",
+            Some("localhost"),
+            Some(3000),
+            true
+        ));
+    }
+
+    #[test]
+    fn navigation_guard_always_allows_tauri_scheme() {
+        assert!(is_allowed_navigation_target("tauri", None, None, false));
+    }
 }

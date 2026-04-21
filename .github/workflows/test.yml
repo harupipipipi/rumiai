@@ -176,3 +176,35 @@ jobs:
       - name: Run cargo test
         run: |
           cd pack-shell && cargo test
+
+  rumi-viewer-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: rumi_ai_1_10/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: rumi_ai_1_10/frontend
+        run: npm ci
+
+      - name: Run frontend panel auth tests
+        working-directory: rumi_ai_1_10/frontend
+        run: npm test
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build rumi viewer
+        working-directory: rumi_viewer/src-tauri
+        run: cargo build --locked
+
+      - name: Run rumi viewer tests
+        working-directory: rumi_viewer/src-tauri
+        run: cargo test --locked
