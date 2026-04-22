@@ -509,6 +509,8 @@ class StartupProfileManager:
                         "runtime_ready": runtime_candidate["runtime_ready"],
                         "runtime_issues": runtime_candidate["runtime_issues"],
                         "selected_component_id": runtime_candidate["selected_component_id"],
+                        "selected_component_type": runtime_candidate["selected_component_type"],
+                        "selected_component_full_id": runtime_candidate["selected_component_full_id"],
                     }
                 )
 
@@ -530,7 +532,7 @@ class StartupProfileManager:
         matched_component_types: List[str] = []
         matched_provides: List[str] = []
         runtime_issue_map: Dict[str, List[str]] = {}
-        ready_component_id: Optional[str] = None
+        ready_component: Optional[Dict[str, str]] = None
 
         for component_key, component in components.items():
             if not isinstance(component, dict):
@@ -548,10 +550,15 @@ class StartupProfileManager:
             matched_component_types.append(component_type)
             matched_provides.extend(normalized_provides)
             component_id = str(component.get("id") or component_key)
+            component_full_id = f"{pack['pack_id']}:{component_type}:{component_id}"
             issues = self._component_runtime_issues(component_id, component, pack)
-            runtime_issue_map[component_id] = issues
-            if not issues and ready_component_id is None:
-                ready_component_id = component_id
+            runtime_issue_map[component_full_id] = issues
+            if not issues and ready_component is None:
+                ready_component = {
+                    "id": component_id,
+                    "type": component_type,
+                    "full_id": component_full_id,
+                }
 
         if not matched_component_types:
             return None
@@ -559,17 +566,19 @@ class StartupProfileManager:
         runtime_issues: List[str] = []
         if not pack.get("enabled", False):
             runtime_issues.append(f"Pack '{pack['pack_id']}' is disabled")
-        if ready_component_id is None:
-            for component_id, issues in runtime_issue_map.items():
+        if ready_component is None:
+            for component_full_id, issues in runtime_issue_map.items():
                 if issues:
-                    runtime_issues.extend(f"{component_id}: {issue}" for issue in issues)
+                    runtime_issues.extend(f"{component_full_id}: {issue}" for issue in issues)
 
         return {
             "component_types": sorted(set(matched_component_types)),
             "provides": sorted(set(matched_provides)),
-            "runtime_ready": bool(pack.get("enabled", False)) and ready_component_id is not None,
+            "runtime_ready": bool(pack.get("enabled", False)) and ready_component is not None,
             "runtime_issues": runtime_issues,
-            "selected_component_id": ready_component_id or next(iter(runtime_issue_map.keys()), ""),
+            "selected_component_id": (ready_component or {}).get("id", ""),
+            "selected_component_type": (ready_component or {}).get("type", ""),
+            "selected_component_full_id": (ready_component or {}).get("full_id", ""),
         }
 
     def _component_runtime_issues(
@@ -651,6 +660,15 @@ class StartupProfileManager:
                 issues = candidate.get("runtime_issues") or []
                 suffix = f": {'; '.join(issues)}" if issues else ""
                 return f"Pack '{selected_pack}' is not runtime-ready for slot '{slot_id}'{suffix}"
+
+        runtime_bindings = self._resolve_runtime_component_bindings(profile, catalog)
+        if runtime_bindings["conflicts"]:
+            conflict = runtime_bindings["conflicts"][0]
+            return (
+                f"Slots '{conflict['existing_slot_id']}' and '{conflict['slot_id']}' "
+                f"select different runtime components for shared component type "
+                f"'{conflict['component_type']}'"
+            )
         return None
 
     def _apply_profile_to_active_ecosystem(
@@ -684,6 +702,9 @@ class StartupProfileManager:
         active.set_metadata("startup_slots", dict(profile.get("slots", {})))
         active.set_metadata("startup_launched", bool(launched))
         active.set_metadata("startup_launch_requested_at", _now_ts() if launched else None)
+        runtime_bindings = self._resolve_runtime_component_bindings(profile, catalog)
+        active.set_metadata("startup_slot_components", runtime_bindings["slot_components"])
+        active.set_metadata("startup_component_overrides", runtime_bindings["component_overrides"])
 
         for slot in SLOT_SPECS:
             interface_key = slot["interface_key"]
@@ -696,6 +717,21 @@ class StartupProfileManager:
                 active.remove_interface_override(interface_key)
                 for extra_key in slot.get("extra_interface_keys", []):
                     active.remove_interface_override(extra_key)
+
+        managed_component_types = sorted(
+            {
+                component_type
+                for slot in SLOT_SPECS
+                for component_type in slot.get("component_types", [])
+                if component_type
+            }
+        )
+        for component_type in managed_component_types:
+            selected_component = runtime_bindings["component_overrides"].get(component_type, "")
+            if selected_component:
+                active.set_override(component_type, selected_component)
+            else:
+                active.remove_override(component_type)
 
     def _request_launch_handoff(self, profile: Dict[str, Any]) -> Dict[str, Any]:
         try:
@@ -730,6 +766,60 @@ class StartupProfileManager:
             if profile.get("profile_id") == profile_id:
                 return profile
         return None
+
+    @staticmethod
+    def _slot_candidate_for_pack(catalog: Dict[str, Any], slot_id: str, pack_id: str) -> Optional[Dict[str, Any]]:
+        for candidate in catalog.get("slot_candidates", {}).get(slot_id, []):
+            if candidate.get("pack_id") == pack_id:
+                return candidate
+        return None
+
+    def _resolve_runtime_component_bindings(
+        self,
+        profile: Dict[str, Any],
+        catalog: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        component_overrides: Dict[str, str] = {}
+        slot_components: Dict[str, str] = {}
+        binding_sources: Dict[str, str] = {}
+        conflicts: List[Dict[str, str]] = []
+
+        for slot in SLOT_SPECS:
+            slot_id = slot["slot_id"]
+            selected_pack = str(profile.get("slots", {}).get(slot_id) or "").strip()
+            if not selected_pack:
+                continue
+            candidate = self._slot_candidate_for_pack(catalog, slot_id, selected_pack)
+            if candidate is None:
+                continue
+
+            selected_component_type = str(candidate.get("selected_component_type") or "").strip()
+            selected_component_full_id = str(candidate.get("selected_component_full_id") or "").strip()
+            if not selected_component_type or not selected_component_full_id:
+                continue
+
+            slot_components[slot_id] = selected_component_full_id
+            existing_full_id = component_overrides.get(selected_component_type)
+            if existing_full_id and existing_full_id != selected_component_full_id:
+                conflicts.append(
+                    {
+                        "component_type": selected_component_type,
+                        "existing_slot_id": binding_sources[selected_component_type],
+                        "slot_id": slot_id,
+                        "existing_component_full_id": existing_full_id,
+                        "selected_component_full_id": selected_component_full_id,
+                    }
+                )
+                continue
+
+            component_overrides[selected_component_type] = selected_component_full_id
+            binding_sources[selected_component_type] = slot_id
+
+        return {
+            "component_overrides": component_overrides,
+            "slot_components": slot_components,
+            "conflicts": conflicts,
+        }
 
     @staticmethod
     def _unique_profile_id(profiles: List[Dict[str, Any]], seed: str) -> str:

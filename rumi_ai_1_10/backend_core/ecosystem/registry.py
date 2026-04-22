@@ -779,8 +779,9 @@ class Registry:
             except Exception:
                 override_id = None
             if override_id:
+                normalized_override = str(override_id).strip()
                 for comp in ordered_components:
-                    if comp.id == override_id:
+                    if comp.id == normalized_override or comp.full_id == normalized_override:
                         if not (hasattr(aem, 'is_component_disabled') and aem.is_component_disabled(comp.full_id)):
                             return comp
                         break

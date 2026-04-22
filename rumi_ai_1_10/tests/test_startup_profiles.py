@@ -13,6 +13,7 @@ class _FakeActiveEcosystem:
         self.active_pack_identity = None
         self.metadata = {}
         self.interface_overrides = {}
+        self.overrides = {}
 
     def set_metadata(self, key, value):
         self.metadata[key] = value
@@ -22,6 +23,12 @@ class _FakeActiveEcosystem:
 
     def remove_interface_override(self, interface_key):
         self.interface_overrides.pop(interface_key, None)
+
+    def set_override(self, component_type, component_id):
+        self.overrides[component_type] = component_id
+
+    def remove_override(self, component_type):
+        self.overrides.pop(component_type, None)
 
 
 def _write_pack(
@@ -267,6 +274,54 @@ def test_launch_profile_updates_active_ecosystem_metadata_and_requests_restart(t
     assert active.active_pack_identity == "rumi:ecosystem/defaultspack"
     assert active.metadata["startup_profile_id"] == "default-profile"
     assert active.metadata["startup_launched"] is True
+    assert active.metadata["startup_slot_components"]["tool"] == "defaultspack:tool:tool"
     assert active.interface_overrides["rumiai.slot.tool"] == "defaultspack"
     assert active.interface_overrides["io.http.server"] == "defaultspack"
+    assert active.overrides["tool"] == "defaultspack:tool:tool"
+    assert active.overrides["frontend"] == "defaultspack:frontend:frontend"
+    assert active.overrides["memory"] == "defaultspack:memory:memory"
+    assert active.overrides["ai_client"] == "defaultspack:ai_client:ai_client"
     mock_restart.assert_called_once_with()
+
+
+def test_launch_profile_rejects_shared_runtime_component_type_conflict(tmp_path: Path):
+    eco_root = tmp_path / "ecosystem"
+    defaultspack_path = _write_pack(
+        eco_root,
+        "defaultspack",
+        {
+            "tool": ["defaults.tool.invoke"],
+            "frontend": ["defaults.frontend.start"],
+            "ai_client": ["defaults.ai.complete", "defaults.ai.providers"],
+            "memory": ["defaults.memory.store"],
+        },
+    )
+    providerpack_path = _write_pack(
+        eco_root,
+        "providerpack",
+        {
+            "ai_client": ["defaults.ai.complete", "defaults.ai.providers"],
+        },
+    )
+    locations = [
+        SimpleNamespace(pack_id="defaultspack", ecosystem_json_path=defaultspack_path, pack_subdir=defaultspack_path.parent),
+        SimpleNamespace(pack_id="providerpack", ecosystem_json_path=providerpack_path, pack_subdir=providerpack_path.parent),
+    ]
+    manager = StartupProfileManager(storage_path=tmp_path / "startup_profiles.json")
+
+    with patch("core_runtime.startup_profiles.discover_pack_locations", return_value=locations):
+        response = manager.update_profile(
+            "default-profile",
+            {
+                "slots": {
+                    "tool": "defaultspack",
+                    "frontend": "defaultspack",
+                    "ai_client": "defaultspack",
+                    "memory": "defaultspack",
+                    "provider": "providerpack",
+                }
+            },
+        )
+
+    assert response["status_code"] == 400
+    assert "shared component type 'ai_client'" in response["error"]

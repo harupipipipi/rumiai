@@ -262,7 +262,18 @@ class EcosystemInitializer:
         # オーバーライドされたコンポーネントが存在するか確認
         overrides = self.active_ecosystem.get_all_overrides()
         for comp_type, comp_id in overrides.items():
-            component = self.registry.get_component(pack.pack_id, comp_type, comp_id)
+            override_value = str(comp_id).strip()
+            component = None
+            if override_value.count(":") >= 2:
+                override_pack_id, override_type, override_component_id = override_value.split(":", 2)
+                if override_type == comp_type:
+                    component = self.registry.get_component(
+                        override_pack_id,
+                        override_type,
+                        override_component_id,
+                    )
+            if component is None:
+                component = self.registry.get_component(pack.pack_id, comp_type, override_value)
             if not component:
                 result["warnings"].append(
                     f"オーバーライド '{comp_type}:{comp_id}' のコンポーネントが見つかりません"

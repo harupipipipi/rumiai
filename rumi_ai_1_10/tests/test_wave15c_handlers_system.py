@@ -204,6 +204,42 @@ class TestComponentDiscover:
             result = mixin._h_component_discover({}, ctx)
         assert result["_kernel_step_status"] == "failed"
 
+    def test_full_id_override_keeps_selected_pack_component(self, mixin):
+        selected_component = SimpleNamespace(
+            full_id="helperpack:tool:tool",
+            pack_id="helperpack",
+            type="tool",
+            id="tool",
+        )
+        non_selected_component = SimpleNamespace(
+            full_id="defaultspack:tool:tool",
+            pack_id="defaultspack",
+            type="tool",
+            id="tool",
+        )
+        registry = MagicMock()
+        registry.get_all_components.return_value = [non_selected_component, selected_component]
+        ctx = {
+            "_packs_approved": ["defaultspack", "helperpack"],
+            "active_ecosystem": SimpleNamespace(
+                get_all_overrides=lambda: {"tool": "helperpack:tool:tool"},
+                config=SimpleNamespace(disabled_components=[]),
+            ),
+        }
+
+        with patch("core_runtime.kernel_handlers_system.get_registry", return_value=registry):
+            result = mixin._h_component_discover({}, ctx)
+
+        assert result["_kernel_step_status"] == "success"
+        assert ctx["_discovered_components"] == [
+            {
+                "full_id": "helperpack:tool:tool",
+                "pack_id": "helperpack",
+                "type": "tool",
+                "id": "tool",
+            }
+        ]
+
 
 # ---------------------------------------------------------------------------
 # 7. _h_mounts_init / _h_registry_load エラーパスのロガー
