@@ -4,7 +4,7 @@
 //! so that the application works correctly when bundled.
 
 use anyhow::Result;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Central configuration resolved from Tauri path APIs.
 #[derive(Debug, Clone)]
@@ -25,6 +25,8 @@ pub struct AppConfig {
     pub log_dir: PathBuf,
     /// Kernel HTTP port (default 8765).
     pub kernel_port: u16,
+    /// Repo root when running against a development checkout.
+    pub dev_workspace_root: Option<PathBuf>,
 }
 
 impl AppConfig {
@@ -48,7 +50,17 @@ impl AppConfig {
     /// └── logs/
     /// ```
     pub fn detect_for_tauri(resource_dir: PathBuf, app_data_dir: PathBuf) -> Result<Self> {
-        let app_dir = resource_dir.join("app");
+        let mut dev_workspace_root = None;
+        let mut app_dir = resource_dir.join("app");
+        if !app_dir.exists() {
+            if let Some(workspace_root) = find_dev_workspace_root(&resource_dir) {
+                let candidate = workspace_root.join("rumi_ai_1_10");
+                if candidate.join("app.py").exists() {
+                    app_dir = candidate;
+                    dev_workspace_root = Some(workspace_root);
+                }
+            }
+        }
         let rumi_home = app_dir.clone();
 
         let python_dir = app_data_dir.join("python");
@@ -70,6 +82,7 @@ impl AppConfig {
             user_data_dir,
             log_dir,
             kernel_port: 8765,
+            dev_workspace_root,
         })
     }
 
@@ -115,6 +128,20 @@ impl AppConfig {
             self.uv_path.clone()
         }
     }
+
+    pub fn is_dev_workspace(&self) -> bool {
+        self.dev_workspace_root.is_some()
+    }
+}
+
+fn find_dev_workspace_root(resource_dir: &Path) -> Option<PathBuf> {
+    for ancestor in resource_dir.ancestors() {
+        let candidate = ancestor.join("rumi_ai_1_10");
+        if candidate.join("app.py").exists() {
+            return Some(ancestor.to_path_buf());
+        }
+    }
+    None
 }
 
 /// Return the platform-appropriate file name for the `uv` binary.
@@ -178,6 +205,7 @@ mod tests {
         assert!(config.app_dir.to_string_lossy().contains("test_resource"));
         assert!(config.python_dir.to_string_lossy().contains("test_appdata"));
         assert_eq!(config.rumi_home, config.app_dir);
+        assert!(!config.is_dev_workspace());
     }
 
     #[test]
@@ -187,5 +215,30 @@ mod tests {
         let config = AppConfig::detect_for_tauri(resource, appdata).unwrap();
         let vp = config.venv_python();
         assert!(vp.to_string_lossy().contains("venv"));
+    }
+
+    #[test]
+    fn detect_for_tauri_falls_back_to_repo_checkout_in_dev() {
+        use std::fs;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("rumi_viewer_config_{unique}"));
+        let resource = root.join("rumi_viewer").join("src-tauri").join("target").join("debug");
+        let appdata = root.join("appdata");
+        let app_py = root.join("rumi_ai_1_10").join("app.py");
+
+        fs::create_dir_all(&resource).unwrap();
+        fs::create_dir_all(app_py.parent().unwrap()).unwrap();
+        fs::write(&app_py, "print('ok')\n").unwrap();
+
+        let config = AppConfig::detect_for_tauri(resource, appdata).unwrap();
+        assert_eq!(config.app_dir, root.join("rumi_ai_1_10"));
+        assert!(config.is_dev_workspace());
+
+        fs::remove_dir_all(&root).ok();
     }
 }

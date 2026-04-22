@@ -11,6 +11,7 @@ Supports:
 """
 
 import json
+import os
 import sys
 import re
 
@@ -39,9 +40,6 @@ def supports_colour():
     if not hasattr(sys.stdout, "isatty"):
         return False
     return sys.stdout.isatty()
-
-
-import os as _os  # noqa: E402  (already imported at module top via re; keep os)
 
 _USE_COLOUR = None
 

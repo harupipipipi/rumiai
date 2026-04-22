@@ -491,6 +491,12 @@ class KernelSystemHandlersMixin:
                 if status is None:
                     pending.append(pack_id)
                     continue
+                if (
+                    callable(getattr(am, "auto_approve_if_dev", None))
+                    and am.auto_approve_if_dev(pack_id) is True
+                ):
+                    approved.append(pack_id)
+                    continue
                 if status:
                     status_str = status.value if hasattr(status, 'value') else str(status)
                     if status_str == "approved":

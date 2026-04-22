@@ -21,7 +21,7 @@ from blocks._common import ok, error, timestamp
 
 
 _DEFAULT_CONFIG = {
-    "default_model": "stub/default",
+    "default_model": "default",
     "system_prompt": "",
     "http_host": "127.0.0.1",
     "http_port": 8766,

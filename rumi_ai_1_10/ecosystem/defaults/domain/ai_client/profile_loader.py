@@ -8,25 +8,25 @@ class ProfileLoader:
 
     # 環境変数で最初に見つかったプロバイダーの最高性能モデルを default に割り当てる
     _PROVIDER_PRIORITY = [
-        ("OPENAI_API_KEY", "openai", "gpt-4o"),
-        ("ANTHROPIC_API_KEY", "anthropic", "claude-sonnet-4-0"),
-        ("GOOGLE_API_KEY", "google", "gemini-2.5-pro"),
+        (("OPENAI_API_KEY",), "openai", "gpt-4o"),
+        (("ANTHROPIC_API_KEY",), "anthropic", "claude-sonnet-4-0"),
+        (("GOOGLE_API_KEY", "GEMINI_API_KEY"), "google", "gemini-2.5-pro"),
     ]
 
     _BUILTIN_PROFILES = {
         "fast": [
-            ("OPENAI_API_KEY", "openai", "gpt-4o-mini"),
-            ("GOOGLE_API_KEY", "google", "gemini-2.5-flash"),
-            ("ANTHROPIC_API_KEY", "anthropic", "claude-3-5-haiku-20241022"),
+            (("OPENAI_API_KEY",), "openai", "gpt-4o-mini"),
+            (("GOOGLE_API_KEY", "GEMINI_API_KEY"), "google", "gemini-2.5-flash"),
+            (("ANTHROPIC_API_KEY",), "anthropic", "claude-3-5-haiku-20241022"),
         ],
         "large": [
-            ("OPENAI_API_KEY", "openai", "gpt-4o"),
-            ("ANTHROPIC_API_KEY", "anthropic", "claude-sonnet-4-0"),
-            ("GOOGLE_API_KEY", "google", "gemini-2.5-pro"),
+            (("OPENAI_API_KEY",), "openai", "gpt-4o"),
+            (("ANTHROPIC_API_KEY",), "anthropic", "claude-sonnet-4-0"),
+            (("GOOGLE_API_KEY", "GEMINI_API_KEY"), "google", "gemini-2.5-pro"),
         ],
         "embedding": [
-            ("OPENAI_API_KEY", "openai", "text-embedding-3-small"),
-            ("GOOGLE_API_KEY", "google", "text-embedding-004"),
+            (("OPENAI_API_KEY",), "openai", "text-embedding-3-small"),
+            (("GOOGLE_API_KEY", "GEMINI_API_KEY"), "google", "text-embedding-004"),
         ],
     }
 
@@ -36,9 +36,13 @@ class ProfileLoader:
 
     def _load_builtin_defaults(self):
         """環境変数に基づいてデフォルトプロファイルを組み込み定義する"""
+        from domain.ai_client.providers import ensure_provider_env_loaded, env_group_configured
+
+        ensure_provider_env_loaded()
+
         # "default" プロファイル
-        for env_var, provider, model in self._PROVIDER_PRIORITY:
-            if os.environ.get(env_var, ""):
+        for env_vars, provider, model in self._PROVIDER_PRIORITY:
+            if env_group_configured(env_vars):
                 self._profiles["default"] = {"provider": provider, "model": model}
                 break
         if "default" not in self._profiles:
@@ -46,8 +50,8 @@ class ProfileLoader:
 
         # "fast", "large", "embedding" プロファイル
         for profile_name, candidates in self._BUILTIN_PROFILES.items():
-            for env_var, provider, model in candidates:
-                if os.environ.get(env_var, ""):
+            for env_vars, provider, model in candidates:
+                if env_group_configured(env_vars):
                     self._profiles[profile_name] = {"provider": provider, "model": model}
                     break
             if profile_name not in self._profiles:

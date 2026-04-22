@@ -91,6 +91,22 @@ impl KernelManager {
             .env("RUMI_LOG_DIR", &self.config.log_dir)
             .env("RUMI_PORT", self.config.kernel_port.to_string())
             .env("RUMI_PANEL_BOOTSTRAP_SECRET", &self.panel_bootstrap_secret)
+            .env(
+                "RUMI_ENVIRONMENT",
+                if cfg!(debug_assertions) || self.config.is_dev_workspace() {
+                    "development"
+                } else {
+                    "production"
+                },
+            )
+            .env(
+                "RUMI_AUTO_APPROVE_LOCAL",
+                if cfg!(debug_assertions) || self.config.is_dev_workspace() {
+                    "true"
+                } else {
+                    "false"
+                },
+            )
             .stdout(Stdio::from(log_file))
             .stderr(Stdio::from(log_stderr))
             .spawn()

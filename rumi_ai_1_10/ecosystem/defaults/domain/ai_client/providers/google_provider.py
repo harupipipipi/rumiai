@@ -8,6 +8,7 @@ import urllib.error
 import urllib.parse
 import base64
 import ssl
+from pathlib import Path
 
 from domain.ai_client.base_provider import BaseProvider
 
@@ -16,19 +17,98 @@ class GoogleProvider(BaseProvider):
     """Google Generative AI API プロバイダー (Gemini 2.5 Pro, Gemini 2.5 Flash 等)"""
 
     BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+    PROFILE_DIR = (
+        Path(__file__).resolve().parents[3]
+        / "user_data"
+        / "shared"
+        / "ai_models"
+        / "google"
+        / "profiles"
+    )
 
-    KNOWN_MODELS = [
+    CURATED_MODELS = [
         {"id": "google/gemini-2.5-pro", "name": "Gemini 2.5 Pro", "provider": "google", "type": "chat"},
         {"id": "google/gemini-2.5-flash", "name": "Gemini 2.5 Flash", "provider": "google", "type": "chat"},
         {"id": "google/gemini-2.0-flash", "name": "Gemini 2.0 Flash", "provider": "google", "type": "chat"},
-        {"id": "google/gemini-1.5-pro", "name": "Gemini 1.5 Pro", "provider": "google", "type": "chat"},
-        {"id": "google/gemini-1.5-flash", "name": "Gemini 1.5 Flash", "provider": "google", "type": "chat"},
+        {"id": "google/gemini-2.0-flash-lite", "name": "Gemini 2.0 Flash-Lite", "provider": "google", "type": "chat"},
         {"id": "google/text-embedding-004", "name": "Text Embedding 004", "provider": "google", "type": "embedding"},
     ]
+    KNOWN_MODELS = CURATED_MODELS
 
     def __init__(self):
-        self._api_key = os.environ.get("GOOGLE_API_KEY", "")
+        self._api_key = os.environ.get("GOOGLE_API_KEY", "") or os.environ.get("GEMINI_API_KEY", "")
         self._ssl_ctx = ssl.create_default_context()
+
+    @classmethod
+    def _iter_profile_paths(cls):
+        if not cls.PROFILE_DIR.exists():
+            return []
+        paths = []
+        seen = set()
+        for pattern in ("*/profile.json", "*.json"):
+            for path in sorted(cls.PROFILE_DIR.glob(pattern)):
+                resolved = str(path.resolve())
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                paths.append(path)
+        return paths
+
+    @classmethod
+    def _infer_profile_type(cls, profile):
+        metadata = profile.get("metadata", {}) or {}
+        model_type = metadata.get("type") or profile.get("type")
+        if model_type:
+            return model_type
+        model_id = (
+            profile.get("model_id")
+            or profile.get("model_name")
+            or profile.get("model")
+            or profile.get("id")
+            or ""
+        )
+        if "embedding" in model_id:
+            return "embedding"
+        return "chat"
+
+    @classmethod
+    def _catalog_entry_from_profile(cls, profile):
+        provider_id = profile.get("provider_id") or profile.get("provider") or "google"
+        if provider_id != "google":
+            return None
+        model_id = (
+            profile.get("model_id")
+            or profile.get("model_name")
+            or profile.get("model")
+            or profile.get("id")
+            or ""
+        )
+        if not model_id:
+            return None
+        return {
+            "id": "google/{}".format(model_id),
+            "name": profile.get("display_name") or profile.get("name") or model_id,
+            "provider": "google",
+            "type": cls._infer_profile_type(profile),
+        }
+
+    @classmethod
+    def _load_profile_models(cls):
+        models = {}
+        for item in cls.CURATED_MODELS:
+            models[item["id"]] = dict(item)
+        for path in cls._iter_profile_paths():
+            try:
+                profile = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            entry = cls._catalog_entry_from_profile(profile)
+            if entry:
+                models[entry["id"]] = entry
+        return list(models.values())
+
+    def list_models(self):
+        return self._load_profile_models()
 
     # ── internal helpers ────────────────────────────────────────────────
 
