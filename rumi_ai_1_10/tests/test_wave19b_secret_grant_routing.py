@@ -193,6 +193,18 @@ class TestSecretGrantRouting:
         assert status == 401
         assert data["success"] is False
 
+    def test_post_grant_unauthenticated_is_stable_across_retries(self, api_server):
+        for _ in range(8):
+            status, data = _request(
+                api_server,
+                "POST",
+                "/api/secrets/grants/mypack",
+                body={"secret_keys": ["KEY1"]},
+                auth=False,
+            )
+            assert status == 401
+            assert data["success"] is False
+
     # --- 9. DELETE /api/secrets/grants/{pack_id} — 存在する Grant → 200 ---
     def test_delete_grant_existing(self, api_server):
         api_server["sgm"].grant_secret_access("del_pack", ["KEY1"])

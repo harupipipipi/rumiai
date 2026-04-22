@@ -257,6 +257,22 @@ project_root/
 | `pack_importer.py` | Pack import（zip/folder → staging） |
 | `pack_applier.py` | Pack apply（staging → ecosystem） |
 
+## Viewer Graph Editor
+
+`frontend/src/pages/Flows.tsx` の graph editor は、Pack 特化の固定 UI ではなく、拡張用の graph metadata を持つ editor として扱います。
+
+- 起点ノードは `rumi_start`
+- ノードは複数ポートを持てる
+- ポートは `contracts` を複数保持できる
+- `contracts` が一致しないポート同士は接続不可
+- YAML には `rumi_graph` を保存し、viewer 側の構造を復元する
+
+この設計により、変換専用の特別機能を増やさなくても、異なる入力/出力契約を持つノードを Pack 側で定義すれば変換的な役割も表現できます。
+
+## Basepack
+
+`ecosystem/setup_pack/basepack/pack.json` を追加し、Rumi AI が graph-first のベース起動プロファイルとして `basepack` を選べるようにしました。現時点では既存の `defaultspack` を起動対象にする薄い bootstrap profile として扱い、巨大な複製 Pack を増やさず安全に導入しています。
+
 ---
 
 ## クイックスタート

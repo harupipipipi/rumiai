@@ -28,14 +28,26 @@ def run(context):
         return handler
 
     routes = [
+        # ---- Tool read/invoke routes ----
+        ("GET", "/api/tools", _lazy("blocks.tool.list"), {}),
+        ("POST", "/api/tools/invoke", _lazy("blocks.tool.invoke"), {}),
         # ---- Dynamic tool routes ----
         ("POST", "/api/tools/create", _lazy("blocks.tool.create"), {}),
         ("PUT", "/api/tools/{name}", _lazy("blocks.tool.update"), {"name": "name"}),
         ("DELETE", "/api/tools/{name}", _lazy("blocks.tool.delete"), {"name": "name"}),
         ("GET", "/api/tools/{name}/export", _lazy("blocks.tool.export"), {"name": "name"}),
+        # ---- Tool policy routes ----
+        ("GET", "/api/tools/permissions", _lazy("blocks.tool.permissions", "run_get"), {}),
+        ("PUT", "/api/tools/permissions", _lazy("blocks.tool.permissions", "run_put"), {}),
+        ("POST", "/api/tools/permissions/check", _lazy("blocks.tool.permissions", "run_check"), {}),
+        ("GET", "/api/tools/{name}/permissions", _lazy("blocks.tool.permissions", "run_get"), {"name": "name"}),
+        ("PUT", "/api/tools/{name}/permissions", _lazy("blocks.tool.permissions", "run_put"), {"name": "name"}),
         # ---- Consent routes ----
         ("POST", "/api/consent/check", _lazy("blocks.tool.consent_check"), {}),
         ("POST", "/api/consent/{id}/confirm", _lazy("blocks.tool.consent_confirm"), {"id": "consent_id"}),
+        # ---- MCP routes ----
+        ("POST", "/api/tools/mcp/connect", _lazy("blocks.tool.mcp_connect"), {}),
+        ("GET", "/api/tools/mcp", _lazy("blocks.tool.mcp_list"), {}),
         # ---- Container routes (T14) ----
         ("POST", "/api/container", _lazy("blocks.tool.container.create"), {}),
         ("POST", "/api/container/{id}/start", _lazy("blocks.tool.container.start"), {"id": "id"}),

@@ -267,6 +267,9 @@ class ChatModeRegistry:
     def list(self, *, enabled_only: bool = True) -> List[Dict[str, Any]]:
         return self._registry.list("chat_mode", enabled_only=enabled_only)
 
+    def get(self, mode_id: str) -> Optional[Dict[str, Any]]:
+        return self._registry.get("chat_mode", mode_id)
+
 
 class AgentModeRegistry:
     def __init__(self, registry: ExtensionRegistry) -> None:
@@ -274,6 +277,9 @@ class AgentModeRegistry:
 
     def list(self, *, enabled_only: bool = True) -> List[Dict[str, Any]]:
         return self._registry.list("agent_mode", enabled_only=enabled_only)
+
+    def get(self, mode_id: str) -> Optional[Dict[str, Any]]:
+        return self._registry.get("agent_mode", mode_id)
 
 
 class KnowledgeBackendRegistry:

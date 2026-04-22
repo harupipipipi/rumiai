@@ -495,6 +495,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                 if path_inject and path_params:
                     for url_param, data_key in path_inject.items():
                         request_data[data_key] = path_params.get(url_param, "")
+                request_data.setdefault("_method", method)
                 context = self.server_ref._build_context()
                 context["_facade"] = self.server_ref.facade
                 result = handler(request_data, context)

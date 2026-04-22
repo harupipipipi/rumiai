@@ -257,6 +257,7 @@ def main():
 
         # HTTPサーバーがPackから提供されている場合は起動
         http_server = None
+        pack_http_server = None
 
         # interface_overrides で優先 Pack が指定されていればそれを使う
         try:
@@ -264,20 +265,43 @@ def main():
             aem = get_active_ecosystem_manager()
             override_pack = aem.get_interface_override("io.http.server")
             if override_pack:
-                http_server = _kernel.interface_registry.get_by_owner(
+                pack_http_server = _kernel.interface_registry.get_by_owner(
                     "io.http.server", override_pack
                 )
+                http_server = pack_http_server
         except Exception:
             _logger.debug("HTTP server override lookup failed", exc_info=True)
 
         # override が見つからなければ通常の last を使う
+        if pack_http_server is None:
+            try:
+                registered_http_servers = _kernel.interface_registry.find(
+                    lambda key, entry: key == "io.http.server"
+                )
+                for entry in reversed(registered_http_servers):
+                    candidate = entry.get("value")
+                    meta = entry.get("meta", {})
+                    if callable(candidate) and not meta.get("_system"):
+                        pack_http_server = candidate
+                        break
+            except Exception:
+                _logger.debug("Pack-provided HTTP server lookup failed", exc_info=True)
         if http_server is None:
-            http_server = _kernel.interface_registry.get("io.http.server")
+            http_server = pack_http_server or _kernel.interface_registry.get("io.http.server")
         if http_server and callable(http_server):
             print(f"[Rumi] {L('startup.http_starting')}")
             # Wave 17-A: KernelFacade でラップし、Pack コードへの Kernel 直接参照を遮断
             from core_runtime.kernel_facade import KernelFacade
-            http_server(KernelFacade(_kernel))
+            kernel_facade = KernelFacade(_kernel)
+            if pack_http_server and pack_http_server is not http_server:
+                def _run_pack_http_server():
+                    try:
+                        pack_http_server(kernel_facade)
+                    except Exception:
+                        _logger.error("Pack HTTP server failed", exc_info=True)
+
+                threading.Thread(target=_run_pack_http_server, daemon=True).start()
+            http_server(kernel_facade)
             _wait_for_signal()
         else:
             # Wave fix: フォールバック — pack_api_server が直接起動済みかチェック

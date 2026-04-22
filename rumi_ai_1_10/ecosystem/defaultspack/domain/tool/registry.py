@@ -45,7 +45,7 @@ class ToolRegistry:
     # ------------------------------------------------------------------
 
     def _register_defaults(self):
-        """デモ用ダミーツールを自動登録"""
+        """フォールバック用ビルトインツールを登録する。"""
         self.register({
             "tool_id": "web_search",
             "name": "web_search",
@@ -58,6 +58,38 @@ class ToolRegistry:
                         "query": {"type": "string"}
                     },
                     "required": ["query"]
+                }
+            },
+            "execution": {"type": "local"}
+        })
+        self.register({
+            "tool_id": "calculator",
+            "name": "calculator",
+            "summary": "計算",
+            "tags": ["math"],
+            "schema": {
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "expression": {"type": "string"}
+                    },
+                    "required": ["expression"]
+                }
+            },
+            "execution": {"type": "local"}
+        })
+        self.register({
+            "tool_id": "file_reader",
+            "name": "file_reader",
+            "summary": "ファイル読み取り",
+            "tags": ["io", "file"],
+            "schema": {
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"}
+                    },
+                    "required": ["path"]
                 }
             },
             "execution": {"type": "local"}
@@ -116,38 +148,6 @@ class ToolRegistry:
                 "manifest_path": manifest.get("source_path", ""),
             },
         }
-        self.register({
-            "tool_id": "calculator",
-            "name": "calculator",
-            "summary": "計算",
-            "tags": ["math"],
-            "schema": {
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "expression": {"type": "string"}
-                    },
-                    "required": ["expression"]
-                }
-            },
-            "execution": {"type": "local"}
-        })
-        self.register({
-            "tool_id": "file_reader",
-            "name": "file_reader",
-            "summary": "ファイル読み取り",
-            "tags": ["io", "file"],
-            "schema": {
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string"}
-                    },
-                    "required": ["path"]
-                }
-            },
-            "execution": {"type": "local"}
-        })
 
     # ------------------------------------------------------------------
     # dynamic tools — persistence

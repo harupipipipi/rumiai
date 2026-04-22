@@ -8,7 +8,20 @@ from __future__ import annotations
 
 import os
 import sys
+import importlib.util
 from pathlib import Path
+
+
+def _load_start_http_server(pack_root: Path, pack_id: str):
+    module_path = pack_root / "transport" / "http.py"
+    module_name = "rumi_{pack}_transport_http".format(pack=pack_id)
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("failed to load transport/http.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module.start_http_server
 
 
 def run(context: dict | None = None) -> dict:
@@ -25,7 +38,7 @@ def run(context: dict | None = None) -> dict:
     if pack_root_str not in sys.path:
         sys.path.insert(0, pack_root_str)
 
-    from transport.http import start_http_server
+    start_http_server = _load_start_http_server(pack_root, pack_id)
 
     interface_registry.register(
         "io.http.server",

@@ -493,6 +493,20 @@ class KernelSystemHandlersMixin:
                     continue
                 if status:
                     status_str = status.value if hasattr(status, 'value') else str(status)
+                    if status_str in ("installed", "pending"):
+                        try:
+                            if (
+                                callable(getattr(am, "auto_approve_if_dev", None))
+                                and am.auto_approve_if_dev(pack_id) is True
+                            ):
+                                status = am.get_status(pack_id)
+                                status_str = status.value if hasattr(status, 'value') else str(status)
+                        except Exception:
+                            _logger.debug(
+                                "DEV auto-approve failed during approval scan",
+                                exc_info=True,
+                                pack_id=pack_id,
+                            )
                     if status_str == "approved":
                         if check_hash and not am.verify_hash(pack_id):
                             am.mark_modified(pack_id)
@@ -708,6 +722,7 @@ class KernelSystemHandlersMixin:
                 _override_selected[_ct] = _ci
 
             components = []
+            component_objects = []
             for comp in reg.get_all_components():
                 pack_id = getattr(comp, "pack_id", None)
                 if approved_only and pack_id not in approved:
@@ -730,8 +745,10 @@ class KernelSystemHandlersMixin:
                     "type": _comp_type,
                     "id": _comp_id
                 })
+                component_objects.append(comp)
 
             ctx["_discovered_components"] = components
+            ctx["_discovered_component_objects"] = component_objects
 
             try:
                 get_metrics_collector().set_gauge("component.discovered.count", float(len(components)))
@@ -754,12 +771,12 @@ class KernelSystemHandlersMixin:
 
     def _h_component_load(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
         container_execution = args.get("container_execution", True)
-        components = ctx.get("_discovered_components", [])
+        components = ctx.get("_discovered_component_objects", [])
 
         if not components:
             return {"_kernel_step_status": "success", "_kernel_step_meta": {"loaded": 0}}
 
-        self.lifecycle.run_phase("setup")
+        self.lifecycle.run_phase("setup", components=components)
 
         self.diagnostics.record_step(
             phase="startup",
