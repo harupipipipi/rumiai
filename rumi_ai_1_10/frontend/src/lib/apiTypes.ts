@@ -117,6 +117,9 @@ export interface ApiStartupStandardPack {
   description: string;
   pack_identity: string;
   available: boolean;
+  runtime_ready: boolean;
+  runtime_issues: string[];
+  enabled: boolean;
   character: string;
   slots: Array<{
     slot_id: string;
@@ -134,6 +137,10 @@ export interface ApiStartupSlotCandidate {
   component_types: string[];
   provides: string[];
   character: string;
+  enabled: boolean;
+  runtime_ready: boolean;
+  runtime_issues: string[];
+  selected_component_id: string;
 }
 
 export interface ApiStartupCatalog {
@@ -173,6 +180,20 @@ export interface StartupProfileMutationResponseData {
   activated?: boolean;
   launched?: boolean;
   active_profile_id?: string;
+  restart_requested?: boolean;
+  handoff?: {
+    kind: string;
+    reason: string;
+    restart_requested: boolean;
+    exit_code?: number;
+    profile_id?: string;
+  };
+}
+
+export interface StartupProfileDeleteResponseData {
+  deleted: boolean;
+  deleted_profile_id: string;
+  active_profile_id: string | null;
 }
 
 export interface FlowCreateResponseData {

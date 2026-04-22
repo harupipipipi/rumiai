@@ -254,7 +254,12 @@ class TestStartupProfileHandlers(unittest.TestCase):
 
     def test_launch_startup_profile_forwards_to_manager(self):
         handler = _FakeHandler()
-        payload = {"profile": {"profile_id": "p1"}, "launched": True}
+        payload = {
+            "profile": {"profile_id": "p1"},
+            "launched": True,
+            "restart_requested": True,
+            "handoff": {"kind": "kernel_restart"},
+        }
         with patch.object(
             ControlPanelHandlersMixin,
             "_panel_startup_profile_manager",
@@ -263,6 +268,19 @@ class TestStartupProfileHandlers(unittest.TestCase):
             result = handler._panel_launch_startup_profile("p1")
         self.assertEqual(result["profile"]["profile_id"], "p1")
         self.assertTrue(result["launched"])
+        self.assertTrue(result["restart_requested"])
+
+    def test_delete_startup_profile_forwards_to_manager(self):
+        handler = _FakeHandler()
+        payload = {"deleted": True, "deleted_profile_id": "p1", "active_profile_id": "default-profile"}
+        with patch.object(
+            ControlPanelHandlersMixin,
+            "_panel_startup_profile_manager",
+        ) as mock_factory:
+            mock_factory.return_value.delete_profile.return_value = payload
+            result = handler._panel_delete_startup_profile("p1")
+        self.assertTrue(result["deleted"])
+        self.assertEqual(result["active_profile_id"], "default-profile")
 
 
 if __name__ == "__main__":
