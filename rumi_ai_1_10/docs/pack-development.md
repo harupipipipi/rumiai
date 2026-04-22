@@ -50,10 +50,10 @@ python -m core_runtime.pack_scaffold my-pack --template minimal --output-dir eco
 ```
 
 テンプレート種別:
-- `minimal`: 最小構成（ecosystem.json + run.py）
+- `minimal`: contract 必須 docs + 最小 runtime ファイル
 - `capability`: Capability Handler 付き
-- `flow`: Flow 定義付き
-- `full`: 全部入り
+- `flow`: Flow 定義と `docs/flows.md` 付き
+- `full`: 全部入り + tests
 
 1. **Pack を作る** — `ecosystem/<pack_id>/backend/` にファイルを配置
 2. **ecosystem.json を書く** — Pack のメタデータ（`pack_id`, `pack_identity` 必須）
@@ -62,12 +62,38 @@ python -m core_runtime.pack_scaffold my-pack --template minimal --output-dir eco
 5. **承認を得る** — ユーザーが Pack を承認
 6. **実行** — 承認後、Flow 実行時に blocks が呼ばれる
 
+### Step 0.5: docs skeleton を先に揃える
+
+Pack 固有 docs は root `docs/` ではなく `ecosystem/<pack_id>/docs/` に置きます。共通規約は [pack-documentation-contract.md](./pack-documentation-contract.md) を参照してください。
+
+最低限必要な docs:
+
+- `README.md`
+- `docs/README.md`
+- `docs/architecture.md`
+- `docs/interfaces.md`
+- `docs/operations.md`
+
+機能に応じて追加:
+
+- `docs/flows.md`
+- `docs/frontend.md`
+- `docs/functions.md`
+- `docs/api.md`
+- `docs/data-model.md`
+
 ---
 
 ## 最小構成
 
 ```
 ecosystem/my_pack/
+├── README.md
+├── docs/
+│   ├── README.md
+│   ├── architecture.md
+│   ├── interfaces.md
+│   └── operations.md
 └── backend/
     ├── ecosystem.json
     └── blocks/
@@ -75,6 +101,8 @@ ecosystem/my_pack/
 ```
 
 > **パスについて**: `ecosystem/<pack_id>/` が推奨パスです。`ecosystem/packs/<pack_id>/` も互換パスとしてサポートされますが、同一 `pack_id` が両方に存在する場合、`ecosystem/<pack_id>/` が優先されます。
+
+`pack_scaffold` の雛形もこの docs contract に寄せます。新しい Pack を切るときは、生成された README / docs skeleton を最初に埋めてから実装を増やしてください。
 
 ---
 

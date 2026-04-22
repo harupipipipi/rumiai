@@ -1,18 +1,9 @@
 # defaultspack migration notes
 
-## Legacy compatibility
+> **Legacy stub**: canonical migration docs は [../ecosystem/defaultspack/docs/migration.md](../ecosystem/defaultspack/docs/migration.md) に移しました。
 
-- Legacy `ecosystem/defaults` can remain present as reference/compatibility data.
-- Production routing for the new pack is the canonical `/api/defaultspack/*` namespace.
-- `user_data/user.csv` is migrated to `user_data/user.json` on setup-pack install when needed.
+要点だけ残します。
 
-## Rollback
-
-- Use module `rollback` or `disable` to isolate a failing module.
-- Revoke `all OK` with `POST /api/setup/packs/{setup_pack_id}/revoke-all-ok`.
-- Remove `user_data/settings/setup_pack_selection.json` to clear setup-pack selection if manual recovery is required.
-
-## Deprecation path
-
-- New features should land in `ecosystem/defaultspack/functions/*`.
-- New production code should not add direct `blocks.*.run` imports for default behavior.
+- production routing は `/api/defaultspack/*` を正とする
+- 新規機能は `ecosystem/defaultspack/functions/*` を優先する
+- rollback / disable / revoke-all-ok の運用は pack-local migration docs を参照する
