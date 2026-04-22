@@ -1,0 +1,9 @@
+{
+  "pack_id": "basepack",
+  "display_name": "Basepack",
+  "description": "Bootstrap profile for the graph-first runtime. Rumi AI boots this base profile and lets the selected runtime pack handle the rest.",
+  "target_pack_id": "defaultspack",
+  "recommended": false,
+  "risk_level": "low",
+  "supports_all_ok": true
+}

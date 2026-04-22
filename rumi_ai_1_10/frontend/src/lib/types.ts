@@ -3,9 +3,23 @@ import type { Node } from '@xyflow/react';
 /** Execution status for flow nodes during simulation */
 export type ExecutionStatus = 'pending' | 'running' | 'success' | 'error' | undefined;
 
+export type PortDirection = 'input' | 'output';
+
+export interface FlowPort {
+  id: string;
+  label: string;
+  direction: PortDirection;
+  contracts: string[];
+  description?: string;
+  allowMultiple?: boolean;
+}
+
 /** Data shape for Trigger nodes */
 export interface TriggerNodeData {
   type: string;
+  title?: string;
+  ports?: FlowPort[];
+  basePack?: string;
   executionStatus?: ExecutionStatus;
   [key: string]: unknown;
 }
@@ -14,6 +28,9 @@ export interface TriggerNodeData {
 export interface StepNodeData {
   id: string;
   type: string;
+  title?: string;
+  phase?: string;
+  ports?: FlowPort[];
   description?: string;
   inputs?: Record<string, unknown>;
   executionStatus?: ExecutionStatus;
@@ -22,6 +39,8 @@ export interface StepNodeData {
 
 /** Data shape for End nodes */
 export interface EndNodeData {
+  title?: string;
+  ports?: FlowPort[];
   executionStatus?: ExecutionStatus;
   [key: string]: unknown;
 }
@@ -43,6 +62,7 @@ export interface AvailableStep {
   name: string;
   pack: string;
   description: string;
+  ports?: FlowPort[];
 }
 
 /** Execution result for a single step */
@@ -57,4 +77,13 @@ export interface FlowExecutionResult {
   status: 'success' | 'error';
   duration: string;
   steps: StepExecutionResult[];
+}
+
+export interface FlowDocumentMeta {
+  flowId: string;
+  name?: string;
+  description?: string;
+  phases: string[];
+  defaults: Record<string, unknown>;
+  basePack: string;
 }

@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "test": "node --import tsx --test src/lib/api.test.ts"
+    "test": "node --import tsx --test src/lib/*.test.ts"
   },
   "dependencies": {
     "@codemirror/lang-yaml": "^6.1.2",

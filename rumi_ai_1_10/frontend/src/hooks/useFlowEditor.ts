@@ -1,6 +1,9 @@
+import type { MouseEvent, RefObject } from 'react';
 import { useState, useCallback } from 'react';
 import type { Node, Edge, Connection, ReactFlowInstance } from '@xyflow/react';
 import { addEdge, reconnectEdge } from '@xyflow/react';
+import type { FlowPort } from '@/src/lib/types';
+import { createPort, pickCompatibleHandles, validateConnection } from '@/src/lib/flowGraph';
 
 interface UseFlowEditorParams {
   nodes: Node[];
@@ -9,7 +12,12 @@ interface UseFlowEditorParams {
   setEdges: (updater: Edge[] | ((edges: Edge[]) => Edge[])) => void;
   saveHistory: () => void;
   reactFlowInstance: ReactFlowInstance | null;
-  pressedKeys: React.RefObject<Set<string>>;
+  pressedKeys: RefObject<Set<string>>;
+  onInvalidConnection?: (reason: string) => void;
+}
+
+function defaultStepPayload(kind: string): Record<string, unknown> {
+  return { id: kind, type: 'action', title: kind, ports: [] as FlowPort[] };
 }
 
 export function useFlowEditor({
@@ -20,25 +28,36 @@ export function useFlowEditor({
   saveHistory,
   reactFlowInstance,
   pressedKeys,
+  onInvalidConnection,
 }: UseFlowEditorParams) {
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const [menuFilter, setMenuFilter] = useState('');
   const [pendingConnection, setPendingConnection] = useState<any>(null);
 
-  const onConnect = useCallback(
-    (params: Connection | Edge) => {
-      saveHistory();
-      setEdges(eds => addEdge({ ...params, animated: true }, eds));
-    },
-    [setEdges, saveHistory],
+  const isValidConnection = useCallback(
+    (params: Connection | Edge) => validateConnection(params, nodes, edges).valid,
+    [nodes, edges],
   );
 
-  const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
+  const onConnect = useCallback(
+    (params: Connection | Edge) => {
+      const validation = validateConnection(params, nodes, edges);
+      if (!validation.valid) {
+        onInvalidConnection?.(validation.reason || 'このポート同士は接続できません。');
+        return;
+      }
+      saveHistory();
+      setEdges((existing) => addEdge({ ...params, animated: true }, existing));
+    },
+    [edges, nodes, onInvalidConnection, saveHistory, setEdges],
+  );
+
+  const onNodeClick = useCallback((_: MouseEvent, node: Node) => {
     setSelectedNode(node);
   }, []);
 
-  const onPaneClick = useCallback((event: React.MouseEvent) => {
+  const onPaneClick = useCallback((event: MouseEvent) => {
     setSelectedNode(null);
     setMenuPos(null);
 
@@ -50,42 +69,33 @@ export function useFlowEditor({
     });
 
     const keys = pressedKeys.current;
-    let newNodeType = '';
-    let newNodeData: Record<string, unknown> = {};
+    let kind = '';
 
     if (keys.has('b')) {
-      newNodeType = 'step';
-      newNodeData = { id: 'branch', type: 'action', description: 'Branch' };
+      kind = 'branch';
     } else if (keys.has('s')) {
-      newNodeType = 'step';
-      newNodeData = { id: 'sequence', type: 'action', description: 'Sequence' };
+      kind = 'sequence';
     } else if (keys.has('d')) {
-      newNodeType = 'step';
-      newNodeData = { id: 'delay', type: 'action', description: 'Delay' };
-    } else if (keys.has('p')) {
-      newNodeType = 'trigger';
-      newNodeData = { type: 'event_begin_play' };
+      kind = 'delay';
     } else if (keys.has('m')) {
-      newNodeType = 'step';
-      newNodeData = { id: 'multigate', type: 'action', description: 'Multigate' };
+      kind = 'multigate';
     } else if (keys.has('c')) {
-      newNodeType = 'step';
-      newNodeData = { id: 'comment', type: 'comment', description: 'Comment' };
+      kind = 'comment';
     }
 
-    if (newNodeType) {
+    if (kind) {
       saveHistory();
-      const newNode: Node = {
-        id: `${newNodeType}-${Date.now()}`,
-        type: newNodeType,
+      const node: Node = {
+        id: `step-${Date.now()}`,
+        type: 'step',
         position,
-        data: newNodeData,
+        data: defaultStepPayload(kind),
       };
-      setNodes(nds => nds.concat(newNode));
+      setNodes((existing) => existing.concat(node));
     }
-  }, [reactFlowInstance, setNodes, saveHistory, pressedKeys]);
+  }, [pressedKeys, reactFlowInstance, saveHistory, setNodes]);
 
-  const onPaneContextMenu = useCallback((event: React.MouseEvent) => {
+  const onPaneContextMenu = useCallback((event: MouseEvent) => {
     event.preventDefault();
     setMenuPos({ x: event.clientX, y: event.clientY });
     setPendingConnection(null);
@@ -94,31 +104,35 @@ export function useFlowEditor({
   const onConnectEnd = useCallback(
     (event: any, connectionState: any) => {
       if (!connectionState.isValid) {
-        const { clientX, clientY } = event;
-        setMenuPos({ x: clientX, y: clientY });
+        setMenuPos({ x: event.clientX, y: event.clientY });
         setPendingConnection(connectionState);
       }
     },
-    []
+    [],
   );
 
-  const onEdgeClick = useCallback((event: React.MouseEvent, edge: Edge) => {
+  const onEdgeClick = useCallback((event: MouseEvent, edge: Edge) => {
     if (event.altKey) {
       saveHistory();
-      setEdges(eds => eds.filter(e => e.id !== edge.id));
+      setEdges((existing) => existing.filter((candidate) => candidate.id !== edge.id));
     }
-  }, [setEdges, saveHistory]);
+  }, [saveHistory, setEdges]);
 
-  // H-5: renamed from onEdgeUpdate to onReconnect
   const onReconnect = useCallback(
     (oldEdge: Edge, newConnection: Connection) => {
+      const otherEdges = edges.filter((edge) => edge.id !== oldEdge.id);
+      const validation = validateConnection(newConnection, nodes, otherEdges);
+      if (!validation.valid) {
+        onInvalidConnection?.(validation.reason || '接続を更新できません。');
+        return;
+      }
       saveHistory();
-      setEdges(els => reconnectEdge(oldEdge, newConnection, els));
+      setEdges((existing) => reconnectEdge(oldEdge, newConnection, existing));
     },
-    [setEdges, saveHistory]
+    [edges, nodes, onInvalidConnection, saveHistory, setEdges],
   );
 
-  const onEdgeDoubleClick = useCallback((event: React.MouseEvent, edge: Edge) => {
+  const onEdgeDoubleClick = useCallback((event: MouseEvent, edge: Edge) => {
     if (!reactFlowInstance) return;
     saveHistory();
 
@@ -132,20 +146,41 @@ export function useFlowEditor({
       id: rerouteNodeId,
       type: 'step',
       position,
-      data: { id: 'reroute', type: 'reroute' },
+      data: {
+        id: 'reroute',
+        type: 'reroute',
+        title: 'reroute',
+        ports: [
+          createPort('in', 'input', [], { id: 'reroute-in', allowMultiple: false }),
+          createPort('out', 'output', [], { id: 'reroute-out', allowMultiple: false }),
+        ],
+      },
     };
 
-    setNodes(nds => nds.concat(rerouteNode));
-
-    setEdges(eds => {
-      const filtered = eds.filter(e => e.id !== edge.id);
+    setNodes((existing) => existing.concat(rerouteNode));
+    setEdges((existing) => {
+      const filtered = existing.filter((candidate) => candidate.id !== edge.id);
       return [
         ...filtered,
-        { id: `e-${edge.source}-${rerouteNodeId}`, source: edge.source, target: rerouteNodeId, sourceHandle: edge.sourceHandle, animated: true },
-        { id: `e-${rerouteNodeId}-${edge.target}`, source: rerouteNodeId, target: edge.target, targetHandle: edge.targetHandle, animated: true },
+        {
+          id: `e-${edge.source}-${rerouteNodeId}`,
+          source: edge.source,
+          target: rerouteNodeId,
+          sourceHandle: edge.sourceHandle,
+          targetHandle: 'reroute-in',
+          animated: true,
+        },
+        {
+          id: `e-${rerouteNodeId}-${edge.target}`,
+          source: rerouteNodeId,
+          target: edge.target,
+          sourceHandle: 'reroute-out',
+          targetHandle: edge.targetHandle,
+          animated: true,
+        },
       ];
     });
-  }, [reactFlowInstance, saveHistory, setNodes, setEdges]);
+  }, [reactFlowInstance, saveHistory, setEdges, setNodes]);
 
   const onNodesDelete = useCallback(() => {
     saveHistory();
@@ -155,7 +190,7 @@ export function useFlowEditor({
     saveHistory();
   }, [saveHistory]);
 
-  const handleAddNodeFromMenu = useCallback((step: { id: string }) => {
+  const handleAddNodeFromMenu = useCallback((step: { id: string; title?: string; type?: string; ports?: FlowPort[] }) => {
     if (!menuPos || !reactFlowInstance) return;
 
     saveHistory();
@@ -164,49 +199,96 @@ export function useFlowEditor({
       id: `step-${Date.now()}`,
       type: 'step',
       position,
-      data: { id: step.id, type: 'action' },
+      data: {
+        id: step.id,
+        type: step.type ?? 'action',
+        title: step.title ?? step.id,
+        ports: step.ports ?? [
+          createPort('input', 'input', [], { id: 'input-main' }),
+          createPort('output', 'output', [], { id: 'output-main', allowMultiple: true }),
+        ],
+      },
     };
 
-    setNodes(nds => nds.concat(newNode));
+    setNodes((existing) => existing.concat(newNode));
 
-    if (pendingConnection && pendingConnection.fromNode) {
-      const isTarget = pendingConnection.fromHandle?.type === 'target';
-      const newEdge: Edge = {
-        id: `e-${Date.now()}`,
-        source: isTarget ? newNode.id : pendingConnection.fromNode.id,
-        target: isTarget ? pendingConnection.fromNode.id : newNode.id,
-        sourceHandle: isTarget ? null : pendingConnection.fromHandle?.id,
-        targetHandle: isTarget ? pendingConnection.fromHandle?.id : null,
-        animated: true,
-      };
-      setEdges(eds => eds.concat(newEdge));
+    if (pendingConnection?.fromNode) {
+      const sourceNode = pendingConnection.fromHandle?.type === 'target' ? newNode : pendingConnection.fromNode;
+      const targetNode = pendingConnection.fromHandle?.type === 'target' ? pendingConnection.fromNode : newNode;
+      const handles = pickCompatibleHandles(sourceNode, targetNode, edges);
+      if (handles) {
+        setEdges((existing) => existing.concat({
+          id: `e-${Date.now()}`,
+          source: sourceNode.id,
+          target: targetNode.id,
+          sourceHandle: handles.sourceHandle ?? undefined,
+          targetHandle: handles.targetHandle ?? undefined,
+          animated: true,
+        }));
+      }
     }
 
     setMenuPos(null);
     setMenuFilter('');
     setPendingConnection(null);
-  }, [menuPos, reactFlowInstance, saveHistory, setNodes, setEdges, pendingConnection]);
+  }, [edges, menuPos, pendingConnection, reactFlowInstance, saveHistory, setEdges, setNodes]);
 
   const updateNodeData = useCallback((key: string, value: string) => {
     if (!selectedNode) return;
-    setNodes(nds =>
-      nds.map(node => {
-        if (node.id === selectedNode.id) {
-          return { ...node, data: { ...node.data, [key]: value } };
-        }
-        return node;
-      })
+    setNodes((existing) =>
+      existing.map((node) => (
+        node.id === selectedNode.id
+          ? { ...node, data: { ...node.data, [key]: value } }
+          : node
+      )),
     );
-    setSelectedNode(prev => prev ? { ...prev, data: { ...prev.data, [key]: value } } : null);
+    setSelectedNode((previous) => previous ? { ...previous, data: { ...previous.data, [key]: value } } : null);
   }, [selectedNode, setNodes]);
+
+  const updateNodePorts = useCallback((ports: FlowPort[]) => {
+    if (!selectedNode) return;
+    setNodes((existing) =>
+      existing.map((node) => (
+        node.id === selectedNode.id
+          ? { ...node, data: { ...node.data, ports } }
+          : node
+      )),
+    );
+    setSelectedNode((previous) => previous ? { ...previous, data: { ...previous.data, ports } } : null);
+  }, [selectedNode, setNodes]);
+
+  const addPortToSelectedNode = useCallback((direction: 'input' | 'output') => {
+    const ports = ((selectedNode?.data as { ports?: FlowPort[] } | undefined)?.ports ?? []);
+    const nextPort = createPort(direction === 'input' ? 'new-in' : 'new-out', direction, []);
+    updateNodePorts([...ports, nextPort]);
+  }, [selectedNode, updateNodePorts]);
+
+  const updateSelectedNodePort = useCallback((portId: string, patch: Partial<FlowPort>) => {
+    const ports = ((selectedNode?.data as { ports?: FlowPort[] } | undefined)?.ports ?? []).map((port) => (
+      port.id === portId
+        ? {
+            ...port,
+            ...patch,
+            contracts: patch.contracts ?? port.contracts,
+          }
+        : port
+    ));
+    updateNodePorts(ports);
+  }, [selectedNode, updateNodePorts]);
+
+  const removeSelectedNodePort = useCallback((portId: string) => {
+    const ports = ((selectedNode?.data as { ports?: FlowPort[] } | undefined)?.ports ?? []).filter((port) => port.id !== portId);
+    updateNodePorts(ports);
+    setEdges((existing) => existing.filter((edge) => edge.sourceHandle !== portId && edge.targetHandle !== portId));
+  }, [selectedNode, setEdges, updateNodePorts]);
 
   const deleteSelectedNode = useCallback(() => {
     if (!selectedNode) return;
     saveHistory();
-    setNodes(nds => nds.filter(node => node.id !== selectedNode.id));
-    setEdges(eds => eds.filter(edge => edge.source !== selectedNode.id && edge.target !== selectedNode.id));
+    setNodes((existing) => existing.filter((node) => node.id !== selectedNode.id));
+    setEdges((existing) => existing.filter((edge) => edge.source !== selectedNode.id && edge.target !== selectedNode.id));
     setSelectedNode(null);
-  }, [selectedNode, saveHistory, setNodes, setEdges]);
+  }, [saveHistory, selectedNode, setEdges, setNodes]);
 
   return {
     selectedNode,
@@ -215,6 +297,8 @@ export function useFlowEditor({
     setMenuPos,
     menuFilter,
     setMenuFilter,
+    pendingConnection,
+    setPendingConnection,
     onConnect,
     onNodeClick,
     onPaneClick,
@@ -227,6 +311,11 @@ export function useFlowEditor({
     onEdgesDelete,
     handleAddNodeFromMenu,
     updateNodeData,
+    updateNodePorts,
+    addPortToSelectedNode,
+    updateSelectedNodePort,
+    removeSelectedNodePort,
     deleteSelectedNode,
+    isValidConnection,
   };
 }

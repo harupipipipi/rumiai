@@ -1,17 +1,22 @@
+import type { DragEvent, MouseEvent, RefObject } from 'react';
 import { useState, useCallback, useRef } from 'react';
 import type { Node, Edge, ReactFlowInstance } from '@xyflow/react';
+import type { FlowPort } from '@/src/lib/types';
+import { createPort, pickCompatibleHandles } from '@/src/lib/flowGraph';
 
 interface UseFlowDragDropParams {
   nodes: Node[];
+  edges: Edge[];
   setNodes: (updater: Node[] | ((nodes: Node[]) => Node[])) => void;
   setEdges: (updater: Edge[] | ((edges: Edge[]) => Edge[])) => void;
   saveHistory: () => void;
   reactFlowInstance: ReactFlowInstance | null;
-  reactFlowWrapper: React.RefObject<HTMLDivElement | null>;
+  reactFlowWrapper: RefObject<HTMLDivElement | null>;
 }
 
 export function useFlowDragDrop({
   nodes,
+  edges,
   setNodes,
   setEdges,
   saveHistory,
@@ -47,7 +52,7 @@ export function useFlowDragDrop({
   }, [reactFlowWrapper]);
 
   const onNodeDragStop = useCallback(
-    (_event: React.MouseEvent, node: Node) => {
+    (_event: MouseEvent, node: Node) => {
       setIsDraggingNode(false);
       setIsOverDeleteZone(false);
 
@@ -57,70 +62,93 @@ export function useFlowDragDrop({
 
       if (mousePosRef.current.y > bounds.bottom - 80) {
         saveHistory();
-        setNodes(nds => nds.filter(n => n.id !== node.id));
-        setEdges(eds => eds.filter(e => e.source !== node.id && e.target !== node.id));
+        setNodes((existing) => existing.filter((candidate) => candidate.id !== node.id));
+        setEdges((existing) => existing.filter((edge) => edge.source !== node.id && edge.target !== node.id));
       }
     },
-    [reactFlowWrapper, saveHistory, setNodes, setEdges]
+    [reactFlowWrapper, saveHistory, setEdges, setNodes],
   );
 
-  const onDragOver = useCallback((event: React.DragEvent) => {
+  const onDragOver = useCallback((event: DragEvent) => {
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
   }, []);
 
-  const onDrop = useCallback(
-    (event: React.DragEvent) => {
-      event.preventDefault();
+  const onDrop = useCallback((event: DragEvent) => {
+    event.preventDefault();
 
-      const type = event.dataTransfer.getData('application/reactflow');
-      const stepId = event.dataTransfer.getData('stepId');
+    const type = event.dataTransfer.getData('application/reactflow');
+    const stepId = event.dataTransfer.getData('stepId');
+    const title = event.dataTransfer.getData('stepTitle');
+    const serializedPorts = event.dataTransfer.getData('stepPorts');
 
-      if (!type || !reactFlowInstance) return;
+    if (!type || !reactFlowInstance) return;
 
-      const position = reactFlowInstance.screenToFlowPosition({
-        x: event.clientX,
-        y: event.clientY,
-      });
+    const position = reactFlowInstance.screenToFlowPosition({
+      x: event.clientX,
+      y: event.clientY,
+    });
 
-      const newNode: Node = {
-        id: `step-${Date.now()}`,
-        type,
-        position,
-        data: { id: stepId, type: 'action' },
-      };
+    let ports: FlowPort[];
+    try {
+      ports = serializedPorts ? JSON.parse(serializedPorts) as FlowPort[] : [];
+    } catch {
+      ports = [];
+    }
+    if (ports.length === 0) {
+      ports = [
+        createPort('input', 'input', [], { id: 'input-main' }),
+        createPort('output', 'output', [], { id: 'output-main', allowMultiple: true }),
+      ];
+    }
 
-      const threshold = 150;
-      let closestNode: Node | null = null;
-      let minDistance = Infinity;
+    const newNode: Node = {
+      id: `step-${Date.now()}`,
+      type,
+      position,
+      data: {
+        id: stepId,
+        type: 'action',
+        title: title || stepId,
+        ports,
+      },
+    };
 
-      nodes.forEach(node => {
-        const dx = node.position.x - position.x;
-        const dy = node.position.y - position.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
+    const threshold = 180;
+    let closestNode: Node | null = null;
+    let minDistance = Infinity;
 
-        if (distance < minDistance && distance < threshold) {
-          minDistance = distance;
-          closestNode = node;
-        }
-      });
-
-      setNodes(nds => nds.concat(newNode));
-
-      if (closestNode) {
-        const cn = closestNode as Node;
-        const isTarget = cn.position.y > position.y;
-        const newEdge: Edge = {
-          id: `e-${isTarget ? newNode.id : cn.id}-${isTarget ? cn.id : newNode.id}`,
-          source: isTarget ? newNode.id : cn.id,
-          target: isTarget ? cn.id : newNode.id,
-          animated: true,
-        };
-        setEdges(eds => eds.concat(newEdge));
+    nodes.forEach((node) => {
+      const dx = node.position.x - position.x;
+      const dy = node.position.y - position.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      if (distance < minDistance && distance < threshold) {
+        minDistance = distance;
+        closestNode = node;
       }
-    },
-    [reactFlowInstance, nodes, setNodes, setEdges],
-  );
+    });
+
+    saveHistory();
+    setNodes((existing) => existing.concat(newNode));
+
+    if (closestNode) {
+      const candidate = closestNode as Node;
+      const isIncoming = candidate.position.x > position.x;
+      const sourceNode = isIncoming ? newNode : candidate;
+      const targetNode = isIncoming ? candidate : newNode;
+      const handles = pickCompatibleHandles(sourceNode, targetNode, edges);
+      if (handles) {
+        setEdges((existing) => existing.concat({
+          id: `e-${sourceNode.id}-${targetNode.id}-${Date.now()}`,
+          source: sourceNode.id,
+          target: targetNode.id,
+          sourceHandle: handles.sourceHandle ?? undefined,
+          targetHandle: handles.targetHandle ?? undefined,
+          animated: true,
+        }));
+      }
+    }
+  }, [edges, nodes, reactFlowInstance, saveHistory, setEdges, setNodes]);
 
   return {
     isDraggingNode,

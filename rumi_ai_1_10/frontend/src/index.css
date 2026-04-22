@@ -139,7 +139,27 @@
   body {
     background-color: var(--bg-main);
     color: var(--text-main);
-    font-family: 'Inter', system-ui, sans-serif;
+    font-family: 'Noto Serif JP', 'Hiragino Mincho ProN', serif;
+  }
+
+  .flow-canvas {
+    background:
+      radial-gradient(circle at top, rgba(255, 219, 140, 0.18), transparent 32%),
+      linear-gradient(180deg, rgba(28, 18, 10, 0.96) 0%, rgba(18, 12, 8, 1) 100%);
+  }
+
+  .flow-grid {
+    background:
+      linear-gradient(180deg, rgba(255, 211, 127, 0.08) 0%, rgba(255, 176, 61, 0.02) 100%);
+  }
+
+  .react-flow__edge-path {
+    stroke: #f2a24a !important;
+    stroke-width: 2px !important;
+  }
+
+  .react-flow__edge.selected .react-flow__edge-path {
+    stroke: #ffd484 !important;
   }
 
   /* React Flow Controls Override */
