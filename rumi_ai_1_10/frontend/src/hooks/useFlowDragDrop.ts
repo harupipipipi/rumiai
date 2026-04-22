@@ -1,4 +1,4 @@
-import type { DragEvent, MouseEvent, RefObject } from 'react';
+import type { DragEvent, MouseEvent as ReactMouseEvent, RefObject } from 'react';
 import { useState, useCallback, useRef } from 'react';
 import type { Node, Edge, ReactFlowInstance } from '@xyflow/react';
 import type { FlowPort } from '@/src/lib/types';
@@ -28,7 +28,7 @@ export function useFlowDragDrop({
   const mousePosRef = useRef({ x: 0, y: 0 });
 
   const setupPointerTracking = useCallback(() => {
-    const handler = (e: PointerEvent | MouseEvent) => {
+    const handler = (e: globalThis.PointerEvent | globalThis.MouseEvent) => {
       mousePosRef.current = { x: e.clientX, y: e.clientY };
     };
     window.addEventListener('pointermove', handler, true);
@@ -52,7 +52,7 @@ export function useFlowDragDrop({
   }, [reactFlowWrapper]);
 
   const onNodeDragStop = useCallback(
-    (_event: MouseEvent, node: Node) => {
+    (_event: ReactMouseEvent, node: Node) => {
       setIsDraggingNode(false);
       setIsOverDeleteZone(false);
 
