@@ -6,6 +6,7 @@ import { Setup } from '@/src/pages/Setup';
 import { Dashboard } from '@/src/pages/Dashboard';
 import { Packs } from '@/src/pages/Packs';
 import { PackDetail } from '@/src/pages/PackDetail';
+import { StartupProfiles } from '@/src/pages/StartupProfiles';
 import { Flows } from '@/src/pages/Flows';
 import { Settings } from '@/src/pages/Settings';
 import { ToastContainer } from '@/src/components/ui/ToastContainer';
@@ -49,6 +50,7 @@ export default function App() {
           <Route index element={<Dashboard />} />
           <Route path="packs" element={<Packs />} />
           <Route path="packs/:id" element={<PackDetail />} />
+          <Route path="startup" element={<StartupProfiles />} />
           <Route path="flows" element={<Flows />} />
           <Route path="settings" element={<Settings />} />
         </Route>

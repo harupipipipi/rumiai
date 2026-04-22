@@ -2,7 +2,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { useAppStore } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
 import { cn } from '@/src/lib/utils';
-import { Folder, LayoutGrid, Settings, PanelLeft, Home } from 'lucide-react';
+import { Folder, LayoutGrid, Settings, PanelLeft, Home, Rocket } from 'lucide-react';
 
 export function Sidebar() {
   const t = useT();
@@ -15,6 +15,7 @@ export function Sidebar() {
   const links = [
     { to: '/panel', icon: Home, label: t('nav.home') },
     { to: '/panel/packs', icon: Folder, label: t('nav.packs') },
+    { to: '/panel/startup', icon: Rocket, label: t('nav.startup') || 'Startup' },
     { to: '/panel/flows', icon: LayoutGrid, label: t('nav.flows') },
     { to: '/panel/settings', icon: Settings, label: t('nav.settings') },
   ];
