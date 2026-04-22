@@ -24,6 +24,7 @@ class _FakeInterfaceRegistry:
 def _reset_singletons(monkeypatch, tmp_path):
     from ecosystem.defaultspack.backend.tool import permission_policy as permission_policy_module
     from ecosystem.defaultspack.domain.ai_client.client import AIClient
+    from ecosystem.defaultspack.domain.tool.runtime_creator import RuntimeToolCreator
     from ecosystem.defaultspack.domain.tool.mcp_client import McpClient
     from ecosystem.defaultspack.domain.tool.registry import ToolRegistry
 
@@ -33,11 +34,13 @@ def _reset_singletons(monkeypatch, tmp_path):
     )
     permission_policy_module._POLICY_STORE = None
     AIClient._instance = None
+    RuntimeToolCreator._instance = None
     ToolRegistry._instance = None
     McpClient._instance = None
     yield
     permission_policy_module._POLICY_STORE = None
     AIClient._instance = None
+    RuntimeToolCreator._instance = None
     ToolRegistry._instance = None
     McpClient._instance = None
 
@@ -72,6 +75,13 @@ def test_provider_catalog_and_profiles_include_local_and_collision_metadata():
     providers = list_provider_catalog()
     provider_ids = {provider["provider_id"] for provider in providers}
     assert {"openai", "anthropic", "ollama", "lmstudio", "vllm", "openrouter"} <= provider_ids
+
+    stub_models = list_model_catalog(provider="stub")
+    assert [model["qualified_model_id"] for model in stub_models] == [
+        "stub/default",
+        "stub/fast",
+        "stub/large",
+    ]
 
     models = list_model_catalog()
     gpt_4o_models = [model for model in models if model["same_model_across_providers_key"] == "gpt-4o"]
@@ -113,6 +123,34 @@ def test_provider_registry_marks_duplicate_model_names_for_ui_disambiguation(tmp
     assert all(item["provider_count_for_model_name"] == 2 for item in models)
     assert models[0]["disambiguated_name"].endswith("(provider-a)")
     assert models[1]["disambiguated_name"].endswith("(provider-b)")
+
+
+def test_ai_client_lists_only_active_runtime_providers_and_preserves_stub_models():
+    from ecosystem.defaultspack.domain.ai_client.client import AIClient
+
+    client = AIClient()
+
+    assert [provider["provider_id"] for provider in client.list_providers()] == ["stub"]
+    assert [model["qualified_model_id"] for model in client.list_models()] == [
+        "stub/default",
+        "stub/fast",
+        "stub/large",
+    ]
+    assert [model["qualified_model_id"] for model in client.list_models(provider="stub")] == [
+        "stub/default",
+        "stub/fast",
+        "stub/large",
+    ]
+    assert client.list_models(provider="openai") == []
+
+
+def test_runtime_tool_creator_keeps_stub_only_environment_as_no_provider():
+    from ecosystem.defaultspack.domain.tool.runtime_creator import RuntimeToolCreator
+
+    creator = RuntimeToolCreator()
+
+    with pytest.raises(RuntimeError, match="No AI provider available"):
+        creator.generate_from_description("say hello")
 
 
 def test_permission_policy_persists_and_blocks_tool_list_and_invoke(tmp_path):

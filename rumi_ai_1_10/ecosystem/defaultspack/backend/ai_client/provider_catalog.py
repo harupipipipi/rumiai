@@ -276,6 +276,11 @@ _CANONICAL_MODEL_NAMES: Dict[str, str] = {
 
 
 _CATALOG_MODELS: Dict[str, Tuple[Dict[str, Any], ...]] = {
+    "stub": (
+        {"id": "stub/default", "name": "Stub Default Model", "provider": "stub", "type": "chat"},
+        {"id": "stub/fast", "name": "Stub Fast Model", "provider": "stub", "type": "chat"},
+        {"id": "stub/large", "name": "Stub Large Model", "provider": "stub", "type": "chat"},
+    ),
     "xai": (
         {"id": "xai/grok-2-latest", "name": "Grok 2", "provider": "xai", "type": "chat"},
         {"id": "xai/grok-2-vision-latest", "name": "Grok 2 Vision", "provider": "xai", "type": "chat"},
@@ -352,9 +357,11 @@ def _load_known_models(entry: ProviderCatalogEntry) -> List[Dict[str, Any]]:
             provider_cls = getattr(mod, entry.class_name)
             known_models = getattr(provider_cls, "KNOWN_MODELS", [])
             if isinstance(known_models, Sequence):
-                return [dict(model) for model in known_models if isinstance(model, dict)]
+                loaded = [dict(model) for model in known_models if isinstance(model, dict)]
+                if loaded:
+                    return loaded
         except Exception:
-            return []
+            pass
     return [dict(model) for model in _CATALOG_MODELS.get(entry.provider_id, ())]
 
 

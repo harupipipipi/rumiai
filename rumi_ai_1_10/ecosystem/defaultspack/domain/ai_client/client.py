@@ -61,6 +61,9 @@ class AIClient:
         """プロファイルエイリアスを登録する。"""
         self._profiles[name] = dict(profile or {})
 
+    def _active_provider_ids(self):
+        return set(self._providers.keys())
+
     def resolve_provider(self, model_str):
         """model文字列("provider/model" or "profile_name")からプロバイダーとモデル名を解決"""
         if "/" in model_str:
@@ -101,19 +104,36 @@ class AIClient:
 
     def list_models(self, provider=None):
         """登録済みプロバイダーの既知モデル一覧を返す"""
-        return get_all_known_models(
+        active_provider_ids = self._active_provider_ids()
+        if provider is not None and provider not in active_provider_ids:
+            return []
+        models = get_all_known_models(
             provider_id=provider,
-            active_provider_ids=self._providers.keys(),
+            active_provider_ids=active_provider_ids,
         )
+        return [
+            model for model in models
+            if model.get("provider_id") in active_provider_ids
+        ]
 
     def list_providers(self):
-        return get_provider_catalog(active_provider_ids=self._providers.keys())
+        active_provider_ids = self._active_provider_ids()
+        return [
+            provider for provider in get_provider_catalog(active_provider_ids=active_provider_ids)
+            if provider.get("provider_id") in active_provider_ids
+        ]
 
     def list_profiles(self, provider=None):
+        active_provider_ids = self._active_provider_ids()
         profiles = build_profile_catalog(
-            active_provider_ids=self._providers.keys(),
+            active_provider_ids=active_provider_ids,
             custom_profiles=self._profiles,
         )
+        profiles = [
+            profile
+            for profile in profiles
+            if not profile.get("provider_id") or profile.get("provider_id") in active_provider_ids
+        ]
         if provider is not None:
             profiles = [profile for profile in profiles if profile.get("provider_id") == provider]
         return profiles

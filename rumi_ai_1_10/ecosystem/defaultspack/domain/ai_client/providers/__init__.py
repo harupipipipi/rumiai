@@ -254,6 +254,11 @@ _PROVIDER_SPECS = [
 ]
 
 _CURATED_PROVIDER_MODELS = {
+    "stub": [
+        {"model_id": "default", "name": "Stub Default Model", "type": "chat"},
+        {"model_id": "fast", "name": "Stub Fast Model", "type": "chat"},
+        {"model_id": "large", "name": "Stub Large Model", "type": "chat"},
+    ],
     "groq": [
         {"model_id": "llama-3.3-70b-versatile", "name": "Llama 3.3 70B Versatile", "type": "chat"},
         {"model_id": "qwen-qwq-32b", "name": "QWQ 32B", "type": "reasoning"},
