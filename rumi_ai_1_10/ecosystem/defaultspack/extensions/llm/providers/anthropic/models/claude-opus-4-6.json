@@ -1,0 +1,13 @@
+{
+  "id": "anthropic/claude-opus-4-6",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "anthropic",
+  "model_id": "claude-opus-4-6",
+  "display_name": "Claude Opus 4.6",
+  "priority": 20,
+  "defaults": {
+    "large": true
+  },
+  "type": "chat"
+}

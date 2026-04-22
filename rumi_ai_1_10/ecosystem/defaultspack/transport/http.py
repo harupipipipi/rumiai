@@ -8,9 +8,9 @@ import re
 import signal
 import threading
 import http.server
-import importlib
 
 from bridge.block_adapter import invoke_block
+from transport.registry import build_fallback_http_routes
 
 
 class DefaultsHttpServer:
@@ -76,67 +76,9 @@ class DefaultsHttpServer:
             )
             return
 
-        # ---- Fallback: hard-coded route list (backward compatibility) ----
+        # ---- Fallback: registry-defined compatibility routes ----
         print("[defaults] Route registry: no routes found, using fallback")
-        fallback = [
-            ("POST", "/v1/chat/completions", self._handle_chat_send),
-            ("POST", "/api/chat/conversations", self._handle_chat_create),
-            ("GET", "/api/chat/conversations", self._handle_chat_list),
-            ("GET", "/api/chat/conversations/{id}", self._handle_chat_get),
-            ("PUT", "/api/chat/conversations/{id}", self._handle_chat_update),
-            ("DELETE", "/api/chat/conversations/{id}", self._handle_chat_delete),
-            ("POST", "/api/chat/conversations/{id}/messages", self._handle_chat_send_message),
-            ("POST", "/api/chat/conversations/{id}/stream", self._handle_chat_stream),
-            ("POST", "/api/chat/conversations/{id}/export", self._handle_chat_export),
-            ("POST", "/api/chat/conversations/{id}/summarize", self._handle_chat_summarize),
-            ("POST", "/api/chat/conversations/{id}/auto-trim", self._handle_chat_auto_trim),
-            # ---- Agent routes ----
-            ("POST", "/api/agent/execute", self._handle_agent_execute),
-            ("POST", "/api/agent/{id}/approve", self._handle_agent_approve),
-            ("POST", "/api/agent/{id}/reject", self._handle_agent_reject),
-            ("POST", "/api/agent/{id}/cancel", self._handle_agent_cancel),
-            ("GET", "/api/agent/{id}/status", self._handle_agent_status),
-            # ---- Multi-Agent routes (Group 8) ----
-            ("POST", "/api/agent/multi/execute", self._handle_multi_execute),
-            ("GET", "/api/agent/multi/{id}/status", self._handle_multi_status),
-            ("POST", "/api/agent/multi/{id}/message", self._handle_multi_message),
-            # ---- Instruction route (Group 8) ----
-            ("POST", "/api/agent/{id}/instruct", self._handle_agent_instruct),
-            # ---- Consent routes (Group 8) ----
-            ("POST", "/api/consent/check", self._handle_consent_check),
-            ("POST", "/api/consent/{id}/confirm", self._handle_consent_confirm),
-            # ---- Knowledge routes (Group 9a) ----
-            ("POST", "/api/packs/defaultspack/knowledge", self._handle_knowledge_create),
-            ("GET", "/api/packs/defaultspack/knowledge", self._handle_knowledge_list),
-            ("POST", "/api/packs/defaultspack/knowledge/search", self._handle_knowledge_search),
-            ("GET", "/api/packs/defaultspack/knowledge/{id}", self._handle_knowledge_get),
-            ("PUT", "/api/packs/defaultspack/knowledge/{id}", self._handle_knowledge_update),
-            ("DELETE", "/api/packs/defaultspack/knowledge/{id}", self._handle_knowledge_delete),
-            # ---- Prompt routes ----
-            ("PUT", "/api/prompts/{name}", self._handle_prompt_update),
-            ("DELETE", "/api/prompts/{name}", self._handle_prompt_delete),
-            ("POST", "/api/prompts/convert", self._handle_prompt_convert),
-            # ---- Dynamic Tool routes ----
-            ("POST", "/api/tools/create", self._handle_tool_create),
-            ("PUT", "/api/tools/{name}", self._handle_tool_update),
-            ("DELETE", "/api/tools/{name}", self._handle_tool_delete),
-            ("GET", "/api/tools/{name}/export", self._handle_tool_export),
-            # ---- Dev Tool routes (P1-1) ----
-            ("GET", "/api/dev/inspect", self._handle_dev_inspect),
-            ("GET", "/api/dev/prompt-history", self._handle_dev_prompt_history),
-            ("POST", "/api/dev/edit-prompt", self._handle_dev_edit_prompt),
-            ("POST", "/api/dev/replay", self._handle_dev_replay),
-            # ---- System routes ----
-            ("GET", "/api/health", self._handle_health),
-            ("GET", "/api/context", self._handle_context_info),
-            ("GET", "/", self._handle_static),
-            ("GET", "/static/{path}", self._handle_static_file),
-        ]
-        for method, pattern, handler in fallback:
-            regex_pattern = re.sub(r"\{(\w+)\}", r"(?P<\1>[^/]+)", pattern)
-            regex_pattern = "^" + regex_pattern + "$"
-            compiled = re.compile(regex_pattern)
-            self._routes.append((method, compiled, handler, "fallback", {}))
+        self._routes.extend(build_fallback_http_routes(self))
 
     def start(self):
         _RequestHandler.server_ref = self

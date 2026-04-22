@@ -1,0 +1,10 @@
+{
+  "id": "default_tool_policy",
+  "category": "policy",
+  "version": "1",
+  "display_name": "Default Tool Policy",
+  "enabled": true,
+  "config": {
+    "checker_class": "domain.tool.permission_checker:PermissionChecker"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "vllm/openai-compatible-model",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "vllm",
+  "model_id": "openai-compatible-model",
+  "display_name": "vLLM OpenAI Compatible Model",
+  "type": "chat",
+  "enabled": true,
+  "priority": 1,
+  "defaults": {
+    "chat": true
+  }
+}
+

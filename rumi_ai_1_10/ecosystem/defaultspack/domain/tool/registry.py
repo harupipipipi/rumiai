@@ -2,6 +2,8 @@ import json
 import os
 import threading
 
+from ..extensions.runtime import get_extension_registry
+
 
 class ToolRegistry:
     """ツール定義の登録・管理（シングルトン・インメモリ + 永続化）"""
@@ -21,7 +23,8 @@ class ToolRegistry:
         self._mcp_servers = {}
         self._lock = threading.Lock()
         self._tools_dir = self._resolve_tools_dir()
-        self._register_defaults()
+        if not self._load_extension_tools():
+            self._register_defaults()
         self._load_dynamic_tools()
 
     # ------------------------------------------------------------------
@@ -59,6 +62,60 @@ class ToolRegistry:
             },
             "execution": {"type": "local"}
         })
+
+    def _load_extension_tools(self):
+        """extension manifests から built-in tools を構築する。"""
+        loaded = 0
+        try:
+            manifests = get_extension_registry(force_reload=True).tools().list(
+                enabled_only=True
+            )
+        except Exception:
+            return 0
+
+        for manifest in manifests:
+            tool_def = self._tool_from_manifest(manifest)
+            if tool_def is None:
+                continue
+            self.register(tool_def)
+            loaded += 1
+        return loaded
+
+    @staticmethod
+    def _tool_from_manifest(manifest):
+        config = manifest.get("config", {}) or {}
+        tool_id = str(config.get("tool_id", manifest.get("id", ""))).strip()
+        if not tool_id:
+            return None
+        execution = dict(config.get("execution", {}))
+        handler = str(config.get("handler", "")).strip()
+        if not execution:
+            execution = {"type": "local"}
+        if handler and "handler" not in execution:
+            execution["handler"] = handler
+        return {
+            "tool_id": tool_id,
+            "name": str(config.get("name", tool_id)),
+            "summary": str(config.get("summary", manifest.get("description", ""))),
+            "tags": list(config.get("tags", [])),
+            "schema": dict(
+                config.get(
+                    "schema",
+                    {
+                        "parameters": {
+                            "type": "object",
+                            "properties": {},
+                            "required": [],
+                        }
+                    },
+                )
+            ),
+            "execution": execution,
+            "metadata": {
+                "source": "extension",
+                "manifest_path": manifest.get("source_path", ""),
+            },
+        }
         self.register({
             "tool_id": "calculator",
             "name": "calculator",

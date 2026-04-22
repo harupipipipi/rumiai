@@ -1,0 +1,15 @@
+{
+  "id": "groq/llama-3.3-70b-versatile",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "groq",
+  "model_id": "llama-3.3-70b-versatile",
+  "display_name": "Llama 3.3 70B Versatile",
+  "type": "chat",
+  "enabled": true,
+  "priority": 1,
+  "defaults": {
+    "chat": true
+  }
+}
+

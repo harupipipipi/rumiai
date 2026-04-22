@@ -1,0 +1,15 @@
+{
+  "id": "genspark/gpt-5-mini",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "genspark",
+  "model_id": "gpt-5-mini",
+  "display_name": "GPT-5 Mini via GenSpark",
+  "type": "chat",
+  "enabled": true,
+  "priority": 1,
+  "defaults": {
+    "chat": true
+  }
+}
+

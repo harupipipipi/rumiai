@@ -45,12 +45,12 @@ def get_settings_dir() -> Path:
 
 def get_tools_dir() -> Path:
     """Legacy tools directory shim."""
-    return Path("tool")
+    return Path("user_data/shared/tools")
 
 
 def get_prompts_dir() -> Path:
     """Legacy prompts directory shim."""
-    return Path("prompt")
+    return Path("user_data/shared/prompts")
 
 
 def get_supporters_dir() -> Path:

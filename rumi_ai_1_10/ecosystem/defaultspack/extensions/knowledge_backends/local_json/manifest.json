@@ -1,0 +1,9 @@
+{
+  "id": "local_json",
+  "category": "knowledge_backend",
+  "version": "1",
+  "display_name": "Local JSON Knowledge",
+  "enabled": true,
+  "entrypoint": "domain.knowledge.store:KnowledgeStore"
+}
+

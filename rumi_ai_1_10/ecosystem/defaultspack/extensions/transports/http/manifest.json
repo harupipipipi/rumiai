@@ -1,0 +1,9 @@
+{
+  "id": "http",
+  "category": "transport",
+  "version": "1",
+  "display_name": "HTTP Transport",
+  "enabled": true,
+  "entrypoint": "transport.http:start_http_server"
+}
+

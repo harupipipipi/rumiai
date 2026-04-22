@@ -63,6 +63,34 @@ class AIClient:
             else:
                 provider_name = "stub"
                 model_name = model_str
+                for pid, prov in self._providers.items():
+                    if pid == "stub":
+                        continue
+                    candidates = []
+                    if callable(getattr(prov, "list_models", None)):
+                        try:
+                            candidates = prov.list_models() or []
+                        except Exception:
+                            candidates = []
+                    if not candidates and hasattr(prov, "KNOWN_MODELS"):
+                        candidates = getattr(prov, "KNOWN_MODELS", []) or []
+                    for candidate in candidates:
+                        if isinstance(candidate, dict):
+                            cid = str(candidate.get("id", ""))
+                            if cid == model_str:
+                                provider_name = pid
+                                model_name = model_str
+                                break
+                            if "/" in cid and cid.split("/", 1)[1] == model_str:
+                                provider_name = pid
+                                model_name = cid.split("/", 1)[1]
+                                break
+                            if str(candidate.get("name", "")) == model_str:
+                                provider_name = pid
+                                model_name = cid.split("/", 1)[1] if "/" in cid else model_str
+                                break
+                    if provider_name != "stub":
+                        break
         provider = self._providers.get(provider_name, self._providers["stub"])
         return provider, model_name
 
@@ -87,11 +115,31 @@ class AIClient:
             {"id": "stub/fast", "name": "Stub Fast Model", "provider": "stub"},
             {"id": "stub/large", "name": "Stub Large Model", "provider": "stub"},
         ]
+        seen = {m["id"] for m in models}
         for pid, prov in self._providers.items():
             if pid == "stub":
                 continue
-            if hasattr(prov, "KNOWN_MODELS"):
-                models.extend(prov.KNOWN_MODELS)
+            listed = []
+            if callable(getattr(prov, "list_models", None)):
+                try:
+                    listed = prov.list_models() or []
+                except Exception:
+                    listed = []
+            if not listed and hasattr(prov, "KNOWN_MODELS"):
+                listed = getattr(prov, "KNOWN_MODELS", []) or []
+            for item in listed:
+                if isinstance(item, dict):
+                    model_id = str(item.get("id", "")).strip()
+                    if not model_id or model_id in seen:
+                        continue
+                    seen.add(model_id)
+                    models.append(item)
+                elif isinstance(item, str):
+                    model_id = item if "/" in item else f"{pid}/{item}"
+                    if model_id in seen:
+                        continue
+                    seen.add(model_id)
+                    models.append({"id": model_id, "name": item, "provider": pid, "type": "chat"})
         if provider is not None:
             models = [m for m in models if m["provider"] == provider]
         return models

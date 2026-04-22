@@ -1,57 +1,96 @@
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+from .providers import (
+    detect_available_providers,
+    get_best_model_for_provider,
+)
+from ..extensions.runtime import get_extension_registry
 
 
 class ProfileLoader:
-    """プロファイル管理。デフォルトプロファイル組み込み + インメモリdict管理。"""
-
-    # 環境変数で最初に見つかったプロバイダーの最高性能モデルを default に割り当てる
-    _PROVIDER_PRIORITY = [
-        ("OPENAI_API_KEY", "openai", "gpt-4o"),
-        ("ANTHROPIC_API_KEY", "anthropic", "claude-sonnet-4-0"),
-        ("GOOGLE_API_KEY", "google", "gemini-2.5-pro"),
-    ]
-
-    _BUILTIN_PROFILES = {
-        "fast": [
-            ("OPENAI_API_KEY", "openai", "gpt-4o-mini"),
-            ("GOOGLE_API_KEY", "google", "gemini-2.5-flash"),
-            ("ANTHROPIC_API_KEY", "anthropic", "claude-3-5-haiku-20241022"),
-        ],
-        "large": [
-            ("OPENAI_API_KEY", "openai", "gpt-4o"),
-            ("ANTHROPIC_API_KEY", "anthropic", "claude-sonnet-4-0"),
-            ("GOOGLE_API_KEY", "google", "gemini-2.5-pro"),
-        ],
-        "embedding": [
-            ("OPENAI_API_KEY", "openai", "text-embedding-3-small"),
-            ("GOOGLE_API_KEY", "google", "text-embedding-004"),
-        ],
-    }
+    """プロファイル管理。extension manifest を優先して組み込みプロファイルを生成する。"""
 
     def __init__(self):
         self._profiles = {}
         self._load_builtin_defaults()
 
+    @staticmethod
+    def _registry_provider_order():
+        try:
+            registry = get_extension_registry(force_reload=True)
+            return [item["id"] for item in registry.llm().providers(enabled_only=True)]
+        except Exception:
+            return []
+
+    @staticmethod
+    def _best_model_from_registry(provider_id, use_case):
+        try:
+            registry = get_extension_registry(force_reload=True)
+            model = registry.llm().best_model(provider_id, use_case=use_case)
+            if model is not None:
+                return str(model.get("model_id", ""))
+        except Exception:
+            pass
+        return ""
+
+    @staticmethod
+    def _embedding_model_from_registry(provider_id):
+        try:
+            registry = get_extension_registry(force_reload=True)
+            for model in registry.llm().models(provider_id=provider_id, enabled_only=True):
+                if str(model.get("type", "")).strip() == "embedding":
+                    return str(model.get("model_id", ""))
+        except Exception:
+            pass
+        return ""
+
     def _load_builtin_defaults(self):
-        """環境変数に基づいてデフォルトプロファイルを組み込み定義する"""
-        # "default" プロファイル
-        for env_var, provider, model in self._PROVIDER_PRIORITY:
-            if os.environ.get(env_var, ""):
+        """利用可能 provider と extension metadata から builtin profile を組み立てる。"""
+        available = detect_available_providers()
+        provider_order = [pid for pid in self._registry_provider_order() if pid in available]
+        if not provider_order:
+            provider_order = [pid for pid in sorted(available.keys()) if pid != "stub"]
+
+        # "default"
+        for provider in provider_order:
+            model = (
+                self._best_model_from_registry(provider, "chat")
+                or get_best_model_for_provider(provider, use_case="chat")
+            )
+            if model:
                 self._profiles["default"] = {"provider": provider, "model": model}
                 break
         if "default" not in self._profiles:
             self._profiles["default"] = {"provider": "stub", "model": "default"}
 
-        # "fast", "large", "embedding" プロファイル
-        for profile_name, candidates in self._BUILTIN_PROFILES.items():
-            for env_var, provider, model in candidates:
-                if os.environ.get(env_var, ""):
-                    self._profiles[profile_name] = {"provider": provider, "model": model}
-                    break
-            if profile_name not in self._profiles:
-                self._profiles[profile_name] = {"provider": "stub", "model": "default"}
+        # "fast"
+        for provider in provider_order:
+            model = self._best_model_from_registry(provider, "fast")
+            if model:
+                self._profiles["fast"] = {"provider": provider, "model": model}
+                break
+        if "fast" not in self._profiles:
+            self._profiles["fast"] = dict(self._profiles["default"])
+
+        # "large"
+        for provider in provider_order:
+            model = (
+                self._best_model_from_registry(provider, "large")
+                or self._best_model_from_registry(provider, "chat")
+                or get_best_model_for_provider(provider, use_case="chat")
+            )
+            if model:
+                self._profiles["large"] = {"provider": provider, "model": model}
+                break
+        if "large" not in self._profiles:
+            self._profiles["large"] = dict(self._profiles["default"])
+
+        # "embedding"
+        for provider in provider_order:
+            model = self._embedding_model_from_registry(provider)
+            if model:
+                self._profiles["embedding"] = {"provider": provider, "model": model}
+                break
+        if "embedding" not in self._profiles:
+            self._profiles["embedding"] = dict(self._profiles["default"])
 
     def load(self, profile_id, profile_dict):
         """プロファイルを登録する"""

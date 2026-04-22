@@ -1,0 +1,15 @@
+{
+  "id": "stub/default",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "stub",
+  "model_id": "default",
+  "display_name": "Stub Default",
+  "type": "chat",
+  "enabled": true,
+  "priority": 1000,
+  "defaults": {
+    "chat": true
+  }
+}
+

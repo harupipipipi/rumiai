@@ -1,0 +1,13 @@
+{
+  "id": "google/gemini-embedding-001",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "google",
+  "model_id": "gemini-embedding-001",
+  "display_name": "Gemini Embedding 001",
+  "priority": 30,
+  "defaults": {
+    "embedding": true
+  },
+  "type": "embedding"
+}

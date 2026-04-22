@@ -1,0 +1,25 @@
+{
+  "id": "google",
+  "category": "llm_provider",
+  "version": "1",
+  "display_name": "Google",
+  "enabled": true,
+  "priority": 30,
+  "adapter": "python_entrypoint",
+  "entrypoint": "domain.ai_client.providers.google_provider:GoogleProvider",
+  "api_key_env": "GOOGLE_API_KEY",
+  "credential_required": true,
+  "default_model_for": {
+    "chat": "gemini-2.5-pro",
+    "fast": "gemini-2.5-flash",
+    "large": "gemini-2.5-pro",
+    "embedding": "gemini-embedding-001"
+  },
+  "capabilities": {
+    "native_tool_calling": true,
+    "vision": true,
+    "embeddings": true,
+    "streaming": true,
+    "structured_output": true
+  }
+}

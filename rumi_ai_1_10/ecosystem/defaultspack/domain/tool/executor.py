@@ -1,5 +1,5 @@
-from domain.tool.registry import ToolRegistry
-from domain.tool.mcp_client import McpClient
+from .registry import ToolRegistry
+from .mcp_client import McpClient
 
 
 # P1-2: サンドボックス用の安全なビルトイン一覧

@@ -1,0 +1,23 @@
+{
+  "id": "openrouter",
+  "category": "llm_provider",
+  "version": "1",
+  "display_name": "OpenRouter",
+  "enabled": true,
+  "priority": 40,
+  "adapter": "python_entrypoint",
+  "entrypoint": "domain.ai_client.providers.openrouter_provider:OpenRouterProvider",
+  "api_key_env": "OPENROUTER_API_KEY",
+  "base_url_env": "OPENROUTER_BASE_URL",
+  "credential_required": false,
+  "default_model": "auto",
+  "capabilities": {
+    "native_tool_calling": true,
+    "vision": true,
+    "embeddings": true,
+    "streaming": true
+  },
+  "config": {
+    "model_sync": "remote_with_cache"
+  }
+}

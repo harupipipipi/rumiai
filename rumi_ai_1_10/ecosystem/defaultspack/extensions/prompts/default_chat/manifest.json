@@ -1,0 +1,12 @@
+{
+  "id": "default_chat",
+  "category": "prompt",
+  "version": "1",
+  "display_name": "Default Chat Prompt",
+  "description": "Default chat prompt extension for defaultspack.",
+  "enabled": true,
+  "config": {
+    "template_file": "prompt.md"
+  }
+}
+

@@ -43,8 +43,8 @@ class TestCompatibilityLayer:
         
         assert compat.get_chats_dir() == Path('chats')
         assert compat.get_settings_dir() == Path('user_data/settings')
-        assert compat.get_tools_dir() == Path('tool')
-        assert compat.get_prompts_dir() == Path('prompt')
+        assert compat.get_tools_dir() == Path('user_data/shared/tools')
+        assert compat.get_prompts_dir() == Path('user_data/shared/prompts')
         assert compat.get_supporters_dir() == Path('supporter')
         assert compat.get_ai_clients_dir() == Path('ai_client')
     
@@ -67,8 +67,8 @@ class TestCompatibilityLayer:
         
         compat._ecosystem_initialized = False
         
-        assert compat.get_component_path('tool_pack') == Path('tool')
-        assert compat.get_component_path('prompt_pack') == Path('prompt')
+        assert compat.get_component_path('tool_pack') == Path('user_data/shared/tools')
+        assert compat.get_component_path('prompt_pack') == Path('user_data/shared/prompts')
         assert compat.get_component_path('unknown_type') is None
 
 

@@ -30,7 +30,8 @@ import time
 import uuid
 from typing import Any
 
-from domain.prompt.template import PromptTemplate
+from ..extensions.runtime import get_extension_registry, get_extensions_root
+from .template import PromptTemplate
 
 
 # ---------------------------------------------------------------------------
@@ -119,25 +120,65 @@ class PromptManager:
         if os.path.isfile(fpath):
             os.remove(fpath)
 
+    def _extension_prompts(self) -> dict[str, dict]:
+        prompts: dict[str, dict] = {}
+        try:
+            registry = get_extension_registry(force_reload=True)
+            extensions_root = get_extensions_root()
+            for manifest in registry.prompts().list(enabled_only=True):
+                prompt_id = str(manifest.get("id", "")).strip()
+                if not prompt_id:
+                    continue
+                template_file = str(
+                    (manifest.get("config", {}) or {}).get("template_file", "prompt.md")
+                ).strip() or "prompt.md"
+                prompt_path = extensions_root / "prompts" / prompt_id / template_file
+                body = ""
+                if prompt_path.is_file():
+                    body = prompt_path.read_text(encoding="utf-8")
+                prompts[prompt_id] = {
+                    "id": prompt_id,
+                    "name": prompt_id,
+                    "content": body,
+                    "body": body,
+                    "description": str(manifest.get("description", "")),
+                    "variables": list((manifest.get("config", {}) or {}).get("variables", [])),
+                    "metadata": {
+                        "source": "extension",
+                        "manifest_path": manifest.get("source_path", ""),
+                    },
+                    "created_at": "",
+                    "updated_at": "",
+                    "read_only": True,
+                }
+        except Exception:
+            return {}
+        return prompts
+
     # -- 一覧 ---------------------------------------------------------------
     def list_prompts(self) -> list[dict]:
         """保存されたプロンプト一覧を返す。"""
         self._ensure_loaded()
-        return list(self._prompts.values())
+        combined = dict(self._extension_prompts())
+        combined.update(self._prompts)
+        return list(combined.values())
 
     # -- 取得 ---------------------------------------------------------------
     def get_prompt(self, prompt_id: str) -> dict | None:
         """ID でプロンプトを取得する。存在しなければ None。"""
         self._ensure_loaded()
-        return self._prompts.get(prompt_id)
+        prompt = self._prompts.get(prompt_id)
+        if prompt is not None:
+            return prompt
+        return self._extension_prompts().get(prompt_id)
 
     def get_prompt_by_name(self, name: str) -> dict | None:
         """name でプロンプトを取得する。存在しなければ None。"""
         self._ensure_loaded()
         pid = self._name_index.get(name)
-        if pid is None:
-            return None
-        return self._prompts.get(pid)
+        if pid is not None:
+            return self._prompts.get(pid)
+        return self._extension_prompts().get(name)
 
     # -- 作成 ---------------------------------------------------------------
     def create_prompt(self, data: dict) -> dict:
