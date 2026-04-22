@@ -7,7 +7,10 @@
   "priority": 30,
   "adapter": "python_entrypoint",
   "entrypoint": "domain.ai_client.providers.google_provider:GoogleProvider",
-  "api_key_env": "GOOGLE_API_KEY",
+  "api_key_env": [
+    "GOOGLE_API_KEY",
+    "GEMINI_API_KEY"
+  ],
   "credential_required": true,
   "default_model_for": {
     "chat": "gemini-2.5-pro",

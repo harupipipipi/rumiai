@@ -19,25 +19,25 @@ manifest does not spell out every compatibility field.
 
 _LEGACY_PROVIDER_REGISTRY = [
     (
-        "OPENAI_API_KEY",
+        ("OPENAI_API_KEY",),
         "openai",
         "ecosystem.defaultspack.domain.ai_client.providers.openai_provider",
         "OpenAIProvider",
     ),
     (
-        "ANTHROPIC_API_KEY",
+        ("ANTHROPIC_API_KEY",),
         "anthropic",
         "ecosystem.defaultspack.domain.ai_client.providers.anthropic_provider",
         "AnthropicProvider",
     ),
     (
-        "GOOGLE_API_KEY",
+        ("GOOGLE_API_KEY", "GEMINI_API_KEY"),
         "google",
         "ecosystem.defaultspack.domain.ai_client.providers.google_provider",
         "GoogleProvider",
     ),
     (
-        "GENSPARK_API_KEY",
+        ("GENSPARK_API_KEY",),
         "genspark",
         "ecosystem.defaultspack.domain.ai_client.providers.genspark_provider",
         "GensparkProvider",
@@ -90,7 +90,7 @@ _CURATED_PROVIDER_METADATA: Dict[str, Dict[str, Any]] = {
         "display_name": "Google",
         "kind": "cloud",
         "description": "Google Gemini and multimodal APIs.",
-        "env_vars": ["GOOGLE_API_KEY", "GOOGLE_APPLICATION_CREDENTIALS"],
+        "env_vars": ["GOOGLE_API_KEY", "GEMINI_API_KEY", "GOOGLE_APPLICATION_CREDENTIALS"],
         "base_url_envs": ["GOOGLE_BASE_URL"],
         "catalog_only": False,
         "supports_invoke": True,
@@ -854,8 +854,8 @@ def build_profile_catalog(active_provider_ids=None, custom_profiles=None):
 
 def _load_legacy_providers() -> Dict[str, Any]:
     available = {}
-    for env_var, provider_id, module_path, class_name in _LEGACY_PROVIDER_REGISTRY:
-        if not _truthy_env(env_var):
+    for env_vars, provider_id, module_path, class_name in _LEGACY_PROVIDER_REGISTRY:
+        if not any(_truthy_env(env_var) for env_var in env_vars):
             continue
         try:
             module = importlib.import_module(module_path)

@@ -1,0 +1,10 @@
+{
+  "id": "google/gemini-2.0-flash-lite",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "google",
+  "model_id": "gemini-2.0-flash-lite",
+  "display_name": "Gemini 2.0 Flash-Lite",
+  "priority": 28,
+  "type": "chat"
+}
