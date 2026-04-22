@@ -25,6 +25,21 @@ cargo tauri dev
 3. `python -m app` で kernel を起動する
 4. `http://127.0.0.1:8765/panel/` へ bootstrap する
 
+## 開発時の承認フロー
+
+- repo checkout を検出しても、それだけでは pack 自動承認は有効になりません
+- 開発環境として kernel へ `RUMI_ENVIRONMENT=development` は渡されます
+- `RUMI_AUTO_APPROVE_LOCAL=true` を明示して viewer を起動したときだけ、開発用の自動承認が有効になります
+
+例:
+
+```bash
+cd rumi_viewer/src-tauri
+RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev
+```
+
+この opt-in を付けない通常の開発起動では、modified pack は再承認待ちのままです。
+
 ## 起動できたときの見え方
 
 - 正常起動すると Tauri window が開きます
