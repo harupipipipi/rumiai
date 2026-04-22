@@ -11,6 +11,7 @@ API 一覧:
   GET  /api/panel/startup/profiles   — 起動プロファイル一覧と slot catalog
   POST /api/panel/startup/profiles   — 起動プロファイル新規作成
   PUT  /api/panel/startup/profiles/{id} — 起動プロファイル更新
+  DELETE /api/panel/startup/profiles/{id} — 起動プロファイル削除
   POST /api/panel/startup/profiles/{id}/duplicate — 起動プロファイル複製
   POST /api/panel/startup/profiles/{id}/activate  — 起動プロファイル切り替え
   POST /api/panel/startup/profiles/{id}/launch    — 起動プロファイル起動
@@ -281,6 +282,13 @@ class ControlPanelHandlersMixin:
             return self._panel_startup_profile_manager().update_profile(profile_id, body)
         except Exception as e:
             _log_internal_error("panel_update_startup_profile", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_delete_startup_profile(self, profile_id: str) -> Dict[str, Any]:
+        try:
+            return self._panel_startup_profile_manager().delete_profile(profile_id)
+        except Exception as e:
+            _log_internal_error("panel_delete_startup_profile", e)
             return {"error": _SAFE_ERROR_MSG, "status_code": 500}
 
     def _panel_duplicate_startup_profile(self, profile_id: str) -> Dict[str, Any]:

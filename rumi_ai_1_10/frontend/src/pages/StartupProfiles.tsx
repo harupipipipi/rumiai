@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   activateStartupProfile,
   createStartupProfile,
+  deleteStartupProfile,
   duplicateStartupProfile,
   fetchStartupProfiles,
   launchStartupProfile,
@@ -19,9 +20,9 @@ import { useAppStore } from '@/src/store';
 import { Button } from '@/src/components/ui/Button';
 import { Input } from '@/src/components/ui/Input';
 import { Badge } from '@/src/components/ui/Badge';
-import { Loader2, Copy, Rocket, Save, PackagePlus, PlugZap, CheckCircle2, PlayCircle } from 'lucide-react';
+import { Loader2, Copy, Rocket, Save, PackagePlus, PlugZap, CheckCircle2, PlayCircle, Trash2, AlertTriangle } from 'lucide-react';
 
-type ActionState = 'create' | 'save' | 'duplicate' | 'activate' | 'launch' | null;
+type ActionState = 'create' | 'save' | 'duplicate' | 'activate' | 'launch' | 'delete' | null;
 
 function formatTimestamp(timestamp: number): string {
   if (!timestamp) return '--';
@@ -168,6 +169,7 @@ function buildSlotNodePorts(slot: ApiStartupSlotSpec, candidate: ApiStartupSlotC
 
 export function StartupProfiles() {
   const addToast = useAppStore((state) => state.addToast);
+  const showDialog = useAppStore((state) => state.showDialog);
   const [payload, setPayload] = useState<StartupProfilesResponseData | null>(null);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [draft, setDraft] = useState<ApiStartupProfile | null>(null);
@@ -212,6 +214,7 @@ export function StartupProfiles() {
   }, [selectedProfile?.profile_id, payload?.profiles]);
 
   const catalog = payload?.catalog ?? null;
+  const profileCount = payload?.profiles.length ?? 0;
   const slotSpecs = catalog?.slot_specs ?? [];
   const standardPacks = catalog?.standard_packs ?? [];
   const selectedStandardPack = standardPacks.find((pack) => pack.pack_id === draft?.standard_pack_id) ?? null;
@@ -306,15 +309,57 @@ export function StartupProfiles() {
     if (!draft) return;
     setActionState('launch');
     try {
-      await launchStartupProfile(draft.profile_id);
-      addToast('Startup profile launched', 'success');
-      await load(draft.profile_id);
+      const response = await launchStartupProfile(draft.profile_id);
+      setPayload((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          active_profile_id: response.active_profile_id ?? current.active_profile_id,
+          last_launched_profile_id: response.profile.profile_id,
+          profiles: current.profiles.map((profile) =>
+            profile.profile_id === response.profile.profile_id ? response.profile : profile,
+          ),
+        };
+      });
+      setSelectedProfileId(response.profile.profile_id);
+      addToast(
+        response.restart_requested
+          ? 'Startup profile launched. Kernel restart scheduled.'
+          : 'Startup profile launched',
+        'success',
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to launch startup profile';
       addToast(message, 'error');
     } finally {
       setActionState(null);
     }
+  };
+
+  const handleDelete = () => {
+    if (!draft) return;
+    showDialog({
+      title: 'Delete startup profile?',
+      message:
+        profileCount <= 1
+          ? 'At least one startup profile must remain.'
+          : `Delete '${draft.name}' and switch to another saved profile?`,
+      confirmText: 'Delete',
+      onConfirm: async () => {
+        if (!draft || profileCount <= 1) return;
+        setActionState('delete');
+        try {
+          const response = await deleteStartupProfile(draft.profile_id);
+          addToast('Startup profile deleted', 'success');
+          await load(response.active_profile_id ?? undefined);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Failed to delete startup profile';
+          addToast(message, 'error');
+        } finally {
+          setActionState(null);
+        }
+      },
+    });
   };
 
   if (loading && !payload) {
@@ -352,7 +397,7 @@ export function StartupProfiles() {
 
                 <div className="space-y-3">
                   {payload?.profiles.map((profile) => {
-                    const isActive = payload.active_profile_id === profile.profile_id;
+                    const isActive = payload?.active_profile_id === profile.profile_id;
                     const isSelected = selectedProfileId === profile.profile_id;
                     return (
                       <button
@@ -394,10 +439,19 @@ export function StartupProfiles() {
                             {payload?.last_launched_profile_id === draft.profile_id ? <Badge variant="outline">Last launched</Badge> : null}
                           </div>
                           <p className="mt-3 text-sm leading-6 text-stone-600">
-                            Contract mismatch never becomes a connection candidate. Each slot is filtered against its required contract before you can save or launch.
+                            Save checks contract compatibility and runtime readiness. Launch writes the active ecosystem and schedules a kernel restart so the selected profile boots for real.
                           </p>
                         </div>
                         <div className="flex flex-wrap gap-2">
+                          <Button
+                            variant="outline"
+                            onClick={handleDelete}
+                            disabled={!draft || profileCount <= 1 || actionState === 'delete'}
+                            className="gap-2"
+                          >
+                            {actionState === 'delete' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                            Delete
+                          </Button>
                           <Button variant="outline" onClick={handleDuplicate} disabled={!draft || actionState === 'duplicate'} className="gap-2">
                             {actionState === 'duplicate' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />}
                             Duplicate
@@ -444,10 +498,24 @@ export function StartupProfiles() {
                             >
                               {standardPacks.map((pack) => (
                                 <option key={pack.pack_id} value={pack.pack_id} disabled={!pack.available}>
-                                  {pack.display_name}{pack.available ? '' : ' (unavailable)'}
+                                  {pack.display_name}
+                                  {pack.available ? '' : pack.enabled ? ' (runtime issue)' : ' (disabled)'}
                                 </option>
                               ))}
                             </select>
+                            {selectedStandardPack && !selectedStandardPack.runtime_ready ? (
+                              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-stone-700">
+                                <div className="flex items-center gap-2 font-semibold text-amber-800">
+                                  <AlertTriangle className="h-4 w-4" />
+                                  Standard pack is not runtime-ready
+                                </div>
+                                <div className="mt-2 space-y-1 text-xs leading-5 text-stone-600">
+                                  {selectedStandardPack.runtime_issues.map((issue) => (
+                                    <div key={`standard-issue-${issue}`}>{issue}</div>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
                           </div>
                         </div>
 
@@ -490,8 +558,13 @@ export function StartupProfiles() {
                                     className="h-10 w-full rounded-xl border border-border bg-white px-3 text-sm text-text-main focus:outline-none focus:ring-2 focus:ring-amber-300"
                                   >
                                     {candidates.map((candidate) => (
-                                      <option key={`${slot.slot_id}-${candidate.pack_id}`} value={candidate.pack_id}>
+                                      <option
+                                        key={`${slot.slot_id}-${candidate.pack_id}`}
+                                        value={candidate.pack_id}
+                                        disabled={!candidate.runtime_ready}
+                                      >
                                         {candidate.display_name}
+                                        {candidate.runtime_ready ? '' : candidate.enabled ? ' (runtime issue)' : ' (disabled)'}
                                       </option>
                                     ))}
                                   </select>
@@ -515,6 +588,28 @@ export function StartupProfiles() {
                                       <Badge key={`${slot.slot_id}-${provide}`} variant="secondary">{summarizeProvide(provide)}</Badge>
                                     ))}
                                   </div>
+                                  {selectedCandidate?.selected_component_id ? (
+                                    <div className="mt-3 text-xs font-medium uppercase tracking-[0.18em] text-stone-500">
+                                      Runtime component: {selectedCandidate.selected_component_id}
+                                    </div>
+                                  ) : null}
+                                  {!selectedCandidate?.runtime_ready ? (
+                                    <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-stone-700">
+                                      <div className="flex items-center gap-2 font-semibold text-amber-800">
+                                        <AlertTriangle className="h-3.5 w-3.5" />
+                                        Runtime issues
+                                      </div>
+                                      <div className="mt-2 space-y-1">
+                                        {(selectedCandidate?.runtime_issues ?? ['No runtime-ready component matched this slot.']).map((issue) => (
+                                          <div key={`${slot.slot_id}-issue-${issue}`}>{issue}</div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="mt-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                                      Runtime-ready for launch handoff.
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             );
@@ -550,6 +645,17 @@ export function StartupProfiles() {
                                 <div className="space-y-2">
                                   <div className="text-xs font-bold uppercase tracking-[0.18em] text-stone-500">Pack Identity</div>
                                   <div className="text-sm text-stone-700">{selectedStandardPack?.pack_identity || 'Unavailable in this workspace'}</div>
+                                  {selectedStandardPack?.runtime_ready ? (
+                                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                                      Standard pack is runtime-ready.
+                                    </div>
+                                  ) : (
+                                    <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-stone-700">
+                                      {(selectedStandardPack?.runtime_issues ?? ['Standard pack is unavailable.']).map((issue) => (
+                                        <div key={`standard-pack-issue-${issue}`}>{issue}</div>
+                                      ))}
+                                    </div>
+                                  )}
                                 </div>
                               }
                             />

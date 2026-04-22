@@ -4,6 +4,7 @@ import type {
   PackToggleResponseData,
   StartupProfilesResponseData,
   StartupProfileMutationResponseData,
+  StartupProfileDeleteResponseData,
   FlowsResponseData,
   ApiFlowDetail,
   FlowCreateResponseData,
@@ -192,6 +193,13 @@ export function updateStartupProfile(
       method: 'PUT',
       body: JSON.stringify(data),
     },
+  );
+}
+
+export function deleteStartupProfile(id: string): Promise<StartupProfileDeleteResponseData> {
+  return apiFetch<StartupProfileDeleteResponseData>(
+    `/api/panel/startup/profiles/${encodeURIComponent(id)}`,
+    { method: 'DELETE' },
   );
 }
 

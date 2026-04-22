@@ -116,6 +116,11 @@
       "pass_body": true
     },
     {
+      "method": "DELETE",
+      "path_pattern": "/api/panel/startup/profiles/{id}",
+      "handler": "_panel_delete_startup_profile"
+    },
+    {
       "method": "PUT",
       "path_pattern": "/api/panel/flows/{id}",
       "handler": "_panel_update_flow",
