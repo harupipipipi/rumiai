@@ -8,6 +8,7 @@ import {
   createUniquePort,
   ensureUniquePortId,
   pickCompatibleHandles,
+  removeEdgesForPort,
   replaceNodePorts,
   syncEdgesForUpdatedPort,
   validateConnection,
@@ -301,9 +302,10 @@ export function useFlowEditor({
   }, [nodes, selectedNode, setEdges, updateNodePorts]);
 
   const removeSelectedNodePort = useCallback((portId: string) => {
+    if (!selectedNode) return;
     const ports = ((selectedNode?.data as { ports?: FlowPort[] } | undefined)?.ports ?? []).filter((port) => port.id !== portId);
     updateNodePorts(ports);
-    setEdges((existing) => existing.filter((edge) => edge.sourceHandle !== portId && edge.targetHandle !== portId));
+    setEdges((existing) => removeEdgesForPort(existing, selectedNode.id, portId));
   }, [selectedNode, setEdges, updateNodePorts]);
 
   const deleteSelectedNode = useCallback(() => {

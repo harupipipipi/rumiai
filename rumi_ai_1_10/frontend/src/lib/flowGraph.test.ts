@@ -6,6 +6,7 @@ import {
   createStartNode,
   createStepNode,
   createUniquePort,
+  removeEdgesForPort,
   replaceNodePorts,
   syncEdgesForUpdatedPort,
   validateConnection,
@@ -180,4 +181,63 @@ test('syncEdgesForUpdatedPort drops edges that become invalid after a port edit'
   const nextEdges = syncEdgesForUpdatedPort(edges, nextNodes, step.id, 'boot-in', 'boot-in');
 
   assert.equal(nextEdges.length, 0);
+});
+
+test('removeEdgesForPort only removes edges connected to the selected node handle', () => {
+  const start = createStartNode();
+  const firstStep = createStepNode(
+    {
+      id: 'registry.load',
+      ports: [
+        createPort('boot', 'input', ['flow.start'], { id: 'boot-in' }),
+        createPort('response', 'output', ['registry.ready'], { id: 'output-main', allowMultiple: true }),
+      ],
+    },
+    { x: 320, y: 140 },
+  );
+  const secondStep = createStepNode(
+    {
+      id: 'log.info',
+      ports: [
+        createPort('boot', 'input', ['flow.start'], { id: 'boot-in' }),
+        createPort('response', 'output', ['log.ready'], { id: 'output-main', allowMultiple: true }),
+      ],
+    },
+    { x: 520, y: 140 },
+  );
+  const edges: Edge[] = [
+    {
+      id: 'e-selected-target',
+      source: start.id,
+      target: firstStep.id,
+      sourceHandle: 'start-out',
+      targetHandle: 'boot-in',
+    },
+    {
+      id: 'e-other-target',
+      source: start.id,
+      target: secondStep.id,
+      sourceHandle: 'start-out',
+      targetHandle: 'boot-in',
+    },
+    {
+      id: 'e-selected-source',
+      source: firstStep.id,
+      target: secondStep.id,
+      sourceHandle: 'output-main',
+      targetHandle: 'boot-in',
+    },
+    {
+      id: 'e-other-source',
+      source: secondStep.id,
+      target: firstStep.id,
+      sourceHandle: 'output-main',
+      targetHandle: 'boot-in',
+    },
+  ];
+
+  const nextEdges = removeEdgesForPort(edges, firstStep.id, 'boot-in');
+  const remainingIds = nextEdges.map((edge) => edge.id).sort();
+
+  assert.deepEqual(remainingIds, ['e-other-target', 'e-selected-source']);
 });

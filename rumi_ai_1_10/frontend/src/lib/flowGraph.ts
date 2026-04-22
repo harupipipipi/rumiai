@@ -240,6 +240,13 @@ export function syncEdgesForUpdatedPort(
   });
 }
 
+export function removeEdgesForPort(edges: Edge[], nodeId: string, portId: string): Edge[] {
+  return edges.filter((edge) => (
+    !(edge.source === nodeId && edge.sourceHandle === portId)
+    && !(edge.target === nodeId && edge.targetHandle === portId)
+  ));
+}
+
 export function createStartNode(position = { x: 160, y: 120 }, basePack = DEFAULT_BASE_PACK): Node<TriggerNodeData> {
   return {
     id: DEFAULT_START_NODE_ID,
