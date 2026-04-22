@@ -197,7 +197,9 @@ class ComponentLifecycleExecutor:
         if not phase:
             return {"_kernel_step_status": "skipped", "_kernel_step_meta": {"reason": "empty_phase_name"}}
         filename = kwargs.get("filename") or f"{phase}.py"
-        components = self.iter_active_components(phase=phase)
+        components = kwargs.get("components")
+        if components is None:
+            components = self.iter_active_components(phase=phase)
         # SV-14 fix: _scoped_syspath を使い、実行後に sys.path を除去する
         # （_ensure_components_on_syspath は永続汚染するため非推奨）
         with self._scoped_syspath(components):

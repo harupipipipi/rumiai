@@ -96,6 +96,29 @@ class TestApprovalScanWarning:
         captured = capsys.readouterr()
         assert "[Rumi] WARNING" not in captured.err
 
+    @patch("core_runtime.approval_manager.get_approval_manager")
+    def test_dev_auto_approved_pack_is_not_left_pending(self, mock_get_am, capsys):
+        """approval scan 時点で dev auto-approve が効けば pending 警告を出さない"""
+        from core_runtime.approval_manager import PackStatus
+
+        k = self._make_kernel()
+        am = self._make_am(
+            ["defaultspack"],
+            {"defaultspack": PackStatus.INSTALLED},
+            {"defaultspack": True},
+        )
+        am.auto_approve_if_dev.return_value = True
+        am.get_status.side_effect = [PackStatus.INSTALLED, PackStatus.APPROVED]
+        mock_get_am.return_value = am
+
+        ctx = {}
+        k._h_approval_scan({"check_hash": True}, ctx)
+
+        captured = capsys.readouterr()
+        assert "awaiting approval" not in captured.err.lower()
+        assert ctx["_packs_approved"] == ["defaultspack"]
+        assert ctx["_packs_pending"] == []
+
 
 # =====================================================================
 # _run_phase_for_component tests (logger.warning)

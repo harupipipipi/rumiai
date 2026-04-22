@@ -2,6 +2,14 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
+from domain.ai_client.providers import (
+    build_profile_catalog,
+    detect_available_providers,
+    detect_rumi_provider,
+    get_all_known_models,
+    get_provider_catalog,
+)
+
 
 class AIClient:
     """AI Client — プロバイダーへの委譲とプロファイル解決"""
@@ -30,7 +38,6 @@ class AIClient:
     def _auto_register_providers(self):
         """環境変数が設定されているプロバイダーを自動登録する"""
         try:
-            from domain.ai_client.providers import detect_available_providers
             available = detect_available_providers()
             for name, instance in available.items():
                 self._providers[name] = instance
@@ -40,7 +47,6 @@ class AIClient:
     def _auto_register_rumi(self):
         """rumi プロバイダーを自動登録する（他のプロバイダーが1つ以上ある場合のみ）"""
         try:
-            from domain.ai_client.providers import detect_rumi_provider
             rumi = detect_rumi_provider(self)
             if rumi is not None:
                 self._providers["rumi"] = rumi
@@ -51,6 +57,13 @@ class AIClient:
         """プロバイダーを動的に登録する"""
         self._providers[name] = provider
 
+    def register_profile(self, name, profile):
+        """プロファイルエイリアスを登録する。"""
+        self._profiles[name] = dict(profile or {})
+
+    def _active_provider_ids(self):
+        return set(self._providers.keys())
+
     def resolve_provider(self, model_str):
         """model文字列("provider/model" or "profile_name")からプロバイダーとモデル名を解決"""
         if "/" in model_str:
@@ -58,11 +71,20 @@ class AIClient:
         else:
             profile = self._profiles.get(model_str)
             if profile:
-                provider_name = profile.get("provider", "stub")
-                model_name = profile.get("model", model_str)
+                provider_name = profile.get("provider") or profile.get("provider_id") or "stub"
+                model_name = profile.get("model") or profile.get("model_id") or model_str
             else:
-                provider_name = "stub"
-                model_name = model_str
+                matches = [
+                    item
+                    for item in self.list_models()
+                    if item.get("model_id") == model_str or item.get("qualified_model_id") == model_str
+                ]
+                if len(matches) == 1:
+                    provider_name = matches[0].get("provider_id", "stub")
+                    model_name = matches[0].get("model_id", model_str)
+                else:
+                    provider_name = "stub"
+                    model_name = model_str
         provider = self._providers.get(provider_name, self._providers["stub"])
         return provider, model_name
 
@@ -82,25 +104,39 @@ class AIClient:
 
     def list_models(self, provider=None):
         """登録済みプロバイダーの既知モデル一覧を返す"""
-        models = [
-            {"id": "stub/default", "name": "Stub Default Model", "provider": "stub"},
-            {"id": "stub/fast", "name": "Stub Fast Model", "provider": "stub"},
-            {"id": "stub/large", "name": "Stub Large Model", "provider": "stub"},
+        active_provider_ids = self._active_provider_ids()
+        if provider is not None and provider not in active_provider_ids:
+            return []
+        models = get_all_known_models(
+            provider_id=provider,
+            active_provider_ids=active_provider_ids,
+        )
+        return [
+            model for model in models
+            if model.get("provider_id") in active_provider_ids
         ]
-        for pid, prov in self._providers.items():
-            if pid == "stub":
-                continue
-            if hasattr(prov, "KNOWN_MODELS"):
-                models.extend(prov.KNOWN_MODELS)
-        if provider is not None:
-            models = [m for m in models if m["provider"] == provider]
-        return models
 
     def list_providers(self):
-        providers = []
-        for pid in self._providers:
-            providers.append({"id": pid, "name": pid.capitalize(), "status": "available"})
-        return providers
+        active_provider_ids = self._active_provider_ids()
+        return [
+            provider for provider in get_provider_catalog(active_provider_ids=active_provider_ids)
+            if provider.get("provider_id") in active_provider_ids
+        ]
+
+    def list_profiles(self, provider=None):
+        active_provider_ids = self._active_provider_ids()
+        profiles = build_profile_catalog(
+            active_provider_ids=active_provider_ids,
+            custom_profiles=self._profiles,
+        )
+        profiles = [
+            profile
+            for profile in profiles
+            if not profile.get("provider_id") or profile.get("provider_id") in active_provider_ids
+        ]
+        if provider is not None:
+            profiles = [profile for profile in profiles if profile.get("provider_id") == provider]
+        return profiles
 
     def embed(self, model, input_text):
         provider, model_name = self.resolve_provider(model)

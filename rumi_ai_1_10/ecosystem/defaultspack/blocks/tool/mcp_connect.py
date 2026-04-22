@@ -32,6 +32,7 @@ def run(input_data, context):
     registry.register_mcp_server(server_name, config)
 
     server_tools = mcp_client.get_server_tools(server_name)
+    registered_tools = []
     for tool in server_tools:
         if not isinstance(tool, dict):
             continue
@@ -39,6 +40,7 @@ def run(input_data, context):
         if not tool_name:
             continue
         tool_id = "mcp__{}__{}".format(server_name, tool_name)
+        registered_tools.append(tool_id)
         registry.register({
             "tool_id": tool_id,
             "name": tool_name,
@@ -55,6 +57,13 @@ def run(input_data, context):
         })
 
     return ok({
+        "server_name": server_name,
         "status": "connected",
         "tools_added": tools_added,
+        "tools": registered_tools,
+        "server": {
+            "name": server_name,
+            "transport": transport,
+            "config": registry.list_mcp_servers().get(server_name, {}),
+        },
     })

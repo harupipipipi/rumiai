@@ -8,7 +8,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ...domain.tool.registry import ToolRegistry as DomainToolRegistry
+try:
+    from ...domain.tool.registry import ToolRegistry as DomainToolRegistry
+except ImportError:
+    from domain.tool.registry import ToolRegistry as DomainToolRegistry
 
 
 @dataclass
