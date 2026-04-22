@@ -30,13 +30,18 @@ class OpenAICompatibleProvider(OpenAIProvider):
         self.provider_id = str(provider_id or "openai_compatible")
         self.display_name = str(display_name or self.provider_id)
         self.DISPLAY_NAME = self.display_name
-        self._api_key_env = str(api_key_env or "")
+        self._api_key_envs = self._normalize_env_names(api_key_env)
+        self._api_key_env = self._api_key_envs[0] if self._api_key_envs else ""
         self._base_url_env = str(base_url_env or "")
         self._default_base_url = str(default_base_url or self.BASE_URL).strip().rstrip("/")
         self._credential_required = bool(credential_required)
         self._extra_headers = dict(extra_headers or {})
 
-        env_api_key = os.environ.get(self._api_key_env, "") if self._api_key_env else ""
+        env_api_key = ""
+        for env_name in self._api_key_envs:
+            env_api_key = str(os.environ.get(env_name, "") or "").strip()
+            if env_api_key:
+                break
         env_base_url = os.environ.get(self._base_url_env, "") if self._base_url_env else ""
 
         self._api_key = str(api_key or env_api_key or "").strip()
@@ -94,7 +99,7 @@ class OpenAICompatibleProvider(OpenAIProvider):
         return cls(
             provider_id=provider_id,
             display_name=str(manifest.get("display_name", provider_id)),
-            api_key_env=str(manifest.get("api_key_env", "")),
+            api_key_env=manifest.get("api_key_env", ""),
             base_url_env=str(manifest.get("base_url_env", "")),
             default_base_url=str(
                 manifest.get("default_base_url", "https://api.openai.com/v1")
@@ -103,6 +108,20 @@ class OpenAICompatibleProvider(OpenAIProvider):
             known_models=known_models,
             extra_headers=dict(manifest.get("headers", {})),
         )
+
+    @staticmethod
+    def _normalize_env_names(value: Any) -> List[str]:
+        if isinstance(value, str):
+            env_name = value.strip()
+            return [env_name] if env_name else []
+        if isinstance(value, (list, tuple, set)):
+            normalized: List[str] = []
+            for item in value:
+                env_name = str(item or "").strip()
+                if env_name and env_name not in normalized:
+                    normalized.append(env_name)
+            return normalized
+        return []
 
     def _normalize_known_models(self, raw_models) -> List[Dict[str, Any]]:
         normalized: List[Dict[str, Any]] = []
@@ -172,7 +191,7 @@ class OpenAICompatibleProvider(OpenAIProvider):
 
     def _ensure_runtime_config(self) -> None:
         if self._credential_required and not self._api_key:
-            missing = self._api_key_env or "api_key"
+            missing = ", ".join(self._api_key_envs) or "api_key"
             raise RuntimeError(
                 f"{self.provider_id}: missing API key env ({missing})"
             )

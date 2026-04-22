@@ -203,3 +203,27 @@ def test_openai_compatible_provider_supports_manifest_constructor():
     assert provider.BASE_URL == "https://manifested.example.test/v1"
     assert listed[0]["id"] == "manifested/manifest-model"
     assert listed[0]["defaults"]["chat"] is True
+
+
+def test_openai_compatible_provider_supports_manifest_api_key_env_list(monkeypatch):
+    from ecosystem.defaultspack.domain.ai_client.providers.openai_compatible_provider import (
+        OpenAICompatibleProvider,
+    )
+
+    monkeypatch.setenv("SECONDARY_MANIFESTED_API_KEY", "secondary-test-key")
+
+    provider = OpenAICompatibleProvider.from_manifest(
+        {
+            "id": "manifested",
+            "display_name": "Manifested",
+            "adapter": "openai_compatible",
+            "api_key_env": ["PRIMARY_MANIFESTED_API_KEY", "SECONDARY_MANIFESTED_API_KEY"],
+            "base_url_env": "MANIFESTED_BASE_URL",
+            "default_base_url": "https://manifested.example.test/v1",
+            "credential_required": True,
+            "default_model": "manifest-model",
+        }
+    )
+
+    assert provider._api_key == "secondary-test-key"
+    assert provider._api_key_env == "PRIMARY_MANIFESTED_API_KEY"

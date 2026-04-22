@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from .categories import DEFAULT_CATEGORY_SPECS
 
@@ -18,6 +18,21 @@ def _as_dict(value: Any, key_name: str) -> Dict[str, Any]:
     if isinstance(value, dict):
         return dict(value)
     raise ManifestValidationError(f"{key_name} must be an object")
+
+
+def _normalize_env_field(value: Any, key_name: str) -> str | List[str]:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (list, tuple)):
+        normalized: List[str] = []
+        for item in value:
+            env_name = str(item or "").strip()
+            if env_name and env_name not in normalized:
+                normalized.append(env_name)
+        return normalized
+    raise ManifestValidationError(f"{key_name} must be a string or array of strings")
 
 
 def validate_manifest(
@@ -74,7 +89,9 @@ def validate_manifest(
             normalized["adapter"] = adapter
         if entrypoint:
             normalized["entrypoint"] = entrypoint
-        api_key_env = str(manifest.get("api_key_env", "")).strip()
+        api_key_env = _normalize_env_field(
+            manifest.get("api_key_env"), "manifest.api_key_env"
+        )
         if api_key_env:
             normalized["api_key_env"] = api_key_env
         base_url_env = str(manifest.get("base_url_env", "")).strip()
