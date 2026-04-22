@@ -1,0 +1,25 @@
+{
+  "id": "calculator",
+  "category": "tool",
+  "version": "1",
+  "display_name": "Calculator",
+  "description": "Basic arithmetic helper.",
+  "enabled": true,
+  "config": {
+    "name": "calculator",
+    "summary": "計算",
+    "tags": ["math"],
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "expression": {"type": "string"}
+        },
+        "required": ["expression"]
+      }
+    },
+    "execution": {
+      "type": "local"
+    }
+  }
+}

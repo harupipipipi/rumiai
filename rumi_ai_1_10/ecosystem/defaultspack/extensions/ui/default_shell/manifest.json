@@ -1,0 +1,11 @@
+{
+  "id": "default_shell",
+  "category": "ui_surface",
+  "version": "1",
+  "display_name": "Default Shell UI",
+  "enabled": true,
+  "config": {
+    "module_id": "ui_shell"
+  }
+}
+

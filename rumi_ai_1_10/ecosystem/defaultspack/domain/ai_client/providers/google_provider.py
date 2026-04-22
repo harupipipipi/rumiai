@@ -9,7 +9,7 @@ import urllib.parse
 import base64
 import ssl
 
-from domain.ai_client.base_provider import BaseProvider
+from ..base_provider import BaseProvider
 
 
 class GoogleProvider(BaseProvider):
@@ -20,10 +20,8 @@ class GoogleProvider(BaseProvider):
     KNOWN_MODELS = [
         {"id": "google/gemini-2.5-pro", "name": "Gemini 2.5 Pro", "provider": "google", "type": "chat"},
         {"id": "google/gemini-2.5-flash", "name": "Gemini 2.5 Flash", "provider": "google", "type": "chat"},
-        {"id": "google/gemini-2.0-flash", "name": "Gemini 2.0 Flash", "provider": "google", "type": "chat"},
-        {"id": "google/gemini-1.5-pro", "name": "Gemini 1.5 Pro", "provider": "google", "type": "chat"},
-        {"id": "google/gemini-1.5-flash", "name": "Gemini 1.5 Flash", "provider": "google", "type": "chat"},
-        {"id": "google/text-embedding-004", "name": "Text Embedding 004", "provider": "google", "type": "embedding"},
+        {"id": "google/gemini-2.5-flash-lite", "name": "Gemini 2.5 Flash-Lite", "provider": "google", "type": "chat"},
+        {"id": "google/gemini-embedding-001", "name": "Gemini Embedding 001", "provider": "google", "type": "embedding"},
     ]
 
     def __init__(self):

@@ -1,0 +1,15 @@
+{
+  "id": "openai_compatible/custom-model",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "openai_compatible",
+  "model_id": "custom-model",
+  "display_name": "Custom OpenAI-Compatible Model",
+  "type": "chat",
+  "enabled": true,
+  "priority": 1,
+  "defaults": {
+    "chat": true
+  }
+}
+

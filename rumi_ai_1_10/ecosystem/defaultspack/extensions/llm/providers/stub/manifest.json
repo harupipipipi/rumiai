@@ -1,0 +1,12 @@
+{
+  "id": "stub",
+  "category": "llm_provider",
+  "version": "1",
+  "display_name": "Stub",
+  "enabled": true,
+  "priority": 999,
+  "adapter": "python_entrypoint",
+  "entrypoint": "domain.ai_client.providers.stub_provider:StubProvider",
+  "credential_required": false
+}
+

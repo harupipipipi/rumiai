@@ -1,0 +1,9 @@
+{
+  "id": "default",
+  "category": "agent_mode",
+  "version": "1",
+  "display_name": "Default Agent Mode",
+  "enabled": true,
+  "entrypoint": "domain.agent.handlers:run"
+}
+

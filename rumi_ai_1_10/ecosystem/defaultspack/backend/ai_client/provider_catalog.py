@@ -276,6 +276,10 @@ _CANONICAL_MODEL_NAMES: Dict[str, str] = {
 
 
 _CATALOG_MODELS: Dict[str, Tuple[Dict[str, Any], ...]] = {
+    "openai": (
+        {"id": "openai/gpt-4o", "name": "GPT-4o", "provider": "openai", "type": "chat"},
+        {"id": "openai/gpt-4o-mini", "name": "GPT-4o mini", "provider": "openai", "type": "chat"},
+    ),
     "stub": (
         {"id": "stub/default", "name": "Stub Default Model", "provider": "stub", "type": "chat"},
         {"id": "stub/fast", "name": "Stub Fast Model", "provider": "stub", "type": "chat"},
@@ -351,18 +355,31 @@ def _env_detected(entry: ProviderCatalogEntry) -> Tuple[bool, List[str]]:
 
 
 def _load_known_models(entry: ProviderCatalogEntry) -> List[Dict[str, Any]]:
+    loaded: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def _append(items: Sequence[Dict[str, Any]]) -> None:
+        for model in items:
+            if not isinstance(model, dict):
+                continue
+            copied = dict(model)
+            key = str(copied.get("id", "") or copied.get("model_id", "") or "").strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            loaded.append(copied)
+
     if entry.module_path and entry.class_name:
         try:
             mod = import_module(entry.module_path)
             provider_cls = getattr(mod, entry.class_name)
             known_models = getattr(provider_cls, "KNOWN_MODELS", [])
             if isinstance(known_models, Sequence):
-                loaded = [dict(model) for model in known_models if isinstance(model, dict)]
-                if loaded:
-                    return loaded
+                _append([dict(model) for model in known_models if isinstance(model, dict)])
         except Exception:
             pass
-    return [dict(model) for model in _CATALOG_MODELS.get(entry.provider_id, ())]
+    _append([dict(model) for model in _CATALOG_MODELS.get(entry.provider_id, ())])
+    return loaded
 
 
 def _normalize_model_payload(model: Dict[str, Any], entry: ProviderCatalogEntry, detected: bool) -> Dict[str, Any]:

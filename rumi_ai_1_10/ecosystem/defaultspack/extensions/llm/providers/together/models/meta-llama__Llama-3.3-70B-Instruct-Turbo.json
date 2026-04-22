@@ -1,0 +1,15 @@
+{
+  "id": "together/meta-llama/Llama-3.3-70B-Instruct-Turbo",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "together",
+  "model_id": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+  "display_name": "Llama 3.3 70B Instruct Turbo",
+  "type": "chat",
+  "enabled": true,
+  "priority": 1,
+  "defaults": {
+    "chat": true
+  }
+}
+

@@ -1,0 +1,26 @@
+{
+  "id": "web_search",
+  "category": "tool",
+  "version": "1",
+  "display_name": "Web Search",
+  "description": "Basic web search tool extension.",
+  "enabled": true,
+  "config": {
+    "name": "web_search",
+    "summary": "ウェブ検索",
+    "tags": ["search"],
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {"type": "string"}
+        },
+        "required": ["query"]
+      }
+    },
+    "execution": {
+      "type": "local"
+    },
+    "handler": "domain.tool.executor:ToolExecutor.execute"
+  }
+}

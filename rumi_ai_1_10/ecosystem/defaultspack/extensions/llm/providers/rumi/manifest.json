@@ -1,0 +1,12 @@
+{
+  "id": "rumi",
+  "category": "llm_provider",
+  "version": "1",
+  "display_name": "Rumi Meta Provider",
+  "enabled": true,
+  "priority": 190,
+  "adapter": "python_entrypoint",
+  "entrypoint": "domain.ai_client.providers.rumi_provider:RumiProvider",
+  "credential_required": false
+}
+

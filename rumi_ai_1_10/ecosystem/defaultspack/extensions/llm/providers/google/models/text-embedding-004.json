@@ -1,0 +1,12 @@
+{
+  "id": "google/text-embedding-004",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "google",
+  "model_id": "text-embedding-004",
+  "display_name": "Text Embedding 004",
+  "type": "embedding",
+  "enabled": true,
+  "priority": 3
+}
+

@@ -1,0 +1,13 @@
+{
+  "id": "openai/text-embedding-3-large",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "openai",
+  "model_id": "text-embedding-3-large",
+  "display_name": "text-embedding-3-large",
+  "priority": 30,
+  "defaults": {
+    "embedding": true
+  },
+  "type": "embedding"
+}

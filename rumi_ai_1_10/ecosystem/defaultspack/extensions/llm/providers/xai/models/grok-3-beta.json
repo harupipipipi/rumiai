@@ -1,0 +1,15 @@
+{
+  "id": "xai/grok-3-beta",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "xai",
+  "model_id": "grok-3-beta",
+  "display_name": "Grok 3 Beta",
+  "type": "chat",
+  "enabled": true,
+  "priority": 1,
+  "defaults": {
+    "chat": true
+  }
+}
+
