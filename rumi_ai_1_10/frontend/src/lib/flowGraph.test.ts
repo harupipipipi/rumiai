@@ -111,6 +111,36 @@ test('nodesToYaml and yamlToNodes preserve rumi_graph metadata', () => {
   assert.equal((parsed.nodes[0].data as { title?: string }).title, 'rumi_start');
 });
 
+test('yamlToNodes preserves fallback metadata for empty YAML', () => {
+  const parsed = yamlToNodes('', {
+    flowId: 'custom_flow',
+    name: 'custom.flow.yaml',
+    description: 'Custom fallback',
+    basePack: 'basepack',
+    phases: ['graph'],
+    defaults: { fail_soft: false, on_missing_step: 'error' },
+  });
+
+  assert.equal(parsed.meta.flowId, 'custom_flow');
+  assert.equal(parsed.meta.name, 'custom.flow.yaml');
+  assert.equal(parsed.meta.description, 'Custom fallback');
+  assert.equal(parsed.meta.basePack, 'basepack');
+  assert.deepEqual(parsed.meta.phases, ['graph']);
+  assert.deepEqual(parsed.meta.defaults, { fail_soft: false, on_missing_step: 'error' });
+});
+
+test('yamlToNodes preserves fallback metadata after YAML parse failure', () => {
+  const parsed = yamlToNodes('flow_id: [broken', {
+    flowId: 'broken_flow',
+    name: 'broken.flow.yaml',
+    basePack: 'basepack',
+  });
+
+  assert.equal(parsed.meta.flowId, 'broken_flow');
+  assert.equal(parsed.meta.name, 'broken.flow.yaml');
+  assert.equal(parsed.meta.basePack, 'basepack');
+});
+
 test('createUniquePort assigns a distinct handle id for repeated ports on the same node', () => {
   const existingPorts = [createPort('new-in', 'input', [])];
 
@@ -240,4 +270,88 @@ test('removeEdgesForPort only removes edges connected to the selected node handl
   const remainingIds = nextEdges.map((edge) => edge.id).sort();
 
   assert.deepEqual(remainingIds, ['e-other-target', 'e-selected-source']);
+});
+
+test('validateConnection rejects duplicate output connections when an existing edge omits sourceHandle', () => {
+  const source = createStepNode(
+    {
+      id: 'registry.load',
+      ports: [createPort('registry', 'output', ['registry.ready'], { id: 'registry-out', allowMultiple: false })],
+    },
+    { x: 100, y: 100 },
+  );
+  const firstTarget = createStepNode(
+    {
+      id: 'http.get',
+      ports: [createPort('registry', 'input', ['registry.ready'], { id: 'registry-in', allowMultiple: false })],
+    },
+    { x: 260, y: 100 },
+  );
+  const secondTarget = createStepNode(
+    {
+      id: 'http.post',
+      ports: [createPort('registry', 'input', ['registry.ready'], { id: 'registry-in', allowMultiple: false })],
+    },
+    { x: 420, y: 100 },
+  );
+
+  const result = validateConnection(
+    {
+      source: source.id,
+      target: secondTarget.id,
+      sourceHandle: 'registry-out',
+      targetHandle: 'registry-in',
+    },
+    [source as Node, firstTarget as Node, secondTarget as Node],
+    [
+      {
+        id: 'e-existing',
+        source: source.id,
+        target: firstTarget.id,
+        targetHandle: 'registry-in',
+      },
+    ],
+  );
+
+  assert.equal(result.valid, false);
+  assert.match(result.reason ?? '', /複数接続/);
+});
+
+test('validateConnection rejects duplicate input connections when an existing edge omits targetHandle', () => {
+  const firstSource = createStartNode();
+  const secondSource = createStepNode(
+    {
+      id: 'emit',
+      ports: [createPort('signal', 'output', ['flow.start'], { id: 'signal-out', allowMultiple: false })],
+    },
+    { x: 100, y: 240 },
+  );
+  const target = createStepNode(
+    {
+      id: 'check_profile',
+      ports: [createPort('boot', 'input', ['flow.start'], { id: 'boot-in', allowMultiple: false })],
+    },
+    { x: 320, y: 140 },
+  );
+
+  const result = validateConnection(
+    {
+      source: secondSource.id,
+      target: target.id,
+      sourceHandle: 'signal-out',
+      targetHandle: 'boot-in',
+    },
+    [firstSource as Node, secondSource as Node, target as Node],
+    [
+      {
+        id: 'e-existing',
+        source: firstSource.id,
+        target: target.id,
+        sourceHandle: 'start-out',
+      },
+    ],
+  );
+
+  assert.equal(result.valid, false);
+  assert.match(result.reason ?? '', /複数接続/);
 });

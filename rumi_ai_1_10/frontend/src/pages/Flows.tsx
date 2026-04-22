@@ -211,9 +211,8 @@ function FlowEditorInner() {
         flowId,
         name: fileName,
       });
-      const newId = Math.random().toString(36).slice(2, 9);
-      await addFlow({ id: newId, name: fileName, content: yamlContent });
-      const created = useAppStore.getState().flows.find((flow) => flow.name === fileName);
+      await addFlow({ id: flowId, name: fileName, content: yamlContent });
+      const created = useAppStore.getState().flows.find((flow) => flow.id === flowId);
       if (created) {
         setSelectedFlowId(created.id);
       }

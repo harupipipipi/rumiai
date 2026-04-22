@@ -70,6 +70,23 @@ function inferMeta(doc: FlowDocument, fallback?: Partial<FlowDocumentMeta>): Flo
   };
 }
 
+function createFallbackDocument(fallback?: Partial<FlowDocumentMeta>): ParsedFlowDocument {
+  const graph = createDefaultFlowGraph(fallback?.basePack || DEFAULT_BASE_PACK);
+  return {
+    nodes: graph.nodes as AppNode[],
+    edges: graph.edges,
+    meta: {
+      ...graph.meta,
+      flowId: fallback?.flowId?.trim() || graph.meta.flowId,
+      name: fallback?.name,
+      description: fallback?.description,
+      phases: fallback?.phases?.length ? [...fallback.phases] : graph.meta.phases,
+      defaults: fallback?.defaults ?? graph.meta.defaults,
+      basePack: fallback?.basePack || graph.meta.basePack,
+    },
+  };
+}
+
 function createNodesFromSimpleDocument(doc: FlowDocument, meta: FlowDocumentMeta): ParsedFlowDocument {
   const graph = createDefaultFlowGraph(meta.basePack);
   const nodes: AppNode[] = [
@@ -192,13 +209,13 @@ export function nodesToYaml(nodes: Node[], edges: Edge[], meta?: Partial<FlowDoc
 
 export function yamlToNodes(yamlStr: string, fallbackMeta?: Partial<FlowDocumentMeta>): ParsedFlowDocument {
   if (!yamlStr.trim()) {
-    return createDefaultFlowGraph(fallbackMeta?.basePack || DEFAULT_BASE_PACK);
+    return createFallbackDocument(fallbackMeta);
   }
 
   try {
     const parsed = yaml.load(yamlStr) as FlowDocument | null;
     if (!parsed || typeof parsed !== 'object') {
-      return createDefaultFlowGraph(fallbackMeta?.basePack || DEFAULT_BASE_PACK);
+      return createFallbackDocument(fallbackMeta);
     }
 
     const meta = inferMeta(parsed, fallbackMeta);
@@ -219,6 +236,6 @@ export function yamlToNodes(yamlStr: string, fallbackMeta?: Partial<FlowDocument
     return createNodesFromSimpleDocument(parsed, meta);
   } catch (error) {
     console.error('YAML parsing error', error);
-    return createDefaultFlowGraph(fallbackMeta?.basePack || DEFAULT_BASE_PACK);
+    return createFallbackDocument(fallbackMeta);
   }
 }

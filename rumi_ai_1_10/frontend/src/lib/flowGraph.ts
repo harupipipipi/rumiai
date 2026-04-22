@@ -125,11 +125,11 @@ function hasContractMatch(sourcePort: FlowPort | null, targetPort: FlowPort | nu
   return sourcePort.contracts.some((contract) => targetPort.contracts.includes(contract));
 }
 
-function portConnectionCount(edges: Edge[], nodeId: string, handleId: string | null | undefined, direction: PortDirection): number {
+function portConnectionCount(edges: Edge[], node: Node, port: FlowPort, direction: PortDirection): number {
   return edges.filter((edge) =>
     direction === 'output'
-      ? edge.source === nodeId && (handleId ? edge.sourceHandle === handleId : !edge.sourceHandle)
-      : edge.target === nodeId && (handleId ? edge.targetHandle === handleId : !edge.targetHandle),
+      ? edge.source === node.id && getPort(node, edge.sourceHandle)?.id === port.id
+      : edge.target === node.id && getPort(node, edge.targetHandle)?.id === port.id,
   ).length;
 }
 
@@ -169,10 +169,10 @@ export function validateConnection(
     };
   }
 
-  if (!sourcePort.allowMultiple && portConnectionCount(edges, connection.source, sourcePort.id, 'output') > 0) {
+  if (!sourcePort.allowMultiple && portConnectionCount(edges, sourceNode, sourcePort, 'output') > 0) {
     return { valid: false, reason: `${sourcePort.label} は複数接続を許可していません。` };
   }
-  if (!targetPort.allowMultiple && portConnectionCount(edges, connection.target, targetPort.id, 'input') > 0) {
+  if (!targetPort.allowMultiple && portConnectionCount(edges, targetNode, targetPort, 'input') > 0) {
     return { valid: false, reason: `${targetPort.label} は複数接続を許可していません。` };
   }
 
