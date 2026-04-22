@@ -1,0 +1,14 @@
+{
+  "id": "anthropic/claude-sonnet-4-6",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "anthropic",
+  "model_id": "claude-sonnet-4-6",
+  "display_name": "Claude Sonnet 4.6",
+  "priority": 10,
+  "defaults": {
+    "chat": true,
+    "fast": true
+  },
+  "type": "chat"
+}

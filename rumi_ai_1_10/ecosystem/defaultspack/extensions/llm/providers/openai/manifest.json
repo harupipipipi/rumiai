@@ -1,0 +1,30 @@
+{
+  "id": "openai",
+  "category": "llm_provider",
+  "version": "1",
+  "display_name": "OpenAI",
+  "description": "Official OpenAI provider adapter.",
+  "enabled": true,
+  "priority": 10,
+  "adapter": "python_entrypoint",
+  "entrypoint": "domain.ai_client.providers.openai_provider:OpenAIProvider",
+  "api_key_env": "OPENAI_API_KEY",
+  "base_url_env": "OPENAI_BASE_URL",
+  "credential_required": true,
+  "default_model_for": {
+    "chat": "gpt-5.4",
+    "fast": "gpt-5.4-mini",
+    "large": "gpt-5.4",
+    "embedding": "text-embedding-3-large"
+  },
+  "capabilities": {
+    "native_tool_calling": true,
+    "vision": true,
+    "embeddings": true,
+    "image_generation": true,
+    "transcription": true,
+    "tts": true,
+    "streaming": true,
+    "structured_output": true
+  }
+}

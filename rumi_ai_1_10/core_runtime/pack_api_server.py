@@ -480,8 +480,10 @@ class PackAPIHandler(
         status: int = 200,
         extra_headers: Optional[list[tuple[str, str]]] = None,
     ) -> None:
+        data = response.to_json().encode('utf-8')
         self.send_response(status)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Content-Length', str(len(data)))
         origin = self._get_cors_origin(self.headers.get('Origin', ''))
         if origin:
             self.send_header('Access-Control-Allow-Origin', origin)
@@ -489,7 +491,21 @@ class PackAPIHandler(
         for header_name, header_value in extra_headers or []:
             self.send_header(header_name, header_value)
         self.end_headers()
-        self.wfile.write(response.to_json().encode('utf-8'))
+        self.wfile.write(data)
+
+    def _discard_request_body(self) -> None:
+        """Consume unread request bytes before returning an early response."""
+        try:
+            raw_cl = self.headers.get('Content-Length', '0')
+            content_length = int(raw_cl)
+        except (TypeError, ValueError):
+            content_length = 0
+        if content_length <= 0:
+            return
+        try:
+            self.rfile.read(content_length)
+        except Exception:
+            logger.debug("Failed to discard request body", exc_info=True)
 
     def _send_result(self, result, error_status: int = 500) -> None:
         """ハンドラ戻り値を判定してレスポンスを送信する (T-008)。
@@ -1244,6 +1260,7 @@ class PackAPIHandler(
 
         # --- 認証チェック（pre-auth ルート以外）---
         if not _is_pre_auth_post and not self._check_auth("POST", _pre_auth_path_post):
+            self._discard_request_body()
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return
         
@@ -1668,6 +1685,7 @@ class PackAPIHandler(
         # --- テーブル駆動: 認証チェック ---
         _pre_auth_path_put = urlparse(self.path).path
         if not self._is_pre_auth_route("PUT", _pre_auth_path_put) and not self._check_auth("PUT", _pre_auth_path_put):
+            self._discard_request_body()
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return
 

@@ -1,0 +1,15 @@
+{
+  "id": "rumi/default",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "rumi",
+  "model_id": "default",
+  "display_name": "Rumi Default",
+  "type": "chat",
+  "enabled": true,
+  "priority": 1,
+  "defaults": {
+    "chat": true
+  }
+}
+

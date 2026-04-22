@@ -1,0 +1,15 @@
+{
+  "id": "llama_cpp/gguf-model",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "llama_cpp",
+  "model_id": "gguf-model",
+  "display_name": "llama.cpp GGUF Model",
+  "type": "chat",
+  "enabled": true,
+  "priority": 1,
+  "defaults": {
+    "chat": true
+  }
+}
+

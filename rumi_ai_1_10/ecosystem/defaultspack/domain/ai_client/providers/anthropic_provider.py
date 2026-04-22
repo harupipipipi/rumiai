@@ -8,22 +8,20 @@ import urllib.error
 import base64
 import ssl
 
-from domain.ai_client.base_provider import BaseProvider
+from ..base_provider import BaseProvider
 
 
 class AnthropicProvider(BaseProvider):
-    """Anthropic API プロバイダー (Claude 4 Opus, Claude 4 Sonnet 等)"""
+    """Anthropic API provider."""
 
     BASE_URL = "https://api.anthropic.com"
     API_VERSION = "2023-06-01"
 
     KNOWN_MODELS = [
-        {"id": "anthropic/claude-opus-4-0", "name": "Claude Opus 4", "provider": "anthropic", "type": "chat"},
-        {"id": "anthropic/claude-sonnet-4-0", "name": "Claude Sonnet 4", "provider": "anthropic", "type": "chat"},
-        {"id": "anthropic/claude-3-5-sonnet-20241022", "name": "Claude 3.5 Sonnet", "provider": "anthropic", "type": "chat"},
-        {"id": "anthropic/claude-3-5-haiku-20241022", "name": "Claude 3.5 Haiku", "provider": "anthropic", "type": "chat"},
-        {"id": "anthropic/claude-3-opus-20240229", "name": "Claude 3 Opus", "provider": "anthropic", "type": "chat"},
-        {"id": "anthropic/claude-3-haiku-20240307", "name": "Claude 3 Haiku", "provider": "anthropic", "type": "chat"},
+        {"id": "anthropic/claude-opus-4-6", "name": "Claude Opus 4.6", "provider": "anthropic", "type": "chat"},
+        {"id": "anthropic/claude-sonnet-4-6", "name": "Claude Sonnet 4.6", "provider": "anthropic", "type": "chat"},
+        {"id": "anthropic/claude-haiku-4-5", "name": "Claude Haiku 4.5", "provider": "anthropic", "type": "chat"},
+        {"id": "anthropic/claude-sonnet-4-20250514", "name": "Claude Sonnet 4 snapshot", "provider": "anthropic", "type": "chat"},
     ]
 
     def __init__(self):

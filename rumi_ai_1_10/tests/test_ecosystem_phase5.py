@@ -43,8 +43,8 @@ class TestCompatibilityLayer:
         
         assert compat.get_chats_dir() == Path('chats')
         assert compat.get_settings_dir() == Path('user_data/settings')
-        assert compat.get_tools_dir() == Path('tool')
-        assert compat.get_prompts_dir() == Path('prompt')
+        assert compat.get_tools_dir() == Path('user_data/shared/tools')
+        assert compat.get_prompts_dir() == Path('user_data/shared/prompts')
         assert compat.get_supporters_dir() == Path('supporter')
         assert compat.get_ai_clients_dir() == Path('ai_client')
     
@@ -67,8 +67,8 @@ class TestCompatibilityLayer:
         
         compat._ecosystem_initialized = False
         
-        assert compat.get_component_path('tool_pack') == Path('tool')
-        assert compat.get_component_path('prompt_pack') == Path('prompt')
+        assert compat.get_component_path('tool_pack') == Path('user_data/shared/tools')
+        assert compat.get_component_path('prompt_pack') == Path('user_data/shared/prompts')
         assert compat.get_component_path('unknown_type') is None
 
 
@@ -121,6 +121,36 @@ class TestToolLoaderMigration:
         loader = ToolLoader(tools_dir=custom_path)
         assert loader.tools_dir == custom_path
 
+    def test_explicit_path_override_with_defaultspack_backend_first(self, temp_dir, monkeypatch):
+        """defaultspack backendが先でも legacy import が解決できる"""
+        backend_root = Path(__file__).parent.parent / 'ecosystem' / 'defaultspack' / 'backend'
+        monkeypatch.syspath_prepend(str(backend_root))
+        sys.modules.pop('tool.tool_loader', None)
+        sys.modules.pop('tool', None)
+
+        from tool.tool_loader import ToolLoader
+
+        custom_path = temp_dir / 'custom_tools_backend'
+        custom_path.mkdir()
+
+        loader = ToolLoader(tools_dir=custom_path)
+        assert loader.tools_dir == custom_path
+
+    def test_explicit_path_override_with_defaultspack_blocks_first(self, temp_dir, monkeypatch):
+        """defaultspack blocksが先でも legacy import が解決できる"""
+        blocks_root = Path(__file__).parent.parent / 'ecosystem' / 'defaultspack' / 'blocks'
+        monkeypatch.syspath_prepend(str(blocks_root))
+        sys.modules.pop('tool.tool_loader', None)
+        sys.modules.pop('tool', None)
+
+        from tool.tool_loader import ToolLoader
+
+        custom_path = temp_dir / 'custom_tools_blocks'
+        custom_path.mkdir()
+
+        loader = ToolLoader(tools_dir=custom_path)
+        assert loader.tools_dir == custom_path
+
 
 class TestPromptLoaderMigration:
     """PromptLoader移行のテスト"""
@@ -138,6 +168,36 @@ class TestPromptLoaderMigration:
         custom_path = temp_dir / 'custom_prompts'
         custom_path.mkdir()
         
+        loader = PromptLoader(prompt_dir=custom_path)
+        assert loader.prompt_dir == custom_path
+
+    def test_explicit_path_override_with_defaultspack_backend_first(self, temp_dir, monkeypatch):
+        """defaultspack backendが先でも legacy import が解決できる"""
+        backend_root = Path(__file__).parent.parent / 'ecosystem' / 'defaultspack' / 'backend'
+        monkeypatch.syspath_prepend(str(backend_root))
+        sys.modules.pop('prompt.prompt_loader', None)
+        sys.modules.pop('prompt', None)
+
+        from prompt.prompt_loader import PromptLoader
+
+        custom_path = temp_dir / 'custom_prompts_backend'
+        custom_path.mkdir()
+
+        loader = PromptLoader(prompt_dir=custom_path)
+        assert loader.prompt_dir == custom_path
+
+    def test_explicit_path_override_with_defaultspack_blocks_first(self, temp_dir, monkeypatch):
+        """defaultspack blocksが先でも legacy import が解決できる"""
+        blocks_root = Path(__file__).parent.parent / 'ecosystem' / 'defaultspack' / 'blocks'
+        monkeypatch.syspath_prepend(str(blocks_root))
+        sys.modules.pop('prompt.prompt_loader', None)
+        sys.modules.pop('prompt', None)
+
+        from prompt.prompt_loader import PromptLoader
+
+        custom_path = temp_dir / 'custom_prompts_blocks'
+        custom_path.mkdir()
+
         loader = PromptLoader(prompt_dir=custom_path)
         assert loader.prompt_dir == custom_path
 

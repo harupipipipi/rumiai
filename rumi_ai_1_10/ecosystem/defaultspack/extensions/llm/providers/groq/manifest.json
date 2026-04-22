@@ -1,0 +1,18 @@
+{
+  "id": "groq",
+  "category": "llm_provider",
+  "version": "1",
+  "display_name": "Groq",
+  "enabled": true,
+  "priority": 70,
+  "adapter": "openai_compatible",
+  "api_key_env": "GROQ_API_KEY",
+  "base_url_env": "GROQ_BASE_URL",
+  "default_base_url": "https://api.groq.com/openai/v1",
+  "credential_required": true,
+  "default_model": "llama-3.3-70b-versatile",
+  "capabilities": {
+    "native_tool_calling": true,
+    "streaming": true
+  }
+}

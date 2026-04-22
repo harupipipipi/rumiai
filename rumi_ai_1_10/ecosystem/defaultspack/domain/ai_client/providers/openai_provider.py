@@ -9,29 +9,25 @@ import urllib.parse
 import base64
 import ssl
 
-from domain.ai_client.base_provider import BaseProvider
+from ..base_provider import BaseProvider
 
 
 class OpenAIProvider(BaseProvider):
-    """OpenAI API プロバイダー (GPT-4o, GPT-4, GPT-3.5-turbo, dall-e-3, whisper-1, tts-1, text-embedding-3-small 等)"""
+    """OpenAI API provider with modern default catalog."""
 
     BASE_URL = "https://api.openai.com/v1"
 
     KNOWN_MODELS = [
-        {"id": "openai/gpt-4o", "name": "GPT-4o", "provider": "openai", "type": "chat"},
-        {"id": "openai/gpt-4o-mini", "name": "GPT-4o Mini", "provider": "openai", "type": "chat"},
-        {"id": "openai/gpt-4-turbo", "name": "GPT-4 Turbo", "provider": "openai", "type": "chat"},
-        {"id": "openai/gpt-4", "name": "GPT-4", "provider": "openai", "type": "chat"},
-        {"id": "openai/gpt-3.5-turbo", "name": "GPT-3.5 Turbo", "provider": "openai", "type": "chat"},
-        {"id": "openai/o1", "name": "o1", "provider": "openai", "type": "chat"},
-        {"id": "openai/o1-mini", "name": "o1 Mini", "provider": "openai", "type": "chat"},
-        {"id": "openai/o3-mini", "name": "o3 Mini", "provider": "openai", "type": "chat"},
-        {"id": "openai/dall-e-3", "name": "DALL-E 3", "provider": "openai", "type": "image_gen"},
-        {"id": "openai/whisper-1", "name": "Whisper", "provider": "openai", "type": "transcription"},
-        {"id": "openai/tts-1", "name": "TTS-1", "provider": "openai", "type": "tts"},
-        {"id": "openai/tts-1-hd", "name": "TTS-1 HD", "provider": "openai", "type": "tts"},
-        {"id": "openai/text-embedding-3-small", "name": "Embedding 3 Small", "provider": "openai", "type": "embedding"},
-        {"id": "openai/text-embedding-3-large", "name": "Embedding 3 Large", "provider": "openai", "type": "embedding"},
+        {"id": "openai/gpt-5.4", "name": "GPT-5.4", "provider": "openai", "type": "chat"},
+        {"id": "openai/gpt-5.4-mini", "name": "GPT-5.4 mini", "provider": "openai", "type": "chat"},
+        {"id": "openai/gpt-5.4-nano", "name": "GPT-5.4 nano", "provider": "openai", "type": "chat"},
+        {"id": "openai/gpt-image-1", "name": "GPT Image 1", "provider": "openai", "type": "image_gen"},
+        {"id": "openai/gpt-image-1-mini", "name": "GPT Image 1 mini", "provider": "openai", "type": "image_gen"},
+        {"id": "openai/gpt-4o-transcribe", "name": "GPT-4o Transcribe", "provider": "openai", "type": "transcription"},
+        {"id": "openai/gpt-4o-mini-transcribe", "name": "GPT-4o mini Transcribe", "provider": "openai", "type": "transcription"},
+        {"id": "openai/gpt-4o-mini-tts", "name": "GPT-4o mini TTS", "provider": "openai", "type": "tts"},
+        {"id": "openai/text-embedding-3-small", "name": "text-embedding-3-small", "provider": "openai", "type": "embedding"},
+        {"id": "openai/text-embedding-3-large", "name": "text-embedding-3-large", "provider": "openai", "type": "embedding"},
     ]
 
     def __init__(self):

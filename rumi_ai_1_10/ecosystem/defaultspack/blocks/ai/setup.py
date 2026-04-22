@@ -28,6 +28,11 @@ def run(context):
         return handler
 
     routes = [
+        # --- Catalog / provider / model routes ---
+        ("GET", "/api/ai/catalog", _lazy("blocks.ai.catalog"), {}),
+        ("GET", "/api/ai/providers", _lazy("blocks.ai.providers"), {}),
+        ("GET", "/api/ai/models", _lazy("blocks.ai.models"), {}),
+        ("GET", "/api/ai/profiles", _lazy("blocks.ai.profiles"), {}),
         # --- Routing: analyze ---
         ("POST", "/api/ai/routing/analyze", _lazy("blocks.ai.routing.analyze"), {}),
         # --- Routing: route ---

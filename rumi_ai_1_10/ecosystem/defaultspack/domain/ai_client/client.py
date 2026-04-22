@@ -1,10 +1,21 @@
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+
+from domain.ai_client.providers import (
+    build_profile_catalog,
+    detect_available_providers,
+    detect_rumi_provider,
+    get_all_known_models,
+    get_provider_catalog,
+    get_provider_catalog_map,
+)
 
 
 class AIClient:
-    """AI Client — プロバイダーへの委譲とプロファイル解決"""
+    """AI Client - provider routing with profile and catalog compatibility."""
+
     _instance = None
 
     def __new__(cls):
@@ -21,17 +32,16 @@ class AIClient:
         self._profiles = {}
         self._register_default_provider()
         self._auto_register_providers()
-        self._load_profiles()
         self._auto_register_rumi()
 
     def _register_default_provider(self):
         from domain.ai_client.providers.stub_provider import StubProvider
+
         self._providers["stub"] = StubProvider()
 
     def _auto_register_providers(self):
-        """環境変数が設定されているプロバイダーを自動登録する"""
+        """環境変数が設定されているプロバイダーを自動登録する。"""
         try:
-            from domain.ai_client.providers import detect_available_providers
             available = detect_available_providers()
             for name, instance in available.items():
                 self._providers[name] = instance
@@ -39,39 +49,183 @@ class AIClient:
             pass
 
     def _auto_register_rumi(self):
-        """rumi プロバイダーを自動登録する（他のプロバイダーが1つ以上ある場合のみ）"""
+        """rumi プロバイダーを自動登録する（他のプロバイダーが1つ以上ある場合のみ）。"""
         try:
-            from domain.ai_client.providers import detect_rumi_provider
             rumi = detect_rumi_provider(self)
             if rumi is not None:
                 self._providers["rumi"] = rumi
         except Exception:
             pass
 
-    def _load_profiles(self):
-        """組み込みプロファイルをロードする。"""
-        try:
-            from domain.ai_client.profile_loader import ProfileLoader
-            ProfileLoader().apply_to_client(self)
-        except Exception:
-            pass
-
     def register_provider(self, name, provider):
-        """プロバイダーを動的に登録する"""
+        """プロバイダーを動的に登録する。"""
         self._providers[name] = provider
 
+    def register_profile(self, name, profile=None, provider="", model="", **kwargs):
+        """互換的にプロファイルを登録する。"""
+        if isinstance(profile, dict):
+            payload = dict(profile)
+        else:
+            payload = dict(kwargs)
+            if profile is not None and not provider:
+                provider = str(profile)
+            if provider:
+                payload["provider"] = provider
+            if model:
+                payload["model"] = model
+        self._profiles[name] = payload
+
+    def _active_provider_ids(self):
+        return set(self._providers.keys())
+
+    def _provider_model_candidates(self, provider_name):
+        provider = self._providers.get(provider_name)
+        if provider is None:
+            return []
+        listed = []
+        if callable(getattr(provider, "list_models", None)):
+            try:
+                listed = provider.list_models() or []
+            except Exception:
+                listed = []
+        if not listed and hasattr(provider, "KNOWN_MODELS"):
+            listed = getattr(provider, "KNOWN_MODELS", []) or []
+        return listed
+
+    @staticmethod
+    def _normalize_runtime_model(provider_id, provider_entry, raw):
+        if isinstance(raw, str):
+            model_id = raw.split("/", 1)[1] if "/" in raw else raw
+            qualified_model_id = raw if "/" in raw else f"{provider_id}/{model_id}"
+            display_name = model_id
+            model_type = "chat"
+            defaults = {}
+            metadata = {}
+            capabilities = []
+            context_window = 0
+        elif isinstance(raw, dict):
+            qualified_model_id = str(raw.get("id", "")).strip()
+            model_id = str(raw.get("model_id", "")).strip()
+            if qualified_model_id and "/" in qualified_model_id and not model_id:
+                _, model_id = qualified_model_id.split("/", 1)
+            if not model_id:
+                model_id = str(raw.get("model_name") or raw.get("name") or "").strip()
+            if not model_id:
+                return None
+            if not qualified_model_id:
+                qualified_model_id = f"{provider_id}/{model_id}"
+            display_name = str(raw.get("display_name") or raw.get("name") or model_id)
+            model_type = str(raw.get("type", "chat"))
+            defaults = dict(raw.get("defaults", {}))
+            metadata = dict(raw.get("metadata", {}))
+            capabilities = list(raw.get("capabilities", []))
+            context_window = int(raw.get("context_window", 0) or 0)
+        else:
+            return None
+
+        normalized = {
+            "id": qualified_model_id,
+            "qualified_model_id": qualified_model_id,
+            "provider": provider_id,
+            "provider_id": provider_id,
+            "provider_display_name": provider_entry.get("display_name", provider_id),
+            "model_id": model_id,
+            "model_name": model_id,
+            "name": display_name,
+            "display_name": display_name,
+            "type": model_type,
+            "context_window": context_window,
+            "capabilities": capabilities,
+            "availability": dict(provider_entry.get("availability", {})),
+            "supports_invoke": bool(
+                provider_entry.get("availability", {}).get("supports_invoke", False)
+            ),
+            "defaults": defaults,
+            "metadata": metadata,
+        }
+        normalized["metadata"].update(
+            {
+                "provider_model_key": qualified_model_id,
+                "provider_display_name": provider_entry.get("display_name", provider_id),
+                "provider_kind": provider_entry.get("kind", ""),
+                "availability_status": provider_entry.get("availability", {}).get("status"),
+            }
+        )
+        return normalized
+
+    def _runtime_model_matches(self, model_ref):
+        active_provider_ids = self._active_provider_ids()
+        catalog_map = get_provider_catalog_map(active_provider_ids=active_provider_ids)
+        matches = []
+        seen = set()
+        for provider_id in active_provider_ids:
+            provider_entry = catalog_map.get(provider_id, {})
+            provider_entry.setdefault("display_name", provider_id)
+            provider_entry.setdefault("availability", {"active": True, "supports_invoke": True})
+            for raw in self._provider_model_candidates(provider_id):
+                candidate = self._normalize_runtime_model(provider_id, provider_entry, raw)
+                if candidate is None:
+                    continue
+                candidate_key = (candidate["provider_id"], candidate["model_id"])
+                if candidate_key in seen:
+                    continue
+                seen.add(candidate_key)
+                if model_ref in {
+                    candidate["qualified_model_id"],
+                    candidate["id"],
+                    candidate["model_id"],
+                    candidate["name"],
+                    candidate["display_name"],
+                }:
+                    matches.append(candidate)
+        return matches
+
     def resolve_provider(self, model_str):
-        """model文字列("provider/model" or "profile_name")からプロバイダーとモデル名を解決"""
+        """model文字列("provider/model" or "profile_name")から解決する。"""
         if "/" in model_str:
             provider_name, model_name = model_str.split("/", 1)
         else:
             profile = self._profiles.get(model_str)
             if profile:
-                provider_name = profile.get("provider", "stub")
-                model_name = profile.get("model", model_str)
+                provider_name = profile.get("provider") or profile.get("provider_id") or "stub"
+                model_name = (
+                    profile.get("model")
+                    or profile.get("model_id")
+                    or profile.get("qualified_model_id")
+                    or model_str
+                )
+                if isinstance(model_name, str) and "/" in model_name:
+                    resolved_provider, resolved_model = model_name.split("/", 1)
+                    provider_name = provider_name or resolved_provider
+                    model_name = resolved_model
             else:
-                provider_name = "stub"
-                model_name = model_str
+                matches = []
+                seen = set()
+                for item in self.list_models():
+                    item_key = (item.get("provider_id"), item.get("model_id"))
+                    if item_key in seen:
+                        continue
+                    if model_str in {
+                        item.get("model_id"),
+                        item.get("qualified_model_id"),
+                        item.get("id"),
+                        item.get("name"),
+                        item.get("display_name"),
+                        item.get("disambiguated_name"),
+                    }:
+                        seen.add(item_key)
+                        matches.append(item)
+                for item in self._runtime_model_matches(model_str):
+                    item_key = (item.get("provider_id"), item.get("model_id"))
+                    if item_key not in seen:
+                        seen.add(item_key)
+                        matches.append(item)
+                if len(matches) == 1:
+                    provider_name = matches[0].get("provider_id", "stub")
+                    model_name = matches[0].get("model_id", model_str)
+                else:
+                    provider_name = "stub"
+                    model_name = model_str
         provider = self._providers.get(provider_name, self._providers["stub"])
         return provider, model_name
 
@@ -90,32 +244,93 @@ class AIClient:
             raise RuntimeError(str(e)) from None
 
     def list_models(self, provider=None):
-        """登録済みプロバイダーの既知モデル一覧を返す"""
+        """登録済みプロバイダーの既知モデル一覧を返す。"""
+        active_provider_ids = self._active_provider_ids()
+        if provider is not None and provider not in active_provider_ids:
+            return []
+
+        models = get_all_known_models(
+            provider_id=provider,
+            active_provider_ids=active_provider_ids,
+        )
         models = [
-            {"id": "stub/default", "name": "Stub Default Model", "provider": "stub"},
-            {"id": "stub/fast", "name": "Stub Fast Model", "provider": "stub"},
-            {"id": "stub/large", "name": "Stub Large Model", "provider": "stub"},
+            model
+            for model in models
+            if model.get("provider_id") in active_provider_ids
         ]
-        for pid, prov in self._providers.items():
-            if pid == "stub":
+
+        catalog_map = get_provider_catalog_map(active_provider_ids=active_provider_ids)
+        seen = {model.get("qualified_model_id") for model in models}
+        provider_ids = [provider] if provider else sorted(active_provider_ids)
+        for provider_id in provider_ids:
+            provider_entry = catalog_map.get(provider_id)
+            if provider_entry is None:
                 continue
-            if hasattr(prov, "list_models"):
-                try:
-                    models.extend(prov.list_models())
+            for raw in self._provider_model_candidates(provider_id):
+                candidate = self._normalize_runtime_model(provider_id, provider_entry, raw)
+                if candidate is None:
                     continue
-                except Exception:
-                    pass
-            if hasattr(prov, "KNOWN_MODELS"):
-                models.extend(prov.KNOWN_MODELS)
-        if provider is not None:
-            models = [m for m in models if m["provider"] == provider]
+                qualified_model_id = candidate.get("qualified_model_id")
+                if qualified_model_id in seen:
+                    continue
+                seen.add(qualified_model_id)
+                models.append(candidate)
         return models
 
     def list_providers(self):
-        providers = []
-        for pid in self._providers:
-            providers.append({"id": pid, "name": pid.capitalize(), "status": "available"})
-        return providers
+        active_provider_ids = self._active_provider_ids()
+        catalog = get_provider_catalog(active_provider_ids=active_provider_ids)
+        active = [
+            provider
+            for provider in catalog
+            if provider.get("provider_id") in active_provider_ids
+        ]
+        known_ids = {provider.get("provider_id") for provider in active}
+        for provider_id in sorted(active_provider_ids - known_ids):
+            provider = self._providers.get(provider_id)
+            active.append(
+                {
+                    "id": provider_id,
+                    "provider_id": provider_id,
+                    "name": getattr(provider, "display_name", provider_id.capitalize()),
+                    "display_name": getattr(provider, "display_name", provider_id.capitalize()),
+                    "kind": "custom",
+                    "description": "",
+                    "env_vars": [],
+                    "base_url_envs": [],
+                    "default_model": "",
+                    "capabilities": [],
+                    "availability": {
+                        "active": True,
+                        "available": True,
+                        "configured": True,
+                        "catalog_only": False,
+                        "supports_invoke": callable(getattr(provider, "complete", None)),
+                        "status": "active",
+                    },
+                    "metadata": {
+                        "catalog_only": False,
+                        "supports_invoke": callable(getattr(provider, "complete", None)),
+                        "default_base_url": "",
+                    },
+                }
+            )
+        return active
+
+    def list_profiles(self, provider=None):
+        active_provider_ids = self._active_provider_ids()
+        profiles = build_profile_catalog(
+            active_provider_ids=active_provider_ids,
+            custom_profiles=self._profiles,
+        )
+        profiles = [
+            profile
+            for profile in profiles
+            if not profile.get("provider_id") or profile.get("provider_id") in active_provider_ids
+        ]
+        if provider is not None:
+            profiles = [profile for profile in profiles if profile.get("provider_id") == provider]
+        return profiles
 
     def embed(self, model, input_text):
         provider, model_name = self.resolve_provider(model)

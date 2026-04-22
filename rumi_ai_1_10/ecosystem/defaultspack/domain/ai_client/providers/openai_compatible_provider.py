@@ -1,261 +1,240 @@
-import sys
+from __future__ import annotations
+
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+from typing import Any, Dict, List, Optional
 
-import json
-import ssl
-import urllib.error
-import urllib.request
-
-from domain.ai_client.base_provider import BaseProvider
-from domain.ai_client.providers.profile_catalog import merge_curated_and_profiles, profile_dir_for
+from .openai_provider import OpenAIProvider
+from .profile_catalog import merge_curated_and_profiles, profile_dir_for
 
 
-class OpenAICompatibleProvider(BaseProvider):
+class OpenAICompatibleProvider(OpenAIProvider):
+    """OpenAI-compatible provider with both legacy and manifest constructors."""
+
     provider_name = ""
-    display_name = ""
-    env_vars = ()
-    base_url_env_vars = ()
-    default_base_url = ""
-    supports_embeddings = False
-    curated_models = []
-    extra_headers = {}
-    timeout = 120
+    KNOWN_MODELS: List[Dict[str, Any]] = []
+    curated_models: List[Dict[str, Any]] = []
+    DISPLAY_NAME = "OpenAI Compatible"
 
-    def __init__(self):
-        self._api_key = self._resolve_api_key()
-        self._base_url = self._resolve_base_url()
-        self._ssl_ctx = ssl.create_default_context()
+    def __init__(
+        self,
+        api_key: str = "",
+        base_url: str = "",
+        known_models=None,
+        *,
+        provider_id: str = "",
+        display_name: str = "",
+        api_key_env: str = "",
+        base_url_env: str = "",
+        default_base_url: str = "",
+        credential_required: bool = True,
+        extra_headers: Optional[Dict[str, str]] = None,
+    ):
+        super().__init__()
+        default_provider_id = str(provider_id or getattr(self.__class__, "provider_name", "") or "openai_compatible")
+        self.provider_id = default_provider_id
+        self.display_name = str(display_name or getattr(self.__class__, "display_name", "") or self.provider_id)
+        self.DISPLAY_NAME = self.display_name
+        self._api_key_envs = self._normalize_env_names(api_key_env)
+        self._api_key_env = self._api_key_envs[0] if self._api_key_envs else ""
+        self._base_url_env = str(base_url_env or "")
+        self._default_base_url = str(default_base_url or self.BASE_URL).strip().rstrip("/")
+        self._credential_required = bool(credential_required)
+        self._extra_headers = dict(extra_headers or {})
+
+        env_api_key = ""
+        for env_name in self._api_key_envs:
+            env_api_key = str(os.environ.get(env_name, "") or "").strip()
+            if env_api_key:
+                break
+        env_base_url = os.environ.get(self._base_url_env, "") if self._base_url_env else ""
+
+        self._api_key = str(api_key or env_api_key or "").strip()
+        resolved_base_url = str(base_url or env_base_url or self._default_base_url or "").strip()
+        self._base_url = resolved_base_url.rstrip("/") if resolved_base_url else ""
+        self.BASE_URL = self._base_url
+        seed_models = known_models
+        if seed_models is None:
+            seed_models = self.list_curated_models()
+        self.KNOWN_MODELS = self._normalize_known_models(seed_models or [])
 
     @classmethod
     def profile_dir(cls):
-        return profile_dir_for(cls.provider_name, __file__)
+        provider_name = str(getattr(cls, "provider_name", "") or "").strip()
+        if not provider_name:
+            return None
+        return profile_dir_for(provider_name, __file__)
 
     @classmethod
-    def list_curated_models(cls):
-        return [dict(item) for item in cls.curated_models]
+    def list_curated_models(cls) -> List[Dict[str, Any]]:
+        source = getattr(cls, "curated_models", None) or getattr(cls, "KNOWN_MODELS", [])
+        return [dict(item) for item in source]
 
     @classmethod
-    def list_profile_models(cls):
-        return merge_curated_and_profiles(cls.provider_name, cls.curated_models, cls.profile_dir())
-
-    @classmethod
-    def list_models(cls):
-        return cls.list_profile_models()
-
-    def _resolve_api_key(self):
-        for env_var in self.env_vars:
-            value = os.environ.get(env_var, "")
-            if value:
-                return value
-        return ""
-
-    def _resolve_base_url(self):
-        for env_var in self.base_url_env_vars:
-            value = os.environ.get(env_var, "")
-            if value:
-                return value.rstrip("/")
-        return self.default_base_url.rstrip("/")
-
-    def _headers(self, content_type="application/json"):
-        headers = {"Authorization": "Bearer " + self._api_key}
-        if content_type:
-            headers["Content-Type"] = content_type
-        for key, value in self.extra_headers.items():
-            headers.setdefault(key, value)
-        return headers
-
-    def _request_json(self, path, body):
-        if not self._api_key:
-            raise RuntimeError("{} API key is not set.".format(self.display_name or self.provider_name))
-        url = self._base_url + path
-        data = json.dumps(body).encode("utf-8")
-        req = urllib.request.Request(url, data=data, headers=self._headers(), method="POST")
-        try:
-            with urllib.request.urlopen(req, context=self._ssl_ctx, timeout=self.timeout) as resp:
-                raw_bytes = resp.read().decode("utf-8")
-        except urllib.error.HTTPError as e:
-            err_body = e.read().decode("utf-8", errors="replace")
-            raise RuntimeError("{} API error {}: {}".format(self.display_name or self.provider_name, e.code, err_body))
-        except urllib.error.URLError as e:
-            raise RuntimeError("{} API connection error: {}".format(self.display_name or self.provider_name, e.reason))
-        try:
-            return json.loads(raw_bytes)
-        except (json.JSONDecodeError, ValueError):
-            raise RuntimeError("{} API returned invalid JSON: {}".format(self.display_name or self.provider_name, raw_bytes[:500]))
-
-    def _request_stream(self, path, body):
-        if not self._api_key:
-            raise RuntimeError("{} API key is not set.".format(self.display_name or self.provider_name))
-        url = self._base_url + path
-        body["stream"] = True
-        data = json.dumps(body).encode("utf-8")
-        req = urllib.request.Request(url, data=data, headers=self._headers(), method="POST")
-        try:
-            return urllib.request.urlopen(req, context=self._ssl_ctx, timeout=self.timeout)
-        except urllib.error.HTTPError as e:
-            err_body = e.read().decode("utf-8", errors="replace")
-            raise RuntimeError("{} API error {}: {}".format(self.display_name or self.provider_name, e.code, err_body))
-        except urllib.error.URLError as e:
-            raise RuntimeError("{} API connection error: {}".format(self.display_name or self.provider_name, e.reason))
+    def from_manifest(
+        cls,
+        manifest: Dict[str, Any],
+        *,
+        model_manifests: Optional[List[Dict[str, Any]]] = None,
+    ) -> "OpenAICompatibleProvider":
+        provider_id = str(manifest.get("id", "")).strip() or "openai_compatible"
+        known_models: List[Dict[str, Any]] = cls.list_curated_models()
+        known_model_map = {
+            str(item.get("id", "")).strip(): dict(item)
+            for item in known_models
+            if str(item.get("id", "")).strip()
+        }
+        for item in model_manifests or []:
+            model_id = str(item.get("model_id", "")).strip()
+            if not model_id:
+                continue
+            qualified_model_id = f"{provider_id}/{model_id}"
+            known_model_map[qualified_model_id] = {
+                "id": qualified_model_id,
+                "model_id": model_id,
+                "name": item.get("display_name", model_id),
+                "display_name": item.get("display_name", model_id),
+                "provider": provider_id,
+                "provider_id": provider_id,
+                "type": item.get("type", "chat"),
+                "defaults": dict(item.get("defaults", {})),
+                "metadata": dict(item.get("metadata", {})),
+            }
+        known_models = list(known_model_map.values())
+        if not known_models:
+            known_models = list(manifest.get("models", []))
+        if not known_models and manifest.get("default_model"):
+            default_model = str(manifest.get("default_model")).strip()
+            defaults = {"chat": True}
+            for use_case, candidate in (manifest.get("default_model_for", {}) or {}).items():
+                if str(candidate).strip() == default_model:
+                    defaults[str(use_case)] = True
+            known_models = [
+                {
+                    "id": f"{provider_id}/{default_model}",
+                    "model_id": default_model,
+                    "name": default_model,
+                    "display_name": default_model,
+                    "provider": provider_id,
+                    "provider_id": provider_id,
+                    "type": "chat",
+                    "defaults": defaults,
+                }
+            ]
+        return cls(
+            provider_id=provider_id,
+            display_name=str(manifest.get("display_name", provider_id)),
+            api_key_env=manifest.get("api_key_env", ""),
+            base_url_env=str(manifest.get("base_url_env", "")),
+            default_base_url=str(
+                manifest.get("default_base_url", "https://api.openai.com/v1")
+            ),
+            credential_required=bool(manifest.get("credential_required", True)),
+            known_models=known_models,
+            extra_headers=dict(manifest.get("headers", {})),
+        )
 
     @staticmethod
-    def _parse_sse_lines(resp):
-        buf = b""
-        for chunk in iter(lambda: resp.read(4096), b""):
-            buf += chunk
-            while b"\n" in buf:
-                line, buf = buf.split(b"\n", 1)
-                line = line.decode("utf-8", errors="replace").strip()
-                if line.startswith("data: "):
-                    payload = line[6:]
-                    if payload == "[DONE]":
-                        return
-                    yield payload
+    def _normalize_env_names(value: Any) -> List[str]:
+        if isinstance(value, str):
+            env_name = value.strip()
+            return [env_name] if env_name else []
+        if isinstance(value, (list, tuple, set)):
+            normalized: List[str] = []
+            for item in value:
+                env_name = str(item or "").strip()
+                if env_name and env_name not in normalized:
+                    normalized.append(env_name)
+            return normalized
+        return []
 
-    def build_request(self, messages):
-        converted = []
-        for msg in messages:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-            if isinstance(content, list):
-                parts = []
-                for item in content:
-                    if item.get("type") == "text":
-                        parts.append({"type": "text", "text": item.get("text", "")})
-                    elif item.get("type") == "image_url":
-                        parts.append({"type": "image_url", "image_url": item.get("image_url", {})})
-                    elif item.get("type") == "image" and item.get("source"):
-                        source = item["source"]
-                        parts.append(
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": "data:{};base64,{}".format(
-                                        source.get("media_type", "image/png"),
-                                        source.get("data", ""),
-                                    )
-                                },
-                            }
-                        )
-                    else:
-                        parts.append(item)
-                converted.append({"role": role, "content": parts})
-            else:
-                converted.append({"role": role, "content": content})
-        return converted
+    def _normalize_known_models(self, raw_models) -> List[Dict[str, Any]]:
+        normalized: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+        for raw in list(raw_models or []):
+            model = self._normalize_known_model(raw)
+            if model is None:
+                continue
+            if model["id"] in seen:
+                continue
+            seen.add(model["id"])
+            normalized.append(model)
+        return normalized
 
-    def parse_response(self, raw):
-        choice = raw.get("choices", [{}])[0]
-        message = choice.get("message", {})
-        text = message.get("content", "") or ""
-        finish = choice.get("finish_reason", "stop") or "stop"
-        usage_raw = raw.get("usage", {})
-        usage = {
-            "input_tokens": usage_raw.get("prompt_tokens", 0),
-            "output_tokens": usage_raw.get("completion_tokens", 0),
-            "total_tokens": usage_raw.get("total_tokens", 0),
+    def _normalize_known_model(self, raw) -> Optional[Dict[str, Any]]:
+        if isinstance(raw, str):
+            model_id = raw.split("/", 1)[1] if "/" in raw else raw
+            if not model_id:
+                return None
+            qualified_model_id = raw if "/" in raw else f"{self.provider_id}/{model_id}"
+            return {
+                "id": qualified_model_id,
+                "provider": self.provider_id,
+                "name": model_id,
+                "type": "chat",
+            }
+        if not isinstance(raw, dict):
+            return None
+        qualified_model_id = str(raw.get("id", "")).strip()
+        model_id = str(raw.get("model_id", "")).strip()
+        if qualified_model_id and "/" in qualified_model_id and not model_id:
+            _, model_id = qualified_model_id.split("/", 1)
+        if not model_id:
+            model_id = str(raw.get("model_name") or raw.get("name") or "").strip()
+        if not model_id:
+            return None
+        if not qualified_model_id:
+            qualified_model_id = f"{self.provider_id}/{model_id}"
+        display_name = str(raw.get("display_name") or raw.get("name") or model_id)
+        normalized = {
+            "id": qualified_model_id,
+            "provider": self.provider_id,
+            "name": display_name,
+            "type": str(raw.get("type", "chat")),
         }
-        content = [{"type": "text", "text": text}]
-        tool_calls = message.get("tool_calls")
-        if tool_calls:
-            for tc in tool_calls:
-                content.append(
-                    {
-                        "type": "tool_use",
-                        "id": tc.get("id", ""),
-                        "name": tc.get("function", {}).get("name", ""),
-                        "input": tc.get("function", {}).get("arguments", "{}"),
-                    }
-                )
-        return {
-            "content": content,
-            "finish_reason": finish,
-            "usage": usage,
-            "raw_extra": {"id": raw.get("id", ""), "model": raw.get("model", "")},
-        }
+        defaults = dict(raw.get("defaults", {}))
+        metadata = dict(raw.get("metadata", {}))
+        capabilities = list(raw.get("capabilities", []))
+        if defaults:
+            normalized["defaults"] = defaults
+        if metadata:
+            normalized["metadata"] = metadata
+        if capabilities:
+            normalized["capabilities"] = capabilities
+        return normalized
 
-    def complete(self, model, messages, tools, params):
-        body = {"model": model, "messages": self.build_request(messages)}
-        if tools:
-            body["tools"] = tools
-        for key in ("temperature", "max_tokens", "top_p", "frequency_penalty", "presence_penalty", "stop", "response_format"):
-            if key in params:
-                body[key] = params[key]
-        raw = self._request_json("/chat/completions", body)
-        return self.parse_response(raw)
+    def list_models(self):
+        provider_name = str(self.provider_id or getattr(self, "provider_name", "") or "").strip()
+        profile_dir = self.profile_dir()
+        if provider_name and profile_dir is not None:
+            return merge_curated_and_profiles(provider_name, self.KNOWN_MODELS, profile_dir)
+        return [dict(model) for model in self.KNOWN_MODELS]
 
-    def stream(self, model, messages, tools, params):
-        body = {"model": model, "messages": self.build_request(messages)}
-        if tools:
-            body["tools"] = tools
-        for key in ("temperature", "max_tokens", "top_p", "frequency_penalty", "presence_penalty", "stop", "response_format"):
-            if key in params:
-                body[key] = params[key]
-        body["stream_options"] = {"include_usage": True}
-        resp = self._request_stream("/chat/completions", body)
-        try:
-            for payload in self._parse_sse_lines(resp):
-                try:
-                    obj = json.loads(payload)
-                except json.JSONDecodeError:
-                    continue
-                choices = obj.get("choices", [])
-                if choices:
-                    delta = choices[0].get("delta", {})
-                    text = delta.get("content")
-                    if text:
-                        yield {"type": "content_delta", "delta": {"type": "text", "text": text}}
-                    finish = choices[0].get("finish_reason")
-                    if finish:
-                        usage_raw = obj.get("usage") or {}
-                        yield {
-                            "type": "stream_end",
-                            "finish_reason": finish,
-                            "usage": {
-                                "input_tokens": usage_raw.get("prompt_tokens", 0),
-                                "output_tokens": usage_raw.get("completion_tokens", 0),
-                                "total_tokens": usage_raw.get("total_tokens", 0),
-                            },
-                        }
-        finally:
-            resp.close()
+    def _headers(self, content_type="application/json"):
+        headers = dict(self._extra_headers)
+        if self._api_key:
+            headers["Authorization"] = "Bearer " + self._api_key
+        if content_type:
+            headers["Content-Type"] = content_type
+        return headers
 
-    def embed(self, model, input_text):
-        if not self.supports_embeddings:
-            raise NotImplementedError("{} does not support embedding.".format(self.display_name or self.provider_name))
-        if isinstance(input_text, str):
-            input_text = [input_text]
-        body = {"model": model, "input": input_text}
-        raw = self._request_json("/embeddings", body)
-        embeddings = [item["embedding"] for item in raw.get("data", [])]
-        usage_raw = raw.get("usage", {})
-        return {
-            "embeddings": embeddings,
-            "usage": {
-                "input_tokens": usage_raw.get("prompt_tokens", 0),
-                "total_tokens": usage_raw.get("total_tokens", 0),
-            },
-        }
+    def _ensure_runtime_config(self) -> None:
+        if self._credential_required and not self._api_key:
+            missing = ", ".join(self._api_key_envs) or "api_key"
+            raise RuntimeError(
+                f"{self.provider_id}: missing API key env ({missing})"
+            )
+        if not self._base_url:
+            raise RuntimeError(f"{self.provider_id}: base URL is not configured")
+        self.BASE_URL = self._base_url
 
-    def image_gen(self, model, prompt, params):
-        raise NotImplementedError("{} generic adapter does not support image generation.".format(self.display_name or self.provider_name))
+    def _request_json(self, path, body):
+        self._ensure_runtime_config()
+        return super()._request_json(path, body)
 
-    def image_analyze(self, model, image, prompt):
-        if image.startswith("data:"):
-            image_content = {"type": "image_url", "image_url": {"url": image}}
-        elif image.startswith("http"):
-            image_content = {"type": "image_url", "image_url": {"url": image}}
-        else:
-            image_content = {"type": "image_url", "image_url": {"url": "data:image/png;base64," + image}}
-        messages = [{"role": "user", "content": [{"type": "text", "text": prompt}, image_content]}]
-        body = {"model": model, "messages": self.build_request(messages)}
-        raw = self._request_json("/chat/completions", body)
-        text = raw.get("choices", [{}])[0].get("message", {}).get("content", "")
-        return {"text": text}
+    def _request_stream(self, path, body):
+        self._ensure_runtime_config()
+        return super()._request_stream(path, body)
 
-    def transcribe(self, model, audio, params):
-        raise NotImplementedError("{} generic adapter does not support transcription.".format(self.display_name or self.provider_name))
-
-    def tts(self, model, text, voice):
-        raise NotImplementedError("{} generic adapter does not support TTS.".format(self.display_name or self.provider_name))
+    def _request_multipart(self, path, fields, files):
+        self._ensure_runtime_config()
+        return super()._request_multipart(path, fields, files)

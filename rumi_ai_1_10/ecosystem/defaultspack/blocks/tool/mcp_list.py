@@ -1,11 +1,14 @@
 import sys, os; sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..")); from _common import ok, error, gen_id, timestamp
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from domain.tool.mcp_client import McpClient
+from domain.tool.registry import ToolRegistry
 
 
 def run(input_data, context):
     """defaults.tool.mcp_list — 接続中 MCP サーバーとツール一覧を返す"""
     mcp_client = McpClient()
+    registry = ToolRegistry()
+    registry_servers = registry.list_mcp_servers()
     servers = mcp_client.list_servers()
 
     detailed_servers = []
@@ -27,6 +30,7 @@ def run(input_data, context):
             "status": srv.get("status", "unknown"),
             "tools": srv.get("tools", []),
             "tool_details": tool_details,
+            "registered_config": registry_servers.get(server_name, {}),
         })
 
-    return ok({"servers": detailed_servers})
+    return ok({"servers": detailed_servers, "count": len(detailed_servers)})

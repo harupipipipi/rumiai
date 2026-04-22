@@ -55,3 +55,15 @@ src/
 ├── store.ts       Zustand ストア
 └── main.tsx       エントリーポイント
 ```
+
+## Graph Editor Extensions
+
+`Flows` ページの graph editor は、単純な縦並び step 表示から次の拡張に対応しました。
+
+- `rumi_start` を起点にした graph 編集
+- ノードごとの複数ポート
+- ポートごとの `contracts`（独自規格タグ）による接続制約
+- `rumi_graph` メタデータとして YAML 内へ editor 状態を保持
+- `basepack` を flow メタデータとして保持
+
+`rumi_graph` はランタイム互換を壊さないための editor 向けメタデータです。既存ランタイムが読める `steps` も同時に出力しつつ、viewer ではポート/接続情報を復元できます。

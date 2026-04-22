@@ -1,0 +1,10 @@
+{
+  "id": "google/gemini-3-pro-preview",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "google",
+  "model_id": "gemini-3-pro-preview",
+  "display_name": "Gemini 3 Pro Preview",
+  "priority": 12,
+  "type": "chat"
+}

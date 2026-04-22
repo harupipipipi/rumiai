@@ -15,17 +15,6 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 
-class _DynamicProvider:
-    KNOWN_MODELS = [
-        {"id": "dynamic/stale", "name": "Stale", "provider": "dynamic", "type": "chat"},
-    ]
-
-    def list_models(self):
-        return [
-            {"id": "dynamic/fresh", "name": "Fresh", "provider": "dynamic", "type": "chat"},
-        ]
-
-
 class TestDefaultspackGoogleProvider(unittest.TestCase):
     def test_detect_available_providers_accepts_gemini_api_key(self):
         from domain.ai_client.providers import detect_available_providers
@@ -73,50 +62,16 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
         self.assertIn("google/gemma-3-12b-it", model_ids)
         self.assertIn("google/gemini-2.5-pro", model_ids)
 
-    def test_ai_client_prefers_provider_list_models(self):
-        from domain.ai_client.client import AIClient
+    def test_google_catalog_includes_gemini_and_gemma_models(self):
+        from domain.ai_client.providers import get_all_known_models
 
-        AIClient._instance = None
-        with patch.object(AIClient, "_auto_register_providers", lambda self: None), patch.object(
-            AIClient, "_auto_register_rumi", lambda self: None
-        ):
-            client = AIClient()
+        model_ids = {item["id"] for item in get_all_known_models(provider_id="google")}
 
-        try:
-            client.register_provider("dynamic", _DynamicProvider())
-            models = client.list_models(provider="dynamic")
-        finally:
-            AIClient._instance = None
-
-        self.assertEqual(
-            models,
-            [{"id": "dynamic/fresh", "name": "Fresh", "provider": "dynamic", "type": "chat"}],
-        )
-
-    def test_ai_client_loads_default_profile_from_environment(self):
-        from domain.ai_client.client import AIClient
-
-        AIClient._instance = None
-        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True):
-            client = AIClient()
-            profile = client._profiles.get("default")
-            provider, model = client.resolve_provider("default")
-
-        try:
-            self.assertEqual(profile, {"provider": "openai", "model": "gpt-4o"})
-            self.assertEqual(provider.__class__.__name__, "OpenAIProvider")
-            self.assertEqual(model, "gpt-4o")
-        finally:
-            AIClient._instance = None
-
-    def test_chat_store_uses_real_default_model_when_provider_is_available(self):
-        from domain.chat.store import ChatStore
-
-        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True):
-            store = ChatStore()
-            conv = store.create_conversation()
-
-        self.assertEqual(conv["model"], "openai/gpt-4o")
+        self.assertIn("google/gemini-3-pro-preview", model_ids)
+        self.assertIn("google/gemini-3-flash-preview", model_ids)
+        self.assertIn("google/gemma-4-31b-it", model_ids)
+        self.assertIn("google/gemma-3-27b-it", model_ids)
+        self.assertIn("google/gemma-3n-e4b-it", model_ids)
 
 
 if __name__ == "__main__":

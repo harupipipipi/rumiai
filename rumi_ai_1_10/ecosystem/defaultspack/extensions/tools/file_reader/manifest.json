@@ -1,0 +1,25 @@
+{
+  "id": "file_reader",
+  "category": "tool",
+  "version": "1",
+  "display_name": "File Reader",
+  "description": "Read file content from a path.",
+  "enabled": true,
+  "config": {
+    "name": "file_reader",
+    "summary": "ファイル読み取り",
+    "tags": ["io", "file"],
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string"}
+        },
+        "required": ["path"]
+      }
+    },
+    "execution": {
+      "type": "local"
+    }
+  }
+}

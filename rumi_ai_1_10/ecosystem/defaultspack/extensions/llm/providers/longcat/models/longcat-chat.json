@@ -1,0 +1,15 @@
+{
+  "id": "longcat/longcat-chat",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "longcat",
+  "model_id": "longcat-chat",
+  "display_name": "Longcat Chat",
+  "type": "chat",
+  "enabled": true,
+  "priority": 1,
+  "defaults": {
+    "chat": true
+  }
+}
+

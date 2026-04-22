@@ -1,0 +1,9 @@
+{
+  "id": "default",
+  "category": "chat_mode",
+  "version": "1",
+  "display_name": "Default Chat Mode",
+  "enabled": true,
+  "entrypoint": "domain.chat.handlers:run"
+}
+

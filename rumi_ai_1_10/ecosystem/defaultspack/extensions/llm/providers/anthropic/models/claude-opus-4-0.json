@@ -1,0 +1,15 @@
+{
+  "id": "anthropic/claude-opus-4-0",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "anthropic",
+  "model_id": "claude-opus-4-0",
+  "display_name": "Claude Opus 4",
+  "type": "chat",
+  "enabled": true,
+  "priority": 2,
+  "defaults": {
+    "large": true
+  }
+}
+

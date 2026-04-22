@@ -14,12 +14,12 @@ class MemoryStorage {
     this.values.clear();
   }
 
-  key(index: number): string | null {
-    return Array.from(this.values.keys())[index] ?? null;
-  }
-
   getItem(key: string): string | null {
     return this.values.get(key) ?? null;
+  }
+
+  key(index: number): string | null {
+    return Array.from(this.values.keys())[index] ?? null;
   }
 
   removeItem(key: string): void {
@@ -31,15 +31,6 @@ class MemoryStorage {
   }
 }
 
-type TestGlobals = typeof globalThis & {
-  document?: Document;
-  fetch?: typeof fetch;
-  sessionStorage?: Storage;
-  window?: Window & typeof globalThis;
-};
-
-const globals = globalThis as TestGlobals;
-
 let lastFetchInit: RequestInit | undefined;
 let lastFetchUrl = '';
 let lastReplacedUrl = '';
@@ -47,12 +38,12 @@ let sessionStorageRef: MemoryStorage;
 
 function installBrowser(href: string): MemoryStorage {
   const storage = new MemoryStorage();
-  const window = {
+  const windowMock = {
     history: {
       replaceState: (_state: unknown, _title: string, url?: string | URL | null) => {
         const nextUrl = String(url ?? '');
         lastReplacedUrl = nextUrl;
-        window.location.href = new URL(nextUrl, window.location.href).toString();
+        windowMock.location.href = new URL(nextUrl, windowMock.location.href).toString();
       },
     },
     location: {
@@ -60,22 +51,48 @@ function installBrowser(href: string): MemoryStorage {
     },
   };
 
-  globals.document = {title: 'Rumi AI'} as unknown as Document;
-  globals.sessionStorage = storage as unknown as Storage;
-  globals.window = window as unknown as Window & typeof globalThis;
+  Object.defineProperty(globalThis, 'document', {
+    configurable: true,
+    value: { title: 'Rumi AI' } as Pick<Document, 'title'>,
+    writable: true,
+  });
+  Object.defineProperty(globalThis, 'sessionStorage', {
+    configurable: true,
+    value: storage as Storage,
+    writable: true,
+  });
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: windowMock as Pick<Window, 'history' | 'location'>,
+    writable: true,
+  });
   sessionStorageRef = storage;
   return storage;
 }
 
 function installFetchMock(): void {
-  globals.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-    lastFetchUrl = String(input);
-    lastFetchInit = init;
+  Object.defineProperty(globalThis, 'fetch', {
+    configurable: true,
+    value: (async (input: string | URL | Request, init?: RequestInit) => {
+      lastFetchUrl = String(input);
+      lastFetchInit = init;
 
-    if (lastFetchUrl === '/api/panel/auth/exchange') {
+      if (lastFetchUrl === '/api/panel/auth/exchange') {
+        return new Response(
+          JSON.stringify({
+            data: {csrf_token: 'csrf-from-server'},
+            success: true,
+          }),
+          {
+            headers: {'Content-Type': 'application/json'},
+            status: 200,
+          },
+        );
+      }
+
       return new Response(
         JSON.stringify({
-          data: {csrf_token: 'csrf-from-server'},
+          data: {ok: true},
           success: true,
         }),
         {
@@ -83,19 +100,9 @@ function installFetchMock(): void {
           status: 200,
         },
       );
-    }
-
-    return new Response(
-      JSON.stringify({
-        data: {ok: true},
-        success: true,
-      }),
-      {
-        headers: {'Content-Type': 'application/json'},
-        status: 200,
-      },
-    );
-  }) as typeof fetch;
+    }) as typeof fetch,
+    writable: true,
+  });
 }
 
 beforeEach(() => {
@@ -115,7 +122,7 @@ test('bootstrapPanelSession exchanges code and strips it from the URL', async ()
   assert.equal((lastFetchInit?.credentials as string | undefined), 'same-origin');
   assert.equal(storage.getItem('rumi-panel-csrf'), 'csrf-from-server');
   assert.equal(lastReplacedUrl, '/panel/?v=42#ready');
-  assert.equal(globals.window?.location.href, 'http://127.0.0.1:8765/panel/?v=42#ready');
+  assert.equal(window.location.href, 'http://127.0.0.1:8765/panel/?v=42#ready');
 });
 
 test('apiFetch adds the panel CSRF header for unsafe methods', async () => {

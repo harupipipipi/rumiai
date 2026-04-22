@@ -1,0 +1,10 @@
+{
+  "id": "google/gemma-3-27b-it",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "google",
+  "model_id": "gemma-3-27b-it",
+  "display_name": "Gemma 3 27B IT",
+  "priority": 40,
+  "type": "chat"
+}
