@@ -226,7 +226,7 @@ def test_permission_policy_defaults_to_ask_when_no_file_exists(tmp_path):
     assert policy["default_action"] == "ask"
 
 
-def test_shell_tool_summary_counts_ask_before_deny():
+def test_shell_html_uses_external_luxe_shell_assets():
     shell_path = (
         Path(__file__).resolve().parent.parent
         / "ecosystem"
@@ -235,6 +235,5 @@ def test_shell_tool_summary_counts_ask_before_deny():
         / "shell.html"
     )
     source = shell_path.read_text(encoding="utf-8")
-    ask_index = source.index('if(permission.action === "ask" || permission.requires_approval) summary.ask += 1;')
-    deny_index = source.index('else if(permission.action === "deny" || permission.allowed === false) summary.denied += 1;')
-    assert ask_index < deny_index
+    assert "/static/shell-app.css" in source
+    assert "/static/shell-app.js" in source

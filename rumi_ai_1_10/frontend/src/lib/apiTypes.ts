@@ -84,9 +84,116 @@ export interface PackToggleResponseData {
   enabled: boolean;
 }
 
+export interface ApiStartupNodePort {
+  port_id: string;
+  label: string;
+  direction: 'input' | 'output';
+  contracts: string[];
+  multi: boolean;
+}
+
+export interface ApiStartupNodeDefinition {
+  node_id: string;
+  title: string;
+  subtitle: string;
+  kind: string;
+  character: string;
+  ports: ApiStartupNodePort[];
+}
+
+export interface ApiStartupSlotSpec {
+  slot_id: string;
+  label: string;
+  description: string;
+  contract: string;
+  multi: boolean;
+  interface_key: string;
+  character: string;
+}
+
+export interface ApiStartupStandardPack {
+  pack_id: string;
+  display_name: string;
+  description: string;
+  pack_identity: string;
+  available: boolean;
+  runtime_ready: boolean;
+  runtime_issues: string[];
+  enabled: boolean;
+  character: string;
+  slots: Array<{
+    slot_id: string;
+    contract: string;
+    label: string;
+  }>;
+}
+
+export interface ApiStartupSlotCandidate {
+  pack_id: string;
+  pack_identity: string;
+  display_name: string;
+  description: string;
+  contracts: string[];
+  component_types: string[];
+  provides: string[];
+  character: string;
+  enabled: boolean;
+  runtime_ready: boolean;
+  runtime_issues: string[];
+  selected_component_id: string;
+}
+
+export interface ApiStartupCatalog {
+  version: number;
+  start_node: ApiStartupNodeDefinition;
+  slot_specs: ApiStartupSlotSpec[];
+  standard_packs: ApiStartupStandardPack[];
+  slot_candidates: Record<string, ApiStartupSlotCandidate[]>;
+}
+
+export interface ApiStartupProfile {
+  profile_id: string;
+  name: string;
+  standard_pack_id: string;
+  slots: Record<string, string>;
+  created_at: number;
+  updated_at: number;
+}
+
 export interface FlowsResponseData {
   flows: ApiFlow[];
   count: number;
+}
+
+export interface StartupProfilesResponseData {
+  profiles: ApiStartupProfile[];
+  active_profile_id: string | null;
+  last_launched_profile_id: string | null;
+  catalog: ApiStartupCatalog;
+}
+
+export interface StartupProfileMutationResponseData {
+  profile: ApiStartupProfile;
+  created?: boolean;
+  updated?: boolean;
+  duplicated?: boolean;
+  activated?: boolean;
+  launched?: boolean;
+  active_profile_id?: string;
+  restart_requested?: boolean;
+  handoff?: {
+    kind: string;
+    reason: string;
+    restart_requested: boolean;
+    exit_code?: number;
+    profile_id?: string;
+  };
+}
+
+export interface StartupProfileDeleteResponseData {
+  deleted: boolean;
+  deleted_profile_id: string;
+  active_profile_id: string | null;
 }
 
 export interface FlowCreateResponseData {

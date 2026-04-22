@@ -5,6 +5,7 @@ import { useT } from '@/src/lib/i18n';
 import { Button } from '@/src/components/ui/Button';
 import { Badge } from '@/src/components/ui/Badge';
 import { Switch } from '@/src/components/ui/Switch';
+import { panelRoutes } from '@/src/lib/routes';
 import { ArrowLeft, Play, Loader2 } from 'lucide-react';
 
 export function PackDetail() {
@@ -49,7 +50,7 @@ export function PackDetail() {
   return (
     <div className="flex-1 overflow-y-auto p-8 flex flex-col gap-8 animate-in fade-in slide-in-from-bottom-4">
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" onClick={() => navigate('/panel/packs')}>
+        <Button variant="ghost" size="icon" onClick={() => navigate(panelRoutes.packs)}>
           <ArrowLeft className="h-5 w-5" />
         </Button>
         <h1 className="text-3xl font-bold tracking-tight text-text-main">{pack.name}</h1>
@@ -96,7 +97,7 @@ export function PackDetail() {
                   <li key={i} className="flex items-center justify-between rounded-lg border border-border p-3">
                     <span className="text-sm font-medium text-text-main">{flow}</span>
                     <Button size="sm" variant="outline" onClick={() => {
-                      setTimeout(() => navigate('/panel/flows'), 1000);
+                      setTimeout(() => navigate(panelRoutes.flows), 1000);
                     }}>
                       <Play className="mr-2 h-4 w-4" />
                       {t('pack.run')}

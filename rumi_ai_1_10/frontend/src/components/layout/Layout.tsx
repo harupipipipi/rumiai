@@ -2,6 +2,7 @@ import { Outlet, Navigate } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { useAppStore } from '@/src/store';
+import { panelRoutes } from '@/src/lib/routes';
 import { PanelLeft } from 'lucide-react';
 
 export function Layout() {
@@ -10,7 +11,7 @@ export function Layout() {
   const setSidebarOpen = useAppStore(state => state.setSidebarOpen);
 
   if (!isSetupDone) {
-    return <Navigate to="/setup" replace />;
+    return <Navigate to={panelRoutes.setup} replace />;
   }
 
   return (

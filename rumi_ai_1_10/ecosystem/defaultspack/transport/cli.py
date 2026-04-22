@@ -44,7 +44,7 @@ from transport.cli_commands import execute_command
 # ── Configuration ────────────────────────────────────────────
 
 _DEFAULT_CONFIG = {
-    "default_model": "stub/default",
+    "default_model": "default",
     "system_prompt": "",
     "http_host": "127.0.0.1",
     "http_port": 8766,

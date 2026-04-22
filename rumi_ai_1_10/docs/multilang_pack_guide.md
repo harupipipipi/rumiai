@@ -413,7 +413,7 @@ echo '{"context":{"principal_id":"test_user","pack_id":"my_rust_pack","function_
 
 ### 7.8 配置
 
-ビルド済みバイナリを function_dir 内にコピーまたはシンボリックリンクして、Rumi AI OS の `ecosystem_packs/` に Pack ディレクトリを配置します。
+ビルド済みバイナリを function_dir 内にコピーまたはシンボリックリンクして、Rumi AI OS の `ecosystem/` に Pack ディレクトリを配置します。
 
 ---
 
@@ -747,7 +747,7 @@ cat /tmp/test_input.json | ./my_binary | wc -c
 
 ## 関連ドキュメント
 
-- [Pack 開発ガイド](pack_development_guide.md) — Pack の全体像
+- [Pack 開発ガイド](pack-development.md) — Pack の全体像
 - [サンプルコード: Rust Pack](examples/rust_pack/) — Rust Pack の完全なサンプル
 - [サンプルコード: Go Pack](examples/go_pack/) — Go Pack の完全なサンプル
 - [サンプルコード: Node.js Pack](examples/node_pack/) — Node.js Pack の完全なサンプル

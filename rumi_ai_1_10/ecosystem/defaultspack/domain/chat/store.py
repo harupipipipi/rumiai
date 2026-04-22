@@ -4,6 +4,20 @@ import uuid
 import json
 
 
+def _default_conversation_model():
+    try:
+        from domain.ai_client.profile_loader import ProfileLoader
+
+        profile = ProfileLoader().get("default") or {}
+        provider = profile.get("provider")
+        model = profile.get("model")
+        if provider and model:
+            return "{}/{}".format(provider, model)
+    except Exception:
+        pass
+    return "stub/default"
+
+
 def _gen_id():
     return str(uuid.uuid4())
 
@@ -32,7 +46,7 @@ class ChatStore:
             "title": "New Conversation",
             "created_at": now,
             "updated_at": now,
-            "model": model if model else "stub/default",
+            "model": model if model else _default_conversation_model(),
             "system_prompt_id": system_prompt_id,
             "agent_id": agent_id,
             "tags": tags if tags is not None else [],

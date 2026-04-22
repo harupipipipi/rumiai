@@ -10,14 +10,16 @@ import base64
 import ssl
 
 from ..base_provider import BaseProvider
+from .profile_catalog import merge_curated_and_profiles, profile_dir_for
 
 
 class GoogleProvider(BaseProvider):
     """Google Generative AI API プロバイダー (Gemini 2.5 Pro, Gemini 2.5 Flash 等)"""
 
     BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+    PROFILE_DIR = profile_dir_for("google", __file__)
 
-    KNOWN_MODELS = [
+    CURATED_MODELS = [
         {"id": "google/gemini-2.5-pro", "name": "Gemini 2.5 Pro", "provider": "google", "type": "chat"},
         {"id": "google/gemini-2.5-flash", "name": "Gemini 2.5 Flash", "provider": "google", "type": "chat"},
         {"id": "google/gemini-3-pro-preview", "name": "Gemini 3 Pro Preview", "provider": "google", "type": "chat"},
@@ -30,10 +32,18 @@ class GoogleProvider(BaseProvider):
         {"id": "google/gemini-embedding-001", "name": "Gemini Embedding 001", "provider": "google", "type": "embedding"},
         {"id": "google/text-embedding-004", "name": "Text Embedding 004", "provider": "google", "type": "embedding"},
     ]
+    KNOWN_MODELS = CURATED_MODELS
 
     def __init__(self):
         self._api_key = os.environ.get("GOOGLE_API_KEY", "") or os.environ.get("GEMINI_API_KEY", "")
         self._ssl_ctx = ssl.create_default_context()
+
+    @classmethod
+    def _load_profile_models(cls):
+        return merge_curated_and_profiles("google", cls.CURATED_MODELS, cls.PROFILE_DIR)
+
+    def list_models(self):
+        return self._load_profile_models()
 
     # ── internal helpers ────────────────────────────────────────────────
 

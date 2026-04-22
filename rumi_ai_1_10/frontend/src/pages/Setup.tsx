@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAppStore } from '@/src/store';
 import { Button } from '@/src/components/ui/Button';
 import { useT } from '@/src/lib/i18n';
+import { panelRoutes } from '@/src/lib/routes';
 import { Loader2, CheckCircle2 } from 'lucide-react';
 
 export function Setup() {
@@ -25,7 +26,7 @@ export function Setup() {
       setSetupDone(true);
       addToast(t('setup.link_success') || 'Account linked successfully!', 'success');
       const timer = setTimeout(() => {
-        navigate('/panel');
+        navigate(panelRoutes.home);
       }, 1500);
       return () => clearTimeout(timer);
     }
@@ -49,7 +50,7 @@ export function Setup() {
 
   const handleSkip = () => {
     setSetupDone(true);
-    navigate('/panel');
+    navigate(panelRoutes.home);
   };
 
   if (linked) {

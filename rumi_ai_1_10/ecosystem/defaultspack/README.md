@@ -35,6 +35,20 @@ defaults 単体で既存の AI サービス（ChatGPT / Claude / Cursor / Devin�
 - **Widget ライブラリ** — lib/rumi_widgets/。バックエンドが UI に描画指示を出すための Python ヘルパー。
 - **シェル** — ui/shell.html。スロット定義 + Asset ローダー + Widget レンダラー。Asset を載せる空の枠。
 
+## まずどこを見るか
+
+| やりたいこと | 読む場所 |
+|---|---|
+| defaultspack を standalone で起動したい | `docs/getting-started.md` |
+| 8766 のフロントエンドを直したい | `webapp/` |
+| 右バー / 設定 / chat renderer の拡張方法を知りたい | `docs/frontend_extensions.md` |
+| frontend の次タスクを見たい | `docs/frontend_todo.md` |
+| ブラウザに返す実ファイルの置き場を見たい | `ui/` |
+| HTTP エンドポイントを見たい | `docs/chat.md`, `transport/http.py` |
+| viewer 経由の起動フローを知りたい | `../../docs/rumi_viewer_start.md` |
+
+`webapp/` は `dont_push_this_file/luxe-chat` を土台にしつつ、`defaultspack` の `/api/chat/...`、`/api/ui/...`、`/api/health` に接続する standalone frontend の source です。`npm run build` の出力先は `ui/` で、HTTP サーバーはその build 済み asset を `/` と `/static/...` で配信します。
+
 ## defaults が提供しないもの
 
 - **Asset** — 画面に描画される UI ファイル。chat 画面、agent 画面、coding 画面、設定画面は全て user_data 側に配置される。

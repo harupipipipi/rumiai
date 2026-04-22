@@ -21,6 +21,7 @@ class AIClient:
         self._profiles = {}
         self._register_default_provider()
         self._auto_register_providers()
+        self._load_profiles()
         self._auto_register_rumi()
 
     def _register_default_provider(self):
@@ -44,6 +45,14 @@ class AIClient:
             rumi = detect_rumi_provider(self)
             if rumi is not None:
                 self._providers["rumi"] = rumi
+        except Exception:
+            pass
+
+    def _load_profiles(self):
+        """組み込みプロファイルをロードする。"""
+        try:
+            from domain.ai_client.profile_loader import ProfileLoader
+            ProfileLoader().apply_to_client(self)
         except Exception:
             pass
 
@@ -90,6 +99,12 @@ class AIClient:
         for pid, prov in self._providers.items():
             if pid == "stub":
                 continue
+            if hasattr(prov, "list_models"):
+                try:
+                    models.extend(prov.list_models())
+                    continue
+                except Exception:
+                    pass
             if hasattr(prov, "KNOWN_MODELS"):
                 models.extend(prov.KNOWN_MODELS)
         if provider is not None:

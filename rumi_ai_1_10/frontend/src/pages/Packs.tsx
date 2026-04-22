@@ -5,6 +5,7 @@ import { useT } from '@/src/lib/i18n';
 import { Input } from '@/src/components/ui/Input';
 import { Badge } from '@/src/components/ui/Badge';
 import { Switch } from '@/src/components/ui/Switch';
+import { panelRoutes } from '@/src/lib/routes';
 import { Search, Package, Loader2 } from 'lucide-react';
 
 export function Packs() {
@@ -66,7 +67,7 @@ export function Packs() {
           filteredPacks.map(pack => (
             <div
               key={pack.id}
-              onClick={() => navigate(`/panel/packs/${pack.id}`)}
+              onClick={() => navigate(panelRoutes.packDetail(pack.id))}
               className="flex cursor-pointer items-center justify-between rounded-xl border border-border bg-bg-card p-6 shadow-sm transition-colors hover:bg-bg-hover"
             >
               <div className="flex flex-col gap-2">

@@ -43,6 +43,11 @@
     },
     {
       "method": "GET",
+      "path": "/api/panel/startup/profiles",
+      "handler": "_panel_get_startup_profiles"
+    },
+    {
+      "method": "GET",
       "path": "/api/panel/flows",
       "handler": "_panel_get_flows"
     },
@@ -73,15 +78,47 @@
     },
     {
       "method": "POST",
+      "path": "/api/panel/startup/profiles",
+      "handler": "_panel_create_startup_profile",
+      "pass_body": true
+    },
+    {
+      "method": "POST",
       "path": "/api/panel/flows",
       "handler": "_panel_create_flow",
       "pass_body": true
     },
     {
       "method": "POST",
+      "path_pattern": "/api/panel/startup/profiles/{id}/duplicate",
+      "handler": "_panel_duplicate_startup_profile"
+    },
+    {
+      "method": "POST",
+      "path_pattern": "/api/panel/startup/profiles/{id}/activate",
+      "handler": "_panel_activate_startup_profile"
+    },
+    {
+      "method": "POST",
+      "path_pattern": "/api/panel/startup/profiles/{id}/launch",
+      "handler": "_panel_launch_startup_profile"
+    },
+    {
+      "method": "POST",
       "path": "/api/panel/kernel/restart",
       "handler": "_panel_restart_kernel",
       "response_mode": "raw"
+    },
+    {
+      "method": "PUT",
+      "path_pattern": "/api/panel/startup/profiles/{id}",
+      "handler": "_panel_update_startup_profile",
+      "pass_body": true
+    },
+    {
+      "method": "DELETE",
+      "path_pattern": "/api/panel/startup/profiles/{id}",
+      "handler": "_panel_delete_startup_profile"
     },
     {
       "method": "PUT",

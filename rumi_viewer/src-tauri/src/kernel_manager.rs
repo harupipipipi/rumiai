@@ -83,6 +83,12 @@ impl KernelManager {
             self.config.rumi_home.display()
         );
 
+        let dev_environment = cfg!(debug_assertions) || self.config.is_dev_workspace();
+        let auto_approve_local = dev_environment
+            && std::env::var("RUMI_AUTO_APPROVE_LOCAL")
+                .map(|value| value.eq_ignore_ascii_case("true"))
+                .unwrap_or(false);
+
         let child = Command::new(&venv_python)
             .args(["-m", "app"])
             .current_dir(&self.config.rumi_home)
@@ -91,6 +97,18 @@ impl KernelManager {
             .env("RUMI_LOG_DIR", &self.config.log_dir)
             .env("RUMI_PORT", self.config.kernel_port.to_string())
             .env("RUMI_PANEL_BOOTSTRAP_SECRET", &self.panel_bootstrap_secret)
+            .env(
+                "RUMI_ENVIRONMENT",
+                if dev_environment {
+                    "development"
+                } else {
+                    "production"
+                },
+            )
+            .env(
+                "RUMI_AUTO_APPROVE_LOCAL",
+                if auto_approve_local { "true" } else { "false" },
+            )
             .stdout(Stdio::from(log_file))
             .stderr(Stdio::from(log_stderr))
             .spawn()
@@ -235,12 +253,19 @@ impl Drop for KernelManager {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        ENV_LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     fn test_config() -> AppConfig {
         AppConfig::detect_for_tauri(
             PathBuf::from("/tmp/test_resource"),
             PathBuf::from("/tmp/test_appdata"),
-        ).unwrap()
+        )
+        .unwrap()
     }
 
     #[test]
@@ -263,5 +288,39 @@ mod tests {
         let mut km = KernelManager::new(&config, "test-bootstrap".into());
         let result = km.wait_and_handle_restart().unwrap();
         assert!(!result);
+    }
+
+    #[test]
+    fn explicit_auto_approve_opt_in_is_required() {
+        let _guard = env_lock().lock().unwrap();
+        std::env::remove_var("RUMI_AUTO_APPROVE_LOCAL");
+
+        let dev_environment = true;
+        let auto_approve_local = dev_environment
+            && std::env::var("RUMI_AUTO_APPROVE_LOCAL")
+                .map(|value| value.eq_ignore_ascii_case("true"))
+                .unwrap_or(false);
+
+        assert!(!auto_approve_local);
+    }
+
+    #[test]
+    fn explicit_auto_approve_opt_in_only_applies_in_dev() {
+        let _guard = env_lock().lock().unwrap();
+        std::env::set_var("RUMI_AUTO_APPROVE_LOCAL", "true");
+
+        let production_auto_approve = false
+            && std::env::var("RUMI_AUTO_APPROVE_LOCAL")
+                .map(|value| value.eq_ignore_ascii_case("true"))
+                .unwrap_or(false);
+        let development_auto_approve = true
+            && std::env::var("RUMI_AUTO_APPROVE_LOCAL")
+                .map(|value| value.eq_ignore_ascii_case("true"))
+                .unwrap_or(false);
+
+        assert!(!production_auto_approve);
+        assert!(development_auto_approve);
+
+        std::env::remove_var("RUMI_AUTO_APPROVE_LOCAL");
     }
 }

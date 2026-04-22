@@ -1,5 +1,7 @@
 # Rumi AI OS — Pack 開発ガイド
 
+> **Legacy ドキュメント**: 互換参照のため残しています。新規参照は [pack-development.md](./pack-development.md) と [pack-development-guide.md](./pack-development-guide.md) を優先してください。
+
 最終更新: 2026-03-23
 
 本ドキュメントは Rumi AI OS の Pack を開発するための総合ガイドです。Pack の概要から構造、ライフサイクル、権限システム、Docker 隔離、開発ワークフローまでを網羅します。
@@ -164,7 +166,7 @@ CapabilityExecutor が実行を担当します。実行フローは以下の通�
 - サードパーティまたはユーザーが開発する Pack
 - Trust チェックが必須（sha256 が TrustStore に登録されている必要がある）
 - 明示的な承認が必要
-- `ecosystem_packs/` ディレクトリに配置
+- `ecosystem/` ディレクトリに配置
 
 ---
 
@@ -291,7 +293,7 @@ echo '{"context":{"principal_id":"test","pack_id":"my_pack","function_id":"my_fu
 ### 9.3 配布
 
 1. Pack ディレクトリを zip で配布、または Git リポジトリで公開
-2. ユーザーが `ecosystem_packs/` に配置
+2. ユーザーが `ecosystem/` に配置
 3. Kernel が次回起動時にスキャンして登録
 4. 将来的にはマーケットプレイス（Phase D/E）で配布
 
@@ -343,4 +345,4 @@ echo '{"context":{"principal_id":"test","pack_id":"my_pack","function_id":"my_fu
 
 - [多言語 Pack 開発ガイド](multilang_pack_guide.md) — Python 以外の言語で Pack を開発する方法
 - [Pack デスクトップアプリ開発ガイド](pack_desktop_app_guide.md) — デスクトップアプリ対応の Pack を開発する方法
-- [セットアップ & デスクトップ配布 TODO](setuptodo.md) — Rumi AI OS 全体のロードマップ
+- [ロードマップ](roadmap.md) — Rumi AI OS の全体計画

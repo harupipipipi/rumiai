@@ -1,0 +1,93 @@
+# rumi_viewer Start Guide
+
+`rumi_viewer` は Tauri 製の desktop shell です。開発起動では repo 内の `rumi_ai_1_10/` を自動検出し、Python kernel を起動して panel UI へ接続します。
+
+## これを読むタイミング
+
+- viewer を最短で起動したい
+- viewer が kernel を見つけられず止まる
+- panel は開くが画面遷移が崩れる
+- `defaultspack` の frontend / panel まわりの起動経路を追いたい
+
+## 最短の起動手順
+
+repo ルートで次を実行します。
+
+```bash
+cd rumi_viewer/src-tauri
+cargo tauri dev
+```
+
+開発起動では viewer が次を自動で行います。
+
+1. repo 内の `rumi_ai_1_10/` を検出する
+2. `~/Library/Application Support/dev.rumiai.app/venv` を用意する
+3. `python -m app` で kernel を起動する
+4. `http://127.0.0.1:8765/panel/` へ bootstrap する
+
+## 開発時の承認フロー
+
+- repo checkout を検出しても、それだけでは pack 自動承認は有効になりません
+- 開発環境として kernel へ `RUMI_ENVIRONMENT=development` は渡されます
+- `RUMI_AUTO_APPROVE_LOCAL=true` を明示して viewer を起動したときだけ、開発用の自動承認が有効になります
+
+例:
+
+```bash
+cd rumi_viewer/src-tauri
+RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev
+```
+
+この opt-in を付けない通常の開発起動では、modified pack は再承認待ちのままです。
+
+## 起動できたときの見え方
+
+- 正常起動すると Tauri window が開きます
+- 初回状態では `/health` が `needs_setup: true` を返すことがあり、その場合は setup 画面から始まります
+- setup 完了後は panel UI に遷移します
+
+## defaultspack との関係
+
+- viewer が直接開くのは kernel の control panel (`/panel/`) です
+- `defaultspack` 自体は kernel から component として読み込まれます
+- `defaultspack` の独立 HTTP frontend は `DEFAULTS_HTTP_PORT` 既定値 `8766` ですが、viewer の初期導線とは別です
+
+## よくある詰まり方
+
+### `Kernel directory not found`
+
+viewer が bundle 内の `app/` しか見ていないか、repo checkout を検出できていません。開発起動は repo ルート配下で行ってください。
+
+### `panel bootstrap returned 401 Unauthorized`
+
+bootstrap secret がずれているか、古い kernel がポート `8765` を掴んでいる可能性があります。以下で占有を確認します。
+
+```bash
+lsof -nP -iTCP:8765 -sTCP:LISTEN
+```
+
+### Home などを押すと真っ暗になる
+
+panel frontend は `basename="/panel"` 前提です。リンクや `navigate()` で `/panel/...` を二重に付けると `/panel/panel` に飛んでルート不一致になります。frontend 側のルートは `/`, `/packs`, `/flows`, `/settings` のように basename 相対で持たせてください。
+
+## 確認コマンド
+
+kernel が起動しているかを確認:
+
+```bash
+curl http://127.0.0.1:8765/health
+```
+
+defaultspack 独立 frontend が起動しているかを確認:
+
+```bash
+curl http://127.0.0.1:8766/api/health
+```
+
+## 関連ファイル
+
+- `rumi_viewer/src-tauri/src/config.rs`
+- `rumi_viewer/src-tauri/src/kernel_manager.rs`
+- `rumi_viewer/src-tauri/src/lib.rs`
+- `rumi_ai_1_10/frontend/src/App.tsx`
+- `rumi_ai_1_10/frontend/src/lib/routes.ts`

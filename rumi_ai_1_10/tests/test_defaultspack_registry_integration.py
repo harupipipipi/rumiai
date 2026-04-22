@@ -80,6 +80,25 @@ class TestDefaultspackRegistryIntegration(unittest.TestCase):
         self.assertEqual(component.pack_id, "defaults")
         self.assertEqual(component.id, "agent")
 
+    def test_full_id_override_can_select_non_preferred_pack(self):
+        function_registry = FunctionRegistry()
+        with patch(
+            "core_runtime.di_container.get_container",
+            return_value=_FakeContainer(function_registry),
+        ):
+            registry = Registry()
+            registry.load_all_packs()
+
+        active = _FakeActiveEcosystem(
+            active_pack_identity="rumi:ecosystem/defaultspack",
+            overrides={"chat": "defaults:chat:chat"},
+        )
+        component = registry.resolve_component_for_type("chat", active)
+
+        self.assertIsNotNone(component)
+        self.assertEqual(component.pack_id, "defaults")
+        self.assertEqual(component.full_id, "defaults:chat:chat")
+
     def test_defaultspack_pack_routes_are_cloned_to_v2_prefix(self):
         function_registry = FunctionRegistry()
         with patch(

@@ -1,0 +1,27 @@
+$ python -m rumi_ai --health
+{
+  "status": "DEGRADED",
+  "timestamp": "2026-04-22T07:05:13.101407Z",
+  "probes": {
+    "disk": {
+      "status": "DEGRADED",
+      "message": "ok",
+      "duration_ms": 0.17
+    },
+    "writable_tmp": {
+      "status": "UP",
+      "message": "ok",
+      "duration_ms": 0.25
+    }
+  }
+}
+
+$ curl -sS http://127.0.0.1:8765/health
+{
+  "success": true,
+  "data": {
+    "status": "ok",
+    "needs_setup": true
+  },
+  "error": null
+}

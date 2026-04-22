@@ -7,6 +7,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from ...extensions.loading import import_entrypoint
 from ...extensions.runtime import get_extension_registry
 from .openai_compatible_provider import OpenAICompatibleProvider
+from .provider_catalog import OPENAI_COMPATIBLE_PROVIDER_CLASSES
 
 """
 providers package - provider discovery and catalog helpers.
@@ -894,7 +895,11 @@ def _instantiate_manifest_provider(manifest: Dict[str, Any]):
     adapter = str(manifest.get("adapter", "")).strip()
     entrypoint = str(manifest.get("entrypoint", "")).strip()
     if adapter == "openai_compatible":
-        return OpenAICompatibleProvider.from_manifest(
+        provider_cls = OPENAI_COMPATIBLE_PROVIDER_CLASSES.get(
+            provider_id,
+            OpenAICompatibleProvider,
+        )
+        return provider_cls.from_manifest(
             manifest,
             model_manifests=_load_model_manifests(provider_id),
         )

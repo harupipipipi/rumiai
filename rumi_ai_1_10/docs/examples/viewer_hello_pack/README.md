@@ -38,19 +38,19 @@ capability の定義は `core_runtime/core_pack/core_viewer_capability/` にあ�
 
 ### 1. Pack を配置する
 
-このディレクトリを `ecosystem_packs/` にコピーします:
+このディレクトリを `ecosystem/` にコピーします:
 
 ```bash
-cp -r docs/examples/viewer_hello_pack/ ecosystem_packs/viewer_hello_pack/
+cp -r docs/examples/viewer_hello_pack/ ecosystem/viewer_hello_pack/
 ```
 
 ### 2. Kernel を起動する
 
 ```bash
-python -m core_runtime.kernel
+python -m rumi_ai
 ```
 
-Kernel が起動すると `ecosystem_packs/viewer_hello_pack/ecosystem.json` を自動でスキャンします。
+Kernel が起動すると `ecosystem/viewer_hello_pack/ecosystem.json` を自動でスキャンします。
 
 ### 3. Pack を承認する
 
@@ -118,6 +118,6 @@ Kernel API のデフォルトポートは `8765` です。
 
 ## 関連ドキュメント
 
-- [Pack 開発ガイド](../../pack_development_guide.md)
+- [Pack 開発ガイド](../../pack-development.md)
 - [多言語 Pack 開発ガイド](../../multilang_pack_guide.md)
 - [core_viewer_capability](../../../core_runtime/core_pack/core_viewer_capability/)

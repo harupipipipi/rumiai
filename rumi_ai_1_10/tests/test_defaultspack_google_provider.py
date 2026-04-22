@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -34,13 +36,36 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
 
         self.assertEqual(provider._api_key, "google-key")
 
+    def test_google_provider_loads_profile_models_from_user_data(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            profile_dir = Path(tmpdir) / "profiles"
+            target_dir = profile_dir / "gemma-3-12b-it"
+            target_dir.mkdir(parents=True, exist_ok=True)
+            (target_dir / "profile.json").write_text(
+                json.dumps(
+                    {
+                        "provider_id": "google",
+                        "model_id": "gemma-3-12b-it",
+                        "display_name": "Gemma 3 12B IT",
+                        "metadata": {"type": "chat"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.object(GoogleProvider, "PROFILE_DIR", profile_dir):
+                provider = GoogleProvider()
+                model_ids = {item["id"] for item in provider.list_models()}
+
+        self.assertIn("google/gemma-3-12b-it", model_ids)
+        self.assertIn("google/gemini-2.5-pro", model_ids)
+
     def test_google_catalog_includes_gemini_and_gemma_models(self):
         from domain.ai_client.providers import get_all_known_models
 
-        model_ids = {
-            item["id"]
-            for item in get_all_known_models(provider_id="google")
-        }
+        model_ids = {item["id"] for item in get_all_known_models(provider_id="google")}
 
         self.assertIn("google/gemini-3-pro-preview", model_ids)
         self.assertIn("google/gemini-3-flash-preview", model_ids)

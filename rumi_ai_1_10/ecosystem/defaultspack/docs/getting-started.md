@@ -26,7 +26,8 @@ blocks/          ← handler（ビジネスロジックの入口）
 domain/          ← ドメインロジック
 transport/       ← HTTP / stdio / UDS サーバー
 flows/           ← Flow 定義
-ui/              ← フロントエンド（shell.html, dev_panel.js）
+webapp/          ← standalone frontend の source（luxe-chat ベース）
+ui/              ← 配信される build 済み frontend（shell.html, shell-app.js など）
 ```
 
 ### 3. 環境変数の設定
@@ -71,13 +72,32 @@ def run(input_data, context):
 [defaults] HTTP server started on 127.0.0.1:8766
 ```
 
+## フロントエンドを編集するとき
+
+`http://127.0.0.1:8766/` で出る standalone UI の source は `webapp/` にあります。`dont_push_this_file/luxe-chat` をベースに、`defaultspack` の実 API に繋ぐ形で管理しています。
+
+```bash
+cd rumi_ai_1_10/ecosystem/defaultspack/webapp
+npm install
+npm run dev
+```
+
+本番相当の配信ファイルを更新したいときは build します。
+
+```bash
+cd rumi_ai_1_10/ecosystem/defaultspack/webapp
+npm run build
+```
+
+この build は `ui/` に `shell-app.js` と `shell-app.css` を出力します。HTTP サーバーは `ui/shell.html` を返し、そこから `/static/shell-app.js` と `/static/shell-app.css` を読み込みます。
+
 ## 最初の会話を送るまでの手順
 
 ### ブラウザで開く
 
-ブラウザで `http://127.0.0.1:8766/` にアクセスすると、`ui/shell.html` が返されます。UI が表示されれば起動成功です。
+ブラウザで `http://127.0.0.1:8766/` にアクセスすると、`ui/shell.html` が返されます。`shell.html` は `webapp` の build 済み asset を mount するだけの薄い入口です。UI が表示されれば起動成功です。
 
-HTTP サーバーのルート `/` は `transport/http.py` の `_handle_static()` が処理し、Pack ルートからの相対パス `ui/shell.html` を読み込んで返します。追加の静的ファイル（CSS、JS、画像等）は `/static/{path}` でアクセスでき、`_handle_static_file()` が `ui/{path}` からファイルを読み込みます。例えば `/static/dev_panel.js` は `ui/dev_panel.js` を返します。
+HTTP サーバーのルート `/` は `transport/http.py` の `_handle_static()` が処理し、Pack ルートからの相対パス `ui/shell.html` を読み込んで返します。追加の静的ファイル（CSS、JS、画像等）は `/static/{path}` でアクセスでき、`_handle_static_file()` が `ui/{path}` からファイルを読み込みます。例えば `/static/shell-app.js` は `ui/shell-app.js`、`/static/dev_panel.js` は `ui/dev_panel.js` を返します。
 
 ### curl で会話を作成してメッセージを送る
 

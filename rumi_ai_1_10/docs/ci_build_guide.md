@@ -196,7 +196,7 @@ icon.png は bundle.icon に含めなくてよい（trayIcon.iconPath で使用�
 
 ### 5.2 将来計画: Phase U
 
-setuptodo.md の Phase U で実装予定:
+roadmap.md のアップデート計画で実装予定:
 
 - **U-1**: バージョン管理（現在のバージョン取得、最新バージョンの取得）
 - **U-2**: アップデートチェック API（Cloudflare Workers or R2）

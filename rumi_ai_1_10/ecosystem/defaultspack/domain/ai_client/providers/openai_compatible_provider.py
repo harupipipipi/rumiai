@@ -4,12 +4,15 @@ import os
 from typing import Any, Dict, List, Optional
 
 from .openai_provider import OpenAIProvider
+from .profile_catalog import merge_curated_and_profiles, profile_dir_for
 
 
 class OpenAICompatibleProvider(OpenAIProvider):
     """OpenAI-compatible provider with both legacy and manifest constructors."""
 
+    provider_name = ""
     KNOWN_MODELS: List[Dict[str, Any]] = []
+    curated_models: List[Dict[str, Any]] = []
     DISPLAY_NAME = "OpenAI Compatible"
 
     def __init__(
@@ -27,8 +30,9 @@ class OpenAICompatibleProvider(OpenAIProvider):
         extra_headers: Optional[Dict[str, str]] = None,
     ):
         super().__init__()
-        self.provider_id = str(provider_id or "openai_compatible")
-        self.display_name = str(display_name or self.provider_id)
+        default_provider_id = str(provider_id or getattr(self.__class__, "provider_name", "") or "openai_compatible")
+        self.provider_id = default_provider_id
+        self.display_name = str(display_name or getattr(self.__class__, "display_name", "") or self.provider_id)
         self.DISPLAY_NAME = self.display_name
         self._api_key_envs = self._normalize_env_names(api_key_env)
         self._api_key_env = self._api_key_envs[0] if self._api_key_envs else ""
@@ -48,7 +52,22 @@ class OpenAICompatibleProvider(OpenAIProvider):
         resolved_base_url = str(base_url or env_base_url or self._default_base_url or "").strip()
         self._base_url = resolved_base_url.rstrip("/") if resolved_base_url else ""
         self.BASE_URL = self._base_url
-        self.KNOWN_MODELS = self._normalize_known_models(known_models or [])
+        seed_models = known_models
+        if seed_models is None:
+            seed_models = self.list_curated_models()
+        self.KNOWN_MODELS = self._normalize_known_models(seed_models or [])
+
+    @classmethod
+    def profile_dir(cls):
+        provider_name = str(getattr(cls, "provider_name", "") or "").strip()
+        if not provider_name:
+            return None
+        return profile_dir_for(provider_name, __file__)
+
+    @classmethod
+    def list_curated_models(cls) -> List[Dict[str, Any]]:
+        source = getattr(cls, "curated_models", None) or getattr(cls, "KNOWN_MODELS", [])
+        return [dict(item) for item in source]
 
     @classmethod
     def from_manifest(
@@ -58,24 +77,29 @@ class OpenAICompatibleProvider(OpenAIProvider):
         model_manifests: Optional[List[Dict[str, Any]]] = None,
     ) -> "OpenAICompatibleProvider":
         provider_id = str(manifest.get("id", "")).strip() or "openai_compatible"
-        known_models: List[Dict[str, Any]] = []
+        known_models: List[Dict[str, Any]] = cls.list_curated_models()
+        known_model_map = {
+            str(item.get("id", "")).strip(): dict(item)
+            for item in known_models
+            if str(item.get("id", "")).strip()
+        }
         for item in model_manifests or []:
             model_id = str(item.get("model_id", "")).strip()
             if not model_id:
                 continue
-            known_models.append(
-                {
-                    "id": f"{provider_id}/{model_id}",
-                    "model_id": model_id,
-                    "name": item.get("display_name", model_id),
-                    "display_name": item.get("display_name", model_id),
-                    "provider": provider_id,
-                    "provider_id": provider_id,
-                    "type": item.get("type", "chat"),
-                    "defaults": dict(item.get("defaults", {})),
-                    "metadata": dict(item.get("metadata", {})),
-                }
-            )
+            qualified_model_id = f"{provider_id}/{model_id}"
+            known_model_map[qualified_model_id] = {
+                "id": qualified_model_id,
+                "model_id": model_id,
+                "name": item.get("display_name", model_id),
+                "display_name": item.get("display_name", model_id),
+                "provider": provider_id,
+                "provider_id": provider_id,
+                "type": item.get("type", "chat"),
+                "defaults": dict(item.get("defaults", {})),
+                "metadata": dict(item.get("metadata", {})),
+            }
+        known_models = list(known_model_map.values())
         if not known_models:
             known_models = list(manifest.get("models", []))
         if not known_models and manifest.get("default_model"):
@@ -179,6 +203,10 @@ class OpenAICompatibleProvider(OpenAIProvider):
         return normalized
 
     def list_models(self):
+        provider_name = str(self.provider_id or getattr(self, "provider_name", "") or "").strip()
+        profile_dir = self.profile_dir()
+        if provider_name and profile_dir is not None:
+            return merge_curated_and_profiles(provider_name, self.KNOWN_MODELS, profile_dir)
         return [dict(model) for model in self.KNOWN_MODELS]
 
     def _headers(self, content_type="application/json"):

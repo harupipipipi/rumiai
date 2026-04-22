@@ -491,6 +491,12 @@ class KernelSystemHandlersMixin:
                 if status is None:
                     pending.append(pack_id)
                     continue
+                if (
+                    callable(getattr(am, "auto_approve_if_dev", None))
+                    and am.auto_approve_if_dev(pack_id) is True
+                ):
+                    approved.append(pack_id)
+                    continue
                 if status:
                     status_str = status.value if hasattr(status, 'value') else str(status)
                     if status_str in ("installed", "pending"):
@@ -719,7 +725,7 @@ class KernelSystemHandlersMixin:
                     pass
             _override_selected = {}
             for _ct, _ci in _overrides.items():
-                _override_selected[_ct] = _ci
+                _override_selected[_ct] = str(_ci)
 
             components = []
             component_objects = []
@@ -736,7 +742,8 @@ class KernelSystemHandlersMixin:
                     continue
                 # override チェック
                 if _comp_type in _override_selected:
-                    if _comp_id != _override_selected[_comp_type]:
+                    _selected_override = _override_selected[_comp_type]
+                    if _comp_id != _selected_override and _full_id != _selected_override:
                         continue
 
                 components.append({
