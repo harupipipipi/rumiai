@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from ecosystem.defaultspack.backend.ai_client.provider_catalog import (
@@ -135,3 +137,26 @@ def test_permission_policy_persists_and_blocks_tool_list_and_invoke(tmp_path):
     assert denied["error"]["code"] == "PERMISSION_DENIED"
     assert denied["error"]["details"]["matched_by"] == "tools"
     assert denied["error"]["details"]["reason"] == "blocked_by_policy"
+
+
+def test_permission_policy_defaults_to_ask_when_no_file_exists(tmp_path):
+    from ecosystem.defaultspack.backend.tool.permission_policy import ToolPermissionPolicyStore
+
+    store = ToolPermissionPolicyStore(path=tmp_path / "missing.json")
+    policy = store.load()
+
+    assert policy["default_action"] == "ask"
+
+
+def test_shell_tool_summary_counts_ask_before_deny():
+    shell_path = (
+        Path(__file__).resolve().parent.parent
+        / "ecosystem"
+        / "defaultspack"
+        / "ui"
+        / "shell.html"
+    )
+    source = shell_path.read_text(encoding="utf-8")
+    ask_index = source.index('if(permission.action === "ask" || permission.requires_approval) summary.ask += 1;')
+    deny_index = source.index('else if(permission.action === "deny" || permission.allowed === false) summary.denied += 1;')
+    assert ask_index < deny_index

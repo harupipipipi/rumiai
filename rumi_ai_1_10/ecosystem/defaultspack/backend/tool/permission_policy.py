@@ -16,7 +16,7 @@ _VALID_ACTIONS = {_ACTION_ALLOW, _ACTION_DENY, _ACTION_ASK}
 
 _DEFAULT_POLICY: Dict[str, Any] = {
     "version": 1,
-    "default_action": _ACTION_ALLOW,
+    "default_action": _ACTION_ASK,
     "tools": {},
     "tags": {},
     "execution_types": {},
@@ -46,7 +46,7 @@ def _deep_merge(base: Dict[str, Any], updates: Dict[str, Any]) -> Dict[str, Any]
     return merged
 
 
-def _normalize_action(value: Any, default: str = _ACTION_ALLOW) -> str:
+def _normalize_action(value: Any, default: str = _ACTION_ASK) -> str:
     action = str(value or default).strip().lower()
     if action not in _VALID_ACTIONS:
         return default
@@ -68,7 +68,7 @@ def _normalize_rule_map(value: Any) -> Dict[str, str]:
 
 def normalize_policy(policy: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     raw = _deep_merge(_DEFAULT_POLICY, policy or {})
-    raw["default_action"] = _normalize_action(raw.get("default_action"), _ACTION_ALLOW)
+    raw["default_action"] = _normalize_action(raw.get("default_action"), _ACTION_ASK)
     raw["tools"] = _normalize_rule_map(raw.get("tools"))
     raw["tags"] = _normalize_rule_map(raw.get("tags"))
     raw["execution_types"] = _normalize_rule_map(raw.get("execution_types"))

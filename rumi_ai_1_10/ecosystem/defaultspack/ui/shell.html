@@ -967,8 +967,8 @@ function summarizeTools(tools){
   (tools || []).forEach(function(tool){
     if(!tool || typeof tool !== "object") return;
     var permission = tool.permission || {};
-    if(permission.action === "deny" || permission.allowed === false) summary.denied += 1;
-    else if(permission.action === "ask" || permission.requires_approval) summary.ask += 1;
+    if(permission.action === "ask" || permission.requires_approval) summary.ask += 1;
+    else if(permission.action === "deny" || permission.allowed === false) summary.denied += 1;
     else summary.allowed += 1;
     if(tool.execution && tool.execution.type === "mcp") summary.mcp += 1;
   });
