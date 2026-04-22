@@ -10,6 +10,7 @@ mod tray;
 mod updater;
 
 use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result as AnyResult};
@@ -90,6 +91,29 @@ fn request_panel_bootstrap_code(port: u16, bootstrap_secret: &str) -> AnyResult<
         bail!("panel bootstrap response missing code");
     }
     Ok(payload.code)
+}
+
+fn request_panel_bootstrap_code_with_retry(
+    port: u16,
+    bootstrap_secret: &str,
+) -> AnyResult<String> {
+    let max_attempts = 10;
+    let retry_delay = Duration::from_millis(500);
+    let mut last_error = None;
+
+    for attempt in 1..=max_attempts {
+        match request_panel_bootstrap_code(port, bootstrap_secret) {
+            Ok(code) => return Ok(code),
+            Err(error) => {
+                last_error = Some(error);
+                if attempt < max_attempts {
+                    thread::sleep(retry_delay);
+                }
+            }
+        }
+    }
+
+    Err(last_error.expect("bootstrap retry should capture at least one error"))
 }
 
 pub fn run() {
@@ -193,8 +217,10 @@ pub fn run() {
 
                 set_progress("Ready");
 
-                let panel_code = match request_panel_bootstrap_code(port, &panel_bootstrap_secret)
-                {
+                let panel_code = match request_panel_bootstrap_code_with_retry(
+                    port,
+                    &panel_bootstrap_secret,
+                ) {
                     Ok(code) => code,
                     Err(e) => {
                         let msg = format!("Error: Panel bootstrap failed — {e}");
