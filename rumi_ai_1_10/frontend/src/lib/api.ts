@@ -2,6 +2,8 @@ import type {
   ApiResponse,
   PacksResponseData,
   PackToggleResponseData,
+  StartupProfilesResponseData,
+  StartupProfileMutationResponseData,
   FlowsResponseData,
   ApiFlowDetail,
   FlowCreateResponseData,
@@ -159,6 +161,57 @@ export function enablePack(id: string): Promise<PackToggleResponseData> {
 export function disablePack(id: string): Promise<PackToggleResponseData> {
   return apiFetch<PackToggleResponseData>(
     `/api/panel/packs/${encodeURIComponent(id)}/disable`,
+    { method: 'POST' },
+  );
+}
+
+// ============================================================
+// Startup Profiles
+// ============================================================
+
+export function fetchStartupProfiles(): Promise<StartupProfilesResponseData> {
+  return apiFetch<StartupProfilesResponseData>('/api/panel/startup/profiles');
+}
+
+export function createStartupProfile(
+  data: { name?: string; standard_pack_id?: string; slots?: Record<string, string> },
+): Promise<StartupProfileMutationResponseData> {
+  return apiFetch<StartupProfileMutationResponseData>('/api/panel/startup/profiles', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateStartupProfile(
+  id: string,
+  data: { name?: string; standard_pack_id?: string; slots?: Record<string, string> },
+): Promise<StartupProfileMutationResponseData> {
+  return apiFetch<StartupProfileMutationResponseData>(
+    `/api/panel/startup/profiles/${encodeURIComponent(id)}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    },
+  );
+}
+
+export function duplicateStartupProfile(id: string): Promise<StartupProfileMutationResponseData> {
+  return apiFetch<StartupProfileMutationResponseData>(
+    `/api/panel/startup/profiles/${encodeURIComponent(id)}/duplicate`,
+    { method: 'POST' },
+  );
+}
+
+export function activateStartupProfile(id: string): Promise<StartupProfileMutationResponseData> {
+  return apiFetch<StartupProfileMutationResponseData>(
+    `/api/panel/startup/profiles/${encodeURIComponent(id)}/activate`,
+    { method: 'POST' },
+  );
+}
+
+export function launchStartupProfile(id: string): Promise<StartupProfileMutationResponseData> {
+  return apiFetch<StartupProfileMutationResponseData>(
+    `/api/panel/startup/profiles/${encodeURIComponent(id)}/launch`,
     { method: 'POST' },
   );
 }

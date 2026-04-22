@@ -240,5 +240,30 @@ class TestPanelEnableDisablePack(unittest.TestCase):
             self.assertFalse(pack["enabled"])
 
 
+class TestStartupProfileHandlers(unittest.TestCase):
+    def test_get_startup_profiles_returns_manager_payload(self):
+        handler = _FakeHandler()
+        payload = {"profiles": [], "active_profile_id": None, "catalog": {}, "last_launched_profile_id": None}
+        with patch.object(
+            ControlPanelHandlersMixin,
+            "_panel_startup_profile_manager",
+        ) as mock_factory:
+            mock_factory.return_value.list_profiles_payload.return_value = payload
+            result = handler._panel_get_startup_profiles()
+        self.assertEqual(result, payload)
+
+    def test_launch_startup_profile_forwards_to_manager(self):
+        handler = _FakeHandler()
+        payload = {"profile": {"profile_id": "p1"}, "launched": True}
+        with patch.object(
+            ControlPanelHandlersMixin,
+            "_panel_startup_profile_manager",
+        ) as mock_factory:
+            mock_factory.return_value.launch_profile.return_value = payload
+            result = handler._panel_launch_startup_profile("p1")
+        self.assertEqual(result["profile"]["profile_id"], "p1")
+        self.assertTrue(result["launched"])
+
+
 if __name__ == "__main__":
     unittest.main()

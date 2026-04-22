@@ -8,6 +8,12 @@ API 一覧:
   GET  /api/panel/packs              — Pack 一覧（有効/無効含む）
   POST /api/panel/packs/{id}/enable  — Pack 有効化
   POST /api/panel/packs/{id}/disable — Pack 無効化
+  GET  /api/panel/startup/profiles   — 起動プロファイル一覧と slot catalog
+  POST /api/panel/startup/profiles   — 起動プロファイル新規作成
+  PUT  /api/panel/startup/profiles/{id} — 起動プロファイル更新
+  POST /api/panel/startup/profiles/{id}/duplicate — 起動プロファイル複製
+  POST /api/panel/startup/profiles/{id}/activate  — 起動プロファイル切り替え
+  POST /api/panel/startup/profiles/{id}/launch    — 起動プロファイル起動
   GET  /api/panel/flows              — Flow 一覧（本文なし）
   GET  /api/panel/flows/{id}         — Flow 詳細（YAML 本文付き）
   POST /api/panel/flows              — Flow 新規作成
@@ -66,6 +72,12 @@ def clear_kernel_restart_request() -> None:
 
 class ControlPanelHandlersMixin:
     """Control Panel API のハンドラ"""
+
+    @staticmethod
+    def _panel_startup_profile_manager():
+        from ..startup_profiles import StartupProfileManager
+
+        return StartupProfileManager()
 
     # ------------------------------------------------------------------
     # Dashboard
@@ -244,6 +256,52 @@ class ControlPanelHandlersMixin:
             return {"error": f"Pack '{pack_id}' not found", "status_code": 404}
         except Exception as e:
             _log_internal_error("panel_set_pack_enabled", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    # ------------------------------------------------------------------
+    # Startup Profiles
+    # ------------------------------------------------------------------
+
+    def _panel_get_startup_profiles(self) -> Dict[str, Any]:
+        try:
+            return self._panel_startup_profile_manager().list_profiles_payload()
+        except Exception as e:
+            _log_internal_error("panel_get_startup_profiles", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_create_startup_profile(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            return self._panel_startup_profile_manager().create_profile(body)
+        except Exception as e:
+            _log_internal_error("panel_create_startup_profile", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_update_startup_profile(self, profile_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            return self._panel_startup_profile_manager().update_profile(profile_id, body)
+        except Exception as e:
+            _log_internal_error("panel_update_startup_profile", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_duplicate_startup_profile(self, profile_id: str) -> Dict[str, Any]:
+        try:
+            return self._panel_startup_profile_manager().duplicate_profile(profile_id)
+        except Exception as e:
+            _log_internal_error("panel_duplicate_startup_profile", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_activate_startup_profile(self, profile_id: str) -> Dict[str, Any]:
+        try:
+            return self._panel_startup_profile_manager().activate_profile(profile_id)
+        except Exception as e:
+            _log_internal_error("panel_activate_startup_profile", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_launch_startup_profile(self, profile_id: str) -> Dict[str, Any]:
+        try:
+            return self._panel_startup_profile_manager().launch_profile(profile_id)
+        except Exception as e:
+            _log_internal_error("panel_launch_startup_profile", e)
             return {"error": _SAFE_ERROR_MSG, "status_code": 500}
 
     # ------------------------------------------------------------------
