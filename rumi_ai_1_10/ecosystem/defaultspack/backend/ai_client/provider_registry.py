@@ -9,6 +9,11 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from .ai_profile import AIProfile, AIProfileManager, ModelProfile, ModelProfileManager
 from .base_provider import ProviderAdapter, RetryPolicy
+from ...domain.ai_client.providers import (
+    build_profile_catalog,
+    get_all_known_models,
+    get_provider_catalog,
+)
 
 
 class ProviderRegistry:
@@ -145,6 +150,11 @@ class ProviderRegistry:
         with self._lock:
             return sorted(self._providers.keys())
 
+    def list_provider_catalog(self) -> List[Dict[str, Any]]:
+        with self._lock:
+            active_provider_ids = list(self._providers.keys())
+        return get_provider_catalog(active_provider_ids=active_provider_ids)
+
     def list_models(self, provider_id: Optional[str] = None) -> List[ModelProfile]:
         with self._lock:
             profiles = self._profiles.list_profiles()
@@ -153,7 +163,49 @@ class ProviderRegistry:
             return [profile for profile in profiles if profile.provider_id == provider_id]
 
     def list_model_dicts(self, provider_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        return [profile.to_dict() for profile in self.list_models(provider_id=provider_id)]
+        profile_dicts = [profile.to_dict() for profile in self.list_models(provider_id=provider_id)]
+        collision_index: Dict[str, int] = {}
+        for profile in profile_dicts:
+            key = str(profile.get("model_id") or profile.get("model_name") or "").strip().lower()
+            if not key:
+                continue
+            collision_index[key] = collision_index.get(key, 0) + 1
+        for profile in profile_dicts:
+            provider = profile.get("provider_id", "")
+            model_id = profile.get("model_id") or profile.get("model_name") or ""
+            key = str(model_id).strip().lower()
+            collision_count = collision_index.get(key, 0)
+            name_collision = collision_count > 1
+            qualified_model_id = "{}/{}".format(provider, model_id) if provider and model_id else model_id
+            metadata = dict(profile.get("metadata", {}))
+            metadata.update(
+                {
+                    "provider_model_key": qualified_model_id,
+                    "ambiguity_key": key,
+                    "name_collision": name_collision,
+                    "provider_count_for_model_name": collision_count,
+                }
+            )
+            profile["qualified_model_id"] = qualified_model_id
+            profile["name_collision"] = name_collision
+            profile["provider_count_for_model_name"] = collision_count
+            profile["disambiguated_name"] = (
+                "{} ({})".format(profile.get("display_name") or model_id, provider)
+                if name_collision
+                else profile.get("display_name") or model_id
+            )
+            profile["metadata"] = metadata
+        return profile_dicts
+
+    def list_catalog_models(self, provider_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        with self._lock:
+            active_provider_ids = list(self._providers.keys())
+        return get_all_known_models(provider_id=provider_id, active_provider_ids=active_provider_ids)
+
+    def list_profile_dicts(self) -> List[Dict[str, Any]]:
+        with self._lock:
+            active_provider_ids = list(self._providers.keys())
+        return build_profile_catalog(active_provider_ids=active_provider_ids)
 
     def model_uuid(self, provider_id: str, model_name: str) -> str:
         return self._profiles.lookup_model_uuid(provider_id, model_name)

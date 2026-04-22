@@ -708,6 +708,7 @@ class KernelSystemHandlersMixin:
                 _override_selected[_ct] = _ci
 
             components = []
+            component_objects = []
             for comp in reg.get_all_components():
                 pack_id = getattr(comp, "pack_id", None)
                 if approved_only and pack_id not in approved:
@@ -730,8 +731,10 @@ class KernelSystemHandlersMixin:
                     "type": _comp_type,
                     "id": _comp_id
                 })
+                component_objects.append(comp)
 
             ctx["_discovered_components"] = components
+            ctx["_discovered_component_objects"] = component_objects
 
             try:
                 get_metrics_collector().set_gauge("component.discovered.count", float(len(components)))
@@ -754,12 +757,12 @@ class KernelSystemHandlersMixin:
 
     def _h_component_load(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
         container_execution = args.get("container_execution", True)
-        components = ctx.get("_discovered_components", [])
+        components = ctx.get("_discovered_component_objects", [])
 
         if not components:
             return {"_kernel_step_status": "success", "_kernel_step_meta": {"loaded": 0}}
 
-        self.lifecycle.run_phase("setup")
+        self.lifecycle.run_phase("setup", components=components)
 
         self.diagnostics.record_step(
             phase="startup",
