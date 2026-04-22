@@ -1,0 +1,59 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+body {
+  background-color: #09090b; /* zinc-950 */
+  color: #fafafa; /* zinc-50 */
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden; /* Prevent body scroll, handle inside panes */
+}
+
+/* Custom scrollbar for a pro-tool look */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #27272a; /* zinc-800 */
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3f3f46; /* zinc-700 */
+}
+
+.markdown-body p {
+  margin-bottom: 0.75em;
+  line-height: 1.6;
+}
+.markdown-body p:last-child {
+  margin-bottom: 0;
+}
+.markdown-body pre {
+  background-color: #18181b !important; /* zinc-900 */
+  border: 1px solid #27272a; /* zinc-800 */
+  border-radius: 0.5rem;
+  padding: 1rem;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+}
+.markdown-body code {
+  font-family: var(--font-mono);
+  background-color: #27272a;
+  padding: 0.125rem 0.25rem;
+  border-radius: 0.25rem;
+  font-size: 0.875em;
+}
+.markdown-body pre code {
+  background-color: transparent;
+  padding: 0;
+}

@@ -1,0 +1,86 @@
+from __future__ import annotations
+
+import json
+import os
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parent.parent
+DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
+
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+
+
+class TestDefaultspackProviderExpansion(unittest.TestCase):
+    def test_detect_available_providers_accepts_new_openai_compatible_provider_keys(self):
+        from domain.ai_client.providers import detect_available_providers
+
+        with patch.dict(
+            os.environ,
+            {"XAI_API_KEY": "x-key", "GROQ_API_KEY": "g-key", "DEEPSEEK_API_KEY": "d-key"},
+            clear=True,
+        ):
+            providers = detect_available_providers()
+
+        self.assertIn("xai", providers)
+        self.assertIn("groq", providers)
+        self.assertIn("deepseek", providers)
+
+    def test_generic_provider_loads_profile_models_from_user_data(self):
+        from domain.ai_client.providers.provider_catalog import XaiProvider
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            profile_dir = Path(tmpdir) / "profiles"
+            target_dir = profile_dir / "grok-code-fast-1"
+            target_dir.mkdir(parents=True, exist_ok=True)
+            (target_dir / "profile.json").write_text(
+                json.dumps(
+                    {
+                        "provider_id": "xai",
+                        "model_id": "grok-code-fast-1",
+                        "display_name": "Grok Code Fast 1",
+                        "metadata": {"type": "chat"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.object(XaiProvider, "profile_dir", return_value=profile_dir):
+                provider = XaiProvider()
+                model_ids = {item["id"] for item in provider.list_models()}
+
+        self.assertIn("xai/grok-code-fast-1", model_ids)
+        self.assertIn("xai/grok-4", model_ids)
+
+    def test_get_all_known_models_includes_generic_provider_catalog(self):
+        from domain.ai_client.providers import get_all_known_models
+
+        model_ids = {item["id"] for item in get_all_known_models()}
+
+        self.assertIn("groq/llama-3.3-70b-versatile", model_ids)
+        self.assertIn("together/meta-llama/Llama-3.3-70B-Instruct-Turbo", model_ids)
+        self.assertIn("mistral/mistral-large-latest", model_ids)
+
+    def test_ai_client_lists_auto_registered_generic_provider_models(self):
+        from domain.ai_client.client import AIClient
+
+        AIClient._instance = None
+        with patch.dict(os.environ, {"MISTRAL_API_KEY": "m-key"}, clear=True):
+            client = AIClient()
+
+        try:
+            models = client.list_models(provider="mistral")
+        finally:
+            AIClient._instance = None
+
+        model_ids = {item["id"] for item in models}
+        self.assertIn("mistral/mistral-large-latest", model_ids)
+        self.assertIn("mistral/mistral-embed", model_ids)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -6,8 +6,16 @@ import {apiFetch, bootstrapPanelSession} from './api.ts';
 class MemoryStorage {
   private readonly values = new Map<string, string>();
 
+  get length(): number {
+    return this.values.size;
+  }
+
   clear(): void {
     this.values.clear();
+  }
+
+  key(index: number): string | null {
+    return Array.from(this.values.keys())[index] ?? null;
   }
 
   getItem(key: string): string | null {
@@ -24,17 +32,10 @@ class MemoryStorage {
 }
 
 type TestGlobals = typeof globalThis & {
-  document?: {title: string};
+  document?: Document;
   fetch?: typeof fetch;
-  sessionStorage?: MemoryStorage;
-  window?: {
-    history: {
-      replaceState: (_state: unknown, _title: string, url?: string | URL | null) => void;
-    };
-    location: {
-      href: string;
-    };
-  };
+  sessionStorage?: Storage;
+  window?: Window & typeof globalThis;
 };
 
 const globals = globalThis as TestGlobals;
@@ -59,9 +60,9 @@ function installBrowser(href: string): MemoryStorage {
     },
   };
 
-  globals.document = {title: 'Rumi AI'};
-  globals.sessionStorage = storage;
-  globals.window = window;
+  globals.document = {title: 'Rumi AI'} as unknown as Document;
+  globals.sessionStorage = storage as unknown as Storage;
+  globals.window = window as unknown as Window & typeof globalThis;
   sessionStorageRef = storage;
   return storage;
 }

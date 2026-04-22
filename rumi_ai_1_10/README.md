@@ -15,10 +15,12 @@
 | まず手を動かして確認したい | [`docs/tutorials/runtime-quickstart.md`](./docs/tutorials/runtime-quickstart.md) | `--health` から `/panel/` までの最短チュートリアル |
 | コードを読まずに runtime の仕組みを理解したい | [`docs/concepts/system-mechanism.md`](./docs/concepts/system-mechanism.md) | 起動・Flow・承認・Grant・viewer 連携の実行経路 |
 | `rumi_viewer` の起動手順と詰まり方を見たい | [`docs/rumi_viewer_start.md`](./docs/rumi_viewer_start.md) | `401`, 黒画面, panel と defaultspack の関係 |
+| defaultspack の frontend を拡張したい | [`ecosystem/defaultspack/docs/frontend_extensions.md`](./ecosystem/defaultspack/docs/frontend_extensions.md) | 右バー、設定、chat renderer、preview feed の増やし方 |
 | この runtime の思想を知りたい | この README の `思想` | Flow 中心、Pack 前提、Fail-Soft の考え方 |
 | ディレクトリの役割を知りたい | この README の `プロジェクト構造` | `core_runtime/`, `ecosystem/`, `user_data/` の役割 |
 | Pack を作る・直す | [`docs/pack-development.md`](./docs/pack-development.md) | `ecosystem.json`, `routes.json`, `permissions.json`, secrets 利用 |
 | defaultspack の chat / ai を追いたい | [`ecosystem/defaultspack/README.md`](./ecosystem/defaultspack/README.md) | defaultspack の実装面 |
+| defaultspack frontend の今後の作業を見たい | [`ecosystem/defaultspack/docs/frontend_todo.md`](./ecosystem/defaultspack/docs/frontend_todo.md) | registry 化の進捗と次の作業 |
 | API キーや secrets を設定したい | [`docs/operations.md`](./docs/operations.md) の Secrets 節 | `user_data/secrets/` と API 経路 |
 | viewer 経由の起動経路を直したい | [`../rumi_viewer/src-tauri/src/config.rs`](../rumi_viewer/src-tauri/src/config.rs) と [`../rumi_viewer/src-tauri/src/kernel_manager.rs`](../rumi_viewer/src-tauri/src/kernel_manager.rs) | viewer がどの kernel を起動し、どの env を渡すか |
 | setup pack / 承認まわりを見たい | [`core_runtime/setup_pack.py`](./core_runtime/setup_pack.py) と [`core_runtime/approval_manager.py`](./core_runtime/approval_manager.py) | setup pack 選択、all-ok grant、再承認 |

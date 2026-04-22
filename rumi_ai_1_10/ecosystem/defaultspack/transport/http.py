@@ -121,6 +121,11 @@ class DefaultsHttpServer:
             ("PUT", "/api/tools/{name}", self._handle_tool_update),
             ("DELETE", "/api/tools/{name}", self._handle_tool_delete),
             ("GET", "/api/tools/{name}/export", self._handle_tool_export),
+            # ---- UI registry routes ----
+            ("GET", "/api/ui/catalog", self._handle_ui_catalog),
+            ("GET", "/api/ui/settings", self._handle_ui_settings),
+            ("PUT", "/api/ui/settings", self._handle_ui_settings),
+            ("GET", "/api/ui/conversations/{id}/preview", self._handle_ui_conversation_preview),
             # ---- Dev Tool routes (P1-1) ----
             ("GET", "/api/dev/inspect", self._handle_dev_inspect),
             ("GET", "/api/dev/prompt-history", self._handle_dev_prompt_history),
@@ -425,6 +430,24 @@ class DefaultsHttpServer:
             {"name": "name"},
         )
 
+    # ---- UI Registry Handlers (fallback) ----
+
+    def _handle_ui_catalog(self, request_data, path_params):
+        return self._invoke_fallback_block("blocks.ui.catalog", request_data, path_params)
+
+    def _handle_ui_settings(self, request_data, path_params):
+        payload = dict(request_data or {})
+        payload["_method"] = getattr(self, "_current_method", "GET")
+        return self._invoke_fallback_block("blocks.ui.settings", payload, path_params)
+
+    def _handle_ui_conversation_preview(self, request_data, path_params):
+        return self._invoke_fallback_block(
+            "blocks.ui.conversation_preview",
+            request_data,
+            path_params,
+            {"id": "conversation_id"},
+        )
+
     # ---- Dev Tool Handlers (fallback, P1-1) ----
 
     def _handle_dev_inspect(self, request_data, path_params):
@@ -532,6 +555,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
 
     def _handle_request(self, method):
         try:
+            self.server_ref._current_method = method
             path = self.path.split("?")[0]
             handler, path_params, source, path_inject = self.server_ref._match_route(method, path)
             if handler is None:

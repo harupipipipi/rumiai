@@ -2,6 +2,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { useAppStore } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
 import { cn } from '@/src/lib/utils';
+import { panelRoutes } from '@/src/lib/routes';
 import { Folder, LayoutGrid, Settings, PanelLeft, Home } from 'lucide-react';
 
 export function Sidebar() {
@@ -13,10 +14,10 @@ export function Sidebar() {
   const setSidebarOpen = useAppStore(state => state.setSidebarOpen);
 
   const links = [
-    { to: '/panel', icon: Home, label: t('nav.home') },
-    { to: '/panel/packs', icon: Folder, label: t('nav.packs') },
-    { to: '/panel/flows', icon: LayoutGrid, label: t('nav.flows') },
-    { to: '/panel/settings', icon: Settings, label: t('nav.settings') },
+    { to: panelRoutes.home, icon: Home, label: t('nav.home') },
+    { to: panelRoutes.packs, icon: Folder, label: t('nav.packs') },
+    { to: panelRoutes.flows, icon: LayoutGrid, label: t('nav.flows') },
+    { to: panelRoutes.settings, icon: Settings, label: t('nav.settings') },
   ];
 
 
@@ -47,7 +48,9 @@ export function Sidebar() {
       {/* Navigation Links */}
       <div className="px-3 py-2 space-y-1 mt-2 flex-1 overflow-y-auto">
         {links.map((link: any) => {
-          const isActive = location.pathname === link.to || (link.to !== '/panel' && location.pathname.startsWith(link.to));
+          const isActive =
+            location.pathname === link.to ||
+            (link.to !== panelRoutes.home && location.pathname.startsWith(link.to));
           return (
             <Link
               key={link.to}
@@ -65,7 +68,10 @@ export function Sidebar() {
 
       {/* Profile Area */}
       <div className="p-3 border-t border-border mt-auto">
-        <Link to="/panel/settings" className="w-full flex items-center justify-between hover:bg-bg-hover p-2 rounded-lg transition-colors">
+        <Link
+          to={panelRoutes.settings}
+          className="w-full flex items-center justify-between hover:bg-bg-hover p-2 rounded-lg transition-colors"
+        >
           <div className="flex items-center gap-3">
             {profile.avatar ? (
               <img src={profile.avatar} alt="User" className="w-8 h-8 rounded-full object-cover border border-border" referrerPolicy="no-referrer" />

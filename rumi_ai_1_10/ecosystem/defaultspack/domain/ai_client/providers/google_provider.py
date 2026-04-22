@@ -8,23 +8,16 @@ import urllib.error
 import urllib.parse
 import base64
 import ssl
-from pathlib import Path
 
 from domain.ai_client.base_provider import BaseProvider
+from domain.ai_client.providers.profile_catalog import merge_curated_and_profiles, profile_dir_for
 
 
 class GoogleProvider(BaseProvider):
     """Google Generative AI API プロバイダー (Gemini 2.5 Pro, Gemini 2.5 Flash 等)"""
 
     BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
-    PROFILE_DIR = (
-        Path(__file__).resolve().parents[3]
-        / "user_data"
-        / "shared"
-        / "ai_models"
-        / "google"
-        / "profiles"
-    )
+    PROFILE_DIR = profile_dir_for("google", __file__)
 
     CURATED_MODELS = [
         {"id": "google/gemini-2.5-pro", "name": "Gemini 2.5 Pro", "provider": "google", "type": "chat"},
@@ -40,72 +33,8 @@ class GoogleProvider(BaseProvider):
         self._ssl_ctx = ssl.create_default_context()
 
     @classmethod
-    def _iter_profile_paths(cls):
-        if not cls.PROFILE_DIR.exists():
-            return []
-        paths = []
-        seen = set()
-        for pattern in ("*/profile.json", "*.json"):
-            for path in sorted(cls.PROFILE_DIR.glob(pattern)):
-                resolved = str(path.resolve())
-                if resolved in seen:
-                    continue
-                seen.add(resolved)
-                paths.append(path)
-        return paths
-
-    @classmethod
-    def _infer_profile_type(cls, profile):
-        metadata = profile.get("metadata", {}) or {}
-        model_type = metadata.get("type") or profile.get("type")
-        if model_type:
-            return model_type
-        model_id = (
-            profile.get("model_id")
-            or profile.get("model_name")
-            or profile.get("model")
-            or profile.get("id")
-            or ""
-        )
-        if "embedding" in model_id:
-            return "embedding"
-        return "chat"
-
-    @classmethod
-    def _catalog_entry_from_profile(cls, profile):
-        provider_id = profile.get("provider_id") or profile.get("provider") or "google"
-        if provider_id != "google":
-            return None
-        model_id = (
-            profile.get("model_id")
-            or profile.get("model_name")
-            or profile.get("model")
-            or profile.get("id")
-            or ""
-        )
-        if not model_id:
-            return None
-        return {
-            "id": "google/{}".format(model_id),
-            "name": profile.get("display_name") or profile.get("name") or model_id,
-            "provider": "google",
-            "type": cls._infer_profile_type(profile),
-        }
-
-    @classmethod
     def _load_profile_models(cls):
-        models = {}
-        for item in cls.CURATED_MODELS:
-            models[item["id"]] = dict(item)
-        for path in cls._iter_profile_paths():
-            try:
-                profile = json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
-                continue
-            entry = cls._catalog_entry_from_profile(profile)
-            if entry:
-                models[entry["id"]] = entry
-        return list(models.values())
+        return merge_curated_and_profiles("google", cls.CURATED_MODELS, cls.PROFILE_DIR)
 
     def list_models(self):
         return self._load_profile_models()

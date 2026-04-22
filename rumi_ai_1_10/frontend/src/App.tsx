@@ -11,6 +11,7 @@ import { Settings } from '@/src/pages/Settings';
 import { ToastContainer } from '@/src/components/ui/ToastContainer';
 import { DialogContainer } from '@/src/components/ui/DialogContainer';
 import { bootstrapPanelSession } from '@/src/lib/api';
+import { panelRoutes } from '@/src/lib/routes';
 
 export default function App() {
   const theme = useAppStore(state => state.theme);
@@ -43,14 +44,17 @@ export default function App() {
   return (
     <BrowserRouter basename="/panel">
       <Routes>
-        <Route path="/setup" element={<Setup />} />
+        <Route path={panelRoutes.setup} element={<Setup />} />
 
-        <Route path="/" element={isSetupDone ? <Layout /> : <Navigate to="/setup" replace />}>
+        <Route
+          path={panelRoutes.home}
+          element={isSetupDone ? <Layout /> : <Navigate to={panelRoutes.setup} replace />}
+        >
           <Route index element={<Dashboard />} />
-          <Route path="packs" element={<Packs />} />
-          <Route path="packs/:id" element={<PackDetail />} />
-          <Route path="flows" element={<Flows />} />
-          <Route path="settings" element={<Settings />} />
+          <Route path={panelRoutes.packs.slice(1)} element={<Packs />} />
+          <Route path={`${panelRoutes.packs.slice(1)}/:id`} element={<PackDetail />} />
+          <Route path={panelRoutes.flows.slice(1)} element={<Flows />} />
+          <Route path={panelRoutes.settings.slice(1)} element={<Settings />} />
         </Route>
       </Routes>
       <ToastContainer />

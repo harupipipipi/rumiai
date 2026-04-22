@@ -16,6 +16,25 @@ _PROVIDER_REGISTRY = [
     (("ANTHROPIC_API_KEY",), "anthropic", "domain.ai_client.providers.anthropic_provider", "AnthropicProvider"),
     (("GOOGLE_API_KEY", "GEMINI_API_KEY"), "google", "domain.ai_client.providers.google_provider", "GoogleProvider"),
     (("GENSPARK_API_KEY",), "genspark", "domain.ai_client.providers.genspark_provider", "GensparkProvider"),
+    (("XAI_API_KEY",), "xai", "domain.ai_client.providers.provider_catalog", "XaiProvider"),
+    (("GROQ_API_KEY",), "groq", "domain.ai_client.providers.provider_catalog", "GroqProvider"),
+    (("TOGETHER_API_KEY",), "together", "domain.ai_client.providers.provider_catalog", "TogetherProvider"),
+    (("DEEPSEEK_API_KEY",), "deepseek", "domain.ai_client.providers.provider_catalog", "DeepseekProvider"),
+    (("FIREWORKS_API_KEY",), "fireworks", "domain.ai_client.providers.provider_catalog", "FireworksProvider"),
+    (("CEREBRAS_API_KEY",), "cerebras", "domain.ai_client.providers.provider_catalog", "CerebrasProvider"),
+    (("SAMBANOVA_API_KEY",), "sambanova", "domain.ai_client.providers.provider_catalog", "SambanovaProvider"),
+    (("PERPLEXITY_API_KEY",), "perplexity", "domain.ai_client.providers.provider_catalog", "PerplexityProvider"),
+    (("MOONSHOT_API_KEY",), "moonshotai", "domain.ai_client.providers.provider_catalog", "MoonshotaiProvider"),
+    (("MISTRAL_API_KEY",), "mistral", "domain.ai_client.providers.provider_catalog", "MistralProvider"),
+    (("NVIDIA_API_KEY", "NGC_API_KEY"), "nvidia", "domain.ai_client.providers.provider_catalog", "NvidiaProvider"),
+    (("NOVITA_API_KEY",), "novita", "domain.ai_client.providers.provider_catalog", "NovitaProvider"),
+    (("NEBIUS_API_KEY",), "nebius", "domain.ai_client.providers.provider_catalog", "NebiusProvider"),
+    (("DEEPINFRA_API_KEY",), "deepinfra", "domain.ai_client.providers.provider_catalog", "DeepinfraProvider"),
+    (("FRIENDLI_API_KEY",), "friendli", "domain.ai_client.providers.provider_catalog", "FriendliProvider"),
+    (("HYPERBOLIC_API_KEY",), "hyperbolic", "domain.ai_client.providers.provider_catalog", "HyperbolicProvider"),
+    (("INFERENCE_NET_API_KEY", "INFERENCENET_API_KEY"), "inference-net", "domain.ai_client.providers.provider_catalog", "InferenceNetProvider"),
+    (("AVIAN_API_KEY",), "avian", "domain.ai_client.providers.provider_catalog", "AvianProvider"),
+    (("UPSTAGE_API_KEY",), "upstage", "domain.ai_client.providers.provider_catalog", "UpstageProvider"),
 ]
 
 
@@ -113,6 +132,25 @@ def get_best_model_for_provider(name):
         "anthropic": "claude-sonnet-4-0",
         "google": "gemini-2.5-pro",
         "genspark": "gpt-5-mini",
+        "xai": "grok-4",
+        "groq": "llama-3.3-70b-versatile",
+        "together": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+        "deepseek": "deepseek-reasoner",
+        "fireworks": "accounts/fireworks/models/deepseek-v3",
+        "cerebras": "llama-3.3-70b",
+        "sambanova": "Meta-Llama-3.3-70B-Instruct",
+        "perplexity": "sonar-pro",
+        "moonshotai": "kimi-k2-0711-preview",
+        "mistral": "mistral-large-latest",
+        "nvidia": "nvidia/llama-3.1-nemotron-70b-instruct",
+        "novita": "deepseek/deepseek-v3-turbo",
+        "nebius": "meta-llama/Meta-Llama-3.1-70B-Instruct",
+        "deepinfra": "deepseek-ai/DeepSeek-V3",
+        "friendli": "meta-llama-3.1-70b-instruct",
+        "hyperbolic": "deepseek-ai/DeepSeek-V3",
+        "inference-net": "deepseek-v3",
+        "avian": "deepseek/deepseek-v3",
+        "upstage": "solar-pro2-preview",
         "rumi": "rumi/default",
     }
     return best.get(name)
@@ -127,6 +165,12 @@ def get_all_known_models():
             import importlib
             mod = importlib.import_module(module_path)
             cls = getattr(mod, class_name)
+            if hasattr(cls, "list_models"):
+                try:
+                    models.extend(cls.list_models())
+                    continue
+                except Exception:
+                    pass
             if hasattr(cls, "KNOWN_MODELS"):
                 models.extend(cls.KNOWN_MODELS)
         except Exception:
