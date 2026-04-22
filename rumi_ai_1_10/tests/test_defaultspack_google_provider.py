@@ -44,6 +44,7 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
 
         self.assertIn("google/gemini-3-pro-preview", model_ids)
         self.assertIn("google/gemini-3-flash-preview", model_ids)
+        self.assertIn("google/gemma-4-31b-it", model_ids)
         self.assertIn("google/gemma-3-27b-it", model_ids)
         self.assertIn("google/gemma-3n-e4b-it", model_ids)
 

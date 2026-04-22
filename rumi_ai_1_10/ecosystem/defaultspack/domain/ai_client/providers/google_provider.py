@@ -24,6 +24,7 @@ class GoogleProvider(BaseProvider):
         {"id": "google/gemini-3-flash-preview", "name": "Gemini 3 Flash Preview", "provider": "google", "type": "chat"},
         {"id": "google/gemini-2.5-flash-lite", "name": "Gemini 2.5 Flash-Lite", "provider": "google", "type": "chat"},
         {"id": "google/gemini-2.0-flash-lite", "name": "Gemini 2.0 Flash-Lite", "provider": "google", "type": "chat"},
+        {"id": "google/gemma-4-31b-it", "name": "Gemma 4 31B IT", "provider": "google", "type": "chat"},
         {"id": "google/gemma-3-27b-it", "name": "Gemma 3 27B IT", "provider": "google", "type": "chat"},
         {"id": "google/gemma-3n-e4b-it", "name": "Gemma 3n E4B IT", "provider": "google", "type": "chat"},
         {"id": "google/gemini-embedding-001", "name": "Gemini Embedding 001", "provider": "google", "type": "embedding"},
