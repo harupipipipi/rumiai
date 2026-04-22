@@ -185,6 +185,24 @@ def test_extension_registry_synthesizes_provider_default_models(tmp_path: Path):
     assert fast_default["model_id"] == "openai/gpt-5.4-mini"
 
 
+def test_extension_registry_preserves_google_api_key_env_list():
+    root = (
+        Path(__file__).resolve().parent.parent
+        / "ecosystem"
+        / "defaultspack"
+        / "extensions"
+    )
+
+    registry = ExtensionRegistry(root)
+    google = next(
+        provider
+        for provider in registry.llm().providers(enabled_only=True)
+        if provider["id"] == "google"
+    )
+
+    assert google["api_key_env"] == ["GOOGLE_API_KEY", "GEMINI_API_KEY"]
+
+
 def test_openrouter_provider_refreshes_and_caches_models(tmp_path: Path, monkeypatch):
     cache_file = tmp_path / "openrouter_models_cache.json"
     monkeypatch.setenv("OPENROUTER_API_KEY", "dummy-token")

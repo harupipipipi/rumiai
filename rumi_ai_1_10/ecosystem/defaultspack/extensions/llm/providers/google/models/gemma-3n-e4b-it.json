@@ -1,0 +1,10 @@
+{
+  "id": "google/gemma-3n-e4b-it",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "google",
+  "model_id": "gemma-3n-e4b-it",
+  "display_name": "Gemma 3n E4B IT",
+  "priority": 45,
+  "type": "chat"
+}

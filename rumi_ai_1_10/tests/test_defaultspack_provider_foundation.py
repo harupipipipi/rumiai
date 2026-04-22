@@ -47,6 +47,20 @@ class TestDefaultspackProviderCatalog(unittest.TestCase):
             providers = detect_available_providers()
         self.assertIn("openrouter", providers)
 
+    def test_provider_catalog_marks_google_configured_when_only_gemini_key_is_set(self):
+        from ecosystem.defaultspack.backend.ai_client.provider_catalog import (
+            list_provider_catalog,
+        )
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}, clear=False):
+            providers = {item["provider_id"]: item for item in list_provider_catalog()}
+
+        google = providers["google"]
+        self.assertIn("GEMINI_API_KEY", google["env_vars"])
+        self.assertEqual(google["configured_envs"], ["GEMINI_API_KEY"])
+        self.assertTrue(google["configured"])
+        self.assertTrue(google["availability"]["configured"])
+
 
 class TestDefaultspackToolPermissionPolicy(unittest.TestCase):
     def test_permission_policy_round_trip_and_checker_behavior(self):
