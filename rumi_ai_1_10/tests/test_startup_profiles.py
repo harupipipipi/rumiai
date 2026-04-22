@@ -239,6 +239,67 @@ def test_delete_profile_reassigns_active_profile(tmp_path: Path):
     assert deleted["active_profile_id"] == "default-profile"
     assert payload["active_profile_id"] == "default-profile"
     assert len(payload["profiles"]) == 1
+    assert active.metadata == {}
+    assert active.interface_overrides == {}
+    assert active.overrides == {}
+
+
+def test_activate_profile_updates_saved_selection_without_mutating_runtime(tmp_path: Path):
+    eco_root = tmp_path / "ecosystem"
+    defaultspack_path = _write_pack(
+        eco_root,
+        "defaultspack",
+        {
+            "tool": ["defaults.tool.invoke"],
+            "frontend": ["defaults.frontend.start"],
+            "ai_client": ["defaults.ai.complete", "defaults.ai.providers"],
+            "memory": ["defaults.memory.store"],
+        },
+    )
+    helper_path = _write_pack(
+        eco_root,
+        "helperpack",
+        {
+            "tool": ["defaults.tool.invoke"],
+            "frontend": ["defaults.frontend.start"],
+            "ai_client": ["defaults.ai.complete", "defaults.ai.providers"],
+            "memory": ["defaults.memory.store"],
+        },
+    )
+    locations = [
+        SimpleNamespace(pack_id="defaultspack", ecosystem_json_path=defaultspack_path, pack_subdir=defaultspack_path.parent),
+        SimpleNamespace(pack_id="helperpack", ecosystem_json_path=helper_path, pack_subdir=helper_path.parent),
+    ]
+    active = _FakeActiveEcosystem()
+    manager = StartupProfileManager(storage_path=tmp_path / "startup_profiles.json")
+
+    with patch("core_runtime.startup_profiles.discover_pack_locations", return_value=locations):
+        created = manager.create_profile(
+            {
+                "name": "Helper launch",
+                "slots": {
+                    "tool": "helperpack",
+                    "frontend": "helperpack",
+                    "ai_client": "helperpack",
+                    "memory": "helperpack",
+                    "provider": "helperpack",
+                },
+            }
+        )
+        with patch(
+            "backend_core.ecosystem.active_ecosystem.get_active_ecosystem_manager",
+            return_value=active,
+        ) as mock_active_manager:
+            response = manager.activate_profile(created["profile"]["profile_id"])
+            payload = manager.list_profiles_payload()
+
+    assert response["activated"] is True
+    assert response["active_profile_id"] == created["profile"]["profile_id"]
+    assert payload["active_profile_id"] == created["profile"]["profile_id"]
+    assert active.metadata == {}
+    assert active.interface_overrides == {}
+    assert active.overrides == {}
+    mock_active_manager.assert_not_called()
 
 
 def test_launch_profile_updates_active_ecosystem_metadata_and_requests_restart(tmp_path: Path):

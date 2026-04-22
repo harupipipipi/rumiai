@@ -295,7 +295,7 @@ export function StartupProfiles() {
     setActionState('activate');
     try {
       await activateStartupProfile(draft.profile_id);
-      addToast('Active startup profile switched', 'success');
+      addToast('Active startup profile updated for the next launch', 'success');
       await load(draft.profile_id);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to switch startup profile';
@@ -439,7 +439,7 @@ export function StartupProfiles() {
                             {payload?.last_launched_profile_id === draft.profile_id ? <Badge variant="outline">Last launched</Badge> : null}
                           </div>
                           <p className="mt-3 text-sm leading-6 text-stone-600">
-                            Save checks contract compatibility and runtime readiness. Launch writes the active ecosystem and schedules a kernel restart so the selected profile boots for real.
+                            Save checks contract compatibility and runtime readiness. Set Active only changes the saved profile for the next launch. Launch writes the active ecosystem and schedules a kernel restart so the selected profile boots for real.
                           </p>
                         </div>
                         <div className="flex flex-wrap gap-2">
@@ -458,7 +458,7 @@ export function StartupProfiles() {
                           </Button>
                           <Button variant="outline" onClick={handleActivate} disabled={!draft || actionState === 'activate'} className="gap-2">
                             {actionState === 'activate' ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                            Switch
+                            Set Active
                           </Button>
                           <Button onClick={handleLaunch} disabled={!draft || actionState === 'launch'} className="gap-2">
                             {actionState === 'launch' ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlayCircle className="h-4 w-4" />}

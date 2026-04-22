@@ -194,10 +194,6 @@ class StartupProfileManager:
 
         self._save_state(state)
 
-        fallback_profile = self._get_profile(state["profiles"], state["active_profile_id"])
-        if fallback_profile is not None:
-            self._apply_profile_to_active_ecosystem(fallback_profile, catalog, launched=False)
-
         return {
             "deleted": True,
             "deleted_profile_id": deleted_profile["profile_id"],
@@ -215,7 +211,6 @@ class StartupProfileManager:
             return {"error": error, "status_code": 400}
         state["active_profile_id"] = profile_id
         self._save_state(state)
-        self._apply_profile_to_active_ecosystem(profile, catalog, launched=False)
         return {"profile": profile, "active_profile_id": profile_id, "activated": True}
 
     def launch_profile(self, profile_id: str) -> Dict[str, Any]:
