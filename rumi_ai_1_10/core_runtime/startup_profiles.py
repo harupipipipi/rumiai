@@ -586,9 +586,12 @@ class StartupProfileManager:
         component_path = str(component.get("path", "")).strip()
         entry = component.get("entry")
         if component_path:
-            component_root = Path(pack_subdir) / component_path
-            if not component_root.exists():
-                issues.append(f"path '{component_path}' is missing")
+            if isinstance(pack_subdir, (str, Path)):
+                component_root = Path(pack_subdir) / component_path
+                if not component_root.exists():
+                    issues.append(f"path '{component_path}' is missing")
+            else:
+                issues.append("pack root is missing")
         elif not entry:
             issues.append("component has neither path nor entry")
 
