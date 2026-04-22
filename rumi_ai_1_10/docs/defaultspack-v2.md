@@ -1,13 +1,10 @@
 # defaultspack v2
 
-This branch adds the defaultspack v2 compatibility surface.
+> **Legacy stub**: root docs には Pack 固有の本体説明を置かない方針に移行しました。現行の canonical docs は [../ecosystem/defaultspack/docs/README.md](../ecosystem/defaultspack/docs/README.md) を参照してください。
 
-- module state and catalog helpers
-- backend/frontend loaders
-- setup pack selection (startup include prompt + initial all-OK grant)
-- thin adapters for AI client, prompt, tool, plugin, chat, memory, agent, sandbox, migration
+`defaultspack` v2 の構造・surface・運用の本体は pack-local docs に集約しています。
 
-`supports_all_ok` is trusted repository metadata from `ecosystem/setup_pack/*`.
-In upstream, only maintainer-reviewed setup pack definitions are trusted. Forks
-can add their own setup packs, which is equivalent to changing trusted source in
-that fork.
+- 構造と責務: [../ecosystem/defaultspack/docs/architecture.md](../ecosystem/defaultspack/docs/architecture.md)
+- interfaces と routes: [../ecosystem/defaultspack/docs/interfaces.md](../ecosystem/defaultspack/docs/interfaces.md)
+- module / setup-pack / request 系 functions: [../ecosystem/defaultspack/docs/functions.md](../ecosystem/defaultspack/docs/functions.md)
+- migration: [../ecosystem/defaultspack/docs/migration.md](../ecosystem/defaultspack/docs/migration.md)

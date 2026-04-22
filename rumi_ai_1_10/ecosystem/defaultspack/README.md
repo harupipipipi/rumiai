@@ -4,6 +4,8 @@
 
 rumiai のデフォルトパック。
 
+canonical docs の入口は [`docs/README.md`](./docs/README.md) です。root `docs/` 側には紹介だけを置き、defaultspack 固有の構造・運用・migration はこの Pack 配下で管理します。
+
 rumiai 本体はドメイン知識を持たない汎用カーネルである。defaults は rumiai ecosystem に「AI サービスとして動作するための全ての仕組み」を提供する。チャット、エージェント、ツール、プロンプト、AI クライアント、コーディング支援、マルチモーダル処理、フロントエンド通信の全てが defaults の handler と domain コードによって動作する。
 
 ただし defaults が提供するのは「仕組み」だけである。具体的な UI、ツール定義、エージェント定義、プロンプト、テーマ、レイアウトは全て user_data 側に配置される。defaults はそれらを「置ける場所」と「動かす仕組み」を提供する。
@@ -39,6 +41,7 @@ defaults 単体で既存の AI サービス（ChatGPT / Claude / Cursor / Devin�
 
 | やりたいこと | 読む場所 |
 |---|---|
+| docs 全体の入口を見たい | `docs/README.md` |
 | defaultspack を standalone で起動したい | `docs/getting-started.md` |
 | 8766 のフロントエンドを直したい | `webapp/` |
 | 右バー / 設定 / chat renderer の拡張方法を知りたい | `docs/frontend_extensions.md` |

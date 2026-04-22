@@ -5,10 +5,10 @@ Pack 開発者が新しい Pack を作る際に、テンプレートに基づい
 ディレクトリ構造とファイルを自動生成する。
 
 テンプレート:
-  minimal    : ecosystem.json + __init__.py
+  minimal    : contract 必須 docs + ecosystem.json + __init__.py
   capability : minimal + capability_handler.py
-  flow       : minimal + flows/ + sample_flow.yaml
-  full       : 上記全部 + tests/ + README.md
+  flow       : minimal + flows/ + sample_flow.yaml + docs/flows.md
+  full       : 上記全部 + tests/
 
 依存: stdlib + core_runtime.validation のみ
 
@@ -100,15 +100,114 @@ def _readme_content(pack_id: str) -> str:
     return (
         f"# {pack_id}\n"
         f"\n"
-        f"A Rumi AI OS Pack.\n"
+        f"3分で分かる {pack_id} Pack の概要です。\n"
         f"\n"
         f"## Overview\n"
         f"\n"
-        f"Describe what this Pack does.\n"
+        f"- What it provides: TODO\n"
+        f"- What it does not provide: TODO\n"
         f"\n"
-        f"## Usage\n"
+        f"## Docs\n"
         f"\n"
-        f"Describe how to use this Pack.\n"
+        f"- [docs/README.md](./docs/README.md)\n"
+    )
+
+
+def _docs_readme_content(pack_id: str) -> str:
+    """docs/README.md のテンプレート内容を生成する。"""
+    return (
+        f"# {pack_id} Docs\n"
+        f"\n"
+        f"`{pack_id}` Pack の公式ドキュメント入口です。\n"
+        f"\n"
+        f"## First Read\n"
+        f"\n"
+        f"1. [architecture.md](./architecture.md)\n"
+        f"2. [interfaces.md](./interfaces.md)\n"
+        f"3. [operations.md](./operations.md)\n"
+        f"\n"
+        f"## Reading Guide\n"
+        f"\n"
+        f"- 初見のとき: architecture -> interfaces -> operations の順で読む\n"
+        f"- Flow を持つ Pack のとき: [flows.md](./flows.md) を追加で読む\n"
+    )
+
+
+def _docs_architecture_content(pack_id: str) -> str:
+    """docs/architecture.md のテンプレート内容を生成する。"""
+    return (
+        f"# {pack_id} Architecture\n"
+        f"\n"
+        f"## Responsibility\n"
+        f"\n"
+        f"- Primary responsibility: TODO\n"
+        f"- Out of scope: TODO\n"
+        f"\n"
+        f"## Directory Map\n"
+        f"\n"
+        f"- `blocks/` or `backend/`: TODO\n"
+        f"- `flows/`: TODO\n"
+        f"- `components/`: TODO\n"
+        f"\n"
+        f"## Runtime Touchpoints\n"
+        f"\n"
+        f"- Kernel entrypoints: TODO\n"
+        f"- Grants / secrets / network: TODO\n"
+    )
+
+
+def _docs_interfaces_content(pack_id: str) -> str:
+    """docs/interfaces.md のテンプレート内容を生成する。"""
+    return (
+        f"# {pack_id} Interfaces\n"
+        f"\n"
+        f"## Public Surface\n"
+        f"\n"
+        f"- flows: TODO\n"
+        f"- functions: TODO\n"
+        f"- handlers: TODO\n"
+        f"- routes / events / stores: TODO\n"
+        f"\n"
+        f"## Required Runtime Contracts\n"
+        f"\n"
+        f"- required secrets: TODO\n"
+        f"- required network: TODO\n"
+        f"- required grants: TODO\n"
+    )
+
+
+def _docs_operations_content(pack_id: str) -> str:
+    """docs/operations.md のテンプレート内容を生成する。"""
+    return (
+        f"# {pack_id} Operations\n"
+        f"\n"
+        f"## Run\n"
+        f"\n"
+        f"- Start: TODO\n"
+        f"- Local development: TODO\n"
+        f"- Tests: TODO\n"
+        f"\n"
+        f"## Change Checklist\n"
+        f"\n"
+        f"- Common failure modes: TODO\n"
+        f"- Verification points after changes: TODO\n"
+    )
+
+
+def _docs_flows_content(pack_id: str) -> str:
+    """docs/flows.md のテンプレート内容を生成する。"""
+    return (
+        f"# {pack_id} Flows\n"
+        f"\n"
+        f"この Pack が持つ Flow / modifier の入口です。\n"
+        f"\n"
+        f"## Flow Inventory\n"
+        f"\n"
+        f"- `sample_flow`: TODO\n"
+        f"\n"
+        f"## Notes\n"
+        f"\n"
+        f"- Trigger / inputs / outputs / side effects を記録する\n"
     )
 
 
@@ -203,6 +302,11 @@ class PackScaffold:
         # --- minimal (全テンプレート共通) ---
         files["ecosystem.json"] = _ecosystem_json_content(pack_id)
         files["__init__.py"] = _init_py_content(pack_id)
+        files["README.md"] = _readme_content(pack_id)
+        files["docs/README.md"] = _docs_readme_content(pack_id)
+        files["docs/architecture.md"] = _docs_architecture_content(pack_id)
+        files["docs/interfaces.md"] = _docs_interfaces_content(pack_id)
+        files["docs/operations.md"] = _docs_operations_content(pack_id)
 
         # --- capability ---
         if template in ("capability", "full"):
@@ -211,11 +315,11 @@ class PackScaffold:
         # --- flow ---
         if template in ("flow", "full"):
             files["flows/sample_flow.yaml"] = _sample_flow_yaml_content(pack_id)
+            files["docs/flows.md"] = _docs_flows_content(pack_id)
 
         # --- full ---
         if template == "full":
             files["tests/__init__.py"] = _test_init_content(pack_id)
-            files["README.md"] = _readme_content(pack_id)
 
         return files
 
