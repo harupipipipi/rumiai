@@ -43,19 +43,19 @@ cargo build --release
 
 ### 2. Pack を配置する
 
-このディレクトリを `ecosystem_packs/` にコピーします:
+このディレクトリを `ecosystem/` にコピーします:
 
 ```bash
-cp -r docs/examples/desktop_app_pack/ ecosystem_packs/desktop_app_pack/
+cp -r docs/examples/desktop_app_pack/ ecosystem/desktop_app_pack/
 ```
 
 ### 3. Kernel を起動する
 
 ```bash
-python -m core_runtime.kernel
+python -m rumi_ai
 ```
 
-Kernel が起動すると `ecosystem_packs/desktop_app_pack/ecosystem.json` を自動でスキャンします。
+Kernel が起動すると `ecosystem/desktop_app_pack/ecosystem.json` を自動でスキャンします。
 
 ### 4. Pack を承認する
 
@@ -147,6 +147,6 @@ pack-shell が設定する環境変数:
 ## 関連ドキュメント
 
 - [Pack デスクトップアプリ開発ガイド](../../pack_desktop_app_guide.md)
-- [Pack 開発ガイド](../../pack_development_guide.md)
+- [Pack 開発ガイド](../../pack-development.md)
 - [多言語 Pack 開発ガイド](../../multilang_pack_guide.md)
 - [pack-shell README](../../../../pack-shell/README.md)

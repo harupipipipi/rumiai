@@ -410,7 +410,7 @@ Pack は悪意前提で設計されています。デスクトップアプリの
 2. **環境変数に対応する**: アプリ内で `RUMI_TOKEN`, `RUMI_PORT`, `RUMI_PACK_ID` を読み取り、Kernel API と通信するコードを実装
 3. **pack-shell でテストする**: `pack-shell run <PACK_ID> --command "python app.py" --working-dir <DIR> --api-token <TOKEN>` で動作確認
 4. **ecosystem.json に desktop_app を追加する**: `command`, `window`, `platforms` 等を設定
-5. **Pack をインストールする**: `ecosystem_packs/` に配置するか、PackImporter でインポート
+5. **Pack をインストールする**: `ecosystem/` に配置するか、PackImporter でインポート
 6. **Grant を承認する**: GrantManager で `desktop_app.execute` の Grant を設定
 7. **ショートカットを生成する**: DesktopAppManager の `register_app` でプラットフォーム別ショートカットを自動生成
 
@@ -468,7 +468,7 @@ curl http://localhost:8765/health
 
 ## 関連ドキュメント
 
-- [Pack 開発ガイド](pack_development_guide.md) — Pack の全体像
+- [Pack 開発ガイド](pack-development.md) — Pack の全体像
 - [多言語 Pack 開発ガイド](multilang_pack_guide.md) — Python 以外の言語で Pack を開発する方法
 - [サンプルコード: Desktop App Pack](examples/desktop_app_pack/) — デスクトップアプリ Pack のテンプレート
 - [pack-shell README](../../pack-shell/README.md) — pack-shell バイナリの詳細

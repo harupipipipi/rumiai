@@ -1,5 +1,7 @@
 # Rumi AI OS — セットアップ & デスクトップ配布 TODO
 
+> **Legacy 計画メモ**: 実装計画の履歴です。現行方針は [roadmap.md](./roadmap.md) と [docs/README.md](./README.md) を参照してください。
+
 最終更新: 2026-03-17
 
 パターン C アーキテクチャに基づくロードマップです。Rust ランチャー（薄い）が Kernel プロセスを管理し、セットアップ UI・コントロールパネル・Flow エディタ等は全て Pack が提供する Web UI（React）です。React UI の実装はユーザーが担当します。

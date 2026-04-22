@@ -70,9 +70,9 @@ Grant は `capability_grant_manager` によって管理されます。
 - **`allowed_packs`**: 空配列 `[]` の場合、全ての Pack からの要求を許可
 - **`max_token_lifetime`**: トークンの最大有効期限（秒）
 
-Grant の仕組みの詳細は [Pack 開発ガイド セクション 6](../../pack_development_guide.md) を参照してください。
+Grant の仕組みの詳細は [Pack 開発ガイド セクション 6](../../pack-development.md) を参照してください。
 
 ## 関連ドキュメント
 
-- [Pack 開発ガイド](../../pack_development_guide.md) — Pack の構造、ライフサイクル、Capability の詳細
+- [Pack 開発ガイド](../../pack-development.md) — Pack の構造、ライフサイクル、Capability の詳細
 - [多言語 Pack 開発ガイド](../../multilang_pack_guide.md) — Python 以外の言語で Pack を開発する方法

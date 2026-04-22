@@ -1,5 +1,7 @@
 # defaultspack v2
 
+> **Legacy メモ**: 概要のみの旧メモです。現行の説明は [defaultspack-v2.md](./defaultspack-v2.md) を参照してください。
+
 `defaultspack` is now a tracked first-class pack under `ecosystem/defaultspack/`.
 
 ## What changed

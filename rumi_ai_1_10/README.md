@@ -10,7 +10,11 @@
 
 | やりたいこと | まず読む場所 | どこまで分かるか |
 |---|---|---|
+| 目的別にドキュメントを辿りたい | [`docs/README.md`](./docs/README.md) | 「何をしたいか→どのドキュメントか」を一枚で辿れる |
 | まず起動したい | ルートの [`README.md`](../README.md) | 最短の起動コマンドと repo の入口 |
+| まず手を動かして確認したい | [`docs/tutorials/runtime-quickstart.md`](./docs/tutorials/runtime-quickstart.md) | `--health` から `/panel/` までの最短チュートリアル |
+| コードを読まずに runtime の仕組みを理解したい | [`docs/concepts/system-mechanism.md`](./docs/concepts/system-mechanism.md) | 起動・Flow・承認・Grant・viewer 連携の実行経路 |
+| `rumi_viewer` の起動手順と詰まり方を見たい | [`docs/rumi_viewer_start.md`](./docs/rumi_viewer_start.md) | `401`, 黒画面, panel と defaultspack の関係 |
 | この runtime の思想を知りたい | この README の `思想` | Flow 中心、Pack 前提、Fail-Soft の考え方 |
 | ディレクトリの役割を知りたい | この README の `プロジェクト構造` | `core_runtime/`, `ecosystem/`, `user_data/` の役割 |
 | Pack を作る・直す | [`docs/pack-development.md`](./docs/pack-development.md) | `ecosystem.json`, `routes.json`, `permissions.json`, secrets 利用 |
