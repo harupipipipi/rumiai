@@ -49,6 +49,41 @@ export function createPort(
   };
 }
 
+export function ensureUniquePortId(candidateId: string, ports: FlowPort[], excludedId?: string): string {
+  const baseId = candidateId.trim() || 'port';
+  const takenIds = new Set(
+    ports
+      .filter((port) => port.id !== excludedId)
+      .map((port) => port.id),
+  );
+
+  if (!takenIds.has(baseId)) {
+    return baseId;
+  }
+
+  let suffix = 2;
+  let nextId = `${baseId}-${suffix}`;
+  while (takenIds.has(nextId)) {
+    suffix += 1;
+    nextId = `${baseId}-${suffix}`;
+  }
+  return nextId;
+}
+
+export function createUniquePort(
+  label: string,
+  direction: PortDirection,
+  contracts: string[] = [],
+  existingPorts: FlowPort[] = [],
+  overrides: Partial<FlowPort> = {},
+): FlowPort {
+  const nextPort = createPort(label, direction, contracts, overrides);
+  return {
+    ...nextPort,
+    id: ensureUniquePortId(nextPort.id, existingPorts),
+  };
+}
+
 export function clonePorts(ports: FlowPort[] | undefined): FlowPort[] {
   return (ports ?? []).map((port) => ({
     ...port,
@@ -70,6 +105,14 @@ export function getPort(node: Node | null | undefined, handleId: string | null |
     return ports.find((port) => port.id === handleId) ?? null;
   }
   return ports[0] ?? null;
+}
+
+export function replaceNodePorts(nodes: Node[], nodeId: string, ports: FlowPort[]): Node[] {
+  return nodes.map((node) => (
+    node.id === nodeId
+      ? { ...node, data: { ...node.data, ports } }
+      : node
+  ));
 }
 
 function hasContractMatch(sourcePort: FlowPort | null, targetPort: FlowPort | null): boolean {
@@ -166,6 +209,35 @@ export function pickCompatibleHandles(
   }
 
   return null;
+}
+
+export function syncEdgesForUpdatedPort(
+  edges: Edge[],
+  nodes: Node[],
+  nodeId: string,
+  previousPortId: string,
+  nextPortId: string,
+): Edge[] {
+  const remappedEdges = edges.map((edge) => {
+    if (edge.source === nodeId && edge.sourceHandle === previousPortId) {
+      return {
+        ...edge,
+        sourceHandle: nextPortId,
+      };
+    }
+    if (edge.target === nodeId && edge.targetHandle === previousPortId) {
+      return {
+        ...edge,
+        targetHandle: nextPortId,
+      };
+    }
+    return edge;
+  });
+
+  return remappedEdges.filter((edge) => {
+    const otherEdges = remappedEdges.filter((candidate) => candidate.id !== edge.id);
+    return validateConnection(edge, nodes, otherEdges).valid;
+  });
 }
 
 export function createStartNode(position = { x: 160, y: 120 }, basePack = DEFAULT_BASE_PACK): Node<TriggerNodeData> {

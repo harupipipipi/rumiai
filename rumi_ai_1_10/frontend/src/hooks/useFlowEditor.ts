@@ -3,7 +3,15 @@ import { useState, useCallback } from 'react';
 import type { Node, Edge, Connection, ReactFlowInstance } from '@xyflow/react';
 import { addEdge, reconnectEdge } from '@xyflow/react';
 import type { FlowPort } from '@/src/lib/types';
-import { createPort, pickCompatibleHandles, validateConnection } from '@/src/lib/flowGraph';
+import {
+  createPort,
+  createUniquePort,
+  ensureUniquePortId,
+  pickCompatibleHandles,
+  replaceNodePorts,
+  syncEdgesForUpdatedPort,
+  validateConnection,
+} from '@/src/lib/flowGraph';
 
 interface UseFlowEditorParams {
   nodes: Node[];
@@ -259,22 +267,38 @@ export function useFlowEditor({
 
   const addPortToSelectedNode = useCallback((direction: 'input' | 'output') => {
     const ports = ((selectedNode?.data as { ports?: FlowPort[] } | undefined)?.ports ?? []);
-    const nextPort = createPort(direction === 'input' ? 'new-in' : 'new-out', direction, []);
+    const nextPort = createUniquePort(direction === 'input' ? 'new-in' : 'new-out', direction, [], ports);
     updateNodePorts([...ports, nextPort]);
   }, [selectedNode, updateNodePorts]);
 
   const updateSelectedNodePort = useCallback((portId: string, patch: Partial<FlowPort>) => {
-    const ports = ((selectedNode?.data as { ports?: FlowPort[] } | undefined)?.ports ?? []).map((port) => (
-      port.id === portId
-        ? {
-            ...port,
-            ...patch,
-            contracts: patch.contracts ?? port.contracts,
-          }
-        : port
-    ));
-    updateNodePorts(ports);
-  }, [selectedNode, updateNodePorts]);
+    if (!selectedNode) return;
+
+    const ports = ((selectedNode.data as { ports?: FlowPort[] } | undefined)?.ports ?? []);
+    const existingPort = ports.find((port) => port.id === portId);
+    if (!existingPort) return;
+
+    const siblingPorts = ports.filter((port) => port.id !== portId);
+    const normalizedPort = createPort(
+      patch.label ?? existingPort.label,
+      patch.direction ?? existingPort.direction,
+      patch.contracts ?? existingPort.contracts,
+      {
+        ...existingPort,
+        ...patch,
+        id: patch.id ?? existingPort.id,
+      },
+    );
+    const nextPort = {
+      ...normalizedPort,
+      id: ensureUniquePortId(normalizedPort.id, siblingPorts),
+    };
+    const nextPorts = ports.map((port) => (port.id === portId ? nextPort : port));
+    const nextNodes = replaceNodePorts(nodes, selectedNode.id, nextPorts);
+
+    updateNodePorts(nextPorts);
+    setEdges((existing) => syncEdgesForUpdatedPort(existing, nextNodes, selectedNode.id, portId, nextPort.id));
+  }, [nodes, selectedNode, setEdges, updateNodePorts]);
 
   const removeSelectedNodePort = useCallback((portId: string) => {
     const ports = ((selectedNode?.data as { ports?: FlowPort[] } | undefined)?.ports ?? []).filter((port) => port.id !== portId);
