@@ -1,7 +1,8 @@
 import { useState, useCallback, useRef } from 'react';
-import type { Node } from '@xyflow/react';
+import type { Edge, Node } from '@xyflow/react';
 import { useMountedRef } from './useMountedRef';
 import type { FlowExecutionResult, StepExecutionResult } from '@/src/lib/types';
+import { buildExecutionPlan } from '@/src/lib/flowGraph';
 
 function delay(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
@@ -16,6 +17,7 @@ export interface FlowExecutionState {
 
 export function useFlowExecution(
   nodes: Node[],
+  edges: Edge[],
   setNodes: (updater: Node[] | ((nodes: Node[]) => Node[])) => void,
 ): FlowExecutionState {
   const [isExecuting, setIsExecuting] = useState(false);
@@ -23,7 +25,9 @@ export function useFlowExecution(
   const mountedRef = useMountedRef();
   const isExecutingRef = useRef(false);
   const nodesRef = useRef(nodes);
+  const edgesRef = useRef(edges);
   nodesRef.current = nodes;
+  edgesRef.current = edges;
 
   const execute = useCallback(async (): Promise<FlowExecutionResult | null> => {
     // Guard against double execution (C-2)
@@ -35,7 +39,7 @@ export function useFlowExecution(
     setNodes(nds => nds.map(n => ({ ...n, data: { ...n.data, executionStatus: 'pending' } })));
 
     const currentNodes = nodesRef.current;
-    const steps = currentNodes.filter(n => n.type === 'step' && n.data.type !== 'reroute');
+    const steps = buildExecutionPlan(currentNodes, edgesRef.current).filter((node) => node.data.type !== 'reroute');
     const results: StepExecutionResult[] = [];
 
     // Run trigger
@@ -60,7 +64,7 @@ export function useFlowExecution(
       setNodes(nds => nds.map(n => n.id === step.id ? { ...n, data: { ...n.data, executionStatus: isSuccess ? 'success' : 'error' } } : n));
 
       results.push({
-        name: (step.data.id as string) || `step_${i}`,
+        name: (step.data.title as string) || (step.data.id as string) || `step_${i}`,
         status: isSuccess ? 'success' : 'error',
         duration: `${(Math.random() * 1 + 0.1).toFixed(1)}s`,
       });
@@ -89,7 +93,7 @@ export function useFlowExecution(
     }
     isExecutingRef.current = false;
     return result;
-  }, [setNodes, mountedRef]);
+  }, [mountedRef, setNodes]);
 
   const clearResult = useCallback(() => {
     setExecutionResult(null);
