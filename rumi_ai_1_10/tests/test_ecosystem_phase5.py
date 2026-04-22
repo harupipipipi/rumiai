@@ -121,6 +121,36 @@ class TestToolLoaderMigration:
         loader = ToolLoader(tools_dir=custom_path)
         assert loader.tools_dir == custom_path
 
+    def test_explicit_path_override_with_defaultspack_backend_first(self, temp_dir, monkeypatch):
+        """defaultspack backendが先でも legacy import が解決できる"""
+        backend_root = Path(__file__).parent.parent / 'ecosystem' / 'defaultspack' / 'backend'
+        monkeypatch.syspath_prepend(str(backend_root))
+        sys.modules.pop('tool.tool_loader', None)
+        sys.modules.pop('tool', None)
+
+        from tool.tool_loader import ToolLoader
+
+        custom_path = temp_dir / 'custom_tools_backend'
+        custom_path.mkdir()
+
+        loader = ToolLoader(tools_dir=custom_path)
+        assert loader.tools_dir == custom_path
+
+    def test_explicit_path_override_with_defaultspack_blocks_first(self, temp_dir, monkeypatch):
+        """defaultspack blocksが先でも legacy import が解決できる"""
+        blocks_root = Path(__file__).parent.parent / 'ecosystem' / 'defaultspack' / 'blocks'
+        monkeypatch.syspath_prepend(str(blocks_root))
+        sys.modules.pop('tool.tool_loader', None)
+        sys.modules.pop('tool', None)
+
+        from tool.tool_loader import ToolLoader
+
+        custom_path = temp_dir / 'custom_tools_blocks'
+        custom_path.mkdir()
+
+        loader = ToolLoader(tools_dir=custom_path)
+        assert loader.tools_dir == custom_path
+
 
 class TestPromptLoaderMigration:
     """PromptLoader移行のテスト"""
@@ -138,6 +168,36 @@ class TestPromptLoaderMigration:
         custom_path = temp_dir / 'custom_prompts'
         custom_path.mkdir()
         
+        loader = PromptLoader(prompt_dir=custom_path)
+        assert loader.prompt_dir == custom_path
+
+    def test_explicit_path_override_with_defaultspack_backend_first(self, temp_dir, monkeypatch):
+        """defaultspack backendが先でも legacy import が解決できる"""
+        backend_root = Path(__file__).parent.parent / 'ecosystem' / 'defaultspack' / 'backend'
+        monkeypatch.syspath_prepend(str(backend_root))
+        sys.modules.pop('prompt.prompt_loader', None)
+        sys.modules.pop('prompt', None)
+
+        from prompt.prompt_loader import PromptLoader
+
+        custom_path = temp_dir / 'custom_prompts_backend'
+        custom_path.mkdir()
+
+        loader = PromptLoader(prompt_dir=custom_path)
+        assert loader.prompt_dir == custom_path
+
+    def test_explicit_path_override_with_defaultspack_blocks_first(self, temp_dir, monkeypatch):
+        """defaultspack blocksが先でも legacy import が解決できる"""
+        blocks_root = Path(__file__).parent.parent / 'ecosystem' / 'defaultspack' / 'blocks'
+        monkeypatch.syspath_prepend(str(blocks_root))
+        sys.modules.pop('prompt.prompt_loader', None)
+        sys.modules.pop('prompt', None)
+
+        from prompt.prompt_loader import PromptLoader
+
+        custom_path = temp_dir / 'custom_prompts_blocks'
+        custom_path.mkdir()
+
         loader = PromptLoader(prompt_dir=custom_path)
         assert loader.prompt_dir == custom_path
 
