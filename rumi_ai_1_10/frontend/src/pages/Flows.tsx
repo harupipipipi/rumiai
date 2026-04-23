@@ -442,10 +442,7 @@ function FlowEditorInner() {
 
             <div
               ref={reactFlowWrapper}
-              className={cn(
-                'flow-canvas relative flex-1 overflow-hidden rounded-2xl border border-border',
-                colorMode === 'dark' ? 'bg-[#120d09]' : 'bg-[#f8e6bf]',
-              )}
+              className="flow-canvas relative flex-1 overflow-hidden rounded-2xl border border-border"
             >
               <ReactFlow<Node, Edge>
                 nodes={nodes}
@@ -476,7 +473,7 @@ function FlowEditorInner() {
                 fitView
                 className="flow-grid"
               >
-                <Background color={colorMode === 'dark' ? '#5d3310' : '#d69c3d'} gap={24} />
+                <Background color="var(--flow-grid-color)" gap={24} />
                 <Controls className="bg-bg-card border-border fill-text-main" />
               </ReactFlow>
 

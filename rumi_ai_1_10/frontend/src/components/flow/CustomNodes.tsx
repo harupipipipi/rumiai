@@ -11,10 +11,10 @@ import type {
 } from '@/src/lib/types';
 
 function statusAccent(status: ExecutionStatus): string {
-  if (status === 'running') return 'ring-2 ring-sky-300/60 border-sky-300';
-  if (status === 'success') return 'ring-2 ring-emerald-300/50 border-emerald-300';
-  if (status === 'error') return 'ring-2 ring-rose-300/50 border-rose-300';
-  return 'border-amber-500/30';
+  if (status === 'running') return 'is-running';
+  if (status === 'success') return 'is-success';
+  if (status === 'error') return 'is-error';
+  return 'is-idle';
 }
 
 function PortHandle({ port, side }: { port: FlowPort; side: 'left' | 'right' }) {
@@ -22,23 +22,29 @@ function PortHandle({ port, side }: { port: FlowPort; side: 'left' | 'right' }) 
   const position = side === 'left' ? Position.Left : Position.Right;
 
   return (
-    <div className={cn(
-      'relative flex items-center gap-2 rounded-md px-3 py-2 text-[11px] font-medium',
-      side === 'left' ? 'justify-start text-amber-50/90' : 'justify-end text-amber-100',
-      'bg-[rgba(255,190,74,0.10)]',
-    )}>
+    <div
+      className={cn(
+        'flow-port-row relative flex min-h-10 items-center',
+        side === 'left' ? 'justify-start pl-4 pr-2 text-left' : 'justify-end pl-2 pr-4 text-right',
+      )}
+    >
       {isInput && (
         <Handle
           id={port.id}
           type="target"
           position={position}
-          className="!h-3 !w-3 !border-2 !border-amber-300/70 !bg-[#ff8654]"
+          className="flow-port-handle !top-1/2 !-translate-y-1/2 !border-[3px] !shadow-none"
         />
       )}
-      <div className={cn('flex min-w-0 flex-col', side === 'right' && 'items-end')}>
-        <span className="truncate">{port.label}</span>
+      <div
+        className={cn(
+          'flow-port-pill flex min-w-0 flex-1 flex-col rounded-2xl border px-3 py-2',
+          side === 'right' && 'items-end',
+        )}
+      >
+        <span className="truncate text-[12px] font-semibold">{port.label}</span>
         {port.contracts.length > 0 && (
-          <span className="truncate text-[10px] text-amber-100/60">{port.contracts.join(' | ')}</span>
+          <span className="truncate text-[10px] opacity-70">{port.contracts.join(' | ')}</span>
         )}
       </div>
       {!isInput && (
@@ -46,7 +52,7 @@ function PortHandle({ port, side }: { port: FlowPort; side: 'left' | 'right' }) 
           id={port.id}
           type="source"
           position={position}
-          className="!h-3 !w-3 !border-2 !border-amber-300/70 !bg-[#ff8654]"
+          className="flow-port-handle !top-1/2 !-translate-y-1/2 !border-[3px] !shadow-none"
         />
       )}
     </div>
@@ -89,20 +95,26 @@ function NodeShell({
   return (
     <div
       className={cn(
-        'flow-node-shell min-w-[240px] rounded-[20px] border bg-[linear-gradient(180deg,rgba(255,197,92,0.92)_0%,rgba(255,173,68,0.82)_100%)] p-3 text-[#2d1702] shadow-[0_22px_50px_rgba(0,0,0,0.28)] transition-all duration-300',
-        selected ? 'scale-[1.01] border-amber-100 shadow-[0_28px_70px_rgba(255,170,72,0.28)]' : statusAccent(status),
+        'flow-node-shell min-w-[220px] transition-transform duration-150',
+        selected && 'is-selected scale-[1.01]',
+        statusAccent(status),
       )}
     >
-      <div className="mb-3 rounded-[16px] border border-amber-100/40 bg-[rgba(120,55,0,0.14)] px-4 py-3 text-amber-950">
-        <div className="flex items-center gap-2 text-sm font-semibold">
+      <div className="flow-node-cap">
+        <div className="flex items-center gap-2 truncate">
           {icon}
-          <span>{title}</span>
+          <span className="truncate">{title}</span>
         </div>
-        {subtitle && <div className="mt-1 text-[11px] text-amber-950/70">{subtitle}</div>}
       </div>
-      <div className="grid grid-cols-[1fr_1fr] gap-3">
-        <PortRail ports={inputPorts} side="left" />
-        <PortRail ports={outputPorts} side="right" />
+
+      <div className="flow-node-card">
+        <div className="flow-node-body">
+          {subtitle ? <div className="flow-node-subtitle">{subtitle}</div> : null}
+          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3">
+            <PortRail ports={inputPorts} side="left" />
+            <PortRail ports={outputPorts} side="right" />
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -132,12 +144,12 @@ export function StepNode({ data, selected }: NodeProps<StepNodeType>) {
   if (data.type === 'reroute') {
     return (
       <div className={cn(
-        'rounded-full border border-amber-200/60 bg-[#ffb24a] p-2 shadow-[0_0_22px_rgba(255,178,74,0.34)]',
-        selected && 'ring-2 ring-amber-100',
+        'flow-reroute-node rounded-full border p-2',
+        selected && 'ring-2',
       )}>
-        <Handle id="reroute-in" type="target" position={Position.Left} className="!h-3 !w-3 !border-2 !border-amber-100 !bg-[#6e3400]" />
-        <Waypoints className="h-4 w-4 text-[#572400]" />
-        <Handle id="reroute-out" type="source" position={Position.Right} className="!h-3 !w-3 !border-2 !border-amber-100 !bg-[#6e3400]" />
+        <Handle id="reroute-in" type="target" position={Position.Left} className="flow-port-handle !top-1/2 !-translate-y-1/2 !border-[3px] !shadow-none" />
+        <Waypoints className="h-4 w-4" />
+        <Handle id="reroute-out" type="source" position={Position.Right} className="flow-port-handle !top-1/2 !-translate-y-1/2 !border-[3px] !shadow-none" />
       </div>
     );
   }
