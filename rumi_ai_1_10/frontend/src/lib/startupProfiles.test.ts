@@ -156,6 +156,14 @@ test('describeStartupActionError maps auth and slot validation problems to user 
     'Your launcher session expired. Reload the panel and try again.',
   );
   assert.equal(
+    describeStartupActionError('API Error: 429 Too Many Requests', 'load startup profiles'),
+    'The local panel is receiving too many requests right now. Wait a moment and try again.',
+  );
+  assert.equal(
+    describeStartupActionError("Standard pack 'defaultspack' is not available: Pack 'defaultspack' changed since it was last approved. Re-approve it before launching.", 'save this profile'),
+    'The selected standard pack changed after approval. Re-approve it or switch packs before saving.',
+  );
+  assert.equal(
     describeStartupActionError("Pack 'broken-tool' does not satisfy slot 'tool'", 'save this profile'),
     'Tool only accepts compatible packs. Pick another pack for that slot.',
   );

@@ -136,8 +136,14 @@ export function describeStartupActionError(error: string, fallbackAction: string
   if (/Unauthorized|Invalid or expired code/i.test(error)) {
     return 'Your launcher session expired. Reload the panel and try again.';
   }
+  if (/Too many requests|429/i.test(error)) {
+    return 'The local panel is receiving too many requests right now. Wait a moment and try again.';
+  }
   if (/At least one startup profile must remain/i.test(error)) {
     return 'You need to keep at least one saved profile.';
+  }
+  if (/Standard pack/i.test(error) && /changed since it was last approved|modified since approval|re-approve/i.test(error)) {
+    return 'The selected standard pack changed after approval. Re-approve it or switch packs before saving.';
   }
   const slotRuntime = error.match(/not runtime-ready for slot '([^']+)'(?:: (.+))?/i);
   if (slotRuntime) {

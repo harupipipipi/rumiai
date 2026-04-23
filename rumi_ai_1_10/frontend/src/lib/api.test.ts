@@ -168,3 +168,43 @@ test('apiFetch leaves GET requests free of CSRF headers', async () => {
     undefined,
   );
 });
+
+test('apiFetch deduplicates concurrent GET requests for the same URL', async () => {
+  installBrowser('http://127.0.0.1:8765/panel/?v=42');
+
+  let requestCount = 0;
+  const pendingFetch = new Promise<Response>((resolve) => {
+    Object.defineProperty(globalThis, 'fetch', {
+      configurable: true,
+      value: (async (input: string | URL | Request, init?: RequestInit) => {
+        requestCount += 1;
+        lastFetchUrl = String(input);
+        lastFetchInit = init;
+        return pendingFetch;
+      }) as typeof fetch,
+      writable: true,
+    });
+
+    queueMicrotask(() => {
+      resolve(new Response(
+        JSON.stringify({
+          data: {ok: true},
+          success: true,
+        }),
+        {
+          headers: {'Content-Type': 'application/json'},
+          status: 200,
+        },
+      ));
+    });
+  });
+
+  const [first, second] = await Promise.all([
+    apiFetch<{ok: boolean}>('/api/panel/flows'),
+    apiFetch<{ok: boolean}>('/api/panel/flows'),
+  ]);
+
+  assert.equal(requestCount, 1);
+  assert.deepEqual(first, {ok: true});
+  assert.deepEqual(second, {ok: true});
+});

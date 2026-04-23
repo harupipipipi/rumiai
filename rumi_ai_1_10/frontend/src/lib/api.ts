@@ -25,6 +25,7 @@ const API_BASE_URL =
 const PANEL_CSRF_STORAGE_KEY = 'rumi-panel-csrf';
 let panelBootstrapPromise: Promise<void> | null = null;
 let panelBootstrapCodeInFlight: string | null = null;
+const inflightGetRequests = new Map<string, Promise<unknown>>();
 
 function getStoredPanelCsrfToken(): string {
   return sessionStorage.getItem(PANEL_CSRF_STORAGE_KEY) || '';
@@ -126,34 +127,53 @@ export async function apiFetch<T>(
     }
   }
 
-  const response = await fetch(url, {
-    ...options,
-    method,
-    credentials: 'same-origin',
-    headers,
-  });
+  const fetchRequest = async (): Promise<T> => {
+    const response = await fetch(url, {
+      ...options,
+      method,
+      credentials: 'same-origin',
+      headers,
+    });
 
-  if (!response.ok) {
-    // Try to parse error envelope even on non-ok status
-    let errorMessage = `API Error: ${response.status} ${response.statusText}`;
-    try {
-      const errorBody: ApiResponse<unknown> = await response.json();
-      if (errorBody.error) {
-        errorMessage = errorBody.error;
+    if (!response.ok) {
+      // Try to parse error envelope even on non-ok status
+      let errorMessage = response.status === 429
+        ? 'Too many requests reached the local panel. Please wait a moment and try again.'
+        : `API Error: ${response.status} ${response.statusText}`;
+      try {
+        const errorBody: ApiResponse<unknown> = await response.json();
+        if (errorBody.error) {
+          errorMessage = errorBody.error;
+        }
+      } catch {
+        // If JSON parsing fails, use the default error message
       }
-    } catch {
-      // If JSON parsing fails, use the default error message
+      throw new Error(errorMessage);
     }
-    throw new Error(errorMessage);
+
+    const envelope: ApiResponse<T> = await response.json();
+
+    if (!envelope.success) {
+      throw new Error(envelope.error || 'Unknown API error');
+    }
+
+    return envelope.data as T;
+  };
+
+  if (method === 'GET') {
+    const cacheKey = `${method}:${url}`;
+    const existing = inflightGetRequests.get(cacheKey) as Promise<T> | undefined;
+    if (existing) {
+      return existing;
+    }
+    const request = fetchRequest().finally(() => {
+      inflightGetRequests.delete(cacheKey);
+    });
+    inflightGetRequests.set(cacheKey, request as Promise<unknown>);
+    return request;
   }
 
-  const envelope: ApiResponse<T> = await response.json();
-
-  if (!envelope.success) {
-    throw new Error(envelope.error || 'Unknown API error');
-  }
-
-  return envelope.data as T;
+  return fetchRequest();
 }
 
 // ============================================================

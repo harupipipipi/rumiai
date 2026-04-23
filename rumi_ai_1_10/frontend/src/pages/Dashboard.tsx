@@ -67,15 +67,6 @@ function formatTimestamp(timestamp: number): string {
   return new Date(timestamp * 1000).toLocaleString();
 }
 
-function formatRelativeTimestamp(timestamp: number): string {
-  if (!timestamp) return 'Never updated';
-  const diff = Math.max(0, Math.floor(Date.now() / 1000) - timestamp);
-  if (diff < 60) return 'Updated just now';
-  if (diff < 3600) return `Updated ${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `Updated ${Math.floor(diff / 3600)}h ago`;
-  return `Updated ${Math.floor(diff / 86400)}d ago`;
-}
-
 function summarizeProvide(value: string): string {
   return value.replace(/^defaults\./, '');
 }
@@ -676,11 +667,16 @@ export function Dashboard() {
               const busy = actionState?.profileId === profile.profile_id;
               const statusTone = toneClassesForIssue(hasDanger, hasWarning);
               const accentTone = accentClassesForIssue(hasDanger, hasWarning);
+              const summaryLine = issueCount > 0
+                ? issues[0]?.description || 'Needs attention before launch.'
+                : runtimeReady
+                  ? 'Ready for quick play.'
+                  : 'Needs attention before launch.';
 
               return (
                 <article
                   key={profile.profile_id}
-                  className={`group flex min-h-[420px] flex-col rounded-[28px] border bg-gradient-to-br p-6 shadow-[0_24px_80px_-48px_rgba(0,0,0,0.85)] ${statusTone}`}
+                  className={`group flex min-h-[380px] flex-col rounded-[28px] border bg-gradient-to-br p-6 shadow-[0_24px_80px_-48px_rgba(0,0,0,0.85)] ${statusTone}`}
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex flex-wrap gap-2">
@@ -735,56 +731,7 @@ export function Dashboard() {
                         {standardPack?.display_name || profile.standard_pack_id}
                       </p>
                     </div>
-
-                    <div className="space-y-1.5">
-                      <p className="text-sm font-medium text-stone-200">{profileView.headline}</p>
-                      <p className="text-sm leading-6 text-stone-500">{profileView.subtitle}</p>
-                    </div>
-                  </div>
-
-                  <div className="mt-6 flex items-center gap-4 text-xs text-stone-500">
-                    <span className="inline-flex items-center gap-1.5">
-                      <Clock3 className="h-3.5 w-3.5" />
-                      {formatRelativeTimestamp(profile.updated_at)}
-                    </span>
-                    <span className="inline-flex items-center gap-1.5">
-                      <Layers3 className="h-3.5 w-3.5" />
-                      {slots.length} slots
-                    </span>
-                  </div>
-
-                  <div className="mt-5 flex flex-wrap gap-2">
-                    {slots.slice(0, 3).map((slot) => (
-                      <span
-                        key={`${profile.profile_id}-${slot.slotId}`}
-                        className={`rounded-full px-2.5 py-1 text-[11px] ${
-                          slot.healthy
-                            ? 'bg-stone-900 text-stone-300 ring-1 ring-inset ring-stone-800'
-                            : 'bg-amber-950/60 text-amber-200 ring-1 ring-inset ring-amber-900/60'
-                        }`}
-                      >
-                        {slot.label}: {slot.packName}
-                      </span>
-                    ))}
-                  </div>
-
-                  <div className="mt-5 min-h-[64px] rounded-2xl border border-stone-900/80 bg-black/20 p-3">
-                    {issueCount > 0 ? (
-                      <div className="space-y-1.5">
-                        {issues.slice(0, 2).map((issue) => (
-                          <div key={`${profile.profile_id}-${issue.title}`} className="flex items-start gap-2 text-sm text-stone-300">
-                            <AlertCircle className={`mt-0.5 h-4 w-4 shrink-0 ${issue.severity === 'danger' ? 'text-rose-300' : 'text-amber-300'}`} />
-                            <span>{issue.description}</span>
-                          </div>
-                        ))}
-                        {issueCount > 2 ? <p className="text-xs text-stone-500">+{issueCount - 2} more issues in details</p> : null}
-                      </div>
-                    ) : (
-                      <div className="flex items-start gap-2 text-sm text-stone-400">
-                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" />
-                        <span>Ready for quick play and safe to activate.</span>
-                      </div>
-                    )}
+                    <p className="text-sm leading-6 text-stone-500">{summaryLine}</p>
                   </div>
 
                   <div className="mt-auto pt-6">
