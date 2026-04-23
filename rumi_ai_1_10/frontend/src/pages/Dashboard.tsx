@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   activateStartupProfile,
@@ -12,11 +12,7 @@ import {
   updateStartupProfile,
 } from '@/src/lib/api';
 import type {
-  ApiStartupCatalog,
-  ApiStartupNodePort,
   ApiStartupProfile,
-  ApiStartupSlotCandidate,
-  ApiStartupSlotSpec,
   StartupProfilesResponseData,
 } from '@/src/lib/apiTypes';
 import {
@@ -34,23 +30,18 @@ import {
   Box,
   CheckCircle2,
   ChevronRight,
-  Clock3,
   Copy,
-  ExternalLink,
-  FolderKanban,
-  Layers3,
-  LayoutGrid,
   Loader2,
-  Play,
+  MoreHorizontal,
   Plus,
   RefreshCw,
   Rocket,
   Save,
   Search,
-  Sparkles,
   Star,
   Trash2,
 } from 'lucide-react';
+import { Popover, PopoverTrigger, PopoverContent } from '@/src/components/ui/Popover';
 
 type ActionState = 'activate' | 'create' | 'delete' | 'duplicate' | 'launch' | 'restart' | 'save';
 
@@ -67,154 +58,11 @@ function formatTimestamp(timestamp: number): string {
   return new Date(timestamp * 1000).toLocaleString();
 }
 
-function summarizeProvide(value: string): string {
-  return value.replace(/^defaults\./, '');
-}
-
-function renderContracts(contracts: string[]) {
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {contracts.map((contract) => (
-        <span
-          key={contract}
-          className="rounded-full border border-stone-800 bg-stone-950 px-2 py-0.5 text-[10px] font-medium text-stone-400"
-        >
-          {contract}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function NodePorts({ ports, direction }: { ports: ApiStartupNodePort[]; direction: 'input' | 'output' }) {
-  const directionalPorts = ports.filter((port) => port.direction === direction);
-  if (directionalPorts.length === 0) {
-    return <div className="min-h-8" />;
-  }
-
-  return (
-    <div className="flex flex-col gap-2">
-      {directionalPorts.map((port) => (
-        <div
-          key={`${direction}-${port.port_id}`}
-          className={`flex items-center gap-2 ${direction === 'output' ? 'justify-end text-right' : ''}`}
-        >
-          {direction === 'input' ? <span className="h-2.5 w-2.5 shrink-0 rounded-full border border-stone-600 bg-stone-300" /> : null}
-          <div className="max-w-[8rem]">
-            <div className="text-[10px] font-semibold text-stone-200">{port.label}</div>
-            <div className="text-[9px] text-stone-500">{port.multi ? 'multi' : 'single'}</div>
-          </div>
-          {direction === 'output' ? <span className="h-2.5 w-2.5 shrink-0 rounded-full border border-stone-600 bg-stone-300" /> : null}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function ContractNode({
-  title,
-  subtitle,
-  character,
-  ports,
-  tone = 'amber',
-  footer,
-}: {
-  title: string;
-  subtitle: string;
-  character: string;
-  ports: ApiStartupNodePort[];
-  tone?: 'amber' | 'emerald' | 'rose' | 'sky';
-  footer?: ReactNode;
-}) {
-  const toneClasses = {
-    amber: 'from-amber-950/60 to-stone-950 border-amber-900/40 text-amber-50',
-    emerald: 'from-emerald-950/60 to-stone-950 border-emerald-900/40 text-emerald-50',
-    rose: 'from-rose-950/60 to-stone-950 border-rose-900/40 text-rose-50',
-    sky: 'from-sky-950/60 to-stone-950 border-sky-900/40 text-sky-50',
-  }[tone];
-
-  return (
-    <div className="rounded-[24px] border border-stone-900 bg-stone-950/80 p-2 shadow-xl shadow-black/20">
-      <div className={`rounded-[18px] border bg-gradient-to-br p-4 ${toneClasses}`}>
-        <div className="mb-4 flex items-start justify-between gap-3">
-          <div>
-            <div className="text-base font-semibold tracking-tight text-white">{title}</div>
-            <div className="mt-1 text-xs leading-5 text-stone-400">{subtitle}</div>
-          </div>
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-lg font-black text-stone-200">
-            {character}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-start gap-4">
-          <NodePorts ports={ports} direction="input" />
-          <div className="mt-2 h-full w-px bg-stone-800" />
-          <NodePorts ports={ports} direction="output" />
-        </div>
-
-        {footer ? <div className="mt-4 border-t border-stone-800 pt-3">{footer}</div> : null}
-      </div>
-    </div>
-  );
-}
-
-function buildStandardPackPorts(catalog: ApiStartupCatalog): ApiStartupNodePort[] {
-  return [
-    {
-      port_id: 'start',
-      label: 'start',
-      direction: 'input',
-      contracts: catalog.start_node.ports[0]?.contracts ?? [],
-      multi: false,
-    },
-    ...catalog.slot_specs.map((slot) => ({
-      port_id: slot.slot_id,
-      label: slot.label,
-      direction: 'output' as const,
-      contracts: [slot.contract],
-      multi: slot.multi,
-    })),
-  ];
-}
-
-function buildSlotNodePorts(slot: ApiStartupSlotSpec, candidate: ApiStartupSlotCandidate | null): ApiStartupNodePort[] {
-  const ports: ApiStartupNodePort[] = [
-    {
-      port_id: `${slot.slot_id}-in`,
-      label: slot.label,
-      direction: 'input',
-      contracts: [slot.contract],
-      multi: slot.multi,
-    },
-  ];
-
-  if (!candidate) {
-    return ports;
-  }
-
-  candidate.provides.slice(0, 3).forEach((provide, index) => {
-    ports.push({
-      port_id: `${slot.slot_id}-out-${index}`,
-      label: summarizeProvide(provide),
-      direction: 'output',
-      contracts: [provide],
-      multi: true,
-    });
-  });
-
-  return ports;
-}
-
-function toneClassesForIssue(hasDanger: boolean, hasWarning: boolean): string {
-  if (hasDanger) return 'from-rose-950/70 to-stone-950 border-rose-900/40';
-  if (hasWarning) return 'from-amber-950/70 to-stone-950 border-amber-900/40';
-  return 'from-stone-900 to-stone-950 border-stone-800';
-}
-
-function accentClassesForIssue(hasDanger: boolean, hasWarning: boolean): string {
-  if (hasDanger) return 'bg-rose-950/60 text-rose-200 ring-1 ring-inset ring-rose-900/60';
-  if (hasWarning) return 'bg-amber-950/60 text-amber-200 ring-1 ring-inset ring-amber-900/60';
-  return 'bg-violet-600/15 text-violet-200 ring-1 ring-inset ring-violet-500/30';
+function cardBorderClass(hasDanger: boolean, hasWarning: boolean, isActive: boolean): string {
+  if (hasDanger) return 'border-rose-900/40';
+  if (hasWarning) return 'border-amber-900/40';
+  if (isActive) return 'border-accent/25';
+  return 'border-border';
 }
 
 export function Dashboard() {
@@ -233,7 +81,6 @@ export function Dashboard() {
   const [feedback, setFeedback] = useState<{ message: string; tone: 'error' | 'success' } | null>(null);
   const [actionState, setActionState] = useState<{ profileId?: string; type: ActionState } | null>(null);
   const [draft, setDraft] = useState<ApiStartupProfile | null>(null);
-  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const editProfileId = searchParams.get('edit');
   const searchQuery = searchParams.get('q') ?? '';
@@ -304,10 +151,8 @@ export function Dashboard() {
   useEffect(() => {
     if (!selectedProfile) {
       setDraft(null);
-      setShowAdvanced(false);
       return;
     }
-
     setDraft(JSON.parse(JSON.stringify(selectedProfile)));
   }, [selectedProfile]);
 
@@ -343,13 +188,13 @@ export function Dashboard() {
   }, [draft, selectedProfile]);
 
   const selectedCandidatesBySlot = useMemo(() => {
-    if (!catalog || !draft) return {} as Record<string, ApiStartupSlotCandidate | null>;
+    if (!catalog || !draft) return {} as Record<string, any>;
     return Object.fromEntries(
       slotSpecs.map((slot) => [
         slot.slot_id,
         (catalog.slot_candidates[slot.slot_id] ?? []).find((candidate) => candidate.pack_id === draft.slots[slot.slot_id]) ?? null,
       ]),
-    ) as Record<string, ApiStartupSlotCandidate | null>;
+    ) as Record<string, any>;
   }, [catalog, draft, slotSpecs]);
 
   const setSuccessFeedback = (message: string) => {
@@ -499,12 +344,12 @@ export function Dashboard() {
 
   if (profilesLoading && !payload) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-[#0b0b0c] px-4 text-stone-200">
+      <div className="flex flex-1 items-center justify-center bg-bg-main px-4 text-text-main">
         <div className="flex max-w-md flex-col items-center gap-4 text-center">
-          <Loader2 className="h-8 w-8 animate-spin text-violet-400" />
+          <Loader2 className="h-8 w-8 animate-spin text-accent" />
           <div className="space-y-2">
-            <h1 className="text-2xl font-semibold text-white">Loading your launcher home</h1>
-            <p className="text-sm text-stone-500">Fetching profiles, pack readiness, and workspace status.</p>
+            <h1 className="text-2xl font-semibold text-text-main">Loading your launcher home</h1>
+            <p className="text-sm text-text-muted">Fetching profiles, pack readiness, and workspace status.</p>
           </div>
         </div>
       </div>
@@ -513,18 +358,18 @@ export function Dashboard() {
 
   if (!payload) {
     return (
-      <div className="flex flex-1 items-center justify-center bg-[#0b0b0c] px-4 text-stone-200">
-        <div className="flex max-w-lg flex-col gap-4 rounded-3xl border border-stone-800 bg-stone-950/90 p-8">
+      <div className="flex flex-1 items-center justify-center bg-bg-main px-4 text-text-main">
+        <div className="flex max-w-lg flex-col gap-4 rounded-2xl border border-border bg-bg-card p-8">
           <div className="flex items-start gap-3">
             <AlertCircle className="mt-0.5 h-5 w-5 text-rose-400" />
             <div className="space-y-2">
-              <h1 className="text-2xl font-semibold text-white">Home could not load</h1>
-              <p className="text-sm text-stone-400">{profilesError || 'The launcher could not load your profiles yet.'}</p>
+              <h1 className="text-2xl font-semibold text-text-main">Home could not load</h1>
+              <p className="text-sm text-text-muted">{profilesError || 'The launcher could not load your profiles yet.'}</p>
             </div>
           </div>
           <button
             onClick={() => void refreshProfiles()}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-violet-500 sm:w-fit"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-accent-fg transition hover:opacity-90 sm:w-fit"
           >
             <RefreshCw className="h-4 w-4" />
             Retry
@@ -535,53 +380,42 @@ export function Dashboard() {
   }
 
   return (
-    <div className="flex flex-1 overflow-y-auto bg-[#0b0b0c] text-stone-200">
-      <div className="mx-auto flex w-full max-w-[1460px] flex-col gap-8 px-6 py-8 lg:px-10">
-        <section className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div className="space-y-2">
-            <div className="inline-flex items-center gap-2 rounded-full border border-stone-800 bg-stone-950/70 px-3 py-1 text-xs font-medium text-stone-400">
-              <Sparkles className="h-3.5 w-3.5 text-violet-300" />
-              Launcher Home
-            </div>
-            <div>
-              <h1 className="text-4xl font-semibold tracking-tight text-white">My Profiles</h1>
-              <p className="mt-2 text-base text-stone-500">
-                Launch fast, keep custom setups organized, and open advanced editing only when you need it.
-              </p>
-            </div>
+    <div className="flex flex-1 overflow-hidden bg-bg-main text-text-main">
+      <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-6 py-8 lg:px-10 scrollbar-hidden overflow-y-auto">
+        {/* Header */}
+        <section className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight text-text-main">My Profiles</h1>
+            <p className="mt-1 text-sm text-text-muted">Launch and manage your startup profiles.</p>
           </div>
-
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <label className="flex items-center gap-2 rounded-xl border border-stone-800 bg-stone-950 px-3 py-2 text-sm text-stone-400">
-              <LayoutGrid className="h-4 w-4" />
-              <select
-                value={sortMode}
-                onChange={(event) => patchSearchParams({ sort: event.target.value })}
-                className="bg-transparent text-sm text-stone-200 outline-none"
-              >
-                <option value="recommended">Recommended</option>
-                <option value="recent">Recently updated</option>
-                <option value="name">Name</option>
-              </select>
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-2 rounded-xl border border-border bg-bg-card px-3 py-2 text-sm">
+              <Search className="h-4 w-4 text-text-muted" />
+              <input
+                value={searchQuery}
+                onChange={(e) => patchSearchParams({ q: e.target.value || null })}
+                placeholder="Search profiles..."
+                className="w-40 bg-transparent text-sm text-text-main outline-none placeholder:text-text-muted sm:w-52"
+              />
             </label>
-
             <button
               onClick={handleCreate}
               disabled={actionState?.type === 'create'}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-accent-fg transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {actionState?.type === 'create' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-              Create Custom Profile
+              Create Profile
             </button>
           </div>
         </section>
 
+        {/* Feedback */}
         {feedback ? (
           <div
             className={`flex flex-col gap-3 rounded-2xl border px-5 py-4 sm:flex-row sm:items-center sm:justify-between ${
               feedback.tone === 'error'
-                ? 'border-rose-900/60 bg-rose-950/40 text-rose-100'
-                : 'border-emerald-900/60 bg-emerald-950/30 text-emerald-100'
+                ? 'border-rose-900/60 bg-rose-950/30 text-rose-100'
+                : 'border-emerald-900/60 bg-emerald-950/20 text-emerald-100'
             }`}
           >
             <div className="flex items-start gap-3">
@@ -604,8 +438,9 @@ export function Dashboard() {
           </div>
         ) : null}
 
+        {/* Partial Error */}
         {profilesError ? (
-          <div className="flex flex-col gap-3 rounded-2xl border border-amber-900/40 bg-amber-950/25 px-5 py-4 text-amber-100 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-3 rounded-2xl border border-amber-900/40 bg-amber-950/20 px-5 py-4 text-amber-100 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-3">
               <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
               <div className="space-y-1">
@@ -623,17 +458,18 @@ export function Dashboard() {
           </div>
         ) : null}
 
+        {/* Profile Grid */}
         {visibleProfiles.length === 0 ? (
-          <section className="rounded-[28px] border border-dashed border-stone-800 bg-stone-950/60 px-8 py-14 text-center">
+          <section className="rounded-2xl border border-dashed border-border bg-bg-card/50 px-8 py-14 text-center">
             <div className="mx-auto flex max-w-xl flex-col items-center gap-4">
-              <div className="flex h-20 w-20 items-center justify-center rounded-full border border-stone-800 bg-stone-900 text-stone-500">
-                {searchQuery ? <Search className="h-9 w-9" /> : <Plus className="h-9 w-9" />}
+              <div className="flex h-16 w-16 items-center justify-center rounded-full border border-border bg-bg-hover text-text-muted">
+                {searchQuery ? <Search className="h-7 w-7" /> : <Plus className="h-7 w-7" />}
               </div>
               <div className="space-y-2">
-                <h2 className="text-2xl font-semibold text-white">
+                <h2 className="text-xl font-semibold text-text-main">
                   {searchQuery ? 'No profiles match that search' : 'Create your first profile'}
                 </h2>
-                <p className="text-sm leading-6 text-stone-500">
+                <p className="text-sm leading-6 text-text-muted">
                   {searchQuery
                     ? 'Try a different profile name, pack name, or slot search.'
                     : 'Profiles keep your preferred standard pack and slot setup ready for launch.'}
@@ -643,7 +479,7 @@ export function Dashboard() {
                 {searchQuery ? (
                   <button
                     onClick={() => patchSearchParams({ q: null })}
-                    className="rounded-xl border border-stone-800 bg-stone-900 px-4 py-3 text-sm font-medium text-stone-200 transition hover:bg-stone-800"
+                    className="rounded-xl border border-border bg-bg-hover px-4 py-2.5 text-sm font-medium text-text-main transition hover:bg-bg-hover/80"
                   >
                     Clear search
                   </button>
@@ -651,173 +487,174 @@ export function Dashboard() {
                 <button
                   onClick={handleCreate}
                   disabled={actionState?.type === 'create'}
-                  className="rounded-xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-violet-500 disabled:opacity-60"
+                  className="rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-accent-fg transition hover:opacity-90 disabled:opacity-60"
                 >
-                  Create Custom Profile
+                  Create Profile
                 </button>
               </div>
             </div>
           </section>
         ) : (
-          <section className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
+          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {visibleProfiles.map((profileView) => {
-              const { badges, issueCount, issues, profile, runtimeReady, slots, standardPack } = profileView;
-              const hasDanger = issues.some((issue) => issue.severity === 'danger');
-              const hasWarning = issues.some((issue) => issue.severity === 'warning');
+              const { issues, profile, runtimeReady, standardPack, lastLaunched } = profileView;
+              const hasDanger = issues.some((i) => i.severity === 'danger');
+              const hasWarning = issues.some((i) => i.severity === 'warning');
+              const isActive = payload.active_profile_id === profile.profile_id;
               const busy = actionState?.profileId === profile.profile_id;
-              const statusTone = toneClassesForIssue(hasDanger, hasWarning);
-              const accentTone = accentClassesForIssue(hasDanger, hasWarning);
-              const summaryLine = issueCount > 0
-                ? issues[0]?.description || 'Needs attention before launch.'
-                : runtimeReady
-                  ? 'Ready for quick play.'
-                  : 'Needs attention before launch.';
+              const borderClass = cardBorderClass(hasDanger, hasWarning, isActive);
 
               return (
                 <article
                   key={profile.profile_id}
-                  className={`group flex min-h-[380px] flex-col rounded-[28px] border bg-gradient-to-br p-6 shadow-[0_24px_80px_-48px_rgba(0,0,0,0.85)] ${statusTone}`}
+                  className={`group relative flex flex-col rounded-2xl border bg-bg-card p-5 transition hover:border-text-muted/30 ${borderClass}`}
                 >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex flex-wrap gap-2">
-                      {badges.map((badge) => (
-                        <span
-                          key={`${profile.profile_id}-${badge.label}`}
-                          className={`rounded-full px-3 py-1 text-[11px] font-medium ${
-                            badge.tone === 'accent'
-                              ? 'bg-violet-600/20 text-violet-100 ring-1 ring-inset ring-violet-500/30'
-                              : badge.tone === 'success'
-                                ? 'bg-emerald-600/15 text-emerald-100 ring-1 ring-inset ring-emerald-500/25'
-                                : badge.tone === 'danger'
-                                  ? 'bg-rose-600/15 text-rose-100 ring-1 ring-inset ring-rose-500/25'
-                                  : badge.tone === 'warning'
-                                    ? 'bg-amber-600/15 text-amber-100 ring-1 ring-inset ring-amber-500/25'
-                                    : 'bg-stone-800 text-stone-300 ring-1 ring-inset ring-stone-700'
-                          }`}
-                        >
-                          {badge.label}
-                        </span>
-                      ))}
-                    </div>
-
-                    <button
-                      onClick={() => void handleActivate(profile.profile_id)}
-                      disabled={busy || payload.active_profile_id === profile.profile_id}
-                      className={`inline-flex h-10 w-10 items-center justify-center rounded-xl transition ${
-                        payload.active_profile_id === profile.profile_id
-                          ? 'bg-white/10 text-white'
-                          : 'bg-black/20 text-stone-400 hover:bg-black/35 hover:text-white'
-                      } disabled:cursor-not-allowed disabled:opacity-70`}
-                      title={payload.active_profile_id === profile.profile_id ? 'Active profile' : 'Set active'}
-                    >
-                      {actionState?.type === 'activate' && busy ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
+                  {/* Top row */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      {isActive ? (
+                        <>
+                          <span className="h-2 w-2 rounded-full bg-accent shadow-[0_0_6px_rgba(99,102,241,0.5)]" />
+                          <span className="text-[11px] font-medium text-accent">Active</span>
+                        </>
+                      ) : lastLaunched ? (
+                        <span className="text-[11px] text-text-muted">Last used</span>
                       ) : (
-                        <Star className="h-4 w-4" fill={payload.active_profile_id === profile.profile_id ? 'currentColor' : 'none'} />
+                        <span className="text-[11px] text-transparent">.</span>
                       )}
+                    </div>
+
+                    <Popover>
+                      <PopoverTrigger className="rounded-lg p-1.5 text-text-muted opacity-0 transition hover:bg-bg-hover group-hover:opacity-100">
+                        <MoreHorizontal className="h-4 w-4" />
+                      </PopoverTrigger>
+                      <PopoverContent className="w-40">
+                        <div className="flex flex-col">
+                          <button
+                            onClick={() => patchSearchParams({ edit: profile.profile_id })}
+                            className="flex items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-text-main transition hover:bg-bg-hover"
+                          >
+                            <Save className="h-3.5 w-3.5" /> Edit
+                          </button>
+                          <button
+                            onClick={() => void handleActivate(profile.profile_id)}
+                            disabled={isActive || busy}
+                            className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition hover:bg-bg-hover ${isActive ? 'cursor-not-allowed opacity-50' : 'text-text-main'}`}
+                          >
+                            <Star className={`h-3.5 w-3.5 ${isActive ? 'fill-accent text-accent' : ''}`} />
+                            {isActive ? 'Active' : 'Set Active'}
+                          </button>
+                          <button
+                            onClick={() => void handleDuplicate(profile.profile_id)}
+                            disabled={busy}
+                            className="flex items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-text-main transition hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {actionState?.type === 'duplicate' && busy ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Copy className="h-3.5 w-3.5" />
+                            )}
+                            Duplicate
+                          </button>
+                          <div className="my-1 border-t border-border" />
+                          <button
+                            onClick={() => handleDelete(profile.profile_id, profile.name)}
+                            disabled={profileCount <= 1 || busy}
+                            className="flex items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-rose-400 transition hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {actionState?.type === 'delete' && busy ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-3.5 w-3.5" />
+                            )}
+                            Delete
+                          </button>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+
+                  {/* Icon */}
+                  <div className="mt-4 flex justify-center">
+                    <div className={`flex h-16 w-16 items-center justify-center rounded-2xl ${isActive ? 'bg-accent/10 text-accent' : 'bg-bg-hover text-text-muted'}`}>
+                      <Box className="h-7 w-7" strokeWidth={1.5} />
+                    </div>
+                  </div>
+
+                  {/* Name & Pack */}
+                  <div className="mt-4 text-center">
+                    <h3 className="font-semibold text-text-main">{profile.name}</h3>
+                    <p className="mt-0.5 text-xs text-text-muted">
+                      {standardPack?.display_name || profile.standard_pack_id}
+                    </p>
+                  </div>
+
+                  {/* Status */}
+                  <div className="mt-2 min-h-[18px] text-center">
+                    {issues.length > 0 ? (
+                      <span className={`text-[11px] ${hasDanger ? 'text-rose-400' : 'text-amber-400'}`}>
+                        {issues[0].description}
+                      </span>
+                    ) : runtimeReady ? (
+                      <span className="text-[11px] text-emerald-400/90">Ready</span>
+                    ) : null}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="mt-auto pt-4 flex gap-2">
+                    <button
+                      onClick={() => void handleLaunch(profile.profile_id)}
+                      disabled={!runtimeReady || busy}
+                      className="flex-1 inline-flex items-center justify-center gap-1.5 rounded-xl bg-accent px-3 py-2.5 text-sm font-semibold text-accent-fg transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {actionState?.type === 'launch' && busy ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Rocket className="h-3.5 w-3.5" />
+                      )}
+                      Launch
                     </button>
-                  </div>
-
-                  <div className="mt-8 flex justify-center">
-                    <div className={`flex h-24 w-24 items-center justify-center rounded-full ${accentTone}`}>
-                      <Box className="h-10 w-10" strokeWidth={1.5} />
-                    </div>
-                  </div>
-
-                  <div className="mt-8 space-y-3">
-                    <div>
-                      <h2 className="text-2xl font-semibold tracking-tight text-white">{profile.name}</h2>
-                      <p className="mt-2 text-sm text-stone-400">
-                        {standardPack?.display_name || profile.standard_pack_id}
-                      </p>
-                    </div>
-                    <p className="text-sm leading-6 text-stone-500">{summaryLine}</p>
-                  </div>
-
-                  <div className="mt-auto pt-6">
-                    <div className="grid grid-cols-2 gap-3">
-                      <button
-                        onClick={() => patchSearchParams({ edit: profile.profile_id })}
-                        className="rounded-xl border border-stone-800 bg-stone-900 px-4 py-3 text-sm font-medium text-white transition hover:bg-stone-800"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => void handleLaunch(profile.profile_id)}
-                        disabled={!runtimeReady || busy}
-                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {actionState?.type === 'launch' && busy ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Play className="h-4 w-4 fill-current" />
-                        )}
-                        Play
-                      </button>
-                    </div>
-
-                    <div className="mt-3 grid grid-cols-3 gap-3">
-                      <button
-                        onClick={() => void handleActivate(profile.profile_id)}
-                        disabled={busy || payload.active_profile_id === profile.profile_id}
-                        className="rounded-xl border border-stone-800 bg-black/20 px-3 py-2.5 text-xs font-medium text-stone-300 transition hover:bg-stone-900 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        Set Active
-                      </button>
-                      <button
-                        onClick={() => void handleDuplicate(profile.profile_id)}
-                        disabled={busy}
-                        className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-stone-800 bg-black/20 px-3 py-2.5 text-xs font-medium text-stone-300 transition hover:bg-stone-900 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {actionState?.type === 'duplicate' && busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />}
-                        Duplicate
-                      </button>
-                      <button
-                        onClick={() => handleDelete(profile.profile_id, profile.name)}
-                        disabled={profileCount <= 1 || busy}
-                        className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-rose-950 bg-rose-950/20 px-3 py-2.5 text-xs font-medium text-rose-200 transition hover:bg-rose-950/40 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        {actionState?.type === 'delete' && busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                        Delete
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => patchSearchParams({ edit: profile.profile_id })}
+                      className="inline-flex items-center justify-center rounded-xl border border-border bg-bg-hover px-3 py-2.5 text-sm font-medium text-text-main transition hover:bg-bg-hover/80"
+                    >
+                      Edit
+                    </button>
                   </div>
                 </article>
               );
             })}
 
+            {/* Create new card */}
             <button
               onClick={handleCreate}
               disabled={actionState?.type === 'create'}
-              className="flex min-h-[420px] flex-col items-center justify-center rounded-[28px] border border-dashed border-stone-800 bg-stone-950/50 p-6 text-center transition hover:border-violet-700 hover:bg-stone-950"
+              className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-bg-card/50 p-5 text-center transition hover:border-accent/50 hover:bg-bg-card min-h-[260px]"
             >
-              <div className="flex h-24 w-24 items-center justify-center rounded-full border border-stone-800 bg-stone-900 text-stone-500">
-                {actionState?.type === 'create' ? <Loader2 className="h-9 w-9 animate-spin text-violet-400" /> : <Plus className="h-9 w-9" strokeWidth={1.25} />}
+              <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-border bg-bg-hover text-text-muted">
+                {actionState?.type === 'create' ? <Loader2 className="h-7 w-7 animate-spin text-accent" /> : <Plus className="h-7 w-7" />}
               </div>
-              <h2 className="mt-8 text-2xl font-semibold text-white">Create Custom Profile</h2>
-              <p className="mt-3 max-w-[240px] text-sm leading-6 text-stone-500">
-                Start from scratch, keep a test setup separate, or build a launch profile for a specific workflow.
-              </p>
+              <h3 className="mt-4 font-semibold text-text-main">Create Profile</h3>
+              <p className="mt-1 text-xs text-text-muted">Build a new startup profile</p>
             </button>
           </section>
         )}
 
+        {/* Edit Panel */}
         {draft && catalog ? (
-          <section className="rounded-[32px] border border-stone-800 bg-stone-950/90 p-6 shadow-[0_32px_120px_-64px_rgba(0,0,0,0.95)] lg:p-8">
-            <div className="flex flex-col gap-6 border-b border-stone-800 pb-6 lg:flex-row lg:items-end lg:justify-between">
+          <section className="rounded-2xl border border-border bg-bg-card p-6 lg:p-8">
+            <div className="flex flex-col gap-6 border-b border-border pb-6 lg:flex-row lg:items-end lg:justify-between">
               <div className="space-y-2">
                 <button
                   onClick={() => patchSearchParams({ edit: null })}
-                  className="inline-flex items-center gap-2 text-sm font-medium text-stone-500 transition hover:text-stone-300"
+                  className="inline-flex items-center gap-2 text-sm font-medium text-text-muted transition hover:text-text-main"
                 >
                   <ArrowLeft className="h-4 w-4" />
-                  Back to library
+                  Back to profiles
                 </button>
                 <div>
-                  <h2 className="text-3xl font-semibold tracking-tight text-white">{draft.name}</h2>
-                  <p className="mt-2 text-sm text-stone-500">
-                    Keep the simple launcher view above, and open advanced pack wiring only when you need to inspect it.
-                  </p>
+                  <h2 className="text-2xl font-semibold tracking-tight text-text-main">{draft.name}</h2>
+                  <p className="mt-1 text-sm text-text-muted">Edit profile settings and slot assignments.</p>
                 </div>
               </div>
 
@@ -825,14 +662,14 @@ export function Dashboard() {
                 <button
                   onClick={() => void handleActivate(draft.profile_id)}
                   disabled={actionState?.profileId === draft.profile_id}
-                  className="rounded-xl border border-stone-800 bg-stone-900 px-4 py-3 text-sm font-medium text-stone-200 transition hover:bg-stone-800 disabled:opacity-60"
+                  className="rounded-xl border border-border bg-bg-hover px-4 py-2.5 text-sm font-medium text-text-main transition hover:bg-bg-hover/80 disabled:opacity-60"
                 >
                   Set Active
                 </button>
                 <button
                   onClick={() => void handleDuplicate(draft.profile_id)}
                   disabled={actionState?.profileId === draft.profile_id}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-stone-800 bg-stone-900 px-4 py-3 text-sm font-medium text-stone-200 transition hover:bg-stone-800 disabled:opacity-60"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-bg-hover px-4 py-2.5 text-sm font-medium text-text-main transition hover:bg-bg-hover/80 disabled:opacity-60"
                 >
                   <Copy className="h-4 w-4" />
                   Duplicate
@@ -840,7 +677,7 @@ export function Dashboard() {
                 <button
                   onClick={() => handleDelete(draft.profile_id, draft.name)}
                   disabled={profileCount <= 1 || actionState?.profileId === draft.profile_id}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-rose-950 bg-rose-950/20 px-4 py-3 text-sm font-medium text-rose-200 transition hover:bg-rose-950/40 disabled:opacity-60"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-rose-950 bg-rose-950/20 px-4 py-2.5 text-sm font-medium text-rose-300 transition hover:bg-rose-950/40 disabled:opacity-60"
                 >
                   <Trash2 className="h-4 w-4" />
                   Delete
@@ -848,7 +685,7 @@ export function Dashboard() {
                 <button
                   onClick={handleSave}
                   disabled={!isDirty || actionState?.type === 'save'}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-accent px-5 py-2.5 text-sm font-semibold text-accent-fg transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {actionState?.type === 'save' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                   Save Changes
@@ -856,28 +693,28 @@ export function Dashboard() {
               </div>
             </div>
 
-            <div className="mt-8 grid gap-8 xl:grid-cols-[minmax(0,1fr)_320px]">
+            <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
               <div className="space-y-6">
-                <section className="rounded-[24px] border border-stone-800 bg-stone-950/70 p-6">
-                  <h3 className="text-lg font-semibold text-white">General settings</h3>
-                  <p className="mt-1 text-sm text-stone-500">Edit the profile name and choose which standard pack anchors the setup.</p>
+                <section className="rounded-2xl border border-border bg-bg-main p-5">
+                  <h3 className="text-base font-semibold text-text-main">General settings</h3>
+                  <p className="mt-1 text-sm text-text-muted">Edit the profile name and choose which standard pack anchors the setup.</p>
 
-                  <div className="mt-6 grid gap-5 md:grid-cols-2">
+                  <div className="mt-5 grid gap-5 md:grid-cols-2">
                     <label className="space-y-2">
-                      <span className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">Profile name</span>
+                      <span className="text-xs font-semibold uppercase tracking-wider text-text-muted">Profile name</span>
                       <input
                         value={draft.name}
                         onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-                        className="w-full rounded-xl border border-stone-800 bg-stone-900 px-4 py-3 text-sm text-white outline-none transition focus:border-violet-600"
+                        className="w-full rounded-xl border border-border bg-bg-hover px-4 py-3 text-sm text-text-main outline-none transition focus:border-accent"
                       />
                     </label>
 
                     <label className="space-y-2">
-                      <span className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">Standard pack</span>
+                      <span className="text-xs font-semibold uppercase tracking-wider text-text-muted">Standard pack</span>
                       <select
                         value={draft.standard_pack_id}
                         onChange={(event) => setDraft({ ...draft, standard_pack_id: event.target.value })}
-                        className="w-full rounded-xl border border-stone-800 bg-stone-900 px-4 py-3 text-sm text-white outline-none transition focus:border-violet-600"
+                        className="w-full rounded-xl border border-border bg-bg-hover px-4 py-3 text-sm text-text-main outline-none transition focus:border-accent"
                       >
                         {standardPacks.map((pack) => (
                           <option key={pack.pack_id} value={pack.pack_id} disabled={!pack.available}>
@@ -903,23 +740,23 @@ export function Dashboard() {
                   ) : null}
                 </section>
 
-                <section className="rounded-[24px] border border-stone-800 bg-stone-950/70 p-6">
-                  <h3 className="text-lg font-semibold text-white">Slot configuration</h3>
-                  <p className="mt-1 text-sm text-stone-500">Choose the pack used for each slot, and keep launch-blocking issues visible before save.</p>
+                <section className="rounded-2xl border border-border bg-bg-main p-5">
+                  <h3 className="text-base font-semibold text-text-main">Slot configuration</h3>
+                  <p className="mt-1 text-sm text-text-muted">Choose the pack used for each slot.</p>
 
-                  <div className="mt-6 grid gap-4">
+                  <div className="mt-5 grid gap-4">
                     {slotSpecs.map((slot) => {
                       const candidates = catalog.slot_candidates[slot.slot_id] ?? [];
                       const selectedCandidate = selectedCandidatesBySlot[slot.slot_id];
 
                       return (
-                        <div key={slot.slot_id} className="rounded-2xl border border-stone-800 bg-black/20 p-5">
+                        <div key={slot.slot_id} className="rounded-xl border border-border bg-bg-hover/50 p-4">
                           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                             <div>
-                              <div className="text-base font-semibold text-white">{slot.label}</div>
-                              <div className="mt-1 text-sm text-stone-500">{slot.description}</div>
+                              <div className="text-sm font-semibold text-text-main">{slot.label}</div>
+                              <div className="mt-0.5 text-xs text-text-muted">{slot.description}</div>
                             </div>
-                            <span className="rounded-full border border-stone-800 bg-stone-900 px-2.5 py-1 text-[11px] font-medium text-stone-400">
+                            <span className="rounded-full border border-border bg-bg-hover px-2.5 py-0.5 text-[11px] font-medium text-text-muted">
                               {slot.contract}
                             </span>
                           </div>
@@ -932,7 +769,7 @@ export function Dashboard() {
                                 slots: { ...draft.slots, [slot.slot_id]: event.target.value },
                               })
                             }
-                            className="mt-4 w-full rounded-xl border border-stone-800 bg-stone-900 px-4 py-3 text-sm text-white outline-none transition focus:border-violet-600"
+                            className="mt-3 w-full rounded-xl border border-border bg-bg-hover px-4 py-2.5 text-sm text-text-main outline-none transition focus:border-accent"
                           >
                             {candidates.length === 0 ? <option value="">No compatible packs available</option> : null}
                             {candidates.map((candidate) => (
@@ -943,8 +780,8 @@ export function Dashboard() {
                           </select>
 
                           {selectedCandidate && !selectedCandidate.runtime_ready ? (
-                            <div className="mt-3 space-y-2 rounded-2xl border border-amber-900/30 bg-amber-950/15 p-3 text-sm text-amber-100">
-                              {selectedCandidate.runtime_issues.map((issue) => (
+                            <div className="mt-3 space-y-2 rounded-xl border border-amber-900/30 bg-amber-950/15 p-3 text-sm text-amber-100">
+                              {selectedCandidate.runtime_issues.map((issue: string) => (
                                 <div key={issue} className="flex items-start gap-2">
                                   <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                                   <span>{describeStartupIssue(issue, slot.label).description}</span>
@@ -957,105 +794,16 @@ export function Dashboard() {
                     })}
                   </div>
                 </section>
-
-                <section className="rounded-[24px] border border-stone-800 bg-stone-950/70 p-6">
-                  <button
-                    onClick={() => setShowAdvanced((current) => !current)}
-                    className="flex w-full items-center justify-between text-left"
-                  >
-                    <div>
-                      <h3 className="text-lg font-semibold text-white">Advanced inspector</h3>
-                      <p className="mt-1 text-sm text-stone-500">Contract graph and pack identity stay available, but out of the main launcher flow.</p>
-                    </div>
-                    <ChevronRight className={`h-5 w-5 text-stone-500 transition-transform ${showAdvanced ? 'rotate-90' : ''}`} />
-                  </button>
-
-                  {showAdvanced ? (
-                    <div className="mt-6 space-y-5">
-                      <div className="grid gap-4 xl:grid-cols-[240px_1fr]">
-                        <ContractNode
-                          title={catalog.start_node.title}
-                          subtitle={catalog.start_node.subtitle}
-                          character={catalog.start_node.character}
-                          ports={catalog.start_node.ports}
-                          tone="rose"
-                          footer={renderContracts(catalog.start_node.ports[0]?.contracts ?? [])}
-                        />
-                        <ContractNode
-                          title={selectedStandardPack?.display_name ?? draft.standard_pack_id}
-                          subtitle={selectedStandardPack?.description ?? 'Reference pack.'}
-                          character={selectedStandardPack?.character ?? 'D'}
-                          ports={buildStandardPackPorts(catalog)}
-                          tone="amber"
-                          footer={
-                            <div className="space-y-2">
-                              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">Pack identity</div>
-                              <div className="text-sm text-stone-300">{selectedStandardPack?.pack_identity || 'Unavailable'}</div>
-                            </div>
-                          }
-                        />
-                      </div>
-
-                      <div className="grid gap-4 md:grid-cols-2">
-                        {slotSpecs.map((slot) => {
-                          const candidate = selectedCandidatesBySlot[slot.slot_id];
-                          return (
-                            <ContractNode
-                              key={slot.slot_id}
-                              title={candidate?.display_name ?? slot.label}
-                              subtitle={`${slot.label} slot`}
-                              character={candidate?.character ?? slot.character}
-                              ports={buildSlotNodePorts(slot, candidate)}
-                              tone={slot.slot_id === 'frontend' ? 'sky' : slot.slot_id === 'memory' ? 'emerald' : 'amber'}
-                              footer={
-                                <div className="space-y-2">
-                                  {renderContracts([slot.contract])}
-                                  <div className="text-xs text-stone-500">
-                                    Connected from <span className="font-semibold text-stone-300">{draft.standard_pack_id}.{slot.slot_id}</span>
-                                  </div>
-                                </div>
-                              }
-                            />
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ) : null}
-                </section>
               </div>
 
               <aside className="space-y-4">
-                <section className="rounded-[24px] border border-stone-800 bg-stone-950/70 p-5">
-                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">Profile metadata</div>
-                  <div className="mt-4 space-y-4 text-sm">
-                    <div>
-                      <div className="text-stone-500">Profile ID</div>
-                      <div className="mt-1 break-all rounded-xl border border-stone-800 bg-stone-900 px-3 py-2 font-mono text-xs text-stone-300">
-                        {draft.profile_id}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-stone-500">Created</div>
-                      <div className="mt-1 text-stone-200">{formatTimestamp(draft.created_at)}</div>
-                    </div>
-                    <div>
-                      <div className="text-stone-500">Last updated</div>
-                      <div className="mt-1 text-stone-200">{formatTimestamp(draft.updated_at)}</div>
-                    </div>
-                    <div>
-                      <div className="text-stone-500">Save status</div>
-                      <div className="mt-1 text-stone-200">{isDirty ? 'Unsaved changes' : 'Saved'}</div>
-                    </div>
-                  </div>
-                </section>
-
-                <section className="rounded-[24px] border border-stone-800 bg-stone-950/70 p-5">
-                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">Quick launch</div>
+                <section className="rounded-2xl border border-border bg-bg-main p-5">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-text-muted">Quick launch</div>
                   <div className="mt-4 space-y-3">
                     <button
                       onClick={() => void handleLaunch(draft.profile_id)}
                       disabled={actionState?.profileId === draft.profile_id}
-                      className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-violet-500 disabled:opacity-50"
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-accent-fg transition hover:opacity-90 disabled:opacity-50"
                     >
                       {actionState?.type === 'launch' && actionState?.profileId === draft.profile_id ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
@@ -1064,118 +812,39 @@ export function Dashboard() {
                       )}
                       Launch Profile
                     </button>
-                    <p className="text-sm leading-6 text-stone-500">
-                      Launch always uses the latest saved server state, then requests the handoff the runtime actually supports.
+                    <p className="text-sm leading-6 text-text-muted">
+                      Launch always uses the latest saved server state.
                     </p>
+                  </div>
+                </section>
+
+                <section className="rounded-2xl border border-border bg-bg-main p-5">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-text-muted">Profile metadata</div>
+                  <div className="mt-4 space-y-4 text-sm">
+                    <div>
+                      <div className="text-text-muted">Profile ID</div>
+                      <div className="mt-1 break-all rounded-xl border border-border bg-bg-hover px-3 py-2 font-mono text-xs text-text-main">
+                        {draft.profile_id}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-text-muted">Created</div>
+                      <div className="mt-1 text-text-main">{formatTimestamp(draft.created_at)}</div>
+                    </div>
+                    <div>
+                      <div className="text-text-muted">Last updated</div>
+                      <div className="mt-1 text-text-main">{formatTimestamp(draft.updated_at)}</div>
+                    </div>
+                    <div>
+                      <div className="text-text-muted">Save status</div>
+                      <div className="mt-1 text-text-main">{isDirty ? 'Unsaved changes' : 'Saved'}</div>
+                    </div>
                   </div>
                 </section>
               </aside>
             </div>
           </section>
         ) : null}
-
-        <section className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,0.7fr)]">
-          <div className="rounded-[28px] border border-stone-800 bg-stone-950/70 p-6">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h2 className="text-xl font-semibold text-white">System overview</h2>
-                <p className="mt-1 text-sm text-stone-500">A quick workspace summary stays on Home so launch actions never feel detached from runtime status.</p>
-              </div>
-              <button
-                onClick={handleRestartKernel}
-                disabled={actionState?.type === 'restart'}
-                className="inline-flex items-center justify-center gap-2 rounded-xl border border-stone-800 bg-stone-900 px-4 py-3 text-sm font-medium text-stone-200 transition hover:bg-stone-800 disabled:opacity-60"
-              >
-                {actionState?.type === 'restart' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                Restart Kernel
-              </button>
-            </div>
-
-            {dashboardError ? (
-              <div className="mt-5 rounded-2xl border border-amber-900/40 bg-amber-950/25 p-4 text-sm text-amber-100">
-                <div className="flex items-start gap-2">
-                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                  <span>{dashboardError}</span>
-                </div>
-                <button
-                  onClick={() => void refreshDashboard()}
-                  className="mt-3 inline-flex items-center gap-2 rounded-xl border border-amber-900/40 bg-black/20 px-3 py-2 text-sm font-medium text-amber-100 transition hover:bg-black/35"
-                >
-                  <RefreshCw className="h-4 w-4" />
-                  Retry summary
-                </button>
-              </div>
-            ) : null}
-
-            <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              {[
-                {
-                  icon: <Rocket className="h-5 w-5 text-violet-300" />,
-                  label: 'Kernel',
-                  value: dashboardLoading ? 'Loading...' : dashboard.kernelStatus,
-                },
-                {
-                  icon: <Clock3 className="h-5 w-5 text-sky-300" />,
-                  label: 'Uptime',
-                  value: dashboardLoading ? 'Loading...' : dashboard.uptime,
-                },
-                {
-                  icon: <FolderKanban className="h-5 w-5 text-emerald-300" />,
-                  label: 'Active Packs',
-                  value: dashboardLoading ? 'Loading...' : String(dashboard.activePacks),
-                },
-                {
-                  icon: <LayoutGrid className="h-5 w-5 text-amber-300" />,
-                  label: 'Registered Flows',
-                  value: dashboardLoading ? 'Loading...' : String(dashboard.registeredFlows),
-                },
-              ].map((card) => (
-                <div key={card.label} className="rounded-2xl border border-stone-800 bg-black/20 p-4">
-                  <div className="flex items-center gap-3 text-sm text-stone-500">
-                    {card.icon}
-                    <span>{card.label}</span>
-                  </div>
-                  <div className="mt-3 text-xl font-semibold text-white">{card.value}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="rounded-[28px] border border-stone-800 bg-stone-950/70 p-6">
-            <div className="flex items-start gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-stone-800 bg-stone-900 text-stone-300">
-                <Layers3 className="h-5 w-5" />
-              </div>
-              <div>
-                <h2 className="text-xl font-semibold text-white">What is a profile?</h2>
-                <p className="mt-2 text-sm leading-7 text-stone-500">
-                  Profiles save different combinations of standard packs and slot selections. Keep a stable default, build a test profile for experiments,
-                  and jump between them without reopening raw editor screens.
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-6 flex flex-col gap-3 text-sm text-stone-400">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4 text-emerald-300" />
-                Play is always the primary action from Home.
-              </div>
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4 text-emerald-300" />
-                Advanced contract details stay tucked away until inspection is needed.
-              </div>
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="h-4 w-4 text-emerald-300" />
-                Runtime issues are translated into launcher-friendly guidance.
-              </div>
-            </div>
-
-            <button className="mt-6 inline-flex items-center gap-2 rounded-xl border border-stone-800 bg-stone-900 px-4 py-3 text-sm font-medium text-stone-200 transition hover:bg-stone-800">
-              Learn More
-              <ExternalLink className="h-4 w-4" />
-            </button>
-          </div>
-        </section>
       </div>
     </div>
   );
