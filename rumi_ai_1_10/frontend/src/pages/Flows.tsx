@@ -1,4 +1,4 @@
-import type { DragEvent, MouseEvent } from 'react';
+import type { DragEvent, MouseEvent, WheelEvent } from 'react';
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useAppStore } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
@@ -92,6 +92,10 @@ function FlowEditorInner() {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance<Node, Edge> | null>(null);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
+  const stepRailRef = useRef<HTMLDivElement>(null);
+  const flowRequestIdRef = useRef(0);
+  const flowsRef = useRef(flows);
+  flowsRef.current = flows;
 
   const selectedFlow = flows.find((flow) => flow.id === selectedFlowId);
   const packs = useMemo(() => ['all', ...Array.from(new Set(AVAILABLE_STEPS.map((step) => step.pack)))], []);
@@ -148,9 +152,15 @@ function FlowEditorInner() {
 
   useEffect(() => {
     if (!selectedFlowId || isCreating) return;
+    const requestId = flowRequestIdRef.current + 1;
+    flowRequestIdRef.current = requestId;
+    let cancelled = false;
+    const fallbackFlow = flowsRef.current.find((flow) => flow.id === selectedFlowId);
+
     setFlowLoading(true);
     fetchFlowDetail(selectedFlowId)
       .then((detail) => {
+        if (cancelled || flowRequestIdRef.current !== requestId) return;
         const flow = transformFlowDetail(detail);
         const parsed = yamlToNodes(flow.content, {
           flowId: selectedFlowId,
@@ -164,10 +174,11 @@ function FlowEditorInner() {
         execution.clearResult();
       })
       .catch((err) => {
-        if (selectedFlow) {
-          const parsed = yamlToNodes(selectedFlow.content, {
-            flowId: selectedFlow.id,
-            name: selectedFlow.name,
+        if (cancelled || flowRequestIdRef.current !== requestId) return;
+        if (fallbackFlow) {
+          const parsed = yamlToNodes(fallbackFlow.content, {
+            flowId: fallbackFlow.id,
+            name: fallbackFlow.name,
             basePack: DEFAULT_BASE_PACK,
           });
           setNodes(parsed.nodes);
@@ -176,8 +187,15 @@ function FlowEditorInner() {
         }
         addToast(err instanceof Error ? err.message : 'Failed to load flow detail', 'error');
       })
-      .finally(() => setFlowLoading(false));
-  }, [addToast, editorHook, execution, isCreating, selectedFlow, selectedFlowId, setEdges, setNodes]);
+      .finally(() => {
+        if (cancelled || flowRequestIdRef.current !== requestId) return;
+        setFlowLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [addToast, execution.clearResult, isCreating, selectedFlowId, setEdges, setNodes, editorHook.setSelectedNode]);
 
   const handleSelectFlow = (id: string) => {
     setSelectedFlowId(id);
@@ -290,6 +308,17 @@ function FlowEditorInner() {
     }));
   }, [history, reactFlowInstance, setNodes]);
 
+  const handleStepRailWheel = useCallback((event: WheelEvent<HTMLDivElement>) => {
+    const rail = stepRailRef.current;
+    if (!rail || rail.scrollWidth <= rail.clientWidth) return;
+
+    const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+    if (delta === 0) return;
+
+    rail.scrollLeft += delta;
+    event.preventDefault();
+  }, []);
+
   const selectedPorts = (((editorHook.selectedNode?.data as { ports?: FlowPort[] } | undefined)?.ports) ?? []);
 
   if (isLoading && flows.length === 0) {
@@ -389,7 +418,11 @@ function FlowEditorInner() {
                   </option>
                 ))}
               </select>
-              <div className="flex flex-1 items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
+              <div
+                ref={stepRailRef}
+                onWheel={handleStepRailWheel}
+                className="scrollbar-hidden flex flex-1 items-center gap-2 overflow-x-auto pb-1 overscroll-contain"
+              >
                 {filteredSteps.map((step) => (
                   <div
                     key={step.id}
@@ -414,44 +447,49 @@ function FlowEditorInner() {
                 colorMode === 'dark' ? 'bg-[#120d09]' : 'bg-[#f8e6bf]',
               )}
             >
-              {flowLoading ? (
-                <div className="flex h-full items-center justify-center">
-                  <Loader2 className="h-6 w-6 animate-spin text-accent" />
+              <ReactFlow<Node, Edge>
+                nodes={nodes}
+                edges={edges}
+                onNodesChange={onNodesChange}
+                onEdgesChange={onEdgesChange}
+                onConnect={editorHook.onConnect}
+                onNodeClick={editorHook.onNodeClick}
+                onNodeDragStart={dragDrop.onNodeDragStart}
+                onNodeDrag={dragDrop.onNodeDrag}
+                onNodeDragStop={dragDrop.onNodeDragStop}
+                onPaneClick={editorHook.onPaneClick}
+                onPaneContextMenu={editorHook.onPaneContextMenu}
+                onConnectEnd={editorHook.onConnectEnd}
+                onEdgeClick={editorHook.onEdgeClick}
+                onReconnect={editorHook.onReconnect}
+                onEdgeDoubleClick={editorHook.onEdgeDoubleClick}
+                onNodesDelete={editorHook.onNodesDelete}
+                onEdgesDelete={editorHook.onEdgesDelete}
+                onInit={(instance) => setReactFlowInstance(instance)}
+                onDrop={dragDrop.onDrop}
+                onDragOver={dragDrop.onDragOver}
+                isValidConnection={editorHook.isValidConnection}
+                nodeTypes={nodeTypes}
+                panOnDrag={[1, 2]}
+                selectionOnDrag
+                selectionMode={SelectionMode.Partial}
+                fitView
+                className="flow-grid"
+              >
+                <Background color={colorMode === 'dark' ? '#5d3310' : '#d69c3d'} gap={24} />
+                <Controls className="bg-bg-card border-border fill-text-main" />
+              </ReactFlow>
+
+              <div
+                className={cn(
+                  'pointer-events-none absolute inset-0 z-20 flex items-center justify-center transition-opacity duration-150',
+                  flowLoading ? 'opacity-100' : 'opacity-0',
+                )}
+              >
+                <div className="rounded-full border border-border bg-bg-card/85 p-3 shadow-lg backdrop-blur-sm">
+                  <Loader2 className="h-5 w-5 animate-spin text-accent" />
                 </div>
-              ) : (
-                <ReactFlow<Node, Edge>
-                  nodes={nodes}
-                  edges={edges}
-                  onNodesChange={onNodesChange}
-                  onEdgesChange={onEdgesChange}
-                  onConnect={editorHook.onConnect}
-                  onNodeClick={editorHook.onNodeClick}
-                  onNodeDragStart={dragDrop.onNodeDragStart}
-                  onNodeDrag={dragDrop.onNodeDrag}
-                  onNodeDragStop={dragDrop.onNodeDragStop}
-                  onPaneClick={editorHook.onPaneClick}
-                  onPaneContextMenu={editorHook.onPaneContextMenu}
-                  onConnectEnd={editorHook.onConnectEnd}
-                  onEdgeClick={editorHook.onEdgeClick}
-                  onReconnect={editorHook.onReconnect}
-                  onEdgeDoubleClick={editorHook.onEdgeDoubleClick}
-                  onNodesDelete={editorHook.onNodesDelete}
-                  onEdgesDelete={editorHook.onEdgesDelete}
-                  onInit={(instance) => setReactFlowInstance(instance)}
-                  onDrop={dragDrop.onDrop}
-                  onDragOver={dragDrop.onDragOver}
-                  isValidConnection={editorHook.isValidConnection}
-                  nodeTypes={nodeTypes}
-                  panOnDrag={[1, 2]}
-                  selectionOnDrag
-                  selectionMode={SelectionMode.Partial}
-                  fitView
-                  className="flow-grid"
-                >
-                  <Background color={colorMode === 'dark' ? '#5d3310' : '#d69c3d'} gap={24} />
-                  <Controls className="bg-bg-card border-border fill-text-main" />
-                </ReactFlow>
-              )}
+              </div>
 
               <div
                 className={cn(
