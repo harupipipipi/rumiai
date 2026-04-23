@@ -24,7 +24,7 @@ function PortHandle({ port, side }: { port: FlowPort; side: 'left' | 'right' }) 
   return (
     <div
       className={cn(
-        'flow-port-row relative flex min-h-10 items-center',
+        'flow-port-row relative flex h-10 items-center',
         side === 'left' ? 'justify-start pl-4 pr-2 text-left' : 'justify-end pl-2 pr-4 text-right',
       )}
     >
@@ -33,7 +33,7 @@ function PortHandle({ port, side }: { port: FlowPort; side: 'left' | 'right' }) 
           id={port.id}
           type="target"
           position={position}
-          className="flow-port-handle !top-1/2 !-translate-y-1/2 !border-[3px] !shadow-none"
+          className="flow-port-handle !border-[3px] !shadow-none"
         />
       )}
       <div
@@ -52,7 +52,7 @@ function PortHandle({ port, side }: { port: FlowPort; side: 'left' | 'right' }) 
           id={port.id}
           type="source"
           position={position}
-          className="flow-port-handle !top-1/2 !-translate-y-1/2 !border-[3px] !shadow-none"
+          className="flow-port-handle !border-[3px] !shadow-none"
         />
       )}
     </div>
@@ -147,9 +147,9 @@ export function StepNode({ data, selected }: NodeProps<StepNodeType>) {
         'flow-reroute-node rounded-full border p-2',
         selected && 'ring-2',
       )}>
-        <Handle id="reroute-in" type="target" position={Position.Left} className="flow-port-handle !top-1/2 !-translate-y-1/2 !border-[3px] !shadow-none" />
+        <Handle id="reroute-in" type="target" position={Position.Left} className="flow-port-handle !border-[3px] !shadow-none" />
         <Waypoints className="h-4 w-4" />
-        <Handle id="reroute-out" type="source" position={Position.Right} className="flow-port-handle !top-1/2 !-translate-y-1/2 !border-[3px] !shadow-none" />
+        <Handle id="reroute-out" type="source" position={Position.Right} className="flow-port-handle !border-[3px] !shadow-none" />
       </div>
     );
   }

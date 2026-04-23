@@ -7,6 +7,7 @@ import { Button } from '@/src/components/ui/Button';
 import { Input } from '@/src/components/ui/Input';
 import {
   Plus,
+  ChevronDown,
   Play,
   Save,
   Trash2,
@@ -17,7 +18,6 @@ import {
   X,
   Box,
   Loader2,
-  PlugZap,
 } from 'lucide-react';
 import CodeMirror from '@uiw/react-codemirror';
 import { yaml } from '@codemirror/lang-yaml';
@@ -82,6 +82,8 @@ function FlowEditorInner() {
 
   const [selectedFlowId, setSelectedFlowId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [isBottomPanelMaximized, setIsBottomPanelMaximized] = useState(false);
+  const [isPackDropdownOpen, setIsPackDropdownOpen] = useState(false);
   const [newFlowName, setNewFlowName] = useState('');
   const [activeTab, setActiveTab] = useState<'yaml' | 'result'>('yaml');
   const [selectedPack, setSelectedPack] = useState<string>('all');
@@ -93,6 +95,7 @@ function FlowEditorInner() {
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance<Node, Edge> | null>(null);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const stepRailRef = useRef<HTMLDivElement>(null);
+  const packDropdownRef = useRef<HTMLDivElement>(null);
   const flowRequestIdRef = useRef(0);
   const flowsRef = useRef(flows);
   flowsRef.current = flows;
@@ -143,6 +146,18 @@ function FlowEditorInner() {
 
   useEffect(() => dragDrop.setupPointerTracking(), [dragDrop.setupPointerTracking]);
   useEffect(() => { loadFlows(); }, [loadFlows]);
+
+  useEffect(() => {
+    const handleClick = (event: globalThis.MouseEvent) => {
+      if (!packDropdownRef.current?.contains(event.target as globalThis.Node)) {
+        setIsPackDropdownOpen(false);
+      }
+    };
+    if (isPackDropdownOpen) {
+      window.addEventListener('mousedown', handleClick as EventListener);
+      return () => window.removeEventListener('mousedown', handleClick as EventListener);
+    }
+  }, [isPackDropdownOpen]);
 
   useEffect(() => {
     if (flows.length > 0 && !selectedFlowId && !isCreating) {
@@ -333,21 +348,13 @@ function FlowEditorInner() {
   }
 
   return (
-    <div className="flex h-full flex-1 gap-6 p-6 animate-in fade-in slide-in-from-bottom-4">
-      <div className="flex w-72 shrink-0 flex-col gap-4 rounded-2xl border border-border bg-bg-card p-4 shadow-sm">
-        <Button size="sm" onClick={handleCreateNew} variant={isCreating ? 'default' : 'outline'} className="w-full">
-          <Plus className="mr-2 h-4 w-4" />
+    <div className="flex h-full flex-1 gap-4 p-3 animate-in fade-in slide-in-from-bottom-4">
+      <div className="flex w-60 shrink-0 flex-col gap-3 rounded-2xl border border-border bg-bg-card p-3 shadow-sm">
+        <Button size="sm" onClick={handleCreateNew} variant={isCreating ? 'default' : 'outline'} className="w-full gap-1.5 text-xs">
+          <Plus className="h-3.5 w-3.5" />
           {t('flows.new')}
         </Button>
-        <div className="rounded-xl border border-border bg-bg-main/70 p-3 text-xs text-text-muted">
-          <div className="mb-1 flex items-center gap-2 text-text-main">
-            <PlugZap className="h-3.5 w-3.5" />
-            <span className="font-semibold">Basepack</span>
-          </div>
-          <div>{flowMeta.basePack || DEFAULT_BASE_PACK}</div>
-          <div className="mt-2 text-[11px] text-text-muted">`rumi_start` から接続されたグラフだけを保存・シミュレートします。</div>
-        </div>
-        <div className="flex flex-col gap-2 overflow-y-auto">
+        <div className="flex flex-col gap-1.5 overflow-y-auto scrollbar-dark">
           {flows.map((flow) => (
             <button
               key={flow.id}
@@ -407,17 +414,34 @@ function FlowEditorInner() {
             </div>
 
             <div className="flex items-center gap-4 rounded-xl border border-border bg-bg-main px-3 py-2">
-              <select
-                value={selectedPack}
-                onChange={(event) => setSelectedPack(event.target.value)}
-                className="h-8 rounded-md border border-border bg-bg-card px-2 text-sm focus:outline-none focus:ring-1 focus:ring-accent"
-              >
-                {packs.map((pack) => (
-                  <option key={pack} value={pack}>
-                    {pack === 'all' ? 'All Packs' : pack}
-                  </option>
-                ))}
-              </select>
+              <div ref={packDropdownRef} className="relative">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 border-border bg-bg-card px-3 text-xs font-medium"
+                  onClick={() => setIsPackDropdownOpen((open) => !open)}
+                >
+                  {selectedPack === 'all' ? 'All Packs' : selectedPack}
+                  <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', isPackDropdownOpen && 'rotate-180')} />
+                </Button>
+                {isPackDropdownOpen && (
+                  <div className="absolute left-0 top-full z-50 mt-1 w-40 rounded-lg border border-border bg-bg-card py-1 shadow-lg">
+                    {packs.map((pack) => (
+                      <button
+                        key={pack}
+                        type="button"
+                        onClick={() => { setSelectedPack(pack); setIsPackDropdownOpen(false); }}
+                        className={cn(
+                          'w-full px-3 py-1.5 text-left text-xs transition-colors hover:bg-bg-hover',
+                          selectedPack === pack ? 'bg-bg-hover text-text-main' : 'text-text-muted',
+                        )}
+                      >
+                        {pack === 'all' ? 'All Packs' : pack}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div
                 ref={stepRailRef}
                 onWheel={handleStepRailWheel}
@@ -520,7 +544,7 @@ function FlowEditorInner() {
                     onChange={(event) => editorHook.setMenuFilter(event.target.value)}
                     className="mb-2 h-8 text-sm"
                   />
-                  <div className="flex max-h-64 flex-col gap-1 overflow-y-auto scrollbar-thin">
+                  <div className="flex max-h-64 flex-col gap-1 overflow-y-auto scrollbar-dark">
                     {AVAILABLE_STEPS
                       .filter((step) => step.name.toLowerCase().includes(editorHook.menuFilter.toLowerCase()) || step.description.toLowerCase().includes(editorHook.menuFilter.toLowerCase()))
                       .map((step) => (
@@ -538,7 +562,7 @@ function FlowEditorInner() {
               )}
 
               {editorHook.selectedNode && (
-                <div className="absolute right-4 top-4 z-10 flex max-h-[80%] w-[360px] flex-col overflow-hidden rounded-2xl border border-border bg-bg-card shadow-xl">
+                <div className="absolute right-4 top-4 z-10 flex max-h-[80%] w-80 flex-col overflow-hidden rounded-2xl border border-border bg-bg-card shadow-xl shadow-black/20">
                   <div className="flex items-center justify-between border-b border-border p-3">
                     <div>
                       <h3 className="text-sm font-semibold text-text-main">{t('flows.properties')}</h3>
@@ -667,22 +691,35 @@ function FlowEditorInner() {
               )}
             </div>
 
-            <div className="flex h-52 shrink-0 flex-col overflow-hidden rounded-xl border border-border bg-bg-main">
-              <div className="flex border-b border-border bg-bg-card">
+            <div className={cn(
+              "flex shrink-0 flex-col overflow-hidden rounded-xl border border-border bg-bg-main transition-all duration-200",
+              isBottomPanelMaximized ? "h-[60%]" : "h-36"
+            )}>
+              <div className="flex items-center justify-between border-b border-border bg-bg-card">
+                <div className="flex">
+                  <button
+                    className={cn('px-4 py-2 text-sm font-medium transition-colors', activeTab === 'yaml' ? 'border-b-2 border-accent text-text-main' : 'text-text-muted hover:text-text-main')}
+                    onClick={() => setActiveTab('yaml')}
+                  >
+                    {t('flows.yaml')}
+                  </button>
+                  <button
+                    className={cn('px-4 py-2 text-sm font-medium transition-colors', activeTab === 'result' ? 'border-b-2 border-accent text-text-main' : 'text-text-muted hover:text-text-main')}
+                    onClick={() => setActiveTab('result')}
+                  >
+                    {t('flows.result')}
+                  </button>
+                </div>
                 <button
-                  className={cn('px-4 py-2 text-sm font-medium transition-colors', activeTab === 'yaml' ? 'border-b-2 border-accent text-text-main' : 'text-text-muted hover:text-text-main')}
-                  onClick={() => setActiveTab('yaml')}
+                  type="button"
+                  onClick={() => setIsBottomPanelMaximized((v) => !v)}
+                  className="mr-2 rounded-md px-2 py-1 text-[10px] font-medium text-text-muted transition-colors hover:bg-bg-hover hover:text-text-main"
+                  title={isBottomPanelMaximized ? 'Collapse' : 'Expand'}
                 >
-                  {t('flows.yaml')}
-                </button>
-                <button
-                  className={cn('px-4 py-2 text-sm font-medium transition-colors', activeTab === 'result' ? 'border-b-2 border-accent text-text-main' : 'text-text-muted hover:text-text-main')}
-                  onClick={() => setActiveTab('result')}
-                >
-                  {t('flows.result')}
+                  {isBottomPanelMaximized ? '▁' : '▭'}
                 </button>
               </div>
-              <div className="flex-1 overflow-auto">
+              <div className="flex-1 overflow-auto scrollbar-dark">
                 {activeTab === 'yaml' && (
                   <CodeMirror
                     value={generatedYaml}

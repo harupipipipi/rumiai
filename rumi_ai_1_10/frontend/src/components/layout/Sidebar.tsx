@@ -25,28 +25,33 @@ export function Sidebar() {
     <aside
       className={cn(
         "flex-shrink-0 flex flex-col bg-bg-sidebar border-r border-border transition-all duration-300 overflow-hidden",
-        isSidebarOpen ? "w-[260px]" : "w-0 border-r-0"
+        isSidebarOpen ? "w-[260px]" : "w-14"
       )}
     >
       {/* Logo Area */}
-      <div className="p-3 flex items-center justify-between">
-        <div className="flex items-center gap-2 px-2">
-          {theme === 'Rumi' && <span className="font-bold text-lg tracking-wide text-text-main">Rumi AI</span>}
-          {theme === 'Minimal' && <span className="font-serif text-lg font-medium tracking-wide text-text-main">Rumi</span>}
-          {theme === 'Standard' && <span className="font-medium text-lg text-text-main">Rumi</span>}
-          {theme === 'Rounded' && <span className="text-xl font-medium text-text-main">Rumi</span>}
+      {isSidebarOpen && (
+        <div className="p-3 flex items-center justify-between">
+          <div className="flex items-center gap-2 px-2">
+            {theme === 'Rumi' && <span className="font-bold text-lg tracking-wide text-text-main">Rumi AI</span>}
+            {theme === 'Minimal' && <span className="font-serif text-lg font-medium tracking-wide text-text-main">Rumi</span>}
+            {theme === 'Standard' && <span className="font-medium text-lg text-text-main">Rumi</span>}
+            {theme === 'Rounded' && <span className="text-xl font-medium text-text-main">Rumi</span>}
+          </div>
+          <button
+            onClick={() => setSidebarOpen(false)}
+            className="p-1.5 hover:bg-bg-hover rounded-md text-text-muted transition-colors"
+            title="Close sidebar"
+          >
+            <PanelLeft className="w-5 h-5" />
+          </button>
         </div>
-        <button
-          onClick={() => setSidebarOpen(false)}
-          className="p-1.5 hover:bg-bg-hover rounded-md text-text-muted transition-colors"
-          title="Close sidebar"
-        >
-          <PanelLeft className="w-5 h-5" />
-        </button>
-      </div>
+      )}
 
       {/* Navigation Links */}
-      <div className="px-3 py-2 space-y-1 mt-2 flex-1 overflow-y-auto">
+      <div className={cn(
+        "py-2 space-y-1 mt-2 flex-1 overflow-y-auto",
+        isSidebarOpen ? "px-3" : "px-1.5"
+      )}>
         {links.map((link: any) => {
           const isActive =
             location.pathname === link.to ||
@@ -55,38 +60,60 @@ export function Sidebar() {
             <Link
               key={link.to}
               to={link.to}
+              title={!isSidebarOpen ? link.label : undefined}
               className={cn(
-                "w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors font-medium text-sm",
+                "flex items-center rounded-lg transition-colors font-medium text-sm",
+                isSidebarOpen ? "w-full gap-3 px-3 py-2" : "justify-center p-2.5",
                 isActive ? "bg-accent text-accent-fg shadow-sm" : "text-text-muted hover:bg-bg-hover hover:text-text-main"
               )}
             >
-              <link.icon className="w-5 h-5" /> {link.label}
+              <link.icon className="w-5 h-5" />
+              {isSidebarOpen && <span>{link.label}</span>}
             </Link>
           );
         })}
       </div>
 
-      {/* Profile Area */}
-      <div className="p-3 border-t border-border mt-auto">
-        <Link
-          to={panelRoutes.settings}
-          className="w-full flex items-center justify-between hover:bg-bg-hover p-2 rounded-lg transition-colors"
-        >
-          <div className="flex items-center gap-3">
-            {profile.avatar ? (
-              <img src={profile.avatar} alt="User" className="w-8 h-8 rounded-full object-cover border border-border" referrerPolicy="no-referrer" />
-            ) : (
-              <div className="w-8 h-8 rounded-full bg-gradient-to-r from-green-400 to-blue-500 flex items-center justify-center text-white font-bold text-sm">
-                {profile.username.charAt(0).toUpperCase()}
-              </div>
-            )}
-            <div className="text-left leading-tight">
-              <div className="text-[13px] font-medium text-text-main">{profile.username}</div>
-              <div className="text-[11px] text-text-muted">{t('nav.admin')}</div>
-            </div>
+      {/* Bottom section: toggle + profile */}
+      <div className="mt-auto border-t border-border">
+        {!isSidebarOpen && (
+          <div className="flex justify-center p-2">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="p-1.5 hover:bg-bg-hover rounded-md text-text-muted transition-colors"
+              title="Expand sidebar"
+            >
+              <PanelLeft className="w-5 h-5" />
+            </button>
           </div>
-          <Settings className="w-4 h-4 text-text-muted" />
-        </Link>
+        )}
+        <div className={cn(isSidebarOpen ? "p-3" : "p-1.5 flex justify-center")}>
+          <Link
+            to={panelRoutes.settings}
+            title={!isSidebarOpen ? t('nav.settings') : undefined}
+            className={cn(
+              "hover:bg-bg-hover rounded-lg transition-colors",
+              isSidebarOpen ? "w-full flex items-center justify-between p-2" : "flex justify-center p-1.5"
+            )}
+          >
+            <div className={cn("flex items-center", isSidebarOpen && "gap-3")}>
+              {profile.avatar ? (
+                <img src={profile.avatar} alt="User" className="w-8 h-8 rounded-full object-cover border border-border" referrerPolicy="no-referrer" />
+              ) : (
+                <div className="w-8 h-8 rounded-full bg-gradient-to-r from-green-400 to-blue-500 flex items-center justify-center text-white font-bold text-sm">
+                  {profile.username.charAt(0).toUpperCase()}
+                </div>
+              )}
+              {isSidebarOpen && (
+                <div className="text-left leading-tight">
+                  <div className="text-[13px] font-medium text-text-main">{profile.username}</div>
+                  <div className="text-[11px] text-text-muted">{t('nav.admin')}</div>
+                </div>
+              )}
+            </div>
+            {isSidebarOpen && <Settings className="w-4 h-4 text-text-muted" />}
+          </Link>
+        </div>
       </div>
     </aside>
   );
