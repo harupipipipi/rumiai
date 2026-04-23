@@ -52,6 +52,8 @@ const defaultDashboard: DashboardData = {
   registeredFlows: 0,
   activities: [],
 };
+const INITIAL_PROFILE_LOAD_MAX_ATTEMPTS = 3;
+const INITIAL_PROFILE_LOAD_RETRY_DELAY_MS = 900;
 
 function formatTimestamp(timestamp: number): string {
   if (!timestamp) return '--';
@@ -63,6 +65,10 @@ function cardBorderClass(hasDanger: boolean, hasWarning: boolean, isActive: bool
   if (hasWarning) return 'border-amber-900/40';
   if (isActive) return 'border-accent/25';
   return 'border-border';
+}
+
+function shouldRetryInitialProfileLoad(errorMessage: string): boolean {
+  return /Unauthorized|Invalid or expired code|Too many requests|429|Failed to fetch|NetworkError/i.test(errorMessage);
 }
 
 export function Dashboard() {
@@ -121,18 +127,34 @@ export function Dashboard() {
 
   const refreshProfiles = async (preferredProfileId?: string | null) => {
     setProfilesLoading(true);
-    try {
-      const response = await fetchStartupProfiles();
-      setPayload(response);
-      setProfilesError(null);
+    const maxAttempts = payload ? 1 : INITIAL_PROFILE_LOAD_MAX_ATTEMPTS;
+    let lastErrorMessage = '';
 
-      if (preferredProfileId) {
-        patchSearchParams({ edit: preferredProfileId });
-      } else if (editProfileId && !response.profiles.some((profile) => profile.profile_id === editProfileId)) {
-        patchSearchParams({ edit: null });
+    try {
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+          const response = await fetchStartupProfiles();
+          setPayload(response);
+          setProfilesError(null);
+
+          if (preferredProfileId) {
+            patchSearchParams({ edit: preferredProfileId });
+          } else if (editProfileId && !response.profiles.some((profile) => profile.profile_id === editProfileId)) {
+            patchSearchParams({ edit: null });
+          }
+          return;
+        } catch (error) {
+          lastErrorMessage = translateActionError(error, 'load startup profiles');
+          const shouldRetry = attempt < maxAttempts && shouldRetryInitialProfileLoad(lastErrorMessage);
+          if (!shouldRetry) {
+            break;
+          }
+          await new Promise<void>((resolve) => {
+            window.setTimeout(resolve, INITIAL_PROFILE_LOAD_RETRY_DELAY_MS * attempt);
+          });
+        }
       }
-    } catch (error) {
-      setProfilesError(translateActionError(error, 'load startup profiles'));
+      setProfilesError(lastErrorMessage || 'The launcher could not load your profiles yet.');
     } finally {
       setProfilesLoading(false);
     }

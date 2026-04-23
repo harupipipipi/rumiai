@@ -194,6 +194,29 @@ class TestCheckAuth:
         assert handler._check_auth("GET", "/api/panel/dashboard") is True
         assert handler._request_auth_mode == "panel_session"
 
+    def test_panel_session_auth_refreshes_cookie_ttl_on_response(self) -> None:
+        panel_mgr = PanelAuthManager(bootstrap_secret="bootstrap")
+        reset_panel_auth_manager_for_tests(panel_mgr)
+        issue = panel_mgr.issue_login_code()
+        exchange = panel_mgr.exchange_code(issue["code"])
+        assert exchange is not None
+
+        handler = _make_handler(
+            headers=_make_headers(Cookie=f"rumi_panel_session={exchange['session_id']}"),
+            _panel_auth_manager=panel_mgr,
+        )
+
+        assert handler._check_auth("GET", "/api/panel/dashboard") is True
+        assert handler._panel_session_cookie is not None
+        assert exchange["session_id"] in handler._panel_session_cookie
+        assert "Max-Age=28800" in handler._panel_session_cookie
+
+        PackAPIHandler._send_response(handler, APIResponse(True, data={"ok": True}))
+
+        assert ("Set-Cookie", handler._panel_session_cookie) in [
+            call.args for call in handler.send_header.call_args_list
+        ]
+
     def test_panel_session_mutation_requires_csrf_and_origin(self) -> None:
         panel_mgr = PanelAuthManager(bootstrap_secret="bootstrap")
         reset_panel_auth_manager_for_tests(panel_mgr)

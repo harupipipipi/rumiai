@@ -182,6 +182,7 @@ class PackAPIHandler(
     app_lifecycle_manager = None  # AppLifecycleManager インスタンス参照（Phase A）
     _request_auth_mode: Optional[str] = None
     _panel_session: Optional[dict[str, Any]] = None
+    _panel_session_cookie: Optional[str] = None
     _web_mounts: list[dict[str, Any]] = []           # web_mount テーブル（テーブル駆動静的配信）
     _pre_auth_table: list[dict[str, Any]] = []       # pre_auth_routes テーブル（テーブル駆動認証バイパス）
     _api_route_exact: dict[tuple[str, str], dict[str, Any]] = {}      # api_routes 完全一致テーブル {(METHOD, path): entry}
@@ -481,6 +482,9 @@ class PackAPIHandler(
         extra_headers: Optional[list[tuple[str, str]]] = None,
     ) -> None:
         data = response.to_json().encode('utf-8')
+        response_headers = list(extra_headers or [])
+        if self._panel_session_cookie:
+            response_headers.append(("Set-Cookie", self._panel_session_cookie))
         self.send_response(status)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', str(len(data)))
@@ -488,7 +492,7 @@ class PackAPIHandler(
         if origin:
             self.send_header('Access-Control-Allow-Origin', origin)
             self.send_header('Vary', 'Origin')
-        for header_name, header_value in extra_headers or []:
+        for header_name, header_value in response_headers:
             self.send_header(header_name, header_value)
         self.end_headers()
         self.wfile.write(data)
@@ -613,6 +617,13 @@ class PackAPIHandler(
                 return False
 
         self._panel_session = session
+        self._panel_session_cookie = self._build_set_cookie(
+            "rumi_panel_session",
+            session_id,
+            path="/",
+            max_age=int(session.get("expires_in", PanelAuthManager.DEFAULT_SESSION_TTL_SECONDS)),
+            http_only=True,
+        )
         return True
 
     def _check_auth(self, method: str, path: str) -> bool:
@@ -992,6 +1003,7 @@ class PackAPIHandler(
             return
         self._request_auth_mode = None
         self._panel_session = None
+        self._panel_session_cookie = None
 
         # --- システムルート（テーブル化対象外）---
         if _pre_auth_path == "/health":
@@ -1218,6 +1230,7 @@ class PackAPIHandler(
             return
         self._request_auth_mode = None
         self._panel_session = None
+        self._panel_session_cookie = None
         result: Any = None
 
         # --- テーブル駆動: pre-auth API ルート ---
@@ -1688,6 +1701,7 @@ class PackAPIHandler(
             return
         self._request_auth_mode = None
         self._panel_session = None
+        self._panel_session_cookie = None
         result: Any = None
         # --- テーブル駆動: 認証チェック ---
         if not self._is_pre_auth_route("PUT", _pre_auth_path_put) and not self._check_auth("PUT", _pre_auth_path_put):
@@ -1721,6 +1735,7 @@ class PackAPIHandler(
             return
         self._request_auth_mode = None
         self._panel_session = None
+        self._panel_session_cookie = None
         result: Any = None
         # --- テーブル駆動: 認証チェック ---
         if not self._is_pre_auth_route("DELETE", _pre_auth_path_del) and not self._check_auth("DELETE", _pre_auth_path_del):

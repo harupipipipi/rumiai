@@ -29,27 +29,27 @@ export function Sidebar() {
       )}
     >
       {/* Logo Area */}
-      {isSidebarOpen && (
-        <div className="p-3 flex items-center justify-between">
+      <div className={cn("p-3 flex items-center", isSidebarOpen ? "justify-between" : "justify-center")}>
+        {isSidebarOpen ? (
           <div className="flex items-center gap-2 px-2">
             {theme === 'Rumi' && <span className="font-bold text-lg tracking-wide text-text-main">Rumi AI</span>}
             {theme === 'Minimal' && <span className="font-serif text-lg font-medium tracking-wide text-text-main">Rumi</span>}
             {theme === 'Standard' && <span className="font-medium text-lg text-text-main">Rumi</span>}
             {theme === 'Rounded' && <span className="text-xl font-medium text-text-main">Rumi</span>}
           </div>
-          <button
-            onClick={() => setSidebarOpen(false)}
-            className="p-1.5 hover:bg-bg-hover rounded-md text-text-muted transition-colors"
-            title="Close sidebar"
-          >
-            <PanelLeft className="w-5 h-5" />
-          </button>
-        </div>
-      )}
+        ) : null}
+        <button
+          onClick={() => setSidebarOpen(!isSidebarOpen)}
+          className="p-1.5 hover:bg-bg-hover rounded-md text-text-muted transition-colors"
+          title={isSidebarOpen ? "Close sidebar" : "Expand sidebar"}
+        >
+          <PanelLeft className={cn("w-5 h-5 transition-transform duration-300", !isSidebarOpen && "rotate-180")} />
+        </button>
+      </div>
 
       {/* Navigation Links */}
       <div className={cn(
-        "py-2 space-y-1 mt-2 flex-1 overflow-y-auto",
+        "py-2 space-y-1 flex-1 overflow-y-auto",
         isSidebarOpen ? "px-3" : "px-1.5"
       )}>
         {links.map((link: any) => {
@@ -76,17 +76,6 @@ export function Sidebar() {
 
       {/* Bottom section: toggle + profile */}
       <div className="mt-auto border-t border-border">
-        {!isSidebarOpen && (
-          <div className="flex justify-center p-2">
-            <button
-              onClick={() => setSidebarOpen(true)}
-              className="p-1.5 hover:bg-bg-hover rounded-md text-text-muted transition-colors"
-              title="Expand sidebar"
-            >
-              <PanelLeft className="w-5 h-5" />
-            </button>
-          </div>
-        )}
         <div className={cn(isSidebarOpen ? "p-3" : "p-1.5 flex justify-center")}>
           <Link
             to={panelRoutes.settings}
