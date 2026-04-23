@@ -19,8 +19,7 @@ import type {
 import { useAppStore } from '@/src/store';
 import { 
   Loader2, Save, Plus, AlertCircle, Copy, CheckCircle2, Trash2, 
-  ArrowLeft, Package, ChevronRight, Play, MoreVertical, Settings, 
-  Clock, Layers, ExternalLink 
+  ArrowLeft, ChevronRight, Play, Settings, Clock, Layers, ExternalLink, Box, Star
 } from 'lucide-react';
 
 type ActionState = 'create' | 'save' | 'duplicate' | 'activate' | 'launch' | 'delete' | null;
@@ -188,7 +187,6 @@ export function StartupProfiles() {
   const [actionState, setActionState] = useState<ActionState>(null);
   const [viewMode, setViewMode] = useState<'launcher' | 'editor'>('launcher');
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [menuOpenFor, setMenuOpenFor] = useState<string | null>(null);
 
   const load = async (preferredProfileId?: string) => {
     setLoading(true);
@@ -302,7 +300,6 @@ export function StartupProfiles() {
       addToast(message, 'error');
     } finally {
       setActionState(null);
-      setMenuOpenFor(null);
     }
   };
 
@@ -317,7 +314,6 @@ export function StartupProfiles() {
       addToast(message, 'error');
     } finally {
       setActionState(null);
-      setMenuOpenFor(null);
     }
   };
 
@@ -352,7 +348,6 @@ export function StartupProfiles() {
   };
 
   const handleDelete = (profileId: string, name: string) => {
-    setMenuOpenFor(null);
     showDialog({
       title: 'Delete startup profile?',
       message:
@@ -384,7 +379,7 @@ export function StartupProfiles() {
     return (
       <div className="flex flex-1 items-center justify-center bg-[#0e0e0e]">
         <div className="flex flex-col items-center gap-3">
-          <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />
+          <Loader2 className="h-8 w-8 animate-spin text-[#5a5af5]" />
           <span className="text-sm text-stone-500">Loading startup profiles...</span>
         </div>
       </div>
@@ -396,12 +391,12 @@ export function StartupProfiles() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-white">My Profiles</h1>
-          <p className="mt-1.5 text-sm text-stone-400">Launch and manage your startup profiles.</p>
+          <p className="mt-1 text-[15px] text-[#8e8e8e]">Launch and manage your startup profiles.</p>
         </div>
         <button
           onClick={handleCreate}
           disabled={actionState === 'create'}
-          className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-50"
+          className="flex items-center gap-2 rounded-md bg-[#5a5af5] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#4a4aff] disabled:opacity-50"
         >
           {actionState === 'create' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
           Create Custom Profile
@@ -415,57 +410,32 @@ export function StartupProfiles() {
           const hasIssue = !standardPack?.runtime_ready;
 
           return (
-            <div key={profile.profile_id} className="group relative flex flex-col justify-between rounded-2xl border border-[#222] bg-[#111] p-6 transition-all hover:bg-[#151515] hover:border-[#333]">
+            <div key={profile.profile_id} className="group relative flex flex-col justify-between rounded-xl border border-[#222] bg-[#161616] p-6 transition-all">
               
-              {/* Context Menu Button */}
+              {/* Star Icon for Set Active (Top Right) */}
               <div className="absolute top-4 right-4">
                 <button 
-                  onClick={() => setMenuOpenFor(menuOpenFor === profile.profile_id ? null : profile.profile_id)}
-                  className="rounded-full p-1.5 text-stone-500 hover:bg-stone-800 hover:text-stone-300"
+                  onClick={() => handleActivate(profile.profile_id)}
+                  className={`flex h-8 w-8 items-center justify-center rounded-md border border-[#333] transition ${isActive ? 'bg-[#2a2a2a] text-white' : 'bg-[#1a1a1a] text-[#888] hover:text-white'}`}
+                  title={isActive ? "Active Profile" : "Set Active"}
                 >
-                  <MoreVertical className="h-4 w-4" />
+                  <Star className="h-4 w-4" fill={isActive ? "currentColor" : "none"} />
                 </button>
-                
-                {menuOpenFor === profile.profile_id && (
-                  <div className="absolute right-0 top-full mt-1 w-40 z-10 rounded-lg border border-[#333] bg-[#1a1a1a] p-1 shadow-xl">
-                    {!isActive && (
-                      <button 
-                        onClick={() => handleActivate(profile.profile_id)}
-                        className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-stone-300 hover:bg-[#2a2a2a]"
-                      >
-                        <CheckCircle2 className="h-4 w-4" /> Set Active
-                      </button>
-                    )}
-                    <button 
-                      onClick={() => handleDuplicate(profile.profile_id)}
-                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-stone-300 hover:bg-[#2a2a2a]"
-                    >
-                      <Copy className="h-4 w-4" /> Duplicate
-                    </button>
-                    <button 
-                      onClick={() => handleDelete(profile.profile_id, profile.name)}
-                      disabled={profileCount <= 1}
-                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-red-400 hover:bg-[#2a2a2a] disabled:opacity-50"
-                    >
-                      <Trash2 className="h-4 w-4" /> Delete
-                    </button>
-                  </div>
-                )}
               </div>
 
-              {/* Big Icon */}
-              <div className="mt-4 flex justify-center">
-                <div className="flex h-20 w-20 items-center justify-center rounded-full bg-stone-900/50 text-stone-300 ring-1 ring-stone-800">
-                  <Package className="h-8 w-8" strokeWidth={1.5} />
+              {/* Big Centered Box Icon */}
+              <div className="mt-8 mb-6 flex justify-center">
+                <div className="flex h-[90px] w-[90px] items-center justify-center rounded-full bg-[#1c1c1c]">
+                  <Box className="h-[38px] w-[38px] text-white" strokeWidth={1.5} />
                 </div>
               </div>
 
-              {/* Info */}
-              <div className="mt-8 text-left">
+              {/* Title & Subtext */}
+              <div className="text-left">
                 <div className="flex items-center gap-2">
-                  <h3 className="text-lg font-bold text-stone-100">{profile.name}</h3>
+                  <h3 className="text-[17px] font-bold text-white">{profile.name}</h3>
                   {isActive && (
-                    <span className="rounded-md bg-indigo-900/40 px-2 py-0.5 text-[10px] font-semibold text-indigo-300 ring-1 ring-indigo-500/30">
+                    <span className="rounded bg-[#2a2a50] px-2 py-0.5 text-[10px] font-semibold text-[#8b8bff]">
                       Default
                     </span>
                   )}
@@ -473,37 +443,38 @@ export function StartupProfiles() {
                     <AlertCircle className="h-4 w-4 text-amber-500" />
                   )}
                 </div>
-                <p className="mt-1.5 text-sm text-stone-400 truncate">
+                <p className="mt-1 text-[13px] text-[#888]">
                   Based on {profile.standard_pack_id}
                 </p>
 
-                <div className="mt-5 flex items-center gap-5 text-xs text-stone-500">
-                  <div className="flex items-center gap-1.5">
-                    <Clock className="h-3.5 w-3.5" />
+                {/* Stats Row */}
+                <div className="mt-6 flex items-center gap-6 text-[13px] text-[#888]">
+                  <div className="flex items-center gap-2">
+                    <Clock className="h-4 w-4" />
                     {formatTimestampRelative(profile.updated_at)}
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <Layers className="h-3.5 w-3.5" />
+                  <div className="flex items-center gap-2">
+                    <Play className="h-4 w-4" />
                     {Object.keys(profile.slots).length} slots
                   </div>
                 </div>
               </div>
 
-              {/* Actions */}
-              <div className="mt-6 grid grid-cols-2 gap-3">
+              {/* Action Buttons (50/50 Split) */}
+              <div className="mt-8 grid grid-cols-2 gap-3">
                 <button
                   onClick={() => {
                     setSelectedProfileId(profile.profile_id);
                     setViewMode('editor');
                   }}
-                  className="flex items-center justify-center gap-2 rounded-lg bg-[#222] py-2.5 text-sm font-semibold text-stone-200 transition hover:bg-[#333]"
+                  className="flex items-center justify-center rounded-md bg-[#222] py-2 text-sm font-semibold text-white transition hover:bg-[#2a2a2a]"
                 >
                   Edit
                 </button>
                 <button
                   onClick={() => handleLaunch(profile.profile_id)}
                   disabled={actionState === 'launch'}
-                  className="flex items-center justify-center gap-2 rounded-lg bg-indigo-600 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-50"
+                  className="flex items-center justify-center gap-2 rounded-md bg-[#5a5af5] py-2 text-sm font-semibold text-white transition hover:bg-[#4a4aff] disabled:opacity-50"
                 >
                   {actionState === 'launch' && selectedProfileId === profile.profile_id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4 fill-current" />}
                   Launch
@@ -513,36 +484,37 @@ export function StartupProfiles() {
           );
         })}
 
-        {/* Create Profile Card */}
+        {/* Create Custom Profile Card */}
         <button 
           onClick={handleCreate}
           disabled={actionState === 'create'}
-          className="group flex flex-col items-center justify-center rounded-2xl border border-dashed border-[#333] bg-transparent p-6 text-center transition hover:border-indigo-500/50 hover:bg-[#111]"
+          className="group flex flex-col items-center justify-center rounded-xl border border-dashed border-[#333] bg-[#0a0a0a] p-6 text-center transition hover:border-[#5a5af5]"
         >
-          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[#1a1a1a] text-stone-400 group-hover:text-indigo-400 transition ring-1 ring-[#333] group-hover:ring-indigo-500/50">
+          <div className="flex h-[72px] w-[72px] items-center justify-center rounded-full bg-[#1c1c1c] text-stone-400 group-hover:text-[#5a5af5] transition">
             {actionState === 'create' ? <Loader2 className="h-8 w-8 animate-spin" /> : <Plus className="h-8 w-8" strokeWidth={1} />}
           </div>
-          <h3 className="mt-6 text-lg font-bold text-stone-200">Create Custom Profile</h3>
-          <p className="mt-2 text-sm text-stone-500 max-w-[200px]">
+          <h3 className="mt-8 text-[17px] font-bold text-white">Create Custom Profile</h3>
+          <p className="mt-2 text-[13px] text-[#888] max-w-[180px]">
             Build a new startup profile from scratch
           </p>
         </button>
       </div>
 
       {/* Footer Banner */}
-      <div className="mt-12 rounded-xl border border-[#222] bg-[#141414] p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
-        <div className="flex items-start gap-4">
-          <div className="rounded-full bg-[#222] p-3 text-stone-400">
+      <div className="mt-8 rounded-xl border border-[#222] bg-[#161616] p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+        <div className="flex items-start gap-5">
+          <div className="rounded-full bg-[#222] p-3 text-[#ccc]">
             <Layers className="h-6 w-6" />
           </div>
           <div>
-            <h4 className="text-base font-bold text-stone-200">What is a profile?</h4>
-            <p className="mt-1 text-sm text-stone-400 max-w-xl">
-              Profiles let you save different configurations of packs and settings. Switch between them anytime or create new ones for different use cases.
+            <h4 className="text-base font-bold text-white">What is a profile?</h4>
+            <p className="mt-1 text-[14px] text-[#888] max-w-xl">
+              Profiles let you save different configurations of packs and settings. 
+              Switch between them anytime or create new ones for different use cases.
             </p>
           </div>
         </div>
-        <button className="flex shrink-0 items-center gap-2 rounded-lg border border-[#333] bg-[#1a1a1a] px-4 py-2 text-sm font-semibold text-stone-300 transition hover:bg-[#222]">
+        <button className="flex shrink-0 items-center gap-2 rounded-md border border-[#333] bg-[#222] px-4 py-2 text-sm font-semibold text-[#ccc] transition hover:bg-[#2a2a2a]">
           Learn More <ExternalLink className="h-4 w-4" />
         </button>
       </div>
@@ -563,14 +535,28 @@ export function StartupProfiles() {
             </button>
             <div>
               <h2 className="text-2xl font-bold tracking-tight text-white">Edit Profile</h2>
-              <p className="mt-1 text-sm text-stone-500">Configure packs and slots for {draft.name}</p>
+              <p className="mt-1 text-sm text-[#888]">Configure packs and slots for {draft.name}</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
             <button
+              onClick={() => handleDuplicate(draft.profile_id)}
+              disabled={actionState === 'duplicate'}
+              className="flex items-center gap-2 rounded-md bg-[#222] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#333] disabled:opacity-50"
+            >
+              <Copy className="h-4 w-4" /> Duplicate
+            </button>
+            <button
+              onClick={() => handleDelete(draft.profile_id, draft.name)}
+              disabled={profileCount <= 1 || actionState === 'delete'}
+              className="flex items-center gap-2 rounded-md bg-[#222] px-4 py-2.5 text-sm font-semibold text-red-400 transition hover:bg-red-950/30 hover:border-red-900/50 disabled:opacity-50"
+            >
+              <Trash2 className="h-4 w-4" /> Delete
+            </button>
+            <button
               onClick={handleSave}
               disabled={!isDirty || actionState === 'save'}
-              className="flex items-center gap-2 rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-50"
+              className="flex items-center gap-2 rounded-md bg-[#5a5af5] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#4a4aff] disabled:opacity-50"
             >
               {actionState === 'save' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               Save Changes
@@ -580,23 +566,23 @@ export function StartupProfiles() {
 
         <div className="grid gap-8 lg:grid-cols-[1fr_320px]">
           <div className="flex flex-col gap-8">
-            <div className="rounded-2xl border border-[#222] bg-[#111] p-6">
-               <h3 className="text-lg font-bold text-stone-100 mb-5">General Settings</h3>
+            <div className="rounded-xl border border-[#222] bg-[#161616] p-6">
+               <h3 className="text-lg font-bold text-white mb-5">General Settings</h3>
                <div className="grid gap-5 md:grid-cols-2">
                  <div className="space-y-2">
-                   <label className="text-xs font-bold uppercase tracking-wider text-stone-500">Profile Name</label>
+                   <label className="text-xs font-bold uppercase tracking-wider text-[#888]">Profile Name</label>
                    <input
                      value={draft.name}
                      onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                     className="w-full rounded-xl border border-[#333] bg-[#1a1a1a] px-4 py-2.5 text-sm text-stone-100 outline-none transition focus:border-indigo-500"
+                     className="w-full rounded-md border border-[#333] bg-[#1a1a1a] px-4 py-2.5 text-sm text-white outline-none transition focus:border-[#5a5af5]"
                    />
                  </div>
                  <div className="space-y-2">
-                   <label className="text-xs font-bold uppercase tracking-wider text-stone-500">Standard Pack</label>
+                   <label className="text-xs font-bold uppercase tracking-wider text-[#888]">Standard Pack</label>
                    <select
                      value={draft.standard_pack_id}
                      onChange={(e) => setDraft({ ...draft, standard_pack_id: e.target.value })}
-                     className="w-full rounded-xl border border-[#333] bg-[#1a1a1a] px-4 py-2.5 text-sm text-stone-100 outline-none transition focus:border-indigo-500"
+                     className="w-full rounded-md border border-[#333] bg-[#1a1a1a] px-4 py-2.5 text-sm text-white outline-none transition focus:border-[#5a5af5]"
                    >
                      {standardPacks.map((pack) => (
                        <option key={pack.pack_id} value={pack.pack_id} disabled={!pack.available}>
@@ -607,7 +593,7 @@ export function StartupProfiles() {
                  </div>
                </div>
                {selectedStandardPack && !selectedStandardPack.runtime_ready && (
-                 <div className="mt-5 rounded-xl border border-amber-900/30 bg-amber-950/20 p-4 text-amber-300">
+                 <div className="mt-5 rounded-md border border-amber-900/30 bg-amber-950/20 p-4 text-amber-300">
                    <div className="flex items-center gap-2 font-bold">
                      <AlertCircle className="h-4 w-4" /> Standard pack issue
                    </div>
@@ -618,24 +604,24 @@ export function StartupProfiles() {
                )}
             </div>
 
-            <div className="rounded-2xl border border-[#222] bg-[#111] p-6">
-               <h3 className="text-lg font-bold text-stone-100 mb-5">Slot Configuration</h3>
+            <div className="rounded-xl border border-[#222] bg-[#161616] p-6">
+               <h3 className="text-lg font-bold text-white mb-5">Slot Configuration</h3>
                <div className="grid gap-4">
                  {slotSpecs.map((slot) => {
                    const candidates = catalog.slot_candidates[slot.slot_id] ?? [];
                    const selectedCandidate = selectedCandidatesBySlot[slot.slot_id];
                    return (
-                     <div key={slot.slot_id} className="rounded-xl border border-[#333] bg-[#1a1a1a] p-5">
+                     <div key={slot.slot_id} className="rounded-md border border-[#333] bg-[#1a1a1a] p-5">
                        <div className="flex items-center justify-between mb-4">
                          <div>
-                           <div className="font-bold text-stone-200">{slot.label}</div>
-                           <div className="text-xs text-stone-500 mt-0.5">{slot.description}</div>
+                           <div className="font-bold text-white">{slot.label}</div>
+                           <div className="text-xs text-[#888] mt-0.5">{slot.description}</div>
                          </div>
                        </div>
                        <select
                          value={draft.slots[slot.slot_id] ?? ''}
                          onChange={(e) => setDraft({ ...draft, slots: { ...draft.slots, [slot.slot_id]: e.target.value } })}
-                         className="w-full rounded-lg border border-[#444] bg-[#222] px-3 py-2 text-sm text-stone-200 outline-none transition focus:border-indigo-500"
+                         className="w-full rounded-md border border-[#444] bg-[#222] px-3 py-2 text-sm text-white outline-none transition focus:border-[#5a5af5]"
                        >
                          {candidates.map((c) => (
                            <option key={c.pack_id} value={c.pack_id} disabled={!c.runtime_ready}>
@@ -660,17 +646,17 @@ export function StartupProfiles() {
             <div>
               <button
                 onClick={() => setShowAdvanced(!showAdvanced)}
-                className="flex items-center gap-2 text-sm font-bold text-stone-500 hover:text-stone-300"
+                className="flex items-center gap-2 text-sm font-bold text-[#888] hover:text-[#ccc]"
               >
                 <ChevronRight className={`h-4 w-4 transition-transform ${showAdvanced ? 'rotate-90' : ''}`} />
                 Advanced / Contract Graph
               </button>
               
               {showAdvanced && (
-                <div className="mt-4 rounded-2xl border border-[#222] bg-[#111] p-6">
+                <div className="mt-4 rounded-xl border border-[#222] bg-[#161616] p-6">
                    <div className="mb-6">
-                     <h3 className="text-lg font-bold text-stone-100">Contract Graph</h3>
-                     <p className="text-sm text-stone-500 mt-1">Graph visualization for debugging contract connections.</p>
+                     <h3 className="text-lg font-bold text-white">Contract Graph</h3>
+                     <p className="text-sm text-[#888] mt-1">Graph visualization for debugging contract connections.</p>
                    </div>
                    
                    <div className="space-y-5">
@@ -728,24 +714,24 @@ export function StartupProfiles() {
           </div>
 
           <div className="flex flex-col gap-4">
-             <div className="rounded-2xl border border-[#222] bg-[#111] p-5">
-               <h4 className="text-sm font-bold uppercase tracking-wider text-stone-500 mb-4">Profile Metadata</h4>
+             <div className="rounded-xl border border-[#222] bg-[#161616] p-5">
+               <h4 className="text-sm font-bold uppercase tracking-wider text-[#888] mb-4">Profile Metadata</h4>
                <div className="space-y-4 text-sm">
                  <div>
-                   <div className="text-stone-600 text-xs mb-1">Profile ID</div>
-                   <div className="font-mono text-stone-400 break-all bg-[#1a1a1a] border border-[#333] p-2 rounded-lg text-xs">{draft.profile_id}</div>
+                   <div className="text-[#888] text-xs mb-1">Profile ID</div>
+                   <div className="font-mono text-stone-400 break-all bg-[#1a1a1a] border border-[#333] p-2 rounded-md text-xs">{draft.profile_id}</div>
                  </div>
                  <div>
-                   <div className="text-stone-600 text-xs mb-1">Created</div>
-                   <div className="text-stone-300">{formatTimestamp(draft.created_at)}</div>
+                   <div className="text-[#888] text-xs mb-1">Created</div>
+                   <div className="text-[#ccc]">{formatTimestamp(draft.created_at)}</div>
                  </div>
                  <div>
-                   <div className="text-stone-600 text-xs mb-1">Last Updated</div>
-                   <div className="text-stone-300">{formatTimestamp(draft.updated_at)}</div>
+                   <div className="text-[#888] text-xs mb-1">Last Updated</div>
+                   <div className="text-[#ccc]">{formatTimestamp(draft.updated_at)}</div>
                  </div>
                  <div className="pt-2 border-t border-[#333]">
-                   <div className="text-stone-600 text-xs mb-1">Status</div>
-                   <div className="text-stone-300">{isDirty ? 'Unsaved changes' : 'Saved'}</div>
+                   <div className="text-[#888] text-xs mb-1">Status</div>
+                   <div className="text-[#ccc]">{isDirty ? 'Unsaved changes' : 'Saved'}</div>
                  </div>
                </div>
              </div>
@@ -755,13 +741,8 @@ export function StartupProfiles() {
     );
   };
 
-  // Outer container
-  // Close any open menu when clicking outside
   return (
-    <div 
-      className="flex flex-1 overflow-y-auto bg-[#0a0a0a] text-stone-300 p-6 lg:p-10 font-sans"
-      onClick={() => setMenuOpenFor(null)}
-    >
+    <div className="flex flex-1 overflow-y-auto bg-[#0a0a0a] text-[#ccc] p-6 lg:p-10 font-sans">
       <div className="mx-auto w-full max-w-[1200px] flex flex-col gap-8">
         {viewMode === 'launcher' ? renderLauncher() : renderEditor()}
       </div>
