@@ -144,12 +144,25 @@ fn startup_failure_message(stage: &str, error: &anyhow::Error, config: &AppConfi
     )
 }
 
-fn start_kernel_and_bootstrap(
-    km: &Arc<Mutex<KernelManager>>,
-    port: u16,
-    bootstrap_secret: &str,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StartupRecoveryStage {
+    HealthCheck,
+    Bootstrap,
+}
+
+fn run_startup_sequence<StartKernel, WaitForHealthy, AuthorizePanel, RecoverConflict>(
     progress: &Arc<Mutex<String>>,
-) -> AnyResult<String> {
+    mut start_kernel: StartKernel,
+    mut wait_for_healthy: WaitForHealthy,
+    mut authorize_panel: AuthorizePanel,
+    mut recover_conflict: RecoverConflict,
+) -> AnyResult<String>
+where
+    StartKernel: FnMut() -> AnyResult<()>,
+    WaitForHealthy: FnMut() -> AnyResult<()>,
+    AuthorizePanel: FnMut() -> AnyResult<String>,
+    RecoverConflict: FnMut(StartupRecoveryStage) -> AnyResult<Option<String>>,
+{
     let mut recovered_conflict = false;
 
     loop {
@@ -162,27 +175,15 @@ fn start_kernel_and_bootstrap(
             },
         );
 
-        {
-            let mut kernel = km
-                .lock()
-                .map_err(|error| anyhow!("kernel manager lock poisoned: {error}"))?;
-            kernel.start()?;
-        }
+        start_kernel()?;
 
         update_setup_progress(progress, "Waiting for Kernel...");
-        if let Err(error) = health_check::wait_for_healthy(port, 60) {
+        if let Err(error) = wait_for_healthy() {
             if recovered_conflict {
                 return Err(error);
             }
 
-            let recovered = {
-                let mut kernel = km
-                    .lock()
-                    .map_err(|lock_error| anyhow!("kernel manager lock poisoned: {lock_error}"))?;
-                kernel.recover_port_conflict()?
-            };
-
-            if let Some(message) = recovered {
+            if let Some(message) = recover_conflict(StartupRecoveryStage::HealthCheck)? {
                 warn!("{message}");
                 recovered_conflict = true;
                 continue;
@@ -192,21 +193,14 @@ fn start_kernel_and_bootstrap(
         }
 
         update_setup_progress(progress, "Authorizing panel session...");
-        match request_panel_bootstrap_code_with_retry(port, bootstrap_secret) {
+        match authorize_panel() {
             Ok(code) => return Ok(code),
             Err(error) => {
                 if recovered_conflict {
                     return Err(error);
                 }
 
-                let recovered = {
-                    let mut kernel = km.lock().map_err(|lock_error| {
-                        anyhow!("kernel manager lock poisoned: {lock_error}")
-                    })?;
-                    kernel.recover_port_conflict()?
-                };
-
-                if let Some(message) = recovered {
+                if let Some(message) = recover_conflict(StartupRecoveryStage::Bootstrap)? {
                     warn!("{message}");
                     recovered_conflict = true;
                     continue;
@@ -216,6 +210,35 @@ fn start_kernel_and_bootstrap(
             }
         }
     }
+}
+
+fn start_kernel_and_bootstrap(
+    km: &Arc<Mutex<KernelManager>>,
+    port: u16,
+    bootstrap_secret: &str,
+    progress: &Arc<Mutex<String>>,
+) -> AnyResult<String> {
+    run_startup_sequence(
+        progress,
+        || {
+            let mut kernel = km
+                .lock()
+                .map_err(|error| anyhow!("kernel manager lock poisoned: {error}"))?;
+            kernel.start()?;
+            Ok(())
+        },
+        || {
+            health_check::wait_for_healthy(port, 60)?;
+            Ok(())
+        },
+        || request_panel_bootstrap_code_with_retry(port, bootstrap_secret),
+        |_| {
+            let mut kernel = km
+                .lock()
+                .map_err(|lock_error| anyhow!("kernel manager lock poisoned: {lock_error}"))?;
+            kernel.recover_port_conflict()
+        },
+    )
 }
 
 pub fn run() {
@@ -348,4 +371,185 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![get_setup_progress, restart_kernel])
         .run(tauri::generate_context!())
         .unwrap_or_else(|error| error!("error while running tauri application: {error}"));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        ENV_LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn test_config() -> AppConfig {
+        AppConfig::detect_for_tauri(
+            PathBuf::from("/tmp/test_resource"),
+            PathBuf::from("/tmp/test_appdata"),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn is_running_default_false() {
+        let config = test_config();
+        let mut km = KernelManager::new(&config, "test-bootstrap".into());
+        assert!(!km.is_running());
+    }
+
+    #[test]
+    fn stop_without_start_is_ok() {
+        let config = test_config();
+        let mut km = KernelManager::new(&config, "test-bootstrap".into());
+        assert!(km.stop().is_ok());
+    }
+
+    #[test]
+    fn wait_and_handle_restart_no_child() {
+        let config = test_config();
+        let mut km = KernelManager::new(&config, "test-bootstrap".into());
+        let result = km.wait_and_handle_restart().unwrap();
+        assert!(!result);
+    }
+
+    #[test]
+    fn explicit_auto_approve_opt_in_is_required() {
+        let _guard = env_lock().lock().unwrap();
+        std::env::remove_var("RUMI_AUTO_APPROVE_LOCAL");
+
+        let dev_environment = true;
+        let auto_approve_local = dev_environment
+            && std::env::var("RUMI_AUTO_APPROVE_LOCAL")
+                .map(|value| value.eq_ignore_ascii_case("true"))
+                .unwrap_or(false);
+
+        assert!(!auto_approve_local);
+    }
+
+    #[test]
+    fn explicit_auto_approve_opt_in_only_applies_in_dev() {
+        let _guard = env_lock().lock().unwrap();
+        std::env::set_var("RUMI_AUTO_APPROVE_LOCAL", "true");
+
+        let production_auto_approve = false
+            && std::env::var("RUMI_AUTO_APPROVE_LOCAL")
+                .map(|value| value.eq_ignore_ascii_case("true"))
+                .unwrap_or(false);
+        let development_auto_approve = true
+            && std::env::var("RUMI_AUTO_APPROVE_LOCAL")
+                .map(|value| value.eq_ignore_ascii_case("true"))
+                .unwrap_or(false);
+
+        assert!(!production_auto_approve);
+        assert!(development_auto_approve);
+
+        std::env::remove_var("RUMI_AUTO_APPROVE_LOCAL");
+    }
+
+    #[test]
+    fn retries_startup_after_recovering_stale_listener_during_health_check() {
+        let progress = Arc::new(Mutex::new(String::new()));
+        let mut start_calls = 0;
+        let mut health_calls = 0;
+        let mut recover_stages = Vec::new();
+
+        let panel_code = run_startup_sequence(
+            &progress,
+            || {
+                start_calls += 1;
+                Ok(())
+            },
+            || {
+                health_calls += 1;
+                if health_calls == 1 {
+                    Err(anyhow!("health failed"))
+                } else {
+                    Ok(())
+                }
+            },
+            || Ok("panel-code".into()),
+            |stage| {
+                recover_stages.push(stage);
+                Ok(Some("Recovered stale listener".into()))
+            },
+        )
+        .unwrap();
+
+        assert_eq!(panel_code, "panel-code");
+        assert_eq!(start_calls, 2);
+        assert_eq!(health_calls, 2);
+        assert_eq!(recover_stages, vec![StartupRecoveryStage::HealthCheck]);
+        assert_eq!(
+            progress.lock().unwrap().as_str(),
+            "Authorizing panel session..."
+        );
+    }
+
+    #[test]
+    fn retries_startup_after_recovering_stale_listener_during_bootstrap() {
+        let progress = Arc::new(Mutex::new(String::new()));
+        let mut start_calls = 0;
+        let mut bootstrap_calls = 0;
+        let mut recover_stages = Vec::new();
+
+        let panel_code = run_startup_sequence(
+            &progress,
+            || {
+                start_calls += 1;
+                Ok(())
+            },
+            || Ok(()),
+            || {
+                bootstrap_calls += 1;
+                if bootstrap_calls == 1 {
+                    Err(anyhow!("bootstrap failed"))
+                } else {
+                    Ok("panel-code".into())
+                }
+            },
+            |stage| {
+                recover_stages.push(stage);
+                Ok(Some("Recovered stale listener".into()))
+            },
+        )
+        .unwrap();
+
+        assert_eq!(panel_code, "panel-code");
+        assert_eq!(start_calls, 2);
+        assert_eq!(bootstrap_calls, 2);
+        assert_eq!(recover_stages, vec![StartupRecoveryStage::Bootstrap]);
+    }
+
+    #[test]
+    fn does_not_retry_when_conflict_recovery_rejects_foreign_listener() {
+        let progress = Arc::new(Mutex::new(String::new()));
+        let mut start_calls = 0;
+        let mut recover_calls = 0;
+
+        let error = run_startup_sequence(
+            &progress,
+            || {
+                start_calls += 1;
+                Ok(())
+            },
+            || Err(anyhow!("health failed")),
+            || Ok("panel-code".into()),
+            |stage| {
+                recover_calls += 1;
+                assert_eq!(stage, StartupRecoveryStage::HealthCheck);
+                Err(anyhow!(
+                    "port 8765 is already in use by pid 999 (foreign process)"
+                ))
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(start_calls, 1);
+        assert_eq!(recover_calls, 1);
+        assert!(error
+            .to_string()
+            .contains("port 8765 is already in use by pid 999"));
+    }
 }

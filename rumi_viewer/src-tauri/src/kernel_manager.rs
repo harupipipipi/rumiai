@@ -8,6 +8,7 @@
 
 use std::fs;
 use std::io::ErrorKind;
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -31,7 +32,23 @@ struct PortListener {
     pid: u32,
     command: String,
     cwd: Option<String>,
-    likely_rumi: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ListenerIdentity {
+    MatchingWorkingDirectory,
+    MatchingEntrypointPath,
+    MatchingVenvPython,
+}
+
+impl ListenerIdentity {
+    fn description(self) -> &'static str {
+        match self {
+            Self::MatchingWorkingDirectory => "matched the configured RUMI_HOME working directory",
+            Self::MatchingEntrypointPath => "matched the configured Kernel entrypoint path",
+            Self::MatchingVenvPython => "matched the configured venv Python path",
+        }
+    }
 }
 
 impl PortListener {
@@ -158,18 +175,19 @@ impl KernelManager {
             return Ok(None);
         }
 
-        if !listener.likely_rumi {
+        let Some(identity) = identify_owned_listener(&listener, &self.config) else {
             bail!(
                 "port {port} is already in use by pid {} ({})",
                 listener.pid,
                 listener.summary(),
             );
-        }
+        };
 
         warn!(
-            "Detected stale Rumi-like listener on port {port}: pid {} ({})",
+            "Detected stale Rumi listener on port {port}: pid {} ({}; {})",
             listener.pid,
             listener.summary(),
+            identity.description(),
         );
 
         if self.child.is_some() {
@@ -180,8 +198,9 @@ impl KernelManager {
         self.restart_count = 0;
 
         Ok(Some(format!(
-            "Recovered stale Rumi-like listener on port {port} from pid {}",
-            listener.pid
+            "Recovered stale Rumi listener on port {port} from pid {} ({})",
+            listener.pid,
+            identity.description(),
         )))
     }
 
@@ -364,14 +383,8 @@ fn detect_port_listener_unix(port: u16) -> Result<Option<PortListener>> {
         .or(short_name)
         .unwrap_or_else(|| "unknown".to_string());
     let cwd = unix_process_cwd(pid);
-    let likely_rumi = is_likely_rumi_process(&command, cwd.as_deref());
 
-    Ok(Some(PortListener {
-        pid,
-        command,
-        cwd,
-        likely_rumi,
-    }))
+    Ok(Some(PortListener { pid, command, cwd }))
 }
 
 #[cfg(windows)]
@@ -403,12 +416,10 @@ fn detect_port_listener_windows(port: u16) -> Result<Option<PortListener>> {
         }
         if let Ok(pid) = pid.parse::<u32>() {
             let command = windows_process_command(pid).unwrap_or_else(|| "unknown".to_string());
-            let likely_rumi = is_likely_rumi_process(&command, None);
             return Ok(Some(PortListener {
                 pid,
                 command,
                 cwd: None,
-                likely_rumi,
             }));
         }
     }
@@ -464,17 +475,66 @@ fn windows_process_command(pid: u32) -> Option<String> {
     (!text.is_empty() && !text.starts_with("INFO:")).then_some(text)
 }
 
-fn is_likely_rumi_process(command: &str, cwd: Option<&str>) -> bool {
-    let command = command.to_ascii_lowercase();
-    let cwd = cwd.unwrap_or_default().to_ascii_lowercase();
-    let combined = format!("{command} {cwd}");
-    let has_rumi_marker = combined.contains("rumi_ai")
-        || combined.contains("rumiai")
-        || combined.contains("dev.rumiai.app");
-    let has_python_app_marker =
-        command.contains("python") && (command.contains("app.py") || command.contains("-m app"));
+fn identify_owned_listener(
+    listener: &PortListener,
+    config: &AppConfig,
+) -> Option<ListenerIdentity> {
+    if !is_python_app_command(&listener.command) {
+        return None;
+    }
 
-    has_rumi_marker || (has_python_app_marker && cwd.contains("rumi"))
+    if listener
+        .cwd
+        .as_deref()
+        .is_some_and(|cwd| observed_path_matches(cwd, &config.rumi_home))
+    {
+        return Some(ListenerIdentity::MatchingWorkingDirectory);
+    }
+
+    let entrypoint = config.rumi_home.join("app.py");
+    if command_mentions_path(&listener.command, &entrypoint)
+        || command_mentions_path(&listener.command, &config.rumi_home)
+    {
+        return Some(ListenerIdentity::MatchingEntrypointPath);
+    }
+
+    if command_mentions_path(&listener.command, &config.venv_python()) {
+        return Some(ListenerIdentity::MatchingVenvPython);
+    }
+
+    None
+}
+
+fn is_python_app_command(command: &str) -> bool {
+    let command = normalize_for_match(command);
+    command.contains("python") && (command.contains("app.py") || command.contains("-m app"))
+}
+
+fn command_mentions_path(command: &str, path: &Path) -> bool {
+    normalize_for_match(command).contains(&normalize_path_for_match(path))
+}
+
+fn observed_path_matches(observed: &str, expected: &Path) -> bool {
+    normalize_for_match(observed) == normalize_path_for_match(expected)
+}
+
+fn normalize_path_for_match(path: &Path) -> String {
+    normalize_for_match(&path.to_string_lossy())
+}
+
+fn normalize_for_match(value: &str) -> String {
+    let normalized = value.trim().replace('\\', "/");
+    let normalized = normalized.trim_end_matches('/').to_string();
+
+    #[cfg(windows)]
+    {
+        normalized.to_ascii_lowercase()
+    }
+
+    #[cfg(not(windows))]
+    {
+        normalized
+    }
 }
 
 fn terminate_external_listener(pid: u32, port: u16) -> Result<()> {
@@ -635,26 +695,77 @@ mod tests {
     }
 
     #[test]
-    fn detects_rumi_process_from_command_and_cwd() {
-        assert!(is_likely_rumi_process(
-            "/opt/homebrew/bin/python3 -m app",
-            Some("/Users/haru/Desktop/puroguramukei/rumi_ai_mac/rumi_ai_1_10"),
-        ));
+    fn exact_rumi_home_cwd_is_recoverable() {
+        let config = test_config();
+        let listener = PortListener {
+            pid: 100,
+            command: "/opt/homebrew/bin/python3 -m app".into(),
+            cwd: Some(config.rumi_home.to_string_lossy().into_owned()),
+        };
+
+        assert_eq!(
+            identify_owned_listener(&listener, &config),
+            Some(ListenerIdentity::MatchingWorkingDirectory),
+        );
     }
 
     #[test]
-    fn detects_bundled_rumi_process_from_command_only() {
-        assert!(is_likely_rumi_process(
-            "/Users/haru/Library/Application Support/dev.rumiai.app/python/bin/python3 app.py",
-            None,
-        ));
+    fn exact_venv_python_command_is_recoverable() {
+        let config = test_config();
+        let listener = PortListener {
+            pid: 101,
+            command: format!("{} -m app", config.venv_python().display()),
+            cwd: None,
+        };
+
+        assert_eq!(
+            identify_owned_listener(&listener, &config),
+            Some(ListenerIdentity::MatchingVenvPython),
+        );
     }
 
     #[test]
-    fn does_not_flag_foreign_python_process() {
-        assert!(!is_likely_rumi_process(
-            "/usr/bin/python3 /tmp/app.py",
-            Some("/tmp"),
-        ));
+    fn exact_entrypoint_path_is_recoverable() {
+        let config = test_config();
+        let listener = PortListener {
+            pid: 102,
+            command: format!(
+                "/usr/bin/python3 {}",
+                config.rumi_home.join("app.py").display()
+            ),
+            cwd: None,
+        };
+
+        assert_eq!(
+            identify_owned_listener(&listener, &config),
+            Some(ListenerIdentity::MatchingEntrypointPath),
+        );
+    }
+
+    #[test]
+    fn does_not_flag_foreign_python_process_from_other_rumi_checkout() {
+        let config = test_config();
+        let listener = PortListener {
+            pid: 103,
+            command: "/usr/bin/python3 -m app".into(),
+            cwd: Some("/Users/haru/dev/rumi-playground/rumi_ai_1_10".into()),
+        };
+
+        assert_eq!(identify_owned_listener(&listener, &config), None);
+    }
+
+    #[test]
+    fn does_not_flag_non_python_process_even_if_path_mentions_rumi_home() {
+        let config = test_config();
+        let listener = PortListener {
+            pid: 104,
+            command: format!(
+                "/usr/bin/node {}",
+                config.rumi_home.join("app.js").display()
+            ),
+            cwd: Some(config.rumi_home.to_string_lossy().into_owned()),
+        };
+
+        assert_eq!(identify_owned_listener(&listener, &config), None);
     }
 }
