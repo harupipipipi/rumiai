@@ -51,9 +51,8 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
     let menu = Menu::with_items(app, &[&open_i, &restart_i, &update_i, &quit_i])?;
 
-    let _ = TrayIconBuilder::with_id("main-tray")
+    let mut tray_builder = TrayIconBuilder::with_id("main-tray")
         .tooltip("Rumi AI")
-        .icon(app.default_window_icon().unwrap().clone())
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
@@ -62,10 +61,16 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             }
             "restart_kernel" => {
                 let km = get_km(app);
-                let mut guard = km.lock().unwrap();
-                if let Err(e) = guard.restart() {
-                    error!("Failed to restart kernel: {e}");
-                }
+                match km.lock() {
+                    Ok(mut guard) => {
+                        if let Err(e) = guard.restart() {
+                            error!("Failed to restart kernel: {e}");
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to lock kernel manager: {e}");
+                    }
+                };
             }
             "check_update" => {
                 std::thread::spawn(|| match updater::check_for_update() {
@@ -88,9 +93,14 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             }
             "quit" => {
                 let km = get_km(app);
-                let mut guard = km.lock().unwrap();
-                let _ = guard.stop();
-                drop(guard);
+                match km.lock() {
+                    Ok(mut guard) => {
+                        let _ = guard.stop();
+                    }
+                    Err(e) => {
+                        error!("Failed to lock kernel manager during quit: {e}");
+                    }
+                };
                 drop(km);
                 app.exit(0);
             }
@@ -106,8 +116,15 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 let app = tray.app_handle();
                 show_primary_window(&app);
             }
-        })
-        .build(app)?;
+        });
+
+    if let Some(icon) = app.default_window_icon() {
+        tray_builder = tray_builder.icon(icon.clone());
+    } else {
+        info!("Default window icon is unavailable; continuing without a tray icon image");
+    }
+
+    let _ = tray_builder.build(app)?;
 
     Ok(())
 }

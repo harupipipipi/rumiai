@@ -196,11 +196,7 @@ fn ensure_python(config: &AppConfig) -> Result<()> {
     let prefix = format!("cpython-{PYTHON_MINOR}");
     let found = fs::read_dir(&tmp_dir)?
         .filter_map(|e| e.ok())
-        .find(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .starts_with(&prefix)
-        });
+        .find(|e| e.file_name().to_string_lossy().starts_with(&prefix));
 
     let extracted = match found {
         Some(entry) => entry.path(),
@@ -235,9 +231,19 @@ fn ensure_python(config: &AppConfig) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 fn ensure_venv(config: &AppConfig) -> Result<()> {
-    if config.venv_dir.exists() {
+    let venv_python = config.venv_python();
+    if venv_python.exists() {
         info!("venv already present at {}", config.venv_dir.display());
         return Ok(());
+    }
+
+    if config.venv_dir.exists() {
+        info!(
+            "venv directory exists but {} is missing; recreating the venv",
+            venv_python.display()
+        );
+        fs::remove_dir_all(&config.venv_dir)
+            .with_context(|| format!("failed to remove {}", config.venv_dir.display()))?;
     }
 
     info!("Creating venv ...");

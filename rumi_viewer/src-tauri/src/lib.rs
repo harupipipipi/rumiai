@@ -13,8 +13,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use anyhow::{bail, Context, Result as AnyResult};
-use log::{error, info};
+use anyhow::{anyhow, bail, Context, Result as AnyResult};
+use log::{error, info, warn};
 use rand::{distributions::Alphanumeric, Rng};
 use serde::Deserialize;
 use tauri::Manager;
@@ -40,7 +40,13 @@ struct ApiEnvelope<T> {
 /// Returns the current setup progress message.
 #[tauri::command]
 fn get_setup_progress(state: tauri::State<'_, SetupProgress>) -> String {
-    state.0.lock().unwrap().clone()
+    match state.0.lock() {
+        Ok(progress) => progress.clone(),
+        Err(error) => {
+            error!("Setup progress lock poisoned: {error}");
+            "Setup status unavailable".to_string()
+        }
+    }
 }
 
 /// Restart the Kernel process.
@@ -81,7 +87,9 @@ fn request_panel_bootstrap_code(port: u16, bootstrap_secret: &str) -> AnyResult<
         .json()
         .context("failed to decode panel bootstrap response")?;
     if !envelope.success {
-        bail!(envelope.error.unwrap_or_else(|| "panel bootstrap failed".into()));
+        bail!(envelope
+            .error
+            .unwrap_or_else(|| "panel bootstrap failed".into()));
     }
 
     let payload = envelope
@@ -93,10 +101,7 @@ fn request_panel_bootstrap_code(port: u16, bootstrap_secret: &str) -> AnyResult<
     Ok(payload.code)
 }
 
-fn request_panel_bootstrap_code_with_retry(
-    port: u16,
-    bootstrap_secret: &str,
-) -> AnyResult<String> {
+fn request_panel_bootstrap_code_with_retry(port: u16, bootstrap_secret: &str) -> AnyResult<String> {
     let max_attempts = 10;
     let retry_delay = Duration::from_millis(500);
     let mut last_error = None;
@@ -113,7 +118,104 @@ fn request_panel_bootstrap_code_with_retry(
         }
     }
 
-    Err(last_error.expect("bootstrap retry should capture at least one error"))
+    match last_error {
+        Some(error) => Err(error),
+        None => bail!("panel bootstrap retry finished without making a request"),
+    }
+}
+
+fn update_setup_progress(progress: &Arc<Mutex<String>>, msg: &str) {
+    match progress.lock() {
+        Ok(mut state) => {
+            *state = msg.to_string();
+        }
+        Err(error) => {
+            error!("Failed to update setup progress: {error}");
+        }
+    }
+    info!("{msg}");
+}
+
+fn startup_failure_message(stage: &str, error: &anyhow::Error, config: &AppConfig) -> String {
+    let log_path = config.log_dir.join("kernel.log");
+    format!(
+        "Error: {stage} failed — {error}. See {}",
+        log_path.display()
+    )
+}
+
+fn start_kernel_and_bootstrap(
+    km: &Arc<Mutex<KernelManager>>,
+    port: u16,
+    bootstrap_secret: &str,
+    progress: &Arc<Mutex<String>>,
+) -> AnyResult<String> {
+    let mut recovered_conflict = false;
+
+    loop {
+        update_setup_progress(
+            progress,
+            if recovered_conflict {
+                "Retrying Kernel startup after recovering a stale listener..."
+            } else {
+                "Starting Kernel..."
+            },
+        );
+
+        {
+            let mut kernel = km
+                .lock()
+                .map_err(|error| anyhow!("kernel manager lock poisoned: {error}"))?;
+            kernel.start()?;
+        }
+
+        update_setup_progress(progress, "Waiting for Kernel...");
+        if let Err(error) = health_check::wait_for_healthy(port, 60) {
+            if recovered_conflict {
+                return Err(error);
+            }
+
+            let recovered = {
+                let mut kernel = km
+                    .lock()
+                    .map_err(|lock_error| anyhow!("kernel manager lock poisoned: {lock_error}"))?;
+                kernel.recover_port_conflict()?
+            };
+
+            if let Some(message) = recovered {
+                warn!("{message}");
+                recovered_conflict = true;
+                continue;
+            }
+
+            return Err(error);
+        }
+
+        update_setup_progress(progress, "Authorizing panel session...");
+        match request_panel_bootstrap_code_with_retry(port, bootstrap_secret) {
+            Ok(code) => return Ok(code),
+            Err(error) => {
+                if recovered_conflict {
+                    return Err(error);
+                }
+
+                let recovered = {
+                    let mut kernel = km.lock().map_err(|lock_error| {
+                        anyhow!("kernel manager lock poisoned: {lock_error}")
+                    })?;
+                    kernel.recover_port_conflict()?
+                };
+
+                if let Some(message) = recovered {
+                    warn!("{message}");
+                    recovered_conflict = true;
+                    continue;
+                }
+
+                return Err(error);
+            }
+        }
+    }
 }
 
 pub fn run() {
@@ -145,14 +247,14 @@ pub fn run() {
             let resource_dir = app
                 .path()
                 .resource_dir()
-                .expect("failed to resolve resource_dir");
+                .context("failed to resolve resource_dir")?;
             let app_data_dir = app
                 .path()
                 .app_data_dir()
-                .expect("failed to resolve app_data_dir");
+                .context("failed to resolve app_data_dir")?;
 
             let config = AppConfig::detect_for_tauri(resource_dir, app_data_dir)
-                .expect("failed to build AppConfig");
+                .context("failed to build AppConfig")?;
 
             std::fs::create_dir_all(&config.log_dir).ok();
             std::fs::create_dir_all(&config.user_data_dir).ok();
@@ -181,54 +283,30 @@ pub fn run() {
             let port = config.kernel_port;
 
             std::thread::spawn(move || {
-                let set_progress = |msg: &str| {
-                    if let Ok(mut p) = progress_arc.lock() {
-                        *p = msg.to_string();
-                    }
-                    info!("{msg}");
-                };
-
-                set_progress("Checking Python environment...");
+                update_setup_progress(&progress_arc, "Checking Python environment...");
                 if let Err(e) = python_env::ensure_python_env(&config) {
-                    let msg = format!("Error: Python setup failed — {e}");
+                    let msg = startup_failure_message("Python setup", &e, &config);
                     error!("{msg}");
-                    set_progress(&msg);
+                    update_setup_progress(&progress_arc, &msg);
                     return;
                 }
 
-                set_progress("Starting Kernel...");
-                {
-                    let mut km = km_for_thread.lock().unwrap();
-                    if let Err(e) = km.start() {
-                        let msg = format!("Error: Kernel start failed — {e}");
-                        error!("{msg}");
-                        set_progress(&msg);
-                        return;
-                    }
-                }
-
-                set_progress("Waiting for Kernel...");
-                if let Err(e) = health_check::wait_for_healthy(port, 60) {
-                    let msg = format!("Error: Kernel health check failed — {e}");
-                    error!("{msg}");
-                    set_progress(&msg);
-                    return;
-                }
-
-                set_progress("Ready");
-
-                let panel_code = match request_panel_bootstrap_code_with_retry(
+                let panel_code = match start_kernel_and_bootstrap(
+                    &km_for_thread,
                     port,
                     &panel_bootstrap_secret,
+                    &progress_arc,
                 ) {
                     Ok(code) => code,
                     Err(e) => {
-                        let msg = format!("Error: Panel bootstrap failed — {e}");
+                        let msg = startup_failure_message("Viewer startup", &e, &config);
                         error!("{msg}");
-                        set_progress(&msg);
+                        update_setup_progress(&progress_arc, &msg);
                         return;
                     }
                 };
+
+                update_setup_progress(&progress_arc, "Ready");
 
                 if let Some(win) = handle.get_webview_window("main") {
                     let js = format!(
@@ -269,5 +347,5 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![get_setup_progress, restart_kernel])
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .unwrap_or_else(|error| error!("error while running tauri application: {error}"));
 }
