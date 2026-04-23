@@ -7,7 +7,10 @@
 //! - Auto-restart on unexpected exit (max 3 times).
 
 use std::fs;
+use std::io::ErrorKind;
 use std::process::{Child, Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use log::{error, info, warn};
@@ -22,6 +25,23 @@ const MAX_AUTO_RESTARTS: u32 = 3;
 
 /// Seconds to wait after SIGTERM before sending SIGKILL.
 const KILL_TIMEOUT_SECS: u64 = 5;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PortListener {
+    pid: u32,
+    command: String,
+    cwd: Option<String>,
+    likely_rumi: bool,
+}
+
+impl PortListener {
+    fn summary(&self) -> String {
+        match self.cwd.as_deref() {
+            Some(cwd) if !cwd.is_empty() => format!("{} (cwd={cwd})", self.command),
+            _ => self.command.clone(),
+        }
+    }
+}
 
 /// Manages a single Kernel child process.
 pub struct KernelManager {
@@ -53,6 +73,10 @@ impl KernelManager {
         if self.is_running() {
             info!("Kernel already running, skipping start");
             return Ok(());
+        }
+
+        if let Some(message) = self.recover_port_conflict()? {
+            warn!("{message}");
         }
 
         let venv_python = self.config.venv_python();
@@ -118,6 +142,47 @@ impl KernelManager {
         self.child = Some(child);
         self.last_exit_code = None;
         Ok(())
+    }
+
+    pub fn current_pid(&self) -> Option<u32> {
+        self.child.as_ref().map(Child::id)
+    }
+
+    pub fn recover_port_conflict(&mut self) -> Result<Option<String>> {
+        let port = self.config.kernel_port;
+        let Some(listener) = detect_port_listener(port)? else {
+            return Ok(None);
+        };
+
+        if Some(listener.pid) == self.current_pid() {
+            return Ok(None);
+        }
+
+        if !listener.likely_rumi {
+            bail!(
+                "port {port} is already in use by pid {} ({})",
+                listener.pid,
+                listener.summary(),
+            );
+        }
+
+        warn!(
+            "Detected stale Rumi-like listener on port {port}: pid {} ({})",
+            listener.pid,
+            listener.summary(),
+        );
+
+        if self.child.is_some() {
+            self.stop().ok();
+        }
+
+        terminate_external_listener(listener.pid, port)?;
+        self.restart_count = 0;
+
+        Ok(Some(format!(
+            "Recovered stale Rumi-like listener on port {port} from pid {}",
+            listener.pid
+        )))
     }
 
     /// Stop the Kernel process.
@@ -239,6 +304,251 @@ impl KernelManager {
     }
 }
 
+fn detect_port_listener(port: u16) -> Result<Option<PortListener>> {
+    #[cfg(unix)]
+    {
+        detect_port_listener_unix(port)
+    }
+
+    #[cfg(windows)]
+    {
+        detect_port_listener_windows(port)
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = port;
+        Ok(None)
+    }
+}
+
+#[cfg(unix)]
+fn detect_port_listener_unix(port: u16) -> Result<Option<PortListener>> {
+    let output = match Command::new("lsof")
+        .args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-Fpc"])
+        .output()
+    {
+        Ok(output) => output,
+        Err(error) if error.kind() == ErrorKind::NotFound => {
+            warn!("`lsof` is not available; port-conflict recovery is disabled");
+            return Ok(None);
+        }
+        Err(error) => return Err(error).context("failed to run lsof"),
+    };
+
+    if !output.status.success() {
+        if output.status.code() == Some(1) {
+            return Ok(None);
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("lsof exited with {}: {}", output.status, stderr.trim());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut pid = None;
+    let mut short_name = None;
+
+    for line in stdout.lines() {
+        if let Some(rest) = line.strip_prefix('p') {
+            pid = rest.trim().parse::<u32>().ok();
+        } else if let Some(rest) = line.strip_prefix('c') {
+            short_name = Some(rest.trim().to_string());
+        }
+    }
+
+    let Some(pid) = pid else {
+        return Ok(None);
+    };
+
+    let command = unix_process_command(pid)
+        .or(short_name)
+        .unwrap_or_else(|| "unknown".to_string());
+    let cwd = unix_process_cwd(pid);
+    let likely_rumi = is_likely_rumi_process(&command, cwd.as_deref());
+
+    Ok(Some(PortListener {
+        pid,
+        command,
+        cwd,
+        likely_rumi,
+    }))
+}
+
+#[cfg(windows)]
+fn detect_port_listener_windows(port: u16) -> Result<Option<PortListener>> {
+    let output = Command::new("netstat")
+        .args(["-ano", "-p", "tcp"])
+        .output()
+        .context("failed to run netstat")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("netstat exited with {}: {}", output.status, stderr.trim());
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        let columns: Vec<&str> = line.split_whitespace().collect();
+        if columns.len() < 5 {
+            continue;
+        }
+        let local = columns[1];
+        let state = columns[3];
+        let pid = columns[4];
+        if state != "LISTENING" {
+            continue;
+        }
+        if !(local.ends_with(&format!(":{port}")) || local.ends_with(&format!("]:{port}"))) {
+            continue;
+        }
+        if let Ok(pid) = pid.parse::<u32>() {
+            let command = windows_process_command(pid).unwrap_or_else(|| "unknown".to_string());
+            let likely_rumi = is_likely_rumi_process(&command, None);
+            return Ok(Some(PortListener {
+                pid,
+                command,
+                cwd: None,
+                likely_rumi,
+            }));
+        }
+    }
+
+    Ok(None)
+}
+
+#[cfg(unix)]
+fn unix_process_command(pid: u32) -> Option<String> {
+    let output = Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "command="])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!text.is_empty()).then_some(text)
+}
+
+#[cfg(unix)]
+fn unix_process_cwd(pid: u32) -> Option<String> {
+    let output = Command::new("lsof")
+        .args(["-a", "-p", &pid.to_string(), "-d", "cwd", "-Fn"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        if let Some(rest) = line.strip_prefix('n') {
+            let cwd = rest.trim().to_string();
+            if !cwd.is_empty() {
+                return Some(cwd);
+            }
+        }
+    }
+
+    None
+}
+
+#[cfg(windows)]
+fn windows_process_command(pid: u32) -> Option<String> {
+    let output = Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!text.is_empty() && !text.starts_with("INFO:")).then_some(text)
+}
+
+fn is_likely_rumi_process(command: &str, cwd: Option<&str>) -> bool {
+    let command = command.to_ascii_lowercase();
+    let cwd = cwd.unwrap_or_default().to_ascii_lowercase();
+    let combined = format!("{command} {cwd}");
+    let has_rumi_marker = combined.contains("rumi_ai")
+        || combined.contains("rumiai")
+        || combined.contains("dev.rumiai.app");
+    let has_python_app_marker =
+        command.contains("python") && (command.contains("app.py") || command.contains("-m app"));
+
+    has_rumi_marker || (has_python_app_marker && cwd.contains("rumi"))
+}
+
+fn terminate_external_listener(pid: u32, port: u16) -> Result<()> {
+    #[cfg(unix)]
+    {
+        let pid_str = pid.to_string();
+        let _ = Command::new("kill").args(["-TERM", &pid_str]).status();
+        wait_for_port_to_clear(port, pid, Duration::from_secs(KILL_TIMEOUT_SECS))?;
+        return Ok(());
+    }
+
+    #[cfg(windows)]
+    {
+        let status = Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .status()
+            .context("failed to run taskkill")?;
+        if !status.success() {
+            bail!("taskkill exited with {status}");
+        }
+        wait_for_port_to_clear(port, pid, Duration::from_secs(KILL_TIMEOUT_SECS))?;
+        return Ok(());
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (pid, port);
+        bail!("port-conflict recovery is not supported on this platform");
+    }
+}
+
+fn wait_for_port_to_clear(port: u16, expected_pid: u32, timeout: Duration) -> Result<()> {
+    let deadline = Instant::now() + timeout;
+
+    loop {
+        match detect_port_listener(port)? {
+            None => return Ok(()),
+            Some(listener) if listener.pid != expected_pid => {
+                bail!(
+                    "port {port} is now occupied by pid {} ({})",
+                    listener.pid,
+                    listener.summary(),
+                );
+            }
+            Some(_) if Instant::now() >= deadline => break,
+            Some(_) => thread::sleep(Duration::from_millis(250)),
+        }
+    }
+
+    #[cfg(unix)]
+    {
+        warn!("Port {port} is still occupied after SIGTERM; sending SIGKILL to pid {expected_pid}");
+        let _ = Command::new("kill")
+            .args(["-KILL", &expected_pid.to_string()])
+            .status();
+        let kill_deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < kill_deadline {
+            match detect_port_listener(port)? {
+                None => return Ok(()),
+                Some(listener) if listener.pid != expected_pid => {
+                    bail!(
+                        "port {port} is now occupied by pid {} ({})",
+                        listener.pid,
+                        listener.summary(),
+                    );
+                }
+                Some(_) => thread::sleep(Duration::from_millis(200)),
+            }
+        }
+    }
+
+    bail!("port {port} remained occupied by pid {expected_pid}")
+}
+
 impl Drop for KernelManager {
     fn drop(&mut self) {
         if self.is_running() {
@@ -322,5 +632,29 @@ mod tests {
         assert!(development_auto_approve);
 
         std::env::remove_var("RUMI_AUTO_APPROVE_LOCAL");
+    }
+
+    #[test]
+    fn detects_rumi_process_from_command_and_cwd() {
+        assert!(is_likely_rumi_process(
+            "/opt/homebrew/bin/python3 -m app",
+            Some("/Users/haru/Desktop/puroguramukei/rumi_ai_mac/rumi_ai_1_10"),
+        ));
+    }
+
+    #[test]
+    fn detects_bundled_rumi_process_from_command_only() {
+        assert!(is_likely_rumi_process(
+            "/Users/haru/Library/Application Support/dev.rumiai.app/python/bin/python3 app.py",
+            None,
+        ));
+    }
+
+    #[test]
+    fn does_not_flag_foreign_python_process() {
+        assert!(!is_likely_rumi_process(
+            "/usr/bin/python3 /tmp/app.py",
+            Some("/tmp"),
+        ));
     }
 }
