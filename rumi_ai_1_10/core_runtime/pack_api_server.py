@@ -524,9 +524,15 @@ class PackAPIHandler(
         else:
             self._send_response(APIResponse(True, data=result))
     
-    def _check_rate_limit(self) -> bool:
+    @staticmethod
+    def _is_loopback_ip(ip: str) -> bool:
+        return ip in {"127.0.0.1", "::1", "::ffff:127.0.0.1", "localhost"}
+
+    def _check_rate_limit(self, path: str) -> bool:
         """レート制限チェック。制限超過なら 429 を返して False。"""
         ip = self.client_address[0]
+        if self._is_loopback_ip(ip) and (path.startswith("/api/panel/") or path.startswith("/panel") or path.startswith("/api/setup/")):
+            return True
         if not _rate_limiter.is_allowed(ip):
             self.send_error(429, "Too Many Requests")
             return False
@@ -981,13 +987,13 @@ class PackAPIHandler(
 
     
     def do_GET(self) -> None:
-        if not self._check_rate_limit():
+        _pre_auth_path = urlparse(self.path).path
+        if not self._check_rate_limit(_pre_auth_path):
             return
         self._request_auth_mode = None
         self._panel_session = None
 
         # --- システムルート（テーブル化対象外）---
-        _pre_auth_path = urlparse(self.path).path
         if _pre_auth_path == "/health":
             _alm = self.__class__.app_lifecycle_manager
             if _alm is not None:
@@ -1207,14 +1213,14 @@ class PackAPIHandler(
             self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
     
     def do_POST(self) -> None:
-        if not self._check_rate_limit():
+        _pre_auth_path_post = urlparse(self.path).path
+        if not self._check_rate_limit(_pre_auth_path_post):
             return
         self._request_auth_mode = None
         self._panel_session = None
         result: Any = None
 
         # --- テーブル駆動: pre-auth API ルート ---
-        _pre_auth_path_post = urlparse(self.path).path
         _is_pre_auth_post = self._is_pre_auth_route("POST", _pre_auth_path_post)
 
         if _is_pre_auth_post:
@@ -1677,13 +1683,13 @@ class PackAPIHandler(
 
     def do_PUT(self) -> None:
         """PUT メソッド — Panel API + Pack独自ルート"""
-        if not self._check_rate_limit():
+        _pre_auth_path_put = urlparse(self.path).path
+        if not self._check_rate_limit(_pre_auth_path_put):
             return
         self._request_auth_mode = None
         self._panel_session = None
         result: Any = None
         # --- テーブル駆動: 認証チェック ---
-        _pre_auth_path_put = urlparse(self.path).path
         if not self._is_pre_auth_route("PUT", _pre_auth_path_put) and not self._check_auth("PUT", _pre_auth_path_put):
             self._discard_request_body()
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
@@ -1710,13 +1716,13 @@ class PackAPIHandler(
             _log_internal_error("do_PUT", e)
             self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
     def do_DELETE(self) -> None:
-        if not self._check_rate_limit():
+        _pre_auth_path_del = urlparse(self.path).path
+        if not self._check_rate_limit(_pre_auth_path_del):
             return
         self._request_auth_mode = None
         self._panel_session = None
         result: Any = None
         # --- テーブル駆動: 認証チェック ---
-        _pre_auth_path_del = urlparse(self.path).path
         if not self._is_pre_auth_route("DELETE", _pre_auth_path_del) and not self._check_auth("DELETE", _pre_auth_path_del):
             self._send_response(APIResponse(False, error="Unauthorized"), 401)
             return

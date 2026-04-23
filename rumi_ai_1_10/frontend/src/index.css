@@ -37,6 +37,26 @@
     --accent: #6366f1;
     --accent-fg: #ffffff;
     --radius: 0.75rem;
+    --flow-canvas-top: rgba(255, 222, 150, 0.78);
+    --flow-canvas-bottom: #fff1c9;
+    --flow-grid-color: rgba(211, 136, 58, 0.32);
+    --flow-edge: #e1764c;
+    --flow-edge-selected: #b44be2;
+    --flow-node-fill: #fffaf0;
+    --flow-node-border: #e46f53;
+    --flow-node-shadow: rgba(224, 120, 71, 0.24);
+    --flow-node-cap: #ef5a79;
+    --flow-node-cap-text: #fff7fb;
+    --flow-node-text: #7a3518;
+    --flow-node-muted: rgba(122, 53, 24, 0.72);
+    --flow-port-fill: #fff5db;
+    --flow-port-border: #f1a14f;
+    --flow-port-handle: #f37f5f;
+    --flow-port-handle-border: #fce6ad;
+    --flow-node-selected: #8b5cf6;
+    --flow-node-running: #38bdf8;
+    --flow-node-success: #34d399;
+    --flow-node-error: #fb7185;
   }
 
   :root.dark {
@@ -48,6 +68,26 @@
     --text-main: #f5f5f5;
     --text-muted: #a3a3a3;
     --border: #262626;
+    --flow-canvas-top: rgba(255, 194, 102, 0.16);
+    --flow-canvas-bottom: #140f0b;
+    --flow-grid-color: rgba(255, 173, 84, 0.18);
+    --flow-edge: #e58a5d;
+    --flow-edge-selected: #d67cff;
+    --flow-node-fill: #ffe4a6;
+    --flow-node-border: #f08b5b;
+    --flow-node-shadow: rgba(0, 0, 0, 0.35);
+    --flow-node-cap: #f04d74;
+    --flow-node-cap-text: #fff7fb;
+    --flow-node-text: #5a2608;
+    --flow-node-muted: rgba(90, 38, 8, 0.72);
+    --flow-port-fill: #ffeab7;
+    --flow-port-border: #f2a24a;
+    --flow-port-handle: #ea6b4b;
+    --flow-port-handle-border: #fff2bf;
+    --flow-node-selected: #c084fc;
+    --flow-node-running: #7dd3fc;
+    --flow-node-success: #6ee7b7;
+    --flow-node-error: #fda4af;
   }
 
   /* ----------------------------------
@@ -65,6 +105,22 @@
     --accent: #d97757;
     --accent-fg: #ffffff;
     --radius: 0.5rem;
+    --flow-canvas-top: rgba(234, 196, 152, 0.5);
+    --flow-canvas-bottom: #f6ede2;
+    --flow-grid-color: rgba(176, 126, 83, 0.28);
+    --flow-edge: #c97c52;
+    --flow-edge-selected: #9f5de2;
+    --flow-node-fill: #fffaf3;
+    --flow-node-border: #cb8667;
+    --flow-node-shadow: rgba(148, 98, 70, 0.2);
+    --flow-node-cap: #c86d5d;
+    --flow-node-cap-text: #fffaf7;
+    --flow-node-text: #5b3525;
+    --flow-node-muted: rgba(91, 53, 37, 0.7);
+    --flow-port-fill: #fdf3e7;
+    --flow-port-border: #d9a06b;
+    --flow-port-handle: #c97c52;
+    --flow-port-handle-border: #fff0d7;
   }
 
   :root.dark.theme-minimal {
@@ -76,6 +132,22 @@
     --text-main: #ececec;
     --text-muted: #8e8e8e;
     --border: #2a2a2a;
+    --flow-canvas-top: rgba(201, 124, 82, 0.16);
+    --flow-canvas-bottom: #14110f;
+    --flow-grid-color: rgba(201, 124, 82, 0.18);
+    --flow-edge: #d59a73;
+    --flow-edge-selected: #c084fc;
+    --flow-node-fill: #f5dcc7;
+    --flow-node-border: #c97c52;
+    --flow-node-shadow: rgba(0, 0, 0, 0.36);
+    --flow-node-cap: #b85f4f;
+    --flow-node-cap-text: #fff8f5;
+    --flow-node-text: #4d2a1b;
+    --flow-node-muted: rgba(77, 42, 27, 0.7);
+    --flow-port-fill: #f3e0cf;
+    --flow-port-border: #d59a73;
+    --flow-port-handle: #c97c52;
+    --flow-port-handle-border: #fff0d7;
   }
 
   /* ----------------------------------
@@ -93,6 +165,22 @@
     --accent: #10a37f;
     --accent-fg: #ffffff;
     --radius: 0.5rem;
+    --flow-canvas-top: rgba(166, 226, 214, 0.4);
+    --flow-canvas-bottom: #edf8f4;
+    --flow-grid-color: rgba(16, 163, 127, 0.22);
+    --flow-edge: #14967a;
+    --flow-edge-selected: #8b5cf6;
+    --flow-node-fill: #f7fffc;
+    --flow-node-border: #22a38c;
+    --flow-node-shadow: rgba(19, 122, 99, 0.2);
+    --flow-node-cap: #0f8b75;
+    --flow-node-cap-text: #f4fffd;
+    --flow-node-text: #0d4f43;
+    --flow-node-muted: rgba(13, 79, 67, 0.68);
+    --flow-port-fill: #effcf7;
+    --flow-port-border: #55c3a8;
+    --flow-port-handle: #10a37f;
+    --flow-port-handle-border: #d4fff1;
   }
 
   :root.dark.theme-standard {
@@ -104,6 +192,22 @@
     --text-main: #ececec;
     --text-muted: #b4b4b4;
     --border: #424242;
+    --flow-canvas-top: rgba(16, 163, 127, 0.15);
+    --flow-canvas-bottom: #0d1715;
+    --flow-grid-color: rgba(78, 203, 171, 0.16);
+    --flow-edge: #4cd3b2;
+    --flow-edge-selected: #c084fc;
+    --flow-node-fill: #b7f3e1;
+    --flow-node-border: #1a9d81;
+    --flow-node-shadow: rgba(0, 0, 0, 0.38);
+    --flow-node-cap: #117764;
+    --flow-node-cap-text: #effff9;
+    --flow-node-text: #0a4037;
+    --flow-node-muted: rgba(10, 64, 55, 0.7);
+    --flow-port-fill: #d9fff4;
+    --flow-port-border: #5bd4b7;
+    --flow-port-handle: #159879;
+    --flow-port-handle-border: #e3fff7;
   }
 
   /* ----------------------------------
@@ -121,6 +225,22 @@
     --accent: #0b57d0;
     --accent-fg: #ffffff;
     --radius: 1.5rem;
+    --flow-canvas-top: rgba(181, 206, 255, 0.45);
+    --flow-canvas-bottom: #eef4ff;
+    --flow-grid-color: rgba(84, 130, 255, 0.22);
+    --flow-edge: #5b7cff;
+    --flow-edge-selected: #d66bff;
+    --flow-node-fill: #f9fbff;
+    --flow-node-border: #6b8cff;
+    --flow-node-shadow: rgba(79, 107, 199, 0.2);
+    --flow-node-cap: #5a73f3;
+    --flow-node-cap-text: #f8faff;
+    --flow-node-text: #243a7a;
+    --flow-node-muted: rgba(36, 58, 122, 0.68);
+    --flow-port-fill: #f1f5ff;
+    --flow-port-border: #9ab0ff;
+    --flow-port-handle: #6b8cff;
+    --flow-port-handle-border: #edf2ff;
   }
 
   :root.dark.theme-rounded {
@@ -134,6 +254,22 @@
     --border: #444746;
     --accent: #a8c7fa;
     --accent-fg: #041e49;
+    --flow-canvas-top: rgba(120, 150, 255, 0.16);
+    --flow-canvas-bottom: #0d1323;
+    --flow-grid-color: rgba(145, 170, 255, 0.18);
+    --flow-edge: #8ea7ff;
+    --flow-edge-selected: #d48dff;
+    --flow-node-fill: #d9e4ff;
+    --flow-node-border: #7c9bff;
+    --flow-node-shadow: rgba(0, 0, 0, 0.38);
+    --flow-node-cap: #617cf0;
+    --flow-node-cap-text: #f8faff;
+    --flow-node-text: #1f3270;
+    --flow-node-muted: rgba(31, 50, 112, 0.68);
+    --flow-port-fill: #eaf0ff;
+    --flow-port-border: #a8bbff;
+    --flow-port-handle: #7c9bff;
+    --flow-port-handle-border: #f3f6ff;
   }
 
   body {
@@ -144,22 +280,111 @@
 
   .flow-canvas {
     background:
-      radial-gradient(circle at top, rgba(255, 219, 140, 0.18), transparent 32%),
-      linear-gradient(180deg, rgba(28, 18, 10, 0.96) 0%, rgba(18, 12, 8, 1) 100%);
+      radial-gradient(circle at top, var(--flow-canvas-top), transparent 36%),
+      linear-gradient(180deg, color-mix(in srgb, var(--flow-canvas-bottom) 88%, #ffffff 12%) 0%, var(--flow-canvas-bottom) 100%);
   }
 
   .flow-grid {
     background:
-      linear-gradient(180deg, rgba(255, 211, 127, 0.08) 0%, rgba(255, 176, 61, 0.02) 100%);
+      linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0) 100%);
   }
 
   .react-flow__edge-path {
-    stroke: #f2a24a !important;
+    stroke: var(--flow-edge) !important;
     stroke-width: 2px !important;
   }
 
   .react-flow__edge.selected .react-flow__edge-path {
-    stroke: #ffd484 !important;
+    stroke: var(--flow-edge-selected) !important;
+  }
+
+  .flow-node-shell {
+    color: var(--flow-node-text);
+    filter: drop-shadow(0 20px 28px var(--flow-node-shadow));
+  }
+
+  .flow-node-card {
+    position: relative;
+    border: 3px solid var(--flow-node-border);
+    border-radius: 1.75rem;
+    background: linear-gradient(180deg, color-mix(in srgb, var(--flow-node-fill) 88%, #ffffff 12%) 0%, var(--flow-node-fill) 100%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  }
+
+  .flow-node-shell.is-selected .flow-node-card {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--flow-node-selected) 44%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+    border-color: color-mix(in srgb, var(--flow-node-selected) 62%, var(--flow-node-border));
+  }
+
+  .flow-node-shell.is-running .flow-node-card {
+    border-color: color-mix(in srgb, var(--flow-node-running) 55%, var(--flow-node-border));
+  }
+
+  .flow-node-shell.is-success .flow-node-card {
+    border-color: color-mix(in srgb, var(--flow-node-success) 55%, var(--flow-node-border));
+  }
+
+  .flow-node-shell.is-error .flow-node-card {
+    border-color: color-mix(in srgb, var(--flow-node-error) 55%, var(--flow-node-border));
+  }
+
+  .flow-node-cap {
+    display: inline-flex;
+    max-width: calc(100% - 2rem);
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: 1rem;
+    margin-bottom: -0.7rem;
+    position: relative;
+    z-index: 2;
+    padding: 0.4rem 0.85rem;
+    border-radius: 999px;
+    background: var(--flow-node-cap);
+    color: var(--flow-node-cap-text);
+    font-size: 0.75rem;
+    font-weight: 700;
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.15);
+  }
+
+  .flow-node-body {
+    padding: 1.2rem 1rem 1rem;
+  }
+
+  .flow-node-subtitle {
+    margin-bottom: 0.8rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--flow-node-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .flow-port-pill {
+    border-color: color-mix(in srgb, var(--flow-port-border) 82%, white 18%);
+    background: color-mix(in srgb, var(--flow-port-fill) 92%, white 8%);
+    color: var(--flow-node-text);
+  }
+
+  .flow-port-handle {
+    width: 15px !important;
+    height: 15px !important;
+    border-color: var(--flow-port-handle-border) !important;
+    background: var(--flow-port-handle) !important;
+  }
+
+  .flow-port-row .react-flow__handle-left {
+    left: -10px !important;
+  }
+
+  .flow-port-row .react-flow__handle-right {
+    right: -10px !important;
+  }
+
+  .flow-reroute-node {
+    color: var(--flow-node-text);
+    border-color: var(--flow-port-border);
+    background: var(--flow-node-fill);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--flow-port-border) 26%, transparent);
   }
 
   /* React Flow Controls Override */
@@ -202,5 +427,14 @@
     width: 16px !important;
     height: 16px !important;
     fill: currentColor !important;
+  }
+
+  .scrollbar-hidden {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hidden::-webkit-scrollbar {
+    display: none;
   }
 }

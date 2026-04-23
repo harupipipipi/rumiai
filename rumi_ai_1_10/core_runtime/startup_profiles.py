@@ -398,6 +398,7 @@ class StartupProfileManager:
                 continue
             default_enabled = bool(ecosystem.get("enabled", True))
             enabled = bool(enabled_overrides.get(loc.pack_id, default_enabled))
+            approval_issues = self._approval_runtime_issues(loc.pack_id)
             discovered[loc.pack_id] = {
                 "pack_id": loc.pack_id,
                 "pack_identity": str(ecosystem.get("pack_identity", "")),
@@ -405,10 +406,54 @@ class StartupProfileManager:
                 "description": str(ecosystem.get("metadata", {}).get("description", "")),
                 "components": ecosystem.get("components", {}),
                 "enabled": enabled,
+                "approval_issues": approval_issues,
                 "load_order": ecosystem.get("load_order", []),
                 "pack_subdir": loc.pack_subdir,
             }
         return discovered
+
+    def _approval_runtime_issues(self, pack_id: str) -> List[str]:
+        try:
+            from .approval_manager import get_approval_manager
+        except Exception:
+            logger.debug("approval manager import is unavailable", exc_info=True)
+            return []
+
+        try:
+            approval_manager = get_approval_manager()
+        except Exception:
+            logger.debug("failed to load approval manager", exc_info=True)
+            return []
+
+        if approval_manager is None or not hasattr(approval_manager, "get_approval"):
+            return []
+
+        try:
+            approval = approval_manager.get_approval(pack_id)
+        except Exception:
+            logger.debug("failed to read pack approval for '%s'", pack_id, exc_info=True)
+            return []
+
+        if approval is None:
+            return []
+
+        try:
+            approved, reason = approval_manager.is_pack_approved_and_verified(pack_id)
+        except Exception:
+            logger.debug("failed to verify pack approval for '%s'", pack_id, exc_info=True)
+            return []
+
+        if approved:
+            return []
+
+        reason_key = str(reason or "").strip().lower()
+        if reason_key in {"modified", "hash_mismatch"}:
+            return [f"Pack '{pack_id}' changed since it was last approved. Re-approve it before launching."]
+        if reason_key == "blocked":
+            return [f"Pack '{pack_id}' is blocked and cannot be launched."]
+        if reason_key in {"not_approved", "not_found"}:
+            return [f"Pack '{pack_id}' needs approval before it can be launched."]
+        return [f"Pack '{pack_id}' is not ready for launch."]
 
     def _read_pack_enabled_overrides(self) -> Dict[str, bool]:
         path = self.storage_path.parent / "pack_enabled_overrides.json"
@@ -468,6 +513,7 @@ class StartupProfileManager:
         issues: List[str] = []
         if not pack.get("enabled", False):
             issues.append(f"Standard pack '{pack_id}' is disabled")
+        issues.extend(str(issue) for issue in pack.get("approval_issues", []) if issue)
         for slot in SLOT_SPECS:
             candidate = next(
                 (
@@ -528,6 +574,7 @@ class StartupProfileManager:
         matched_provides: List[str] = []
         runtime_issue_map: Dict[str, List[str]] = {}
         ready_component: Optional[Dict[str, str]] = None
+        approval_issues = [str(issue) for issue in pack.get("approval_issues", []) if issue]
 
         for component_key, component in components.items():
             if not isinstance(component, dict):
@@ -561,7 +608,8 @@ class StartupProfileManager:
         runtime_issues: List[str] = []
         if not pack.get("enabled", False):
             runtime_issues.append(f"Pack '{pack['pack_id']}' is disabled")
-        if ready_component is None:
+        runtime_issues.extend(approval_issues)
+        if ready_component is None and not approval_issues:
             for component_full_id, issues in runtime_issue_map.items():
                 if issues:
                     runtime_issues.extend(f"{component_full_id}: {issue}" for issue in issues)
@@ -569,7 +617,7 @@ class StartupProfileManager:
         return {
             "component_types": sorted(set(matched_component_types)),
             "provides": sorted(set(matched_provides)),
-            "runtime_ready": bool(pack.get("enabled", False)) and ready_component is not None,
+            "runtime_ready": bool(pack.get("enabled", False)) and not approval_issues and ready_component is not None,
             "runtime_issues": runtime_issues,
             "selected_component_id": (ready_component or {}).get("id", ""),
             "selected_component_type": (ready_component or {}).get("type", ""),

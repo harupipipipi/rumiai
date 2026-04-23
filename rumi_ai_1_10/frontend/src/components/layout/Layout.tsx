@@ -19,7 +19,7 @@ export function Layout() {
       <Header />
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />
-        <main className="flex-1 flex flex-col relative overflow-hidden">
+        <main className="flex-1 flex flex-col relative overflow-hidden scrollbar-hidden">
           {!isSidebarOpen && (
             <div className="absolute top-3 left-3 z-50">
               <button

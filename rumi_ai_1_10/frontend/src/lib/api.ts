@@ -23,6 +23,9 @@ import type {
 const API_BASE_URL =
   (import.meta as ImportMeta & {env?: Record<string, string>}).env?.VITE_API_BASE_URL ?? '';
 const PANEL_CSRF_STORAGE_KEY = 'rumi-panel-csrf';
+let panelBootstrapPromise: Promise<void> | null = null;
+let panelBootstrapCodeInFlight: string | null = null;
+const inflightGetRequests = new Map<string, Promise<unknown>>();
 
 function getStoredPanelCsrfToken(): string {
   return sessionStorage.getItem(PANEL_CSRF_STORAGE_KEY) || '';
@@ -40,6 +43,10 @@ function isUnsafeMethod(method: string): boolean {
   return method === 'POST' || method === 'PUT' || method === 'DELETE' || method === 'PATCH';
 }
 
+export function hasPendingPanelBootstrapCode(href = window.location.href): boolean {
+  return new URL(href).searchParams.has('code');
+}
+
 export async function bootstrapPanelSession(): Promise<void> {
   const url = new URL(window.location.href);
   const code = url.searchParams.get('code');
@@ -47,36 +54,50 @@ export async function bootstrapPanelSession(): Promise<void> {
     return;
   }
 
-  const response = await fetch(`${API_BASE_URL}/api/panel/auth/exchange`, {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ code }),
-  });
+  if (panelBootstrapPromise && panelBootstrapCodeInFlight === code) {
+    return panelBootstrapPromise;
+  }
 
-  if (!response.ok) {
-    let errorMessage = `Panel bootstrap failed: ${response.status} ${response.statusText}`;
-    try {
-      const errorBody: ApiResponse<unknown> = await response.json();
-      if (errorBody.error) {
-        errorMessage = errorBody.error;
+  panelBootstrapCodeInFlight = code;
+  panelBootstrapPromise = (async () => {
+    const response = await fetch(`${API_BASE_URL}/api/panel/auth/exchange`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ code }),
+    });
+
+    if (!response.ok) {
+      let errorMessage = `Panel bootstrap failed: ${response.status} ${response.statusText}`;
+      try {
+        const errorBody: ApiResponse<unknown> = await response.json();
+        if (errorBody.error) {
+          errorMessage = errorBody.error;
+        }
+      } catch {
+        // fall back to default message
       }
-    } catch {
-      // fall back to default message
+      throw new Error(errorMessage);
     }
-    throw new Error(errorMessage);
-  }
 
-  const envelope: ApiResponse<{ csrf_token: string }> = await response.json();
-  if (!envelope.success || !envelope.data?.csrf_token) {
-    throw new Error(envelope.error || 'Panel bootstrap failed');
-  }
+    const envelope: ApiResponse<{ csrf_token: string }> = await response.json();
+    if (!envelope.success || !envelope.data?.csrf_token) {
+      throw new Error(envelope.error || 'Panel bootstrap failed');
+    }
 
-  setStoredPanelCsrfToken(envelope.data.csrf_token);
-  url.searchParams.delete('code');
-  window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
+    setStoredPanelCsrfToken(envelope.data.csrf_token);
+    url.searchParams.delete('code');
+    window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
+  })();
+
+  try {
+    await panelBootstrapPromise;
+  } finally {
+    panelBootstrapPromise = null;
+    panelBootstrapCodeInFlight = null;
+  }
 }
 
 /**
@@ -106,34 +127,53 @@ export async function apiFetch<T>(
     }
   }
 
-  const response = await fetch(url, {
-    ...options,
-    method,
-    credentials: 'same-origin',
-    headers,
-  });
+  const fetchRequest = async (): Promise<T> => {
+    const response = await fetch(url, {
+      ...options,
+      method,
+      credentials: 'same-origin',
+      headers,
+    });
 
-  if (!response.ok) {
-    // Try to parse error envelope even on non-ok status
-    let errorMessage = `API Error: ${response.status} ${response.statusText}`;
-    try {
-      const errorBody: ApiResponse<unknown> = await response.json();
-      if (errorBody.error) {
-        errorMessage = errorBody.error;
+    if (!response.ok) {
+      // Try to parse error envelope even on non-ok status
+      let errorMessage = response.status === 429
+        ? 'Too many requests reached the local panel. Please wait a moment and try again.'
+        : `API Error: ${response.status} ${response.statusText}`;
+      try {
+        const errorBody: ApiResponse<unknown> = await response.json();
+        if (errorBody.error) {
+          errorMessage = errorBody.error;
+        }
+      } catch {
+        // If JSON parsing fails, use the default error message
       }
-    } catch {
-      // If JSON parsing fails, use the default error message
+      throw new Error(errorMessage);
     }
-    throw new Error(errorMessage);
+
+    const envelope: ApiResponse<T> = await response.json();
+
+    if (!envelope.success) {
+      throw new Error(envelope.error || 'Unknown API error');
+    }
+
+    return envelope.data as T;
+  };
+
+  if (method === 'GET') {
+    const cacheKey = `${method}:${url}`;
+    const existing = inflightGetRequests.get(cacheKey) as Promise<T> | undefined;
+    if (existing) {
+      return existing;
+    }
+    const request = fetchRequest().finally(() => {
+      inflightGetRequests.delete(cacheKey);
+    });
+    inflightGetRequests.set(cacheKey, request as Promise<unknown>);
+    return request;
   }
 
-  const envelope: ApiResponse<T> = await response.json();
-
-  if (!envelope.success) {
-    throw new Error(envelope.error || 'Unknown API error');
-  }
-
-  return envelope.data as T;
+  return fetchRequest();
 }
 
 // ============================================================

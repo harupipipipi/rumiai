@@ -22,6 +22,7 @@ from core_runtime.pack_api_server import (
     SAFE_ID_RE,
     MAX_REQUEST_BODY_BYTES,
     THREAD_JOIN_TIMEOUT_SECONDS,
+    _rate_limiter,
 )
 from core_runtime.api.api_response import APIResponse
 from core_runtime.panel_auth import PanelAuthManager, reset_panel_auth_manager_for_tests
@@ -426,6 +427,31 @@ class TestCORS:
         monkeypatch.delenv("RUMI_CORS_ORIGINS", raising=False)
         result = PackAPIHandler._get_cors_origin("http://localhost:9999")
         assert result == ""
+
+
+class TestRateLimit:
+    def test_panel_routes_bypass_rate_limit_for_loopback(self) -> None:
+        handler = _make_handler(client_address=("127.0.0.1", 12345))
+
+        with patch.object(_rate_limiter, "is_allowed", return_value=False) as mocked:
+            assert handler._check_rate_limit("/api/panel/flows") is True
+            mocked.assert_not_called()
+
+    def test_panel_web_mount_bypasses_rate_limit_for_loopback(self) -> None:
+        handler = _make_handler(client_address=("::1", 12345))
+
+        with patch.object(_rate_limiter, "is_allowed", return_value=False) as mocked:
+            assert handler._check_rate_limit("/panel/") is True
+            mocked.assert_not_called()
+
+    def test_non_panel_route_still_uses_rate_limit_for_loopback(self) -> None:
+        handler = _make_handler(client_address=("127.0.0.1", 12345))
+        handler.send_error = MagicMock()
+
+        with patch.object(_rate_limiter, "is_allowed", return_value=False) as mocked:
+            assert handler._check_rate_limit("/api/packs") is False
+            mocked.assert_called_once_with("127.0.0.1")
+            handler.send_error.assert_called_once_with(429, "Too Many Requests")
 
 
 # ---------------------------------------------------------------------------
