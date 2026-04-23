@@ -5,6 +5,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from core_runtime.startup_profiles import START_CONTRACT, StartupProfileManager, can_connect_ports
 
 
@@ -29,6 +31,28 @@ class _FakeActiveEcosystem:
 
     def remove_override(self, component_type):
         self.overrides.pop(component_type, None)
+
+
+class _FakeApprovalManager:
+    def __init__(self, *, reason_by_pack: dict[str, str | None]) -> None:
+        self.reason_by_pack = reason_by_pack
+
+    def get_approval(self, pack_id: str):
+        if pack_id not in self.reason_by_pack:
+            return None
+        return object()
+
+    def is_pack_approved_and_verified(self, pack_id: str):
+        reason = self.reason_by_pack.get(pack_id)
+        return (reason is None, reason)
+
+
+@pytest.fixture(autouse=True)
+def _stub_approval_manager(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(
+        "core_runtime.approval_manager.get_approval_manager",
+        lambda: _FakeApprovalManager(reason_by_pack={}),
+    )
 
 
 def _write_pack(
@@ -204,6 +228,51 @@ def test_update_profile_rejects_runtime_unready_candidate(tmp_path: Path):
     assert response["status_code"] == 400
     assert "not runtime-ready for slot 'tool'" in response["error"]
     assert "path 'blocks/tool' is missing" in response["error"]
+
+
+def test_list_profiles_payload_marks_modified_packs_as_not_runtime_ready(tmp_path: Path):
+    eco_root = tmp_path / "ecosystem"
+    defaultspack_path = _write_pack(
+        eco_root,
+        "defaultspack",
+        {
+            "tool": ["defaults.tool.invoke"],
+            "frontend": ["defaults.frontend.start"],
+            "ai_client": ["defaults.ai.complete", "defaults.ai.providers"],
+            "memory": ["defaults.memory.store"],
+        },
+    )
+    locations = [
+        SimpleNamespace(pack_id="defaultspack", ecosystem_json_path=defaultspack_path, pack_subdir=defaultspack_path.parent),
+    ]
+    manager = StartupProfileManager(storage_path=tmp_path / "startup_profiles.json")
+    approval_manager = _FakeApprovalManager(reason_by_pack={"defaultspack": "modified"})
+
+    with patch("core_runtime.startup_profiles.discover_pack_locations", return_value=locations):
+        with patch("core_runtime.approval_manager.get_approval_manager", return_value=approval_manager):
+            payload = manager.list_profiles_payload()
+            response = manager.update_profile(
+                "default-profile",
+                {
+                    "slots": {
+                        "tool": "defaultspack",
+                        "frontend": "defaultspack",
+                        "ai_client": "defaultspack",
+                        "memory": "defaultspack",
+                        "provider": "defaultspack",
+                    }
+                },
+            )
+
+    tool_candidate = payload["catalog"]["slot_candidates"]["tool"][0]
+    standard_pack = payload["catalog"]["standard_packs"][0]
+
+    assert tool_candidate["runtime_ready"] is False
+    assert "Re-approve it before launching" in tool_candidate["runtime_issues"][0]
+    assert standard_pack["runtime_ready"] is False
+    assert response["status_code"] == 400
+    assert "Standard pack 'defaultspack' is not available" in response["error"]
+    assert "Re-approve it before launching" in response["error"]
 
 
 def test_delete_profile_reassigns_active_profile(tmp_path: Path):

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {beforeEach, test} from 'node:test';
 
-import {apiFetch, bootstrapPanelSession} from './api.ts';
+import {apiFetch, bootstrapPanelSession, hasPendingPanelBootstrapCode} from './api.ts';
 
 class MemoryStorage {
   private readonly values = new Map<string, string>();
@@ -34,6 +34,7 @@ class MemoryStorage {
 let lastFetchInit: RequestInit | undefined;
 let lastFetchUrl = '';
 let lastReplacedUrl = '';
+let panelExchangeCount = 0;
 let sessionStorageRef: MemoryStorage;
 
 function installBrowser(href: string): MemoryStorage {
@@ -78,6 +79,7 @@ function installFetchMock(): void {
       lastFetchInit = init;
 
       if (lastFetchUrl === '/api/panel/auth/exchange') {
+        panelExchangeCount += 1;
         return new Response(
           JSON.stringify({
             data: {csrf_token: 'csrf-from-server'},
@@ -109,6 +111,7 @@ beforeEach(() => {
   lastFetchInit = undefined;
   lastFetchUrl = '';
   lastReplacedUrl = '';
+  panelExchangeCount = 0;
   installBrowser('http://127.0.0.1:8765/panel/');
   installFetchMock();
 });
@@ -123,6 +126,20 @@ test('bootstrapPanelSession exchanges code and strips it from the URL', async ()
   assert.equal(storage.getItem('rumi-panel-csrf'), 'csrf-from-server');
   assert.equal(lastReplacedUrl, '/panel/?v=42#ready');
   assert.equal(window.location.href, 'http://127.0.0.1:8765/panel/?v=42#ready');
+});
+
+test('bootstrapPanelSession deduplicates concurrent exchanges for the same code', async () => {
+  installBrowser('http://127.0.0.1:8765/panel/?code=one-time-code');
+
+  await Promise.all([bootstrapPanelSession(), bootstrapPanelSession()]);
+
+  assert.equal(panelExchangeCount, 1);
+  assert.equal(sessionStorageRef.getItem('rumi-panel-csrf'), 'csrf-from-server');
+});
+
+test('hasPendingPanelBootstrapCode only reports true when the URL includes a code', () => {
+  assert.equal(hasPendingPanelBootstrapCode('http://127.0.0.1:8765/panel/?code=abc'), true);
+  assert.equal(hasPendingPanelBootstrapCode('http://127.0.0.1:8765/panel/'), false);
 });
 
 test('apiFetch adds the panel CSRF header for unsafe methods', async () => {

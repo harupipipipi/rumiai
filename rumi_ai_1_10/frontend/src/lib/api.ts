@@ -23,6 +23,8 @@ import type {
 const API_BASE_URL =
   (import.meta as ImportMeta & {env?: Record<string, string>}).env?.VITE_API_BASE_URL ?? '';
 const PANEL_CSRF_STORAGE_KEY = 'rumi-panel-csrf';
+let panelBootstrapPromise: Promise<void> | null = null;
+let panelBootstrapCodeInFlight: string | null = null;
 
 function getStoredPanelCsrfToken(): string {
   return sessionStorage.getItem(PANEL_CSRF_STORAGE_KEY) || '';
@@ -40,6 +42,10 @@ function isUnsafeMethod(method: string): boolean {
   return method === 'POST' || method === 'PUT' || method === 'DELETE' || method === 'PATCH';
 }
 
+export function hasPendingPanelBootstrapCode(href = window.location.href): boolean {
+  return new URL(href).searchParams.has('code');
+}
+
 export async function bootstrapPanelSession(): Promise<void> {
   const url = new URL(window.location.href);
   const code = url.searchParams.get('code');
@@ -47,36 +53,50 @@ export async function bootstrapPanelSession(): Promise<void> {
     return;
   }
 
-  const response = await fetch(`${API_BASE_URL}/api/panel/auth/exchange`, {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ code }),
-  });
+  if (panelBootstrapPromise && panelBootstrapCodeInFlight === code) {
+    return panelBootstrapPromise;
+  }
 
-  if (!response.ok) {
-    let errorMessage = `Panel bootstrap failed: ${response.status} ${response.statusText}`;
-    try {
-      const errorBody: ApiResponse<unknown> = await response.json();
-      if (errorBody.error) {
-        errorMessage = errorBody.error;
+  panelBootstrapCodeInFlight = code;
+  panelBootstrapPromise = (async () => {
+    const response = await fetch(`${API_BASE_URL}/api/panel/auth/exchange`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ code }),
+    });
+
+    if (!response.ok) {
+      let errorMessage = `Panel bootstrap failed: ${response.status} ${response.statusText}`;
+      try {
+        const errorBody: ApiResponse<unknown> = await response.json();
+        if (errorBody.error) {
+          errorMessage = errorBody.error;
+        }
+      } catch {
+        // fall back to default message
       }
-    } catch {
-      // fall back to default message
+      throw new Error(errorMessage);
     }
-    throw new Error(errorMessage);
-  }
 
-  const envelope: ApiResponse<{ csrf_token: string }> = await response.json();
-  if (!envelope.success || !envelope.data?.csrf_token) {
-    throw new Error(envelope.error || 'Panel bootstrap failed');
-  }
+    const envelope: ApiResponse<{ csrf_token: string }> = await response.json();
+    if (!envelope.success || !envelope.data?.csrf_token) {
+      throw new Error(envelope.error || 'Panel bootstrap failed');
+    }
 
-  setStoredPanelCsrfToken(envelope.data.csrf_token);
-  url.searchParams.delete('code');
-  window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
+    setStoredPanelCsrfToken(envelope.data.csrf_token);
+    url.searchParams.delete('code');
+    window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
+  })();
+
+  try {
+    await panelBootstrapPromise;
+  } finally {
+    panelBootstrapPromise = null;
+    panelBootstrapCodeInFlight = null;
+  }
 }
 
 /**
