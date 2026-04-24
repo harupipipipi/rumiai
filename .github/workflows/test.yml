@@ -210,10 +210,11 @@ jobs:
             UV_TRIPLE="x86_64-apple-darwin"
           fi
           UV_URL="https://github.com/astral-sh/uv/releases/latest/download/uv-${UV_TRIPLE}.tar.gz"
-          mkdir -p rumi_viewer/src-tauri/bundled
-          curl -sL "$UV_URL" | tar -xz -C rumi_viewer/src-tauri/bundled --strip-components=1 "uv-${UV_TRIPLE}/uv"
+          mkdir -p rumi_ai_1_10/bundled
+          curl -sL "$UV_URL" | tar -xz -C rumi_ai_1_10/bundled --strip-components=1 "uv-${UV_TRIPLE}/uv"
+          chmod +x rumi_ai_1_10/bundled/uv
           echo "Bundled uv at:"
-          ls -la rumi_viewer/src-tauri/bundled/
+          ls -la rumi_ai_1_10/bundled/
 
       - name: Build rumi viewer
         working-directory: rumi_viewer/src-tauri

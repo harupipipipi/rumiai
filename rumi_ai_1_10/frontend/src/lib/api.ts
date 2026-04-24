@@ -43,6 +43,10 @@ function isUnsafeMethod(method: string): boolean {
   return method === 'POST' || method === 'PUT' || method === 'DELETE' || method === 'PATCH';
 }
 
+function isPanelApiPath(path: string): boolean {
+  return path === '/api/panel' || path.startsWith('/api/panel/');
+}
+
 export function hasPendingPanelBootstrapCode(href = window.location.href): boolean {
   return new URL(href).searchParams.has('code');
 }
@@ -100,8 +104,12 @@ export async function bootstrapPanelSession(): Promise<void> {
   }
 }
 
-async function ensurePanelSessionForUnsafeRequest(method: string): Promise<void> {
-  if (!isUnsafeMethod(method)) {
+async function ensurePanelSessionForRequest(path: string, method: string): Promise<void> {
+  if (!isPanelApiPath(path)) {
+    return;
+  }
+
+  if (!isUnsafeMethod(method) && !hasPendingPanelBootstrapCode() && !panelBootstrapPromise) {
     return;
   }
 
@@ -126,7 +134,7 @@ export async function apiFetch<T>(
   const method = (options.method || 'GET').toUpperCase();
 
   const fetchRequest = async (): Promise<T> => {
-    await ensurePanelSessionForUnsafeRequest(method);
+    await ensurePanelSessionForRequest(path, method);
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
