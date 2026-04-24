@@ -41,6 +41,12 @@
       border-radius: 50%;
       animation: spin 0.8s linear infinite;
       margin-bottom: 2rem;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+
+    .spinner.visible {
+      opacity: 1;
     }
 
     @keyframes spin {
@@ -53,7 +59,12 @@
       text-align: center;
       min-height: 1.5em;
       padding: 0 2rem;
-      transition: color 0.3s;
+      transition: color 0.3s, opacity 0.3s ease;
+      opacity: 0;
+    }
+
+    .progress.visible {
+      opacity: 1;
     }
 
     .progress.error {
@@ -74,35 +85,94 @@
     document.addEventListener('DOMContentLoaded', function () {
       var el = document.getElementById('progress');
       var spinner = document.getElementById('spinner');
+      var showDelay = 350; // ms — don't show spinner/progress for very fast startups
+      var timer = null;
+      var shown = false;
+      var finished = false;
 
+      function showUi() {
+        if (shown || finished) return;
+        shown = true;
+        spinner.classList.add('visible');
+        el.classList.add('visible');
+      }
+
+      function hideSpinner() {
+        spinner.classList.remove('visible');
+      }
+
+      function setMessage(msg, type) {
+        el.textContent = msg;
+        el.className = 'progress visible';
+        if (type === 'error') {
+          el.classList.add('error');
+          hideSpinner();
+        } else if (type === 'ready') {
+          el.classList.add('ready');
+          hideSpinner();
+        }
+      }
+
+      function scheduleShow() {
+        if (timer) clearTimeout(timer);
+        if (!finished) {
+          timer = setTimeout(showUi, showDelay);
+        }
+      }
+
+      function onProgress(msg) {
+        if (finished) return;
+
+        if (msg.indexOf('Error') === 0) {
+          finished = true;
+          clearTimeout(timer);
+          setMessage(msg, 'error');
+        } else if (msg === 'Ready') {
+          finished = true;
+          clearTimeout(timer);
+          setMessage(msg, 'ready');
+        } else {
+          scheduleShow();
+          if (shown) {
+            el.textContent = msg;
+            el.className = 'progress visible';
+          }
+        }
+      }
+
+      // Try Tauri event listener first (push-based, instant)
+      function listenProgress() {
+        if (!window.__TAURI__ || !window.__TAURI__.event) {
+          setTimeout(listenProgress, 100);
+          return;
+        }
+
+        window.__TAURI__.event.listen('setup-progress', function (event) {
+          onProgress(event.payload);
+        });
+      }
+
+      // Fallback polling at slower rate for backwards compatibility
       function poll() {
-        // Wait until Tauri IPC is available
         if (!window.__TAURI__ || !window.__TAURI__.core) {
-          setTimeout(poll, 500);
+          setTimeout(poll, 300);
           return;
         }
 
         window.__TAURI__.core.invoke('get_setup_progress')
           .then(function (msg) {
-            el.textContent = msg;
-            el.className = 'progress';
-
-            if (msg.indexOf('Error') === 0) {
-              el.className = 'progress error';
-              spinner.style.display = 'none';
-            } else if (msg === 'Ready') {
-              el.className = 'progress ready';
-              spinner.style.display = 'none';
-            }
+            onProgress(msg);
           })
-          .catch(function (err) {
-            el.textContent = 'IPC error: ' + err;
-            el.className = 'progress error';
+          .catch(function () {
+            // ignore — don't spam errors
           });
 
-        setTimeout(poll, 1000);
+        if (!finished) {
+          setTimeout(poll, 500);
+        }
       }
 
+      listenProgress();
       poll();
     });
   </script>

@@ -9,14 +9,16 @@
 //! Each step is idempotent — if the artefact already exists the step is
 //! skipped.
 
+use std::collections::hash_map::DefaultHasher;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::io;
 use std::path::Path;
 use std::process::Command;
 
 use anyhow::{bail, Context, Result};
 use flate2::read::GzDecoder;
-use log::info;
+use log::{info, warn};
 
 use crate::config::{platform_triple, AppConfig};
 
@@ -271,6 +273,17 @@ fn ensure_venv(config: &AppConfig) -> Result<()> {
 // Step 4 — requirements
 // ---------------------------------------------------------------------------
 
+fn compute_requirements_hash(req_path: &Path) -> Result<String> {
+    let contents = fs::read_to_string(req_path)
+        .with_context(|| format!("failed to read {}", req_path.display()))?;
+
+    let mut hasher = DefaultHasher::new();
+    contents.hash(&mut hasher);
+    PYTHON_MINOR.hash(&mut hasher);
+    let hash = hasher.finish();
+    Ok(format!("{:x}", hash))
+}
+
 fn install_requirements(config: &AppConfig) -> Result<()> {
     let req_path = config.requirements_txt();
     if !req_path.exists() {
@@ -278,9 +291,28 @@ fn install_requirements(config: &AppConfig) -> Result<()> {
         return Ok(());
     }
 
+    let stamp_path = config.venv_dir.join(".rumi_requirements_stamp");
+    let venv_python = config.venv_python();
+
+    // If venv Python exists and stamp matches, skip installation.
+    if venv_python.exists() && stamp_path.exists() {
+        let stamp_content = fs::read_to_string(&stamp_path).unwrap_or_default();
+        match compute_requirements_hash(&req_path) {
+            Ok(current_hash) => {
+                if stamp_content.trim() == current_hash {
+                    info!("Requirements stamp matches, skipping pip install");
+                    return Ok(());
+                }
+                info!("Requirements stamp mismatch, re-installing dependencies");
+            }
+            Err(e) => {
+                warn!("Failed to compute requirements hash: {e}, re-installing");
+            }
+        }
+    }
+
     info!("Installing requirements ...");
     let uv = config.resolved_uv_path();
-    let venv_python = config.venv_python();
     let status = Command::new(&uv)
         .args([
             "pip",
@@ -295,6 +327,18 @@ fn install_requirements(config: &AppConfig) -> Result<()> {
 
     if !status.success() {
         bail!("uv pip install exited with {status}");
+    }
+
+    // Write stamp after successful installation.
+    match compute_requirements_hash(&req_path) {
+        Ok(hash) => {
+            if let Err(e) = fs::write(&stamp_path, hash) {
+                warn!("Failed to write requirements stamp: {e}");
+            }
+        }
+        Err(e) => {
+            warn!("Failed to compute requirements hash after install: {e}");
+        }
     }
 
     info!("Requirements installed");

@@ -3,23 +3,32 @@
 //! The Kernel exposes `GET /health` on its API port (default 8765).
 //! A 200 response means the Kernel is ready to serve requests.
 
+use std::sync::OnceLock;
 use std::time::Duration;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use log::info;
+
+/// Reusable blocking HTTP client for health checks.
+static HEALTH_CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
+
+fn health_client() -> &'static reqwest::blocking::Client {
+    HEALTH_CLIENT.get_or_init(|| {
+        reqwest::blocking::Client::builder()
+            .timeout(Duration::from_millis(800))
+            .build()
+            .expect("failed to build health-check HTTP client")
+    })
+}
 
 /// Send a single health-check request.
 ///
 /// Returns `Ok(true)` if the Kernel responded with HTTP 200,
 /// `Ok(false)` for any other status or a connection error.
 pub fn check_health(port: u16) -> Result<bool> {
-    let url = format!("http://localhost:{port}/health");
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(3))
-        .build()
-        .context("failed to build health-check HTTP client")?;
+    let url = format!("http://127.0.0.1:{port}/health");
 
-    match client.get(&url).send() {
+    match health_client().get(&url).send() {
         Ok(resp) => Ok(resp.status().is_success()),
         Err(_) => Ok(false),
     }
@@ -27,18 +36,22 @@ pub fn check_health(port: u16) -> Result<bool> {
 
 /// Poll `GET /health` until the Kernel is ready or `timeout_secs` elapses.
 ///
-/// Checks once per second.
+/// Checks every 200 ms.
 pub fn wait_for_healthy(port: u16, timeout_secs: u64) -> Result<()> {
     info!(
         "Waiting for Kernel health-check on port {port} (timeout {timeout_secs}s) ..."
     );
 
-    for elapsed in 0..timeout_secs {
+    let start = std::time::Instant::now();
+    let timeout = Duration::from_secs(timeout_secs);
+    let interval = Duration::from_millis(200);
+
+    while start.elapsed() < timeout {
         if check_health(port)? {
-            info!("Kernel healthy after ~{elapsed}s");
+            info!("Kernel healthy after ~{:?}", start.elapsed());
             return Ok(());
         }
-        std::thread::sleep(Duration::from_secs(1));
+        std::thread::sleep(interval);
     }
 
     bail!("Kernel did not become healthy within {timeout_secs}s on port {port}")

@@ -201,6 +201,20 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Bundle uv binary for offline startup
+        run: |
+          ARCH=$(uname -m)
+          if [ "$ARCH" = "arm64" ]; then
+            UV_TRIPLE="aarch64-apple-darwin"
+          else
+            UV_TRIPLE="x86_64-apple-darwin"
+          fi
+          UV_URL="https://github.com/astral-sh/uv/releases/latest/download/uv-${UV_TRIPLE}.tar.gz"
+          mkdir -p rumi_viewer/src-tauri/bundled
+          curl -sL "$UV_URL" | tar -xz -C rumi_viewer/src-tauri/bundled --strip-components=1 "uv-${UV_TRIPLE}/uv"
+          echo "Bundled uv at:"
+          ls -la rumi_viewer/src-tauri/bundled/
+
       - name: Build rumi viewer
         working-directory: rumi_viewer/src-tauri
         run: cargo build --locked
