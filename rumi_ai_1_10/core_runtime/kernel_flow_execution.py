@@ -94,6 +94,11 @@ class KernelFlowExecutionMixin:
     __init__ を持たない。self の属性は KernelCore.__init__ で初期化済みの
     前提でアクセスする。
     """
+    _startup_ctx: Optional[Dict[str, Any]]
+    _startup_steps: Optional[List[Dict[str, Any]]]
+    _startup_next_index: int
+    _startup_executed_ids: Set[str]
+    _startup_fail_soft_default: bool
 
     # ------------------------------------------------------------------
     # Wave 10-C: depends_on チェック

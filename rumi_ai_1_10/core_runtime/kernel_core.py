@@ -79,10 +79,10 @@ class KernelCore:
         self._startup_fail_soft_default: bool = True
         self._kernel_handlers: Dict[str, Callable[[Dict[str, Any], Dict[str, Any]], Any]] = {}
         self._shutdown_handlers: List[Callable[[], None]] = []
-        self._capability_proxy = None
+        self._capability_proxy: Any = None
         self._executor: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=4)
         self._flow_scheduler = None  # FlowScheduler instance (lazy)
-        self._uds_proxy_manager = None  # UDS Egress Proxy Manager
+        self._uds_proxy_manager: Any = None  # UDS Egress Proxy Manager
         # SV-3 fix: circuit breaker flags for lazy init proxies
         self._uds_proxy_init_failed: bool = False
         self._capability_proxy_init_failed: bool = False

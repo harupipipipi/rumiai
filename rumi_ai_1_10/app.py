@@ -203,10 +203,18 @@ def main():
 
     try:
         from core_runtime import Kernel
-        from core_runtime.app_lifecycle_manager import (
-            mark_runtime_failed,
-            reset_runtime_readiness,
-        )
+        try:
+            from core_runtime.app_lifecycle_manager import (
+                mark_runtime_failed,
+                reset_runtime_readiness,
+            )
+        except (ImportError, ModuleNotFoundError):
+            def reset_runtime_readiness() -> None:
+                return None
+
+            def mark_runtime_failed(_error: str) -> None:
+                return None
+
         try:
             from core_runtime.lang import L as _L, load_system_lang
             global L
