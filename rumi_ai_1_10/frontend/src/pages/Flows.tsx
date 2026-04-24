@@ -7,6 +7,7 @@ import { Button } from '@/src/components/ui/Button';
 import { Input } from '@/src/components/ui/Input';
 import {
   Plus,
+  ChevronDown,
   Play,
   Save,
   Trash2,
@@ -17,7 +18,7 @@ import {
   X,
   Box,
   Loader2,
-  PlugZap,
+  PanelLeft,
 } from 'lucide-react';
 import CodeMirror from '@uiw/react-codemirror';
 import { yaml } from '@codemirror/lang-yaml';
@@ -78,10 +79,14 @@ function FlowEditorInner() {
   const deleteFlow = useAppStore((state) => state.deleteFlow);
   const showDialog = useAppStore((state) => state.showDialog);
   const addToast = useAppStore((state) => state.addToast);
+  const setSidebarOpen = useAppStore((state) => state.setSidebarOpen);
   const colorMode = useAppStore((state) => state.colorMode);
 
   const [selectedFlowId, setSelectedFlowId] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [isFlowLibraryOpen, setIsFlowLibraryOpen] = useState(true);
+  const [isConsoleOpen, setIsConsoleOpen] = useState(false);
+  const [isPackDropdownOpen, setIsPackDropdownOpen] = useState(false);
   const [newFlowName, setNewFlowName] = useState('');
   const [activeTab, setActiveTab] = useState<'yaml' | 'result'>('yaml');
   const [selectedPack, setSelectedPack] = useState<string>('all');
@@ -93,6 +98,7 @@ function FlowEditorInner() {
   const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance<Node, Edge> | null>(null);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const stepRailRef = useRef<HTMLDivElement>(null);
+  const packDropdownRef = useRef<HTMLDivElement>(null);
   const flowRequestIdRef = useRef(0);
   const flowsRef = useRef(flows);
   flowsRef.current = flows;
@@ -143,12 +149,43 @@ function FlowEditorInner() {
 
   useEffect(() => dragDrop.setupPointerTracking(), [dragDrop.setupPointerTracking]);
   useEffect(() => { loadFlows(); }, [loadFlows]);
+  useEffect(() => {
+    // Flow is a focus workspace; collapse the global sidebar on entry so the canvas gets priority.
+    setSidebarOpen(false);
+  }, [setSidebarOpen]);
+
+  useEffect(() => {
+    const handleClick = (event: globalThis.MouseEvent) => {
+      if (!packDropdownRef.current?.contains(event.target as globalThis.Node)) {
+        setIsPackDropdownOpen(false);
+      }
+    };
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsPackDropdownOpen(false);
+      }
+    };
+    if (isPackDropdownOpen) {
+      window.addEventListener('mousedown', handleClick as EventListener);
+      window.addEventListener('keydown', handleKeyDown as EventListener);
+      return () => {
+        window.removeEventListener('mousedown', handleClick as EventListener);
+        window.removeEventListener('keydown', handleKeyDown as EventListener);
+      };
+    }
+  }, [isPackDropdownOpen]);
 
   useEffect(() => {
     if (flows.length > 0 && !selectedFlowId && !isCreating) {
       setSelectedFlowId(flows[0].id);
     }
   }, [flows, isCreating, selectedFlowId]);
+
+  useEffect(() => {
+    if (selectedFlowId || isCreating) {
+      setIsFlowLibraryOpen(false);
+    }
+  }, [isCreating, selectedFlowId]);
 
   useEffect(() => {
     if (!selectedFlowId || isCreating) return;
@@ -200,11 +237,14 @@ function FlowEditorInner() {
   const handleSelectFlow = (id: string) => {
     setSelectedFlowId(id);
     setIsCreating(false);
+    setIsFlowLibraryOpen(false);
   };
 
   const handleCreateNew = () => {
     setIsCreating(true);
     setSelectedFlowId(null);
+    setIsFlowLibraryOpen(false);
+    setIsConsoleOpen(false);
     setNewFlowName('');
     execution.clearResult();
     const graph = createDefaultFlowGraph(DEFAULT_BASE_PACK);
@@ -266,6 +306,7 @@ function FlowEditorInner() {
 
   const handleExecute = async () => {
     setActiveTab('result');
+    setIsConsoleOpen(true);
     const result = await execution.execute();
     if (result) {
       addToast(t('flows.executed'), result.status === 'success' ? 'success' : 'error');
@@ -321,6 +362,14 @@ function FlowEditorInner() {
 
   const selectedPorts = (((editorHook.selectedNode?.data as { ports?: FlowPort[] } | undefined)?.ports) ?? []);
 
+  useEffect(() => {
+    if (!reactFlowInstance || nodes.length === 0) return;
+    const frame = window.requestAnimationFrame(() => {
+      reactFlowInstance.fitView({ padding: 0.22, duration: 280, maxZoom: 1.05 });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [nodes.length, reactFlowInstance, selectedFlowId, isCreating]);
+
   if (isLoading && flows.length === 0) {
     return (
       <div className="flex flex-1 items-center justify-center bg-bg-main">
@@ -333,44 +382,59 @@ function FlowEditorInner() {
   }
 
   return (
-    <div className="flex h-full flex-1 gap-6 p-6 animate-in fade-in slide-in-from-bottom-4">
-      <div className="flex w-72 shrink-0 flex-col gap-4 rounded-2xl border border-border bg-bg-card p-4 shadow-sm">
-        <Button size="sm" onClick={handleCreateNew} variant={isCreating ? 'default' : 'outline'} className="w-full">
-          <Plus className="mr-2 h-4 w-4" />
-          {t('flows.new')}
-        </Button>
-        <div className="rounded-xl border border-border bg-bg-main/70 p-3 text-xs text-text-muted">
-          <div className="mb-1 flex items-center gap-2 text-text-main">
-            <PlugZap className="h-3.5 w-3.5" />
-            <span className="font-semibold">Basepack</span>
-          </div>
-          <div>{flowMeta.basePack || DEFAULT_BASE_PACK}</div>
-          <div className="mt-2 text-[11px] text-text-muted">`rumi_start` から接続されたグラフだけを保存・シミュレートします。</div>
-        </div>
-        <div className="flex flex-col gap-2 overflow-y-auto">
-          {flows.map((flow) => (
+    <div className="flow-focus-shell flex h-full flex-1 gap-3 p-2 animate-in fade-in slide-in-from-bottom-4 sm:p-3">
+      {isFlowLibraryOpen && (
+        <div className="flex w-64 shrink-0 flex-col gap-3 rounded-[28px] border border-border bg-bg-card/95 p-3 shadow-[0_22px_60px_rgba(0,0,0,0.24)] backdrop-blur-sm">
+          <div className="flex items-center justify-between">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-text-muted">Flows</div>
             <button
-              key={flow.id}
               type="button"
-              onClick={() => handleSelectFlow(flow.id)}
-              className={cn(
-                'flex items-center gap-3 rounded-xl p-3 text-left transition-colors',
-                selectedFlowId === flow.id && !isCreating
-                  ? 'bg-accent text-accent-fg'
-                  : 'text-text-main hover:bg-bg-hover',
-              )}
+              onClick={() => setIsFlowLibraryOpen(false)}
+              className="rounded-xl border border-border bg-bg-main px-2 py-1 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-main"
+              title="Close flow list"
             >
-              <FileText className="h-4 w-4 shrink-0" />
-              <span className="truncate text-sm font-medium">{flow.name}</span>
+              <PanelLeft className="h-4 w-4" />
             </button>
-          ))}
+          </div>
+          <Button size="sm" onClick={handleCreateNew} variant={isCreating ? 'default' : 'outline'} className="w-full gap-1.5 text-xs">
+            <Plus className="h-3.5 w-3.5" />
+            {t('flows.new')}
+          </Button>
+          <div className="flex flex-col gap-1.5 overflow-y-auto scrollbar-dark">
+            {flows.map((flow) => (
+              <button
+                key={flow.id}
+                type="button"
+                onClick={() => handleSelectFlow(flow.id)}
+                className={cn(
+                  'flex items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors',
+                  selectedFlowId === flow.id && !isCreating
+                    ? 'bg-accent text-accent-fg shadow-sm'
+                    : 'text-text-main hover:bg-bg-hover',
+                )}
+              >
+                <FileText className="h-4 w-4 shrink-0" />
+                <span className="truncate text-sm font-medium">{flow.name}</span>
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
-      <div className="relative flex flex-1 flex-col gap-4 overflow-hidden rounded-2xl border border-border bg-bg-card p-4 shadow-sm">
+      <div className="relative flex flex-1 flex-col gap-3 overflow-hidden rounded-[30px] border border-border bg-bg-card/96 p-4 shadow-[0_24px_70px_rgba(0,0,0,0.28)] backdrop-blur-sm">
+        {!isFlowLibraryOpen && (
+          <button
+            type="button"
+            onClick={() => setIsFlowLibraryOpen(true)}
+            className="absolute left-4 top-4 z-30 inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-border bg-bg-main/92 text-text-muted shadow-sm transition-colors hover:bg-bg-hover hover:text-text-main"
+            title="Open flow list"
+          >
+            <PanelLeft className="h-4 w-4 rotate-180" />
+          </button>
+        )}
         {isCreating || selectedFlowId ? (
           <>
-            <div className="flex items-center justify-between gap-4">
+            <div className={cn('flex items-center justify-between gap-4', !isFlowLibraryOpen && 'pl-12')}>
               <div className="flex items-center gap-3">
                 {isCreating ? (
                   <Input
@@ -406,18 +470,45 @@ function FlowEditorInner() {
               </div>
             </div>
 
-            <div className="flex items-center gap-4 rounded-xl border border-border bg-bg-main px-3 py-2">
-              <select
-                value={selectedPack}
-                onChange={(event) => setSelectedPack(event.target.value)}
-                className="h-8 rounded-md border border-border bg-bg-card px-2 text-sm focus:outline-none focus:ring-1 focus:ring-accent"
-              >
-                {packs.map((pack) => (
-                  <option key={pack} value={pack}>
-                    {pack === 'all' ? 'All Packs' : pack}
-                  </option>
-                ))}
-              </select>
+            <div className={cn('flex items-center gap-4 rounded-2xl border border-border bg-bg-main/90 px-3 py-2.5', !isFlowLibraryOpen && 'ml-12')}>
+              <div ref={packDropdownRef} className="relative">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 border-border bg-bg-card px-3 text-xs font-medium"
+                  onClick={() => setIsPackDropdownOpen((open) => !open)}
+                  aria-haspopup="listbox"
+                  aria-expanded={isPackDropdownOpen}
+                  aria-controls="flow-pack-selector-menu"
+                >
+                  {selectedPack === 'all' ? 'All Packs' : selectedPack}
+                  <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', isPackDropdownOpen && 'rotate-180')} />
+                </Button>
+                {isPackDropdownOpen && (
+                  <div
+                    id="flow-pack-selector-menu"
+                    role="listbox"
+                    aria-label="Flow pack filter"
+                    className="absolute left-0 top-full z-50 mt-1 w-40 rounded-lg border border-border bg-bg-card py-1 shadow-lg"
+                  >
+                    {packs.map((pack) => (
+                      <button
+                        key={pack}
+                        type="button"
+                        role="option"
+                        aria-selected={selectedPack === pack}
+                        onClick={() => { setSelectedPack(pack); setIsPackDropdownOpen(false); }}
+                        className={cn(
+                          'w-full px-3 py-1.5 text-left text-xs transition-colors hover:bg-bg-hover',
+                          selectedPack === pack ? 'bg-bg-hover text-text-main' : 'text-text-muted',
+                        )}
+                      >
+                        {pack === 'all' ? 'All Packs' : pack}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div
                 ref={stepRailRef}
                 onWheel={handleStepRailWheel}
@@ -442,7 +533,7 @@ function FlowEditorInner() {
 
             <div
               ref={reactFlowWrapper}
-              className="flow-canvas relative flex-1 overflow-hidden rounded-2xl border border-border"
+              className="flow-canvas relative flex-1 overflow-hidden rounded-[28px] border border-border"
             >
               <ReactFlow<Node, Edge>
                 nodes={nodes}
@@ -473,7 +564,7 @@ function FlowEditorInner() {
                 fitView
                 className="flow-grid"
               >
-                <Background color="var(--flow-grid-color)" gap={24} />
+                <Background color="var(--flow-grid-color)" gap={28} size={1.1} />
                 <Controls className="bg-bg-card border-border fill-text-main" />
               </ReactFlow>
 
@@ -520,7 +611,7 @@ function FlowEditorInner() {
                     onChange={(event) => editorHook.setMenuFilter(event.target.value)}
                     className="mb-2 h-8 text-sm"
                   />
-                  <div className="flex max-h-64 flex-col gap-1 overflow-y-auto scrollbar-thin">
+                  <div className="flex max-h-64 flex-col gap-1 overflow-y-auto scrollbar-dark">
                     {AVAILABLE_STEPS
                       .filter((step) => step.name.toLowerCase().includes(editorHook.menuFilter.toLowerCase()) || step.description.toLowerCase().includes(editorHook.menuFilter.toLowerCase()))
                       .map((step) => (
@@ -538,7 +629,7 @@ function FlowEditorInner() {
               )}
 
               {editorHook.selectedNode && (
-                <div className="absolute right-4 top-4 z-10 flex max-h-[80%] w-[360px] flex-col overflow-hidden rounded-2xl border border-border bg-bg-card shadow-xl">
+                <div className="absolute right-4 top-4 z-10 flex max-h-[80%] w-80 flex-col overflow-hidden rounded-2xl border border-border bg-bg-card shadow-xl shadow-black/20">
                   <div className="flex items-center justify-between border-b border-border p-3">
                     <div>
                       <h3 className="text-sm font-semibold text-text-main">{t('flows.properties')}</h3>
@@ -635,14 +726,23 @@ function FlowEditorInner() {
                                 onChange={(event) => editorHook.updateSelectedNodePort(port.id, { label: event.target.value })}
                                 className="h-8 text-xs"
                               />
-                              <select
-                                value={port.direction}
-                                onChange={(event) => editorHook.updateSelectedNodePort(port.id, { direction: event.target.value as FlowPort['direction'] })}
-                                className="h-8 rounded-md border border-border bg-bg-main px-2 text-xs"
-                              >
-                                <option value="input">input</option>
-                                <option value="output">output</option>
-                              </select>
+                              <div className="grid h-8 grid-cols-2 overflow-hidden rounded-md border border-border bg-bg-main p-0.5">
+                                {(['input', 'output'] as const).map((direction) => (
+                                  <button
+                                    key={direction}
+                                    type="button"
+                                    onClick={() => editorHook.updateSelectedNodePort(port.id, { direction })}
+                                    className={cn(
+                                      'rounded-[5px] px-2 text-xs font-semibold transition-colors',
+                                      port.direction === direction
+                                        ? 'bg-accent text-white shadow-sm'
+                                        : 'text-text-muted hover:bg-bg-hover hover:text-text-main',
+                                    )}
+                                  >
+                                    {direction === 'input' ? 'in' : 'out'}
+                                  </button>
+                                ))}
+                              </div>
                               <Input
                                 value={port.id}
                                 onChange={(event) => editorHook.updateSelectedNodePort(port.id, { id: event.target.value })}
@@ -665,70 +765,92 @@ function FlowEditorInner() {
                   </div>
                 </div>
               )}
-            </div>
 
-            <div className="flex h-52 shrink-0 flex-col overflow-hidden rounded-xl border border-border bg-bg-main">
-              <div className="flex border-b border-border bg-bg-card">
-                <button
-                  className={cn('px-4 py-2 text-sm font-medium transition-colors', activeTab === 'yaml' ? 'border-b-2 border-accent text-text-main' : 'text-text-muted hover:text-text-main')}
-                  onClick={() => setActiveTab('yaml')}
-                >
-                  {t('flows.yaml')}
-                </button>
-                <button
-                  className={cn('px-4 py-2 text-sm font-medium transition-colors', activeTab === 'result' ? 'border-b-2 border-accent text-text-main' : 'text-text-muted hover:text-text-main')}
-                  onClick={() => setActiveTab('result')}
-                >
-                  {t('flows.result')}
-                </button>
-              </div>
-              <div className="flex-1 overflow-auto">
-                {activeTab === 'yaml' && (
-                  <CodeMirror
-                    value={generatedYaml}
-                    height="100%"
-                    extensions={[yaml()]}
-                    theme={colorMode === 'dark' ? 'dark' : 'light'}
-                    readOnly
-                    className="h-full text-sm"
-                  />
+              <div className="absolute bottom-4 right-4 z-30 flex flex-col items-end gap-3">
+                {!isConsoleOpen && (
+                  <button
+                    type="button"
+                    onClick={() => setIsConsoleOpen(true)}
+                    className="inline-flex items-center gap-2 rounded-full border border-border bg-bg-card/92 px-4 py-2 text-sm font-medium text-text-main shadow-lg shadow-black/20 backdrop-blur-sm transition-colors hover:bg-bg-hover"
+                  >
+                    <FileText className="h-4 w-4" />
+                    YAML / Result
+                  </button>
                 )}
-                {activeTab === 'result' && (
-                  <div className="p-4">
-                    {execution.isExecuting ? (
-                      <div className="flex h-full items-center justify-center text-text-muted">
-                        <Clock className="mr-2 h-4 w-4 animate-spin" /> {t('flows.executing')}
+
+                {isConsoleOpen && (
+                  <div className="flex h-[320px] w-[440px] max-w-[calc(100vw-4rem)] flex-col overflow-hidden rounded-[26px] border border-border bg-bg-card/96 shadow-[0_22px_60px_rgba(0,0,0,0.35)] backdrop-blur-sm">
+                    <div className="flex items-center justify-between border-b border-border bg-bg-main/85 px-3 py-2">
+                      <div className="flex">
+                        <button
+                          className={cn('px-4 py-2 text-sm font-medium transition-colors', activeTab === 'yaml' ? 'border-b-2 border-accent text-text-main' : 'text-text-muted hover:text-text-main')}
+                          onClick={() => setActiveTab('yaml')}
+                        >
+                          {t('flows.yaml')}
+                        </button>
+                        <button
+                          className={cn('px-4 py-2 text-sm font-medium transition-colors', activeTab === 'result' ? 'border-b-2 border-accent text-text-main' : 'text-text-muted hover:text-text-main')}
+                          onClick={() => setActiveTab('result')}
+                        >
+                          {t('flows.result')}
+                        </button>
                       </div>
-                    ) : execution.executionResult ? (
-                      <div className="flex flex-col gap-2">
-                        {execution.executionResult.steps.map((step, index) => (
-                          <div key={index} className="flex items-center justify-between rounded border border-border bg-bg-card p-2 text-sm">
-                            <div className="flex items-center gap-2">
-                              {step.status === 'success' ? <CheckCircle2 className="h-4 w-4 text-green-500" /> : <X className="h-4 w-4 text-red-500" />}
-                              <span className="font-medium text-text-main">{step.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => setIsConsoleOpen(false)}
+                        className="rounded-xl px-2 py-1 text-[11px] font-medium text-text-muted transition-colors hover:bg-bg-hover hover:text-text-main"
+                        title="Hide YAML and result panel"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <div className="flex-1 overflow-auto scrollbar-dark">
+                      {activeTab === 'yaml' && (
+                        <CodeMirror
+                          value={generatedYaml}
+                          height="100%"
+                          extensions={[yaml()]}
+                          theme={colorMode === 'dark' ? 'dark' : 'light'}
+                          readOnly
+                          className="h-full text-sm"
+                        />
+                      )}
+                      {activeTab === 'result' && (
+                        <div className="p-4">
+                          {execution.isExecuting ? (
+                            <div className="flex h-full items-center justify-center text-text-muted">
+                              <Clock className="mr-2 h-4 w-4 animate-spin" /> {t('flows.executing')}
                             </div>
-                            <div className="flex items-center gap-2 text-text-muted">
-                              <Clock className="h-3 w-3" />
-                              <span>{step.duration}</span>
+                          ) : execution.executionResult ? (
+                            <div className="flex flex-col gap-2">
+                              {execution.executionResult.steps.map((step, index) => (
+                                <div key={index} className="flex items-center justify-between rounded-xl border border-border bg-bg-main/80 p-2.5 text-sm">
+                                  <div className="flex items-center gap-2">
+                                    {step.status === 'success' ? <CheckCircle2 className="h-4 w-4 text-green-500" /> : <X className="h-4 w-4 text-red-500" />}
+                                    <span className="font-medium text-text-main">{step.name}</span>
+                                  </div>
+                                  <div className="flex items-center gap-2 text-text-muted">
+                                    <Clock className="h-3 w-3" />
+                                    <span>{step.duration}</span>
+                                  </div>
+                                </div>
+                              ))}
                             </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="flex h-full items-center justify-center text-sm text-text-muted">
-                        {t('flows.no_result')}
-                      </div>
-                    )}
+                          ) : (
+                            <div className="flex h-full items-center justify-center text-sm text-text-muted">
+                              {t('flows.no_result')}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
             </div>
           </>
         ) : (
-          <div className="relative flex h-full flex-col items-center justify-center overflow-hidden rounded-[var(--radius)] text-center">
-            <div className="absolute inset-0 opacity-10">
-              <div className="h-full w-full bg-[radial-gradient(circle_at_top,#ffdf92,transparent_40%),linear-gradient(180deg,#21150c_0%,#0e0a08_100%)]" />
-            </div>
+          <div className="relative flex h-full flex-col items-center justify-center overflow-hidden rounded-[28px] border border-border/70 bg-bg-main text-center">
             <div className="relative z-10 flex flex-col items-center">
               <Workflow className="mb-4 h-16 w-16 text-accent opacity-80" />
               <h3 className="mb-2 text-xl font-bold text-text-main">{t('flows.title')}</h3>

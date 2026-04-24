@@ -8,6 +8,7 @@ export function Header() {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const isHome = location.pathname === panelRoutes.home;
+  const isFlows = location.pathname === panelRoutes.flows;
   const searchValue = searchParams.get('q') ?? '';
 
   const updateSearchValue = (value: string) => {
@@ -21,10 +22,15 @@ export function Header() {
   };
 
   return (
-    <header className="z-40 flex h-[72px] shrink-0 items-center justify-between border-b border-border bg-bg-header px-6 transition-colors duration-200">
-      <div className="flex items-center gap-3">
-        <img src="https://picsum.photos/seed/rumi/64/64" alt="Rumi Logo" className="h-8 w-8 rounded-full object-cover" referrerPolicy="no-referrer" />
-        <span className="text-lg font-bold text-text-main tracking-tight">Rumi AI</span>
+    <header className={`z-40 flex shrink-0 items-center justify-between border-b border-border bg-bg-header transition-colors duration-200 ${isFlows ? 'h-14 px-4' : 'h-[72px] px-6'}`}>
+      <div className={`flex items-center ${isFlows ? 'gap-2' : 'gap-3'}`}>
+        <img
+          src="https://picsum.photos/seed/rumi/64/64"
+          alt="Rumi Logo"
+          className={`${isFlows ? 'h-7 w-7 opacity-85' : 'h-8 w-8'} rounded-full object-cover`}
+          referrerPolicy="no-referrer"
+        />
+        {!isFlows && <span className="text-lg font-bold text-text-main tracking-tight">Rumi AI</span>}
       </div>
 
       {isHome ? (
@@ -41,10 +47,15 @@ export function Header() {
         <div className="flex-1" />
       )}
 
-      <div className="flex items-center gap-3">
-        <span className="text-sm font-medium text-text-muted">{profile.username}</span>
-        <ChevronDown className="h-4 w-4 text-text-muted" />
-        <img src={profile.avatar} alt="User Avatar" className="h-9 w-9 rounded-full object-cover" referrerPolicy="no-referrer" />
+      <div className={`flex items-center ${isFlows ? 'gap-2' : 'gap-3'}`}>
+        {!isFlows && <span className="text-sm font-medium text-text-muted">{profile.username}</span>}
+        {!isFlows && <ChevronDown className="h-4 w-4 text-text-muted" />}
+        <img
+          src={profile.avatar}
+          alt="User Avatar"
+          className={`${isFlows ? 'h-8 w-8' : 'h-9 w-9'} rounded-full object-cover`}
+          referrerPolicy="no-referrer"
+        />
       </div>
     </header>
   );
