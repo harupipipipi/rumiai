@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import {
+  checkHealth,
   fetchDashboard,
   fetchPacks,
   fetchFlows,
@@ -102,6 +103,8 @@ export interface VersionInfo {
   };
 }
 
+export type RuntimeStatus = 'starting' | 'panel_ready' | 'runtime_ready' | 'error';
+
 interface AppState {
   theme: Theme;
   setTheme: (theme: Theme) => void;
@@ -125,6 +128,12 @@ interface AppState {
 
   isLoading: boolean;
   apiError: string | null;
+
+  runtimeReady: boolean;
+  runtimeStatus: RuntimeStatus;
+  runtimeError: string | null;
+  setRuntimeHealth: (health: { status?: 'ok' | 'error'; panel_ready?: boolean; runtime_ready?: boolean; runtime_status?: RuntimeStatus; runtime_error?: string | null }) => void;
+  refreshRuntimeHealth: () => Promise<void>;
 
   packs: Pack[];
   loadPacks: () => Promise<void>;
@@ -216,6 +225,37 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   isLoading: false,
   apiError: null,
+
+  runtimeReady: false,
+  runtimeStatus: 'starting',
+  runtimeError: null,
+  setRuntimeHealth: (health) =>
+    set((state) => ({
+      runtimeReady: Boolean(health.runtime_ready),
+      runtimeStatus:
+        health.runtime_status ??
+        (health.status === 'error'
+          ? 'error'
+          : health.runtime_ready
+            ? 'runtime_ready'
+            : health.panel_ready
+              ? 'panel_ready'
+              : state.runtimeStatus),
+      runtimeError: health.runtime_error ?? null,
+    })),
+  refreshRuntimeHealth: async () => {
+    try {
+      const health = await checkHealth();
+      get().setRuntimeHealth(health);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to read runtime health';
+      get().setRuntimeHealth({
+        status: 'error',
+        runtime_status: 'error',
+        runtime_error: msg,
+      });
+    }
+  },
 
   // ============================================================
   // Packs

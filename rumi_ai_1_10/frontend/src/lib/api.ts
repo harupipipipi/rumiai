@@ -100,6 +100,16 @@ export async function bootstrapPanelSession(): Promise<void> {
   }
 }
 
+async function ensurePanelSessionForUnsafeRequest(method: string): Promise<void> {
+  if (!isUnsafeMethod(method)) {
+    return;
+  }
+
+  if (panelBootstrapPromise || hasPendingPanelBootstrapCode()) {
+    await bootstrapPanelSession();
+  }
+}
+
 /**
  * Common fetch wrapper for API calls.
  * - Prepends API_BASE_URL
@@ -115,19 +125,21 @@ export async function apiFetch<T>(
   const url = `${API_BASE_URL}${path}`;
   const method = (options.method || 'GET').toUpperCase();
 
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(options.headers as Record<string, string> | undefined),
-  };
-
-  if (isUnsafeMethod(method)) {
-    const csrfToken = getStoredPanelCsrfToken();
-    if (csrfToken) {
-      headers['X-Rumi-CSRF'] = csrfToken;
-    }
-  }
-
   const fetchRequest = async (): Promise<T> => {
+    await ensurePanelSessionForUnsafeRequest(method);
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(options.headers as Record<string, string> | undefined),
+    };
+
+    if (isUnsafeMethod(method)) {
+      const csrfToken = getStoredPanelCsrfToken();
+      if (csrfToken) {
+        headers['X-Rumi-CSRF'] = csrfToken;
+      }
+    }
+
     const response = await fetch(url, {
       ...options,
       method,

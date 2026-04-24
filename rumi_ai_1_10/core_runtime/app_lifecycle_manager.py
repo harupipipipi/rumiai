@@ -10,11 +10,73 @@ Phase A で新規作成。
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
+
+
+_RUNTIME_READINESS_LOCK = threading.Lock()
+_RUNTIME_READINESS_STATE: Dict[str, Any] = {
+    "panel_ready": False,
+    "runtime_ready": False,
+    "runtime_status": "starting",
+    "runtime_error": None,
+}
+
+
+def reset_runtime_readiness() -> None:
+    with _RUNTIME_READINESS_LOCK:
+        _RUNTIME_READINESS_STATE.update(
+            {
+                "panel_ready": False,
+                "runtime_ready": False,
+                "runtime_status": "starting",
+                "runtime_error": None,
+            }
+        )
+
+
+def mark_panel_ready() -> None:
+    with _RUNTIME_READINESS_LOCK:
+        _RUNTIME_READINESS_STATE.update(
+            {
+                "panel_ready": True,
+                "runtime_status": "panel_ready",
+                "runtime_error": None,
+            }
+        )
+
+
+def mark_runtime_ready() -> None:
+    with _RUNTIME_READINESS_LOCK:
+        _RUNTIME_READINESS_STATE.update(
+            {
+                "panel_ready": True,
+                "runtime_ready": True,
+                "runtime_status": "runtime_ready",
+                "runtime_error": None,
+            }
+        )
+
+
+def mark_runtime_failed(error: str) -> None:
+    with _RUNTIME_READINESS_LOCK:
+        _RUNTIME_READINESS_STATE.update(
+            {
+                "panel_ready": True,
+                "runtime_ready": False,
+                "runtime_status": "error",
+                "runtime_error": error,
+            }
+        )
+
+
+def get_runtime_readiness() -> Dict[str, Any]:
+    with _RUNTIME_READINESS_LOCK:
+        return dict(_RUNTIME_READINESS_STATE)
 
 
 @dataclass
@@ -38,13 +100,16 @@ class AppLifecycleManager:
         """
         try:
             from .core_pack.core_setup.check_profile import check_profile
-            return check_profile(base_dir=self.base_dir)
+            result = check_profile(base_dir=self.base_dir)
         except ImportError:
             logger.warning("core_setup.check_profile not available, assuming needs_setup=True")
-            return {"needs_setup": True, "reason": "check_profile_unavailable"}
+            result = {"needs_setup": True, "reason": "check_profile_unavailable"}
         except Exception as e:
             logger.error("check_setup_status failed: %s", e)
-            return {"needs_setup": True, "reason": "check_error: {}".format(e)}
+            result = {"needs_setup": True, "reason": "check_error: {}".format(e)}
+
+        result.update(get_runtime_readiness())
+        return result
 
     def complete_setup(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -98,6 +163,10 @@ class AppLifecycleManager:
         """
         status = self.check_setup_status()
         return {
-            "status": "ok",
+            "status": "error" if status.get("runtime_status") == "error" else "ok",
             "needs_setup": status.get("needs_setup", True),
+            "panel_ready": status.get("panel_ready", False),
+            "runtime_ready": status.get("runtime_ready", False),
+            "runtime_status": status.get("runtime_status", "starting"),
+            "runtime_error": status.get("runtime_error"),
         }

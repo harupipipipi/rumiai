@@ -138,7 +138,10 @@ class KernelFlowExecutionMixin:
     # Startup / Pipeline 実行 (同期)
     # ------------------------------------------------------------------
 
-    def run_startup(self) -> Dict[str, Any]:
+    def _prepare_startup_pipeline(self) -> None:
+        if self._startup_steps is not None and self._startup_ctx is not None:
+            return
+
         self.load_user_flows()
         flow = self._flow or self.load_flow()
         defaults = flow.get("defaults", {}) if isinstance(flow, dict) else {}
@@ -147,18 +150,46 @@ class KernelFlowExecutionMixin:
         pipelines = flow.get("pipelines", {})
         startup_steps = pipelines.get("startup", []) if isinstance(pipelines, dict) else []
         startup_steps = startup_steps if isinstance(startup_steps, list) else []
+
         ctx = self._build_kernel_context()
-        ctx["_flow_defaults"] = {"fail_soft": fail_soft_default, "on_missing_handler": on_missing_handler}
-        self.diagnostics.record_step(phase="startup", step_id="startup.pipeline.start", handler="kernel:startup.run",
-                                      status="success", meta={"step_count": len(startup_steps)})
+        ctx["_flow_defaults"] = {
+            "fail_soft": fail_soft_default,
+            "on_missing_handler": on_missing_handler,
+        }
+
+        self._startup_ctx = ctx
+        self._startup_steps = startup_steps
+        self._startup_next_index = 0
+        self._startup_executed_ids = set()
+        self._startup_fail_soft_default = fail_soft_default
+
+    def _reset_startup_pipeline(self) -> None:
+        self._startup_ctx = None
+        self._startup_steps = None
+        self._startup_next_index = 0
+        self._startup_executed_ids = set()
+        self._startup_fail_soft_default = True
+
+    def _run_prepared_startup(self, stop_after_step_id: Optional[str] = None) -> Dict[str, Any]:
+        self._prepare_startup_pipeline()
+        steps = self._startup_steps or []
+        ctx = self._startup_ctx or {}
+        fail_soft_default = self._startup_fail_soft_default
+
+        if self._startup_next_index == 0:
+            self.diagnostics.record_step(
+                phase="startup",
+                step_id="startup.pipeline.start",
+                handler="kernel:startup.run",
+                status="success",
+                meta={"step_count": len(steps)},
+            )
+
         aborted = False
-        executed_ids: Set[str] = set()
-        for step in startup_steps:
-            if aborted:
-                break
-            # --- Wave 10-C: depends_on check ---
+        for index in range(self._startup_next_index, len(steps)):
+            step = steps[index]
             step_id_for_dep = step.get("id") if isinstance(step, dict) else getattr(step, "id", None)
-            dep_ok, dep_missing = self._check_depends_on(step, executed_ids)
+            dep_ok, dep_missing = self._check_depends_on(step, self._startup_executed_ids)
             if not dep_ok:
                 if fail_soft_default:
                     _logger.warning(
@@ -171,30 +202,62 @@ class KernelFlowExecutionMixin:
                         status="skipped",
                         meta={"missing_deps": dep_missing},
                     )
+                    self._startup_next_index = index + 1
+                    if step_id_for_dep == stop_after_step_id:
+                        break
                     continue
-                else:
-                    self.diagnostics.record_step(
-                        phase="startup",
-                        step_id=f"{step_id_for_dep or 'unknown'}.depends_on.abort",
-                        handler="kernel:depends_on_check",
-                        status="failed",
-                        meta={"missing_deps": dep_missing},
-                    )
-                    aborted = True
-                    break
-            # --- end depends_on check ---
+
+                self.diagnostics.record_step(
+                    phase="startup",
+                    step_id=f"{step_id_for_dep or 'unknown'}.depends_on.abort",
+                    handler="kernel:depends_on_check",
+                    status="failed",
+                    meta={"missing_deps": dep_missing},
+                )
+                aborted = True
+                break
+
             try:
                 aborted = self._execute_flow_step(step, phase="startup", ctx=ctx)
                 if not aborted and step_id_for_dep:
-                    executed_ids.add(step_id_for_dep)
+                    self._startup_executed_ids.add(step_id_for_dep)
             except Exception as e:
-                self.diagnostics.record_step(phase="startup", step_id="startup.pipeline.internal_error",
-                                              handler="kernel:startup.run", status="failed", error=e)
+                self.diagnostics.record_step(
+                    phase="startup",
+                    step_id="startup.pipeline.internal_error",
+                    handler="kernel:startup.run",
+                    status="failed",
+                    error=e,
+                )
                 if not fail_soft_default:
+                    aborted = True
                     break
-        self.diagnostics.record_step(phase="startup", step_id="startup.pipeline.end", handler="kernel:startup.run",
-                                      status="success" if not aborted else "failed", meta={"aborted": aborted})
+
+            self._startup_next_index = index + 1
+            if aborted or step_id_for_dep == stop_after_step_id:
+                break
+
+        completed = self._startup_next_index >= len(steps)
+        if completed or aborted:
+            self.diagnostics.record_step(
+                phase="startup",
+                step_id="startup.pipeline.end",
+                handler="kernel:startup.run",
+                status="success" if not aborted else "failed",
+                meta={"aborted": aborted},
+            )
+            self._reset_startup_pipeline()
+
         return self.diagnostics.as_dict()
+
+    def run_startup(self) -> Dict[str, Any]:
+        return self._run_prepared_startup()
+
+    def run_startup_until(self, step_id: str) -> Dict[str, Any]:
+        return self._run_prepared_startup(stop_after_step_id=step_id)
+
+    def run_startup_remaining(self) -> Dict[str, Any]:
+        return self._run_prepared_startup()
 
     def run_pipeline(self, pipeline_name: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
         flow = self._flow or self.load_flow()

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAppStore } from '@/src/store';
 import { Layout } from '@/src/components/layout/Layout';
@@ -13,16 +13,15 @@ import { ToastContainer } from '@/src/components/ui/ToastContainer';
 import { DialogContainer } from '@/src/components/ui/DialogContainer';
 import { bootstrapPanelSession, hasPendingPanelBootstrapCode } from '@/src/lib/api';
 import { panelRoutes } from '@/src/lib/routes';
-import { Button } from '@/src/components/ui/Button';
-import { Loader2 } from 'lucide-react';
 
 export default function App() {
   const theme = useAppStore(state => state.theme);
   const colorMode = useAppStore(state => state.colorMode);
   const isSetupDone = useAppStore(state => state.isSetupDone);
   const addToast = useAppStore(state => state.addToast);
-  const [panelReady, setPanelReady] = useState(() => !hasPendingPanelBootstrapCode());
-  const [panelBootstrapError, setPanelBootstrapError] = useState<string | null>(null);
+  const refreshRuntimeHealth = useAppStore(state => state.refreshRuntimeHealth);
+  const runtimeReady = useAppStore(state => state.runtimeReady);
+  const runtimeStatus = useAppStore(state => state.runtimeStatus);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -40,65 +39,45 @@ export default function App() {
   }, [colorMode]);
 
   useEffect(() => {
-    let alive = true;
     if (!hasPendingPanelBootstrapCode()) {
-      setPanelReady(true);
-      setPanelBootstrapError(null);
-      return () => {
-        alive = false;
-      };
+      return;
     }
 
-    setPanelReady(false);
-    setPanelBootstrapError(null);
-    bootstrapPanelSession().catch((error) => {
+    void bootstrapPanelSession().catch((error) => {
       const message = error instanceof Error ? error.message : 'Panel bootstrap failed';
-      if (alive) {
-        setPanelBootstrapError(message);
-      }
       addToast(message, 'error');
-    }).finally(() => {
-      if (alive) {
-        setPanelReady(true);
-      }
     });
-
-    return () => {
-      alive = false;
-    };
   }, [addToast]);
 
-  if (!panelReady) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-bg-main px-4 text-text-main">
-        <div className="flex max-w-md flex-col items-center gap-4 text-center">
-          <Loader2 className="h-8 w-8 animate-spin text-accent" />
-          <div className="space-y-2">
-            <h1 className="text-2xl font-semibold">Opening your launcher session</h1>
-            <p className="text-sm text-text-muted">We&apos;re securing the panel before loading your profiles.</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | undefined;
 
-  if (panelBootstrapError) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-bg-main px-4 text-text-main">
-        <div className="flex max-w-lg flex-col gap-4 rounded-2xl border border-border bg-bg-card p-8 shadow-sm">
-          <div className="space-y-2">
-            <h1 className="text-2xl font-semibold">Panel session could not start</h1>
-            <p className="text-sm text-text-muted">
-              {panelBootstrapError}
-            </p>
-          </div>
-          <Button onClick={() => window.location.reload()} className="w-full sm:w-fit">
-            Reload panel
-          </Button>
-        </div>
-      </div>
-    );
-  }
+    const pollRuntimeReadiness = async () => {
+      while (!cancelled) {
+        await refreshRuntimeHealth();
+        if (cancelled) {
+          return;
+        }
+        const currentState = useAppStore.getState();
+        if (currentState.runtimeReady || currentState.runtimeStatus === 'error') {
+          return;
+        }
+        await new Promise<void>((resolve) => {
+          timer = window.setTimeout(resolve, 250);
+        });
+      }
+    };
+
+    void pollRuntimeReadiness();
+
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [refreshRuntimeHealth, runtimeReady, runtimeStatus]);
 
   return (
     <BrowserRouter basename="/panel">

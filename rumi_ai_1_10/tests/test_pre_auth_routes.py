@@ -25,12 +25,14 @@ def _make_handler_class():
         _pre_auth_table = []
 
         @classmethod
-        def load_pre_auth_routes(cls, registry):
+        def load_pre_auth_routes(cls, registry, pack_ids=None):
             cls._pre_auth_table = []
             if registry is None:
                 return 0
             count = 0
             for pack_id, pack_info in registry.packs.items():
+                if pack_ids is not None and pack_id not in pack_ids:
+                    continue
                 routes = pack_info.ecosystem.get("pre_auth_routes")
                 if routes and isinstance(routes, list):
                     for route in routes:
@@ -191,6 +193,27 @@ class TestPreAuthRoutes(unittest.TestCase):
         handler = self.Handler()
         self.assertTrue(handler._is_pre_auth_route("GET", "/api/setup/status"))
         self.assertTrue(handler._is_pre_auth_route("GET", "/api/panel/dashboard"))
+
+    def test_pack_filter_only_loads_requested_routes(self):
+        """pack_ids 指定時は control panel の pre-auth だけ先行ロードできる"""
+        packs = {
+            "core_control_panel": FakePackInfo("core_control_panel", {
+                "pre_auth_routes": [
+                    {"method": "POST", "path": "/api/panel/auth/exchange"},
+                ]
+            }),
+            "core_setup": FakePackInfo("core_setup", {
+                "pre_auth_routes": [
+                    {"method": "GET", "path": "/api/setup/status"},
+                ]
+            }),
+        }
+
+        self.Handler.load_pre_auth_routes(FakeRegistry(packs), pack_ids={"core_control_panel"})
+        handler = self.Handler()
+
+        self.assertTrue(handler._is_pre_auth_route("POST", "/api/panel/auth/exchange"))
+        self.assertFalse(handler._is_pre_auth_route("GET", "/api/setup/status"))
 
 
 if __name__ == "__main__":

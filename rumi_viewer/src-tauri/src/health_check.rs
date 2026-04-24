@@ -8,9 +8,21 @@ use std::time::Duration;
 
 use anyhow::{bail, Result};
 use log::info;
+use serde::Deserialize;
 
 /// Reusable blocking HTTP client for health checks.
 static HEALTH_CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
+
+#[derive(Debug, Deserialize)]
+struct ApiEnvelope<T> {
+    success: bool,
+    data: Option<T>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HealthPayload {
+    panel_ready: Option<bool>,
+}
 
 fn health_client() -> &'static reqwest::blocking::Client {
     HEALTH_CLIENT.get_or_init(|| {
@@ -29,7 +41,25 @@ pub fn check_health(port: u16) -> Result<bool> {
     let url = format!("http://127.0.0.1:{port}/health");
 
     match health_client().get(&url).send() {
-        Ok(resp) => Ok(resp.status().is_success()),
+        Ok(resp) => {
+            if !resp.status().is_success() {
+                return Ok(false);
+            }
+
+            let envelope: ApiEnvelope<HealthPayload> = match resp.json() {
+                Ok(payload) => payload,
+                Err(_) => return Ok(true),
+            };
+
+            if !envelope.success {
+                return Ok(false);
+            }
+
+            Ok(envelope
+                .data
+                .and_then(|payload| payload.panel_ready)
+                .unwrap_or(true))
+        }
         Err(_) => Ok(false),
     }
 }

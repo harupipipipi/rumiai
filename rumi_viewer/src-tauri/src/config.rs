@@ -109,6 +109,15 @@ impl AppConfig {
         self.rumi_home.join("requirements.txt")
     }
 
+    /// Return the persisted panel bootstrap secret path inside app data.
+    pub fn panel_bootstrap_secret_path(&self) -> PathBuf {
+        self.user_data_dir
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| self.user_data_dir.clone())
+            .join(".rumi_panel_bootstrap_secret")
+    }
+
     /// Return the path where a bundled `uv` binary would live.
     ///
     /// Layout: `{app_dir}/bundled/uv` (Unix) or `{app_dir}/bundled/uv.exe` (Windows).
@@ -215,6 +224,17 @@ mod tests {
         let config = AppConfig::detect_for_tauri(resource, appdata).unwrap();
         let vp = config.venv_python();
         assert!(vp.to_string_lossy().contains("venv"));
+    }
+
+    #[test]
+    fn panel_bootstrap_secret_path_uses_appdata_root() {
+        let resource = PathBuf::from("/tmp/res");
+        let appdata = PathBuf::from("/tmp/data");
+        let config = AppConfig::detect_for_tauri(resource, appdata).unwrap();
+        assert_eq!(
+            config.panel_bootstrap_secret_path(),
+            PathBuf::from("/tmp/data/.rumi_panel_bootstrap_secret")
+        );
     }
 
     #[test]

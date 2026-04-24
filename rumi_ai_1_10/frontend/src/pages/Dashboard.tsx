@@ -69,6 +69,9 @@ export function Dashboard() {
   const addToast = useAppStore((state) => state.addToast);
   const showDialog = useAppStore((state) => state.showDialog);
   const closeDialog = useAppStore((state) => state.closeDialog);
+  const runtimeReady = useAppStore((state) => state.runtimeReady);
+  const runtimeStatus = useAppStore((state) => state.runtimeStatus);
+  const runtimeError = useAppStore((state) => state.runtimeError);
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [dashboard, setDashboard] = useState<DashboardData>(defaultDashboard);
@@ -139,9 +142,12 @@ export function Dashboard() {
   };
 
   useEffect(() => {
+    if (!runtimeReady) {
+      return;
+    }
     void refreshDashboard();
     void refreshProfiles();
-  }, []);
+  }, [runtimeReady]);
 
   const selectedProfile = useMemo(
     () => payload?.profiles.find((profile) => profile.profile_id === editProfileId) ?? null,
@@ -341,6 +347,35 @@ export function Dashboard() {
       },
     });
   };
+
+  if (!runtimeReady && runtimeStatus !== 'error') {
+    return <DashboardSkeleton />;
+  }
+
+  if (runtimeStatus === 'error' && !payload) {
+    return (
+      <div className="flex flex-1 items-center justify-center bg-bg-main px-4 text-text-main">
+        <div className="flex max-w-lg flex-col gap-4 rounded-2xl border border-rose-900/40 bg-rose-950/20 p-8">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="mt-0.5 h-5 w-5 text-rose-400" />
+            <div className="space-y-2">
+              <h1 className="text-2xl font-semibold text-text-main">Runtime could not finish starting</h1>
+              <p className="text-sm text-text-muted">
+                {runtimeError || 'The control panel opened, but the background runtime startup failed.'}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => window.location.reload()}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-accent-fg transition hover:opacity-90 sm:w-fit"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Reload
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (profilesLoading && !payload) {
     return <DashboardSkeleton />;

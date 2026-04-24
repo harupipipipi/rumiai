@@ -219,13 +219,15 @@ class PackAPIHandler(
     # --- テーブル駆動: web_mount / pre_auth_routes ---
 
     @classmethod
-    def load_web_mounts(cls, registry) -> int:
+    def load_web_mounts(cls, registry, pack_ids: Optional[set[str]] = None) -> int:
         """Registry から全 Pack の web_mount 情報を読み込み、テーブルを構築する。"""
         cls._web_mounts = []
         if registry is None:
             return 0
         count = 0
         for pack_id, pack_info in registry.packs.items():
+            if pack_ids is not None and pack_id not in pack_ids:
+                continue
             wm = pack_info.ecosystem.get("web_mount")
             if not wm or not isinstance(wm, dict):
                 continue
@@ -250,7 +252,7 @@ class PackAPIHandler(
         return count
 
     @classmethod
-    def load_pre_auth_routes(cls, registry) -> int:
+    def load_pre_auth_routes(cls, registry, pack_ids: Optional[set[str]] = None) -> int:
         """Registry から全 Pack の pre_auth_routes を読み込み、テーブルを構築する。
 
         web_mount で auth_required=false の静的配信パスも自動的に
@@ -261,6 +263,8 @@ class PackAPIHandler(
             return 0
         count = 0
         for pack_id, pack_info in registry.packs.items():
+            if pack_ids is not None and pack_id not in pack_ids:
+                continue
             # 1. 明示的な pre_auth_routes
             routes = pack_info.ecosystem.get("pre_auth_routes")
             if routes and isinstance(routes, list):
@@ -1865,6 +1869,15 @@ class PackAPIServer:
         # component setup 完了後にロードされる。
         # event_bus が利用可能ならイベント駆動、なければ即時ロード。
         self._routes_loaded = False
+        try:
+            from backend_core.ecosystem.registry import get_registry
+
+            reg = get_registry()
+            PackAPIHandler.load_web_mounts(reg, pack_ids={"core_control_panel"})
+            PackAPIHandler.load_pre_auth_routes(reg, pack_ids={"core_control_panel"})
+            logger.info("Preloaded control panel shell routes before runtime-ready")
+        except Exception as e:
+            logger.warning("Failed to preload control panel shell routes: %s", e)
         try:
             if self.kernel and hasattr(self.kernel, 'event_bus') and self.kernel.event_bus:
                 def _deferred_load_routes(event_data=None):

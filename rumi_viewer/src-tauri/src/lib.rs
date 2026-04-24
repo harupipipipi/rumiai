@@ -10,6 +10,7 @@ mod tray;
 mod updater;
 
 use std::sync::{Arc, Mutex};
+use std::{fs, io};
 use std::thread;
 use std::time::Duration;
 
@@ -63,6 +64,42 @@ fn generate_panel_bootstrap_secret() -> String {
         .take(64)
         .map(char::from)
         .collect()
+}
+
+fn load_or_create_panel_bootstrap_secret(config: &AppConfig) -> AnyResult<String> {
+    let path = config.panel_bootstrap_secret_path();
+    match fs::read_to_string(&path) {
+        Ok(existing) => {
+            let trimmed = existing.trim();
+            if !trimmed.is_empty() {
+                return Ok(trimmed.to_string());
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => {
+            warn!(
+                "Failed to read persisted panel bootstrap secret from {}: {error}",
+                path.display()
+            );
+        }
+    }
+
+    let secret = generate_panel_bootstrap_secret();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "failed to create parent directory for bootstrap secret at {}",
+                path.display()
+            )
+        })?;
+    }
+    fs::write(&path, &secret).with_context(|| {
+        format!(
+            "failed to persist panel bootstrap secret at {}",
+            path.display()
+        )
+    })?;
+    Ok(secret)
 }
 
 fn request_panel_bootstrap_code(port: u16, bootstrap_secret: &str) -> AnyResult<String> {
@@ -313,7 +350,8 @@ pub fn run() {
             let progress_arc = progress.0.clone();
             app.manage(progress);
 
-            let panel_bootstrap_secret = generate_panel_bootstrap_secret();
+            let panel_bootstrap_secret = load_or_create_panel_bootstrap_secret(&config)
+                .context("failed to load persisted panel bootstrap secret")?;
             let km = Arc::new(Mutex::new(KernelManager::new(
                 &config,
                 panel_bootstrap_secret.clone(),
@@ -417,6 +455,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use std::sync::{Mutex, OnceLock};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn env_lock() -> &'static Mutex<()> {
         static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -429,6 +468,30 @@ mod tests {
             PathBuf::from("/tmp/test_appdata"),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn reuses_persisted_panel_bootstrap_secret() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("rumi_viewer_secret_{unique}"));
+        let config =
+            AppConfig::detect_for_tauri(root.join("resource"), root.join("appdata")).unwrap();
+
+        let first = load_or_create_panel_bootstrap_secret(&config).unwrap();
+        let second = load_or_create_panel_bootstrap_secret(&config).unwrap();
+
+        assert_eq!(first, second);
+        assert_eq!(
+            fs::read_to_string(config.panel_bootstrap_secret_path())
+                .unwrap()
+                .trim(),
+            first
+        );
+
+        fs::remove_dir_all(root).ok();
     }
 
     #[test]

@@ -36,12 +36,14 @@ def _make_handler_class():
         _pre_auth_table = []
 
         @classmethod
-        def load_web_mounts(cls, registry):
+        def load_web_mounts(cls, registry, pack_ids=None):
             cls._web_mounts = []
             if registry is None:
                 return 0
             count = 0
             for pack_id, pack_info in registry.packs.items():
+                if pack_ids is not None and pack_id not in pack_ids:
+                    continue
                 wm = pack_info.ecosystem.get("web_mount")
                 if not wm or not isinstance(wm, dict):
                     continue
@@ -178,6 +180,23 @@ class TestWebMountTable(unittest.TestCase):
         reg = FakeRegistry(packs)
         count = self.Handler.load_web_mounts(reg)
         self.assertEqual(count, 2)
+
+    def test_pack_filter_only_loads_requested_mounts(self):
+        """pack_ids を指定すると control panel だけ先行ロードできる"""
+        packs = {
+            "core_control_panel": FakePackInfo("core_control_panel", {
+                "web_mount": {"path_prefix": "/panel", "static_root": "web"}
+            }),
+            "core_setup": FakePackInfo("core_setup", {
+                "web_mount": {"path_prefix": "/setup", "static_root": "web"}
+            }),
+        }
+        reg = FakeRegistry(packs)
+
+        count = self.Handler.load_web_mounts(reg, pack_ids={"core_control_panel"})
+
+        self.assertEqual(count, 1)
+        self.assertEqual(self.Handler._web_mounts[0]["pack_id"], "core_control_panel")
 
 
 if __name__ == "__main__":
