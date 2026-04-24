@@ -149,7 +149,10 @@ function FlowEditorInner() {
 
   useEffect(() => dragDrop.setupPointerTracking(), [dragDrop.setupPointerTracking]);
   useEffect(() => { loadFlows(); }, [loadFlows]);
-  useEffect(() => { setSidebarOpen(false); }, [setSidebarOpen]);
+  useEffect(() => {
+    // Flow is a focus workspace; collapse the global sidebar on entry so the canvas gets priority.
+    setSidebarOpen(false);
+  }, [setSidebarOpen]);
 
   useEffect(() => {
     const handleClick = (event: globalThis.MouseEvent) => {
@@ -157,9 +160,18 @@ function FlowEditorInner() {
         setIsPackDropdownOpen(false);
       }
     };
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsPackDropdownOpen(false);
+      }
+    };
     if (isPackDropdownOpen) {
       window.addEventListener('mousedown', handleClick as EventListener);
-      return () => window.removeEventListener('mousedown', handleClick as EventListener);
+      window.addEventListener('keydown', handleKeyDown as EventListener);
+      return () => {
+        window.removeEventListener('mousedown', handleClick as EventListener);
+        window.removeEventListener('keydown', handleKeyDown as EventListener);
+      };
     }
   }, [isPackDropdownOpen]);
 
@@ -465,16 +477,26 @@ function FlowEditorInner() {
                   size="sm"
                   className="h-8 gap-1.5 border-border bg-bg-card px-3 text-xs font-medium"
                   onClick={() => setIsPackDropdownOpen((open) => !open)}
+                  aria-haspopup="listbox"
+                  aria-expanded={isPackDropdownOpen}
+                  aria-controls="flow-pack-selector-menu"
                 >
                   {selectedPack === 'all' ? 'All Packs' : selectedPack}
                   <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', isPackDropdownOpen && 'rotate-180')} />
                 </Button>
                 {isPackDropdownOpen && (
-                  <div className="absolute left-0 top-full z-50 mt-1 w-40 rounded-lg border border-border bg-bg-card py-1 shadow-lg">
+                  <div
+                    id="flow-pack-selector-menu"
+                    role="listbox"
+                    aria-label="Flow pack filter"
+                    className="absolute left-0 top-full z-50 mt-1 w-40 rounded-lg border border-border bg-bg-card py-1 shadow-lg"
+                  >
                     {packs.map((pack) => (
                       <button
                         key={pack}
                         type="button"
+                        role="option"
+                        aria-selected={selectedPack === pack}
                         onClick={() => { setSelectedPack(pack); setIsPackDropdownOpen(false); }}
                         className={cn(
                           'w-full px-3 py-1.5 text-left text-xs transition-colors hover:bg-bg-hover',
