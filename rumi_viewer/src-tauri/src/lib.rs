@@ -10,6 +10,7 @@ mod tray;
 mod updater;
 
 use std::sync::{Arc, Mutex};
+use std::{fs, io};
 use std::thread;
 use std::time::Duration;
 
@@ -17,7 +18,7 @@ use anyhow::{anyhow, bail, Context, Result as AnyResult};
 use log::{error, info, warn};
 use rand::{distributions::Alphanumeric, Rng};
 use serde::Deserialize;
-use tauri::Manager;
+use tauri::{AppHandle, Emitter, Manager};
 
 use config::AppConfig;
 use kernel_manager::KernelManager;
@@ -63,6 +64,42 @@ fn generate_panel_bootstrap_secret() -> String {
         .take(64)
         .map(char::from)
         .collect()
+}
+
+fn load_or_create_panel_bootstrap_secret(config: &AppConfig) -> AnyResult<String> {
+    let path = config.panel_bootstrap_secret_path();
+    match fs::read_to_string(&path) {
+        Ok(existing) => {
+            let trimmed = existing.trim();
+            if !trimmed.is_empty() {
+                return Ok(trimmed.to_string());
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => {
+            warn!(
+                "Failed to read persisted panel bootstrap secret from {}: {error}",
+                path.display()
+            );
+        }
+    }
+
+    let secret = generate_panel_bootstrap_secret();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "failed to create parent directory for bootstrap secret at {}",
+                path.display()
+            )
+        })?;
+    }
+    fs::write(&path, &secret).with_context(|| {
+        format!(
+            "failed to persist panel bootstrap secret at {}",
+            path.display()
+        )
+    })?;
+    Ok(secret)
 }
 
 fn request_panel_bootstrap_code(port: u16, bootstrap_secret: &str) -> AnyResult<String> {
@@ -124,7 +161,7 @@ fn request_panel_bootstrap_code_with_retry(port: u16, bootstrap_secret: &str) ->
     }
 }
 
-fn update_setup_progress(progress: &Arc<Mutex<String>>, msg: &str) {
+fn update_setup_progress(app_handle: Option<&AppHandle>, progress: &Arc<Mutex<String>>, msg: &str) {
     match progress.lock() {
         Ok(mut state) => {
             *state = msg.to_string();
@@ -133,7 +170,28 @@ fn update_setup_progress(progress: &Arc<Mutex<String>>, msg: &str) {
             error!("Failed to update setup progress: {error}");
         }
     }
+    if let Some(handle) = app_handle {
+        let _ = handle.emit("setup-progress", msg);
+    }
     info!("{msg}");
+}
+
+fn run_delayed_update_check() {
+    thread::sleep(Duration::from_secs(5));
+    match updater::check_for_update() {
+        Ok(Some(info)) => {
+            info!(
+                "Update available: {} -> {}",
+                info.current_version, info.latest_version
+            );
+        }
+        Ok(None) => {
+            info!("Rumi AI is up to date.");
+        }
+        Err(e) => {
+            error!("Startup update check failed (non-fatal): {e}");
+        }
+    }
 }
 
 fn startup_failure_message(stage: &str, error: &anyhow::Error, config: &AppConfig) -> String {
@@ -151,6 +209,7 @@ enum StartupRecoveryStage {
 }
 
 fn run_startup_sequence<StartKernel, WaitForHealthy, AuthorizePanel, RecoverConflict>(
+    app_handle: Option<&AppHandle>,
     progress: &Arc<Mutex<String>>,
     mut start_kernel: StartKernel,
     mut wait_for_healthy: WaitForHealthy,
@@ -167,6 +226,7 @@ where
 
     loop {
         update_setup_progress(
+            app_handle,
             progress,
             if recovered_conflict {
                 "Retrying Kernel startup after recovering a stale listener..."
@@ -177,7 +237,7 @@ where
 
         start_kernel()?;
 
-        update_setup_progress(progress, "Waiting for Kernel...");
+        update_setup_progress(app_handle, progress, "Waiting for Kernel...");
         if let Err(error) = wait_for_healthy() {
             if recovered_conflict {
                 return Err(error);
@@ -192,7 +252,7 @@ where
             return Err(error);
         }
 
-        update_setup_progress(progress, "Authorizing panel session...");
+        update_setup_progress(app_handle, progress, "Authorizing panel session...");
         match authorize_panel() {
             Ok(code) => return Ok(code),
             Err(error) => {
@@ -213,12 +273,14 @@ where
 }
 
 fn start_kernel_and_bootstrap(
+    app_handle: &AppHandle,
     km: &Arc<Mutex<KernelManager>>,
     port: u16,
     bootstrap_secret: &str,
     progress: &Arc<Mutex<String>>,
 ) -> AnyResult<String> {
     run_startup_sequence(
+        Some(app_handle),
         progress,
         || {
             let mut kernel = km
@@ -288,7 +350,8 @@ pub fn run() {
             let progress_arc = progress.0.clone();
             app.manage(progress);
 
-            let panel_bootstrap_secret = generate_panel_bootstrap_secret();
+            let panel_bootstrap_secret = load_or_create_panel_bootstrap_secret(&config)
+                .context("failed to load persisted panel bootstrap secret")?;
             let km = Arc::new(Mutex::new(KernelManager::new(
                 &config,
                 panel_bootstrap_secret.clone(),
@@ -306,15 +369,42 @@ pub fn run() {
             let port = config.kernel_port;
 
             std::thread::spawn(move || {
-                update_setup_progress(&progress_arc, "Checking Python environment...");
+                // --- Fast path: existing healthy kernel ---
+                update_setup_progress(Some(&handle), &progress_arc, "Checking for existing session...");
+                if let Ok(true) = health_check::check_health(port) {
+                    info!("Existing healthy kernel detected on port {port}, attempting fast-path bootstrap...");
+                    match request_panel_bootstrap_code_with_retry(port, &panel_bootstrap_secret) {
+                        Ok(panel_code) => {
+                            update_setup_progress(Some(&handle), &progress_arc, "Ready");
+                            if let Some(win) = handle.get_webview_window("main") {
+                                let js = format!(
+                                    "window.location.replace('http://127.0.0.1:{port}/panel/?code={panel_code}')"
+                                );
+                                if let Err(e) = win.eval(&js) {
+                                    error!("Failed to navigate to panel: {e}");
+                                }
+                            }
+                            // Delayed background update check.
+                            run_delayed_update_check();
+                            return;
+                        }
+                        Err(e) => {
+                            info!("Fast-path bootstrap failed: {e}, falling back to normal startup");
+                        }
+                    }
+                }
+
+                // --- Normal startup sequence ---
+                update_setup_progress(Some(&handle), &progress_arc, "Checking Python environment...");
                 if let Err(e) = python_env::ensure_python_env(&config) {
                     let msg = startup_failure_message("Python setup", &e, &config);
                     error!("{msg}");
-                    update_setup_progress(&progress_arc, &msg);
+                    update_setup_progress(Some(&handle), &progress_arc, &msg);
                     return;
                 }
 
                 let panel_code = match start_kernel_and_bootstrap(
+                    &handle,
                     &km_for_thread,
                     port,
                     &panel_bootstrap_secret,
@@ -324,12 +414,12 @@ pub fn run() {
                     Err(e) => {
                         let msg = startup_failure_message("Viewer startup", &e, &config);
                         error!("{msg}");
-                        update_setup_progress(&progress_arc, &msg);
+                        update_setup_progress(Some(&handle), &progress_arc, &msg);
                         return;
                     }
                 };
 
-                update_setup_progress(&progress_arc, "Ready");
+                update_setup_progress(Some(&handle), &progress_arc, "Ready");
 
                 if let Some(win) = handle.get_webview_window("main") {
                     let js = format!(
@@ -340,21 +430,8 @@ pub fn run() {
                     }
                 }
 
-                // Background update check — log only, never interrupt startup.
-                match updater::check_for_update() {
-                    Ok(Some(info)) => {
-                        info!(
-                            "Update available: {} -> {}",
-                            info.current_version, info.latest_version
-                        );
-                    }
-                    Ok(None) => {
-                        info!("Rumi AI is up to date.");
-                    }
-                    Err(e) => {
-                        error!("Startup update check failed (non-fatal): {e}");
-                    }
-                }
+                // Delayed background update check.
+                run_delayed_update_check();
             });
 
             tray::setup_tray(app)?;
@@ -378,6 +455,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use std::sync::{Mutex, OnceLock};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn env_lock() -> &'static Mutex<()> {
         static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -390,6 +468,30 @@ mod tests {
             PathBuf::from("/tmp/test_appdata"),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn reuses_persisted_panel_bootstrap_secret() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("rumi_viewer_secret_{unique}"));
+        let config =
+            AppConfig::detect_for_tauri(root.join("resource"), root.join("appdata")).unwrap();
+
+        let first = load_or_create_panel_bootstrap_secret(&config).unwrap();
+        let second = load_or_create_panel_bootstrap_secret(&config).unwrap();
+
+        assert_eq!(first, second);
+        assert_eq!(
+            fs::read_to_string(config.panel_bootstrap_secret_path())
+                .unwrap()
+                .trim(),
+            first
+        );
+
+        fs::remove_dir_all(root).ok();
     }
 
     #[test]
@@ -456,6 +558,7 @@ mod tests {
         let mut recover_stages = Vec::new();
 
         let panel_code = run_startup_sequence(
+            None,
             &progress,
             || {
                 start_calls += 1;
@@ -495,6 +598,7 @@ mod tests {
         let mut recover_stages = Vec::new();
 
         let panel_code = run_startup_sequence(
+            None,
             &progress,
             || {
                 start_calls += 1;
@@ -529,6 +633,7 @@ mod tests {
         let mut recover_calls = 0;
 
         let error = run_startup_sequence(
+            None,
             &progress,
             || {
                 start_calls += 1;

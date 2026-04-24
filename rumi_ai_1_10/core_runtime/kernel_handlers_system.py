@@ -605,7 +605,7 @@ class KernelSystemHandlersMixin:
     def _h_api_init(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
         try:
             from .pack_api_server import initialize_pack_api_server
-            from .app_lifecycle_manager import AppLifecycleManager
+            from .app_lifecycle_manager import AppLifecycleManager, mark_panel_ready
             from .paths import BASE_DIR as _api_base_dir
 
             host = args.get("host", "127.0.0.1")
@@ -649,6 +649,7 @@ class KernelSystemHandlersMixin:
                 status="success",
                 meta={"host": host, "port": port}
             )
+            mark_panel_ready()
             return {"_kernel_step_status": "success"}
         except Exception as e:
             _logger.error("Pack API server init failed", exc_info=e, error=str(e))
@@ -800,6 +801,13 @@ class KernelSystemHandlersMixin:
 
     def _h_emit(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
         event = args.get("event", "")
+        if event == "system.ready":
+            try:
+                from .app_lifecycle_manager import mark_runtime_ready
+
+                mark_runtime_ready()
+            except Exception:
+                _logger.warning("Failed to mark runtime as ready", exc_info=True)
         if event and self.event_bus:
             self.event_bus.publish(event, {"ts": self._now_ts()})
         return {"_kernel_step_status": "success"}

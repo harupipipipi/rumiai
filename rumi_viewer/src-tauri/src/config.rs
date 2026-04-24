@@ -109,11 +109,30 @@ impl AppConfig {
         self.rumi_home.join("requirements.txt")
     }
 
+    /// Return the persisted panel bootstrap secret path inside app data.
+    pub fn panel_bootstrap_secret_path(&self) -> PathBuf {
+        self.user_data_dir
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| self.user_data_dir.clone())
+            .join(".rumi_panel_bootstrap_secret")
+    }
+
     /// Return the path where a bundled `uv` binary would live.
     ///
     /// Layout: `{app_dir}/bundled/uv` (Unix) or `{app_dir}/bundled/uv.exe` (Windows).
     pub fn bundled_uv_path(&self) -> PathBuf {
         self.app_dir.join("bundled").join(uv_binary_name())
+    }
+
+    /// Return the path where a development-checkout bundled `uv` binary lives.
+    ///
+    /// Layout: `{workspace_root}/rumi_ai_1_10/bundled/uv` (Unix) or
+    /// `{workspace_root}/rumi_ai_1_10/bundled/uv.exe` (Windows).
+    pub fn dev_bundled_uv_path(&self) -> Option<PathBuf> {
+        self.dev_workspace_root
+            .as_ref()
+            .map(|root| root.join("rumi_ai_1_10").join("bundled").join(uv_binary_name()))
     }
 
     /// Resolve the best available `uv` binary path.
@@ -123,10 +142,16 @@ impl AppConfig {
     pub fn resolved_uv_path(&self) -> PathBuf {
         let bundled = self.bundled_uv_path();
         if bundled.exists() {
-            bundled
-        } else {
-            self.uv_path.clone()
+            return bundled;
         }
+
+        if let Some(dev_bundled) = self.dev_bundled_uv_path() {
+            if dev_bundled.exists() {
+                return dev_bundled;
+            }
+        }
+
+        self.uv_path.clone()
     }
 
     pub fn is_dev_workspace(&self) -> bool {
@@ -218,6 +243,17 @@ mod tests {
     }
 
     #[test]
+    fn panel_bootstrap_secret_path_uses_appdata_root() {
+        let resource = PathBuf::from("/tmp/res");
+        let appdata = PathBuf::from("/tmp/data");
+        let config = AppConfig::detect_for_tauri(resource, appdata).unwrap();
+        assert_eq!(
+            config.panel_bootstrap_secret_path(),
+            PathBuf::from("/tmp/data/.rumi_panel_bootstrap_secret")
+        );
+    }
+
+    #[test]
     fn detect_for_tauri_falls_back_to_repo_checkout_in_dev() {
         use std::fs;
         use std::time::{SystemTime, UNIX_EPOCH};
@@ -240,5 +276,69 @@ mod tests {
         assert!(config.is_dev_workspace());
 
         fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn resolved_uv_path_prefers_bundled_copy_in_app_dir() {
+        use std::fs;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("rumi_viewer_uv_app_bundle_{unique}"));
+        let resource = root.join("resources");
+        let app_dir = resource.join("app");
+        let appdata = root.join("appdata");
+        let bundled_uv = app_dir.join("bundled").join(uv_binary_name());
+
+        fs::create_dir_all(bundled_uv.parent().unwrap()).unwrap();
+        fs::write(&bundled_uv, b"uv").unwrap();
+
+        let config = AppConfig::detect_for_tauri(resource, appdata.clone()).unwrap();
+        assert_eq!(config.resolved_uv_path(), bundled_uv);
+        assert_eq!(config.bundled_uv_path(), bundled_uv);
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn resolved_uv_path_prefers_dev_workspace_bundle_over_downloaded_uv() {
+        use std::fs;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("rumi_viewer_uv_dev_bundle_{unique}"));
+        let resource = root.join("rumi_viewer").join("src-tauri").join("target").join("debug");
+        let appdata = root.join("appdata");
+        let app_py = root.join("rumi_ai_1_10").join("app.py");
+        let dev_bundled_uv = root.join("rumi_ai_1_10").join("bundled").join(uv_binary_name());
+
+        fs::create_dir_all(&resource).unwrap();
+        fs::create_dir_all(app_py.parent().unwrap()).unwrap();
+        fs::create_dir_all(dev_bundled_uv.parent().unwrap()).unwrap();
+        fs::write(&app_py, "print('ok')\n").unwrap();
+        fs::write(&dev_bundled_uv, b"uv").unwrap();
+
+        let config = AppConfig::detect_for_tauri(resource, appdata.clone()).unwrap();
+        assert_eq!(config.dev_bundled_uv_path().as_deref(), Some(dev_bundled_uv.as_path()));
+        assert_eq!(config.resolved_uv_path(), dev_bundled_uv);
+        assert!(config.is_dev_workspace());
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn resolved_uv_path_falls_back_to_downloaded_uv_when_no_bundle_exists() {
+        let resource = PathBuf::from("/tmp/res");
+        let appdata = PathBuf::from("/tmp/data");
+        let config = AppConfig::detect_for_tauri(resource, appdata.clone()).unwrap();
+
+        assert_eq!(config.resolved_uv_path(), config.uv_path);
+        assert_eq!(config.uv_path, appdata.join(uv_binary_name()));
     }
 }

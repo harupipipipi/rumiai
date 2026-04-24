@@ -75,6 +75,9 @@ export function Dashboard() {
   const addToast = useAppStore((state) => state.addToast);
   const showDialog = useAppStore((state) => state.showDialog);
   const closeDialog = useAppStore((state) => state.closeDialog);
+  const runtimeReady = useAppStore((state) => state.runtimeReady);
+  const runtimeStatus = useAppStore((state) => state.runtimeStatus);
+  const runtimeError = useAppStore((state) => state.runtimeError);
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [dashboard, setDashboard] = useState<DashboardData>(defaultDashboard);
@@ -161,9 +164,12 @@ export function Dashboard() {
   };
 
   useEffect(() => {
+    if (!runtimeReady) {
+      return;
+    }
     void refreshDashboard();
     void refreshProfiles();
-  }, []);
+  }, [runtimeReady]);
 
   const selectedProfile = useMemo(
     () => payload?.profiles.find((profile) => profile.profile_id === editProfileId) ?? null,
@@ -364,18 +370,37 @@ export function Dashboard() {
     });
   };
 
-  if (profilesLoading && !payload) {
+  if (!runtimeReady && runtimeStatus !== 'error') {
+    return <DashboardSkeleton />;
+  }
+
+  if (runtimeStatus === 'error' && !payload) {
     return (
       <div className="flex flex-1 items-center justify-center bg-bg-main px-4 text-text-main">
-        <div className="flex max-w-md flex-col items-center gap-4 text-center">
-          <Loader2 className="h-8 w-8 animate-spin text-accent" />
-          <div className="space-y-2">
-            <h1 className="text-2xl font-semibold text-text-main">Loading your launcher home</h1>
-            <p className="text-sm text-text-muted">Fetching profiles, pack readiness, and workspace status.</p>
+        <div className="flex max-w-lg flex-col gap-4 rounded-2xl border border-rose-900/40 bg-rose-950/20 p-8">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="mt-0.5 h-5 w-5 text-rose-400" />
+            <div className="space-y-2">
+              <h1 className="text-2xl font-semibold text-text-main">Runtime could not finish starting</h1>
+              <p className="text-sm text-text-muted">
+                {runtimeError || 'The control panel opened, but the background runtime startup failed.'}
+              </p>
+            </div>
           </div>
+          <button
+            onClick={() => window.location.reload()}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-accent-fg transition hover:opacity-90 sm:w-fit"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Reload
+          </button>
         </div>
       </div>
     );
+  }
+
+  if (profilesLoading && !payload) {
+    return <DashboardSkeleton />;
   }
 
   if (!payload) {
@@ -867,6 +892,69 @@ export function Dashboard() {
             </div>
           </section>
         ) : null}
+      </div>
+    </div>
+  );
+}
+
+function SkeletonPulse({ className }: { className: string }) {
+  return (
+    <div
+      className={`animate-pulse rounded-xl bg-bg-hover ${className}`}
+    />
+  );
+}
+
+function DashboardSkeleton() {
+  return (
+    <div className="flex flex-1 overflow-hidden bg-bg-main text-text-main">
+      <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-6 py-8 lg:px-10 scrollbar-hidden overflow-y-auto">
+        {/* Header skeleton */}
+        <section className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="space-y-2">
+            <SkeletonPulse className="h-8 w-48" />
+            <SkeletonPulse className="h-4 w-64" />
+          </div>
+          <div className="flex items-center gap-3">
+            <SkeletonPulse className="h-10 w-40" />
+            <SkeletonPulse className="h-10 w-32" />
+          </div>
+        </section>
+
+        {/* Profile cards skeleton */}
+        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <article
+              key={i}
+              className="flex flex-col rounded-2xl border border-border bg-bg-card p-5"
+            >
+              <div className="flex items-center justify-between">
+                <SkeletonPulse className="h-3 w-12" />
+                <SkeletonPulse className="h-6 w-6 rounded-lg" />
+              </div>
+              <div className="mt-4 flex justify-center">
+                <SkeletonPulse className="h-16 w-16 rounded-2xl" />
+              </div>
+              <div className="mt-4 flex flex-col items-center gap-2">
+                <SkeletonPulse className="h-5 w-32" />
+                <SkeletonPulse className="h-3 w-24" />
+              </div>
+              <div className="mt-2 flex justify-center">
+                <SkeletonPulse className="h-3 w-20" />
+              </div>
+              <div className="mt-auto pt-4 flex gap-2">
+                <SkeletonPulse className="h-10 flex-1" />
+                <SkeletonPulse className="h-10 w-16" />
+              </div>
+            </article>
+          ))}
+          {/* Create card skeleton */}
+          <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-bg-card/50 p-5 min-h-[260px]">
+            <SkeletonPulse className="h-16 w-16 rounded-2xl" />
+            <SkeletonPulse className="mt-4 h-5 w-28" />
+            <SkeletonPulse className="mt-1 h-3 w-36" />
+          </div>
+        </section>
       </div>
     </div>
   );

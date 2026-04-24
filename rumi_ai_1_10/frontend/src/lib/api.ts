@@ -43,6 +43,10 @@ function isUnsafeMethod(method: string): boolean {
   return method === 'POST' || method === 'PUT' || method === 'DELETE' || method === 'PATCH';
 }
 
+function isPanelApiPath(path: string): boolean {
+  return path === '/api/panel' || path.startsWith('/api/panel/');
+}
+
 export function hasPendingPanelBootstrapCode(href = window.location.href): boolean {
   return new URL(href).searchParams.has('code');
 }
@@ -100,6 +104,20 @@ export async function bootstrapPanelSession(): Promise<void> {
   }
 }
 
+async function ensurePanelSessionForRequest(path: string, method: string): Promise<void> {
+  if (!isPanelApiPath(path)) {
+    return;
+  }
+
+  if (!isUnsafeMethod(method) && !hasPendingPanelBootstrapCode() && !panelBootstrapPromise) {
+    return;
+  }
+
+  if (panelBootstrapPromise || hasPendingPanelBootstrapCode()) {
+    await bootstrapPanelSession();
+  }
+}
+
 /**
  * Common fetch wrapper for API calls.
  * - Prepends API_BASE_URL
@@ -115,19 +133,21 @@ export async function apiFetch<T>(
   const url = `${API_BASE_URL}${path}`;
   const method = (options.method || 'GET').toUpperCase();
 
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(options.headers as Record<string, string> | undefined),
-  };
-
-  if (isUnsafeMethod(method)) {
-    const csrfToken = getStoredPanelCsrfToken();
-    if (csrfToken) {
-      headers['X-Rumi-CSRF'] = csrfToken;
-    }
-  }
-
   const fetchRequest = async (): Promise<T> => {
+    await ensurePanelSessionForRequest(path, method);
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(options.headers as Record<string, string> | undefined),
+    };
+
+    if (isUnsafeMethod(method)) {
+      const csrfToken = getStoredPanelCsrfToken();
+      if (csrfToken) {
+        headers['X-Rumi-CSRF'] = csrfToken;
+      }
+    }
+
     const response = await fetch(url, {
       ...options,
       method,

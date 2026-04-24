@@ -156,6 +156,20 @@ test('apiFetch adds the panel CSRF header for unsafe methods', async () => {
   assert.equal((lastFetchInit?.credentials as string | undefined), 'same-origin');
 });
 
+test('apiFetch waits for panel bootstrap before unsafe requests when code is pending', async () => {
+  installBrowser('http://127.0.0.1:8765/panel/?code=one-time-code');
+
+  await apiFetch<{ok: boolean}>('/api/panel/flows', {method: 'POST', body: '{}'});
+
+  assert.equal(panelExchangeCount, 1);
+  assert.equal(lastFetchUrl, '/api/panel/flows');
+  assert.equal(
+    (lastFetchInit?.headers as Record<string, string>)?.['X-Rumi-CSRF'],
+    'csrf-from-server',
+  );
+  assert.equal(window.location.href, 'http://127.0.0.1:8765/panel/');
+});
+
 test('apiFetch leaves GET requests free of CSRF headers', async () => {
   installBrowser('http://127.0.0.1:8765/panel/?v=42');
   sessionStorageRef.setItem('rumi-panel-csrf', 'persisted-csrf');
@@ -167,6 +181,26 @@ test('apiFetch leaves GET requests free of CSRF headers', async () => {
     (lastFetchInit?.headers as Record<string, string>)?.['X-Rumi-CSRF'],
     undefined,
   );
+});
+
+test('apiFetch waits for panel bootstrap before GET requests to panel APIs when code is pending', async () => {
+  installBrowser('http://127.0.0.1:8765/panel/?code=one-time-code');
+
+  await apiFetch<{ok: boolean}>('/api/panel/dashboard');
+
+  assert.equal(panelExchangeCount, 1);
+  assert.equal(lastFetchUrl, '/api/panel/dashboard');
+  assert.equal(window.location.href, 'http://127.0.0.1:8765/panel/');
+});
+
+test('apiFetch does not bootstrap non-panel GET requests when code is pending', async () => {
+  installBrowser('http://127.0.0.1:8765/panel/?code=one-time-code');
+
+  await apiFetch<{ok: boolean}>('/health');
+
+  assert.equal(panelExchangeCount, 0);
+  assert.equal(lastFetchUrl, '/health');
+  assert.equal(window.location.href, 'http://127.0.0.1:8765/panel/?code=one-time-code');
 });
 
 test('apiFetch deduplicates concurrent GET requests for the same URL', async () => {

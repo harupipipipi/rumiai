@@ -231,9 +231,17 @@ export interface OAuthStartResponseData {
 export interface SetupStatusResponseData {
   needs_setup: boolean;
   reason?: string;
+  panel_ready?: boolean;
+  runtime_ready?: boolean;
+  runtime_status?: 'starting' | 'panel_ready' | 'runtime_ready' | 'error';
+  runtime_error?: string | null;
 }
 
 export interface HealthResponseData {
   status: 'ok' | 'error';
   needs_setup?: boolean;
+  panel_ready?: boolean;
+  runtime_ready?: boolean;
+  runtime_status?: 'starting' | 'panel_ready' | 'runtime_ready' | 'error';
+  runtime_error?: string | null;
 }

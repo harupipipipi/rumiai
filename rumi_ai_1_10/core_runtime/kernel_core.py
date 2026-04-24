@@ -21,7 +21,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, List, Tuple, Callable
+from typing import Any, Dict, Optional, List, Tuple, Callable, Set
 from concurrent.futures import ThreadPoolExecutor
 
 from .types import FlowId
@@ -72,12 +72,17 @@ class KernelCore:
         self.lifecycle = lifecycle or ComponentLifecycleExecutor(diagnostics=self.diagnostics, install_journal=self.install_journal)
         self._flow: Optional[Dict[str, Any]] = None
         self._flow_degraded: bool = False
+        self._startup_ctx: Optional[Dict[str, Any]] = None
+        self._startup_steps: Optional[List[Dict[str, Any]]] = None
+        self._startup_next_index: int = 0
+        self._startup_executed_ids: Set[str] = set()
+        self._startup_fail_soft_default: bool = True
         self._kernel_handlers: Dict[str, Callable[[Dict[str, Any], Dict[str, Any]], Any]] = {}
         self._shutdown_handlers: List[Callable[[], None]] = []
-        self._capability_proxy = None
+        self._capability_proxy: Any = None
         self._executor: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=4)
         self._flow_scheduler = None  # FlowScheduler instance (lazy)
-        self._uds_proxy_manager = None  # UDS Egress Proxy Manager
+        self._uds_proxy_manager: Any = None  # UDS Egress Proxy Manager
         # SV-3 fix: circuit breaker flags for lazy init proxies
         self._uds_proxy_init_failed: bool = False
         self._capability_proxy_init_failed: bool = False

@@ -204,6 +204,18 @@ def main():
     try:
         from core_runtime import Kernel
         try:
+            from core_runtime.app_lifecycle_manager import (
+                mark_runtime_failed,
+                reset_runtime_readiness,
+            )
+        except (ImportError, ModuleNotFoundError):
+            def reset_runtime_readiness() -> None:
+                return None
+
+            def mark_runtime_failed(_error: str) -> None:
+                return None
+
+        try:
             from core_runtime.lang import L as _L, load_system_lang
             global L
             L = _L
@@ -216,7 +228,12 @@ def main():
         _kernel = Kernel()
 
         print(f"[Rumi] {L('startup.starting')}")
-        _kernel.run_startup()
+        deferred_runtime_thread = None
+        if args.headless:
+            _kernel.run_startup()
+        else:
+            reset_runtime_readiness()
+            _kernel.run_startup_until("api_init")
 
         # --- W19-D: host_execution guard ---
         from core_runtime.pack_validator import validate_host_execution_single
@@ -243,13 +260,36 @@ def main():
 
         atexit.register(lambda: _kernel.shutdown() if _kernel else None)
 
-        try:
-            from backend_core.ecosystem.compat import mark_ecosystem_initialized
-            mark_ecosystem_initialized()
-        except Exception:
-            _logger.debug("mark_ecosystem_initialized failed", exc_info=True)
+        def _finish_runtime_startup():
+            try:
+                _kernel.run_startup_remaining()
+                try:
+                    from backend_core.ecosystem.compat import mark_ecosystem_initialized
 
-        print(f"[Rumi] {L('startup.success')}")
+                    mark_ecosystem_initialized()
+                except Exception:
+                    _logger.debug("mark_ecosystem_initialized failed", exc_info=True)
+                print(f"[Rumi] {L('startup.success')}")
+            except Exception as e:
+                mark_runtime_failed(str(e))
+                _logger.error("Deferred runtime startup failed", exc_info=True)
+                traceback.print_exc()
+
+        if not args.headless:
+            deferred_runtime_thread = threading.Thread(
+                target=_finish_runtime_startup,
+                daemon=True,
+                name="rumi-runtime-startup",
+            )
+            deferred_runtime_thread.start()
+        else:
+            try:
+                from backend_core.ecosystem.compat import mark_ecosystem_initialized
+
+                mark_ecosystem_initialized()
+            except Exception:
+                _logger.debug("mark_ecosystem_initialized failed", exc_info=True)
+            print(f"[Rumi] {L('startup.success')}")
 
         if args.headless:
             print(f"[Rumi] {L('startup.headless')}")

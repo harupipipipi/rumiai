@@ -57,6 +57,23 @@ class TestCheckSetupStatus:
         result = alm.check_setup_status()
         assert result["needs_setup"] is False
 
+    def test_setup_status_includes_runtime_readiness(self, tmp_path):
+        from core_runtime.app_lifecycle_manager import (
+            AppLifecycleManager,
+            mark_panel_ready,
+            reset_runtime_readiness,
+        )
+
+        reset_runtime_readiness()
+        mark_panel_ready()
+
+        alm = AppLifecycleManager(base_dir=tmp_path)
+        result = alm.check_setup_status()
+
+        assert result["panel_ready"] is True
+        assert result["runtime_ready"] is False
+        assert result["runtime_status"] == "panel_ready"
+
 
 class TestCompleteSetup:
     """AppLifecycleManager.complete_setup() のテスト"""
@@ -144,3 +161,22 @@ class TestCompleteSetup:
         auth_pos = source.find('_check_auth("POST", _pre_auth_path_post)')
         assert complete_pos != -1, "/api/setup/complete not found in do_POST"
         assert complete_pos < auth_pos, "/api/setup/complete must appear before _check_auth"
+
+
+class TestHealthPayload:
+    def test_health_reports_runtime_error(self, tmp_path):
+        from core_runtime.app_lifecycle_manager import (
+            AppLifecycleManager,
+            mark_runtime_failed,
+            reset_runtime_readiness,
+        )
+
+        reset_runtime_readiness()
+        mark_runtime_failed("runtime crashed")
+
+        alm = AppLifecycleManager(base_dir=tmp_path)
+        result = alm.get_health()
+
+        assert result["status"] == "error"
+        assert result["runtime_status"] == "error"
+        assert result["runtime_error"] == "runtime crashed"
