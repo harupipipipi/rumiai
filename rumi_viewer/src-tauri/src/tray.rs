@@ -10,6 +10,7 @@ use tauri::{
 };
 
 use crate::kernel_manager::KernelManager;
+use crate::{refresh_panel_session_for_window, request_app_exit};
 use crate::updater;
 
 /// Helper: clone the Arc<Mutex<KernelManager>> out of Tauri State.
@@ -34,6 +35,7 @@ fn show_primary_window(app: &tauri::AppHandle) {
     );
 
     if let Some(label) = target {
+        refresh_panel_session_for_window(app, label);
         if let Some(win) = app.get_webview_window(label) {
             let _ = win.unminimize();
             let _ = win.show();
@@ -92,17 +94,7 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 });
             }
             "quit" => {
-                let km = get_km(app);
-                match km.lock() {
-                    Ok(mut guard) => {
-                        let _ = guard.stop();
-                    }
-                    Err(e) => {
-                        error!("Failed to lock kernel manager during quit: {e}");
-                    }
-                };
-                drop(km);
-                app.exit(0);
+                request_app_exit(app);
             }
             _ => {}
         })

@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Play, Settings2, Square, CheckCircle2, XCircle, Loader2, Waypoints } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
+import { useT } from '@/src/lib/i18n';
 import type {
   EndNode as EndNodeType,
   ExecutionStatus,
@@ -17,7 +18,58 @@ function statusAccent(status: ExecutionStatus): string {
   return 'is-idle';
 }
 
+function localizePortLabel(port: FlowPort, t: ReturnType<typeof useT>): string {
+  const keyById: Record<string, string> = {
+    'start-out': 'flows.port.boot',
+    'boot-in': 'flows.port.boot',
+    'profile-in': 'flows.port.boot',
+    'end-in': 'flows.port.done',
+    'mounts-in': 'flows.port.mounts',
+    'mounts-out': 'flows.port.mounts',
+    'registry-in': 'flows.port.registry',
+    'registry-out': 'flows.port.registry',
+    'profile-out': 'flows.port.profile',
+    'event-in': 'flows.port.event',
+    'event-out': 'flows.port.signal',
+    'exec-in': 'flows.port.command',
+    'exec-out': 'flows.port.result',
+    'http-in': 'flows.port.request',
+    'http-out': 'flows.port.response',
+    'http-post-in': 'flows.port.request',
+    'http-post-out': 'flows.port.response',
+    'log-in': 'flows.port.text',
+    'log-out': 'flows.port.signal',
+    'input-main': 'flows.port.input',
+    'output-main': 'flows.port.output',
+  };
+
+  const translationKey = keyById[port.id];
+  return translationKey ? t(translationKey) : port.label;
+}
+
+function localizeNodeTitle(value: string | undefined, fallbackKey: string, t: ReturnType<typeof useT>): string {
+  if (!value) {
+    return t(fallbackKey);
+  }
+
+  if (fallbackKey === 'flows.node.start_title' && value === 'rumi_start') {
+    return t(fallbackKey);
+  }
+  if (fallbackKey === 'flows.node.finish_title' && value === 'finish') {
+    return t(fallbackKey);
+  }
+  return value;
+}
+
+function localizeNodeKind(value: string | undefined, t: ReturnType<typeof useT>): string {
+  if (!value || value === 'action') {
+    return t('flows.node.action');
+  }
+  return value;
+}
+
 function PortHandle({ port, side }: { port: FlowPort; side: 'left' | 'right' }) {
+  const t = useT();
   const position = side === 'left' ? Position.Left : Position.Right;
   const type = side === 'left' ? 'target' : 'source';
 
@@ -32,7 +84,7 @@ function PortHandle({ port, side }: { port: FlowPort; side: 'left' | 'right' }) 
         />
       )}
       <div className="flow-port-tag">
-        <span className="truncate">{port.label}</span>
+        <span className="truncate">{localizePortLabel(port, t)}</span>
       </div>
       {side === 'right' && (
         <Handle
@@ -114,6 +166,7 @@ function NodeShell({
 }
 
 export function TriggerNode({ data, selected }: NodeProps<TriggerNodeType>) {
+  const t = useT();
   const status = data.executionStatus;
   const icon = status === 'running'
     ? <Loader2 className="h-4 w-4 animate-spin" />
@@ -124,9 +177,9 @@ export function TriggerNode({ data, selected }: NodeProps<TriggerNodeType>) {
 
   return (
     <NodeShell
-      title={data.title || 'rumi_start'}
-      subtitle={`basepack: ${(data.basePack || 'basepack').toUpperCase()}`}
-      tokenTitle={startPort?.label || 'Start'}
+      title={localizeNodeTitle(data.title, 'flows.node.start_title', t)}
+      subtitle={`${t('flows.node.basepack')}: ${(data.basePack || 'basepack').toUpperCase()}`}
+      tokenTitle={startPort ? localizePortLabel(startPort, t) : t('flows.port.boot')}
       tokenSubtitle={startPort?.contracts[0] || String(data.type || 'flow.start')}
       status={status}
       selected={selected}
@@ -137,6 +190,7 @@ export function TriggerNode({ data, selected }: NodeProps<TriggerNodeType>) {
 }
 
 export function StepNode({ data, selected }: NodeProps<StepNodeType>) {
+  const t = useT();
   if (data.type === 'reroute') {
     return (
       <div className={cn(
@@ -158,9 +212,9 @@ export function StepNode({ data, selected }: NodeProps<StepNodeType>) {
   return (
     <NodeShell
       title={data.title || data.id || 'step'}
-      subtitle={`${data.type || 'action'}${data.phase ? ` / ${data.phase}` : ''}`}
+      subtitle={`${localizeNodeKind(data.type, t)}${data.phase ? ` / ${data.phase}` : ''}`}
       tokenTitle={data.id || 'step'}
-      tokenSubtitle={data.description || 'Configured step'}
+      tokenSubtitle={data.description || t('flows.node.configured_step')}
       status={data.executionStatus}
       selected={selected}
       icon={icon}
@@ -170,6 +224,7 @@ export function StepNode({ data, selected }: NodeProps<StepNodeType>) {
 }
 
 export function EndNode({ data, selected }: NodeProps<EndNodeType>) {
+  const t = useT();
   const icon = data.executionStatus === 'success'
     ? <CheckCircle2 className="h-4 w-4" />
     : <Square className="h-4 w-4" />;
@@ -177,9 +232,9 @@ export function EndNode({ data, selected }: NodeProps<EndNodeType>) {
 
   return (
     <NodeShell
-      title={data.title || 'finish'}
-      subtitle="terminal"
-      tokenTitle={endPort?.label || 'Done'}
+      title={localizeNodeTitle(data.title, 'flows.node.finish_title', t)}
+      subtitle={t('flows.node.terminal')}
+      tokenTitle={endPort ? localizePortLabel(endPort, t) : t('flows.port.done')}
       tokenSubtitle="flow.complete"
       status={data.executionStatus}
       selected={selected}

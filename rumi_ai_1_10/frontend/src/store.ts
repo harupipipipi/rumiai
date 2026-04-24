@@ -13,6 +13,7 @@ import {
   deleteFlow as apiDeleteFlow,
   updateProfile as apiUpdateProfile,
   restartKernel as apiRestartKernel,
+  openExternalUrl,
   startOAuth,
 } from './lib/api';
 import {
@@ -420,10 +421,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   connectAccount: async () => {
     try {
       const data = await startOAuth();
-      window.location.href = data.authorize_url;
+      await openExternalUrl(data.authorize_url);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed to start OAuth';
-      get().addToast(msg, 'error');
+      throw e;
     }
   },
 

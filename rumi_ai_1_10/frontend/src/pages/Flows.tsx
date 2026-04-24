@@ -51,16 +51,18 @@ import {
   normalizeContracts,
 } from '@/src/lib/flowGraph';
 
-const AVAILABLE_STEPS: AvailableStep[] = [
-  { id: 'mounts.init', name: 'mounts.init', pack: 'core', description: 'Initialize mounts', ports: defaultPortsForStep('mounts.init') },
-  { id: 'registry.load', name: 'registry.load', pack: 'core', description: 'Load registry', ports: defaultPortsForStep('registry.load') },
-  { id: 'check_profile', name: 'check_profile', pack: 'utils', description: 'Check user profile', ports: defaultPortsForStep('check_profile') },
-  { id: 'emit', name: 'emit', pack: 'core', description: 'Emit an event', ports: defaultPortsForStep('emit') },
-  { id: 'exec_py', name: 'exec_py', pack: 'python', description: 'Execute Python script', ports: defaultPortsForStep('exec_py') },
-  { id: 'http.get', name: 'http.get', pack: 'network', description: 'Make an HTTP GET request', ports: defaultPortsForStep('http.get') },
-  { id: 'http.post', name: 'http.post', pack: 'network', description: 'Make an HTTP POST request', ports: defaultPortsForStep('http.post') },
-  { id: 'log.info', name: 'log.info', pack: 'utils', description: 'Log info message', ports: defaultPortsForStep('log.info') },
-];
+function buildAvailableSteps(t: ReturnType<typeof useT>): AvailableStep[] {
+  return [
+    { id: 'mounts.init', name: 'mounts.init', pack: 'core', description: t('flows.step.mounts_init.desc'), ports: defaultPortsForStep('mounts.init') },
+    { id: 'registry.load', name: 'registry.load', pack: 'core', description: t('flows.step.registry_load.desc'), ports: defaultPortsForStep('registry.load') },
+    { id: 'check_profile', name: 'check_profile', pack: 'utils', description: t('flows.step.check_profile.desc'), ports: defaultPortsForStep('check_profile') },
+    { id: 'emit', name: 'emit', pack: 'core', description: t('flows.step.emit.desc'), ports: defaultPortsForStep('emit') },
+    { id: 'exec_py', name: 'exec_py', pack: 'python', description: t('flows.step.exec_py.desc'), ports: defaultPortsForStep('exec_py') },
+    { id: 'http.get', name: 'http.get', pack: 'network', description: t('flows.step.http_get.desc'), ports: defaultPortsForStep('http.get') },
+    { id: 'http.post', name: 'http.post', pack: 'network', description: t('flows.step.http_post.desc'), ports: defaultPortsForStep('http.post') },
+    { id: 'log.info', name: 'log.info', pack: 'utils', description: t('flows.step.log_info.desc'), ports: defaultPortsForStep('log.info') },
+  ];
+}
 
 function deriveFlowId(fileName: string): string {
   return fileName
@@ -71,6 +73,7 @@ function deriveFlowId(fileName: string): string {
 
 function FlowEditorInner() {
   const t = useT();
+  const availableSteps = useMemo(() => buildAvailableSteps(t), [t]);
   const flows = useAppStore((state) => state.flows);
   const isLoading = useAppStore((state) => state.isLoading);
   const loadFlows = useAppStore((state) => state.loadFlows);
@@ -104,8 +107,8 @@ function FlowEditorInner() {
   flowsRef.current = flows;
 
   const selectedFlow = flows.find((flow) => flow.id === selectedFlowId);
-  const packs = useMemo(() => ['all', ...Array.from(new Set(AVAILABLE_STEPS.map((step) => step.pack)))], []);
-  const filteredSteps = selectedPack === 'all' ? AVAILABLE_STEPS : AVAILABLE_STEPS.filter((step) => step.pack === selectedPack);
+  const packs = useMemo(() => ['all', ...Array.from(new Set(availableSteps.map((step) => step.pack)))], [availableSteps]);
+  const filteredSteps = selectedPack === 'all' ? availableSteps : availableSteps.filter((step) => step.pack === selectedPack);
 
   const history = useFlowHistory(nodes, edges, setNodes, setEdges);
   const execution = useFlowExecution(nodes, edges, setNodes);
@@ -386,12 +389,12 @@ function FlowEditorInner() {
       {isFlowLibraryOpen && (
         <div className="flex w-64 shrink-0 flex-col gap-3 rounded-[28px] border border-border bg-bg-card/95 p-3 shadow-[0_22px_60px_rgba(0,0,0,0.24)] backdrop-blur-sm">
           <div className="flex items-center justify-between">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-text-muted">Flows</div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-text-muted">{t('flows.flow_list')}</div>
             <button
               type="button"
               onClick={() => setIsFlowLibraryOpen(false)}
               className="rounded-xl border border-border bg-bg-main px-2 py-1 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-main"
-              title="Close flow list"
+              title={t('flows.close_flow_list')}
             >
               <PanelLeft className="h-4 w-4" />
             </button>
@@ -427,7 +430,7 @@ function FlowEditorInner() {
             type="button"
             onClick={() => setIsFlowLibraryOpen(true)}
             className="absolute left-4 top-4 z-30 inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-border bg-bg-main/92 text-text-muted shadow-sm transition-colors hover:bg-bg-hover hover:text-text-main"
-            title="Open flow list"
+            title={t('flows.open_flow_list')}
           >
             <PanelLeft className="h-4 w-4 rotate-180" />
           </button>
@@ -446,7 +449,7 @@ function FlowEditorInner() {
                 ) : (
                   <div>
                     <h2 className="text-xl font-bold text-text-main">{selectedFlow?.name}</h2>
-                    <div className="text-xs text-text-muted">flow_id: {flowMeta.flowId}</div>
+                    <div className="text-xs text-text-muted">{t('flows.flow_id')}: {flowMeta.flowId}</div>
                   </div>
                 )}
               </div>
@@ -481,14 +484,14 @@ function FlowEditorInner() {
                   aria-expanded={isPackDropdownOpen}
                   aria-controls="flow-pack-selector-menu"
                 >
-                  {selectedPack === 'all' ? 'All Packs' : selectedPack}
+                  {selectedPack === 'all' ? t('flows.all_packs') : selectedPack}
                   <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', isPackDropdownOpen && 'rotate-180')} />
                 </Button>
                 {isPackDropdownOpen && (
                   <div
                     id="flow-pack-selector-menu"
                     role="listbox"
-                    aria-label="Flow pack filter"
+                    aria-label={t('flows.pack_filter')}
                     className="absolute left-0 top-full z-50 mt-1 w-40 rounded-lg border border-border bg-bg-card py-1 shadow-lg"
                   >
                     {packs.map((pack) => (
@@ -503,7 +506,7 @@ function FlowEditorInner() {
                           selectedPack === pack ? 'bg-bg-hover text-text-main' : 'text-text-muted',
                         )}
                       >
-                        {pack === 'all' ? 'All Packs' : pack}
+                        {pack === 'all' ? t('flows.all_packs') : pack}
                       </button>
                     ))}
                   </div>
@@ -522,7 +525,7 @@ function FlowEditorInner() {
                     onDragStart={(event) => onDragStart(event, step)}
                     onMouseDown={(event) => handleStepMiddleClick(event, step)}
                     onAuxClick={(event) => event.preventDefault()}
-                    title={`${step.description} (Pack: ${step.pack})`}
+                    title={`${step.description} (${t('flows.pack')}: ${step.pack})`}
                   >
                     <Box className="h-3.5 w-3.5" />
                     {step.name}
@@ -599,20 +602,20 @@ function FlowEditorInner() {
                   onClick={(event) => event.stopPropagation()}
                 >
                   <div className="mb-2 flex items-center justify-between">
-                    <span className="px-1 text-xs font-bold text-text-muted">Add Node</span>
+                    <span className="px-1 text-xs font-bold text-text-muted">{t('flows.add_node')}</span>
                     <button type="button" onClick={() => editorHook.setMenuPos(null)} className="text-text-muted hover:text-text-main">
                       <X className="h-3 w-3" />
                     </button>
                   </div>
                   <Input
                     autoFocus
-                    placeholder="Search nodes..."
+                    placeholder={t('flows.search_nodes')}
                     value={editorHook.menuFilter}
                     onChange={(event) => editorHook.setMenuFilter(event.target.value)}
                     className="mb-2 h-8 text-sm"
                   />
                   <div className="flex max-h-64 flex-col gap-1 overflow-y-auto scrollbar-dark">
-                    {AVAILABLE_STEPS
+                    {availableSteps
                       .filter((step) => step.name.toLowerCase().includes(editorHook.menuFilter.toLowerCase()) || step.description.toLowerCase().includes(editorHook.menuFilter.toLowerCase()))
                       .map((step) => (
                         <div
@@ -643,7 +646,7 @@ function FlowEditorInner() {
                     {editorHook.selectedNode.type === 'trigger' && (
                       <>
                         <div className="space-y-2">
-                          <label className="text-xs font-medium text-text-muted">Start Type</label>
+                          <label className="text-xs font-medium text-text-muted">{t('flows.start_type')}</label>
                           <Input
                             value={(editorHook.selectedNode.data.type as string) || ''}
                             onChange={(event) => editorHook.updateNodeData('type', event.target.value)}
@@ -651,7 +654,7 @@ function FlowEditorInner() {
                           />
                         </div>
                         <div className="space-y-2">
-                          <label className="text-xs font-medium text-text-muted">Base Pack</label>
+                          <label className="text-xs font-medium text-text-muted">{t('flows.base_pack')}</label>
                           <Input
                             value={(editorHook.selectedNode.data.basePack as string) || DEFAULT_BASE_PACK}
                             onChange={(event) => {
@@ -666,7 +669,7 @@ function FlowEditorInner() {
                     {editorHook.selectedNode.type === 'step' && (
                       <>
                         <div className="space-y-2">
-                          <label className="text-xs font-medium text-text-muted">Step ID</label>
+                          <label className="text-xs font-medium text-text-muted">{t('flows.step_id')}</label>
                           <Input
                             value={(editorHook.selectedNode.data.id as string) || ''}
                             onChange={(event) => editorHook.updateNodeData('id', event.target.value)}
@@ -674,7 +677,7 @@ function FlowEditorInner() {
                           />
                         </div>
                         <div className="space-y-2">
-                          <label className="text-xs font-medium text-text-muted">Title</label>
+                          <label className="text-xs font-medium text-text-muted">{t('flows.step_title')}</label>
                           <Input
                             value={(editorHook.selectedNode.data.title as string) || ''}
                             onChange={(event) => editorHook.updateNodeData('title', event.target.value)}
@@ -682,7 +685,7 @@ function FlowEditorInner() {
                           />
                         </div>
                         <div className="space-y-2">
-                          <label className="text-xs font-medium text-text-muted">Step Type</label>
+                          <label className="text-xs font-medium text-text-muted">{t('flows.step_type')}</label>
                           <Input
                             value={(editorHook.selectedNode.data.type as string) || ''}
                             onChange={(event) => editorHook.updateNodeData('type', event.target.value)}
@@ -690,7 +693,7 @@ function FlowEditorInner() {
                           />
                         </div>
                         <div className="space-y-2">
-                          <label className="text-xs font-medium text-text-muted">Phase</label>
+                          <label className="text-xs font-medium text-text-muted">{t('flows.phase')}</label>
                           <Input
                             value={(editorHook.selectedNode.data.phase as string) || flowMeta.phases[0] || 'graph'}
                             onChange={(event) => editorHook.updateNodeData('phase', event.target.value)}
@@ -703,12 +706,12 @@ function FlowEditorInner() {
                     <div className="rounded-xl border border-border bg-bg-main p-3">
                       <div className="mb-3 flex items-center justify-between">
                         <div>
-                          <div className="text-sm font-semibold text-text-main">Ports</div>
-                          <div className="text-[11px] text-text-muted">contracts が一致しないポート同士は接続できません。</div>
+                          <div className="text-sm font-semibold text-text-main">{t('flows.ports')}</div>
+                          <div className="text-[11px] text-text-muted">{t('flows.port_contract_help')}</div>
                         </div>
                         <div className="flex gap-2">
-                          <Button type="button" variant="outline" size="sm" onClick={() => editorHook.addPortToSelectedNode('input')}>+ in</Button>
-                          <Button type="button" variant="outline" size="sm" onClick={() => editorHook.addPortToSelectedNode('output')}>+ out</Button>
+                          <Button type="button" variant="outline" size="sm" onClick={() => editorHook.addPortToSelectedNode('input')}>{t('flows.add_input')}</Button>
+                          <Button type="button" variant="outline" size="sm" onClick={() => editorHook.addPortToSelectedNode('output')}>{t('flows.add_output')}</Button>
                         </div>
                       </div>
                       <div className="flex flex-col gap-3">
@@ -717,7 +720,7 @@ function FlowEditorInner() {
                             <div className="mb-2 flex items-center justify-between">
                               <div className="text-xs font-semibold text-text-main">{port.id}</div>
                               <button type="button" className="text-xs text-rose-400 hover:text-rose-300" onClick={() => editorHook.removeSelectedNodePort(port.id)}>
-                                remove
+                                {t('flows.remove')}
                               </button>
                             </div>
                             <div className="grid grid-cols-2 gap-2">
@@ -739,7 +742,7 @@ function FlowEditorInner() {
                                         : 'text-text-muted hover:bg-bg-hover hover:text-text-main',
                                     )}
                                   >
-                                    {direction === 'input' ? 'in' : 'out'}
+                                    {direction === 'input' ? t('flows.direction.short_input') : t('flows.direction.short_output')}
                                   </button>
                                 ))}
                               </div>
@@ -774,7 +777,7 @@ function FlowEditorInner() {
                     className="inline-flex items-center gap-2 rounded-full border border-border bg-bg-card/92 px-4 py-2 text-sm font-medium text-text-main shadow-lg shadow-black/20 backdrop-blur-sm transition-colors hover:bg-bg-hover"
                   >
                     <FileText className="h-4 w-4" />
-                    YAML / Result
+                    {t('flows.yaml_result')}
                   </button>
                 )}
 
@@ -799,7 +802,7 @@ function FlowEditorInner() {
                         type="button"
                         onClick={() => setIsConsoleOpen(false)}
                         className="rounded-xl px-2 py-1 text-[11px] font-medium text-text-muted transition-colors hover:bg-bg-hover hover:text-text-main"
-                        title="Hide YAML and result panel"
+                        title={t('flows.hide_yaml_result')}
                       >
                         <X className="h-4 w-4" />
                       </button>

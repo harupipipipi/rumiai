@@ -9,6 +9,7 @@ mod python_env;
 mod tray;
 mod updater;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::{fs, io};
 use std::thread;
@@ -25,6 +26,7 @@ use kernel_manager::KernelManager;
 
 /// Wrapper around a shared progress string, managed as Tauri State.
 pub struct SetupProgress(pub Arc<Mutex<String>>);
+pub struct ShutdownState(pub Arc<AtomicBool>);
 
 #[derive(Debug, Deserialize)]
 struct PanelBootstrapPayload {
@@ -56,6 +58,24 @@ fn restart_kernel(state: tauri::State<'_, Arc<Mutex<KernelManager>>>) -> Result<
     let mut km = state.lock().map_err(|e| format!("lock error: {e}"))?;
     km.restart().map_err(|e| format!("restart error: {e}"))?;
     Ok("Kernel restarted".into())
+}
+
+#[tauri::command]
+fn reauthorize_panel_session(
+    config: tauri::State<'_, AppConfig>,
+    km: tauri::State<'_, Arc<Mutex<KernelManager>>>,
+) -> Result<String, String> {
+    request_fresh_panel_session_code(&config, km.inner())
+        .map_err(|error| format!("panel reauthorization failed: {error}"))
+}
+
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err("only http(s) URLs can be opened externally".into());
+    }
+
+    open::that_detached(url).map_err(|error| format!("failed to open external url: {error}"))
 }
 
 fn generate_panel_bootstrap_secret() -> String {
@@ -159,6 +179,137 @@ fn request_panel_bootstrap_code_with_retry(port: u16, bootstrap_secret: &str) ->
         Some(error) => Err(error),
         None => bail!("panel bootstrap retry finished without making a request"),
     }
+}
+
+fn ensure_kernel_ready_for_panel_auth(
+    config: &AppConfig,
+    km: &Arc<Mutex<KernelManager>>,
+) -> AnyResult<()> {
+    let port = config.kernel_port;
+    if health_check::check_health(port)? {
+        return Ok(());
+    }
+
+    if health_check::wait_for_healthy(port, 5).is_ok() {
+        return Ok(());
+    }
+
+    let mut kernel = km
+        .lock()
+        .map_err(|error| anyhow!("kernel manager lock poisoned: {error}"))?;
+    if kernel.is_running() {
+        kernel.restart()?;
+    } else {
+        kernel.start()?;
+    }
+    drop(kernel);
+
+    health_check::wait_for_healthy(port, 60)?;
+    Ok(())
+}
+
+fn request_fresh_panel_session_code(
+    config: &AppConfig,
+    km: &Arc<Mutex<KernelManager>>,
+) -> AnyResult<String> {
+    ensure_kernel_ready_for_panel_auth(config, km)?;
+    let bootstrap_secret = load_or_create_panel_bootstrap_secret(config)
+        .context("failed to load persisted panel bootstrap secret")?;
+    request_panel_bootstrap_code_with_retry(config.kernel_port, &bootstrap_secret)
+}
+
+fn navigate_window_to_panel_session(
+    window: &tauri::WebviewWindow,
+    port: u16,
+    panel_code: &str,
+) -> Result<(), tauri::Error> {
+    let panel_code = serde_json::to_string(panel_code).unwrap_or_else(|_| "\"\"".into());
+    let loopback_origin =
+        serde_json::to_string(&format!("http://127.0.0.1:{port}")).unwrap_or_else(|_| "\"\"".into());
+    let localhost_origin =
+        serde_json::to_string(&format!("http://localhost:{port}")).unwrap_or_else(|_| "\"\"".into());
+
+    let js = format!(
+        r#"
+(() => {{
+  const code = {panel_code};
+  const loopbackOrigin = {loopback_origin};
+  const localhostOrigin = {localhost_origin};
+  let nextUrl = `${{loopbackOrigin}}/panel/?code=${{encodeURIComponent(code)}}`;
+
+  try {{
+    const current = new URL(window.location.href);
+    const isPanelRoute =
+      (current.origin === loopbackOrigin || current.origin === localhostOrigin) &&
+      current.pathname.startsWith('/panel');
+
+    if (isPanelRoute) {{
+      current.searchParams.set('code', code);
+      nextUrl = current.pathname + current.search + current.hash;
+    }}
+  }} catch (_error) {{
+    // Fall back to the default panel entrypoint.
+  }}
+
+  window.location.replace(nextUrl);
+}})();
+"#
+    );
+
+    window.eval(&js)
+}
+
+pub(crate) fn refresh_panel_session_for_window(app: &AppHandle, window_label: &str) {
+    let config = app.state::<AppConfig>().inner().clone();
+    let km = Arc::clone(app.state::<Arc<Mutex<KernelManager>>>().inner());
+    let handle = app.clone();
+    let label = window_label.to_string();
+
+    std::thread::spawn(move || match request_fresh_panel_session_code(&config, &km) {
+        Ok(panel_code) => {
+            if let Some(win) = handle.get_webview_window(&label) {
+                if let Err(error) =
+                    navigate_window_to_panel_session(&win, config.kernel_port, &panel_code)
+                {
+                    error!("Failed to refresh panel session for {label}: {error}");
+                }
+            }
+        }
+        Err(error) => {
+            warn!("Failed to refresh panel session for {label}: {error}");
+        }
+    });
+}
+
+pub(crate) fn request_app_exit(app: &AppHandle) {
+    let shutdown_flag = Arc::clone(&app.state::<ShutdownState>().inner().0);
+    if shutdown_flag.swap(true, Ordering::SeqCst) {
+        return;
+    }
+
+    for label in ["panel", "main"] {
+        if let Some(window) = app.get_webview_window(label) {
+            let _ = window.hide();
+        }
+    }
+
+    let km = Arc::clone(app.state::<Arc<Mutex<KernelManager>>>().inner());
+    let handle = app.clone();
+
+    std::thread::spawn(move || {
+        match km.lock() {
+            Ok(mut kernel) => {
+                if let Err(error) = kernel.stop() {
+                    error!("Failed to stop kernel during shutdown: {error}");
+                }
+            }
+            Err(error) => {
+                error!("Failed to lock kernel manager during shutdown: {error}");
+            }
+        }
+
+        handle.exit(0);
+    });
 }
 
 fn update_setup_progress(app_handle: Option<&AppHandle>, progress: &Arc<Mutex<String>>, msg: &str) {
@@ -349,6 +500,7 @@ pub fn run() {
             )));
             let progress_arc = progress.0.clone();
             app.manage(progress);
+            app.manage(ShutdownState(Arc::new(AtomicBool::new(false))));
 
             let panel_bootstrap_secret = load_or_create_panel_bootstrap_secret(&config)
                 .context("failed to load persisted panel bootstrap secret")?;
@@ -377,10 +529,9 @@ pub fn run() {
                         Ok(panel_code) => {
                             update_setup_progress(Some(&handle), &progress_arc, "Ready");
                             if let Some(win) = handle.get_webview_window("main") {
-                                let js = format!(
-                                    "window.location.replace('http://127.0.0.1:{port}/panel/?code={panel_code}')"
-                                );
-                                if let Err(e) = win.eval(&js) {
+                                if let Err(e) =
+                                    navigate_window_to_panel_session(&win, port, &panel_code)
+                                {
                                     error!("Failed to navigate to panel: {e}");
                                 }
                             }
@@ -422,10 +573,7 @@ pub fn run() {
                 update_setup_progress(Some(&handle), &progress_arc, "Ready");
 
                 if let Some(win) = handle.get_webview_window("main") {
-                    let js = format!(
-                        "window.location.replace('http://127.0.0.1:{port}/panel/?code={panel_code}')"
-                    );
-                    if let Err(e) = win.eval(&js) {
+                    if let Err(e) = navigate_window_to_panel_session(&win, port, &panel_code) {
                         error!("Failed to navigate to panel: {e}");
                     }
                 }
@@ -442,10 +590,15 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
-                let _ = window.hide();
+                request_app_exit(&window.app_handle());
             }
         })
-        .invoke_handler(tauri::generate_handler![get_setup_progress, restart_kernel])
+        .invoke_handler(tauri::generate_handler![
+            get_setup_progress,
+            restart_kernel,
+            reauthorize_panel_session,
+            open_external_url
+        ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|error| error!("error while running tauri application: {error}"));
 }

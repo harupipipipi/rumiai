@@ -25,7 +25,10 @@ const API_BASE_URL =
 const PANEL_CSRF_STORAGE_KEY = 'rumi-panel-csrf';
 let panelBootstrapPromise: Promise<void> | null = null;
 let panelBootstrapCodeInFlight: string | null = null;
+let panelSessionRecoveryPromise: Promise<boolean> | null = null;
 const inflightGetRequests = new Map<string, Promise<unknown>>();
+
+type TauriInvoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 
 function getStoredPanelCsrfToken(): string {
   return sessionStorage.getItem(PANEL_CSRF_STORAGE_KEY) || '';
@@ -51,6 +54,107 @@ export function hasPendingPanelBootstrapCode(href = window.location.href): boole
   return new URL(href).searchParams.has('code');
 }
 
+async function exchangePanelBootstrapCode(code: string): Promise<void> {
+  const url = new URL(window.location.href);
+  if (!code) {
+    return;
+  }
+
+  const response = await fetch(`${API_BASE_URL}/api/panel/auth/exchange`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ code }),
+  });
+
+  if (!response.ok) {
+    let errorMessage = `Panel bootstrap failed: ${response.status} ${response.statusText}`;
+    try {
+      const errorBody: ApiResponse<unknown> = await response.json();
+      if (errorBody.error) {
+        errorMessage = errorBody.error;
+      }
+    } catch {
+      // fall back to default message
+    }
+    throw new Error(errorMessage);
+  }
+
+  const envelope: ApiResponse<{ csrf_token: string }> = await response.json();
+  if (!envelope.success || !envelope.data?.csrf_token) {
+    throw new Error(envelope.error || 'Panel bootstrap failed');
+  }
+
+  setStoredPanelCsrfToken(envelope.data.csrf_token);
+  url.searchParams.delete('code');
+  window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
+}
+
+function getTauriInvoke(): TauriInvoke | null {
+  const maybeWindow = window as Window & {
+    __TAURI__?: {
+      core?: {
+        invoke?: TauriInvoke;
+      };
+    };
+  };
+
+  const invoke = maybeWindow.__TAURI__?.core?.invoke;
+  return typeof invoke === 'function' ? invoke : null;
+}
+
+export async function openExternalUrl(url: string): Promise<void> {
+  const invoke = getTauriInvoke();
+  if (invoke) {
+    await invoke('open_external_url', {url});
+    return;
+  }
+
+  window.location.href = url;
+}
+
+async function requestDesktopPanelBootstrapCode(): Promise<string | null> {
+  const invoke = getTauriInvoke();
+  if (!invoke) {
+    return null;
+  }
+
+  return invoke<string>('reauthorize_panel_session');
+}
+
+function isRecoverablePanelAuthError(status: number, errorMessage: string): boolean {
+  return status === 401 || /Unauthorized|Invalid or expired code/i.test(errorMessage);
+}
+
+async function recoverExpiredPanelSession(): Promise<boolean> {
+  if (panelSessionRecoveryPromise) {
+    return panelSessionRecoveryPromise;
+  }
+
+  panelSessionRecoveryPromise = (async () => {
+    if (hasPendingPanelBootstrapCode()) {
+      await bootstrapPanelSession();
+      return true;
+    }
+
+    const code = await requestDesktopPanelBootstrapCode();
+    if (!code) {
+      return false;
+    }
+
+    await exchangePanelBootstrapCode(code);
+    return true;
+  })();
+
+  try {
+    return await panelSessionRecoveryPromise;
+  } finally {
+    panelSessionRecoveryPromise = null;
+  }
+}
+
 export async function bootstrapPanelSession(): Promise<void> {
   const url = new URL(window.location.href);
   const code = url.searchParams.get('code');
@@ -63,38 +167,7 @@ export async function bootstrapPanelSession(): Promise<void> {
   }
 
   panelBootstrapCodeInFlight = code;
-  panelBootstrapPromise = (async () => {
-    const response = await fetch(`${API_BASE_URL}/api/panel/auth/exchange`, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ code }),
-    });
-
-    if (!response.ok) {
-      let errorMessage = `Panel bootstrap failed: ${response.status} ${response.statusText}`;
-      try {
-        const errorBody: ApiResponse<unknown> = await response.json();
-        if (errorBody.error) {
-          errorMessage = errorBody.error;
-        }
-      } catch {
-        // fall back to default message
-      }
-      throw new Error(errorMessage);
-    }
-
-    const envelope: ApiResponse<{ csrf_token: string }> = await response.json();
-    if (!envelope.success || !envelope.data?.csrf_token) {
-      throw new Error(envelope.error || 'Panel bootstrap failed');
-    }
-
-    setStoredPanelCsrfToken(envelope.data.csrf_token);
-    url.searchParams.delete('code');
-    window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
-  })();
+  panelBootstrapPromise = exchangePanelBootstrapCode(code);
 
   try {
     await panelBootstrapPromise;
@@ -133,7 +206,7 @@ export async function apiFetch<T>(
   const url = `${API_BASE_URL}${path}`;
   const method = (options.method || 'GET').toUpperCase();
 
-  const fetchRequest = async (): Promise<T> => {
+  const fetchRequest = async (allowPanelRecovery = true): Promise<T> => {
     await ensurePanelSessionForRequest(path, method);
 
     const headers: Record<string, string> = {
@@ -168,13 +241,32 @@ export async function apiFetch<T>(
       } catch {
         // If JSON parsing fails, use the default error message
       }
+
+      if (
+        allowPanelRecovery &&
+        isPanelApiPath(path) &&
+        isRecoverablePanelAuthError(response.status, errorMessage) &&
+        await recoverExpiredPanelSession()
+      ) {
+        return fetchRequest(false);
+      }
+
       throw new Error(errorMessage);
     }
 
     const envelope: ApiResponse<T> = await response.json();
 
     if (!envelope.success) {
-      throw new Error(envelope.error || 'Unknown API error');
+      const errorMessage = envelope.error || 'Unknown API error';
+      if (
+        allowPanelRecovery &&
+        isPanelApiPath(path) &&
+        isRecoverablePanelAuthError(response.status, errorMessage) &&
+        await recoverExpiredPanelSession()
+      ) {
+        return fetchRequest(false);
+      }
+      throw new Error(errorMessage);
     }
 
     return envelope.data as T;

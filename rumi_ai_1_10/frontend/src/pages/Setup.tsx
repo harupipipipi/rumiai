@@ -11,10 +11,34 @@ export function Setup() {
   const [searchParams] = useSearchParams();
   const setSetupDone = useAppStore(state => state.setSetupDone);
   const connectAccount = useAppStore(state => state.connectAccount);
+  const loadProfile = useAppStore(state => state.loadProfile);
+  const profile = useAppStore(state => state.profile);
   const addToast = useAppStore(state => state.addToast);
   const t = useT();
   const [loading, setLoading] = useState(false);
   const [linked, setLinked] = useState(false);
+
+  useEffect(() => {
+    void loadProfile();
+  }, [loadProfile]);
+
+  useEffect(() => {
+    const refreshProfile = () => {
+      void loadProfile();
+    };
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') {
+        refreshProfile();
+      }
+    };
+
+    window.addEventListener('focus', refreshProfile);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      window.removeEventListener('focus', refreshProfile);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+  }, [loadProfile]);
 
   // Handle OAuth callback redirect params
   useEffect(() => {
@@ -36,15 +60,32 @@ export function Setup() {
     }
   }, [searchParams, setSetupDone, addToast, navigate, t]);
 
+  useEffect(() => {
+    if (!profile.connected || linked) {
+      return;
+    }
+
+    setLinked(true);
+    setSetupDone(true);
+    addToast(t('setup.link_success') || 'Account linked successfully!', 'success');
+    const timer = setTimeout(() => {
+      navigate(panelRoutes.home);
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [profile.connected, linked, setSetupDone, addToast, navigate, t]);
+
   const handleConnect = async () => {
     setLoading(true);
     try {
       await connectAccount();
-      // connectAccount redirects the page via window.location.href
-      // so we won't reach here normally
+      addToast(
+        t('setup.connect_started') || 'Browser opened. Finish signing in there, then return.',
+        'success',
+      );
     } catch {
-      setLoading(false);
       addToast(t('setup.connect_failed') || 'Failed to connect', 'error');
+    } finally {
+      setLoading(false);
     }
   };
 

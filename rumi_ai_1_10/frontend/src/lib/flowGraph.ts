@@ -260,7 +260,6 @@ export function createStartNode(position = { x: 160, y: 120 }, basePack = DEFAUL
         createPort('起動', 'output', ['flow.start'], {
           id: 'start-out',
           allowMultiple: true,
-          description: '起動時に downstream へ流すベースポート。',
         }),
       ],
     },
