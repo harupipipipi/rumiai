@@ -295,7 +295,7 @@ export function Dashboard() {
     setFeedback(null);
     try {
       const response = await launchStartupProfile(profileId);
-      await refreshProfiles(profileId);
+      await refreshProfiles(editProfileId);
       await refreshDashboard();
       setSuccessFeedback(
         response.restart_requested
