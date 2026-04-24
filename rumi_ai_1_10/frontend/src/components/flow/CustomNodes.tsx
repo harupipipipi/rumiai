@@ -1,4 +1,4 @@
-import React, { type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Play, Settings2, Square, CheckCircle2, XCircle, Loader2, Waypoints } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
@@ -18,57 +18,41 @@ function statusAccent(status: ExecutionStatus): string {
 }
 
 function PortHandle({ port, side }: { port: FlowPort; side: 'left' | 'right' }) {
-  const isInput = port.direction === 'input';
   const position = side === 'left' ? Position.Left : Position.Right;
+  const type = side === 'left' ? 'target' : 'source';
 
   return (
-    <div
-      className={cn(
-        'flow-port-row relative flex min-h-10 items-center',
-        side === 'left' ? 'justify-start pl-4 pr-2 text-left' : 'justify-end pl-2 pr-4 text-right',
-      )}
-    >
-      {isInput && (
+    <div className={cn('flow-port-item', side === 'left' ? 'flow-port-item-left' : 'flow-port-item-right')}>
+      {side === 'left' && (
         <Handle
           id={port.id}
-          type="target"
+          type={type}
           position={position}
-          className="flow-port-handle !top-1/2 !-translate-y-1/2 !border-[3px] !shadow-none"
+          className="flow-port-handle !border-2 !shadow-none"
         />
       )}
-      <div
-        className={cn(
-          'flow-port-pill flex min-w-0 flex-1 flex-col rounded-2xl border px-3 py-2',
-          side === 'right' && 'items-end',
-        )}
-      >
-        <span className="truncate text-[12px] font-semibold">{port.label}</span>
-        {port.contracts.length > 0 && (
-          <span className="truncate text-[10px] opacity-70">{port.contracts.join(' | ')}</span>
-        )}
+      <div className="flow-port-tag">
+        <span className="truncate">{port.label}</span>
       </div>
-      {!isInput && (
+      {side === 'right' && (
         <Handle
           id={port.id}
-          type="source"
+          type={type}
           position={position}
-          className="flow-port-handle !top-1/2 !-translate-y-1/2 !border-[3px] !shadow-none"
+          className="flow-port-handle !border-2 !shadow-none"
         />
       )}
     </div>
   );
 }
 
-function PortRail({ ports, side }: { ports: FlowPort[]; side: 'left' | 'right' }) {
-  if (ports.length === 0) {
-    return null;
-  }
+function PortStack({ ports, side }: { ports: FlowPort[]; side: 'left' | 'right' }) {
+  if (ports.length === 0) return null;
+
   return (
-    <div className="flex flex-1 flex-col gap-2">
+    <div className={cn('flow-port-stack', side === 'left' ? 'flow-port-stack-left' : 'flow-port-stack-right')}>
       {ports.map((port) => (
-        <div key={port.id}>
-          <PortHandle port={port} side={side} />
-        </div>
+        <PortHandle key={port.id} port={port} side={side} />
       ))}
     </div>
   );
@@ -77,6 +61,8 @@ function PortRail({ ports, side }: { ports: FlowPort[]; side: 'left' | 'right' }
 function NodeShell({
   title,
   subtitle,
+  tokenTitle,
+  tokenSubtitle,
   status,
   selected,
   icon,
@@ -84,6 +70,8 @@ function NodeShell({
 }: {
   title: string;
   subtitle?: string;
+  tokenTitle: string;
+  tokenSubtitle?: string;
   status: ExecutionStatus;
   selected: boolean;
   icon: ReactNode;
@@ -95,7 +83,7 @@ function NodeShell({
   return (
     <div
       className={cn(
-        'flow-node-shell min-w-[220px] transition-transform duration-150',
+        'flow-node-shell min-w-[240px] transition-transform duration-150',
         selected && 'is-selected scale-[1.01]',
         statusAccent(status),
       )}
@@ -108,11 +96,16 @@ function NodeShell({
       </div>
 
       <div className="flow-node-card">
+        <PortStack ports={inputPorts} side="left" />
+        <PortStack ports={outputPorts} side="right" />
+
         <div className="flow-node-body">
-          {subtitle ? <div className="flow-node-subtitle">{subtitle}</div> : null}
-          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3">
-            <PortRail ports={inputPorts} side="left" />
-            <PortRail ports={outputPorts} side="right" />
+          <div className="flow-node-core">
+            {subtitle ? <div className="flow-node-subtitle">{subtitle}</div> : null}
+            <div className="flow-node-token">
+              <div className="flow-node-token-title">{tokenTitle}</div>
+              {tokenSubtitle ? <div className="flow-node-token-subtext">{tokenSubtitle}</div> : null}
+            </div>
           </div>
         </div>
       </div>
@@ -127,11 +120,14 @@ export function TriggerNode({ data, selected }: NodeProps<TriggerNodeType>) {
     : status === 'success'
       ? <CheckCircle2 className="h-4 w-4" />
       : <Play className="h-4 w-4" />;
+  const startPort = (data.ports || []).find((port) => port.direction === 'output');
 
   return (
     <NodeShell
       title={data.title || 'rumi_start'}
-      subtitle={`basepack: ${data.basePack || 'basepack'}`}
+      subtitle={`basepack: ${(data.basePack || 'basepack').toUpperCase()}`}
+      tokenTitle={startPort?.label || 'Start'}
+      tokenSubtitle={startPort?.contracts[0] || String(data.type || 'flow.start')}
       status={status}
       selected={selected}
       icon={icon}
@@ -147,9 +143,9 @@ export function StepNode({ data, selected }: NodeProps<StepNodeType>) {
         'flow-reroute-node rounded-full border p-2',
         selected && 'ring-2',
       )}>
-        <Handle id="reroute-in" type="target" position={Position.Left} className="flow-port-handle !top-1/2 !-translate-y-1/2 !border-[3px] !shadow-none" />
+        <Handle id="reroute-in" type="target" position={Position.Left} className="flow-port-handle !border-2 !shadow-none" />
         <Waypoints className="h-4 w-4" />
-        <Handle id="reroute-out" type="source" position={Position.Right} className="flow-port-handle !top-1/2 !-translate-y-1/2 !border-[3px] !shadow-none" />
+        <Handle id="reroute-out" type="source" position={Position.Right} className="flow-port-handle !border-2 !shadow-none" />
       </div>
     );
   }
@@ -163,6 +159,8 @@ export function StepNode({ data, selected }: NodeProps<StepNodeType>) {
     <NodeShell
       title={data.title || data.id || 'step'}
       subtitle={`${data.type || 'action'}${data.phase ? ` / ${data.phase}` : ''}`}
+      tokenTitle={data.id || 'step'}
+      tokenSubtitle={data.description || 'Configured step'}
       status={data.executionStatus}
       selected={selected}
       icon={icon}
@@ -175,11 +173,14 @@ export function EndNode({ data, selected }: NodeProps<EndNodeType>) {
   const icon = data.executionStatus === 'success'
     ? <CheckCircle2 className="h-4 w-4" />
     : <Square className="h-4 w-4" />;
+  const endPort = (data.ports || []).find((port) => port.direction === 'input');
 
   return (
     <NodeShell
       title={data.title || 'finish'}
       subtitle="terminal"
+      tokenTitle={endPort?.label || 'Done'}
+      tokenSubtitle="flow.complete"
       status={data.executionStatus}
       selected={selected}
       icon={icon}
