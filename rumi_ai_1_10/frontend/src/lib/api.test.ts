@@ -36,6 +36,7 @@ let lastFetchUrl = '';
 let lastReplacedUrl = '';
 let panelExchangeCount = 0;
 let tauriReauthorizeCount = 0;
+let tauriOpenExternalCount = 0;
 let sessionStorageRef: MemoryStorage;
 let fetchHandler: ((input: string | URL | Request, init?: RequestInit) => Promise<Response>) | null = null;
 
@@ -45,11 +46,12 @@ function installBrowser(href: string): MemoryStorage {
     __TAURI__: {
       core: {
         invoke: async (command: string) => {
-          tauriReauthorizeCount += 1;
           if (command === 'reauthorize_panel_session') {
+            tauriReauthorizeCount += 1;
             return 'desktop-refresh-code';
           }
           if (command === 'open_external_url') {
+            tauriOpenExternalCount += 1;
             return undefined;
           }
           throw new Error(`Unknown command: ${command}`);
@@ -70,7 +72,7 @@ function installBrowser(href: string): MemoryStorage {
 
   Object.defineProperty(globalThis, 'document', {
     configurable: true,
-    value: { title: 'Rumi AI' } as Pick<Document, 'title'>,
+    value: {title: 'Rumi AI'} as Pick<Document, 'title'>,
     writable: true,
   });
   Object.defineProperty(globalThis, 'sessionStorage', {
@@ -136,6 +138,7 @@ beforeEach(() => {
   lastReplacedUrl = '';
   panelExchangeCount = 0;
   tauriReauthorizeCount = 0;
+  tauriOpenExternalCount = 0;
   installBrowser('http://127.0.0.1:8765/panel/');
   installFetchMock();
 });
@@ -328,6 +331,6 @@ test('apiFetch recovers an expired panel session through the desktop shell and r
 test('openExternalUrl uses the desktop shell when Tauri is available', async () => {
   await openExternalUrl('https://example.com/oauth');
 
-  assert.equal(tauriReauthorizeCount, 1);
+  assert.equal(tauriOpenExternalCount, 1);
   assert.equal(window.location.href, 'http://127.0.0.1:8765/panel/');
 });

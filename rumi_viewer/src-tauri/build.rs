@@ -11,7 +11,6 @@ fn main() {
     println!("cargo:rerun-if-changed=../../rumi_ai_1_10/flows");
     println!("cargo:rerun-if-changed=../../rumi_ai_1_10/lang");
     println!("cargo:rerun-if-changed=../../rumi_ai_1_10/rumi_setup");
-    println!("cargo:rerun-if-changed=../../rumi_ai_1_10/user_data");
     println!("cargo:rerun-if-changed=../../rumi_ai_1_10/requirements.txt");
     println!("cargo:rerun-if-changed=bundled");
 
@@ -29,7 +28,6 @@ fn stage_runtime_bundle() -> io::Result<()> {
     let staged_root = project_dir.join("gen").join("app");
 
     reset_dir(&staged_root)?;
-
     copy_runtime_tree(&runtime_root, &staged_root, &runtime_root)?;
 
     let bundled_src = project_dir.join("bundled");
@@ -134,14 +132,31 @@ fn should_skip(relative: &Path, is_dir: bool) -> bool {
 
     if matches!(
         first.to_str(),
-        Some(".git")
-            | Some(".mypy_cache")
-            | Some(".pytest_cache")
-            | Some(".ruff_cache")
-            | Some("__pycache__")
-            | Some("docs")
-            | Some("tests")
+        Some(".env")
+            | Some(".env.local")
+            | Some(".backups")
+            | Some(".backup_dead_code_removal")
+            | Some("user_data")
+            | Some("userdata")
+            | Some("chats")
+            | Some("tenpu")
     ) {
+        return true;
+    }
+
+    if matches!(
+        first.to_str(),
+        Some(".git") | Some(".mypy_cache") | Some("docs") | Some("tests")
+    ) {
+        return true;
+    }
+
+    if relative.components().any(|component| {
+        matches!(
+            component.as_os_str().to_str(),
+            Some("__pycache__") | Some(".pytest_cache") | Some(".ruff_cache")
+        )
+    }) {
         return true;
     }
 
@@ -154,7 +169,12 @@ fn should_skip(relative: &Path, is_dir: bool) -> bool {
             return true;
         }
 
-        if !is_dir && matches!(relative.extension().and_then(|ext| ext.to_str()), Some("tsbuildinfo")) {
+        if !is_dir
+            && matches!(
+                relative.extension().and_then(|ext| ext.to_str()),
+                Some("tsbuildinfo")
+            )
+        {
             return true;
         }
     }
