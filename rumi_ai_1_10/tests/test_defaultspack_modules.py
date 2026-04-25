@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from ecosystem.defaultspack.backend.ai_client.ai_profile import AIProfile, AIProfileManager
-from ecosystem.defaultspack.backend.ai_client.provider_registry import ProviderRegistry
 from ecosystem.defaultspack.backend.prompt.prompt_manager import PromptEntry, PromptManager
 from ecosystem.defaultspack.backend.tool.tool_manager import ToolEntry, ToolManager
-from ecosystem.defaultspack.backend.plugin.plugin_manager import PluginManifest, PluginManager
+from ecosystem.defaultspack.backend.plugin.plugin_manager import PluginManager
 from ecosystem.defaultspack.backend.chat.chat_manager import ChatManager, Message
 from ecosystem.defaultspack.backend.memory.memory_manager import MemoryEntry, MemoryManager
 from ecosystem.defaultspack.backend.knowledge.knowledge_manager import KnowledgeEntry, KnowledgeManager
