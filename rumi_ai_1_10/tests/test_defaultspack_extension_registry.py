@@ -203,6 +203,22 @@ def test_extension_registry_preserves_google_api_key_env_list():
     assert google["api_key_env"] == ["GOOGLE_API_KEY", "GEMINI_API_KEY"]
 
 
+def test_extension_registry_lists_rumi_bundle_ui_surface():
+    root = (
+        Path(__file__).resolve().parent.parent
+        / "ecosystem"
+        / "defaultspack"
+        / "extensions"
+    )
+
+    registry = ExtensionRegistry(root)
+    surfaces = {item["id"]: item for item in registry.ui_surfaces().list(enabled_only=True)}
+    assert "rumi_bundle" in surfaces
+    assert surfaces["rumi_bundle"]["config"]["module_id"] == "rumi_bundle"
+    assert surfaces["rumi_bundle"]["config"]["launch_mode"] == "desktop_app"
+    assert surfaces["rumi_bundle"]["config"]["port_source"]["default"] == 8766
+
+
 def test_openrouter_provider_refreshes_and_caches_models(tmp_path: Path, monkeypatch):
     cache_file = tmp_path / "openrouter_models_cache.json"
     monkeypatch.setenv("OPENROUTER_API_KEY", "dummy-token")

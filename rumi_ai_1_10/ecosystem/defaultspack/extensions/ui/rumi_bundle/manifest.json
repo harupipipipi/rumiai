@@ -1,0 +1,19 @@
+{
+  "id": "rumi_bundle",
+  "category": "ui_surface",
+  "version": "1",
+  "display_name": "Rumi Bundle",
+  "description": "Standalone defaultspack desktop-app bundle metadata kept inside the bundled ecosystem tree.",
+  "enabled": true,
+  "config": {
+    "module_id": "rumi_bundle",
+    "bundle_id": "rumi_bundle",
+    "pack_id": "defaultspack",
+    "launch_mode": "desktop_app",
+    "entry_url": "http://127.0.0.1:${RUMI_DEFAULTSPACK_PORT}",
+    "port_source": {
+      "env": "RUMI_DEFAULTSPACK_PORT",
+      "default": 8766
+    }
+  }
+}

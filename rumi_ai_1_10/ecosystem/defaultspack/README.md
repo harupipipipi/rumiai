@@ -41,6 +41,7 @@ defaults 単体で既存の AI サービス（ChatGPT / Claude / Cursor / Devin�
 |---|---|
 | defaultspack を standalone で起動したい | `docs/getting-started.md` |
 | 8766 のフロントエンドを直したい | `webapp/` |
+| rumi_bundle の metadata を見たい | `docs/rumi_bundle.md` |
 | 右バー / 設定 / chat renderer の拡張方法を知りたい | `docs/frontend_extensions.md` |
 | frontend の次タスクを見たい | `docs/frontend_todo.md` |
 | ブラウザに返す実ファイルの置き場を見たい | `ui/` |
