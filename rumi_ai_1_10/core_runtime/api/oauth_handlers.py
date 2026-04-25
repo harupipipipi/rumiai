@@ -14,21 +14,22 @@ Supabase Auth の OAuth 2.1 Server + PKCE を使用する。
 """
 from __future__ import annotations
 
+from io import BufferedIOBase
 import base64
 import hashlib
+import html
 import json
 import logging
-import os
 import secrets
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
-from urllib.parse import urlencode, urlparse, parse_qs
-from urllib.request import Request, urlopen
+from typing import Any, Dict, Optional, Protocol, cast
 from urllib.error import URLError, HTTPError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
-from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
+from ._helpers import _log_internal_error
 
 logger = logging.getLogger(__name__)
 
@@ -252,6 +253,97 @@ class OAuthHandlersMixin:
 
     def _oauth_send_redirect(self, location: str) -> None:
         """HTTP 302 リダイレクトを送信する"""
-        self.send_response(302)
-        self.send_header("Location", location)
-        self.end_headers()
+        handler = cast(_OAuthHttpHandler, self)
+        handler.send_response(302)
+        handler.send_header("Location", location)
+        handler.end_headers()
+
+    def _oauth_send_result_page(self, title: str, message: str, *, success: bool) -> None:
+        """OAuth 完了後に外部ブラウザへ結果ページを返す"""
+        escaped_title = html.escape(title, quote=True)
+        escaped_message = html.escape(message, quote=True)
+        tone = "#86efac" if success else "#fca5a5"
+        html_doc = f"""<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{escaped_title}</title>
+    <style>
+      :root {{ color-scheme: dark; }}
+      body {{
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #0f172a;
+        color: #e2e8f0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }}
+      main {{
+        width: min(34rem, calc(100vw - 2rem));
+        padding: 2rem;
+        border-radius: 1rem;
+        background: rgba(15, 23, 42, 0.92);
+        box-shadow: 0 20px 45px rgba(15, 23, 42, 0.35);
+      }}
+      h1 {{
+        margin: 0 0 0.75rem;
+        font-size: 1.35rem;
+        color: {tone};
+      }}
+      p {{
+        margin: 0 0 1rem;
+        line-height: 1.6;
+        color: #cbd5e1;
+      }}
+      button {{
+        appearance: none;
+        border: 0;
+        border-radius: 999px;
+        padding: 0.85rem 1.1rem;
+        background: #e2e8f0;
+        color: #0f172a;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }}
+      small {{
+        display: block;
+        color: #94a3b8;
+      }}
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>{escaped_title}</h1>
+      <p>{escaped_message}</p>
+      <p>Return to the Rumi AI app. This tab can be closed.</p>
+      <button type="button" onclick="window.close()">Close this tab</button>
+      <small>If this tab stays open, you can safely close it manually.</small>
+    </main>
+  </body>
+</html>
+"""
+        data = html_doc.encode("utf-8")
+        handler = cast(_OAuthHttpHandler, self)
+        handler.send_response(200)
+        handler.send_header("Content-Type", "text/html; charset=utf-8")
+        handler.send_header("Content-Length", str(len(data)))
+        handler.end_headers()
+        handler.wfile.write(data)
+
+
+class _OAuthHttpHandler(Protocol):
+    """BaseHTTPRequestHandler 互換の最小インターフェース。"""
+
+    wfile: BufferedIOBase
+
+    def send_response(self, code: int, message: str | None = None) -> None:
+        ...
+
+    def send_header(self, keyword: str, value: str) -> None:
+        ...
+
+    def end_headers(self) -> None:
+        ...

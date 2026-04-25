@@ -1065,13 +1065,25 @@ class PackAPIHandler(
                     _cb_query = _parse_qs(_urlparse(self.path).query)
                     callback_result = self._oauth_callback(_cb_query)
                     if callback_result is None:
-                        self._oauth_send_redirect("/panel/setup?linked=true")
+                        self._oauth_send_result_page(
+                            "Rumi account connected",
+                            "Sign-in completed successfully.",
+                            success=True,
+                        )
                     else:
                         _err_msg = callback_result.get("error", "unknown_error")
-                        self._oauth_send_redirect("/panel/setup?error=" + _err_msg)
+                        self._oauth_send_result_page(
+                            "Rumi account connection failed",
+                            _err_msg,
+                            success=False,
+                        )
                 except Exception as e:
                     _log_internal_error("oauth_callback", e)
-                    self._oauth_send_redirect("/panel/setup?error=internal_error")
+                    self._oauth_send_result_page(
+                        "Rumi account connection failed",
+                        "internal_error",
+                        success=False,
+                    )
                 return
 
             # pre-auth テーブルにマッチしたが上記に該当しない場合

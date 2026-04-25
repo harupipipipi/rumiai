@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import sys
 import unittest
 from pathlib import Path
@@ -195,6 +196,30 @@ class TestOAuthSendRedirect(unittest.TestCase):
         handler.send_response.assert_called_once_with(302)
         handler.send_header.assert_called_once_with("Location", "/setup?linked=true")
         handler.end_headers.assert_called_once()
+
+
+class TestOAuthResultPage(unittest.TestCase):
+    """_oauth_send_result_page のテスト"""
+
+    def test_result_page_sends_html(self):
+        handler = _FakeHandler()
+        handler.send_response = MagicMock()
+        handler.send_header = MagicMock()
+        handler.end_headers = MagicMock()
+        handler.wfile = io.BytesIO()
+
+        handler._oauth_send_result_page(
+            "Connected",
+            "Return to the app.",
+            success=True,
+        )
+
+        handler.send_response.assert_called_once_with(200)
+        handler.send_header.assert_any_call("Content-Type", "text/html; charset=utf-8")
+        body = handler.wfile.getvalue().decode("utf-8")
+        self.assertIn("Connected", body)
+        self.assertIn("Return to the app.", body)
+        self.assertIn("Close this tab", body)
 
 
 if __name__ == "__main__":

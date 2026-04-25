@@ -279,25 +279,11 @@
   }
 
   .flow-focus-shell {
-    --flow-canvas: #111418;
-    --flow-grid-color: rgba(255, 255, 255, 0.08);
-    --flow-edge: #8a91a0;
-    --flow-edge-selected: #d96f8d;
-    --flow-node-fill: #24272d;
-    --flow-node-border: #3c414b;
-    --flow-node-shadow: rgba(0, 0, 0, 0.28);
-    --flow-node-cap: #e56784;
-    --flow-node-cap-text: #fff8fb;
-    --flow-node-text: #f3f5f8;
-    --flow-node-muted: rgba(243, 245, 248, 0.6);
-    --flow-port-fill: #2a2d34;
-    --flow-port-border: #454a57;
-    --flow-port-handle: #ee6a8d;
-    --flow-port-handle-border: #1b1d23;
-    --flow-node-selected: #7fa1ff;
-    --flow-node-running: #79c6ff;
-    --flow-node-success: #6fdbb4;
-    --flow-node-error: #ff8ca4;
+    --flow-canvas: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--flow-canvas-top) 62%, var(--bg-main) 38%) 0%,
+      color-mix(in srgb, var(--flow-canvas-bottom) 92%, var(--bg-main) 8%) 100%
+    );
   }
 
   .flow-canvas {
@@ -319,6 +305,8 @@
   }
 
   .flow-node-shell {
+    position: relative;
+    padding-top: 0.9rem;
     color: var(--flow-node-text);
     filter: drop-shadow(0 14px 22px var(--flow-node-shadow));
   }
@@ -355,14 +343,14 @@
   }
 
   .flow-node-cap {
+    position: absolute;
+    top: 0;
+    left: 1rem;
+    z-index: 4;
     display: inline-flex;
-    max-width: calc(100% - 1.5rem);
+    max-width: calc(100% - 2rem);
     align-items: center;
     gap: 0.5rem;
-    margin-left: 1rem;
-    margin-bottom: -0.8rem;
-    position: relative;
-    z-index: 2;
     padding: 0.52rem 1rem;
     border-radius: 0.85rem;
     background: var(--flow-node-cap);
@@ -370,11 +358,13 @@
     font-size: 0.78rem;
     font-weight: 700;
     box-shadow: 0 10px 20px rgba(0, 0, 0, 0.18);
+    pointer-events: none;
+    user-select: none;
   }
 
   .flow-node-body {
     min-height: 138px;
-    padding: 1.3rem 4.75rem;
+    padding: 2.2rem 4.75rem 1.3rem;
     display: flex;
     align-items: center;
     justify-content: center;

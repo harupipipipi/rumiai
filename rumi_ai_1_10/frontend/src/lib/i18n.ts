@@ -64,9 +64,11 @@ const en: Dict = {
   'settings.dark_mode': 'Switched to Dark mode',
   'settings.theme_changed': 'Theme changed to {theme}',
   'settings.connecting': 'Connecting...',
+  'settings.connect_started': 'Browser opened. Finish signing in there, then return.',
   'settings.connect_success': 'Rumi account connected',
   'setup.subtitle': 'Set up your personal AI assistant',
   'setup.connect_rumi': 'Connect with Rumi Account',
+  'setup.connect_started': 'Browser opened. Finish signing in there, then return.',
   'setup.skip': 'Skip',
   'packs.title': 'Packs',
   'packs.search': 'Search packs...',
@@ -110,6 +112,68 @@ const en: Dict = {
   'flows.drop_to_delete': 'Drop here to delete',
   'flows.release_to_delete': 'Release to delete node',
   'flows.loading': 'Loading flows...',
+  'flows.flow_list': 'Flows',
+  'flows.open_flow_list': 'Open flow list',
+  'flows.close_flow_list': 'Close flow list',
+  'flows.flow_id': 'flow_id',
+  'flows.all_packs': 'All Packs',
+  'flows.pack_filter': 'Flow pack filter',
+  'flows.pack': 'Pack',
+  'flows.add_node': 'Add Node',
+  'flows.search_nodes': 'Search nodes...',
+  'flows.start_type': 'Start Type',
+  'flows.base_pack': 'Base Pack',
+  'flows.step_id': 'Step ID',
+  'flows.step_title': 'Title',
+  'flows.step_type': 'Step Type',
+  'flows.phase': 'Phase',
+  'flows.ports': 'Ports',
+  'flows.port_contract_help': 'Only ports with matching contracts can connect.',
+  'flows.add_input': '+ in',
+  'flows.add_output': '+ out',
+  'flows.remove': 'Remove',
+  'flows.direction.input': 'Input',
+  'flows.direction.output': 'Output',
+  'flows.direction.short_input': 'in',
+  'flows.direction.short_output': 'out',
+  'flows.yaml_result': 'YAML / Result',
+  'flows.hide_yaml_result': 'Hide YAML and result panel',
+  'flows.node.basepack': 'Basepack',
+  'flows.node.terminal': 'Terminal',
+  'flows.node.configured_step': 'Configured step',
+  'flows.node.action': 'Action',
+  'flows.node.start_title': 'rumi_start',
+  'flows.node.finish_title': 'finish',
+  'flows.port.boot': 'Start',
+  'flows.port.done': 'Done',
+  'flows.port.mounts': 'mounts',
+  'flows.port.registry': 'registry',
+  'flows.port.profile': 'profile',
+  'flows.port.event': 'event',
+  'flows.port.signal': 'signal',
+  'flows.port.command': 'command',
+  'flows.port.result': 'result',
+  'flows.port.request': 'request',
+  'flows.port.response': 'response',
+  'flows.port.text': 'text',
+  'flows.port.input': 'input',
+  'flows.port.output': 'output',
+  'flows.step.mounts_init.desc': 'Initialize mounts',
+  'flows.step.registry_load.desc': 'Load registry',
+  'flows.step.check_profile.desc': 'Check user profile',
+  'flows.step.emit.desc': 'Emit an event',
+  'flows.step.exec_py.desc': 'Execute Python script',
+  'flows.step.http_get.desc': 'Make an HTTP GET request',
+  'flows.step.http_post.desc': 'Make an HTTP POST request',
+  'flows.step.log_info.desc': 'Log info message',
+  'flows.validation.incomplete_connection': 'The connection is incomplete.',
+  'flows.validation.same_node': 'You cannot connect a node to itself.',
+  'flows.validation.node_missing': 'The target node could not be found.',
+  'flows.validation.output_required': 'Start the connection from an output port.',
+  'flows.validation.input_required': 'Connect to an input port.',
+  'flows.validation.contract_mismatch': 'Port contracts do not match: {source} -> {target}',
+  'flows.validation.single_output': '{label} does not allow multiple outgoing connections.',
+  'flows.validation.single_input': '{label} does not allow multiple incoming connections.',
   'dialog.cancel': 'Cancel',
   'dialog.confirm': 'Confirm',
 };
@@ -169,9 +233,11 @@ const ja: Dict = {
   'settings.dark_mode': '\u30c0\u30fc\u30af\u30e2\u30fc\u30c9\u306b\u5207\u308a\u66ff\u3048\u307e\u3057\u305f',
   'settings.theme_changed': '\u30c6\u30fc\u30de\u3092{theme}\u306b\u5909\u66f4\u3057\u307e\u3057\u305f',
   'settings.connecting': '\u63a5\u7d9a\u4e2d...',
+  'settings.connect_started': '\u30d6\u30e9\u30a6\u30b6\u304c\u958b\u304d\u307e\u3057\u305f\u3002\u305d\u3061\u3089\u3067\u30b5\u30a4\u30f3\u30a4\u30f3\u3092\u5b8c\u4e86\u3057\u3066\u3001\u3053\u3061\u3089\u306b\u623b\u3063\u3066\u304f\u3060\u3055\u3044\u3002',
   'settings.connect_success': 'Rumi\u30a2\u30ab\u30a6\u30f3\u30c8\u306b\u63a5\u7d9a\u3057\u307e\u3057\u305f',
   'setup.subtitle': '\u30d1\u30fc\u30bd\u30ca\u30ebAI\u30a2\u30b7\u30b9\u30bf\u30f3\u30c8\u3092\u30bb\u30c3\u30c8\u30a2\u30c3\u30d7',
   'setup.connect_rumi': 'Rumi\u30a2\u30ab\u30a6\u30f3\u30c8\u3067\u63a5\u7d9a',
+  'setup.connect_started': '\u30d6\u30e9\u30a6\u30b6\u304c\u958b\u304d\u307e\u3057\u305f\u3002\u305d\u3061\u3089\u3067\u30b5\u30a4\u30f3\u30a4\u30f3\u3092\u5b8c\u4e86\u3057\u3066\u3001\u3053\u3061\u3089\u306b\u623b\u3063\u3066\u304f\u3060\u3055\u3044\u3002',
   'setup.skip': '\u30b9\u30ad\u30c3\u30d7',
   'packs.title': '\u30d1\u30c3\u30af',
   'packs.search': '\u30d1\u30c3\u30af\u3092\u691c\u7d22...',
@@ -215,6 +281,68 @@ const ja: Dict = {
   'flows.drop_to_delete': '\u3053\u3053\u306b\u30c9\u30ed\u30c3\u30d7\u3057\u3066\u524a\u9664',
   'flows.release_to_delete': '\u30ea\u30ea\u30fc\u30b9\u3057\u3066\u30ce\u30fc\u30c9\u3092\u524a\u9664',
   'flows.loading': '\u30d5\u30ed\u30fc\u3092\u8aad\u307f\u8fbc\u307f\u4e2d...',
+  'flows.flow_list': '\u30d5\u30ed\u30fc\u4e00\u89a7',
+  'flows.open_flow_list': '\u30d5\u30ed\u30fc\u4e00\u89a7\u3092\u958b\u304f',
+  'flows.close_flow_list': '\u30d5\u30ed\u30fc\u4e00\u89a7\u3092\u9589\u3058\u308b',
+  'flows.flow_id': 'flow_id',
+  'flows.all_packs': '\u3059\u3079\u3066\u306e\u30d1\u30c3\u30af',
+  'flows.pack_filter': '\u30d1\u30c3\u30af\u30d5\u30a3\u30eb\u30bf\u30fc',
+  'flows.pack': '\u30d1\u30c3\u30af',
+  'flows.add_node': '\u30ce\u30fc\u30c9\u3092\u8ffd\u52a0',
+  'flows.search_nodes': '\u30ce\u30fc\u30c9\u3092\u691c\u7d22...',
+  'flows.start_type': '\u8d77\u52d5\u30bf\u30a4\u30d7',
+  'flows.base_pack': '\u30d9\u30fc\u30b9\u30d1\u30c3\u30af',
+  'flows.step_id': '\u30b9\u30c6\u30c3\u30d7 ID',
+  'flows.step_title': '\u30bf\u30a4\u30c8\u30eb',
+  'flows.step_type': '\u30b9\u30c6\u30c3\u30d7\u7a2e\u5225',
+  'flows.phase': '\u30d5\u30a7\u30fc\u30ba',
+  'flows.ports': '\u30dd\u30fc\u30c8',
+  'flows.port_contract_help': '\u5951\u7d04\u304c\u4e00\u81f4\u3059\u308b\u30dd\u30fc\u30c8\u540c\u58eb\u3060\u3051\u63a5\u7d9a\u3067\u304d\u307e\u3059\u3002',
+  'flows.add_input': '+ \u5165\u529b',
+  'flows.add_output': '+ \u51fa\u529b',
+  'flows.remove': '\u524a\u9664',
+  'flows.direction.input': '\u5165\u529b',
+  'flows.direction.output': '\u51fa\u529b',
+  'flows.direction.short_input': 'in',
+  'flows.direction.short_output': 'out',
+  'flows.yaml_result': 'YAML / \u7d50\u679c',
+  'flows.hide_yaml_result': 'YAML \u3068\u7d50\u679c\u30d1\u30cd\u30eb\u3092\u96a0\u3059',
+  'flows.node.basepack': '\u30d9\u30fc\u30b9\u30d1\u30c3\u30af',
+  'flows.node.terminal': '\u30bf\u30fc\u30df\u30ca\u30eb',
+  'flows.node.configured_step': '\u8a2d\u5b9a\u6e08\u307f\u30b9\u30c6\u30c3\u30d7',
+  'flows.node.action': '\u30a2\u30af\u30b7\u30e7\u30f3',
+  'flows.node.start_title': 'rumi_start',
+  'flows.node.finish_title': 'finish',
+  'flows.port.boot': '\u8d77\u52d5',
+  'flows.port.done': '\u5b8c\u4e86',
+  'flows.port.mounts': 'mounts',
+  'flows.port.registry': 'registry',
+  'flows.port.profile': 'profile',
+  'flows.port.event': 'event',
+  'flows.port.signal': 'signal',
+  'flows.port.command': 'command',
+  'flows.port.result': 'result',
+  'flows.port.request': 'request',
+  'flows.port.response': 'response',
+  'flows.port.text': 'text',
+  'flows.port.input': '\u5165\u529b',
+  'flows.port.output': '\u51fa\u529b',
+  'flows.step.mounts_init.desc': 'mounts \u3092\u521d\u671f\u5316',
+  'flows.step.registry_load.desc': 'registry \u3092\u8aad\u307f\u8fbc\u3080',
+  'flows.step.check_profile.desc': '\u30e6\u30fc\u30b6\u30fc\u30d7\u30ed\u30d5\u30a3\u30fc\u30eb\u3092\u78ba\u8a8d',
+  'flows.step.emit.desc': '\u30a4\u30d9\u30f3\u30c8\u3092 emit \u3059\u308b',
+  'flows.step.exec_py.desc': 'Python \u30b9\u30af\u30ea\u30d7\u30c8\u3092\u5b9f\u884c',
+  'flows.step.http_get.desc': 'HTTP GET \u30ea\u30af\u30a8\u30b9\u30c8\u3092\u9001\u4fe1',
+  'flows.step.http_post.desc': 'HTTP POST \u30ea\u30af\u30a8\u30b9\u30c8\u3092\u9001\u4fe1',
+  'flows.step.log_info.desc': 'info \u30ed\u30b0\u3092\u51fa\u529b',
+  'flows.validation.incomplete_connection': '\u63a5\u7d9a\u5148\u304c\u4e0d\u5b8c\u5168\u3067\u3059\u3002',
+  'flows.validation.same_node': '\u540c\u3058\u30ce\u30fc\u30c9\u540c\u58eb\u306f\u63a5\u7d9a\u3067\u304d\u307e\u305b\u3093\u3002',
+  'flows.validation.node_missing': '\u63a5\u7d9a\u5bfe\u8c61\u30ce\u30fc\u30c9\u304c\u898b\u3064\u304b\u308a\u307e\u305b\u3093\u3002',
+  'flows.validation.output_required': '\u51fa\u529b\u30dd\u30fc\u30c8\u304b\u3089\u63a5\u7d9a\u3057\u3066\u304f\u3060\u3055\u3044\u3002',
+  'flows.validation.input_required': '\u5165\u529b\u30dd\u30fc\u30c8\u306b\u63a5\u7d9a\u3057\u3066\u304f\u3060\u3055\u3044\u3002',
+  'flows.validation.contract_mismatch': '\u30dd\u30fc\u30c8\u5951\u7d04\u304c\u4e00\u81f4\u3057\u307e\u305b\u3093: {source} -> {target}',
+  'flows.validation.single_output': '{label} \u306f\u8907\u6570\u306e\u51fa\u529b\u63a5\u7d9a\u3092\u8a31\u53ef\u3057\u3066\u3044\u307e\u305b\u3093\u3002',
+  'flows.validation.single_input': '{label} \u306f\u8907\u6570\u306e\u5165\u529b\u63a5\u7d9a\u3092\u8a31\u53ef\u3057\u3066\u3044\u307e\u305b\u3093\u3002',
   'dialog.cancel': '\u30ad\u30e3\u30f3\u30bb\u30eb',
   'dialog.confirm': '\u78ba\u8a8d',
 };
@@ -361,17 +489,22 @@ const ar: Dict = {
 
 const dict: Record<Locale, Dict> = { en, ja, zh, ko, es, fr, de, pt, ru, ar };
 
+export function resolveLocale(language?: string): Locale {
+  return (language && language in dict) ? (language as Locale) : 'en';
+}
+
+export function translate(key: string, params?: Record<string, string>, language?: string): string {
+  const locale = resolveLocale(language ?? useAppStore.getState().profile.language);
+  let text = dict[locale][key] ?? dict.en[key] ?? key;
+  if (params) {
+    Object.entries(params).forEach(([k, v]) => {
+      text = text.replace(`{${k}}`, v);
+    });
+  }
+  return text;
+}
+
 export function useT() {
   const language = useAppStore(state => state.profile.language) as string;
-  const locale: Locale = (language in dict) ? (language as Locale) : 'en';
-
-  return (key: string, params?: Record<string, string>): string => {
-    let text = dict[locale][key] ?? dict['en'][key] ?? key;
-    if (params) {
-      Object.entries(params).forEach(([k, v]) => {
-        text = text.replace(`{${k}}`, v);
-      });
-    }
-    return text;
-  };
+  return (key: string, params?: Record<string, string>): string => translate(key, params, language);
 }

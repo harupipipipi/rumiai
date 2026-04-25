@@ -33,6 +33,24 @@ export function Settings() {
   }, [loadProfile, loadVersion]);
 
   useEffect(() => {
+    const refreshProfile = () => {
+      void loadProfile();
+    };
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') {
+        refreshProfile();
+      }
+    };
+
+    window.addEventListener('focus', refreshProfile);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      window.removeEventListener('focus', refreshProfile);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+  }, [loadProfile]);
+
+  useEffect(() => {
     setFormData(profile);
   }, [profile]);
 
@@ -45,10 +63,14 @@ export function Settings() {
     setIsConnecting(true);
     try {
       await connectAccount();
-      // connectAccount redirects the page, so we won't reach here
+      addToast(
+        t('settings.connect_started') || 'Browser opened. Finish signing in there, then return.',
+        'success',
+      );
     } catch {
-      setIsConnecting(false);
       addToast(t('settings.connect_failed') || 'Failed to connect', 'error');
+    } finally {
+      setIsConnecting(false);
     }
   };
 
