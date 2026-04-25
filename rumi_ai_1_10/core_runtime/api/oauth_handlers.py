@@ -14,22 +14,22 @@ Supabase Auth の OAuth 2.1 Server + PKCE を使用する。
 """
 from __future__ import annotations
 
+from io import BufferedIOBase
 import base64
 import hashlib
 import html
 import json
 import logging
-import os
 import secrets
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
-from urllib.parse import urlencode, urlparse, parse_qs
-from urllib.request import Request, urlopen
+from typing import Any, Dict, Optional, Protocol, cast
 from urllib.error import URLError, HTTPError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
-from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
+from ._helpers import _log_internal_error
 
 logger = logging.getLogger(__name__)
 
@@ -253,9 +253,10 @@ class OAuthHandlersMixin:
 
     def _oauth_send_redirect(self, location: str) -> None:
         """HTTP 302 リダイレクトを送信する"""
-        self.send_response(302)
-        self.send_header("Location", location)
-        self.end_headers()
+        handler = cast(_OAuthHttpHandler, self)
+        handler.send_response(302)
+        handler.send_header("Location", location)
+        handler.end_headers()
 
     def _oauth_send_result_page(self, title: str, message: str, *, success: bool) -> None:
         """OAuth 完了後に外部ブラウザへ結果ページを返す"""
@@ -325,8 +326,24 @@ class OAuthHandlersMixin:
 </html>
 """
         data = html_doc.encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+        handler = cast(_OAuthHttpHandler, self)
+        handler.send_response(200)
+        handler.send_header("Content-Type", "text/html; charset=utf-8")
+        handler.send_header("Content-Length", str(len(data)))
+        handler.end_headers()
+        handler.wfile.write(data)
+
+
+class _OAuthHttpHandler(Protocol):
+    """BaseHTTPRequestHandler 互換の最小インターフェース。"""
+
+    wfile: BufferedIOBase
+
+    def send_response(self, code: int, message: str | None = None) -> None:
+        ...
+
+    def send_header(self, keyword: str, value: str) -> None:
+        ...
+
+    def end_headers(self) -> None:
+        ...
