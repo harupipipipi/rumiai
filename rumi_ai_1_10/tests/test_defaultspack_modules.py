@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from ecosystem.defaultspack.backend.ai_client.ai_profile import AIProfile, AIProfileManager
-from ecosystem.defaultspack.backend.ai_client.provider_registry import ProviderRegistry
 from ecosystem.defaultspack.backend.prompt.prompt_manager import PromptEntry, PromptManager
 from ecosystem.defaultspack.backend.tool.tool_manager import ToolEntry, ToolManager
-from ecosystem.defaultspack.backend.plugin.plugin_manager import PluginManifest, PluginManager
+from ecosystem.defaultspack.backend.plugin.plugin_manager import PluginManager
 from ecosystem.defaultspack.backend.chat.chat_manager import ChatManager, Message
 from ecosystem.defaultspack.backend.memory.memory_manager import MemoryEntry, MemoryManager
 from ecosystem.defaultspack.backend.knowledge.knowledge_manager import KnowledgeEntry, KnowledgeManager
@@ -105,7 +104,14 @@ def test_setup_pack_selector(tmp_path):
 
 def test_frontend_loader_includes_ui_shell_root_module():
     assert "ui_shell" in discover_frontend_modules()
+    assert "rumi_bundle" in discover_frontend_modules()
     loaded = load_frontend_module("ui_shell")
     assert loaded["loaded"]
     assert loaded["spec"]["module_id"] == "ui_shell"
+    bundle = load_frontend_module("rumi_bundle")
+    assert bundle["loaded"]
+    assert bundle["spec"]["module_id"] == "rumi_bundle"
+    assert bundle["spec"]["bundle"]["launch_mode"] == "desktop_app"
+    assert bundle["spec"]["bundle"]["port_source"]["default"] == 8766
     assert "ui_shell" in build_frontend_dependency_graph()
+    assert "rumi_bundle" in build_frontend_dependency_graph()
