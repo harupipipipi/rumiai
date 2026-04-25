@@ -105,7 +105,14 @@ def test_setup_pack_selector(tmp_path):
 
 def test_frontend_loader_includes_ui_shell_root_module():
     assert "ui_shell" in discover_frontend_modules()
+    assert "rumi_bundle" in discover_frontend_modules()
     loaded = load_frontend_module("ui_shell")
     assert loaded["loaded"]
     assert loaded["spec"]["module_id"] == "ui_shell"
+    bundle = load_frontend_module("rumi_bundle")
+    assert bundle["loaded"]
+    assert bundle["spec"]["module_id"] == "rumi_bundle"
+    assert bundle["spec"]["bundle"]["launch_mode"] == "desktop_app"
+    assert bundle["spec"]["bundle"]["port_source"]["default"] == 8766
     assert "ui_shell" in build_frontend_dependency_graph()
+    assert "rumi_bundle" in build_frontend_dependency_graph()
