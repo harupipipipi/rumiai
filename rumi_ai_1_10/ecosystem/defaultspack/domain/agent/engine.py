@@ -4,6 +4,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import gen_id, timestamp
 from domain.agent.execution import AgentExecution
+from domain.tool.schema_adapter import (
+    adapt_tool_definitions,
+    build_tool_execution_context,
+    connected_tool_names,
+    max_tool_calls,
+    runtime_profile_enforced_tool_names,
+    tool_name_from_definition,
+)
 
 MAX_FLOW_CALL_DEPTH = 10
 
@@ -69,21 +77,22 @@ class AgentEngine:
         return result
 
     def _tool_name_from_definition(self, tool):
-        if isinstance(tool, str):
-            return tool
-        if not isinstance(tool, dict):
-            return ""
-        function_def = tool.get("function")
-        if isinstance(function_def, dict) and function_def.get("name"):
-            return function_def.get("name")
-        return tool.get("name") or tool.get("tool_id") or ""
+        return tool_name_from_definition(tool)
 
     def _connected_tool_names(self, execution):
-        return {
-            name
-            for name in (self._tool_name_from_definition(tool) for tool in execution.tools)
-            if name
-        }
+        runtime_profile = getattr(execution, "context", {}).get("runtime_profile")
+        agent_id = getattr(execution, "context", {}).get("agent_id")
+        return connected_tool_names(execution.tools, runtime_profile, agent_id)
+
+    def _enforced_tool_names(self, execution):
+        context = getattr(execution, "context", {}) or {}
+        return runtime_profile_enforced_tool_names(
+            context.get("runtime_profile"),
+            context.get("agent_id"),
+        )
+
+    def _tool_call_count(self, execution):
+        return sum(1 for step in execution.steps if step.step_type == "tool_result")
 
     def _normalize_tool_args(self, tool_args):
         if isinstance(tool_args, str):
@@ -98,8 +107,10 @@ class AgentEngine:
 
     def _reject_unconnected_tool_call(self, execution, parsed):
         connected_tools = self._connected_tool_names(execution)
+        enforced_tools = self._enforced_tool_names(execution)
         tool_name = parsed.get("tool_name", "")
-        if tool_name in connected_tools:
+        allowed_tools = enforced_tools if enforced_tools is not None else connected_tools
+        if tool_name in allowed_tools:
             return False
         execution.status = "error"
         execution.error = "tool call is not connected to this agent: " + tool_name
@@ -107,6 +118,21 @@ class AgentEngine:
             "error": execution.error,
             "tool_name": tool_name,
             "connected_tools": sorted(connected_tools),
+            "enforced_tools": sorted(enforced_tools) if enforced_tools is not None else None,
+        })
+        return True
+
+    def _reject_policy_violation(self, execution, parsed):
+        limit = max_tool_calls(getattr(execution, "context", {}) or {})
+        if limit is None or self._tool_call_count(execution) < limit:
+            return False
+        tool_name = parsed.get("tool_name", "")
+        execution.status = "error"
+        execution.error = "max tool calls exceeded"
+        execution.add_step("error", {
+            "error": execution.error,
+            "tool_name": tool_name,
+            "max_tool_calls": limit,
         })
         return True
 
@@ -171,7 +197,7 @@ class AgentEngine:
         execution = AgentExecution(
             execution_id=execution_id,
             task=task,
-            tools=tools if tools else [],
+            tools=adapt_tool_definitions(tools if tools else []),
             model=model if model else "default",
             system_prompt=system_prompt,
         )
@@ -193,7 +219,7 @@ class AgentEngine:
                 "result": execution.to_dict(),
             }
         if parsed["type"] == "tool_call":
-            if self._reject_unconnected_tool_call(execution, parsed):
+            if self._reject_unconnected_tool_call(execution, parsed) or self._reject_policy_violation(execution, parsed):
                 return {
                     "execution_id": execution_id,
                     "status": "error",
@@ -231,6 +257,11 @@ class AgentEngine:
         execution.status = "running"
         execution.pending_tool_call = None
         context_for_tool = dict(getattr(execution, "context", {}) or {})
+        context_for_tool = build_tool_execution_context(
+            context_for_tool,
+            pending["tool_name"],
+            self._connected_tool_names(execution),
+        )
         tool_result = self._execute_tool(pending["tool_name"], pending["tool_args"], context_for_tool)
         tool_content = ""
         if isinstance(tool_result, dict):
@@ -274,7 +305,7 @@ class AgentEngine:
                 "result": execution.to_dict(),
             }
         if parsed["type"] == "tool_call":
-            if self._reject_unconnected_tool_call(execution, parsed):
+            if self._reject_unconnected_tool_call(execution, parsed) or self._reject_policy_violation(execution, parsed):
                 return {
                     "execution_id": execution_id,
                     "status": "error",
@@ -334,7 +365,7 @@ class AgentEngine:
                 "result": execution.to_dict(),
             }
         if parsed["type"] == "tool_call":
-            if self._reject_unconnected_tool_call(execution, parsed):
+            if self._reject_unconnected_tool_call(execution, parsed) or self._reject_policy_violation(execution, parsed):
                 return {
                     "execution_id": execution_id,
                     "status": "error",
@@ -388,7 +419,7 @@ class AgentEngine:
         execution = AgentExecution(
             execution_id=execution_id,
             task=task,
-            tools=tools if tools else [],
+            tools=adapt_tool_definitions(tools if tools else []),
             model=model if model else "default",
             system_prompt=plan_system,
         )

@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 
 from ..extensions.runtime import get_extension_registry
 from .executor import ToolExecutor
+from .schema_adapter import adapt_tool_definitions, tool_name_from_definition
 
 
 class ToolBroker:
@@ -36,10 +37,10 @@ class ToolBroker:
     ) -> Dict[str, Any]:
         strategy = self.select_strategy(provider_manifest, tools)
         if strategy == "native":
-            return {"strategy": "native", "tools": tools}
+            return {"strategy": "native", "tools": adapt_tool_definitions(tools)}
         return {
             "strategy": "prompt_fallback",
-            "tool_names": [tool.get("name", tool.get("tool_id", "")) for tool in tools],
+            "tool_names": [tool_name_from_definition(tool) for tool in tools],
         }
 
     def execute_tool_intent(
