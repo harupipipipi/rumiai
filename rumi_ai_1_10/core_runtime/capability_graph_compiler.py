@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from .binding_handlers import BindingHandlerResolver
 from .graph_models import GraphDefinition, GraphEdge, GraphNodeInstance
@@ -181,19 +182,21 @@ class CapabilityGraphCompiler:
         if resolution.handler is None:
             return
         try:
-            result = resolution.handler(
+            result = _call_binding_handler(
+                resolution.handler,
                 context=context,
-                runtime_profile=context.runtime_profile,
-                graph=context.graph,
-                profile=context.profile,
-                nodes=context.nodes,
-                instance=instance,
-                edge=edge,
-                source=source,
-                target=target,
+                call_kwargs={
+                    "context": context,
+                    "runtime_profile": context.runtime_profile,
+                    "graph": context.graph,
+                    "profile": context.profile,
+                    "nodes": context.nodes,
+                    "instance": instance,
+                    "edge": edge,
+                    "source": source,
+                    "target": target,
+                },
             )
-        except TypeError:
-            result = resolution.handler(context)
         except Exception as exc:
             context.diagnose(
                 "error",
@@ -220,6 +223,39 @@ class CapabilityGraphCompiler:
                     node_instance_id=instance.id,
                     edge_id=edge.id if edge else None,
                 )
+
+
+def _call_binding_handler(
+    handler: Callable[..., Any],
+    *,
+    context: CompileContext,
+    call_kwargs: Dict[str, Any],
+) -> Any:
+    try:
+        signature = inspect.signature(handler)
+    except (TypeError, ValueError):
+        return handler(**call_kwargs)
+
+    positional_args: List[Any] = []
+    filtered_kwargs: Dict[str, Any] = {}
+    for parameter in signature.parameters.values():
+        if parameter.kind == inspect.Parameter.VAR_KEYWORD:
+            return handler(**call_kwargs)
+        if parameter.kind == inspect.Parameter.POSITIONAL_ONLY:
+            if parameter.name == "context":
+                positional_args.append(context)
+            continue
+        if (
+            parameter.kind
+            in (
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY,
+            )
+            and parameter.name in call_kwargs
+        ):
+            filtered_kwargs[parameter.name] = call_kwargs[parameter.name]
+
+    return handler(*positional_args, **filtered_kwargs)
 
 
 def _make_runtime_profile(

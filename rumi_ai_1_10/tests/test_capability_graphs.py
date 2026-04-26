@@ -536,6 +536,69 @@ def test_graph_compiler_reports_missing_binding_handler(tmp_path) -> None:
     assert result.diagnostics[-1]["code"] == "binding_handler_not_found"
 
 
+def test_graph_compiler_does_not_retry_handler_internal_type_error(tmp_path) -> None:
+    pack = _pack(
+        tmp_path,
+        "samplepack",
+        {
+            "components/source/node.json": _node_doc(
+                {
+                    "node_id": "samplepack.source",
+                    "ports": [{"id": "out", "direction": "output", "standards": ["sample.standard"]}],
+                }
+            ),
+            "components/target/node.json": _node_doc(
+                {
+                    "node_id": "samplepack.target",
+                    "ports": [
+                        {"id": "start", "direction": "input", "standards": ["rumi.flow.start"], "required": True},
+                        {"id": "in", "direction": "input", "standards": ["sample.standard"], "required": True},
+                    ],
+                    "bindings": {"on_input": {"in": "binding:buggy"}},
+                }
+            ),
+        },
+    )
+    graph_pack = _pack(
+        tmp_path,
+        "graphpack",
+        {"graphs/coding.graph.yaml": _graph_doc("graphpack.coding")},
+    )
+    registry = _registry(pack, graph_pack)
+    node_registry = EcosystemNodeRegistry(
+        registry=registry,
+        approval_manager=FakeApprovalManager({"samplepack", "graphpack"}),
+    )
+    loader = CapabilityGraphLoader(
+        registry=registry,
+        approval_manager=FakeApprovalManager({"samplepack", "graphpack"}),
+        shared_graphs_dir=tmp_path / "missing-user-graphs",
+        workspace_graphs_dir=tmp_path / "missing-workspace-graphs",
+    )
+    interface_registry = InterfaceRegistry()
+    calls = []
+
+    def buggy_handler(**kwargs):
+        calls.append(kwargs["edge"].id)
+        raise TypeError("internal handler bug")
+
+    interface_registry.register("binding:buggy", buggy_handler)
+    graph = loader.get_graph("graphpack.coding")
+    assert graph is not None
+
+    result = CapabilityGraphCompiler(interface_registry=interface_registry).compile(
+        graph,
+        profile=load_profile_document(_profile_doc()),
+        nodes=node_registry.load_all_nodes(register=False),
+    )
+
+    assert calls == ["source_to_target"]
+    assert result.ok is False
+    assert result.runtime_profile is None
+    assert result.diagnostics[-1]["code"] == "binding_handler_failed"
+    assert "internal handler bug" in result.diagnostics[-1]["message"]
+
+
 def test_graph_compiler_core_has_no_domain_specific_branches() -> None:
     source = inspect.getsource(compiler_module)
 
