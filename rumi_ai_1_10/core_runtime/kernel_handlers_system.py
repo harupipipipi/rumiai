@@ -107,6 +107,7 @@ class KernelSystemHandlersMixin:
             "kernel:graph.load_all": self._h_graph_load_all,
             "kernel:graph.get": self._h_graph_get,
             "kernel:graph.validate": self._h_graph_validate,
+            "kernel:graph.compile": self._h_graph_compile,
             "kernel:exec_python": self._h_exec_python,
             "kernel:ctx.set": self._h_ctx_set,
             "kernel:ctx.get": self._h_ctx_get,
@@ -492,6 +493,73 @@ class KernelSystemHandlersMixin:
             }
         except Exception as e:
             return _failed_step_result("kernel:graph.validate", e, graph_id=graph_id)
+
+    def _h_graph_compile(self: Any, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        graph_id = args.get("graph_id")
+        profile_id = args.get("profile_id")
+        if not graph_id:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "missing 'graph_id' argument"}}
+        if not profile_id:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "missing 'profile_id' argument"}}
+        try:
+            from .capability_graph_compiler import CapabilityGraphCompiler
+
+            profile_loader = self._get_profile_loader(args, ctx)
+            profile = profile_loader.get_profile(str(profile_id))
+            if profile is None:
+                return {
+                    "_kernel_step_status": "failed",
+                    "_kernel_step_meta": {"graph_id": graph_id, "profile_id": profile_id, "profile_found": False},
+                    "ok": False,
+                    "runtime_profile": None,
+                    "diagnostics": [
+                        {
+                            "level": "error",
+                            "code": "profile_not_found",
+                            "message": f"Profile '{profile_id}' was not found",
+                            "profile_id": profile_id,
+                        }
+                    ],
+                }
+
+            graph_loader = self._get_graph_loader(args, ctx)
+            graph = graph_loader.get_graph(str(graph_id))
+            if graph is None:
+                return {
+                    "_kernel_step_status": "failed",
+                    "_kernel_step_meta": {"graph_id": graph_id, "profile_id": profile_id, "graph_found": False},
+                    "ok": False,
+                    "runtime_profile": None,
+                    "diagnostics": [
+                        {
+                            "level": "error",
+                            "code": "graph_not_found",
+                            "message": f"Graph '{graph_id}' was not found",
+                            "graph_id": graph_id,
+                        }
+                    ],
+                }
+
+            node_registry = self._get_node_registry(args, ctx)
+            nodes = getattr(node_registry, "nodes", None)
+            if not nodes:
+                nodes = node_registry.load_all_nodes(register=True)
+            compiler = CapabilityGraphCompiler(interface_registry=self.interface_registry)
+            result = compiler.compile(
+                graph,
+                profile=profile,
+                nodes=dict(nodes),
+                register=bool(args.get("register", True)),
+            )
+            return {
+                "_kernel_step_status": "success" if result.ok else "failed",
+                "_kernel_step_meta": {"graph_id": graph_id, "profile_id": profile_id},
+                "ok": result.ok,
+                "runtime_profile": result.runtime_profile,
+                "diagnostics": list(result.diagnostics),
+            }
+        except Exception as e:
+            return _failed_step_result("kernel:graph.compile", e, graph_id=graph_id, profile_id=profile_id)
 
     # ------------------------------------------------------------------
     # ctx ハンドラ
