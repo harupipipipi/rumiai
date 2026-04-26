@@ -33,6 +33,10 @@ Scope:
 
 Required behavior:
 
+- register core-owned `rumi.start` before ecosystem node discovery
+- define `rumi.start` with output port `out` and standard `rumi.flow.start`
+- prevent ecosystem packs from overriding core-owned built-in node ids
+- load pack-provided node files only from packs that pass existing approval and hash verification
 - parse `rumi.node.v1`
 - normalize `contract` to `standards`
 - normalize `name` to `display_name.en`
@@ -65,16 +69,19 @@ Scope:
 Required behavior:
 
 - load `*.profile.yaml`
+- load pack-provided profile files only from packs that pass existing approval and hash verification
 - parse `enabled_nodes` and `disabled_nodes`
 - parse profile permissions without making them security source of truth
 - parse locale and `node_settings`
 - compute profile node state
 - register `profile.<profile_id>` in `InterfaceRegistry`
+- adapt by coexisting with `StartupProfileManager`; PR 2 does not bridge or supersede launch-time startup profiles
 
 Non-goals:
 
 - graph compiler
 - viewer UI
+- superseding the existing startup profile model
 
 ## PR 3: GraphLoader And PortStandardsValidator
 
@@ -92,6 +99,7 @@ Scope:
 Required behavior:
 
 - load `.graph.yaml`
+- load pack-provided graph files only from packs that pass existing approval and hash verification
 - validate graph schema
 - check node refs
 - check profile-aware node availability
@@ -190,6 +198,14 @@ Scope:
 - profiles API
 - graphs API
 - profile node state API
+- document and expose the relationship between Capability Graph profiles and existing startup profiles
+
+Required behavior:
+
+- keep `StartupProfileManager` as the launch-time source of truth
+- expose Capability Graph profiles as graph/runtime presets
+- choose an explicit API bridge between the two systems
+- do not silently supersede the existing startup profile model
 - tests
 
 ## PR 10: Viewer Node Manager

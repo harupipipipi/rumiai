@@ -6,12 +6,41 @@ Version: `rumi.node.v1`
 
 ## Discovery
 
+Core registers built-in nodes before ecosystem node discovery. Phase 1 has exactly one core-owned built-in node:
+
+```json
+{
+  "node_id": "rumi.start",
+  "kind": "core.builtin",
+  "display_name": {
+    "en": "Start",
+    "ja": "開始"
+  },
+  "ports": [
+    {
+      "id": "out",
+      "direction": "output",
+      "standards": ["rumi.flow.start"],
+      "multiple": true,
+      "required": false
+    }
+  ],
+  "metadata": {
+    "owner": "core"
+  }
+}
+```
+
+`rumi.start` is registered in the global node registry before scanning packs, so graphs can reference it without requiring an ecosystem pack. Ecosystem packs must not override core-owned built-in node ids.
+
 Phase 1 discovery paths:
 
 1. `ecosystem/<pack_id>/nodes/*.node.json`
 2. `ecosystem/<pack_id>/components/*/node.json`
 
 Recursive `**/node.json` discovery is intentionally deferred.
+
+Pack-provided node definition files are loaded only from packs that pass the existing pack approval and hash verification flow. This mirrors pack-provided Flow loading. User shared files, when supported by a future loader, still require schema validation and diagnostics but are not treated as pack-approved content.
 
 ## File Shape
 

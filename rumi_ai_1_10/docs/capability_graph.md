@@ -49,6 +49,8 @@ Initial discovery candidates:
 
 If duplicate `graph_id` values are discovered, Phase 1 treats that as a diagnostic error.
 
+Pack-provided graph files are loaded only from packs that pass the existing pack approval and hash verification flow, following the same trust boundary as pack-provided Flow loading. User shared graph files are allowed as user-owned configuration, but they still require schema validation and diagnostics before registration or compile.
+
 ## Schema
 
 Version: `rumi.graph.v1`
@@ -150,4 +152,18 @@ runtime_profile.<profile_id>.<graph_id>
 
 ## Core Node
 
-`rumi.start` is the only special node owned by core. All other nodes are discovered from ecosystem packs.
+`rumi.start` is the only special node owned by core. Core registers it before ecosystem node discovery.
+
+`rumi.start` has one output port:
+
+```json
+{
+  "id": "out",
+  "direction": "output",
+  "standards": ["rumi.flow.start"],
+  "multiple": true,
+  "required": false
+}
+```
+
+All other nodes are discovered from approved ecosystem packs. Ecosystem packs must not override core-owned built-in node ids.

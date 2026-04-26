@@ -13,6 +13,16 @@ Initial discovery candidates:
 1. `user_data/shared/profiles/*.profile.yaml`
 2. `ecosystem/<pack_id>/profiles/*.profile.yaml`
 
+Pack-provided profile files are loaded only from packs that pass the existing pack approval and hash verification flow, matching the trust boundary used for pack-provided Flow loading. User shared profile files are user-owned configuration, but they still require schema validation and diagnostics before registration or use.
+
+## Relationship To Startup Profiles
+
+Capability Graph profiles do not replace the existing `StartupProfileManager` or launch-time startup profile system in the initial PRs.
+
+Until an explicit bridge or migration PR lands, existing startup profiles remain the launch-time source of truth for selecting startup behavior, setup, and runtime launch defaults. `rumi.profile.v1` is a graph/runtime preset used by Capability Graph loading, validation, compile, and later viewer palette filtering.
+
+The planned profile loader PR adapts to the existing system by coexisting with it. It may read startup-related defaults for display or diagnostics only when explicitly wired, but it must not supersede startup profile selection. A later backend API PR may expose both systems side by side or add a bridge endpoint, but replacing `StartupProfileManager` requires a dedicated migration decision and PR.
+
 ## Relationship To Graphs
 
 Graph and profile are separate:
