@@ -1,0 +1,40 @@
+{
+  "version": "rumi.node.v1",
+  "nodes": [
+    {
+      "node_id": "defaultspack.ai_client",
+      "kind": "ecosystem.component",
+      "display_name": {
+        "ja": "AI クライアント",
+        "en": "AI Client"
+      },
+      "description": {
+        "ja": "モデルプロバイダに接続する AI クライアントノード。",
+        "en": "AI client node that connects to model providers."
+      },
+      "ports": [
+        {
+          "id": "client",
+          "direction": "output",
+          "display_name": {
+            "ja": "クライアント",
+            "en": "Client"
+          },
+          "standards": ["rumi.ai.client"],
+          "aliases": ["ai", "client", "model"],
+          "multiple": true,
+          "required": false
+        }
+      ],
+      "bindings": {
+        "compile": "defaultspack.ai_client.compile_node"
+      },
+      "metadata": {
+        "pack_id": "defaultspack",
+        "component": "ai_client",
+        "icon": "sparkles",
+        "category": "ai"
+      }
+    }
+  ]
+}

@@ -192,8 +192,8 @@ class TestKernelHandlerManifests:
     def test_kernel_handler_manifests_count(self) -> None:
         """エントリ数が 74 であること (system 29 + runtime 45)"""
         manifests = _get_kernel_handler_manifests()
-        assert len(manifests) == 74, (
-            f"Expected 74 manifests, got {len(manifests)}"
+        assert len(manifests) == 77, (
+            f"Expected 77 manifests, got {len(manifests)}"
         )
 
     def test_kernel_handler_manifests_system_tags(self) -> None:

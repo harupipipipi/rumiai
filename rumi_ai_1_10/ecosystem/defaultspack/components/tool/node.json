@@ -1,0 +1,40 @@
+{
+  "version": "rumi.node.v1",
+  "nodes": [
+    {
+      "node_id": "defaultspack.tool",
+      "kind": "ecosystem.component",
+      "display_name": {
+        "ja": "ツール",
+        "en": "Tool Bundle"
+      },
+      "description": {
+        "ja": "実行可能なツール群を提供するノード。",
+        "en": "Node that provides executable tool bundles."
+      },
+      "ports": [
+        {
+          "id": "tools",
+          "direction": "output",
+          "display_name": {
+            "ja": "ツール",
+            "en": "Tools"
+          },
+          "standards": ["rumi.tool.bundle", "defaultspack.tool.bundle.v1"],
+          "aliases": ["tools", "tool_bundle", "functions"],
+          "multiple": true,
+          "required": false
+        }
+      ],
+      "bindings": {
+        "compile": "defaultspack.tool.compile_node"
+      },
+      "metadata": {
+        "pack_id": "defaultspack",
+        "component": "tool",
+        "icon": "wrench",
+        "category": "tools"
+      }
+    }
+  ]
+}
