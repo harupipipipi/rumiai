@@ -24,6 +24,6 @@ def timestamp():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
-def gen_id():
+def gen_id(prefix=""):
     """Generate unique ID"""
-    return str(uuid.uuid4())
+    return prefix + str(uuid.uuid4())
