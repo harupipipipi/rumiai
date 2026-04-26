@@ -231,6 +231,74 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         },
     },
 
+    # --- Capability Graph node registry ---
+    "kernel:node.load_all": {
+        "description": "Load approved Capability Graph node definitions into InterfaceRegistry",
+        "permission_id": "kernel:node.load_all",
+        "risk": "low",
+        "requires": [],
+        "tags": ["kernel", "system", "node", "capability_graph"],
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ecosystem_dir": {
+                    "type": "string",
+                    "description": "Optional ecosystem directory override",
+                },
+            },
+        },
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "_kernel_step_status": {"type": "string", "enum": ["success", "failed"]},
+                "_kernel_step_meta": {"type": "object"},
+                "nodes": {"type": "array", "items": {"type": "object"}},
+                "diagnostics": {"type": "array", "items": {"type": "object"}},
+            },
+            "required": ["_kernel_step_status"],
+        },
+    },
+    "kernel:node.list": {
+        "description": "List loaded Capability Graph node definitions",
+        "permission_id": "kernel:node.list",
+        "risk": "low",
+        "requires": [],
+        "tags": ["kernel", "system", "node", "capability_graph"],
+        "input_schema": {"type": "object", "properties": {}},
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "_kernel_step_status": {"type": "string", "enum": ["success"]},
+                "_kernel_step_meta": {"type": "object"},
+                "nodes": {"type": "array", "items": {"type": "object"}},
+            },
+            "required": ["_kernel_step_status"],
+        },
+    },
+    "kernel:node.get": {
+        "description": "Get a Capability Graph node definition by node_id",
+        "permission_id": "kernel:node.get",
+        "risk": "low",
+        "requires": [],
+        "tags": ["kernel", "system", "node", "capability_graph"],
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "node_id": {"type": "string", "description": "Node definition id"},
+            },
+            "required": ["node_id"],
+        },
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "_kernel_step_status": {"type": "string", "enum": ["success", "failed"]},
+                "_kernel_step_meta": {"type": "object"},
+                "node": {"type": "object"},
+            },
+            "required": ["_kernel_step_status"],
+        },
+    },
+
     # --- exec_python ---
     "kernel:exec_python": {
         "description": "Execute a Python file with sandboxed context and inject support",

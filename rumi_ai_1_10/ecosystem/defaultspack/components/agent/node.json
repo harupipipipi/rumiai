@@ -1,0 +1,80 @@
+{
+  "version": "rumi.node.v1",
+  "nodes": [
+    {
+      "node_id": "defaultspack.agent",
+      "kind": "ecosystem.component",
+      "display_name": {
+        "ja": "エージェント",
+        "en": "Agent"
+      },
+      "description": {
+        "ja": "AI、ツール、メモリ、プロンプトを束ねて実行するノード。",
+        "en": "Runtime node that combines AI, tools, memory, and prompts."
+      },
+      "ports": [
+        {
+          "id": "start",
+          "direction": "input",
+          "display_name": {
+            "ja": "開始",
+            "en": "Start"
+          },
+          "standards": ["rumi.flow.start"],
+          "aliases": ["start", "entry"],
+          "multiple": false,
+          "required": true
+        },
+        {
+          "id": "ai",
+          "direction": "input",
+          "display_name": {
+            "ja": "AI",
+            "en": "AI"
+          },
+          "standards": ["rumi.ai.client"],
+          "aliases": ["ai", "ai_client", "model"],
+          "multiple": false,
+          "required": false
+        },
+        {
+          "id": "tools",
+          "direction": "input",
+          "display_name": {
+            "ja": "ツール",
+            "en": "Tools"
+          },
+          "standards": ["rumi.tool.bundle", "defaultspack.tool.bundle.v1"],
+          "aliases": ["tools", "tool_bundle", "functions"],
+          "multiple": true,
+          "required": false
+        },
+        {
+          "id": "result",
+          "direction": "output",
+          "display_name": {
+            "ja": "結果",
+            "en": "Result"
+          },
+          "standards": ["rumi.agent.result"],
+          "aliases": ["result", "output"],
+          "multiple": true,
+          "required": false
+        }
+      ],
+      "bindings": {
+        "compile": "defaultspack.agent.compile_node",
+        "on_input": {
+          "ai": "defaultspack.agent.bind_ai",
+          "tools": "defaultspack.agent.bind_tools"
+        }
+      },
+      "metadata": {
+        "pack_id": "defaultspack",
+        "component": "agent",
+        "icon": "bot",
+        "category": "runtime"
+      }
+    }
+  ]
+}

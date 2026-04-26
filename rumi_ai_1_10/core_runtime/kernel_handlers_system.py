@@ -97,6 +97,9 @@ class KernelSystemHandlersMixin:
             "kernel:ir.get": self._h_ir_get,
             "kernel:ir.call": self._h_ir_call,
             "kernel:ir.register": self._h_ir_register,
+            "kernel:node.load_all": self._h_node_load_all,
+            "kernel:node.list": self._h_node_list,
+            "kernel:node.get": self._h_node_get,
             "kernel:exec_python": self._h_exec_python,
             "kernel:ctx.set": self._h_ctx_set,
             "kernel:ctx.get": self._h_ctx_get,
@@ -231,6 +234,64 @@ class KernelSystemHandlersMixin:
         value = ctx.get(args["value_from_ctx"]) if args.get("value_from_ctx") else (self._resolve_value(args.get("value"), ctx) if args.get("value") is not None else None)
         self.interface_registry.register(key, value, meta=args.get("meta", {}))
         return {"_kernel_step_status": "success", "_kernel_step_meta": {"key": key, "has_value": value is not None}}
+
+    # ------------------------------------------------------------------
+    # Capability Graph node registry handlers
+    # ------------------------------------------------------------------
+
+    def _get_node_registry(self, args: Dict[str, Any], ctx: Dict[str, Any]):
+        from .ecosystem_nodes import EcosystemNodeRegistry
+
+        existing = ctx.get("node_registry")
+        if existing is not None:
+            return existing
+        registry = EcosystemNodeRegistry(
+            registry=ctx.get("registry") or getattr(self.lifecycle, "registry", None),
+            interface_registry=self.interface_registry,
+            approval_manager=ctx.get("approval_manager"),
+            ecosystem_dir=args.get("ecosystem_dir"),
+        )
+        ctx["node_registry"] = registry
+        self.interface_registry.register(
+            "node.registry",
+            registry,
+            meta={"source": "kernel", "_system": True},
+        )
+        return registry
+
+    def _h_node_load_all(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        try:
+            node_registry = self._get_node_registry(args, ctx)
+            nodes = node_registry.load_all_nodes(register=True)
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_step_meta": {"count": len(nodes)},
+                "nodes": [node.to_dict() for node in nodes.values()],
+                "diagnostics": list(node_registry.diagnostics),
+            }
+        except Exception as e:
+            return _failed_step_result("kernel:node.load_all", e)
+
+    def _h_node_list(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        node_registry = self._get_node_registry(args, ctx)
+        nodes = node_registry.list_nodes()
+        return {
+            "_kernel_step_status": "success",
+            "_kernel_step_meta": {"count": len(nodes)},
+            "nodes": [node.to_dict() for node in nodes],
+        }
+
+    def _h_node_get(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        node_id = args.get("node_id")
+        if not node_id:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "missing 'node_id' argument"}}
+        node_registry = self._get_node_registry(args, ctx)
+        node = node_registry.get_node(str(node_id))
+        return {
+            "_kernel_step_status": "success" if node else "failed",
+            "_kernel_step_meta": {"node_id": node_id, "found": node is not None},
+            "node": node.to_dict() if node else None,
+        }
 
     # ------------------------------------------------------------------
     # ctx ハンドラ

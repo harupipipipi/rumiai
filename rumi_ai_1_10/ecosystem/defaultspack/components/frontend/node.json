@@ -1,0 +1,52 @@
+{
+  "version": "rumi.node.v1",
+  "nodes": [
+    {
+      "node_id": "defaultspack.frontend",
+      "kind": "ecosystem.component",
+      "display_name": {
+        "ja": "フロントエンド",
+        "en": "Frontend"
+      },
+      "description": {
+        "ja": "UI または CLI surface を提供するノード。",
+        "en": "Node that provides UI or CLI surfaces."
+      },
+      "ports": [
+        {
+          "id": "ui",
+          "direction": "output",
+          "display_name": {
+            "ja": "UI",
+            "en": "UI"
+          },
+          "standards": ["rumi.ui.surface"],
+          "aliases": ["ui", "frontend", "surface"],
+          "multiple": true,
+          "required": false
+        },
+        {
+          "id": "cli",
+          "direction": "output",
+          "display_name": {
+            "ja": "CLI",
+            "en": "CLI"
+          },
+          "standards": ["rumi.cli.surface"],
+          "aliases": ["cli", "terminal", "surface"],
+          "multiple": true,
+          "required": false
+        }
+      ],
+      "bindings": {
+        "compile": "defaultspack.frontend.compile_node"
+      },
+      "metadata": {
+        "pack_id": "defaultspack",
+        "component": "frontend",
+        "icon": "monitor",
+        "category": "surface"
+      }
+    }
+  ]
+}
