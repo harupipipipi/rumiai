@@ -167,3 +167,38 @@ runtime_profile.<profile_id>.<graph_id>
 ```
 
 All other nodes are discovered from approved ecosystem packs. Ecosystem packs must not override core-owned built-in node ids.
+
+## Backend API
+
+The backend exposes Capability Graph data through authenticated HTTP APIs. `/api/*` paths are the spec-facing API surface. `/api/panel/*` aliases return the same shapes for the control panel session and CSRF flow.
+
+Read APIs:
+
+- `GET /api/nodes`
+- `GET /api/nodes/{node_id}`
+- `GET /api/profiles`
+- `GET /api/profiles/{profile_id}`
+- `GET /api/profiles/{profile_id}/nodes`
+- `GET /api/graphs`
+- `GET /api/graphs/{graph_id}`
+
+Graph preview APIs:
+
+- `POST /api/graphs/{graph_id}/validate`
+- `POST /api/graphs/{graph_id}/compile`
+
+The viewer-facing node responses include locale-resolved labels, ports, standards, aliases, bindings, metadata, requirements, permissions, and profile node state when a profile is selected. The profile node API also returns `palette_nodes`, which contains only installed and profile-enabled nodes so the viewer does not need to hardcode node types.
+
+The compile endpoint is a preview by default in the panel alias; callers can compile without replacing the launch-time startup profile source of truth.
+
+## Viewer Node Manager
+
+The initial Node Manager is a profile-scoped catalog, not a graph editor replacement. It displays:
+
+- Capability Graph profiles
+- profile-enabled palette nodes
+- installed, disabled, missing, unapproved, and missing-config states
+- node ports, standards, aliases, bindings, and metadata
+- graph validate and compile preview results
+
+Profile clone controls are shown only when the selected Capability Graph profile has `permissions.can_create_profile: true`. This permission is still a preset/UI gate; privileged writes remain behind the existing authenticated panel API and filesystem controls.

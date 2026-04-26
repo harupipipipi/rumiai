@@ -245,3 +245,118 @@ export interface HealthResponseData {
   runtime_status?: 'starting' | 'panel_ready' | 'runtime_ready' | 'error';
   runtime_error?: string | null;
 }
+
+export interface ApiCapabilityPort {
+  id: string;
+  label: string;
+  direction: 'input' | 'output' | 'bidirectional';
+  standards: string[];
+  aliases: string[];
+  multiple?: boolean;
+  required?: boolean;
+  display_name?: Record<string, string>;
+  description?: Record<string, string>;
+}
+
+export interface ApiCapabilityNodeState {
+  node_id: string;
+  installed: boolean;
+  approved: boolean;
+  enabled: boolean;
+  configured: boolean;
+  status: string;
+  missing: string[];
+  credential_ref?: string | null;
+  profile_id?: string;
+}
+
+export interface ApiCapabilityNode {
+  node_id: string;
+  label: string;
+  description_label: string;
+  kind: string;
+  ports: ApiCapabilityPort[];
+  bindings: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  requirements?: Record<string, unknown>;
+  permissions?: Record<string, unknown>;
+  state?: ApiCapabilityNodeState;
+}
+
+export interface ApiCapabilityProfile {
+  profile_id: string;
+  label: string;
+  description_label: string;
+  locale?: string | null;
+  default_graph?: string | null;
+  default_flow?: string | null;
+  permissions: Record<string, unknown>;
+  enabled_nodes: string[];
+  disabled_nodes: string[];
+  node_settings: Record<string, Record<string, unknown>>;
+  policy: Record<string, unknown>;
+}
+
+export interface ApiCapabilityGraph {
+  graph_id: string;
+  label: string;
+  description_label: string;
+  nodes: Array<{id: string; ref: string; display_name?: Record<string, string>; metadata?: Record<string, unknown>}>;
+  edges: Array<{id: string; from: string; to: string; kind: string; metadata?: Record<string, unknown>}>;
+  metadata: Record<string, unknown>;
+}
+
+export interface ApiCapabilityDiagnostic {
+  level: string;
+  code: string;
+  message: string;
+  [key: string]: unknown;
+}
+
+export interface StartupProfileRelationship {
+  launch_time_source_of_truth: string;
+  capability_graph_profiles_role: string;
+  bridge_policy: string;
+  startup_profile_api: string;
+}
+
+export interface CapabilityProfilesResponseData {
+  profiles: ApiCapabilityProfile[];
+  count: number;
+  startup_profile_relationship: StartupProfileRelationship;
+}
+
+export interface CapabilityNodesResponseData {
+  nodes: ApiCapabilityNode[];
+  count: number;
+}
+
+export interface CapabilityProfileNodesResponseData {
+  profile: ApiCapabilityProfile;
+  nodes: ApiCapabilityNode[];
+  node_state: ApiCapabilityNodeState[];
+  palette_nodes: ApiCapabilityNode[];
+  count: number;
+  palette_count: number;
+}
+
+export interface CapabilityGraphsResponseData {
+  graphs: ApiCapabilityGraph[];
+  count: number;
+  diagnostics: ApiCapabilityDiagnostic[];
+}
+
+export interface CapabilityGraphCompileResponseData {
+  ok: boolean;
+  graph_id: string;
+  profile_id: string;
+  runtime_profile?: Record<string, unknown> | null;
+  diagnostics: ApiCapabilityDiagnostic[];
+}
+
+export interface CapabilityProfileCloneResponseData {
+  profile: ApiCapabilityProfile;
+  created: boolean;
+  path: string;
+  diagnostics: ApiCapabilityDiagnostic[];
+}

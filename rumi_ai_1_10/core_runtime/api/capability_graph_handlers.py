@@ -1,0 +1,393 @@
+"""Capability Graph API handlers for viewer and external clients."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+from ._helpers import _log_internal_error, _SAFE_ERROR_MSG
+
+
+def _label(value: Any, fallback: str, locale: str = "en") -> str:
+    if isinstance(value, dict):
+        return (
+            str(value.get(locale) or value.get("en") or fallback)
+        )
+    if isinstance(value, str) and value:
+        return value
+    return fallback
+
+
+def _status_from_kernel_result(result: Dict[str, Any]) -> bool:
+    return result.get("_kernel_step_status") == "success"
+
+
+class CapabilityGraphHandlersMixin:
+    """HTTP handlers that expose Capability Graph registries to the viewer."""
+
+    def _capability_kernel(self) -> Any:
+        kernel = getattr(self.__class__, "kernel", None) or getattr(self, "kernel", None)
+        if kernel is None:
+            return None
+        return kernel
+
+    def _capability_ctx(self, kernel: Any) -> Dict[str, Any]:
+        ctx = getattr(kernel, "_startup_ctx", None)
+        if not isinstance(ctx, dict):
+            ctx = {}
+            try:
+                setattr(kernel, "_startup_ctx", ctx)
+            except Exception:
+                pass
+        return ctx
+
+    def _call_kernel_handler(self, handler_id: str, args: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        kernel = self._capability_kernel()
+        if kernel is None:
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {"error": "Kernel not initialized"},
+            }
+        handler = None
+        resolver = getattr(kernel, "_resolve_handler", None)
+        if callable(resolver):
+            handler = resolver(handler_id)
+        if handler is None:
+            handler = getattr(kernel, "_kernel_handlers", {}).get(handler_id)
+        if handler is None:
+            return {
+                "_kernel_step_status": "failed",
+                "_kernel_step_meta": {"error": f"Kernel handler '{handler_id}' not found"},
+            }
+        return handler(dict(args or {}), self._capability_ctx(kernel))
+
+    def _capability_startup_relationship(self) -> Dict[str, Any]:
+        return {
+            "launch_time_source_of_truth": "StartupProfileManager",
+            "capability_graph_profiles_role": "graph_runtime_presets",
+            "bridge_policy": (
+                "Capability Graph profiles do not supersede startup profiles. "
+                "They are exposed as graph/runtime presets until an explicit "
+                "migration or bridge writes startup-profile state."
+            ),
+            "startup_profile_api": "/api/panel/startup/profiles",
+        }
+
+    def _capability_public_port(self, port: Dict[str, Any], *, locale: str) -> Dict[str, Any]:
+        port_id = str(port.get("id") or "")
+        return {
+            **port,
+            "label": _label(port.get("display_name"), port_id, locale),
+            "standards": list(port.get("standards") or []),
+            "aliases": list(port.get("aliases") or []),
+        }
+
+    def _capability_public_node(
+        self,
+        node: Dict[str, Any],
+        *,
+        locale: str,
+        state_by_id: Optional[Dict[str, Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        node_id = str(node.get("node_id") or "")
+        public = {
+            **node,
+            "label": _label(node.get("display_name"), node_id, locale),
+            "description_label": _label(node.get("description"), "", locale),
+            "ports": [
+                self._capability_public_port(port, locale=locale)
+                for port in node.get("ports") or []
+                if isinstance(port, dict)
+            ],
+            "metadata": dict(node.get("metadata") or {}),
+            "bindings": dict(node.get("bindings") or {}),
+        }
+        if state_by_id is not None:
+            public["state"] = state_by_id.get(node_id)
+        return public
+
+    def _capability_public_profile(self, profile: Dict[str, Any], *, locale: str) -> Dict[str, Any]:
+        profile_id = str(profile.get("profile_id") or "")
+        profile_locale = str(profile.get("locale") or locale)
+        return {
+            **profile,
+            "label": _label(profile.get("display_name"), profile_id, profile_locale),
+            "description_label": _label(profile.get("description"), "", profile_locale),
+        }
+
+    def _capability_public_graph(self, graph: Dict[str, Any], *, locale: str) -> Dict[str, Any]:
+        graph_id = str(graph.get("graph_id") or "")
+        return {
+            **graph,
+            "label": _label(graph.get("display_name"), graph_id, locale),
+            "description_label": _label(graph.get("description"), "", locale),
+        }
+
+    def _capability_get_nodes(self) -> Dict[str, Any]:
+        """GET /api/nodes and /api/panel/nodes."""
+        try:
+            result = self._call_kernel_handler("kernel:node.list")
+            if not _status_from_kernel_result(result):
+                return {
+                    "error": result.get("_kernel_step_meta", {}).get("error", _SAFE_ERROR_MSG),
+                    "status_code": 500,
+                }
+            nodes = [
+                self._capability_public_node(node, locale="en")
+                for node in result.get("nodes", [])
+                if isinstance(node, dict)
+            ]
+            return {
+                "nodes": nodes,
+                "count": len(nodes),
+            }
+        except Exception as exc:
+            _log_internal_error("capability_get_nodes", exc)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _capability_get_node(self, node_id: str) -> Dict[str, Any]:
+        """GET /api/nodes/{node_id} and /api/panel/nodes/{node_id}."""
+        try:
+            result = self._call_kernel_handler("kernel:node.get", {"node_id": node_id})
+            if not _status_from_kernel_result(result) or result.get("node") is None:
+                return {"error": f"Node '{node_id}' not found", "status_code": 404}
+            return {
+                "node": self._capability_public_node(result["node"], locale="en"),
+            }
+        except Exception as exc:
+            _log_internal_error("capability_get_node", exc)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _capability_get_profiles(self) -> Dict[str, Any]:
+        """GET /api/profiles and /api/panel/profiles."""
+        try:
+            result = self._call_kernel_handler("kernel:profile.list")
+            if not _status_from_kernel_result(result):
+                return {
+                    "error": result.get("_kernel_step_meta", {}).get("error", _SAFE_ERROR_MSG),
+                    "status_code": 500,
+                }
+            profiles = [
+                self._capability_public_profile(profile, locale="en")
+                for profile in result.get("profiles", [])
+                if isinstance(profile, dict)
+            ]
+            return {
+                "profiles": profiles,
+                "count": len(profiles),
+                "startup_profile_relationship": self._capability_startup_relationship(),
+            }
+        except Exception as exc:
+            _log_internal_error("capability_get_profiles", exc)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _capability_get_profile(self, profile_id: str) -> Dict[str, Any]:
+        """GET /api/profiles/{profile_id} and /api/panel/profiles/{profile_id}."""
+        try:
+            result = self._call_kernel_handler("kernel:profile.get", {"profile_id": profile_id})
+            if not _status_from_kernel_result(result) or result.get("profile") is None:
+                return {"error": f"Profile '{profile_id}' not found", "status_code": 404}
+            profile = self._capability_public_profile(result["profile"], locale="en")
+            return {
+                "profile": profile,
+                "startup_profile_relationship": self._capability_startup_relationship(),
+            }
+        except Exception as exc:
+            _log_internal_error("capability_get_profile", exc)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _capability_get_profile_nodes(self, profile_id: str) -> Dict[str, Any]:
+        """GET /api/profiles/{profile_id}/nodes and panel alias."""
+        try:
+            profile_result = self._call_kernel_handler("kernel:profile.get", {"profile_id": profile_id})
+            if not _status_from_kernel_result(profile_result) or profile_result.get("profile") is None:
+                return {"error": f"Profile '{profile_id}' not found", "status_code": 404}
+            profile = profile_result["profile"]
+            locale = str(profile.get("locale") or "en")
+
+            nodes_result = self._call_kernel_handler("kernel:node.list")
+            if not _status_from_kernel_result(nodes_result):
+                return {
+                    "error": nodes_result.get("_kernel_step_meta", {}).get("error", _SAFE_ERROR_MSG),
+                    "status_code": 500,
+                }
+            state_result = self._call_kernel_handler(
+                "kernel:profile.node_state",
+                {"profile_id": profile_id},
+            )
+            if not _status_from_kernel_result(state_result):
+                return {
+                    "error": state_result.get("_kernel_step_meta", {}).get("error", _SAFE_ERROR_MSG),
+                    "status_code": 500,
+                }
+            states = [
+                item for item in state_result.get("node_state", [])
+                if isinstance(item, dict)
+            ]
+            state_by_id = {str(item.get("node_id")): item for item in states}
+            nodes = [
+                self._capability_public_node(node, locale=locale, state_by_id=state_by_id)
+                for node in nodes_result.get("nodes", [])
+                if isinstance(node, dict)
+            ]
+            palette_nodes = [
+                node for node in nodes
+                if node.get("state", {}).get("enabled") is True
+                and node.get("state", {}).get("installed") is True
+            ]
+            return {
+                "profile": self._capability_public_profile(profile, locale=locale),
+                "nodes": nodes,
+                "node_state": states,
+                "palette_nodes": palette_nodes,
+                "count": len(nodes),
+                "palette_count": len(palette_nodes),
+            }
+        except Exception as exc:
+            _log_internal_error("capability_get_profile_nodes", exc)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _capability_get_graphs(self) -> Dict[str, Any]:
+        """GET /api/graphs and /api/panel/graphs."""
+        try:
+            result = self._call_kernel_handler("kernel:graph.load_all")
+            if not _status_from_kernel_result(result):
+                return {
+                    "error": result.get("_kernel_step_meta", {}).get("error", _SAFE_ERROR_MSG),
+                    "status_code": 500,
+                }
+            graphs = [
+                self._capability_public_graph(graph, locale="en")
+                for graph in result.get("graphs", [])
+                if isinstance(graph, dict)
+            ]
+            return {
+                "graphs": graphs,
+                "count": len(graphs),
+                "diagnostics": list(result.get("diagnostics") or []),
+            }
+        except Exception as exc:
+            _log_internal_error("capability_get_graphs", exc)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _capability_get_graph(self, graph_id: str) -> Dict[str, Any]:
+        """GET /api/graphs/{graph_id} and /api/panel/graphs/{graph_id}."""
+        try:
+            result = self._call_kernel_handler("kernel:graph.get", {"graph_id": graph_id})
+            if not _status_from_kernel_result(result) or result.get("graph") is None:
+                return {"error": f"Graph '{graph_id}' not found", "status_code": 404}
+            return {
+                "graph": self._capability_public_graph(result["graph"], locale="en"),
+            }
+        except Exception as exc:
+            _log_internal_error("capability_get_graph", exc)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _capability_validate_graph(self, graph_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        """POST /api/graphs/{graph_id}/validate and panel alias."""
+        try:
+            result = self._call_kernel_handler(
+                "kernel:graph.validate",
+                {"graph_id": graph_id, "profile_id": body.get("profile_id")},
+            )
+            return {
+                "ok": bool(result.get("ok")),
+                "graph_id": graph_id,
+                "profile_id": body.get("profile_id"),
+                "diagnostics": list(result.get("diagnostics") or []),
+            }
+        except Exception as exc:
+            _log_internal_error("capability_validate_graph", exc)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _capability_compile_graph(self, graph_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        """POST /api/graphs/{graph_id}/compile and panel alias."""
+        profile_id = body.get("profile_id")
+        if not profile_id:
+            return {"error": "profile_id is required", "status_code": 400}
+        try:
+            result = self._call_kernel_handler(
+                "kernel:graph.compile",
+                {
+                    "graph_id": graph_id,
+                    "profile_id": profile_id,
+                    "register": bool(body.get("register", False)),
+                },
+            )
+            return {
+                "ok": bool(result.get("ok")),
+                "graph_id": graph_id,
+                "profile_id": profile_id,
+                "runtime_profile": result.get("runtime_profile"),
+                "diagnostics": list(result.get("diagnostics") or []),
+            }
+        except Exception as exc:
+            _log_internal_error("capability_compile_graph", exc)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _capability_clone_profile(self, profile_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        """POST /api/panel/profiles/{profile_id}/clone."""
+        try:
+            import copy
+            import yaml  # type: ignore[import-untyped]
+
+            from ..profile_models import load_profile_document
+
+            result = self._call_kernel_handler("kernel:profile.get", {"profile_id": profile_id})
+            if not _status_from_kernel_result(result) or result.get("profile") is None:
+                return {"error": f"Profile '{profile_id}' not found", "status_code": 404}
+
+            source_profile = result["profile"]
+            permissions = source_profile.get("permissions") or {}
+            if permissions.get("can_create_profile") is not True:
+                return {
+                    "error": "Profile cloning is not allowed by this capability profile",
+                    "status_code": 403,
+                }
+
+            new_profile_id = str(body.get("profile_id") or f"{profile_id}_copy").strip()
+            cloned = copy.deepcopy(source_profile)
+            cloned["profile_id"] = new_profile_id
+            cloned["version"] = "rumi.profile.v1"
+            display_name = dict(cloned.get("display_name") or {})
+            if body.get("display_name"):
+                display_name["en"] = str(body["display_name"])
+            elif display_name.get("en"):
+                display_name["en"] = f"{display_name['en']} Copy"
+            cloned["display_name"] = display_name
+            metadata = dict(cloned.get("metadata") or {})
+            metadata["source_type"] = "user"
+            metadata["cloned_from"] = profile_id
+            cloned["metadata"] = metadata
+
+            normalized = load_profile_document(
+                cloned,
+                source_type="user",
+            ).to_dict()
+            user_profile_dir = (
+                Path(__file__).resolve().parent.parent.parent
+                / "user_data"
+                / "shared"
+                / "profiles"
+            )
+            user_profile_dir.mkdir(parents=True, exist_ok=True)
+            target = user_profile_dir / f"{new_profile_id}.profile.yaml"
+            if target.exists():
+                return {"error": f"Profile '{new_profile_id}' already exists", "status_code": 409}
+            target.write_text(
+                yaml.safe_dump(normalized, allow_unicode=True, sort_keys=False),
+                encoding="utf-8",
+            )
+
+            ctx = self._capability_ctx(self._capability_kernel())
+            ctx.pop("profile_loader", None)
+            load_result = self._call_kernel_handler("kernel:profile.load_all")
+            return {
+                "profile": self._capability_public_profile(normalized, locale=str(normalized.get("locale") or "en")),
+                "created": True,
+                "path": str(target),
+                "diagnostics": list(load_result.get("diagnostics") or []),
+            }
+        except Exception as exc:
+            _log_internal_error("capability_clone_profile", exc)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}

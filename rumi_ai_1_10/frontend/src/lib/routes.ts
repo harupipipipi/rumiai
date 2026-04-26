@@ -3,6 +3,7 @@ export const panelRoutes = {
   setup: '/setup',
   packs: '/packs',
   packDetail: (id: string) => `/packs/${id}`,
+  nodes: '/nodes',
   startup: '/startup',
   flows: '/flows',
   settings: '/settings',
