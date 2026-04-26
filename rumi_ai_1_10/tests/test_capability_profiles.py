@@ -162,6 +162,27 @@ def test_user_shared_profile_overrides_pack_profile(tmp_path) -> None:
     assert loader.diagnostics[0]["code"] == "profile_skipped_user_override"
 
 
+def test_duplicate_user_shared_profile_ids_are_rejected(tmp_path) -> None:
+    shared_dir = tmp_path / "profiles"
+    shared_dir.mkdir()
+    (shared_dir / "a.profile.yaml").write_text(
+        yaml.safe_dump(_profile_doc("coding", display_name={"en": "Coding A"})),
+        encoding="utf-8",
+    )
+    (shared_dir / "b.profile.yaml").write_text(
+        yaml.safe_dump(_profile_doc("coding", display_name={"en": "Coding B"})),
+        encoding="utf-8",
+    )
+    loader = CapabilityProfileLoader(
+        registry=_registry(),
+        approval_manager=FakeApprovalManager(),
+        shared_profiles_dir=shared_dir,
+    )
+
+    with pytest.raises(ProfileDiscoveryError, match="duplicate profile_id 'coding'"):
+        loader.load_all_profiles()
+
+
 def test_profile_node_registry_computes_enabled_and_missing_state(tmp_path) -> None:
     pack = _pack(
         tmp_path,

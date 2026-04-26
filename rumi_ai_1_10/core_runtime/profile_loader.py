@@ -131,7 +131,7 @@ class CapabilityProfileLoader:
         register: bool,
         allow_override: bool,
     ) -> None:
-        if profile.profile_id in self.profiles and not allow_override:
+        if profile.profile_id in self.profiles:
             existing = self.profiles[profile.profile_id]
             if existing.metadata.get("source_type") == "user" and profile.metadata.get("source_type") == "ecosystem":
                 self._diagnose(
@@ -141,6 +141,9 @@ class CapabilityProfileLoader:
                     profile_id=profile.profile_id,
                     path=str(profile.metadata.get("source_path") or ""),
                 )
+                return
+            if allow_override and existing.metadata.get("source_type") != profile.metadata.get("source_type"):
+                self.profiles[profile.profile_id] = profile
                 return
             raise ProfileDiscoveryError(
                 "duplicate profile_id '{}': {} conflicts with {}".format(
