@@ -36,15 +36,65 @@
           "aliases": ["cli", "terminal", "surface"],
           "multiple": true,
           "required": false
+        },
+        {
+          "id": "surface",
+          "direction": "input",
+          "display_name": {
+            "ja": "サーフェス",
+            "en": "Surface"
+          },
+          "standards": ["rumi.cli.surface"],
+          "aliases": ["surface", "cli_surface"],
+          "multiple": false,
+          "required": false
         }
       ],
       "bindings": {
-        "compile": "defaultspack.frontend.compile_node"
+        "compile": "defaultspack:frontend.compile_node",
+        "on_input": {
+          "surface": "defaultspack:frontend.bind_surface"
+        }
       },
       "metadata": {
         "pack_id": "defaultspack",
         "component": "frontend",
         "icon": "monitor",
+        "category": "surface"
+      }
+    },
+    {
+      "node_id": "defaultspack.cli_surface",
+      "kind": "ecosystem.component",
+      "display_name": {
+        "ja": "CLI サーフェス",
+        "en": "CLI Surface"
+      },
+      "description": {
+        "ja": "フロントエンドに接続できる CLI surface ノード。",
+        "en": "CLI surface node that can bind into a frontend."
+      },
+      "ports": [
+        {
+          "id": "surface",
+          "direction": "output",
+          "display_name": {
+            "ja": "サーフェス",
+            "en": "Surface"
+          },
+          "standards": ["rumi.cli.surface"],
+          "aliases": ["cli", "surface"],
+          "multiple": true,
+          "required": false
+        }
+      ],
+      "bindings": {
+        "compile": "defaultspack:cli_surface.compile_node"
+      },
+      "metadata": {
+        "pack_id": "defaultspack",
+        "component": "frontend",
+        "icon": "terminal",
         "category": "surface"
       }
     }

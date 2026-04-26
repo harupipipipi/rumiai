@@ -37,6 +37,7 @@ enabled_nodes:
   - defaultspack.ai_client
   - defaultspack.tool
   - defaultspack.frontend
+  - defaultspack.cli_surface
 
 disabled_nodes: []
 

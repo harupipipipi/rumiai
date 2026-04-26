@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -14,6 +15,7 @@ from core_runtime.capability_graph_loader import CapabilityGraphLoader, GraphDis
 from core_runtime.ecosystem_nodes import EcosystemNodeRegistry
 from core_runtime.graph_models import GraphValidationError, load_graph_document
 from core_runtime.interface_registry import InterfaceRegistry
+from core_runtime.profile_loader import CapabilityProfileLoader
 from core_runtime.profile_models import load_profile_document
 
 
@@ -604,3 +606,60 @@ def test_graph_compiler_core_has_no_domain_specific_branches() -> None:
 
     for forbidden in ('"ai"', '"tool"', '"agent"', "== 'ai'", "== 'tool'", "== 'agent'"):
         assert forbidden not in source
+
+
+def test_defaultspack_minimal_bindings_compile_sample_graph() -> None:
+    from ecosystem.defaultspack.capability_bindings import (
+        register_defaultspack_binding_handlers,
+    )
+
+    defaultspack_root = Path(__file__).resolve().parents[1] / "ecosystem" / "defaultspack"
+    pack = SimpleNamespace(
+        pack_id="defaultspack",
+        subdir=defaultspack_root,
+        path=defaultspack_root,
+    )
+    registry = _registry(pack)
+    approval_manager = FakeApprovalManager({"defaultspack"})
+    interface_registry = InterfaceRegistry()
+    register_defaultspack_binding_handlers(interface_registry)
+
+    node_registry = EcosystemNodeRegistry(
+        registry=registry,
+        approval_manager=approval_manager,
+        interface_registry=interface_registry,
+    )
+    graph_loader = CapabilityGraphLoader(
+        registry=registry,
+        approval_manager=approval_manager,
+        interface_registry=interface_registry,
+        shared_graphs_dir=defaultspack_root / "missing-user-graphs",
+        workspace_graphs_dir=defaultspack_root / "missing-workspace-graphs",
+    )
+    profile_loader = CapabilityProfileLoader(
+        registry=registry,
+        approval_manager=approval_manager,
+        interface_registry=interface_registry,
+        shared_profiles_dir=defaultspack_root / "missing-user-profiles",
+    )
+    graph = graph_loader.get_graph("defaultspack.coding_workspace")
+    profile = profile_loader.get_profile("defaultspack.coding")
+    assert graph is not None
+    assert profile is not None
+
+    result = CapabilityGraphCompiler(interface_registry=interface_registry).compile(
+        graph,
+        profile=profile,
+        nodes=node_registry.load_all_nodes(register=True),
+    )
+
+    assert result.ok is True
+    assert result.runtime_profile is not None
+    defaultspack = result.runtime_profile["defaultspack"]
+    assert defaultspack["agents"]["agent"]["ai"] == "ai"
+    assert defaultspack["agents"]["agent"]["tools"] == ["tools"]
+    assert defaultspack["frontends"]["frontend"]["surface"] == "cli"
+    assert defaultspack["frontends"]["frontend"]["surfaces"] == ["cli"]
+    assert set(defaultspack["ai_clients"]) == {"ai"}
+    assert set(defaultspack["tools"]) == {"tools"}
+    assert set(defaultspack["cli_surfaces"]) == {"cli"}

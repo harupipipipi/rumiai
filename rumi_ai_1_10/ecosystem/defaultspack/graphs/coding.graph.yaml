@@ -18,6 +18,10 @@ nodes:
     ref: defaultspack.tool
   - id: agent
     ref: defaultspack.agent
+  - id: cli
+    ref: defaultspack.cli_surface
+  - id: frontend
+    ref: defaultspack.frontend
 
 edges:
   - id: start_to_agent
@@ -31,6 +35,10 @@ edges:
   - id: tools_to_agent
     from: tools.tools
     to: agent.tools
+    kind: binding
+  - id: cli_to_frontend
+    from: cli.surface
+    to: frontend.surface
     kind: binding
 
 metadata:
