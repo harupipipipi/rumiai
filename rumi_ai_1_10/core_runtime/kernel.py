@@ -298,6 +298,113 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
             "required": ["_kernel_step_status"],
         },
     },
+    "kernel:profile.load_all": {
+        "description": "Load approved Capability Graph profiles into InterfaceRegistry",
+        "permission_id": "kernel:profile.load_all",
+        "risk": "low",
+        "requires": [],
+        "tags": ["kernel", "system", "profile", "capability_graph"],
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ecosystem_dir": {
+                    "type": "string",
+                    "description": "Optional ecosystem directory override",
+                },
+                "shared_profiles_dir": {
+                    "type": "string",
+                    "description": "Optional user shared profile directory override",
+                },
+            },
+        },
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "_kernel_step_status": {"type": "string", "enum": ["success", "failed"]},
+                "_kernel_step_meta": {"type": "object"},
+                "profiles": {"type": "array", "items": {"type": "object"}},
+                "diagnostics": {"type": "array", "items": {"type": "object"}},
+            },
+            "required": ["_kernel_step_status"],
+        },
+    },
+    "kernel:profile.list": {
+        "description": "List loaded Capability Graph profiles",
+        "permission_id": "kernel:profile.list",
+        "risk": "low",
+        "requires": [],
+        "tags": ["kernel", "system", "profile", "capability_graph"],
+        "input_schema": {"type": "object", "properties": {}},
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "_kernel_step_status": {"type": "string", "enum": ["success", "failed"]},
+                "_kernel_step_meta": {"type": "object"},
+                "profiles": {"type": "array", "items": {"type": "object"}},
+            },
+            "required": ["_kernel_step_status"],
+        },
+    },
+    "kernel:profile.get": {
+        "description": "Get a Capability Graph profile by profile_id",
+        "permission_id": "kernel:profile.get",
+        "risk": "low",
+        "requires": [],
+        "tags": ["kernel", "system", "profile", "capability_graph"],
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "profile_id": {"type": "string", "description": "Capability Graph profile id"},
+            },
+            "required": ["profile_id"],
+        },
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "_kernel_step_status": {"type": "string", "enum": ["success", "failed"]},
+                "_kernel_step_meta": {"type": "object"},
+                "profile": {"type": "object"},
+            },
+            "required": ["_kernel_step_status"],
+        },
+    },
+    "kernel:profile.node_state": {
+        "description": "Compute profile-scoped Capability Graph node state",
+        "permission_id": "kernel:profile.node_state",
+        "risk": "low",
+        "requires": [],
+        "tags": ["kernel", "system", "profile", "node", "capability_graph"],
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "profile_id": {"type": "string", "description": "Capability Graph profile id"},
+                "node_id": {"type": "string", "description": "Optional node id to inspect"},
+                "ecosystem_dir": {
+                    "type": "string",
+                    "description": "Optional ecosystem directory override",
+                },
+                "shared_profiles_dir": {
+                    "type": "string",
+                    "description": "Optional user shared profile directory override",
+                },
+            },
+            "required": ["profile_id"],
+        },
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "_kernel_step_status": {"type": "string", "enum": ["success", "failed"]},
+                "_kernel_step_meta": {"type": "object"},
+                "node_state": {
+                    "oneOf": [
+                        {"type": "object"},
+                        {"type": "array", "items": {"type": "object"}},
+                    ]
+                },
+            },
+            "required": ["_kernel_step_status"],
+        },
+    },
 
     # --- exec_python ---
     "kernel:exec_python": {
