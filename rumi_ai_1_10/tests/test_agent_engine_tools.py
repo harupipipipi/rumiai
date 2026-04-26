@@ -50,6 +50,28 @@ def _runtime_profile(*, connected_tools: list[str]) -> dict:
     }
 
 
+def _compiled_bundle_runtime_profile(*, bundle_tools: list[str] | None = None) -> dict:
+    tool_record = {
+        "node_instance_id": "tools",
+        "node_id": "defaultspack.tool",
+    }
+    if bundle_tools is not None:
+        tool_record["tools"] = bundle_tools
+    return {
+        "version": "rumi.runtime_profile.v1",
+        "defaultspack": {
+            "agents": {
+                "agent": {
+                    "tools": ["tools"],
+                }
+            },
+            "tools": {
+                "tools": tool_record,
+            },
+        },
+    }
+
+
 def _text_response(content: str = "done") -> dict:
     return {"status": "ok", "data": {"content": content}}
 
@@ -138,6 +160,59 @@ def test_runtime_profile_connected_tools_override_supplied_tool_list() -> None:
 
     assert result["status"] == "error"
     assert result["result"]["steps"][-1]["content"]["enforced_tools"] == ["search"]
+
+
+def test_compiled_defaultspack_runtime_profile_allows_actual_tool_names() -> None:
+    engine = AgentEngine()
+
+    def fake_ai(messages, model, context, tools=None):
+        return _tool_call_response("web_search")
+
+    engine._ai_complete = fake_ai
+
+    result = engine.execute(
+        "find docs",
+        [_tool("web_search"), _tool("calculator")],
+        "stub/model",
+        None,
+        {
+            "runtime_profile": _compiled_bundle_runtime_profile(),
+            "agent_id": "agent",
+        },
+    )
+
+    assert result["status"] == "waiting_approval"
+    assert result["result"]["pending_tool_call"]["tool_name"] == "web_search"
+
+
+def test_runtime_profile_tool_bundle_filters_provider_tools_to_bundle_names() -> None:
+    engine = AgentEngine()
+    seen = {}
+
+    def fake_ai(messages, model, context, tools=None):
+        seen["tools"] = tools
+        return _text_response()
+
+    engine._ai_complete = fake_ai
+
+    result = engine.execute(
+        "find docs",
+        [_tool("web_search"), _tool("calculator"), _tool("file_reader")],
+        "stub/model",
+        None,
+        {
+            "runtime_profile": _compiled_bundle_runtime_profile(
+                bundle_tools=["web_search", "calculator"],
+            ),
+            "agent_id": "agent",
+        },
+    )
+
+    assert result["status"] == "completed"
+    assert [tool["function"]["name"] for tool in seen["tools"]] == [
+        "web_search",
+        "calculator",
+    ]
 
 
 def test_agent_approve_preserves_tools_for_followup_completion() -> None:

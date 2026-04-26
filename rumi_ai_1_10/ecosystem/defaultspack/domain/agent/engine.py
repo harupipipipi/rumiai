@@ -8,6 +8,7 @@ from domain.tool.schema_adapter import (
     adapt_tool_definitions,
     build_tool_execution_context,
     connected_tool_names,
+    filter_tool_definitions_for_runtime_profile,
     max_tool_calls,
     runtime_profile_enforced_tool_names,
     tool_name_from_definition,
@@ -89,6 +90,7 @@ class AgentEngine:
         return runtime_profile_enforced_tool_names(
             context.get("runtime_profile"),
             context.get("agent_id"),
+            execution.tools,
         )
 
     def _tool_call_count(self, execution):
@@ -194,14 +196,21 @@ class AgentEngine:
 
     def execute(self, task, tools, model, system_prompt, context):
         execution_id = gen_id("agent_")
+        execution_context = dict(context or {}) if isinstance(context, dict) else {}
+        normalized_tools = adapt_tool_definitions(tools if tools else [])
+        provider_tools = filter_tool_definitions_for_runtime_profile(
+            normalized_tools,
+            execution_context.get("runtime_profile"),
+            execution_context.get("agent_id"),
+        )
         execution = AgentExecution(
             execution_id=execution_id,
             task=task,
-            tools=adapt_tool_definitions(tools if tools else []),
+            tools=provider_tools,
             model=model if model else "default",
             system_prompt=system_prompt,
         )
-        execution.context = dict(context or {}) if isinstance(context, dict) else {}
+        execution.context = execution_context
         self._executions[execution_id] = execution
         execution.status = "running"
         execution.messages = self._build_initial_messages(execution)
@@ -410,6 +419,13 @@ class AgentEngine:
 
     def plan(self, task, tools, model, system_prompt, context):
         execution_id = gen_id("agent_")
+        execution_context = dict(context or {}) if isinstance(context, dict) else {}
+        normalized_tools = adapt_tool_definitions(tools if tools else [])
+        provider_tools = filter_tool_definitions_for_runtime_profile(
+            normalized_tools,
+            execution_context.get("runtime_profile"),
+            execution_context.get("agent_id"),
+        )
         plan_system = system_prompt if system_prompt else ""
         plan_system += (
             "\n\nYou are in PLANNING mode. Do NOT execute any actions. "
@@ -419,11 +435,11 @@ class AgentEngine:
         execution = AgentExecution(
             execution_id=execution_id,
             task=task,
-            tools=adapt_tool_definitions(tools if tools else []),
+            tools=provider_tools,
             model=model if model else "default",
             system_prompt=plan_system,
         )
-        execution.context = dict(context or {}) if isinstance(context, dict) else {}
+        execution.context = execution_context
         self._executions[execution_id] = execution
         execution.status = "running"
         messages = []

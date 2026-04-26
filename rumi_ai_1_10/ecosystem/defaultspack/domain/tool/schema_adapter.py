@@ -42,23 +42,44 @@ def adapt_tool_definitions(tools: Iterable[Any]) -> List[Any]:
     return [adapt_tool_definition(tool) for tool in tools]
 
 
+def filter_tool_definitions_for_runtime_profile(
+    tools: Iterable[Any],
+    runtime_profile: Optional[Dict[str, Any]] = None,
+    agent_id: Optional[str] = None,
+) -> List[Any]:
+    normalized = list(tools)
+    enforced = runtime_profile_enforced_tool_names(
+        runtime_profile,
+        agent_id,
+        normalized,
+    )
+    if enforced is None:
+        return normalized
+    return [
+        tool
+        for tool in normalized
+        if tool_name_from_definition(tool) in enforced
+    ]
+
+
 def connected_tool_names(
     tools: Iterable[Any],
     runtime_profile: Optional[Dict[str, Any]] = None,
     agent_id: Optional[str] = None,
 ) -> Set[str]:
     names = {name for name in (tool_name_from_definition(tool) for tool in tools) if name}
-    names.update(_runtime_profile_tool_names(runtime_profile, agent_id))
+    names.update(_runtime_profile_tool_names(runtime_profile, agent_id, tools))
     return names
 
 
 def runtime_profile_enforced_tool_names(
     runtime_profile: Optional[Dict[str, Any]],
     agent_id: Optional[str] = None,
+    tools: Optional[Iterable[Any]] = None,
 ) -> Optional[Set[str]]:
     if not runtime_profile:
         return None
-    return _runtime_profile_tool_names(runtime_profile, agent_id)
+    return _runtime_profile_tool_names(runtime_profile, agent_id, tools)
 
 
 def build_tool_execution_context(
@@ -97,6 +118,39 @@ def max_tool_calls(context: Dict[str, Any]) -> Optional[int]:
 def _runtime_profile_tool_names(
     runtime_profile: Optional[Dict[str, Any]],
     agent_id: Optional[str],
+    tools: Optional[Iterable[Any]] = None,
+) -> Set[str]:
+    refs = _runtime_profile_tool_refs(runtime_profile, agent_id)
+    if not refs:
+        return set()
+
+    supplied_names = {
+        name for name in (tool_name_from_definition(tool) for tool in (tools or [])) if name
+    }
+    defaultspack = runtime_profile.get("defaultspack") if isinstance(runtime_profile, dict) else None
+    bundles = defaultspack.get("tools") if isinstance(defaultspack, dict) else None
+    bundles = bundles if isinstance(bundles, dict) else {}
+
+    names: Set[str] = set()
+    for ref in refs:
+        if ref in supplied_names:
+            names.add(ref)
+            continue
+        bundle_record = bundles.get(ref)
+        if isinstance(bundle_record, dict):
+            bundle_names = _tool_names_from_bundle_record(bundle_record)
+            if bundle_names:
+                names.update(bundle_names)
+            else:
+                names.update(supplied_names)
+            continue
+        names.add(ref)
+    return names
+
+
+def _runtime_profile_tool_refs(
+    runtime_profile: Optional[Dict[str, Any]],
+    agent_id: Optional[str],
 ) -> Set[str]:
     if not isinstance(runtime_profile, dict):
         return set()
@@ -115,3 +169,16 @@ def _runtime_profile_tool_names(
     if not isinstance(tools, list):
         return set()
     return {str(tool) for tool in tools if tool}
+
+
+def _tool_names_from_bundle_record(record: Dict[str, Any]) -> Set[str]:
+    names: Set[str] = set()
+    for key in ("tools", "tool_ids", "tool_names", "definitions"):
+        values = record.get(key)
+        if not isinstance(values, list):
+            continue
+        for value in values:
+            name = tool_name_from_definition(value)
+            if name:
+                names.add(name)
+    return names
