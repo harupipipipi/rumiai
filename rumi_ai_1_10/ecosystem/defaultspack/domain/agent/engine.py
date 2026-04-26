@@ -1,3 +1,4 @@
+import json
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -57,15 +58,71 @@ class AgentEngine:
         })
         return True
 
-    def _ai_complete(self, messages, model, context):
+    def _ai_complete(self, messages, model, context, tools=None):
         from blocks.ai.complete import run as ai_complete_run
-        result = ai_complete_run({"messages": messages, "model": model}, context)
+        result = ai_complete_run({"messages": messages, "model": model, "tools": tools or []}, context)
         return result
 
     def _execute_tool(self, tool_name, tool_args, context):
         from blocks.tool.invoke import run as tool_invoke_run
-        result = tool_invoke_run({"tool_name": tool_name, "args": tool_args}, context)
+        result = tool_invoke_run({"tool_name": tool_name, "arguments": tool_args}, context)
         return result
+
+    def _tool_name_from_definition(self, tool):
+        if isinstance(tool, str):
+            return tool
+        if not isinstance(tool, dict):
+            return ""
+        function_def = tool.get("function")
+        if isinstance(function_def, dict) and function_def.get("name"):
+            return function_def.get("name")
+        return tool.get("name") or tool.get("tool_id") or ""
+
+    def _connected_tool_names(self, execution):
+        return {
+            name
+            for name in (self._tool_name_from_definition(tool) for tool in execution.tools)
+            if name
+        }
+
+    def _normalize_tool_args(self, tool_args):
+        if isinstance(tool_args, str):
+            try:
+                parsed = json.loads(tool_args)
+                return parsed if isinstance(parsed, dict) else {"value": parsed}
+            except (TypeError, ValueError):
+                return {"value": tool_args}
+        if isinstance(tool_args, dict):
+            return tool_args
+        return {}
+
+    def _reject_unconnected_tool_call(self, execution, parsed):
+        connected_tools = self._connected_tool_names(execution)
+        tool_name = parsed.get("tool_name", "")
+        if tool_name in connected_tools:
+            return False
+        execution.status = "error"
+        execution.error = "tool call is not connected to this agent: " + tool_name
+        execution.add_step("error", {
+            "error": execution.error,
+            "tool_name": tool_name,
+            "connected_tools": sorted(connected_tools),
+        })
+        return True
+
+    def _set_pending_tool_call(self, execution, parsed):
+        execution.status = "waiting_approval"
+        execution.pending_tool_call = {
+            "tool_name": parsed["tool_name"],
+            "tool_args": self._normalize_tool_args(parsed["tool_args"]),
+            "raw": parsed.get("raw", {}),
+        }
+        execution.add_step("tool_call", {
+            "tool_name": parsed["tool_name"],
+            "tool_args": execution.pending_tool_call["tool_args"],
+        })
+        step = execution.steps[-1]
+        step.status = "pending"
 
     def _parse_ai_response(self, ai_result):
         if ai_result.get("status") != "ok":
@@ -83,6 +140,16 @@ class AgentEngine:
                 "tool_args": first_call.get("args", first_call.get("function", {}).get("arguments", {})),
                 "raw": first_call,
             }
+        if isinstance(data, dict) and isinstance(data.get("content"), list):
+            for part in data["content"]:
+                if not isinstance(part, dict) or part.get("type") not in {"tool_use", "tool_call"}:
+                    continue
+                return {
+                    "type": "tool_call",
+                    "tool_name": part.get("name", "unknown"),
+                    "tool_args": part.get("input", part.get("args", {})),
+                    "raw": part,
+                }
         content = ""
         if isinstance(data, dict):
             content = data.get("content", data.get("text", str(data)))
@@ -108,12 +175,13 @@ class AgentEngine:
             model=model if model else "default",
             system_prompt=system_prompt,
         )
+        execution.context = dict(context or {}) if isinstance(context, dict) else {}
         self._executions[execution_id] = execution
         execution.status = "running"
         execution.messages = self._build_initial_messages(execution)
         execution.add_step("think", {"action": "start", "task": task})
         self._inject_pending_instructions(execution)
-        ai_result = self._ai_complete(execution.messages, execution.model, context)
+        ai_result = self._ai_complete(execution.messages, execution.model, execution.context, execution.tools)
         parsed = self._parse_ai_response(ai_result)
         if parsed["type"] == "error":
             execution.status = "error"
@@ -125,18 +193,13 @@ class AgentEngine:
                 "result": execution.to_dict(),
             }
         if parsed["type"] == "tool_call":
-            execution.status = "waiting_approval"
-            execution.pending_tool_call = {
-                "tool_name": parsed["tool_name"],
-                "tool_args": parsed["tool_args"],
-                "raw": parsed.get("raw", {}),
-            }
-            execution.add_step("tool_call", {
-                "tool_name": parsed["tool_name"],
-                "tool_args": parsed["tool_args"],
-            })
-            step = execution.steps[-1]
-            step.status = "pending"
+            if self._reject_unconnected_tool_call(execution, parsed):
+                return {
+                    "execution_id": execution_id,
+                    "status": "error",
+                    "result": execution.to_dict(),
+                }
+            self._set_pending_tool_call(execution, parsed)
             return {
                 "execution_id": execution_id,
                 "status": "waiting_approval",
@@ -167,7 +230,7 @@ class AgentEngine:
             return {"execution_id": execution_id, "status": "error", "result": {"error": "no pending tool call"}}
         execution.status = "running"
         execution.pending_tool_call = None
-        context_for_tool = {}
+        context_for_tool = dict(getattr(execution, "context", {}) or {})
         tool_result = self._execute_tool(pending["tool_name"], pending["tool_args"], context_for_tool)
         tool_content = ""
         if isinstance(tool_result, dict):
@@ -199,7 +262,7 @@ class AgentEngine:
                 "result": execution.to_dict(),
             }
         self._inject_pending_instructions(execution)
-        ai_result = self._ai_complete(execution.messages, execution.model, context_for_tool)
+        ai_result = self._ai_complete(execution.messages, execution.model, context_for_tool, execution.tools)
         parsed = self._parse_ai_response(ai_result)
         if parsed["type"] == "error":
             execution.status = "error"
@@ -211,18 +274,13 @@ class AgentEngine:
                 "result": execution.to_dict(),
             }
         if parsed["type"] == "tool_call":
-            execution.status = "waiting_approval"
-            execution.pending_tool_call = {
-                "tool_name": parsed["tool_name"],
-                "tool_args": parsed["tool_args"],
-                "raw": parsed.get("raw", {}),
-            }
-            execution.add_step("tool_call", {
-                "tool_name": parsed["tool_name"],
-                "tool_args": parsed["tool_args"],
-            })
-            step = execution.steps[-1]
-            step.status = "pending"
+            if self._reject_unconnected_tool_call(execution, parsed):
+                return {
+                    "execution_id": execution_id,
+                    "status": "error",
+                    "result": execution.to_dict(),
+                }
+            self._set_pending_tool_call(execution, parsed)
             return {
                 "execution_id": execution_id,
                 "status": "waiting_approval",
@@ -263,7 +321,8 @@ class AgentEngine:
         execution.messages.append({"role": "user", "content": rejection_msg})
         execution.add_step("think", {"action": "rejection", "reason": reason})
         self._inject_pending_instructions(execution)
-        ai_result = self._ai_complete(execution.messages, execution.model, {})
+        context_for_ai = dict(getattr(execution, "context", {}) or {})
+        ai_result = self._ai_complete(execution.messages, execution.model, context_for_ai, execution.tools)
         parsed = self._parse_ai_response(ai_result)
         if parsed["type"] == "error":
             execution.status = "error"
@@ -275,18 +334,13 @@ class AgentEngine:
                 "result": execution.to_dict(),
             }
         if parsed["type"] == "tool_call":
-            execution.status = "waiting_approval"
-            execution.pending_tool_call = {
-                "tool_name": parsed["tool_name"],
-                "tool_args": parsed["tool_args"],
-                "raw": parsed.get("raw", {}),
-            }
-            execution.add_step("tool_call", {
-                "tool_name": parsed["tool_name"],
-                "tool_args": parsed["tool_args"],
-            })
-            step = execution.steps[-1]
-            step.status = "pending"
+            if self._reject_unconnected_tool_call(execution, parsed):
+                return {
+                    "execution_id": execution_id,
+                    "status": "error",
+                    "result": execution.to_dict(),
+                }
+            self._set_pending_tool_call(execution, parsed)
             return {
                 "execution_id": execution_id,
                 "status": "waiting_approval",
@@ -338,6 +392,7 @@ class AgentEngine:
             model=model if model else "default",
             system_prompt=plan_system,
         )
+        execution.context = dict(context or {}) if isinstance(context, dict) else {}
         self._executions[execution_id] = execution
         execution.status = "running"
         messages = []
@@ -345,7 +400,7 @@ class AgentEngine:
         messages.append({"role": "user", "content": task})
         execution.messages = messages
         execution.add_step("plan", {"action": "planning", "task": task})
-        ai_result = self._ai_complete(messages, execution.model, context)
+        ai_result = self._ai_complete(messages, execution.model, execution.context, execution.tools)
         parsed = self._parse_ai_response(ai_result)
         if parsed["type"] == "error":
             execution.status = "error"
