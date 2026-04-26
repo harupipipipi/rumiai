@@ -268,7 +268,7 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
         "output_schema": {
             "type": "object",
             "properties": {
-                "_kernel_step_status": {"type": "string", "enum": ["success"]},
+                "_kernel_step_status": {"type": "string", "enum": ["success", "failed"]},
                 "_kernel_step_meta": {"type": "object"},
                 "nodes": {"type": "array", "items": {"type": "object"}},
             },
