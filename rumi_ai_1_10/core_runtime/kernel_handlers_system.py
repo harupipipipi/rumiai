@@ -239,7 +239,7 @@ class KernelSystemHandlersMixin:
     # Capability Graph node registry handlers
     # ------------------------------------------------------------------
 
-    def _get_node_registry(self, args: Dict[str, Any], ctx: Dict[str, Any]):
+    def _get_node_registry(self: Any, args: Dict[str, Any], ctx: Dict[str, Any]):
         from .ecosystem_nodes import EcosystemNodeRegistry
 
         existing = ctx.get("node_registry")
@@ -259,7 +259,7 @@ class KernelSystemHandlersMixin:
         )
         return registry
 
-    def _h_node_load_all(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+    def _h_node_load_all(self: Any, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
         try:
             node_registry = self._get_node_registry(args, ctx)
             nodes = node_registry.load_all_nodes(register=True)
@@ -272,26 +272,32 @@ class KernelSystemHandlersMixin:
         except Exception as e:
             return _failed_step_result("kernel:node.load_all", e)
 
-    def _h_node_list(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
-        node_registry = self._get_node_registry(args, ctx)
-        nodes = node_registry.list_nodes()
-        return {
-            "_kernel_step_status": "success",
-            "_kernel_step_meta": {"count": len(nodes)},
-            "nodes": [node.to_dict() for node in nodes],
-        }
+    def _h_node_list(self: Any, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        try:
+            node_registry = self._get_node_registry(args, ctx)
+            nodes = node_registry.list_nodes()
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_step_meta": {"count": len(nodes)},
+                "nodes": [node.to_dict() for node in nodes],
+            }
+        except Exception as e:
+            return _failed_step_result("kernel:node.list", e)
 
-    def _h_node_get(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+    def _h_node_get(self: Any, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
         node_id = args.get("node_id")
         if not node_id:
             return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "missing 'node_id' argument"}}
-        node_registry = self._get_node_registry(args, ctx)
-        node = node_registry.get_node(str(node_id))
-        return {
-            "_kernel_step_status": "success" if node else "failed",
-            "_kernel_step_meta": {"node_id": node_id, "found": node is not None},
-            "node": node.to_dict() if node else None,
-        }
+        try:
+            node_registry = self._get_node_registry(args, ctx)
+            node = node_registry.get_node(str(node_id))
+            return {
+                "_kernel_step_status": "success" if node else "failed",
+                "_kernel_step_meta": {"node_id": node_id, "found": node is not None},
+                "node": node.to_dict() if node else None,
+            }
+        except Exception as e:
+            return _failed_step_result("kernel:node.get", e, node_id=node_id)
 
     # ------------------------------------------------------------------
     # ctx ハンドラ
