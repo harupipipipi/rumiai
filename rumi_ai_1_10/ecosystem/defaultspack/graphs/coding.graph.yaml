@@ -1,0 +1,38 @@
+graph_id: defaultspack.coding_workspace
+version: rumi.graph.v1
+
+display_name:
+  ja: コーディングワークスペース
+  en: Coding Workspace
+
+description:
+  ja: defaultspack の最小 Capability Graph サンプル。
+  en: Minimal defaultspack Capability Graph sample.
+
+nodes:
+  - id: start
+    ref: rumi.start
+  - id: ai
+    ref: defaultspack.ai_client
+  - id: tools
+    ref: defaultspack.tool
+  - id: agent
+    ref: defaultspack.agent
+
+edges:
+  - id: start_to_agent
+    from: start.out
+    to: agent.start
+    kind: binding
+  - id: ai_to_agent
+    from: ai.client
+    to: agent.ai
+    kind: binding
+  - id: tools_to_agent
+    from: tools.tools
+    to: agent.tools
+    kind: binding
+
+metadata:
+  pack_id: defaultspack
+  category: workspace

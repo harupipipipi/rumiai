@@ -49,6 +49,9 @@ _SYSTEM_HANDLER_KEYS: Set[str] = {
     "kernel:profile.list",
     "kernel:profile.get",
     "kernel:profile.node_state",
+    "kernel:graph.load_all",
+    "kernel:graph.get",
+    "kernel:graph.validate",
     "kernel:execute_flow",
     "kernel:save_flow",
     "kernel:load_flows",
@@ -194,10 +197,10 @@ class TestKernelHandlerManifests:
             )
 
     def test_kernel_handler_manifests_count(self) -> None:
-        """エントリ数が 81 であること"""
+        """エントリ数が 84 であること"""
         manifests = _get_kernel_handler_manifests()
-        assert len(manifests) == 81, (
-            f"Expected 81 manifests, got {len(manifests)}"
+        assert len(manifests) == 84, (
+            f"Expected 84 manifests, got {len(manifests)}"
         )
 
     def test_kernel_handler_manifests_system_tags(self) -> None:

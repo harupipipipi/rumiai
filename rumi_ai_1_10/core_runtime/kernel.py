@@ -405,6 +405,119 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
             "required": ["_kernel_step_status"],
         },
     },
+    "kernel:graph.load_all": {
+        "description": "Load approved Capability Graph definitions into InterfaceRegistry",
+        "permission_id": "kernel:graph.load_all",
+        "risk": "low",
+        "requires": [],
+        "tags": ["kernel", "system", "graph", "capability_graph"],
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ecosystem_dir": {
+                    "type": "string",
+                    "description": "Optional ecosystem directory override",
+                },
+                "shared_graphs_dir": {
+                    "type": "string",
+                    "description": "Optional user shared graph directory override",
+                },
+                "workspace_graphs_dir": {
+                    "type": "string",
+                    "description": "Optional workspace graph directory override",
+                },
+            },
+        },
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "_kernel_step_status": {"type": "string", "enum": ["success", "failed"]},
+                "_kernel_step_meta": {"type": "object"},
+                "graphs": {"type": "array", "items": {"type": "object"}},
+                "diagnostics": {"type": "array", "items": {"type": "object"}},
+            },
+            "required": ["_kernel_step_status"],
+        },
+    },
+    "kernel:graph.get": {
+        "description": "Get a Capability Graph definition by graph_id",
+        "permission_id": "kernel:graph.get",
+        "risk": "low",
+        "requires": [],
+        "tags": ["kernel", "system", "graph", "capability_graph"],
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "graph_id": {"type": "string", "description": "Capability Graph id"},
+                "ecosystem_dir": {
+                    "type": "string",
+                    "description": "Optional ecosystem directory override",
+                },
+                "shared_graphs_dir": {
+                    "type": "string",
+                    "description": "Optional user shared graph directory override",
+                },
+                "workspace_graphs_dir": {
+                    "type": "string",
+                    "description": "Optional workspace graph directory override",
+                },
+            },
+            "required": ["graph_id"],
+        },
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "_kernel_step_status": {"type": "string", "enum": ["success", "failed"]},
+                "_kernel_step_meta": {"type": "object"},
+                "graph": {"type": "object"},
+            },
+            "required": ["_kernel_step_status"],
+        },
+    },
+    "kernel:graph.validate": {
+        "description": "Validate Capability Graph node refs, ports, and profile availability",
+        "permission_id": "kernel:graph.validate",
+        "risk": "low",
+        "requires": [],
+        "tags": ["kernel", "system", "graph", "profile", "node", "capability_graph"],
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "graph_id": {"type": "string", "description": "Capability Graph id"},
+                "profile_id": {
+                    "type": "string",
+                    "description": "Optional Capability Graph profile id",
+                },
+                "ecosystem_dir": {
+                    "type": "string",
+                    "description": "Optional ecosystem directory override",
+                },
+                "shared_graphs_dir": {
+                    "type": "string",
+                    "description": "Optional user shared graph directory override",
+                },
+                "workspace_graphs_dir": {
+                    "type": "string",
+                    "description": "Optional workspace graph directory override",
+                },
+                "shared_profiles_dir": {
+                    "type": "string",
+                    "description": "Optional user shared profile directory override",
+                },
+            },
+            "required": ["graph_id"],
+        },
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "_kernel_step_status": {"type": "string", "enum": ["success", "failed"]},
+                "_kernel_step_meta": {"type": "object"},
+                "ok": {"type": "boolean"},
+                "diagnostics": {"type": "array", "items": {"type": "object"}},
+            },
+            "required": ["_kernel_step_status"],
+        },
+    },
 
     # --- exec_python ---
     "kernel:exec_python": {

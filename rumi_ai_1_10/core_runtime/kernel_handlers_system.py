@@ -104,6 +104,9 @@ class KernelSystemHandlersMixin:
             "kernel:profile.list": self._h_profile_list,
             "kernel:profile.get": self._h_profile_get,
             "kernel:profile.node_state": self._h_profile_node_state,
+            "kernel:graph.load_all": self._h_graph_load_all,
+            "kernel:graph.get": self._h_graph_get,
+            "kernel:graph.validate": self._h_graph_validate,
             "kernel:exec_python": self._h_exec_python,
             "kernel:ctx.set": self._h_ctx_set,
             "kernel:ctx.get": self._h_ctx_get,
@@ -396,6 +399,99 @@ class KernelSystemHandlersMixin:
             }
         except Exception as e:
             return _failed_step_result("kernel:profile.node_state", e, profile_id=profile_id)
+
+    # ------------------------------------------------------------------
+    # Capability Graph graph handlers
+    # ------------------------------------------------------------------
+
+    def _get_graph_loader(self: Any, args: Dict[str, Any], ctx: Dict[str, Any]):
+        from .capability_graph_loader import CapabilityGraphLoader
+
+        existing = ctx.get("graph_loader")
+        if existing is not None:
+            return existing
+        loader = CapabilityGraphLoader(
+            registry=ctx.get("registry") or getattr(self.lifecycle, "registry", None),
+            interface_registry=self.interface_registry,
+            approval_manager=ctx.get("approval_manager"),
+            ecosystem_dir=args.get("ecosystem_dir"),
+            shared_graphs_dir=args.get("shared_graphs_dir"),
+            workspace_graphs_dir=args.get("workspace_graphs_dir"),
+        )
+        ctx["graph_loader"] = loader
+        self.interface_registry.register(
+            "graph.loader",
+            loader,
+            meta={"source": "kernel", "_system": True},
+        )
+        return loader
+
+    def _h_graph_load_all(self: Any, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        try:
+            loader = self._get_graph_loader(args, ctx)
+            graphs = loader.load_all_graphs(register=True)
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_step_meta": {"count": len(graphs)},
+                "graphs": [graph.to_dict() for graph in graphs.values()],
+                "diagnostics": list(loader.diagnostics),
+            }
+        except Exception as e:
+            return _failed_step_result("kernel:graph.load_all", e)
+
+    def _h_graph_get(self: Any, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        graph_id = args.get("graph_id")
+        if not graph_id:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "missing 'graph_id' argument"}}
+        try:
+            loader = self._get_graph_loader(args, ctx)
+            graph = loader.get_graph(str(graph_id))
+            return {
+                "_kernel_step_status": "success" if graph else "failed",
+                "_kernel_step_meta": {"graph_id": graph_id, "found": graph is not None},
+                "graph": graph.to_dict() if graph else None,
+            }
+        except Exception as e:
+            return _failed_step_result("kernel:graph.get", e, graph_id=graph_id)
+
+    def _h_graph_validate(self: Any, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        graph_id = args.get("graph_id")
+        if not graph_id:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "missing 'graph_id' argument"}}
+        try:
+            profile = None
+            profile_id = args.get("profile_id")
+            if profile_id:
+                profile_loader = self._get_profile_loader(args, ctx)
+                profile = profile_loader.get_profile(str(profile_id))
+                if profile is None:
+                    return {
+                        "_kernel_step_status": "failed",
+                        "_kernel_step_meta": {"graph_id": graph_id, "profile_id": profile_id, "profile_found": False},
+                        "ok": False,
+                        "diagnostics": [
+                            {
+                                "level": "error",
+                                "code": "profile_not_found",
+                                "message": f"Profile '{profile_id}' was not found",
+                                "profile_id": profile_id,
+                            }
+                        ],
+                    }
+            loader = self._get_graph_loader(args, ctx)
+            result = loader.validate_graph(
+                str(graph_id),
+                node_registry=self._get_node_registry(args, ctx),
+                profile=profile,
+            )
+            return {
+                "_kernel_step_status": "success" if result.ok else "failed",
+                "_kernel_step_meta": {"graph_id": graph_id, "profile_id": profile_id},
+                "ok": result.ok,
+                "diagnostics": list(result.diagnostics),
+            }
+        except Exception as e:
+            return _failed_step_result("kernel:graph.validate", e, graph_id=graph_id)
 
     # ------------------------------------------------------------------
     # ctx ハンドラ
