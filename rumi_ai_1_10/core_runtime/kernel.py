@@ -518,6 +518,53 @@ _KERNEL_HANDLER_MANIFESTS: Dict[str, Dict[str, Any]] = {
             "required": ["_kernel_step_status"],
         },
     },
+    "kernel:graph.compile": {
+        "description": "Compile a validated Capability Graph into a runtime profile",
+        "permission_id": "kernel:graph.compile",
+        "risk": "low",
+        "requires": [],
+        "tags": ["kernel", "system", "graph", "profile", "node", "capability_graph"],
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "graph_id": {"type": "string", "description": "Capability Graph id"},
+                "profile_id": {"type": "string", "description": "Capability Graph profile id"},
+                "register": {
+                    "type": "boolean",
+                    "description": "Register the compiled runtime profile in InterfaceRegistry",
+                    "default": True,
+                },
+                "ecosystem_dir": {
+                    "type": "string",
+                    "description": "Optional ecosystem directory override",
+                },
+                "shared_graphs_dir": {
+                    "type": "string",
+                    "description": "Optional user shared graph directory override",
+                },
+                "workspace_graphs_dir": {
+                    "type": "string",
+                    "description": "Optional workspace graph directory override",
+                },
+                "shared_profiles_dir": {
+                    "type": "string",
+                    "description": "Optional user shared profile directory override",
+                },
+            },
+            "required": ["graph_id", "profile_id"],
+        },
+        "output_schema": {
+            "type": "object",
+            "properties": {
+                "_kernel_step_status": {"type": "string", "enum": ["success", "failed"]},
+                "_kernel_step_meta": {"type": "object"},
+                "ok": {"type": "boolean"},
+                "runtime_profile": {"type": "object"},
+                "diagnostics": {"type": "array", "items": {"type": "object"}},
+            },
+            "required": ["_kernel_step_status"],
+        },
+    },
 
     # --- exec_python ---
     "kernel:exec_python": {

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import inspect
 import json
 from types import SimpleNamespace
 
 import pytest
 import yaml
 
+import core_runtime.capability_graph_compiler as compiler_module
+from core_runtime.binding_handlers import BindingHandlerResolver
+from core_runtime.capability_graph_compiler import CapabilityGraphCompiler
 from core_runtime.capability_graph_loader import CapabilityGraphLoader, GraphDiscoveryError
 from core_runtime.ecosystem_nodes import EcosystemNodeRegistry
 from core_runtime.graph_models import GraphValidationError, load_graph_document
@@ -332,3 +336,208 @@ def test_graph_validation_enforces_multiple_false_and_required_inputs(tmp_path) 
     assert result.ok is False
     assert "input_multiple_violation" in codes
     assert "required_input_missing" in codes
+
+
+def test_graph_compiler_validates_before_compile_and_returns_diagnostics(tmp_path) -> None:
+    pack = _sample_node_pack(tmp_path)
+    graph_pack = _pack(
+        tmp_path,
+        "graphpack",
+        {
+            "graphs/coding.graph.yaml": _graph_doc(
+                "graphpack.coding",
+                edges=[
+                    {"id": "bad", "from": "start.out", "to": "target.in", "kind": "binding"},
+                ],
+            )
+        },
+    )
+    registry = _registry(pack, graph_pack)
+    node_registry = EcosystemNodeRegistry(
+        registry=registry,
+        approval_manager=FakeApprovalManager({"samplepack", "graphpack"}),
+    )
+    loader = CapabilityGraphLoader(
+        registry=registry,
+        approval_manager=FakeApprovalManager({"samplepack", "graphpack"}),
+        shared_graphs_dir=tmp_path / "missing-user-graphs",
+        workspace_graphs_dir=tmp_path / "missing-workspace-graphs",
+    )
+    graph = loader.get_graph("graphpack.coding")
+    assert graph is not None
+
+    result = CapabilityGraphCompiler().compile(
+        graph,
+        profile=load_profile_document(_profile_doc()),
+        nodes=node_registry.load_all_nodes(register=False),
+    )
+
+    assert result.ok is False
+    assert result.runtime_profile is None
+    assert {item["code"] for item in result.diagnostics} >= {
+        "standards_mismatch",
+        "required_input_missing",
+    }
+
+
+def test_graph_compiler_builds_profile_runs_handlers_and_registers_runtime_profile(tmp_path) -> None:
+    pack = _pack(
+        tmp_path,
+        "samplepack",
+        {
+            "components/source/node.json": _node_doc(
+                {
+                    "node_id": "samplepack.source",
+                    "ports": [
+                        {
+                            "id": "out",
+                            "direction": "output",
+                            "standards": ["sample.standard"],
+                        }
+                    ],
+                }
+            ),
+            "components/target/node.json": _node_doc(
+                {
+                    "node_id": "samplepack.target",
+                    "ports": [
+                        {
+                            "id": "start",
+                            "direction": "input",
+                            "standards": ["rumi.flow.start"],
+                            "required": True,
+                        },
+                        {
+                            "id": "in",
+                            "direction": "input",
+                            "standards": ["sample.standard"],
+                            "required": True,
+                        },
+                    ],
+                    "bindings": {
+                        "compile": "binding:target.compile",
+                        "on_input": {"in": "binding:target.input"},
+                    },
+                }
+            ),
+        },
+    )
+    graph_pack = _pack(
+        tmp_path,
+        "graphpack",
+        {"graphs/coding.graph.yaml": _graph_doc("graphpack.coding")},
+    )
+    registry = _registry(pack, graph_pack)
+    node_registry = EcosystemNodeRegistry(
+        registry=registry,
+        approval_manager=FakeApprovalManager({"samplepack", "graphpack"}),
+    )
+    loader = CapabilityGraphLoader(
+        registry=registry,
+        approval_manager=FakeApprovalManager({"samplepack", "graphpack"}),
+        shared_graphs_dir=tmp_path / "missing-user-graphs",
+        workspace_graphs_dir=tmp_path / "missing-workspace-graphs",
+    )
+    interface_registry = InterfaceRegistry()
+    calls = []
+
+    def compile_handler(**kwargs):
+        calls.append(("compile", kwargs["instance"].id))
+        kwargs["runtime_profile"].setdefault("handler_notes", []).append("compile")
+
+    def input_handler(**kwargs):
+        calls.append(("input", kwargs["edge"].id))
+        kwargs["runtime_profile"].setdefault("handler_notes", []).append("input")
+
+    interface_registry.register("binding:target.compile", compile_handler)
+    interface_registry.register("binding:target.input", input_handler)
+    graph = loader.get_graph("graphpack.coding")
+    assert graph is not None
+
+    result = CapabilityGraphCompiler(interface_registry=interface_registry).compile(
+        graph,
+        profile=load_profile_document(
+            _profile_doc(
+                node_settings={"samplepack.target": {"setting": "value"}},
+            )
+        ),
+        nodes=node_registry.load_all_nodes(register=False),
+    )
+
+    assert result.ok is True
+    assert result.runtime_profile is not None
+    assert result.runtime_profile["version"] == "rumi.runtime_profile.v1"
+    assert result.runtime_profile["nodes"]["target"]["settings"] == {"setting": "value"}
+    assert result.runtime_profile["handler_notes"] == ["compile", "input"]
+    assert calls == [("compile", "target"), ("input", "source_to_target")]
+    assert result.runtime_profile["registry_key"] == "runtime_profile.coding.graphpack.coding"
+    assert interface_registry.get("runtime_profile.coding.graphpack.coding") is result.runtime_profile
+
+
+def test_binding_handler_resolver_rejects_import_paths() -> None:
+    resolver = BindingHandlerResolver(interface_registry=InterfaceRegistry())
+
+    result = resolver.resolve("some.module.handler")
+
+    assert result.handler is None
+    assert result.diagnostics[0]["code"] == "binding_handler_import_path_rejected"
+
+
+def test_graph_compiler_reports_missing_binding_handler(tmp_path) -> None:
+    pack = _pack(
+        tmp_path,
+        "samplepack",
+        {
+            "components/source/node.json": _node_doc(
+                {
+                    "node_id": "samplepack.source",
+                    "ports": [{"id": "out", "direction": "output", "standards": ["sample.standard"]}],
+                }
+            ),
+            "components/target/node.json": _node_doc(
+                {
+                    "node_id": "samplepack.target",
+                    "ports": [
+                        {"id": "start", "direction": "input", "standards": ["rumi.flow.start"], "required": True},
+                        {"id": "in", "direction": "input", "standards": ["sample.standard"], "required": True},
+                    ],
+                    "bindings": {"on_input": {"in": "binding:missing"}},
+                }
+            ),
+        },
+    )
+    graph_pack = _pack(
+        tmp_path,
+        "graphpack",
+        {"graphs/coding.graph.yaml": _graph_doc("graphpack.coding")},
+    )
+    registry = _registry(pack, graph_pack)
+    node_registry = EcosystemNodeRegistry(
+        registry=registry,
+        approval_manager=FakeApprovalManager({"samplepack", "graphpack"}),
+    )
+    loader = CapabilityGraphLoader(
+        registry=registry,
+        approval_manager=FakeApprovalManager({"samplepack", "graphpack"}),
+        shared_graphs_dir=tmp_path / "missing-user-graphs",
+        workspace_graphs_dir=tmp_path / "missing-workspace-graphs",
+    )
+    graph = loader.get_graph("graphpack.coding")
+    assert graph is not None
+
+    result = CapabilityGraphCompiler(interface_registry=InterfaceRegistry()).compile(
+        graph,
+        profile=load_profile_document(_profile_doc()),
+        nodes=node_registry.load_all_nodes(register=False),
+    )
+
+    assert result.ok is False
+    assert result.runtime_profile is None
+    assert result.diagnostics[-1]["code"] == "binding_handler_not_found"
+
+
+def test_graph_compiler_core_has_no_domain_specific_branches() -> None:
+    source = inspect.getsource(compiler_module)
+
+    for forbidden in ('"ai"', '"tool"', '"agent"', "== 'ai'", "== 'tool'", "== 'agent'"):
+        assert forbidden not in source
