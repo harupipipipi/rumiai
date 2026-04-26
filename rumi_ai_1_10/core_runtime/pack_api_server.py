@@ -462,8 +462,7 @@ class PackAPIHandler(
 
                 args: list[Any] = []
                 if path_params:
-                    first_param = next(iter(path_params.values()))
-                    args.append(first_param)
+                    args.extend(path_params.values())
                 if pass_body:
                     args.append(body if body is not None else {})
 

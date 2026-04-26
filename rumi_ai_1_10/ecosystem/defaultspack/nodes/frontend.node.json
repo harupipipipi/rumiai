@@ -1,0 +1,68 @@
+{
+  "version": "rumi.node.v1",
+  "nodes": [
+    {
+      "node_id": "defaultspack.frontend",
+      "component_id": "frontend",
+      "kind": "ecosystem.frontend",
+      "display_name": {
+        "ja": "フロントエンド",
+        "en": "Frontend"
+      },
+      "description": {
+        "ja": "CLI やデスクトップなどの surface に接続される defaultspack フロントエンドノード。",
+        "en": "Defaultspack frontend node connected to a CLI or desktop surface."
+      },
+      "ports": [
+        {
+          "id": "surface",
+          "direction": "input",
+          "standards": ["rumi.surface"],
+          "display_name": {"ja": "サーフェス", "en": "Surface"},
+          "multiple": true
+        }
+      ],
+      "bindings": {
+        "compile": "defaultspack:frontend.compile_node",
+        "on_input": {
+          "surface": "defaultspack:frontend.bind_surface"
+        }
+      },
+      "metadata": {
+        "pack_id": "defaultspack",
+        "component_id": "frontend",
+        "category": "runtime"
+      }
+    },
+    {
+      "node_id": "defaultspack.cli_surface",
+      "component_id": "frontend",
+      "kind": "ecosystem.surface",
+      "display_name": {
+        "ja": "CLI サーフェス",
+        "en": "CLI Surface"
+      },
+      "description": {
+        "ja": "CLI runtime の入出力 surface。",
+        "en": "Input/output surface for CLI runtime."
+      },
+      "ports": [
+        {
+          "id": "surface",
+          "direction": "output",
+          "standards": ["rumi.surface"],
+          "display_name": {"ja": "サーフェス", "en": "Surface"},
+          "multiple": true
+        }
+      ],
+      "bindings": {
+        "compile": "defaultspack:cli_surface.compile_node"
+      },
+      "metadata": {
+        "pack_id": "defaultspack",
+        "component_id": "frontend",
+        "category": "surface"
+      }
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+graph_id: defaultspack.startup
+version: rumi.graph.v1
+
+display_name:
+  ja: defaultspack 起動
+  en: defaultspack Startup
+
+description:
+  ja: Runtime Profile から defaultspack の最小起動能力を組み立てる Capability Graph。
+  en: Capability Graph that assembles defaultspack startup capabilities from a Runtime Profile.
+
+nodes:
+  - id: start
+    ref: rumi.start
+  - id: ai
+    ref: defaultspack.ai_client
+  - id: tools
+    ref: defaultspack.tool
+  - id: memory
+    ref: defaultspack.memory
+  - id: prompt
+    ref: defaultspack.prompt
+  - id: agent
+    ref: defaultspack.agent
+  - id: cli
+    ref: defaultspack.cli_surface
+  - id: frontend
+    ref: defaultspack.frontend
+
+edges:
+  - id: start_to_agent
+    from: start.out
+    to: agent.start
+    kind: binding
+  - id: ai_to_agent
+    from: ai.client
+    to: agent.ai
+    kind: binding
+  - id: tools_to_agent
+    from: tools.tools
+    to: agent.tools
+    kind: binding
+  - id: memory_to_agent
+    from: memory.memory
+    to: agent.memory
+    kind: binding
+  - id: prompt_to_agent
+    from: prompt.prompt
+    to: agent.prompt
+    kind: binding
+  - id: cli_to_frontend
+    from: cli.surface
+    to: frontend.surface
+    kind: binding
+
+metadata:
+  pack_id: defaultspack
+  category: startup
