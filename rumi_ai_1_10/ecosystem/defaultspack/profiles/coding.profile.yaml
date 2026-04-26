@@ -1,0 +1,53 @@
+profile_id: defaultspack.coding
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+
+display_name:
+  ja: コーディング
+  en: Coding
+
+description:
+  ja: defaultspack の最小 Capability Graph コーディング用プリセット。
+  en: Minimal defaultspack Capability Graph preset for coding work.
+
+default_graph: defaultspack.coding_workspace
+default_flow: agent_chat
+
+surfaces:
+  preferred: desktop
+  enabled:
+    - desktop
+    - cli
+
+permissions:
+  can_create_profile: true
+  can_update_profile: true
+  can_delete_profile: false
+  can_enable_node: true
+  can_disable_node: true
+  can_enable_unapproved_nodes: false
+  can_install_packs: false
+  can_edit_bindings: false
+  require_audit: false
+
+enabled_nodes:
+  - rumi.start
+  - defaultspack.agent
+  - defaultspack.ai_client
+  - defaultspack.tool
+  - defaultspack.frontend
+
+disabled_nodes: []
+
+node_settings:
+  defaultspack.ai_client:
+    default_model: openrouter/auto
+
+policy:
+  write_actions_require_approval: true
+  audit_level: normal
+
+metadata:
+  pack_id: defaultspack
+  category: workspace

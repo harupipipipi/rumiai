@@ -100,6 +100,10 @@ class KernelSystemHandlersMixin:
             "kernel:node.load_all": self._h_node_load_all,
             "kernel:node.list": self._h_node_list,
             "kernel:node.get": self._h_node_get,
+            "kernel:profile.load_all": self._h_profile_load_all,
+            "kernel:profile.list": self._h_profile_list,
+            "kernel:profile.get": self._h_profile_get,
+            "kernel:profile.node_state": self._h_profile_node_state,
             "kernel:exec_python": self._h_exec_python,
             "kernel:ctx.set": self._h_ctx_set,
             "kernel:ctx.get": self._h_ctx_get,
@@ -298,6 +302,100 @@ class KernelSystemHandlersMixin:
             }
         except Exception as e:
             return _failed_step_result("kernel:node.get", e, node_id=node_id)
+
+    # ------------------------------------------------------------------
+    # Capability Graph profile handlers
+    # ------------------------------------------------------------------
+
+    def _get_profile_loader(self: Any, args: Dict[str, Any], ctx: Dict[str, Any]):
+        from .profile_loader import CapabilityProfileLoader
+
+        existing = ctx.get("profile_loader")
+        if existing is not None:
+            return existing
+        loader = CapabilityProfileLoader(
+            registry=ctx.get("registry") or getattr(self.lifecycle, "registry", None),
+            interface_registry=self.interface_registry,
+            approval_manager=ctx.get("approval_manager"),
+            ecosystem_dir=args.get("ecosystem_dir"),
+            shared_profiles_dir=args.get("shared_profiles_dir"),
+        )
+        ctx["profile_loader"] = loader
+        self.interface_registry.register(
+            "profile.loader",
+            loader,
+            meta={"source": "kernel", "_system": True},
+        )
+        return loader
+
+    def _h_profile_load_all(self: Any, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        try:
+            loader = self._get_profile_loader(args, ctx)
+            profiles = loader.load_all_profiles(register=True)
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_step_meta": {"count": len(profiles)},
+                "profiles": [profile.to_dict() for profile in profiles.values()],
+                "diagnostics": list(loader.diagnostics),
+            }
+        except Exception as e:
+            return _failed_step_result("kernel:profile.load_all", e)
+
+    def _h_profile_list(self: Any, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        try:
+            loader = self._get_profile_loader(args, ctx)
+            profiles = loader.list_profiles()
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_step_meta": {"count": len(profiles)},
+                "profiles": [profile.to_dict() for profile in profiles],
+            }
+        except Exception as e:
+            return _failed_step_result("kernel:profile.list", e)
+
+    def _h_profile_get(self: Any, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        profile_id = args.get("profile_id")
+        if not profile_id:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "missing 'profile_id' argument"}}
+        try:
+            loader = self._get_profile_loader(args, ctx)
+            profile = loader.get_profile(str(profile_id))
+            return {
+                "_kernel_step_status": "success" if profile else "failed",
+                "_kernel_step_meta": {"profile_id": profile_id, "found": profile is not None},
+                "profile": profile.to_dict() if profile else None,
+            }
+        except Exception as e:
+            return _failed_step_result("kernel:profile.get", e, profile_id=profile_id)
+
+    def _h_profile_node_state(self: Any, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
+        profile_id = args.get("profile_id")
+        if not profile_id:
+            return {"_kernel_step_status": "failed", "_kernel_step_meta": {"error": "missing 'profile_id' argument"}}
+        try:
+            from .profile_node_registry import ProfileNodeRegistry
+
+            loader = self._get_profile_loader(args, ctx)
+            profile = loader.get_profile(str(profile_id))
+            if profile is None:
+                return {
+                    "_kernel_step_status": "failed",
+                    "_kernel_step_meta": {"profile_id": profile_id, "found": False},
+                    "node_state": None,
+                }
+            profile_nodes = ProfileNodeRegistry(
+                node_registry=self._get_node_registry(args, ctx),
+                profile=profile,
+            )
+            node_id = args.get("node_id")
+            state = profile_nodes.node_state(str(node_id)) if node_id else profile_nodes.node_state()
+            return {
+                "_kernel_step_status": "success",
+                "_kernel_step_meta": {"profile_id": profile_id, "node_id": node_id},
+                "node_state": state,
+            }
+        except Exception as e:
+            return _failed_step_result("kernel:profile.node_state", e, profile_id=profile_id)
 
     # ------------------------------------------------------------------
     # ctx ハンドラ

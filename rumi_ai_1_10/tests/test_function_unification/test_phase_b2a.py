@@ -45,6 +45,10 @@ _SYSTEM_HANDLER_KEYS: Set[str] = {
     "kernel:ctx.set",
     "kernel:ctx.get",
     "kernel:ctx.copy",
+    "kernel:profile.load_all",
+    "kernel:profile.list",
+    "kernel:profile.get",
+    "kernel:profile.node_state",
     "kernel:execute_flow",
     "kernel:save_flow",
     "kernel:load_flows",
@@ -190,10 +194,10 @@ class TestKernelHandlerManifests:
             )
 
     def test_kernel_handler_manifests_count(self) -> None:
-        """エントリ数が 74 であること (system 29 + runtime 45)"""
+        """エントリ数が 81 であること"""
         manifests = _get_kernel_handler_manifests()
-        assert len(manifests) == 77, (
-            f"Expected 77 manifests, got {len(manifests)}"
+        assert len(manifests) == 81, (
+            f"Expected 81 manifests, got {len(manifests)}"
         )
 
     def test_kernel_handler_manifests_system_tags(self) -> None:
