@@ -8,6 +8,7 @@ if str(DEFAULTSPACK_ROOT) not in sys.path:
     sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from domain.agent.engine import AgentEngine
+from domain.tool.schema_adapter import adapt_tool_definition
 
 
 def _tool(name: str) -> dict:
@@ -17,6 +18,56 @@ def _tool(name: str) -> dict:
             "name": name,
             "description": "test tool",
             "parameters": {"type": "object", "properties": {}},
+        },
+    }
+
+
+def _registry_tool(name: str) -> dict:
+    return {
+        "tool_id": name,
+        "name": name,
+        "summary": "registry tool",
+        "schema": {
+            "parameters": {
+                "type": "object",
+                "properties": {"q": {"type": "string"}},
+                "required": ["q"],
+            }
+        },
+    }
+
+
+def _runtime_profile(*, connected_tools: list[str]) -> dict:
+    return {
+        "version": "rumi.runtime_profile.v1",
+        "defaultspack": {
+            "agents": {
+                "agent": {
+                    "tools": connected_tools,
+                }
+            }
+        },
+    }
+
+
+def _compiled_bundle_runtime_profile(*, bundle_tools: list[str] | None = None) -> dict:
+    tool_record = {
+        "node_instance_id": "tools",
+        "node_id": "defaultspack.tool",
+    }
+    if bundle_tools is not None:
+        tool_record["tools"] = bundle_tools
+    return {
+        "version": "rumi.runtime_profile.v1",
+        "defaultspack": {
+            "agents": {
+                "agent": {
+                    "tools": ["tools"],
+                }
+            },
+            "tools": {
+                "tools": tool_record,
+            },
         },
     }
 
@@ -56,6 +107,23 @@ def test_agent_execute_passes_tools_to_ai_completion() -> None:
     assert seen["tools"] == tools
 
 
+def test_defaultspack_tool_schema_adapter_normalizes_registry_tool() -> None:
+    adapted = adapt_tool_definition(_registry_tool("search"))
+
+    assert adapted == {
+        "type": "function",
+        "function": {
+            "name": "search",
+            "description": "registry tool",
+            "parameters": {
+                "type": "object",
+                "properties": {"q": {"type": "string"}},
+                "required": ["q"],
+            },
+        },
+    }
+
+
 def test_agent_rejects_unconnected_tool_call() -> None:
     engine = AgentEngine()
 
@@ -69,6 +137,82 @@ def test_agent_rejects_unconnected_tool_call() -> None:
     assert result["status"] == "error"
     assert "not connected" in result["result"]["error"]
     assert result["result"]["pending_tool_call"] is None
+
+
+def test_runtime_profile_connected_tools_override_supplied_tool_list() -> None:
+    engine = AgentEngine()
+
+    def fake_ai(messages, model, context, tools=None):
+        return _tool_call_response("loose_tool")
+
+    engine._ai_complete = fake_ai
+
+    result = engine.execute(
+        "find docs",
+        [_tool("loose_tool")],
+        "stub/model",
+        None,
+        {
+            "runtime_profile": _runtime_profile(connected_tools=["search"]),
+            "agent_id": "agent",
+        },
+    )
+
+    assert result["status"] == "error"
+    assert result["result"]["steps"][-1]["content"]["enforced_tools"] == ["search"]
+
+
+def test_compiled_defaultspack_runtime_profile_allows_actual_tool_names() -> None:
+    engine = AgentEngine()
+
+    def fake_ai(messages, model, context, tools=None):
+        return _tool_call_response("web_search")
+
+    engine._ai_complete = fake_ai
+
+    result = engine.execute(
+        "find docs",
+        [_tool("web_search"), _tool("calculator")],
+        "stub/model",
+        None,
+        {
+            "runtime_profile": _compiled_bundle_runtime_profile(),
+            "agent_id": "agent",
+        },
+    )
+
+    assert result["status"] == "waiting_approval"
+    assert result["result"]["pending_tool_call"]["tool_name"] == "web_search"
+
+
+def test_runtime_profile_tool_bundle_filters_provider_tools_to_bundle_names() -> None:
+    engine = AgentEngine()
+    seen = {}
+
+    def fake_ai(messages, model, context, tools=None):
+        seen["tools"] = tools
+        return _text_response()
+
+    engine._ai_complete = fake_ai
+
+    result = engine.execute(
+        "find docs",
+        [_tool("web_search"), _tool("calculator"), _tool("file_reader")],
+        "stub/model",
+        None,
+        {
+            "runtime_profile": _compiled_bundle_runtime_profile(
+                bundle_tools=["web_search", "calculator"],
+            ),
+            "agent_id": "agent",
+        },
+    )
+
+    assert result["status"] == "completed"
+    assert [tool["function"]["name"] for tool in seen["tools"]] == [
+        "web_search",
+        "calculator",
+    ]
 
 
 def test_agent_approve_preserves_tools_for_followup_completion() -> None:
@@ -99,6 +243,74 @@ def test_agent_approve_preserves_tools_for_followup_completion() -> None:
     assert approved["status"] == "completed"
     assert seen_followup_tools == [tools, tools]
     assert executed == {"tool_name": "search", "tool_args": {"q": "rumi"}}
+
+
+def test_agent_approve_passes_graph_profile_principal_context_to_tool() -> None:
+    engine = AgentEngine()
+    seen_context = {}
+
+    def fake_ai(messages, model, context, tools=None):
+        if seen_context:
+            return _text_response("used tool")
+        return _tool_call_response("search")
+
+    def fake_execute_tool(tool_name, tool_args, context):
+        seen_context.update(context)
+        return {"status": "ok", "data": {"result": "found"}}
+
+    engine._ai_complete = fake_ai
+    engine._execute_tool = fake_execute_tool
+
+    started = engine.execute(
+        "find docs",
+        [_tool("search")],
+        "stub/model",
+        None,
+        {
+            "runtime_profile": _runtime_profile(connected_tools=["search"]),
+            "agent_id": "agent",
+            "graph_id": "defaultspack.coding_workspace",
+            "profile_id": "defaultspack.coding",
+            "principal_id": "defaultspack",
+        },
+    )
+    approved = engine.approve(started["execution_id"])
+
+    assert approved["status"] == "completed"
+    assert seen_context["capability_graph"] == {
+        "graph_id": "defaultspack.coding_workspace",
+        "profile_id": "defaultspack.coding",
+        "principal_id": "defaultspack",
+        "tool_name": "search",
+        "connected_tools": ["search"],
+    }
+
+
+def test_agent_rejects_tool_call_after_profile_policy_limit() -> None:
+    engine = AgentEngine()
+    ai_calls = []
+
+    def fake_ai(messages, model, context, tools=None):
+        ai_calls.append(True)
+        return _tool_call_response("search")
+
+    def fake_execute_tool(tool_name, tool_args, context):
+        return {"status": "ok", "data": {"result": "found"}}
+
+    engine._ai_complete = fake_ai
+    engine._execute_tool = fake_execute_tool
+
+    started = engine.execute(
+        "find docs",
+        [_tool("search")],
+        "stub/model",
+        None,
+        {"profile_policy": {"max_tool_calls": 1}},
+    )
+    approved = engine.approve(started["execution_id"])
+
+    assert approved["status"] == "error"
+    assert approved["result"]["error"] == "max tool calls exceeded"
 
 
 def test_agent_reject_preserves_tools_for_followup_completion() -> None:
