@@ -63,10 +63,10 @@
         }
       ],
       "bindings": {
-        "compile": "defaultspack.agent.compile_node",
+        "compile": "defaultspack:agent.compile_node",
         "on_input": {
-          "ai": "defaultspack.agent.bind_ai",
-          "tools": "defaultspack.agent.bind_tools"
+          "ai": "defaultspack:agent.bind_ai",
+          "tools": "defaultspack:agent.bind_tools"
         }
       },
       "metadata": {

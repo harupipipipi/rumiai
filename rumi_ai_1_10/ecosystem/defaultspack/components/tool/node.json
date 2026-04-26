@@ -27,7 +27,7 @@
         }
       ],
       "bindings": {
-        "compile": "defaultspack.tool.compile_node"
+        "compile": "defaultspack:tool.compile_node"
       },
       "metadata": {
         "pack_id": "defaultspack",

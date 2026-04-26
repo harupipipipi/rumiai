@@ -17,6 +17,15 @@ def run(context):
 
     interface_registry = context["interface_registry"]
     source_component = context.get("_source_component", "defaultspack:tool:tool")
+    try:
+        from capability_bindings import register_defaultspack_binding_handlers
+        register_defaultspack_binding_handlers(interface_registry)
+    except Exception as exc:
+        print(
+            "[defaultspack.tool] setup: failed to register capability bindings - "
+            + str(exc),
+            file=sys.stderr,
+        )
 
     def _lazy(module_path, func_name="run"):
         """Return a lazy handler that imports the module on first call."""

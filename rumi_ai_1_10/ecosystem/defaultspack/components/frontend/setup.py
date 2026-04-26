@@ -38,6 +38,9 @@ def run(context: dict | None = None) -> dict:
     if pack_root_str not in sys.path:
         sys.path.insert(0, pack_root_str)
 
+    from capability_bindings import register_defaultspack_binding_handlers
+    register_defaultspack_binding_handlers(interface_registry)
+
     start_http_server = _load_start_http_server(pack_root, pack_id)
 
     interface_registry.register(

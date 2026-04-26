@@ -27,7 +27,7 @@
         }
       ],
       "bindings": {
-        "compile": "defaultspack.ai_client.compile_node"
+        "compile": "defaultspack:ai_client.compile_node"
       },
       "metadata": {
         "pack_id": "defaultspack",
