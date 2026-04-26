@@ -13,6 +13,9 @@ from core_runtime.binding_handlers import BindingHandlerResolver
 from core_runtime.capability_graph_compiler import CapabilityGraphCompiler
 from core_runtime.capability_graph_loader import CapabilityGraphLoader, GraphDiscoveryError
 from core_runtime.ecosystem_nodes import EcosystemNodeRegistry
+from core_runtime.flow_loader import FlowLoader
+from core_runtime.kernel import Kernel
+from core_runtime.kernel_flow_converter import FlowConverter
 from core_runtime.graph_models import GraphValidationError, load_graph_document
 from core_runtime.interface_registry import InterfaceRegistry
 from core_runtime.profile_loader import CapabilityProfileLoader
@@ -663,3 +666,55 @@ def test_defaultspack_minimal_bindings_compile_sample_graph() -> None:
     assert set(defaultspack["ai_clients"]) == {"ai"}
     assert set(defaultspack["tools"]) == {"tools"}
     assert set(defaultspack["cli_surfaces"]) == {"cli"}
+
+
+def test_flow_step_can_explicitly_compile_defaultspack_graph() -> None:
+    from ecosystem.defaultspack.capability_bindings import (
+        register_defaultspack_binding_handlers,
+    )
+
+    repo_root = Path(__file__).resolve().parents[1]
+    defaultspack_root = repo_root / "ecosystem" / "defaultspack"
+    flow_path = defaultspack_root / "flows" / "coding_workspace_compile.flow.yaml"
+    pack = SimpleNamespace(
+        pack_id="defaultspack",
+        subdir=defaultspack_root,
+        path=defaultspack_root,
+    )
+    registry = _registry(pack)
+    approval_manager = FakeApprovalManager({"defaultspack"})
+    interface_registry = InterfaceRegistry()
+    register_defaultspack_binding_handlers(interface_registry)
+
+    loaded = FlowLoader().load_flow_file(
+        flow_path,
+        source_type="pack",
+        pack_id="defaultspack",
+    )
+    assert loaded.success is True
+    assert loaded.flow_def is not None
+    flow_def = FlowConverter().convert_flow_def_to_legacy(loaded.flow_def)
+
+    kernel = Kernel(interface_registry=interface_registry)
+    kernel.interface_registry.register(f"flow.{loaded.flow_id}", flow_def)
+    try:
+        result = kernel.execute_flow_sync(
+            str(loaded.flow_id),
+            {
+                "registry": registry,
+                "approval_manager": approval_manager,
+            },
+        )
+    finally:
+        kernel._executor.shutdown(wait=True)
+
+    compiled = result["compiled_runtime_profile"]
+    assert compiled["_kernel_step_status"] == "success"
+    assert compiled["ok"] is True
+    runtime_profile = compiled["runtime_profile"]
+    assert runtime_profile["registry_key"] == (
+        "runtime_profile.defaultspack.coding.defaultspack.coding_workspace"
+    )
+    assert runtime_profile["defaultspack"]["agents"]["agent"]["ai"] == "ai"
+    assert runtime_profile["defaultspack"]["agents"]["agent"]["tools"] == ["tools"]
+    assert kernel.interface_registry.get(runtime_profile["registry_key"]) == runtime_profile

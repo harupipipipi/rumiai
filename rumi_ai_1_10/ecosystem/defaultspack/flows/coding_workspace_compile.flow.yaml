@@ -1,0 +1,24 @@
+flow_id: defaultspack.compile_coding_workspace
+inputs: {}
+outputs:
+  compiled_runtime_profile: object
+
+phases:
+  - compile
+
+defaults:
+  fail_soft: false
+  on_missing_step: skip
+
+steps:
+  - id: compile_capability_graph
+    phase: compile
+    priority: 10
+    type: handler
+    input:
+      handler: "kernel:graph.compile"
+      args:
+        graph_id: "defaultspack.coding_workspace"
+        profile_id: "defaultspack.coding"
+        register: true
+    output: compiled_runtime_profile
