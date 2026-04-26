@@ -17,6 +17,12 @@ import type {
   OAuthStartResponseData,
   SetupStatusResponseData,
   HealthResponseData,
+  CapabilityGraphsResponseData,
+  CapabilityGraphCompileResponseData,
+  CapabilityNodesResponseData,
+  CapabilityProfileCloneResponseData,
+  CapabilityProfileNodesResponseData,
+  CapabilityProfilesResponseData,
 } from './apiTypes';
 
 // Base URL: empty string means relative path (works with Vite proxy)
@@ -468,4 +474,67 @@ export function startOAuth(): Promise<OAuthStartResponseData> {
 
 export function checkHealth(): Promise<HealthResponseData> {
   return apiFetch<HealthResponseData>('/health');
+}
+
+// ============================================================
+// Capability Graph
+// ============================================================
+
+export function fetchCapabilityNodes(): Promise<CapabilityNodesResponseData> {
+  return apiFetch<CapabilityNodesResponseData>('/api/panel/nodes');
+}
+
+export function fetchCapabilityProfiles(): Promise<CapabilityProfilesResponseData> {
+  return apiFetch<CapabilityProfilesResponseData>('/api/panel/profiles');
+}
+
+export function fetchCapabilityProfileNodes(
+  profileId: string,
+): Promise<CapabilityProfileNodesResponseData> {
+  return apiFetch<CapabilityProfileNodesResponseData>(
+    `/api/panel/profiles/${encodeURIComponent(profileId)}/nodes`,
+  );
+}
+
+export function fetchCapabilityGraphs(): Promise<CapabilityGraphsResponseData> {
+  return apiFetch<CapabilityGraphsResponseData>('/api/panel/graphs');
+}
+
+export function validateCapabilityGraph(
+  graphId: string,
+  profileId: string,
+): Promise<CapabilityGraphCompileResponseData> {
+  return apiFetch<CapabilityGraphCompileResponseData>(
+    `/api/panel/graphs/${encodeURIComponent(graphId)}/validate`,
+    {
+      method: 'POST',
+      body: JSON.stringify({profile_id: profileId}),
+    },
+  );
+}
+
+export function compileCapabilityGraph(
+  graphId: string,
+  profileId: string,
+): Promise<CapabilityGraphCompileResponseData> {
+  return apiFetch<CapabilityGraphCompileResponseData>(
+    `/api/panel/graphs/${encodeURIComponent(graphId)}/compile`,
+    {
+      method: 'POST',
+      body: JSON.stringify({profile_id: profileId, register: false}),
+    },
+  );
+}
+
+export function cloneCapabilityProfile(
+  profileId: string,
+  data: {profile_id: string; display_name?: string},
+): Promise<CapabilityProfileCloneResponseData> {
+  return apiFetch<CapabilityProfileCloneResponseData>(
+    `/api/panel/profiles/${encodeURIComponent(profileId)}/clone`,
+    {
+      method: 'POST',
+      body: JSON.stringify(data),
+    },
+  );
 }

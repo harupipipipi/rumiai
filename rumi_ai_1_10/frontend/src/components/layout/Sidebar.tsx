@@ -3,7 +3,7 @@ import { useAppStore } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
 import { cn } from '@/src/lib/utils';
 import { panelRoutes } from '@/src/lib/routes';
-import { Folder, LayoutGrid, Settings, PanelLeft, Home } from 'lucide-react';
+import { Folder, LayoutGrid, Network, Settings, PanelLeft, Home } from 'lucide-react';
 
 export function Sidebar() {
   const t = useT();
@@ -16,6 +16,7 @@ export function Sidebar() {
   const links = [
     { to: panelRoutes.home, icon: Home, label: t('nav.home') },
     { to: panelRoutes.packs, icon: Folder, label: t('nav.packs') },
+    { to: panelRoutes.nodes, icon: Network, label: t('nav.nodes') },
     { to: panelRoutes.flows, icon: LayoutGrid, label: t('nav.flows') },
     { to: panelRoutes.settings, icon: Settings, label: t('nav.settings') },
   ];

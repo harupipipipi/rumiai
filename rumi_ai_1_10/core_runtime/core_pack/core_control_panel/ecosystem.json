@@ -67,6 +67,76 @@
       "handler": "_panel_get_version"
     },
     {
+      "method": "GET",
+      "path": "/api/nodes",
+      "handler": "_capability_get_nodes"
+    },
+    {
+      "method": "GET",
+      "path": "/api/panel/nodes",
+      "handler": "_capability_get_nodes"
+    },
+    {
+      "method": "GET",
+      "path_pattern": "/api/nodes/{id}",
+      "handler": "_capability_get_node"
+    },
+    {
+      "method": "GET",
+      "path_pattern": "/api/panel/nodes/{id}",
+      "handler": "_capability_get_node"
+    },
+    {
+      "method": "GET",
+      "path": "/api/profiles",
+      "handler": "_capability_get_profiles"
+    },
+    {
+      "method": "GET",
+      "path": "/api/panel/profiles",
+      "handler": "_capability_get_profiles"
+    },
+    {
+      "method": "GET",
+      "path_pattern": "/api/profiles/{id}",
+      "handler": "_capability_get_profile"
+    },
+    {
+      "method": "GET",
+      "path_pattern": "/api/panel/profiles/{id}",
+      "handler": "_capability_get_profile"
+    },
+    {
+      "method": "GET",
+      "path_pattern": "/api/profiles/{id}/nodes",
+      "handler": "_capability_get_profile_nodes"
+    },
+    {
+      "method": "GET",
+      "path_pattern": "/api/panel/profiles/{id}/nodes",
+      "handler": "_capability_get_profile_nodes"
+    },
+    {
+      "method": "GET",
+      "path": "/api/graphs",
+      "handler": "_capability_get_graphs"
+    },
+    {
+      "method": "GET",
+      "path": "/api/panel/graphs",
+      "handler": "_capability_get_graphs"
+    },
+    {
+      "method": "GET",
+      "path_pattern": "/api/graphs/{id}",
+      "handler": "_capability_get_graph"
+    },
+    {
+      "method": "GET",
+      "path_pattern": "/api/panel/graphs/{id}",
+      "handler": "_capability_get_graph"
+    },
+    {
       "method": "POST",
       "path_pattern": "/api/panel/packs/{id}/enable",
       "handler": "_panel_enable_pack"
@@ -108,6 +178,36 @@
       "path": "/api/panel/kernel/restart",
       "handler": "_panel_restart_kernel",
       "response_mode": "raw"
+    },
+    {
+      "method": "POST",
+      "path_pattern": "/api/graphs/{id}/validate",
+      "handler": "_capability_validate_graph",
+      "pass_body": true
+    },
+    {
+      "method": "POST",
+      "path_pattern": "/api/panel/graphs/{id}/validate",
+      "handler": "_capability_validate_graph",
+      "pass_body": true
+    },
+    {
+      "method": "POST",
+      "path_pattern": "/api/graphs/{id}/compile",
+      "handler": "_capability_compile_graph",
+      "pass_body": true
+    },
+    {
+      "method": "POST",
+      "path_pattern": "/api/panel/graphs/{id}/compile",
+      "handler": "_capability_compile_graph",
+      "pass_body": true
+    },
+    {
+      "method": "POST",
+      "path_pattern": "/api/panel/profiles/{id}/clone",
+      "handler": "_capability_clone_profile",
+      "pass_body": true
     },
     {
       "method": "PUT",

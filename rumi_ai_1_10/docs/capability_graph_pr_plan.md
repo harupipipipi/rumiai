@@ -208,6 +208,18 @@ Required behavior:
 - do not silently supersede the existing startup profile model
 - tests
 
+Implemented API surface:
+
+- `GET /api/nodes` and `GET /api/nodes/{node_id}`
+- `GET /api/profiles` and `GET /api/profiles/{profile_id}`
+- `GET /api/profiles/{profile_id}/nodes`
+- `GET /api/graphs` and `GET /api/graphs/{graph_id}`
+- `POST /api/graphs/{graph_id}/validate`
+- `POST /api/graphs/{graph_id}/compile`
+- `/api/panel/*` aliases for the control panel viewer session
+
+The profile API returns a startup-profile relationship object that states `StartupProfileManager` remains the launch-time source of truth. Capability Graph profiles are exposed as graph/runtime presets and palette filters, not as a silent replacement for startup profiles.
+
 ## PR 10: Viewer Node Manager
 
 Scope:
@@ -216,6 +228,16 @@ Scope:
 - profile-scoped node palette
 - enabled/disabled display
 - profile create/clone UI only where permissions allow
+
+Implemented viewer surface:
+
+- `/panel/nodes` Node Manager route
+- profile switcher
+- profile-scoped node catalog and palette counts
+- enabled, disabled, ready, missing-config, missing-node, and unapproved state display
+- node port, standards, binding, and metadata detail
+- graph validate and compile preview controls
+- profile clone action shown only when `permissions.can_create_profile` is true
 
 ## Guardrails For Every PR
 
