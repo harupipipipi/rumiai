@@ -74,11 +74,13 @@ def clear_kernel_restart_request() -> None:
 class ControlPanelHandlersMixin:
     """Control Panel API のハンドラ"""
 
-    @staticmethod
-    def _panel_startup_profile_manager():
+    def _panel_startup_profile_manager(self):
         from ..startup_profiles import StartupProfileManager
 
-        return StartupProfileManager()
+        return StartupProfileManager(
+            interface_registry=getattr(self, "interface_registry", None),
+            approval_manager=getattr(self, "approval_manager", None),
+        )
 
     # ------------------------------------------------------------------
     # Dashboard
