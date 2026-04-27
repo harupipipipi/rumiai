@@ -239,8 +239,8 @@ class EcosystemNodeRegistry:
 
 
 def _is_nodes_components_duplicate(existing: NodeDefinition, candidate: NodeDefinition) -> bool:
-    existing_path = str(existing.metadata.get("source_path") or "")
-    candidate_path = str(candidate.metadata.get("source_path") or "")
+    existing_path = str(existing.metadata.get("source_path") or "").replace("\\", "/")
+    candidate_path = str(candidate.metadata.get("source_path") or "").replace("\\", "/")
     return (
         "/nodes/" in existing_path
         and "/components/" in candidate_path

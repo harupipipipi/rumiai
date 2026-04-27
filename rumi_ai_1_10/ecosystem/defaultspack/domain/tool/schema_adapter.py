@@ -234,11 +234,15 @@ def _runtime_profile_tool_names(
             bundle_names = _tool_names_from_bundle_record(bundle_record)
             if bundle_names:
                 names.update(bundle_names)
-            else:
+            elif not _bundle_record_has_concrete_tool_list(bundle_record):
                 names.update(supplied_names)
             continue
         names.add(ref)
     return names
+
+
+def _bundle_record_has_concrete_tool_list(record: Dict[str, Any]) -> bool:
+    return any(isinstance(record.get(key), list) for key in ("tools", "tool_ids", "tool_names", "definitions"))
 
 
 def _runtime_profile_tool_refs(

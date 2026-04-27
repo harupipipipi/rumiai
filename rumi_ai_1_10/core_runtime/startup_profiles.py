@@ -237,19 +237,15 @@ class StartupProfileManager:
         error = self._validate_profile(profile, catalog)
         if error:
             return {"error": error, "status_code": 400}
-        state["active_profile_id"] = profile_id
-        state["last_launched_profile_id"] = profile_id
-        self._save_state(state)
-        self._apply_profile_to_active_ecosystem(profile, catalog, launched=True)
         capability_graph = self._compile_launch_capability_graph(profile)
-        policy = profile.get("policy") if isinstance(profile.get("policy"), dict) else {}
+        raw_policy = profile.get("policy")
+        policy = raw_policy if isinstance(raw_policy, dict) else {}
         if policy.get("require_capability_graph_compile") is True and not capability_graph.get("ok"):
-            self._record_capability_graph_result(capability_graph)
             return {
                 "error": "Capability graph compile failed for strict startup profile",
                 "status_code": 400,
                 "profile": profile,
-                "active_profile_id": profile_id,
+                "active_profile_id": state.get("active_profile_id"),
                 "launched": False,
                 "capability_graph": capability_graph,
             }
@@ -258,7 +254,10 @@ class StartupProfileManager:
             index = self._find_profile_index(state["profiles"], profile_id)
             if index is not None:
                 state["profiles"][index] = profile
-                self._save_state(state)
+        state["active_profile_id"] = profile_id
+        state["last_launched_profile_id"] = profile_id
+        self._save_state(state)
+        self._apply_profile_to_active_ecosystem(profile, catalog, launched=True)
         self._record_capability_graph_result(capability_graph)
         handoff = self._request_launch_handoff(profile)
         if not handoff.get("restart_requested"):

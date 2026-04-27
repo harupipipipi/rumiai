@@ -41,6 +41,34 @@ class CapabilityGraphHandlersMixin:
                 pass
         return ctx
 
+    def _capability_registry_context(self) -> Dict[str, Any]:
+        kernel = self._capability_kernel()
+        ctx = self._capability_ctx(kernel)
+        lifecycle = getattr(kernel, "lifecycle", None)
+        return {
+            "interface_registry": ctx.get("interface_registry") or getattr(kernel, "interface_registry", None),
+            "approval_manager": (
+                ctx.get("approval_manager")
+                or getattr(self, "approval_manager", None)
+                or getattr(kernel, "approval_manager", None)
+            ),
+            "registry": ctx.get("registry") or getattr(lifecycle, "registry", None),
+            "ecosystem_dir": ctx.get("ecosystem_dir") or getattr(kernel, "ecosystem_dir", None),
+        }
+
+    def _capability_invalid_graph_response(self, exc: Exception) -> Dict[str, Any]:
+        return {
+            "ok": False,
+            "status_code": 400,
+            "diagnostics": [
+                {
+                    "level": "error",
+                    "code": "invalid_graph",
+                    "message": str(exc),
+                }
+            ],
+        }
+
     def _call_kernel_handler(self, handler_id: str, args: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         kernel = self._capability_kernel()
         if kernel is None:
@@ -422,10 +450,13 @@ class CapabilityGraphHandlersMixin:
 
     def _capability_validate_draft_graph(self, graph_data: Dict[str, Any], profile_id: Optional[str]) -> Dict[str, Any]:
         from ..ecosystem_nodes import EcosystemNodeRegistry
-        from ..graph_models import load_graph_document
+        from ..graph_models import GraphValidationError, load_graph_document
         from ..port_standards import validate_graph_ports
 
-        graph = load_graph_document(graph_data, source_type="draft")
+        try:
+            graph = load_graph_document(graph_data, source_type="draft")
+        except GraphValidationError as exc:
+            return self._capability_invalid_graph_response(exc)
         profile = None
         if profile_id:
             profile_result = self._call_kernel_handler("kernel:profile.get", {"profile_id": profile_id})
@@ -435,11 +466,12 @@ class CapabilityGraphHandlersMixin:
                     from ..profile_models import load_profile_document
 
                     profile = load_profile_document(profile_dict)
+        services = self._capability_registry_context()
         node_registry = EcosystemNodeRegistry(
-            interface_registry=(
-                self._capability_ctx(self._capability_kernel()).get("interface_registry")
-                or getattr(self._capability_kernel(), "interface_registry", None)
-            ),
+            registry=services["registry"],
+            interface_registry=services["interface_registry"],
+            approval_manager=services["approval_manager"],
+            ecosystem_dir=services["ecosystem_dir"],
         )
         nodes = node_registry.load_all_nodes(register=True)
         result = validate_graph_ports(graph, nodes=nodes, profile=profile)
@@ -450,9 +482,10 @@ class CapabilityGraphHandlersMixin:
         }
 
     def _capability_compile_draft_graph(self, graph_data: Dict[str, Any], profile_id: str, *, register: bool) -> Dict[str, Any]:
+        from ..capability_binding_registration import register_pack_binding_handlers
         from ..capability_graph_compiler import CapabilityGraphCompiler
         from ..ecosystem_nodes import EcosystemNodeRegistry
-        from ..graph_models import load_graph_document
+        from ..graph_models import GraphValidationError, load_graph_document
         from ..profile_models import load_profile_document
 
         profile_result = self._call_kernel_handler("kernel:profile.get", {"profile_id": profile_id})
@@ -460,12 +493,27 @@ class CapabilityGraphHandlersMixin:
             return {"ok": False, "profile_id": profile_id, "runtime_profile": None, "diagnostics": [
                 {"level": "error", "code": "profile_not_found", "message": f"Profile '{profile_id}' was not found"}
             ]}
-        graph = load_graph_document(graph_data, source_type="draft")
+        try:
+            graph = load_graph_document(graph_data, source_type="draft")
+        except GraphValidationError as exc:
+            response = self._capability_invalid_graph_response(exc)
+            response.update({"profile_id": profile_id, "runtime_profile": None})
+            return response
         profile = load_profile_document(profile_result["profile"])
-        ctx = self._capability_ctx(self._capability_kernel())
-        kernel = self._capability_kernel()
-        interface_registry = ctx.get("interface_registry") or getattr(kernel, "interface_registry", None)
-        node_registry = EcosystemNodeRegistry(interface_registry=interface_registry)
+        services = self._capability_registry_context()
+        interface_registry = services["interface_registry"]
+        registration = register_pack_binding_handlers(
+            interface_registry=interface_registry,
+            approval_manager=services["approval_manager"],
+            ecosystem_dir=services["ecosystem_dir"],
+            registry=services["registry"],
+        )
+        node_registry = EcosystemNodeRegistry(
+            registry=services["registry"],
+            interface_registry=interface_registry,
+            approval_manager=services["approval_manager"],
+            ecosystem_dir=services["ecosystem_dir"],
+        )
         nodes = node_registry.load_all_nodes(register=True)
         result = CapabilityGraphCompiler(interface_registry=interface_registry).compile(
             graph,
@@ -477,17 +525,20 @@ class CapabilityGraphHandlersMixin:
             "ok": result.ok,
             "profile_id": profile_id,
             "runtime_profile": result.runtime_profile,
-            "diagnostics": list(node_registry.diagnostics) + list(result.diagnostics),
+            "diagnostics": list(registration.diagnostics) + list(node_registry.diagnostics) + list(result.diagnostics),
         }
 
     def _capability_save_graph(self, graph_data: Any, *, create: bool) -> Dict[str, Any]:
         try:
             import yaml  # type: ignore[import-untyped]
-            from ..graph_models import load_graph_document
+            from ..graph_models import GraphValidationError, load_graph_document
 
             if not isinstance(graph_data, dict):
                 return {"error": "graph object is required", "status_code": 400}
-            graph = load_graph_document(graph_data, source_type="user")
+            try:
+                graph = load_graph_document(graph_data, source_type="user")
+            except GraphValidationError as exc:
+                return self._capability_invalid_graph_response(exc)
             user_graph_dir = (
                 Path(__file__).resolve().parent.parent.parent
                 / "user_data"

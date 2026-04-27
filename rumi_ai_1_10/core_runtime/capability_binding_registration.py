@@ -194,11 +194,15 @@ def _call_register_function(
     interface_registry: InterfaceRegistry,
 ) -> List[str]:
     module_path, _, fn_name = register_path.rpartition(".")
-    added_path = str(pack_location.pack_dir.parent)
-    inserted = False
-    if added_path not in sys.path:
-        sys.path.insert(0, added_path)
-        inserted = True
+    candidate_paths = [pack_location.pack_dir.parent]
+    if register_path.startswith("ecosystem."):
+        candidate_paths.append(pack_location.pack_dir.parent.parent)
+    added_paths: List[str] = []
+    for candidate_path in candidate_paths:
+        added_path = str(candidate_path)
+        if added_path not in sys.path:
+            sys.path.insert(0, added_path)
+            added_paths.append(added_path)
     try:
         module = importlib.import_module(module_path)
         fn = getattr(module, fn_name)
@@ -206,7 +210,7 @@ def _call_register_function(
             raise TypeError(f"{register_path} is not callable")
         value = fn(interface_registry)
     finally:
-        if inserted:
+        for added_path in added_paths:
             try:
                 sys.path.remove(added_path)
             except ValueError:
