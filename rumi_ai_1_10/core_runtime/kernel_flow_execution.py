@@ -390,6 +390,15 @@ class KernelFlowExecutionMixin:
         _prof_start = time.monotonic()
         ctx = self._build_kernel_context()
         ctx.update(context or {})
+        try:
+            from .runtime_profile_resolver import resolve_runtime_profile_context
+
+            ctx = resolve_runtime_profile_context(
+                ctx,
+                interface_registry=self.interface_registry,
+            )
+        except Exception:
+            pass
         execution_id = str(uuid.uuid4())
         ctx["_flow_id"] = flow_id
         ctx["_flow_execution_id"] = execution_id

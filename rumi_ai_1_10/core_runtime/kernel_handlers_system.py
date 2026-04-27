@@ -20,7 +20,7 @@ import json
 import importlib
 import subprocess
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from .logging_utils import get_structured_logger
 from .metrics import get_metrics_collector
@@ -544,6 +544,25 @@ class KernelSystemHandlersMixin:
             nodes = getattr(node_registry, "nodes", None)
             if not nodes:
                 nodes = node_registry.load_all_nodes(register=True)
+            diagnostics: List[Dict[str, Any]] = []
+            try:
+                from .capability_binding_registration import register_pack_binding_handlers
+
+                registration = register_pack_binding_handlers(
+                    interface_registry=self.interface_registry,
+                    approval_manager=ctx.get("approval_manager"),
+                    ecosystem_dir=args.get("ecosystem_dir"),
+                    registry=ctx.get("registry") or getattr(self.lifecycle, "registry", None),
+                )
+                diagnostics.extend(registration.diagnostics)
+            except Exception as exc:
+                diagnostics.append(
+                    {
+                        "level": "warning",
+                        "code": "pack_binding_registration_unavailable",
+                        "message": f"Pack binding registration is unavailable: {exc}",
+                    }
+                )
             compiler = CapabilityGraphCompiler(interface_registry=self.interface_registry)
             result = compiler.compile(
                 graph,
@@ -551,12 +570,13 @@ class KernelSystemHandlersMixin:
                 nodes=dict(nodes),
                 register=bool(args.get("register", True)),
             )
+            diagnostics.extend(result.diagnostics)
             return {
                 "_kernel_step_status": "success" if result.ok else "failed",
                 "_kernel_step_meta": {"graph_id": graph_id, "profile_id": profile_id},
                 "ok": result.ok,
                 "runtime_profile": result.runtime_profile,
-                "diagnostics": list(result.diagnostics),
+                "diagnostics": diagnostics,
             }
         except Exception as e:
             return _failed_step_result("kernel:graph.compile", e, graph_id=graph_id, profile_id=profile_id)

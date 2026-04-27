@@ -148,6 +148,20 @@
       "description": "追加のメタデータ（自由形式）",
       "additionalProperties": true
     },
+    "capability_bindings": {
+      "type": "object",
+      "description": "Capability Graph binding registration metadata",
+      "properties": {
+        "register": {
+          "type": "string",
+          "description": "Pack-owned Python register function path"
+        }
+      },
+      "required": [
+        "register"
+      ],
+      "additionalProperties": false
+    },
     "components": {
       "type": "object",
       "description": "Pack内のComponentの定義マップ。キーはComponent識別子。",

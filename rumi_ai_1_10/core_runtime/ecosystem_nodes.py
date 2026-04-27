@@ -116,6 +116,19 @@ class EcosystemNodeRegistry:
     ) -> None:
         if node.node_id in self.nodes:
             existing = self.nodes[node.node_id]
+            if (
+                existing.metadata.get("pack_id") == node.metadata.get("pack_id")
+                and _is_nodes_components_duplicate(existing, node)
+            ):
+                self._diagnose(
+                    "warning",
+                    "duplicate_node_id_same_pack_skipped",
+                    f"Duplicate node_id '{node.node_id}' in pack '{node.metadata.get('pack_id')}' was skipped",
+                    node_id=node.node_id,
+                    path=str(node.metadata.get("source_path") or ""),
+                    existing_path=str(existing.metadata.get("source_path") or ""),
+                )
+                return
             raise NodeDiscoveryError(
                 "duplicate node_id '{}': {} conflicts with {}".format(
                     node.node_id,
@@ -199,8 +212,6 @@ class EcosystemNodeRegistry:
         nodes_dir = base / "nodes"
         if nodes_dir.is_dir():
             candidates.extend(sorted(nodes_dir.glob("*.node.json")))
-            if candidates:
-                return candidates
 
         components_dir = base / "components"
         if components_dir.is_dir():
@@ -225,3 +236,15 @@ class EcosystemNodeRegistry:
             logger.error("%s: %s", code, message)
         else:
             logger.info("%s: %s", code, message)
+
+
+def _is_nodes_components_duplicate(existing: NodeDefinition, candidate: NodeDefinition) -> bool:
+    existing_path = str(existing.metadata.get("source_path") or "")
+    candidate_path = str(candidate.metadata.get("source_path") or "")
+    return (
+        "/nodes/" in existing_path
+        and "/components/" in candidate_path
+    ) or (
+        "/components/" in existing_path
+        and "/nodes/" in candidate_path
+    )

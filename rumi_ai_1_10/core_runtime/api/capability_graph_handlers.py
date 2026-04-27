@@ -286,6 +286,10 @@ class CapabilityGraphHandlersMixin:
     def _capability_validate_graph(self, graph_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
         """POST /api/graphs/{graph_id}/validate and panel alias."""
         try:
+            if isinstance(body.get("graph"), dict):
+                result = self._capability_validate_draft_graph(body["graph"], body.get("profile_id"))
+                result["graph_id"] = graph_id
+                return result
             result = self._call_kernel_handler(
                 "kernel:graph.validate",
                 {"graph_id": graph_id, "profile_id": body.get("profile_id")},
@@ -306,6 +310,14 @@ class CapabilityGraphHandlersMixin:
         if not profile_id:
             return {"error": "profile_id is required", "status_code": 400}
         try:
+            if isinstance(body.get("graph"), dict):
+                result = self._capability_compile_draft_graph(
+                    body["graph"],
+                    profile_id,
+                    register=bool(body.get("register", False)),
+                )
+                result["graph_id"] = graph_id
+                return result
             result = self._call_kernel_handler(
                 "kernel:graph.compile",
                 {
@@ -323,6 +335,184 @@ class CapabilityGraphHandlersMixin:
             }
         except Exception as exc:
             _log_internal_error("capability_compile_graph", exc)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _capability_create_graph(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        """POST /api/panel/graphs."""
+        graph_data = body.get("graph") if isinstance(body.get("graph"), dict) else body
+        return self._capability_save_graph(graph_data, create=True)
+
+    def _capability_update_graph(self, graph_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        """PUT /api/panel/graphs/{graph_id}."""
+        graph_data = body.get("graph") if isinstance(body.get("graph"), dict) else body
+        if isinstance(graph_data, dict):
+            graph_data = {**graph_data, "graph_id": graph_id}
+        return self._capability_save_graph(graph_data, create=False)
+
+    def _capability_edge_compatibility(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        """POST /api/panel/graphs/edge-compatibility."""
+        try:
+            from ..port_standards import can_connect_ports
+
+            source = body.get("source_port")
+            target = body.get("target_port")
+            if not isinstance(source, dict) or not isinstance(target, dict):
+                return {"error": "source_port and target_port are required", "status_code": 400}
+            compatible = can_connect_ports(
+                str(source.get("direction") or ""),
+                source,
+                str(target.get("direction") or ""),
+                target,
+            )
+            return {
+                "ok": True,
+                "compatible": compatible,
+                "shared_standards": sorted(
+                    set(source.get("standards") or []).intersection(target.get("standards") or [])
+                ),
+            }
+        except Exception as exc:
+            _log_internal_error("capability_edge_compatibility", exc)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _capability_get_current_runtime_profile(self) -> Dict[str, Any]:
+        """GET /api/panel/runtime-profile/current."""
+        try:
+            ctx = self._capability_ctx(self._capability_kernel())
+            from ..runtime_profile_resolver import resolve_runtime_profile_context
+
+            kernel = self._capability_kernel()
+            resolved = resolve_runtime_profile_context(
+                ctx,
+                interface_registry=ctx.get("interface_registry") or getattr(kernel, "interface_registry", None),
+            )
+            runtime_profile = resolved.get("runtime_profile") or resolved.get("_capability_profile")
+            return {
+                "runtime_profile_key": resolved.get("_runtime_profile_key"),
+                "runtime_profile": runtime_profile,
+                "diagnostics": [] if isinstance(runtime_profile, dict) else [
+                    {
+                        "level": "warning",
+                        "code": "runtime_profile_not_found",
+                        "message": "No active runtime profile is registered",
+                    }
+                ],
+            }
+        except Exception as exc:
+            _log_internal_error("capability_get_current_runtime_profile", exc)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _capability_get_runtime_profile(self, runtime_profile_key: str) -> Dict[str, Any]:
+        """GET /api/panel/runtime-profile/{runtime_profile_key}."""
+        try:
+            ctx = self._capability_ctx(self._capability_kernel())
+            kernel = self._capability_kernel()
+            registry = ctx.get("interface_registry") or getattr(kernel, "interface_registry", None)
+            value = registry.get(runtime_profile_key) if registry is not None else None
+            if not isinstance(value, dict):
+                return {"error": f"Runtime profile '{runtime_profile_key}' not found", "status_code": 404}
+            return {
+                "runtime_profile_key": runtime_profile_key,
+                "runtime_profile": value,
+                "diagnostics": [],
+            }
+        except Exception as exc:
+            _log_internal_error("capability_get_runtime_profile", exc)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _capability_validate_draft_graph(self, graph_data: Dict[str, Any], profile_id: Optional[str]) -> Dict[str, Any]:
+        from ..ecosystem_nodes import EcosystemNodeRegistry
+        from ..graph_models import load_graph_document
+        from ..port_standards import validate_graph_ports
+
+        graph = load_graph_document(graph_data, source_type="draft")
+        profile = None
+        if profile_id:
+            profile_result = self._call_kernel_handler("kernel:profile.get", {"profile_id": profile_id})
+            if _status_from_kernel_result(profile_result):
+                profile_dict = profile_result.get("profile")
+                if isinstance(profile_dict, dict):
+                    from ..profile_models import load_profile_document
+
+                    profile = load_profile_document(profile_dict)
+        node_registry = EcosystemNodeRegistry(
+            interface_registry=(
+                self._capability_ctx(self._capability_kernel()).get("interface_registry")
+                or getattr(self._capability_kernel(), "interface_registry", None)
+            ),
+        )
+        nodes = node_registry.load_all_nodes(register=True)
+        result = validate_graph_ports(graph, nodes=nodes, profile=profile)
+        return {
+            "ok": result.ok,
+            "profile_id": profile_id,
+            "diagnostics": list(node_registry.diagnostics) + list(result.diagnostics),
+        }
+
+    def _capability_compile_draft_graph(self, graph_data: Dict[str, Any], profile_id: str, *, register: bool) -> Dict[str, Any]:
+        from ..capability_graph_compiler import CapabilityGraphCompiler
+        from ..ecosystem_nodes import EcosystemNodeRegistry
+        from ..graph_models import load_graph_document
+        from ..profile_models import load_profile_document
+
+        profile_result = self._call_kernel_handler("kernel:profile.get", {"profile_id": profile_id})
+        if not _status_from_kernel_result(profile_result) or not isinstance(profile_result.get("profile"), dict):
+            return {"ok": False, "profile_id": profile_id, "runtime_profile": None, "diagnostics": [
+                {"level": "error", "code": "profile_not_found", "message": f"Profile '{profile_id}' was not found"}
+            ]}
+        graph = load_graph_document(graph_data, source_type="draft")
+        profile = load_profile_document(profile_result["profile"])
+        ctx = self._capability_ctx(self._capability_kernel())
+        kernel = self._capability_kernel()
+        interface_registry = ctx.get("interface_registry") or getattr(kernel, "interface_registry", None)
+        node_registry = EcosystemNodeRegistry(interface_registry=interface_registry)
+        nodes = node_registry.load_all_nodes(register=True)
+        result = CapabilityGraphCompiler(interface_registry=interface_registry).compile(
+            graph,
+            profile=profile,
+            nodes=nodes,
+            register=register,
+        )
+        return {
+            "ok": result.ok,
+            "profile_id": profile_id,
+            "runtime_profile": result.runtime_profile,
+            "diagnostics": list(node_registry.diagnostics) + list(result.diagnostics),
+        }
+
+    def _capability_save_graph(self, graph_data: Any, *, create: bool) -> Dict[str, Any]:
+        try:
+            import yaml  # type: ignore[import-untyped]
+            from ..graph_models import load_graph_document
+
+            if not isinstance(graph_data, dict):
+                return {"error": "graph object is required", "status_code": 400}
+            graph = load_graph_document(graph_data, source_type="user")
+            user_graph_dir = (
+                Path(__file__).resolve().parent.parent.parent
+                / "user_data"
+                / "shared"
+                / "graphs"
+            )
+            user_graph_dir.mkdir(parents=True, exist_ok=True)
+            target = user_graph_dir / f"{graph.graph_id}.graph.yaml"
+            if create and target.exists():
+                return {"error": f"Graph '{graph.graph_id}' already exists", "status_code": 409}
+            target.write_text(
+                yaml.safe_dump(graph.to_dict(), allow_unicode=True, sort_keys=False),
+                encoding="utf-8",
+            )
+            ctx = self._capability_ctx(self._capability_kernel())
+            ctx.pop("graph_loader", None)
+            load_result = self._call_kernel_handler("kernel:graph.load_all")
+            return {
+                "graph": self._capability_public_graph(graph.to_dict(), locale="en"),
+                "created": create,
+                "path": str(target),
+                "diagnostics": list(load_result.get("diagnostics") or []),
+            }
+        except Exception as exc:
+            _log_internal_error("capability_save_graph", exc)
             return {"error": _SAFE_ERROR_MSG, "status_code": 500}
 
     def _capability_clone_profile(self, profile_id: str, body: Dict[str, Any]) -> Dict[str, Any]:

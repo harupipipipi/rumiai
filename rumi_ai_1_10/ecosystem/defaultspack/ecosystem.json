@@ -228,6 +228,9 @@
     "author": "Rumi AI Team",
     "license": "MIT"
   },
+  "capability_bindings": {
+    "register": "ecosystem.defaultspack.capability_bindings.register_defaultspack_binding_handlers"
+  },
   "api_routes": [
     {
       "method": "GET",

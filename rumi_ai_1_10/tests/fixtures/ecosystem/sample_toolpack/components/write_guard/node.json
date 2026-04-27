@@ -1,0 +1,26 @@
+{
+  "version": "rumi.node.v1",
+  "nodes": [
+    {
+      "node_id": "sample_toolpack.write_guard",
+      "component_id": "write_guard",
+      "display_name": {"ja": "書き込み保護ツール", "en": "Write Guarded Tool"},
+      "ports": [
+        {
+          "id": "tools",
+          "direction": "output",
+          "standards": ["rumi.tool.bundle", "sample_toolpack.write_tools.v1"],
+          "multiple": true
+        }
+      ],
+      "bindings": {
+        "compile": "sample_toolpack:write_guard.compile_node"
+      },
+      "metadata": {
+        "category": "toolpack",
+        "write_actions": true,
+        "requires_approval": true
+      }
+    }
+  ]
+}

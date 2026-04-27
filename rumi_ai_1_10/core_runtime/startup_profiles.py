@@ -242,6 +242,17 @@ class StartupProfileManager:
         self._save_state(state)
         self._apply_profile_to_active_ecosystem(profile, catalog, launched=True)
         capability_graph = self._compile_launch_capability_graph(profile)
+        policy = profile.get("policy") if isinstance(profile.get("policy"), dict) else {}
+        if policy.get("require_capability_graph_compile") is True and not capability_graph.get("ok"):
+            self._record_capability_graph_result(capability_graph)
+            return {
+                "error": "Capability graph compile failed for strict startup profile",
+                "status_code": 400,
+                "profile": profile,
+                "active_profile_id": profile_id,
+                "launched": False,
+                "capability_graph": capability_graph,
+            }
         if capability_graph.get("runtime_profile_key"):
             profile["last_runtime_profile_key"] = capability_graph["runtime_profile_key"]
             index = self._find_profile_index(state["profiles"], profile_id)

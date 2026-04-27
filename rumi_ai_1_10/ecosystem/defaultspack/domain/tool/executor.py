@@ -1,5 +1,6 @@
 from .registry import ToolRegistry
 from .mcp_client import McpClient
+from .schema_adapter import is_tool_rejected_by_policy, policy_from_context
 
 
 # P1-2: サンドボックス用の安全なビルトイン一覧
@@ -77,6 +78,14 @@ class ToolExecutor:
                 "result": "Tool '{}' not found".format(tool_name),
                 "is_error": True,
                 "widget": None
+            }
+        policy = policy_from_context(context if isinstance(context, dict) else {})
+        if is_tool_rejected_by_policy(tool_def, policy):
+            return {
+                "result": "Tool '{}' rejected by runtime policy".format(tool_name),
+                "is_error": True,
+                "widget": None,
+                "rejected_by_policy": True,
             }
 
         execution = tool_def.get("execution", {})

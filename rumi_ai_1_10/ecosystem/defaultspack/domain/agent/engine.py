@@ -10,6 +10,8 @@ from domain.tool.schema_adapter import (
     connected_tool_names,
     filter_tool_definitions_for_runtime_profile,
     max_tool_calls,
+    policy_from_context,
+    resolve_runtime_profile_context,
     runtime_profile_enforced_tool_names,
     tool_name_from_definition,
 )
@@ -197,6 +199,7 @@ class AgentEngine:
     def execute(self, task, tools, model, system_prompt, context):
         execution_id = gen_id("agent_")
         execution_context = dict(context or {}) if isinstance(context, dict) else {}
+        execution_context = resolve_runtime_profile_context(execution_context)
         normalized_tools = adapt_tool_definitions(tools if tools else [])
         provider_tools = filter_tool_definitions_for_runtime_profile(
             normalized_tools,
@@ -266,6 +269,7 @@ class AgentEngine:
         execution.status = "running"
         execution.pending_tool_call = None
         context_for_tool = dict(getattr(execution, "context", {}) or {})
+        context_for_tool["profile_policy"] = policy_from_context(context_for_tool)
         context_for_tool = build_tool_execution_context(
             context_for_tool,
             pending["tool_name"],

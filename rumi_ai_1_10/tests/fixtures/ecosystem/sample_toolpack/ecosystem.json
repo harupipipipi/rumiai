@@ -1,0 +1,11 @@
+{
+  "pack_id": "sample_toolpack",
+  "version": "0.1.0",
+  "metadata": {
+    "name": "Sample Toolpack",
+    "description": "Fixture pack for external capability nodes."
+  },
+  "capability_bindings": {
+    "register": "sample_toolpack.capability_bindings.register_sample_toolpack_binding_handlers"
+  }
+}

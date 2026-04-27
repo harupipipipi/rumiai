@@ -1,0 +1,30 @@
+graph_id: sample_toolpack_to_default_agent
+version: rumi.graph.v1
+
+display_name:
+  en: Sample Toolpack to Default Agent
+
+nodes:
+  - id: start
+    ref: rumi.start
+  - id: agent
+    ref: defaultspack.agent
+  - id: ai
+    ref: defaultspack.ai_client
+  - id: sample_search
+    ref: sample_toolpack.search
+
+edges:
+  - id: e_start_agent
+    from: start.out
+    to: agent.start
+  - id: e_ai_agent
+    from: ai.client
+    to: agent.ai
+  - id: e_sample_tools_agent
+    from: sample_search.tools
+    to: agent.tools
+
+metadata:
+  pack_id: sample_toolpack
+  category: fixture

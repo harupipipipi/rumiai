@@ -1,0 +1,10 @@
+{
+  "pack_id": "example_pack",
+  "version": "0.1.0",
+  "metadata": {
+    "name": "Example Pack"
+  },
+  "capability_bindings": {
+    "register": "example_pack.capability_bindings.register_example_pack_binding_handlers"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "version": "rumi.node.v1",
+  "nodes": [
+    {
+      "node_id": "example_pack.search",
+      "display_name": {"en": "Search"},
+      "ports": [
+        {
+          "id": "tools",
+          "direction": "output",
+          "standards": ["rumi.tool.bundle"],
+          "multiple": true
+        }
+      ],
+      "bindings": {
+        "compile": "example_pack:search.compile_node"
+      },
+      "metadata": {
+        "category": "toolpack"
+      }
+    }
+  ]
+}

@@ -80,7 +80,12 @@ def compile_startup_capabilities(
         )
 
     try:
-        _register_defaultspack_binding_handlers(interface_registry, diagnostics)
+        _register_pack_binding_handlers(
+            interface_registry,
+            diagnostics,
+            approval_manager=approval_manager,
+            ecosystem_dir=ecosystem_dir,
+        )
 
         profile_loader = CapabilityProfileLoader(
             interface_registry=interface_registry,
@@ -174,31 +179,31 @@ def compile_startup_capabilities(
         )
 
 
-def _register_defaultspack_binding_handlers(
+def _register_pack_binding_handlers(
     interface_registry: InterfaceRegistry,
     diagnostics: List[Dict[str, Any]],
+    *,
+    approval_manager: Any = None,
+    ecosystem_dir: Optional[str] = None,
 ) -> None:
     try:
-        from ecosystem.defaultspack.capability_bindings import register_defaultspack_binding_handlers
+        from .capability_binding_registration import register_pack_binding_handlers
     except Exception as exc:
         diagnostics.append(
             _diagnostic(
                 "warning",
-                "defaultspack_binding_handlers_unavailable",
-                f"defaultspack binding handlers are unavailable: {exc}",
+                "pack_binding_registration_unavailable",
+                f"Pack binding registration is unavailable: {exc}",
             )
         )
         return
 
-    result = register_defaultspack_binding_handlers(interface_registry)
-    diagnostics.append(
-        _diagnostic(
-            "info",
-            "defaultspack_binding_handlers_registered",
-            "defaultspack binding handlers are registered",
-            registered=result.get("registered") if isinstance(result, dict) else None,
-        )
+    result = register_pack_binding_handlers(
+        interface_registry=interface_registry,
+        approval_manager=approval_manager,
+        ecosystem_dir=ecosystem_dir,
     )
+    diagnostics.extend(result.diagnostics)
 
 
 def _string_or_none(value: Any) -> Optional[str]:
