@@ -1,6 +1,6 @@
-# Profile Spec
+# Capability Profile Spec
 
-Profiles are runtime or workspace presets. They describe which nodes are available and how a selected graph should run in a particular environment.
+Capability Profiles are runtime or workspace presets for Capability Graph compile. They describe which nodes are available and how a selected graph should run in a particular environment.
 
 Version: `rumi.profile.v1`
 
@@ -19,9 +19,16 @@ Pack-provided profile files are loaded only from packs that pass the existing pa
 
 Capability Graph profiles do not replace the existing `StartupProfileManager` or launch-time startup profile system in the initial PRs.
 
-Until an explicit bridge or migration PR lands, existing startup profiles remain the launch-time source of truth for selecting startup behavior, setup, and runtime launch defaults. `rumi.profile.v1` is a graph/runtime preset used by Capability Graph loading, validation, compile, and later viewer palette filtering.
+Until an explicit bridge or migration PR lands, existing startup profiles remain the launch-time source of truth for selecting startup behavior, setup, and runtime launch defaults. `rumi.profile.v1` is a graph/runtime preset used by Capability Graph loading, validation, compile, and viewer/node-manager filtering.
 
 The planned profile loader PR adapts to the existing system by coexisting with it. It may read startup-related defaults for display or diagnostics only when explicitly wired, but it must not supersede startup profile selection. A later backend API PR may expose both systems side by side or add a bridge endpoint, but replacing `StartupProfileManager` requires a dedicated migration decision and PR.
+
+Terminology:
+
+- `StartupProfileManager` owns launch-time startup profiles such as `rumi_cli`, `rumi_desktopapp`, and `rumi_work`.
+- `CapabilityProfileDefinition` owns `rumi.profile.v1` graph/runtime presets such as `defaultspack.coding`.
+- `default_graph` on a Capability Profile is compile input only. Startup profile launch does not automatically compile that graph in this PR.
+- Bridging startup profile launch to Capability Graph compile/runtime registration is intentionally out of scope until the launch contract is explicitly designed.
 
 ## Relationship To Graphs
 

@@ -53,6 +53,16 @@
     },
     {
       "method": "GET",
+      "path": "/api/panel/nodes",
+      "handler": "_panel_get_nodes"
+    },
+    {
+      "method": "GET",
+      "path_pattern": "/api/panel/profiles/{id}/nodes",
+      "handler": "_panel_get_profile_nodes"
+    },
+    {
+      "method": "GET",
       "path_pattern": "/api/panel/flows/{id}",
       "handler": "_panel_get_flow_detail"
     },

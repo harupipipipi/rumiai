@@ -15,6 +15,8 @@ API 一覧:
   POST /api/panel/startup/profiles/{id}/duplicate — 起動プロファイル複製
   POST /api/panel/startup/profiles/{id}/activate  — 起動プロファイル切り替え
   POST /api/panel/startup/profiles/{id}/launch    — 起動プロファイル起動
+  GET  /api/panel/nodes              — Capability Graph Node 一覧
+  GET  /api/panel/profiles/{id}/nodes — Capability Profile scoped Node 状態
   GET  /api/panel/flows              — Flow 一覧（本文なし）
   GET  /api/panel/flows/{id}         — Flow 詳細（YAML 本文付き）
   POST /api/panel/flows              — Flow 新規作成
@@ -79,6 +81,18 @@ class ControlPanelHandlersMixin:
         from ..startup_profiles import StartupProfileManager
 
         return StartupProfileManager()
+
+    @staticmethod
+    def _panel_capability_node_registry():
+        from ..ecosystem_nodes import EcosystemNodeRegistry
+
+        return EcosystemNodeRegistry()
+
+    @staticmethod
+    def _panel_capability_profile_loader():
+        from ..profile_loader import CapabilityProfileLoader
+
+        return CapabilityProfileLoader()
 
     # ------------------------------------------------------------------
     # Dashboard
@@ -310,6 +324,53 @@ class ControlPanelHandlersMixin:
             return self._panel_startup_profile_manager().launch_profile(profile_id)
         except Exception as e:
             _log_internal_error("panel_launch_startup_profile", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    # ------------------------------------------------------------------
+    # Capability Graph Nodes
+    # ------------------------------------------------------------------
+
+    def _panel_get_nodes(self) -> Dict[str, Any]:
+        """GET /api/panel/nodes — Capability Graph Node 一覧"""
+        try:
+            registry = self._panel_capability_node_registry()
+            nodes = registry.to_public_list()
+            return {
+                "nodes": nodes,
+                "count": len(nodes),
+                "diagnostics": list(getattr(registry, "diagnostics", [])),
+            }
+        except Exception as e:
+            _log_internal_error("panel_get_nodes", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_get_profile_nodes(self, profile_id: str) -> Dict[str, Any]:
+        """GET /api/panel/profiles/{id}/nodes — profile scoped node state"""
+        try:
+            profile_loader = self._panel_capability_profile_loader()
+            profile = profile_loader.get_profile(profile_id)
+            if profile is None:
+                return {"error": f"Profile '{profile_id}' not found", "status_code": 404}
+
+            node_registry = self._panel_capability_node_registry()
+            from ..profile_node_registry import ProfileNodeRegistry
+
+            profile_nodes = ProfileNodeRegistry(
+                node_registry=node_registry,
+                profile=profile,
+            )
+            node_states = profile_nodes.node_state()
+            return {
+                "profile": profile.to_dict(),
+                "nodes": node_states,
+                "count": len(node_states),
+                "diagnostics": [
+                    *list(getattr(profile_loader, "diagnostics", [])),
+                    *list(getattr(node_registry, "diagnostics", [])),
+                ],
+            }
+        except Exception as e:
+            _log_internal_error("panel_get_profile_nodes", e)
             return {"error": _SAFE_ERROR_MSG, "status_code": 500}
 
     # ------------------------------------------------------------------
