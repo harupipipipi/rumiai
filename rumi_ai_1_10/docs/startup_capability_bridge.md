@@ -1,0 +1,63 @@
+# Startup Capability Bridge
+
+Startup Profiles remain the launch-time source of truth for Rumi modes such as
+desktop, CLI, and work profiles. Capability Profiles remain graph compile
+presets. The startup capability bridge connects them without replacing either
+model.
+
+## Opt-in fields
+
+Startup Profiles can opt in to graph compilation with these fields:
+
+```json
+{
+  "default_graph": "defaultspack.startup",
+  "capability_profile_id": "defaultspack.startup",
+  "launch_capability_graph": true,
+  "runtime_profile_key": null
+}
+```
+
+- `default_graph` selects the Capability Graph to compile.
+- `capability_profile_id` selects the Capability Profile used for graph policy,
+  node settings, and enabled or disabled nodes.
+- `launch_capability_graph` controls whether launch compiles the graph.
+- `runtime_profile_key` records the last registered runtime profile key after a
+  successful launch compile.
+
+Profiles that omit `launch_capability_graph`, or set it to `false`, keep the
+previous startup launch behavior.
+
+## Launch behavior
+
+When `launch_capability_graph` is true, `StartupProfileManager.launch_profile()`
+launches the startup profile and then calls the bridge. The bridge:
+
+1. Resolves `default_graph` and `capability_profile_id`.
+2. Registers defaultspack Capability Graph binding handlers.
+3. Loads approved Capability Profiles, Capability Graphs, and node definitions.
+4. Compiles the graph with `CapabilityGraphCompiler`.
+5. Registers the compiled runtime profile in `InterfaceRegistry`.
+6. Returns `capability_graph` metadata in the launch result.
+
+Compile failures are soft failures. Startup launch still succeeds, and the
+launch result includes `capability_graph.ok: false` plus diagnostics.
+
+## Launch result
+
+Successful graph compilation adds a result like:
+
+```json
+{
+  "capability_graph": {
+    "ok": true,
+    "graph_id": "defaultspack.startup",
+    "capability_profile_id": "defaultspack.startup",
+    "runtime_profile_key": "runtime_profile.defaultspack.startup.defaultspack.startup"
+  }
+}
+```
+
+Consumers should use `runtime_profile_key` to retrieve the registered runtime
+profile from `InterfaceRegistry`. Existing explicit flow steps that compile
+graphs still work as before.

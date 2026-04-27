@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -8,6 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from core_runtime.startup_profiles import START_CONTRACT, StartupProfileManager, can_connect_ports
+from core_runtime.interface_registry import InterfaceRegistry
 
 
 class _FakeActiveEcosystem:
@@ -168,6 +170,9 @@ def test_runtime_profile_v2_fields_are_saved_and_preserved_on_update(tmp_path: P
                 "locale": "ja",
                 "default_flow": "cli_session",
                 "default_graph": "cli_workspace",
+                "capability_profile_id": "defaultspack.coding",
+                "launch_capability_graph": True,
+                "runtime_profile_key": "runtime_profile.defaultspack.coding.cli_workspace",
                 "surfaces": {"preferred": "cli", "enabled": ["cli"]},
                 "enabled_nodes": ["defaultspack.agent"],
                 "disabled_nodes": ["defaultspack.frontend"],
@@ -184,6 +189,9 @@ def test_runtime_profile_v2_fields_are_saved_and_preserved_on_update(tmp_path: P
     assert profile["kind"] == "runtime_profile"
     assert profile["default_flow"] == "cli_session"
     assert profile["default_graph"] == "cli_workspace"
+    assert profile["capability_profile_id"] == "defaultspack.coding"
+    assert profile["launch_capability_graph"] is True
+    assert profile["runtime_profile_key"] == "runtime_profile.defaultspack.coding.cli_workspace"
     assert profile["surfaces"] == {"preferred": "cli", "enabled": ["cli"]}
     assert profile["enabled_nodes"] == ["defaultspack.agent"]
     assert profile["disabled_nodes"] == ["defaultspack.frontend"]
@@ -462,6 +470,84 @@ def test_launch_profile_updates_active_ecosystem_metadata_and_requests_restart(t
     assert active.overrides["memory"] == "defaultspack:memory:memory"
     assert active.overrides["ai_client"] == "defaultspack:ai_client:ai_client"
     mock_restart.assert_called_once_with()
+
+
+def test_launch_profile_compiles_capability_graph_when_opted_in(tmp_path: Path):
+    repo_defaultspack = Path(__file__).resolve().parents[1] / "ecosystem" / "defaultspack"
+    eco_root = tmp_path / "ecosystem"
+    shutil.copytree(repo_defaultspack, eco_root / "defaultspack")
+    interface_registry = InterfaceRegistry()
+    manager = StartupProfileManager(
+        storage_path=tmp_path / "startup_profiles.json",
+        interface_registry=interface_registry,
+        approval_manager=_FakeApprovalManager(reason_by_pack={"defaultspack": None}),
+        ecosystem_dir=str(eco_root),
+    )
+    active = _FakeActiveEcosystem()
+
+    with patch(
+        "backend_core.ecosystem.active_ecosystem.get_active_ecosystem_manager",
+        return_value=active,
+    ):
+        with patch("core_runtime.api.control_panel_handlers.request_kernel_restart"):
+            created = manager.create_profile(
+                {
+                    "profile_id": "rumi_desktopapp",
+                    "name": "Rumi Desktop",
+                    "default_graph": "defaultspack.startup",
+                    "capability_profile_id": "defaultspack.startup",
+                    "launch_capability_graph": True,
+                }
+            )
+            response = manager.launch_profile(created["profile"]["profile_id"])
+
+    capability_graph = response["capability_graph"]
+    assert response["launched"] is True
+    assert capability_graph["ok"] is True
+    assert capability_graph["graph_id"] == "defaultspack.startup"
+    assert capability_graph["capability_profile_id"] == "defaultspack.startup"
+    assert capability_graph["runtime_profile_key"] == "runtime_profile.defaultspack.startup.defaultspack.startup"
+    assert interface_registry.get(capability_graph["runtime_profile_key"]) is not None
+    assert response["profile"]["runtime_profile_key"] == capability_graph["runtime_profile_key"]
+    assert active.metadata["startup_capability_graph"]["runtime_profile_key"] == capability_graph["runtime_profile_key"]
+
+
+def test_launch_profile_soft_fails_when_capability_graph_is_missing(tmp_path: Path):
+    repo_defaultspack = Path(__file__).resolve().parents[1] / "ecosystem" / "defaultspack"
+    eco_root = tmp_path / "ecosystem"
+    shutil.copytree(repo_defaultspack, eco_root / "defaultspack")
+    manager = StartupProfileManager(
+        storage_path=tmp_path / "startup_profiles.json",
+        interface_registry=InterfaceRegistry(),
+        approval_manager=_FakeApprovalManager(reason_by_pack={"defaultspack": None}),
+        ecosystem_dir=str(eco_root),
+    )
+    active = _FakeActiveEcosystem()
+
+    with patch(
+        "backend_core.ecosystem.active_ecosystem.get_active_ecosystem_manager",
+        return_value=active,
+    ):
+        with patch("core_runtime.api.control_panel_handlers.request_kernel_restart"):
+            created = manager.create_profile(
+                {
+                    "profile_id": "rumi_desktopapp",
+                    "name": "Rumi Desktop",
+                    "default_graph": "missing.graph",
+                    "capability_profile_id": "defaultspack.startup",
+                    "launch_capability_graph": True,
+                }
+            )
+            response = manager.launch_profile(created["profile"]["profile_id"])
+
+    assert response["launched"] is True
+    assert response["capability_graph"]["ok"] is False
+    assert response["capability_graph"]["runtime_profile_key"] is None
+    assert any(
+        item.get("code") == "startup_graph_not_found"
+        for item in response["capability_graph"]["diagnostics"]
+    )
+    assert active.metadata["startup_capability_graph"]["ok"] is False
 
 
 def test_launch_profile_rejects_shared_runtime_component_type_conflict(tmp_path: Path):

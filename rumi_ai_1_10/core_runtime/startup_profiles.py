@@ -103,9 +103,19 @@ def _now_ts() -> int:
 
 
 class StartupProfileManager:
-    def __init__(self, storage_path: Optional[Path] = None) -> None:
+    def __init__(
+        self,
+        storage_path: Optional[Path] = None,
+        *,
+        interface_registry: Any = None,
+        approval_manager: Any = None,
+        ecosystem_dir: Optional[str] = None,
+    ) -> None:
         base_dir = Path(__file__).resolve().parent.parent
         self._storage_path = storage_path or (base_dir / "user_data" / "settings" / "startup_profiles.json")
+        self.interface_registry = interface_registry
+        self.approval_manager = approval_manager
+        self.ecosystem_dir = ecosystem_dir
 
     @property
     def storage_path(self) -> Path:
@@ -231,6 +241,14 @@ class StartupProfileManager:
         state["last_launched_profile_id"] = profile_id
         self._save_state(state)
         self._apply_profile_to_active_ecosystem(profile, catalog, launched=True)
+        capability_graph = self._compile_launch_capability_graph(profile)
+        if capability_graph.get("runtime_profile_key"):
+            profile["runtime_profile_key"] = capability_graph["runtime_profile_key"]
+            index = self._find_profile_index(state["profiles"], profile_id)
+            if index is not None:
+                state["profiles"][index] = profile
+                self._save_state(state)
+        self._record_capability_graph_result(capability_graph)
         handoff = self._request_launch_handoff(profile)
         if not handoff.get("restart_requested"):
             return {
@@ -243,6 +261,7 @@ class StartupProfileManager:
             "launched": True,
             "restart_requested": True,
             "handoff": handoff,
+            "capability_graph": capability_graph,
         }
 
     def _load_state(self, catalog: Dict[str, Any]) -> Dict[str, Any]:
@@ -353,6 +372,13 @@ class StartupProfileManager:
             "locale": payload.get("locale") if isinstance(payload.get("locale"), str) else "ja",
             "default_flow": payload.get("default_flow") if isinstance(payload.get("default_flow"), str) else None,
             "default_graph": payload.get("default_graph") if isinstance(payload.get("default_graph"), str) else None,
+            "capability_profile_id": (
+                payload.get("capability_profile_id") if isinstance(payload.get("capability_profile_id"), str) else None
+            ),
+            "launch_capability_graph": bool(payload.get("launch_capability_graph", False)),
+            "runtime_profile_key": (
+                payload.get("runtime_profile_key") if isinstance(payload.get("runtime_profile_key"), str) else None
+            ),
             "surfaces": dict(surfaces),
             "enabled_nodes": self._string_list(payload.get("enabled_nodes")),
             "disabled_nodes": self._string_list(payload.get("disabled_nodes")),
@@ -368,6 +394,9 @@ class StartupProfileManager:
             "locale",
             "default_flow",
             "default_graph",
+            "capability_profile_id",
+            "launch_capability_graph",
+            "runtime_profile_key",
             "surfaces",
             "enabled_nodes",
             "disabled_nodes",
@@ -447,7 +476,7 @@ class StartupProfileManager:
     def _discover_packs(self) -> Dict[str, Dict[str, Any]]:
         discovered: Dict[str, Dict[str, Any]] = {}
         enabled_overrides = self._read_pack_enabled_overrides()
-        for loc in discover_pack_locations():
+        for loc in discover_pack_locations(self.ecosystem_dir):
             try:
                 ecosystem = json.loads(loc.ecosystem_json_path.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
@@ -769,6 +798,72 @@ class StartupProfileManager:
                 f"'{conflict['component_type']}'"
             )
         return None
+
+    def _compile_launch_capability_graph(self, profile: Dict[str, Any]) -> Dict[str, Any]:
+        if not profile.get("launch_capability_graph"):
+            return {
+                "ok": False,
+                "graph_id": profile.get("default_graph"),
+                "capability_profile_id": profile.get("capability_profile_id"),
+                "runtime_profile_key": None,
+                "runtime_profile": None,
+                "diagnostics": [
+                    {
+                        "level": "info",
+                        "code": "startup_capability_graph_not_enabled",
+                        "message": "Startup capability graph compile is not enabled for this profile",
+                    }
+                ],
+            }
+
+        if self.interface_registry is None:
+            return {
+                "ok": False,
+                "graph_id": profile.get("default_graph"),
+                "capability_profile_id": profile.get("capability_profile_id"),
+                "runtime_profile_key": None,
+                "runtime_profile": None,
+                "diagnostics": [
+                    {
+                        "level": "warning",
+                        "code": "interface_registry_unavailable",
+                        "message": "Startup capability graph compile requires an InterfaceRegistry",
+                    }
+                ],
+            }
+
+        from .startup_capability_bridge import compile_startup_capabilities
+
+        return compile_startup_capabilities(
+            profile,
+            interface_registry=self.interface_registry,
+            approval_manager=self.approval_manager,
+            ecosystem_dir=self.ecosystem_dir,
+        ).to_dict()
+
+    def _record_capability_graph_result(self, capability_graph: Dict[str, Any]) -> None:
+        try:
+            from backend_core.ecosystem.active_ecosystem import get_active_ecosystem_manager
+        except Exception:
+            logger.debug("active ecosystem manager is unavailable", exc_info=True)
+            return
+
+        try:
+            active = get_active_ecosystem_manager()
+        except Exception:
+            logger.debug("failed to load active ecosystem manager", exc_info=True)
+            return
+
+        active.set_metadata(
+            "startup_capability_graph",
+            {
+                "ok": bool(capability_graph.get("ok")),
+                "graph_id": capability_graph.get("graph_id"),
+                "capability_profile_id": capability_graph.get("capability_profile_id"),
+                "runtime_profile_key": capability_graph.get("runtime_profile_key"),
+                "diagnostics": list(capability_graph.get("diagnostics") or []),
+            },
+        )
 
     def _apply_profile_to_active_ecosystem(
         self,
