@@ -343,6 +343,9 @@ class StartupProfileManager:
         surfaces = payload.get("surfaces")
         if not isinstance(surfaces, dict):
             surfaces = {"preferred": "desktop", "enabled": ["desktop", "cli"]}
+        node_settings = payload.get("node_settings")
+        policy = payload.get("policy")
+        permissions = payload.get("permissions")
 
         return {
             "kind": str(payload.get("kind") or "runtime_profile"),
@@ -353,9 +356,9 @@ class StartupProfileManager:
             "surfaces": dict(surfaces),
             "enabled_nodes": self._string_list(payload.get("enabled_nodes")),
             "disabled_nodes": self._string_list(payload.get("disabled_nodes")),
-            "node_settings": dict(payload.get("node_settings")) if isinstance(payload.get("node_settings"), dict) else {},
-            "policy": dict(payload.get("policy")) if isinstance(payload.get("policy"), dict) else {},
-            "permissions": dict(payload.get("permissions")) if isinstance(payload.get("permissions"), dict) else {},
+            "node_settings": dict(node_settings) if isinstance(node_settings, dict) else {},
+            "policy": dict(policy) if isinstance(policy, dict) else {},
+            "permissions": dict(permissions) if isinstance(permissions, dict) else {},
         }
 
     def _runtime_profile_field_names(self) -> List[str]:
