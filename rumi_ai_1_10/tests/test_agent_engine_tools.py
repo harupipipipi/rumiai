@@ -107,6 +107,28 @@ def test_agent_execute_passes_tools_to_ai_completion() -> None:
     assert seen["tools"] == tools
 
 
+def test_agent_plan_does_not_expose_tools_to_ai_completion() -> None:
+    engine = AgentEngine()
+    seen = {}
+
+    def fake_ai(messages, model, context, tools=None):
+        seen["tools"] = tools
+        return _text_response("1. Inspect\n2. Report")
+
+    engine._ai_complete = fake_ai
+
+    result = engine.plan(
+        "make a plan",
+        [_tool("search")],
+        "stub/model",
+        None,
+        {"runtime_profile": _runtime_profile(connected_tools=["search"])},
+    )
+
+    assert result["status"] == "planned"
+    assert seen["tools"] == []
+
+
 def test_defaultspack_tool_schema_adapter_normalizes_registry_tool() -> None:
     adapted = adapt_tool_definition(_registry_tool("search"))
 

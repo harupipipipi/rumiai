@@ -420,12 +420,6 @@ class AgentEngine:
     def plan(self, task, tools, model, system_prompt, context):
         execution_id = gen_id("agent_")
         execution_context = dict(context or {}) if isinstance(context, dict) else {}
-        normalized_tools = adapt_tool_definitions(tools if tools else [])
-        provider_tools = filter_tool_definitions_for_runtime_profile(
-            normalized_tools,
-            execution_context.get("runtime_profile"),
-            execution_context.get("agent_id"),
-        )
         plan_system = system_prompt if system_prompt else ""
         plan_system += (
             "\n\nYou are in PLANNING mode. Do NOT execute any actions. "
@@ -435,7 +429,7 @@ class AgentEngine:
         execution = AgentExecution(
             execution_id=execution_id,
             task=task,
-            tools=provider_tools,
+            tools=[],
             model=model if model else "default",
             system_prompt=plan_system,
         )
@@ -447,7 +441,7 @@ class AgentEngine:
         messages.append({"role": "user", "content": task})
         execution.messages = messages
         execution.add_step("plan", {"action": "planning", "task": task})
-        ai_result = self._ai_complete(messages, execution.model, execution.context, execution.tools)
+        ai_result = self._ai_complete(messages, execution.model, execution.context, [])
         parsed = self._parse_ai_response(ai_result)
         if parsed["type"] == "error":
             execution.status = "error"

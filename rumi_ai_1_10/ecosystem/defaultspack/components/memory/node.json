@@ -1,0 +1,40 @@
+{
+  "version": "rumi.node.v1",
+  "nodes": [
+    {
+      "node_id": "defaultspack.memory",
+      "kind": "ecosystem.component",
+      "display_name": {
+        "ja": "メモリ",
+        "en": "Memory"
+      },
+      "description": {
+        "ja": "会話や作業コンテキストを保持するメモリノード。",
+        "en": "Memory node that stores conversation and workspace context."
+      },
+      "ports": [
+        {
+          "id": "store",
+          "direction": "output",
+          "display_name": {
+            "ja": "ストア",
+            "en": "Store"
+          },
+          "standards": ["rumi.memory.store"],
+          "aliases": ["memory", "store", "recall"],
+          "multiple": true,
+          "required": false
+        }
+      ],
+      "bindings": {
+        "compile": "defaultspack:memory.compile_node"
+      },
+      "metadata": {
+        "pack_id": "defaultspack",
+        "component": "memory",
+        "icon": "database",
+        "category": "memory"
+      }
+    }
+  ]
+}

@@ -334,7 +334,7 @@ class AgentEngine:
         execution = AgentExecution(
             execution_id=execution_id,
             task=task,
-            tools=tools if tools else [],
+            tools=[],
             model=model if model else "default",
             system_prompt=plan_system,
         )

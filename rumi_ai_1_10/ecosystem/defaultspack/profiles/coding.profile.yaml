@@ -36,6 +36,8 @@ enabled_nodes:
   - defaultspack.agent
   - defaultspack.ai_client
   - defaultspack.tool
+  - defaultspack.memory
+  - defaultspack.prompt
   - defaultspack.frontend
   - defaultspack.cli_surface
 

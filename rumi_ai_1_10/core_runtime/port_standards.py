@@ -1,9 +1,9 @@
-"""Domain-neutral Capability Graph port validation."""
+"""Domain-neutral Capability Graph port standards and validation."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 from .graph_models import GraphDefinition, GraphEdge, GraphEndpoint
 from .node_models import NodeDefinition, PortDefinition
@@ -20,6 +20,39 @@ class GraphValidationResult:
             "ok": self.ok,
             "diagnostics": list(self.diagnostics),
         }
+
+
+def normalize_port_standards(port_or_contracts: Any) -> List[str]:
+    """Normalize legacy contract fields into the canonical standards list."""
+    if port_or_contracts is None:
+        return []
+    if isinstance(port_or_contracts, str):
+        return [port_or_contracts] if port_or_contracts else []
+    if isinstance(port_or_contracts, Mapping):
+        if "standards" in port_or_contracts:
+            return _string_list(port_or_contracts.get("standards"))
+        if "contracts" in port_or_contracts:
+            return _string_list(port_or_contracts.get("contracts"))
+        if "contract" in port_or_contracts:
+            return _string_list(port_or_contracts.get("contract"))
+        return []
+    if isinstance(port_or_contracts, Sequence) and not isinstance(port_or_contracts, (bytes, bytearray)):
+        return _string_list(port_or_contracts)
+    return []
+
+
+def can_connect_ports(
+    source_direction: str,
+    source_port: Dict[str, Any] | List[str],
+    target_direction: str,
+    target_port: Dict[str, Any] | List[str],
+) -> bool:
+    """Return True when output/input ports share at least one standard."""
+    if source_direction != "output" or target_direction != "input":
+        return False
+    source_standards = set(normalize_port_standards(source_port))
+    target_standards = set(normalize_port_standards(target_port))
+    return bool(source_standards.intersection(target_standards))
 
 
 def validate_graph_ports(
@@ -191,3 +224,22 @@ def _diagnose(
             **meta,
         }
     )
+
+
+def _string_list(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value] if value else []
+    if not isinstance(value, Sequence) or isinstance(value, (bytes, bytearray)):
+        return []
+    seen = set()
+    result: List[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item:
+            continue
+        if item in seen:
+            continue
+        seen.add(item)
+        result.append(item)
+    return result

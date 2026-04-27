@@ -1,9 +1,9 @@
 """
-Profile models for Capability Graph runtime/workspace presets.
+Capability Profile models for Capability Graph runtime/workspace presets.
 
-These profiles are intentionally separate from StartupProfileManager. Existing
-startup profiles remain the launch-time source of truth until a later explicit
-bridge or migration PR.
+Capability profiles are intentionally separate from StartupProfileManager.
+Existing startup profiles remain the launch-time source of truth until a later
+explicit bridge or migration PR.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ class ProfileValidationError(ValueError):
 
 
 @dataclass(frozen=True)
-class ProfileDefinition:
+class CapabilityProfileDefinition:
     profile_id: str
     kind: str = "runtime_profile"
     locale: Optional[str] = None
@@ -47,7 +47,7 @@ class ProfileDefinition:
         source_path: Optional[str] = None,
         pack_id: Optional[str] = None,
         source_type: str = "user",
-    ) -> "ProfileDefinition":
+    ) -> "CapabilityProfileDefinition":
         if not isinstance(data, Mapping):
             raise ProfileValidationError("profile must be an object")
         version = data.get("version")
@@ -125,13 +125,19 @@ def load_profile_document(
     source_path: Optional[str] = None,
     pack_id: Optional[str] = None,
     source_type: str = "user",
-) -> ProfileDefinition:
-    return ProfileDefinition.from_dict(
+) -> CapabilityProfileDefinition:
+    return CapabilityProfileDefinition.from_dict(
         data,
         source_path=source_path,
         pack_id=pack_id,
         source_type=source_type,
     )
+
+
+# Compatibility alias for the initial Capability Graph PRs. New code should use
+# CapabilityProfileDefinition to keep it distinct from StartupProfileManager's
+# launch-time startup profiles.
+ProfileDefinition = CapabilityProfileDefinition
 
 
 def _require_id(value: Any, field_name: str) -> str:

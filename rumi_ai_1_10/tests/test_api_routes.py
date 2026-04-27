@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -160,6 +161,26 @@ class TestApiRouteTableBuild(unittest.TestCase):
         from core_runtime.pack_api_server import PackAPIHandler
         count = PackAPIHandler.load_api_routes(None)
         self.assertEqual(count, 0)
+
+    def test_core_control_panel_declares_node_manager_routes(self):
+        routes_path = (
+            Path(__file__).resolve().parent.parent
+            / "core_runtime"
+            / "core_pack"
+            / "core_control_panel"
+            / "ecosystem.json"
+        )
+        routes = json.loads(routes_path.read_text(encoding="utf-8"))["api_routes"]
+        node_routes = [
+            route
+            for route in routes
+            if route.get("method") == "GET"
+            and (route.get("path") == "/api/panel/nodes" or route.get("path_pattern") == "/api/panel/profiles/{profile_id}/nodes")
+        ]
+
+        handlers = {route["handler"] for route in node_routes}
+        self.assertIn("_panel_get_nodes", handlers)
+        self.assertIn("_panel_get_profile_nodes", handlers)
 
 
 class TestPathParamSafety(unittest.TestCase):
