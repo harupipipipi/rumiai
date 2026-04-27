@@ -20,10 +20,14 @@ class StartupCapabilityCompileResult:
     runtime_profile_key: Optional[str] = None
     runtime_profile: Optional[Dict[str, Any]] = None
     diagnostics: List[Dict[str, Any]] = field(default_factory=list)
+    skipped: bool = False
+    reason: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "ok": self.ok,
+            "skipped": self.skipped,
+            "reason": self.reason,
             "graph_id": self.graph_id,
             "capability_profile_id": self.capability_profile_id,
             "runtime_profile_key": self.runtime_profile_key,

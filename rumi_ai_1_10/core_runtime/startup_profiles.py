@@ -243,7 +243,7 @@ class StartupProfileManager:
         self._apply_profile_to_active_ecosystem(profile, catalog, launched=True)
         capability_graph = self._compile_launch_capability_graph(profile)
         if capability_graph.get("runtime_profile_key"):
-            profile["runtime_profile_key"] = capability_graph["runtime_profile_key"]
+            profile["last_runtime_profile_key"] = capability_graph["runtime_profile_key"]
             index = self._find_profile_index(state["profiles"], profile_id)
             if index is not None:
                 state["profiles"][index] = profile
@@ -376,8 +376,12 @@ class StartupProfileManager:
                 payload.get("capability_profile_id") if isinstance(payload.get("capability_profile_id"), str) else None
             ),
             "launch_capability_graph": bool(payload.get("launch_capability_graph", False)),
-            "runtime_profile_key": (
-                payload.get("runtime_profile_key") if isinstance(payload.get("runtime_profile_key"), str) else None
+            "last_runtime_profile_key": (
+                payload.get("last_runtime_profile_key")
+                if isinstance(payload.get("last_runtime_profile_key"), str)
+                else payload.get("runtime_profile_key")
+                if isinstance(payload.get("runtime_profile_key"), str)
+                else None
             ),
             "surfaces": dict(surfaces),
             "enabled_nodes": self._string_list(payload.get("enabled_nodes")),
@@ -396,7 +400,7 @@ class StartupProfileManager:
             "default_graph",
             "capability_profile_id",
             "launch_capability_graph",
-            "runtime_profile_key",
+            "last_runtime_profile_key",
             "surfaces",
             "enabled_nodes",
             "disabled_nodes",
@@ -802,7 +806,9 @@ class StartupProfileManager:
     def _compile_launch_capability_graph(self, profile: Dict[str, Any]) -> Dict[str, Any]:
         if not profile.get("launch_capability_graph"):
             return {
-                "ok": False,
+                "ok": True,
+                "skipped": True,
+                "reason": "launch_capability_graph_disabled",
                 "graph_id": profile.get("default_graph"),
                 "capability_profile_id": profile.get("capability_profile_id"),
                 "runtime_profile_key": None,
@@ -819,6 +825,8 @@ class StartupProfileManager:
         if self.interface_registry is None:
             return {
                 "ok": False,
+                "skipped": False,
+                "reason": None,
                 "graph_id": profile.get("default_graph"),
                 "capability_profile_id": profile.get("capability_profile_id"),
                 "runtime_profile_key": None,
@@ -858,6 +866,8 @@ class StartupProfileManager:
             "startup_capability_graph",
             {
                 "ok": bool(capability_graph.get("ok")),
+                "skipped": bool(capability_graph.get("skipped", False)),
+                "reason": capability_graph.get("reason"),
                 "graph_id": capability_graph.get("graph_id"),
                 "capability_profile_id": capability_graph.get("capability_profile_id"),
                 "runtime_profile_key": capability_graph.get("runtime_profile_key"),

@@ -172,7 +172,7 @@ def test_runtime_profile_v2_fields_are_saved_and_preserved_on_update(tmp_path: P
                 "default_graph": "cli_workspace",
                 "capability_profile_id": "defaultspack.coding",
                 "launch_capability_graph": True,
-                "runtime_profile_key": "runtime_profile.defaultspack.coding.cli_workspace",
+                "last_runtime_profile_key": "runtime_profile.defaultspack.coding.cli_workspace",
                 "surfaces": {"preferred": "cli", "enabled": ["cli"]},
                 "enabled_nodes": ["defaultspack.agent"],
                 "disabled_nodes": ["defaultspack.frontend"],
@@ -191,7 +191,7 @@ def test_runtime_profile_v2_fields_are_saved_and_preserved_on_update(tmp_path: P
     assert profile["default_graph"] == "cli_workspace"
     assert profile["capability_profile_id"] == "defaultspack.coding"
     assert profile["launch_capability_graph"] is True
-    assert profile["runtime_profile_key"] == "runtime_profile.defaultspack.coding.cli_workspace"
+    assert profile["last_runtime_profile_key"] == "runtime_profile.defaultspack.coding.cli_workspace"
     assert profile["surfaces"] == {"preferred": "cli", "enabled": ["cli"]}
     assert profile["enabled_nodes"] == ["defaultspack.agent"]
     assert profile["disabled_nodes"] == ["defaultspack.frontend"]
@@ -508,7 +508,7 @@ def test_launch_profile_compiles_capability_graph_when_opted_in(tmp_path: Path):
     assert capability_graph["capability_profile_id"] == "defaultspack.startup"
     assert capability_graph["runtime_profile_key"] == "runtime_profile.defaultspack.startup.defaultspack.startup"
     assert interface_registry.get(capability_graph["runtime_profile_key"]) is not None
-    assert response["profile"]["runtime_profile_key"] == capability_graph["runtime_profile_key"]
+    assert response["profile"]["last_runtime_profile_key"] == capability_graph["runtime_profile_key"]
     assert active.metadata["startup_capability_graph"]["runtime_profile_key"] == capability_graph["runtime_profile_key"]
 
 
@@ -548,6 +548,40 @@ def test_launch_profile_soft_fails_when_capability_graph_is_missing(tmp_path: Pa
         for item in response["capability_graph"]["diagnostics"]
     )
     assert active.metadata["startup_capability_graph"]["ok"] is False
+
+
+def test_launch_profile_skips_capability_graph_when_not_opted_in(tmp_path: Path):
+    manager = StartupProfileManager(
+        storage_path=tmp_path / "startup_profiles.json",
+        interface_registry=InterfaceRegistry(),
+    )
+    active = _FakeActiveEcosystem()
+
+    with patch(
+        "backend_core.ecosystem.active_ecosystem.get_active_ecosystem_manager",
+        return_value=active,
+    ):
+        with patch("core_runtime.api.control_panel_handlers.request_kernel_restart"):
+            created = manager.create_profile(
+                {
+                    "profile_id": "rumi_desktopapp",
+                    "name": "Rumi Desktop",
+                    "default_graph": "defaultspack.startup",
+                    "capability_profile_id": "defaultspack.startup",
+                    "launch_capability_graph": False,
+                }
+            )
+            response = manager.launch_profile(created["profile"]["profile_id"])
+
+    capability_graph = response["capability_graph"]
+    assert response["launched"] is True
+    assert capability_graph["ok"] is True
+    assert capability_graph["skipped"] is True
+    assert capability_graph["reason"] == "launch_capability_graph_disabled"
+    assert capability_graph["runtime_profile_key"] is None
+    assert response["profile"]["last_runtime_profile_key"] is None
+    assert active.metadata["startup_capability_graph"]["skipped"] is True
+    assert active.metadata["startup_capability_graph"]["reason"] == "launch_capability_graph_disabled"
 
 
 def test_launch_profile_rejects_shared_runtime_component_type_conflict(tmp_path: Path):

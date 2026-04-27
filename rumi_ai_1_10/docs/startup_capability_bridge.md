@@ -14,7 +14,7 @@ Startup Profiles can opt in to graph compilation with these fields:
   "default_graph": "defaultspack.startup",
   "capability_profile_id": "defaultspack.startup",
   "launch_capability_graph": true,
-  "runtime_profile_key": null
+  "last_runtime_profile_key": null
 }
 ```
 
@@ -22,11 +22,13 @@ Startup Profiles can opt in to graph compilation with these fields:
 - `capability_profile_id` selects the Capability Profile used for graph policy,
   node settings, and enabled or disabled nodes.
 - `launch_capability_graph` controls whether launch compiles the graph.
-- `runtime_profile_key` records the last registered runtime profile key after a
-  successful launch compile.
+- `last_runtime_profile_key` records the last registered runtime profile key
+  after a successful launch compile.
 
 Profiles that omit `launch_capability_graph`, or set it to `false`, keep the
-previous startup launch behavior.
+previous startup launch behavior. Their launch result includes
+`capability_graph.skipped: true` with reason
+`launch_capability_graph_disabled`; this is non-fatal.
 
 ## Launch behavior
 
