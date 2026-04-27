@@ -49,6 +49,8 @@ class PortDefinition:
             )
 
         standards = data.get("standards")
+        if standards is None and data.get("contracts") is not None:
+            standards = data.get("contracts")
         legacy_contract = data.get("contract")
         if standards is None and legacy_contract is not None:
             standards = [legacy_contract]

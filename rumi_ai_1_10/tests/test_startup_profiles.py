@@ -142,6 +142,56 @@ def test_list_profiles_payload_builds_default_profile_and_candidates(tmp_path: P
     assert payload["catalog"]["slot_candidates"]["provider"][0]["pack_id"] == "defaultspack"
 
 
+def test_runtime_profile_v2_fields_are_saved_and_preserved_on_update(tmp_path: Path):
+    eco_root = tmp_path / "ecosystem"
+    defaultspack_path = _write_pack(
+        eco_root,
+        "defaultspack",
+        {
+            "tool": ["defaults.tool.invoke"],
+            "frontend": ["defaults.frontend.start"],
+            "ai_client": ["defaults.ai.complete", "defaults.ai.providers"],
+            "memory": ["defaults.memory.store"],
+        },
+    )
+    locations = [
+        SimpleNamespace(pack_id="defaultspack", ecosystem_json_path=defaultspack_path, pack_subdir=defaultspack_path.parent),
+    ]
+    manager = StartupProfileManager(storage_path=tmp_path / "startup_profiles.json")
+
+    with patch("core_runtime.startup_profiles.discover_pack_locations", return_value=locations):
+        created = manager.create_profile(
+            {
+                "profile_id": "rumi_cli",
+                "name": "Rumi CLI",
+                "display_name": {"ja": "Rumi CLI", "en": "Rumi CLI"},
+                "locale": "ja",
+                "default_flow": "cli_session",
+                "default_graph": "cli_workspace",
+                "surfaces": {"preferred": "cli", "enabled": ["cli"]},
+                "enabled_nodes": ["defaultspack.agent"],
+                "disabled_nodes": ["defaultspack.frontend"],
+                "node_settings": {"defaultspack.agent": {"model": "default"}},
+                "policy": {"max_tool_calls": 3},
+                "permissions": {"tools": "ask"},
+            }
+        )
+        updated = manager.update_profile("rumi_cli", {"name": "CLI Updated"})
+
+    profile = updated["profile"]
+    assert created["profile"]["version"] == 2
+    assert profile["name"] == "CLI Updated"
+    assert profile["kind"] == "runtime_profile"
+    assert profile["default_flow"] == "cli_session"
+    assert profile["default_graph"] == "cli_workspace"
+    assert profile["surfaces"] == {"preferred": "cli", "enabled": ["cli"]}
+    assert profile["enabled_nodes"] == ["defaultspack.agent"]
+    assert profile["disabled_nodes"] == ["defaultspack.frontend"]
+    assert profile["node_settings"] == {"defaultspack.agent": {"model": "default"}}
+    assert profile["policy"] == {"max_tool_calls": 3}
+    assert profile["permissions"] == {"tools": "ask"}
+
+
 def test_update_profile_rejects_contract_mismatch(tmp_path: Path):
     eco_root = tmp_path / "ecosystem"
     defaultspack_path = _write_pack(

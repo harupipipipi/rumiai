@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .paths import discover_pack_locations
+from .port_standards import can_connect_ports as _can_connect_standard_ports
 
 logger = logging.getLogger(__name__)
 
@@ -89,11 +90,12 @@ def can_connect_ports(
     target_direction: str,
     target_contracts: List[str],
 ) -> bool:
-    if source_direction != "output" or target_direction != "input":
-        return False
-    source_set = {contract for contract in source_contracts if contract}
-    target_set = {contract for contract in target_contracts if contract}
-    return bool(source_set.intersection(target_set))
+    return _can_connect_standard_ports(
+        source_direction,
+        source_contracts,
+        target_direction,
+        target_contracts,
+    )
 
 
 def _now_ts() -> int:
@@ -150,6 +152,9 @@ class StartupProfileManager:
             "standard_pack_id": payload.get("standard_pack_id", current.get("standard_pack_id")),
             "slots": payload.get("slots", current.get("slots", {})),
         }
+        for field_name in self._runtime_profile_field_names():
+            if field_name in payload or field_name in current:
+                merged_payload[field_name] = payload.get(field_name, current.get(field_name))
         updated = self._profile_from_payload(profile_id, merged_payload, catalog)
         updated["created_at"] = current.get("created_at", _now_ts())
         updated["updated_at"] = _now_ts()
@@ -319,11 +324,59 @@ class StartupProfileManager:
                 slot_value = self._default_slot_binding(slot_id, catalog)
             slots[slot_id] = slot_value
         return {
+            "version": 2,
             "profile_id": profile_id,
             "name": str(payload.get("name") or profile_id),
+            **self._runtime_profile_fields(profile_id, payload),
             "standard_pack_id": standard_pack_id,
             "slots": slots,
         }
+
+    def _runtime_profile_fields(self, profile_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        display_name = payload.get("display_name")
+        if isinstance(display_name, str):
+            display_name = {"en": display_name}
+        if not isinstance(display_name, dict):
+            name = str(payload.get("name") or profile_id)
+            display_name = {"en": name, "ja": name}
+
+        surfaces = payload.get("surfaces")
+        if not isinstance(surfaces, dict):
+            surfaces = {"preferred": "desktop", "enabled": ["desktop", "cli"]}
+
+        return {
+            "kind": str(payload.get("kind") or "runtime_profile"),
+            "display_name": {str(key): str(value) for key, value in display_name.items() if key and value},
+            "locale": payload.get("locale") if isinstance(payload.get("locale"), str) else "ja",
+            "default_flow": payload.get("default_flow") if isinstance(payload.get("default_flow"), str) else None,
+            "default_graph": payload.get("default_graph") if isinstance(payload.get("default_graph"), str) else None,
+            "surfaces": dict(surfaces),
+            "enabled_nodes": self._string_list(payload.get("enabled_nodes")),
+            "disabled_nodes": self._string_list(payload.get("disabled_nodes")),
+            "node_settings": dict(payload.get("node_settings")) if isinstance(payload.get("node_settings"), dict) else {},
+            "policy": dict(payload.get("policy")) if isinstance(payload.get("policy"), dict) else {},
+            "permissions": dict(payload.get("permissions")) if isinstance(payload.get("permissions"), dict) else {},
+        }
+
+    def _runtime_profile_field_names(self) -> List[str]:
+        return [
+            "kind",
+            "display_name",
+            "locale",
+            "default_flow",
+            "default_graph",
+            "surfaces",
+            "enabled_nodes",
+            "disabled_nodes",
+            "node_settings",
+            "policy",
+            "permissions",
+        ]
+
+    def _string_list(self, value: Any) -> List[str]:
+        if not isinstance(value, list):
+            return []
+        return [str(item) for item in value if isinstance(item, str) and item]
 
     def _default_standard_pack_id(self, catalog: Dict[str, Any]) -> str:
         standard_packs = catalog.get("standard_packs") or []

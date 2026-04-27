@@ -50,6 +50,42 @@
           "required": false
         },
         {
+          "id": "memory",
+          "direction": "input",
+          "display_name": {
+            "ja": "メモリ",
+            "en": "Memory"
+          },
+          "standards": ["rumi.memory.store"],
+          "aliases": ["memory", "store", "recall"],
+          "multiple": false,
+          "required": false
+        },
+        {
+          "id": "prompt",
+          "direction": "input",
+          "display_name": {
+            "ja": "プロンプト",
+            "en": "Prompt"
+          },
+          "standards": ["rumi.prompt.bundle"],
+          "aliases": ["prompt", "system_prompt"],
+          "multiple": false,
+          "required": false
+        },
+        {
+          "id": "surface",
+          "direction": "input",
+          "display_name": {
+            "ja": "サーフェス",
+            "en": "Surface"
+          },
+          "standards": ["rumi.ui.surface", "rumi.cli.surface"],
+          "aliases": ["surface", "frontend", "ui", "cli"],
+          "multiple": true,
+          "required": false
+        },
+        {
           "id": "result",
           "direction": "output",
           "display_name": {
@@ -66,7 +102,10 @@
         "compile": "defaultspack:agent.compile_node",
         "on_input": {
           "ai": "defaultspack:agent.bind_ai",
-          "tools": "defaultspack:agent.bind_tools"
+          "tools": "defaultspack:agent.bind_tools",
+          "memory": "defaultspack:agent.bind_memory",
+          "prompt": "defaultspack:agent.bind_prompt",
+          "surface": "defaultspack:agent.bind_surface"
         }
       },
       "metadata": {

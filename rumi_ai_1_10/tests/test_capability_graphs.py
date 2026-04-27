@@ -668,6 +668,63 @@ def test_defaultspack_minimal_bindings_compile_sample_graph() -> None:
     assert set(defaultspack["cli_surfaces"]) == {"cli"}
 
 
+def test_defaultspack_startup_graph_includes_memory_prompt_and_surface() -> None:
+    from ecosystem.defaultspack.capability_bindings import (
+        register_defaultspack_binding_handlers,
+    )
+
+    defaultspack_root = Path(__file__).resolve().parents[1] / "ecosystem" / "defaultspack"
+    pack = SimpleNamespace(
+        pack_id="defaultspack",
+        subdir=defaultspack_root,
+        path=defaultspack_root,
+    )
+    registry = _registry(pack)
+    approval_manager = FakeApprovalManager({"defaultspack"})
+    interface_registry = InterfaceRegistry()
+    register_defaultspack_binding_handlers(interface_registry)
+
+    node_registry = EcosystemNodeRegistry(
+        registry=registry,
+        approval_manager=approval_manager,
+        interface_registry=interface_registry,
+    )
+    graph_loader = CapabilityGraphLoader(
+        registry=registry,
+        approval_manager=approval_manager,
+        interface_registry=interface_registry,
+        shared_graphs_dir=defaultspack_root / "missing-user-graphs",
+        workspace_graphs_dir=defaultspack_root / "missing-workspace-graphs",
+    )
+    profile_loader = CapabilityProfileLoader(
+        registry=registry,
+        approval_manager=approval_manager,
+        interface_registry=interface_registry,
+        shared_profiles_dir=defaultspack_root / "missing-user-profiles",
+    )
+    nodes = node_registry.load_all_nodes(register=True)
+    graph = graph_loader.get_graph("defaultspack_startup")
+    profile = profile_loader.get_profile("defaultspack.coding")
+    assert graph is not None
+    assert profile is not None
+    assert {"defaultspack.memory", "defaultspack.prompt"}.issubset(nodes)
+
+    result = CapabilityGraphCompiler(interface_registry=interface_registry).compile(
+        graph,
+        profile=profile,
+        nodes=nodes,
+    )
+
+    assert result.ok is True
+    assert result.runtime_profile is not None
+    defaultspack = result.runtime_profile["defaultspack"]
+    assert defaultspack["agents"]["agent"]["memory"] == "memory"
+    assert defaultspack["agents"]["agent"]["prompt"] == "prompt"
+    assert defaultspack["agents"]["agent"]["surfaces"] == ["frontend"]
+    assert set(defaultspack["memory"]) == {"memory"}
+    assert set(defaultspack["prompts"]) == {"prompt"}
+
+
 def test_flow_step_can_explicitly_compile_defaultspack_graph() -> None:
     from ecosystem.defaultspack.capability_bindings import (
         register_defaultspack_binding_handlers,

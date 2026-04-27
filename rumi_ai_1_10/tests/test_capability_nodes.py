@@ -76,6 +76,25 @@ def test_legacy_name_and_contract_are_normalized() -> None:
     assert node.display_label("ja") == "Agent"
 
 
+def test_legacy_contracts_are_normalized() -> None:
+    [node] = load_node_document(
+        _node_doc(
+            {
+                "node_id": "pack.agent",
+                "ports": [
+                    {
+                        "id": "tools",
+                        "direction": "input",
+                        "contracts": ["rumi.tool.bundle"],
+                    }
+                ],
+            }
+        )
+    )
+
+    assert node.ports[0].standards == ["rumi.tool.bundle"]
+
+
 def test_invalid_direction_is_rejected() -> None:
     with pytest.raises(NodeValidationError, match="invalid direction"):
         load_node_document(

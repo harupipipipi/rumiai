@@ -186,7 +186,11 @@ class CapabilityGraphLoader:
         return sorted(self.shared_graphs_dir.glob("*.graph.yaml"))
 
     def _discover_pack_graph_files(self, pack_info: Any) -> List[Path]:
-        pack_subdir = getattr(pack_info, "subdir", None) or getattr(pack_info, "path", None)
+        pack_subdir = (
+            getattr(pack_info, "pack_subdir", None)
+            or getattr(pack_info, "subdir", None)
+            or getattr(pack_info, "path", None)
+        )
         if pack_subdir is None:
             return []
         graphs_dir = Path(pack_subdir) / "graphs"
@@ -207,10 +211,14 @@ class CapabilityGraphLoader:
         return []
 
     def _load_registry(self) -> Any:
-        from backend_core.ecosystem.registry import Registry
+        from .paths import discover_pack_locations
 
-        registry = Registry(ecosystem_dir=self.ecosystem_dir) if self.ecosystem_dir else Registry()
-        registry.load_all_packs()
+        locations = discover_pack_locations(self.ecosystem_dir)
+        registry = type(
+            "DiscoveredPackRegistry",
+            (),
+            {"packs": {loc.pack_id: loc for loc in locations}},
+        )()
         self.registry = registry
         return registry
 
