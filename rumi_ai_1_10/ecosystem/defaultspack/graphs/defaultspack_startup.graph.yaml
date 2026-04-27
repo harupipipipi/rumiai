@@ -1,19 +1,17 @@
-graph_id: defaultspack_startup
+graph_id: defaultspack.startup
 version: rumi.graph.v1
 
 display_name:
-  ja: defaultspack startup
-  en: defaultspack startup
+  ja: defaultspack 起動
+  en: defaultspack Startup
 
 description:
-  ja: defaultspack の起動時 Capability Graph。
-  en: Startup Capability Graph for defaultspack.
+  ja: Runtime Profile から defaultspack の最小起動能力を組み立てる Capability Graph。
+  en: Capability Graph that assembles defaultspack startup capabilities from a Runtime Profile.
 
 nodes:
   - id: start
     ref: rumi.start
-  - id: agent
-    ref: defaultspack.agent
   - id: ai
     ref: defaultspack.ai_client
   - id: tools
@@ -22,6 +20,10 @@ nodes:
     ref: defaultspack.memory
   - id: prompt
     ref: defaultspack.prompt
+  - id: agent
+    ref: defaultspack.agent
+  - id: cli
+    ref: defaultspack.cli_surface
   - id: frontend
     ref: defaultspack.frontend
 
@@ -39,16 +41,16 @@ edges:
     to: agent.tools
     kind: binding
   - id: memory_to_agent
-    from: memory.store
+    from: memory.memory
     to: agent.memory
     kind: binding
   - id: prompt_to_agent
     from: prompt.prompt
     to: agent.prompt
     kind: binding
-  - id: frontend_to_agent
-    from: frontend.ui
-    to: agent.surface
+  - id: cli_to_frontend
+    from: cli.surface
+    to: frontend.surface
     kind: binding
 
 metadata:

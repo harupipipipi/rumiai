@@ -11,16 +11,15 @@ def register_defaultspack_binding_handlers(interface_registry: Any) -> Dict[str,
         "defaultspack:agent.compile_node": compile_agent_node,
         "defaultspack:agent.bind_ai": bind_agent_ai,
         "defaultspack:agent.bind_tools": bind_agent_tools,
-        "defaultspack:agent.bind_memory": bind_agent_memory,
-        "defaultspack:agent.bind_prompt": bind_agent_prompt,
-        "defaultspack:agent.bind_surface": bind_agent_surface,
         "defaultspack:ai_client.compile_node": compile_ai_client_node,
         "defaultspack:tool.compile_node": compile_tool_node,
-        "defaultspack:memory.compile_node": compile_memory_node,
-        "defaultspack:prompt.compile_node": compile_prompt_node,
         "defaultspack:frontend.compile_node": compile_frontend_node,
         "defaultspack:frontend.bind_surface": bind_frontend_surface,
         "defaultspack:cli_surface.compile_node": compile_cli_surface_node,
+        "defaultspack:memory.compile_node": compile_memory_node,
+        "defaultspack:prompt.compile_node": compile_prompt_node,
+        "defaultspack:agent.bind_memory": bind_agent_memory,
+        "defaultspack:agent.bind_prompt": bind_agent_prompt,
     }
     for handler_id, handler in handlers.items():
         if interface_registry.get(handler_id) is not None:
@@ -43,9 +42,6 @@ def compile_agent_node(runtime_profile: Dict[str, Any], instance: Any) -> None:
     agent = _agent_record(runtime_profile, instance)
     agent.setdefault("ai", None)
     agent.setdefault("tools", [])
-    agent.setdefault("memory", None)
-    agent.setdefault("prompt", None)
-    agent.setdefault("surfaces", [])
 
 
 def bind_agent_ai(runtime_profile: Dict[str, Any], source: Any, target: Any) -> None:
@@ -63,20 +59,14 @@ def bind_agent_tools(runtime_profile: Dict[str, Any], source: Any, target: Any) 
 
 def bind_agent_memory(runtime_profile: Dict[str, Any], source: Any, target: Any) -> None:
     agent = _agent_record(runtime_profile, target)
-    agent["memory"] = _instance_ref(source)
+    memory_ref = _instance_ref(source)
+    agent["memory"] = memory_ref
 
 
 def bind_agent_prompt(runtime_profile: Dict[str, Any], source: Any, target: Any) -> None:
     agent = _agent_record(runtime_profile, target)
-    agent["prompt"] = _instance_ref(source)
-
-
-def bind_agent_surface(runtime_profile: Dict[str, Any], source: Any, target: Any) -> None:
-    agent = _agent_record(runtime_profile, target)
-    surface_ref = _instance_ref(source)
-    surfaces = agent.setdefault("surfaces", [])
-    if surface_ref not in surfaces:
-        surfaces.append(surface_ref)
+    prompt_ref = _instance_ref(source)
+    agent["prompt"] = prompt_ref
 
 
 def compile_ai_client_node(runtime_profile: Dict[str, Any], instance: Any) -> None:
@@ -85,14 +75,6 @@ def compile_ai_client_node(runtime_profile: Dict[str, Any], instance: Any) -> No
 
 def compile_tool_node(runtime_profile: Dict[str, Any], instance: Any) -> None:
     _section(runtime_profile, "tools")[_instance_ref(instance)] = _node_record(instance)
-
-
-def compile_memory_node(runtime_profile: Dict[str, Any], instance: Any) -> None:
-    _section(runtime_profile, "memory")[_instance_ref(instance)] = _node_record(instance)
-
-
-def compile_prompt_node(runtime_profile: Dict[str, Any], instance: Any) -> None:
-    _section(runtime_profile, "prompts")[_instance_ref(instance)] = _node_record(instance)
 
 
 def compile_frontend_node(runtime_profile: Dict[str, Any], instance: Any) -> None:
@@ -112,6 +94,14 @@ def bind_frontend_surface(runtime_profile: Dict[str, Any], source: Any, target: 
 
 def compile_cli_surface_node(runtime_profile: Dict[str, Any], instance: Any) -> None:
     _section(runtime_profile, "cli_surfaces")[_instance_ref(instance)] = _node_record(instance)
+
+
+def compile_memory_node(runtime_profile: Dict[str, Any], instance: Any) -> None:
+    _section(runtime_profile, "memory")[_instance_ref(instance)] = _node_record(instance)
+
+
+def compile_prompt_node(runtime_profile: Dict[str, Any], instance: Any) -> None:
+    _section(runtime_profile, "prompts")[_instance_ref(instance)] = _node_record(instance)
 
 
 def _agent_record(runtime_profile: Dict[str, Any], instance: Any) -> Dict[str, Any]:

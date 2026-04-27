@@ -1,0 +1,36 @@
+{
+  "version": "rumi.node.v1",
+  "nodes": [
+    {
+      "node_id": "defaultspack.tool",
+      "component_id": "tool",
+      "kind": "ecosystem.tool",
+      "display_name": {
+        "ja": "ツール",
+        "en": "Tools"
+      },
+      "description": {
+        "ja": "AgentEngine に接続できる tool bundle を提供する defaultspack ノード。",
+        "en": "Defaultspack node that provides a tool bundle for AgentEngine."
+      },
+      "ports": [
+        {
+          "id": "tools",
+          "direction": "output",
+          "standards": ["rumi.tool.bundle"],
+          "display_name": {"ja": "ツール", "en": "Tools"},
+          "aliases": ["functions"],
+          "multiple": true
+        }
+      ],
+      "bindings": {
+        "compile": "defaultspack:tool.compile_node"
+      },
+      "metadata": {
+        "pack_id": "defaultspack",
+        "component_id": "tool",
+        "category": "runtime"
+      }
+    }
+  ]
+}

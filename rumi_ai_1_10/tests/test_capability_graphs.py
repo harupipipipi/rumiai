@@ -668,7 +668,7 @@ def test_defaultspack_minimal_bindings_compile_sample_graph() -> None:
     assert set(defaultspack["cli_surfaces"]) == {"cli"}
 
 
-def test_defaultspack_startup_graph_includes_memory_prompt_and_surface() -> None:
+def test_defaultspack_startup_graph_compiles_with_memory_and_prompt_nodes() -> None:
     from ecosystem.defaultspack.capability_bindings import (
         register_defaultspack_binding_handlers,
     )
@@ -702,12 +702,14 @@ def test_defaultspack_startup_graph_includes_memory_prompt_and_surface() -> None
         interface_registry=interface_registry,
         shared_profiles_dir=defaultspack_root / "missing-user-profiles",
     )
-    nodes = node_registry.load_all_nodes(register=True)
-    graph = graph_loader.get_graph("defaultspack_startup")
-    profile = profile_loader.get_profile("defaultspack.coding")
+    graph = graph_loader.get_graph("defaultspack.startup")
+    profile = profile_loader.get_profile("defaultspack.startup")
     assert graph is not None
     assert profile is not None
-    assert {"defaultspack.memory", "defaultspack.prompt"}.issubset(nodes)
+
+    nodes = node_registry.load_all_nodes(register=True)
+    assert "defaultspack.memory" in nodes
+    assert "defaultspack.prompt" in nodes
 
     result = CapabilityGraphCompiler(interface_registry=interface_registry).compile(
         graph,
@@ -717,12 +719,11 @@ def test_defaultspack_startup_graph_includes_memory_prompt_and_surface() -> None
 
     assert result.ok is True
     assert result.runtime_profile is not None
-    defaultspack = result.runtime_profile["defaultspack"]
-    assert defaultspack["agents"]["agent"]["memory"] == "memory"
-    assert defaultspack["agents"]["agent"]["prompt"] == "prompt"
-    assert defaultspack["agents"]["agent"]["surfaces"] == ["frontend"]
-    assert set(defaultspack["memory"]) == {"memory"}
-    assert set(defaultspack["prompts"]) == {"prompt"}
+    agent = result.runtime_profile["defaultspack"]["agents"]["agent"]
+    assert agent["memory"] == "memory"
+    assert agent["prompt"] == "prompt"
+    assert set(result.runtime_profile["defaultspack"]["memory"]) == {"memory"}
+    assert set(result.runtime_profile["defaultspack"]["prompts"]) == {"prompt"}
 
 
 def test_flow_step_can_explicitly_compile_defaultspack_graph() -> None:

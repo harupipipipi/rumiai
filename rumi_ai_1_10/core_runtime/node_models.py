@@ -52,8 +52,11 @@ class PortDefinition:
         if standards is None and data.get("contracts") is not None:
             standards = data.get("contracts")
         legacy_contract = data.get("contract")
+        legacy_contracts = data.get("contracts")
         if standards is None and legacy_contract is not None:
             standards = [legacy_contract]
+        if standards is None and legacy_contracts is not None:
+            standards = legacy_contracts
         standards = _normalize_standards(standards, f"port '{port_id}'")
 
         return cls(

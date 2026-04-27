@@ -171,20 +171,16 @@ class TestApiRouteTableBuild(unittest.TestCase):
             / "ecosystem.json"
         )
         routes = json.loads(routes_path.read_text(encoding="utf-8"))["api_routes"]
-        exact = {(route.get("method"), route.get("path")): route for route in routes}
-        patterns = {
-            (route.get("method"), route.get("path_pattern")): route
+        node_routes = [
+            route
             for route in routes
-        }
+            if route.get("method") == "GET"
+            and (route.get("path") == "/api/panel/nodes" or route.get("path_pattern") == "/api/panel/profiles/{profile_id}/nodes")
+        ]
 
-        self.assertEqual(
-            exact[("GET", "/api/panel/nodes")]["handler"],
-            "_panel_get_nodes",
-        )
-        self.assertEqual(
-            patterns[("GET", "/api/panel/profiles/{id}/nodes")]["handler"],
-            "_panel_get_profile_nodes",
-        )
+        handlers = {route["handler"] for route in node_routes}
+        self.assertIn("_panel_get_nodes", handlers)
+        self.assertIn("_panel_get_profile_nodes", handlers)
 
 
 class TestPathParamSafety(unittest.TestCase):

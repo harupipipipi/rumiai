@@ -1,0 +1,67 @@
+{
+  "version": "rumi.node.v1",
+  "nodes": [
+    {
+      "node_id": "defaultspack.agent",
+      "component_id": "agent",
+      "kind": "ecosystem.agent",
+      "display_name": {
+        "ja": "エージェント",
+        "en": "Agent"
+      },
+      "description": {
+        "ja": "AI、ツール、メモリ、プロンプトを束ねて実行する defaultspack エージェントノード。",
+        "en": "Defaultspack agent node that runs with connected AI, tools, memory, and prompts."
+      },
+      "ports": [
+        {
+          "id": "start",
+          "direction": "input",
+          "standards": ["rumi.flow.start"],
+          "display_name": {"ja": "開始", "en": "Start"},
+          "required": true
+        },
+        {
+          "id": "ai",
+          "direction": "input",
+          "standards": ["rumi.ai.client"],
+          "display_name": {"ja": "AI", "en": "AI"},
+          "required": true
+        },
+        {
+          "id": "tools",
+          "direction": "input",
+          "standards": ["rumi.tool.bundle"],
+          "display_name": {"ja": "ツール", "en": "Tools"},
+          "multiple": true
+        },
+        {
+          "id": "memory",
+          "direction": "input",
+          "standards": ["rumi.memory.store"],
+          "display_name": {"ja": "メモリ", "en": "Memory"}
+        },
+        {
+          "id": "prompt",
+          "direction": "input",
+          "standards": ["rumi.prompt.bundle"],
+          "display_name": {"ja": "プロンプト", "en": "Prompt"}
+        }
+      ],
+      "bindings": {
+        "compile": "defaultspack:agent.compile_node",
+        "on_input": {
+          "ai": "defaultspack:agent.bind_ai",
+          "tools": "defaultspack:agent.bind_tools",
+          "memory": "defaultspack:agent.bind_memory",
+          "prompt": "defaultspack:agent.bind_prompt"
+        }
+      },
+      "metadata": {
+        "pack_id": "defaultspack",
+        "component_id": "agent",
+        "category": "runtime"
+      }
+    }
+  ]
+}

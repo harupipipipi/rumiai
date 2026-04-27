@@ -1,0 +1,35 @@
+{
+  "version": "rumi.node.v1",
+  "nodes": [
+    {
+      "node_id": "defaultspack.prompt",
+      "component_id": "prompt",
+      "kind": "ecosystem.prompt",
+      "display_name": {
+        "ja": "プロンプト",
+        "en": "Prompt"
+      },
+      "description": {
+        "ja": "system prompt と prompt bundle を提供する defaultspack ノード。",
+        "en": "Defaultspack node that provides system prompts and prompt bundles."
+      },
+      "ports": [
+        {
+          "id": "prompt",
+          "direction": "output",
+          "standards": ["rumi.prompt.bundle"],
+          "display_name": {"ja": "プロンプト", "en": "Prompt"},
+          "multiple": true
+        }
+      ],
+      "bindings": {
+        "compile": "defaultspack:prompt.compile_node"
+      },
+      "metadata": {
+        "pack_id": "defaultspack",
+        "component_id": "prompt",
+        "category": "runtime"
+      }
+    }
+  ]
+}

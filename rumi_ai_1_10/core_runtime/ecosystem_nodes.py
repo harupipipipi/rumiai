@@ -199,6 +199,8 @@ class EcosystemNodeRegistry:
         nodes_dir = base / "nodes"
         if nodes_dir.is_dir():
             candidates.extend(sorted(nodes_dir.glob("*.node.json")))
+            if candidates:
+                return candidates
 
         components_dir = base / "components"
         if components_dir.is_dir():

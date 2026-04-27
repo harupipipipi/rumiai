@@ -18,6 +18,10 @@ export function Setup() {
   const [loading, setLoading] = useState(false);
   const [linked, setLinked] = useState(false);
 
+  const finalizeSetup = async () => {
+    setSetupDone(true);
+  };
+
   useEffect(() => {
     void loadProfile();
   }, [loadProfile]);

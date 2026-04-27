@@ -21,7 +21,19 @@ Capability Graph profiles do not replace the existing `StartupProfileManager` or
 
 Until an explicit bridge or migration PR lands, existing startup profiles remain the launch-time source of truth for selecting startup behavior, setup, and runtime launch defaults. `rumi.profile.v1` is a graph/runtime preset used by Capability Graph loading, validation, compile, and viewer/node-manager filtering.
 
-The planned profile loader PR adapts to the existing system by coexisting with it. It may read startup-related defaults for display or diagnostics only when explicitly wired, but it must not supersede startup profile selection. A later backend API PR may expose both systems side by side or add a bridge endpoint, but replacing `StartupProfileManager` requires a dedicated migration decision and PR.
+The profile loader adapts to the existing system by coexisting with it. It may read startup-related defaults for display or diagnostics only when explicitly wired, but it must not supersede startup profile selection.
+
+The backend API exposes this relationship side by side:
+
+```json
+{
+  "launch_time_source_of_truth": "StartupProfileManager",
+  "capability_graph_profiles_role": "graph_runtime_presets",
+  "startup_profile_api": "/api/panel/startup/profiles"
+}
+```
+
+This is an explicit bridge contract for the viewer: startup profiles continue to own launch-time startup behavior, while `rumi.profile.v1` controls Capability Graph loading, palette filtering, validation, and compile preview. Replacing `StartupProfileManager` still requires a dedicated migration decision and PR.
 
 Terminology:
 

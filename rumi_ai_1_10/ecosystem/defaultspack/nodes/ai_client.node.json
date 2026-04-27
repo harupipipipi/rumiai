@@ -1,0 +1,36 @@
+{
+  "version": "rumi.node.v1",
+  "nodes": [
+    {
+      "node_id": "defaultspack.ai_client",
+      "component_id": "ai_client",
+      "kind": "ecosystem.ai_client",
+      "display_name": {
+        "ja": "AI クライアント",
+        "en": "AI Client"
+      },
+      "description": {
+        "ja": "completion、stream、embedding などを提供する defaultspack AI クライアント。",
+        "en": "Defaultspack AI client for completion, streaming, and embedding calls."
+      },
+      "ports": [
+        {
+          "id": "client",
+          "direction": "output",
+          "standards": ["rumi.ai.client"],
+          "display_name": {"ja": "クライアント", "en": "Client"},
+          "aliases": ["ai", "model_client"],
+          "multiple": true
+        }
+      ],
+      "bindings": {
+        "compile": "defaultspack:ai_client.compile_node"
+      },
+      "metadata": {
+        "pack_id": "defaultspack",
+        "component_id": "ai_client",
+        "category": "runtime"
+      }
+    }
+  ]
+}
