@@ -1,0 +1,35 @@
+{
+  "version": "rumi.node.v1",
+  "nodes": [
+    {
+      "node_id": "defaultspack.memory",
+      "component_id": "memory",
+      "kind": "ecosystem.memory",
+      "display_name": {
+        "ja": "メモリ",
+        "en": "Memory"
+      },
+      "description": {
+        "ja": "会話・プロジェクト・ベクターメモリを提供する defaultspack ノード。",
+        "en": "Defaultspack node for conversation, project, and vector memory."
+      },
+      "ports": [
+        {
+          "id": "memory",
+          "direction": "output",
+          "standards": ["rumi.memory.store"],
+          "display_name": {"ja": "メモリ", "en": "Memory"},
+          "multiple": true
+        }
+      ],
+      "bindings": {
+        "compile": "defaultspack:memory.compile_node"
+      },
+      "metadata": {
+        "pack_id": "defaultspack",
+        "component_id": "memory",
+        "category": "runtime"
+      }
+    }
+  ]
+}

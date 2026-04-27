@@ -48,6 +48,26 @@
     },
     {
       "method": "GET",
+      "path": "/api/panel/nodes",
+      "handler": "_panel_get_nodes"
+    },
+    {
+      "method": "GET",
+      "path_pattern": "/api/panel/nodes/{id}",
+      "handler": "_panel_get_node_detail"
+    },
+    {
+      "method": "GET",
+      "path_pattern": "/api/panel/profiles/{profile_id}/nodes",
+      "handler": "_panel_get_profile_nodes"
+    },
+    {
+      "method": "GET",
+      "path_pattern": "/api/panel/profiles/{profile_id}/node-state",
+      "handler": "_panel_get_profile_node_state"
+    },
+    {
+      "method": "GET",
       "path": "/api/panel/flows",
       "handler": "_panel_get_flows"
     },
@@ -172,6 +192,16 @@
       "method": "POST",
       "path_pattern": "/api/panel/startup/profiles/{id}/launch",
       "handler": "_panel_launch_startup_profile"
+    },
+    {
+      "method": "POST",
+      "path_pattern": "/api/panel/profiles/{profile_id}/nodes/{node_id}/enable",
+      "handler": "_panel_enable_profile_node"
+    },
+    {
+      "method": "POST",
+      "path_pattern": "/api/panel/profiles/{profile_id}/nodes/{node_id}/disable",
+      "handler": "_panel_disable_profile_node"
     },
     {
       "method": "POST",

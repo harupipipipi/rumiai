@@ -313,6 +313,192 @@ class ControlPanelHandlersMixin:
             return {"error": _SAFE_ERROR_MSG, "status_code": 500}
 
     # ------------------------------------------------------------------
+    # Capability Graph Node Manager
+    # ------------------------------------------------------------------
+
+    def _panel_node_registry(self):
+        from ..ecosystem_nodes import EcosystemNodeRegistry
+
+        kernel = getattr(self.__class__, "kernel", None) or getattr(self, "kernel", None)
+        interface_registry = getattr(kernel, "interface_registry", None) if kernel is not None else None
+        registry = getattr(getattr(kernel, "lifecycle", None), "registry", None) if kernel is not None else None
+        return EcosystemNodeRegistry(
+            registry=registry,
+            interface_registry=interface_registry,
+        )
+
+    def _panel_profile_loader(self):
+        from ..profile_loader import CapabilityProfileLoader
+
+        kernel = getattr(self.__class__, "kernel", None) or getattr(self, "kernel", None)
+        interface_registry = getattr(kernel, "interface_registry", None) if kernel is not None else None
+        registry = getattr(getattr(kernel, "lifecycle", None), "registry", None) if kernel is not None else None
+        return CapabilityProfileLoader(
+            registry=registry,
+            interface_registry=interface_registry,
+        )
+
+    def _panel_profile_node_overrides_path(self) -> Path:
+        base_dir = Path(__file__).resolve().parent.parent.parent
+        settings_dir = base_dir / "user_data" / "settings"
+        settings_dir.mkdir(parents=True, exist_ok=True)
+        return settings_dir / "profile_node_overrides.json"
+
+    def _panel_read_profile_node_overrides(self) -> Dict[str, Any]:
+        path = self._panel_profile_node_overrides_path()
+        if not path.is_file():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _panel_write_profile_node_overrides(self, overrides: Dict[str, Any]) -> None:
+        path = self._panel_profile_node_overrides_path()
+        tmp_path = path.with_suffix(".tmp")
+        tmp_path.write_text(json.dumps(overrides, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        os.replace(tmp_path, path)
+
+    def _panel_profile_with_node_overrides(self, profile_id: str):
+        from ..profile_models import load_profile_document
+
+        profile = self._panel_profile_loader().get_profile(profile_id)
+        if profile is None:
+            return None
+
+        data = profile.to_dict()
+        overrides = self._panel_read_profile_node_overrides().get(profile_id, {})
+        if isinstance(overrides, dict):
+            enabled_add = set(str(item) for item in overrides.get("enabled_nodes", []) if item)
+            disabled_add = set(str(item) for item in overrides.get("disabled_nodes", []) if item)
+            enabled_nodes = set(data.get("enabled_nodes") or [])
+            disabled_nodes = set(data.get("disabled_nodes") or [])
+            enabled_nodes.update(enabled_add)
+            disabled_nodes.update(disabled_add)
+            enabled_nodes.difference_update(disabled_add)
+            disabled_nodes.difference_update(enabled_add)
+            data["enabled_nodes"] = sorted(enabled_nodes)
+            data["disabled_nodes"] = sorted(disabled_nodes)
+
+        return load_profile_document(
+            {"version": "rumi.profile.v1", **data},
+            source_path=str(profile.metadata.get("source_path") or ""),
+            pack_id=profile.metadata.get("pack_id"),
+            source_type=str(profile.metadata.get("source_type") or "user"),
+        )
+
+    def _panel_get_nodes(self) -> Dict[str, Any]:
+        """GET /api/panel/nodes — Capability Graph node catalog."""
+        try:
+            registry = self._panel_node_registry()
+            nodes = registry.load_all_nodes(register=True)
+            return {
+                "nodes": [node.to_dict() for node in nodes.values()],
+                "count": len(nodes),
+                "diagnostics": list(registry.diagnostics),
+            }
+        except Exception as e:
+            _log_internal_error("panel_get_nodes", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_get_node_detail(self, node_id: str) -> Dict[str, Any]:
+        """GET /api/panel/nodes/{node_id} — Capability Graph node detail."""
+        try:
+            registry = self._panel_node_registry()
+            node = registry.get_node(node_id)
+            if node is None:
+                return {"error": f"Node '{node_id}' not found", "status_code": 404}
+            return {"node": node.to_dict()}
+        except Exception as e:
+            _log_internal_error("panel_get_node_detail", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_get_profile_nodes(self, profile_id: str) -> Dict[str, Any]:
+        """GET /api/panel/profiles/{profile_id}/nodes — profile-aware node catalog."""
+        try:
+            from ..profile_node_registry import ProfileNodeRegistry
+
+            profile = self._panel_profile_with_node_overrides(profile_id)
+            if profile is None:
+                return {"error": f"Profile '{profile_id}' not found", "status_code": 404}
+            profile_nodes = ProfileNodeRegistry(
+                node_registry=self._panel_node_registry(),
+                profile=profile,
+            )
+            nodes = [node.to_dict() for node in profile_nodes.list_enabled_nodes()]
+            return {
+                "profile_id": profile_id,
+                "nodes": nodes,
+                "count": len(nodes),
+            }
+        except Exception as e:
+            _log_internal_error("panel_get_profile_nodes", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_get_profile_node_state(self, profile_id: str) -> Dict[str, Any]:
+        """GET /api/panel/profiles/{profile_id}/node-state — profile-scoped node state."""
+        try:
+            from ..profile_node_registry import ProfileNodeRegistry
+
+            profile = self._panel_profile_with_node_overrides(profile_id)
+            if profile is None:
+                return {"error": f"Profile '{profile_id}' not found", "status_code": 404}
+            profile_nodes = ProfileNodeRegistry(
+                node_registry=self._panel_node_registry(),
+                profile=profile,
+            )
+            state = profile_nodes.node_state()
+            return {
+                "profile_id": profile_id,
+                "node_state": state,
+                "count": len(state) if isinstance(state, list) else 1,
+            }
+        except Exception as e:
+            _log_internal_error("panel_get_profile_node_state", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_enable_profile_node(self, profile_id: str, node_id: str) -> Dict[str, Any]:
+        return self._panel_set_profile_node_enabled(profile_id, node_id, True)
+
+    def _panel_disable_profile_node(self, profile_id: str, node_id: str) -> Dict[str, Any]:
+        return self._panel_set_profile_node_enabled(profile_id, node_id, False)
+
+    def _panel_set_profile_node_enabled(self, profile_id: str, node_id: str, enabled: bool) -> Dict[str, Any]:
+        try:
+            if self._panel_profile_loader().get_profile(profile_id) is None:
+                return {"error": f"Profile '{profile_id}' not found", "status_code": 404}
+            if self._panel_node_registry().get_node(node_id) is None:
+                return {"error": f"Node '{node_id}' not found", "status_code": 404}
+
+            overrides = self._panel_read_profile_node_overrides()
+            profile_overrides = overrides.setdefault(profile_id, {})
+            if not isinstance(profile_overrides, dict):
+                profile_overrides = {}
+                overrides[profile_id] = profile_overrides
+            enabled_nodes = set(str(item) for item in profile_overrides.get("enabled_nodes", []) if item)
+            disabled_nodes = set(str(item) for item in profile_overrides.get("disabled_nodes", []) if item)
+            if enabled:
+                enabled_nodes.add(node_id)
+                disabled_nodes.discard(node_id)
+            else:
+                disabled_nodes.add(node_id)
+                enabled_nodes.discard(node_id)
+            profile_overrides["enabled_nodes"] = sorted(enabled_nodes)
+            profile_overrides["disabled_nodes"] = sorted(disabled_nodes)
+            self._panel_write_profile_node_overrides(overrides)
+            state = self._panel_get_profile_node_state(profile_id)
+            return {
+                "profile_id": profile_id,
+                "node_id": node_id,
+                "enabled": enabled,
+                "node_state": state.get("node_state"),
+            }
+        except Exception as e:
+            _log_internal_error("panel_set_profile_node_enabled", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    # ------------------------------------------------------------------
     # Flow Management
     # ------------------------------------------------------------------
 
