@@ -26,7 +26,7 @@ function SettingsField({
   switch (field.type) {
     case "secret":
       control = (
-        <div className="flex items-center gap-2 min-w-[320px]">
+        <div className="flex flex-wrap items-center gap-2 min-w-0">
           <input
             type="password"
             autoComplete="off"
@@ -43,7 +43,7 @@ function SettingsField({
               setSecretDraft("");
               setSecretState("saved");
             }}
-            className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none"
+            className="min-w-[220px] flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none"
           />
           <button
             type="button"
@@ -131,8 +131,8 @@ function SettingsField({
   }
 
   return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between gap-4">
+    <div className="space-y-1.5 min-w-0">
+      <div className="flex flex-col gap-2">
         {commonLabel}
         {control}
       </div>
@@ -151,6 +151,9 @@ export function SettingsModalRenderer({
   onClose,
   onSettingChange,
 }: SettingsModalRendererProps) {
+  const [activeSectionId, setActiveSectionId] = useState(settingsSections[0]?.id ?? "system");
+  const activeSection = settingsSections.find((section) => section.id === activeSectionId) ?? settingsSections[0];
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -166,7 +169,7 @@ export function SettingsModalRenderer({
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            className="relative w-full max-w-4xl bg-[#09090b] border border-zinc-800 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]"
+            className="relative w-full max-w-5xl bg-[#09090b] border border-zinc-800 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[84vh]"
           >
             <div className="px-6 py-4 border-b border-zinc-800 flex justify-between items-center">
               <div>
@@ -179,30 +182,59 @@ export function SettingsModalRenderer({
                 <X size={18} />
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto p-6 space-y-8">
-              {settingsSections.map((section) => (
-                <section key={section.id} className="space-y-4">
-                  <div>
-                    <h3 className="text-sm font-medium text-zinc-100">{section.label}</h3>
-                    {section.description && <p className="text-xs text-zinc-500 mt-1">{section.description}</p>}
-                  </div>
-                  <div className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-4 space-y-4">
-                    {section.fields.map((field) => (
-                      <SettingsField
-                        key={`${section.id}.${field.id}`}
-                        sectionId={section.id}
-                        field={field}
-                        value={
-                          field.type === "secret" && field.configured_field
-                            ? settingsValues[section.id]?.[field.configured_field]
-                            : settingsValues[section.id]?.[field.id] ?? field.default
-                        }
-                        onChange={onSettingChange}
-                      />
-                    ))}
-                  </div>
-                </section>
-              ))}
+            <div className="grid flex-1 min-h-0 md:grid-cols-[220px_1fr]">
+              <nav className="border-b border-zinc-800 bg-zinc-950/50 p-3 md:border-b-0 md:border-r overflow-x-auto md:overflow-y-auto">
+                <div className="flex gap-2 md:flex-col">
+                  {settingsSections.map((section) => (
+                    <button
+                      key={section.id}
+                      type="button"
+                      onClick={() => setActiveSectionId(section.id)}
+                      className={cn(
+                        "flex-shrink-0 rounded-lg px-3 py-2 text-left text-xs transition-colors border",
+                        activeSection?.id === section.id
+                          ? "border-zinc-600 bg-zinc-800 text-zinc-100"
+                          : "border-transparent text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300",
+                      )}
+                    >
+                      <span className="block font-medium">{section.label}</span>
+                      <span className="mt-0.5 block text-[10px] text-zinc-600">{section.fields.length} fields</span>
+                    </button>
+                  ))}
+                </div>
+              </nav>
+
+              <div className="flex-1 overflow-y-auto p-6 space-y-8">
+                {activeSection && (
+                  <section className="space-y-4">
+                    <div>
+                      <h3 className="text-sm font-medium text-zinc-100">{activeSection.label}</h3>
+                      {activeSection.description && <p className="text-xs text-zinc-500 mt-1">{activeSection.description}</p>}
+                    </div>
+                    <div className="grid gap-4 lg:grid-cols-2">
+                      {activeSection.fields.map((field) => (
+                        <div
+                          key={`${activeSection.id}.${field.id}`}
+                          className={cn(
+                            "rounded-lg border border-zinc-800 bg-zinc-950/50 p-4",
+                            field.type === "textarea" || field.type === "secret" ? "lg:col-span-2" : "",
+                          )}
+                        >
+                          <SettingsField
+                            sectionId={activeSection.id}
+                            field={field}
+                            value={
+                              field.type === "secret" && field.configured_field
+                                ? settingsValues[activeSection.id]?.[field.configured_field]
+                                : settingsValues[activeSection.id]?.[field.id] ?? field.default
+                            }
+                            onChange={onSettingChange}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
 
               <section className="space-y-4">
                 <div>
@@ -257,6 +289,7 @@ export function SettingsModalRenderer({
                   readOnly
                 />
               </section>
+              </div>
             </div>
           </motion.div>
         </div>

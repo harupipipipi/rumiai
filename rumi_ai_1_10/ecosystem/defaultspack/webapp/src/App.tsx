@@ -68,6 +68,23 @@ function toUiMessage(message: ChatMessage): ChatUiMessage {
   };
 }
 
+function optimisticUserMessage(conversationId: string, text: string): ChatMessage {
+  return {
+    id: `optimistic-${Date.now()}`,
+    role: "user",
+    content: [{ type: "text", text }],
+    raw_text: text,
+    created_at: Date.now(),
+    conversation_id: conversationId,
+    parent_id: null,
+    children_ids: [],
+    sequence_number: 0,
+    finish_reason: null,
+    usage: null,
+    widget: null,
+  };
+}
+
 export default function App() {
   const [catalog, setCatalog] = useState<UICatalog | null>(null);
   const [settingsSections, setSettingsSections] = useState<SettingsSection[]>([]);
@@ -255,6 +272,7 @@ export default function App() {
     const userText = input.trim();
     setIsGenerating(true);
     setError(null);
+    setInput("");
 
     try {
       let conversation = activeConversation;
@@ -265,20 +283,36 @@ export default function App() {
         setActiveConversationId(conversation.id);
       }
 
-      await api.sendMessage(conversation.id, userText);
-
       const title =
         conversation.title === "New Conversation"
           ? deriveConversationTitle(userText)
           : conversation.title;
+      const optimisticConversation = {
+        ...conversation,
+        title,
+        updated_at: Date.now(),
+        messages: [...conversation.messages, optimisticUserMessage(conversation.id, userText)],
+      };
+      setActiveConversation(optimisticConversation);
+      setConversations((current) => {
+        const item = {
+          ...optimisticConversation,
+          messages: [],
+        };
+        const withoutCurrent = current.filter((candidate) => candidate.id !== conversation.id);
+        return [item, ...withoutCurrent];
+      });
+
+      await api.sendMessage(conversation.id, userText);
+
       if (title !== conversation.title) {
         await api.updateConversation(conversation.id, { title });
       }
 
       await refreshConversations(conversation.id);
-      setInput("");
     } catch (submitError) {
       console.error("Chat error:", submitError);
+      setInput(userText);
       setError(
         submitError instanceof Error
           ? submitError.message
@@ -301,6 +335,7 @@ export default function App() {
           <Renderers.historyBoard
             activeChatId={activeConversationId}
             chatItems={chatItems}
+            account={catalog?.app?.account}
             onChatSelect={handleHistoryClick}
             onNewTask={handleNewTask}
             onSettingsClick={() => setIsSettingsOpen(true)}

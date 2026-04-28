@@ -26,6 +26,7 @@ export type TitleBarRendererProps = {
 export type HistoryBoardRendererProps = {
   activeChatId: string | null;
   chatItems: ChatItem[];
+  account?: NonNullable<UICatalog["app"]>["account"];
   onChatSelect: (conversationId: string) => void;
   onNewTask: () => void;
   onSettingsClick: () => void;

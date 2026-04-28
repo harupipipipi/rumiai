@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 from copy import deepcopy
 from pathlib import Path
@@ -107,12 +108,88 @@ class FrontendRegistry:
             "id": "defaultspack",
             "name": "Rumi Defaultspack",
             "icon": "/static/assets/icons/defaultspack-icon.png",
+            "account": self._rumi_account_metadata(),
         }
         for surface in ui_surfaces:
             config = surface.get("config", {})
             if isinstance(config, dict) and isinstance(config.get("app"), dict):
                 app = self._deep_merge(app, config["app"])
         return app
+
+    def _rumi_root(self) -> Path:
+        return self._pack_root.parents[1]
+
+    def _rumi_account_metadata(self) -> dict[str, Any]:
+        account: dict[str, Any] = {
+            "display_name": "Rumi",
+            "email": "",
+            "plan_label": "Local Account",
+            "avatar_url": "",
+            "initial": "R",
+            "source": "fallback",
+        }
+        token_payload = self._read_rumi_oauth_payload()
+        profile = self._read_rumi_profile()
+        user_metadata = token_payload.get("user_metadata", {}) if isinstance(token_payload, dict) else {}
+        app_metadata = token_payload.get("app_metadata", {}) if isinstance(token_payload, dict) else {}
+        email = str(token_payload.get("email") or user_metadata.get("email") or "").strip()
+        display_name = str(
+            profile.get("username")
+            or user_metadata.get("full_name")
+            or user_metadata.get("name")
+            or token_payload.get("name")
+            or ""
+        ).strip()
+        if not display_name and email:
+            display_name = email.split("@", 1)[0]
+        avatar_url = str(
+            profile.get("icon")
+            or user_metadata.get("avatar_url")
+            or user_metadata.get("picture")
+            or token_payload.get("picture")
+            or ""
+        ).strip()
+        plan_label = str(
+            profile.get("plan")
+            or profile.get("subscription_plan")
+            or token_payload.get("plan")
+            or token_payload.get("subscription_plan")
+            or app_metadata.get("plan")
+            or app_metadata.get("subscription_plan")
+            or "Rumi Account"
+        ).strip()
+        if display_name:
+            account["display_name"] = display_name
+        if email:
+            account["email"] = email
+        if avatar_url:
+            account["avatar_url"] = avatar_url
+        if plan_label:
+            account["plan_label"] = plan_label
+        account["initial"] = str(account["display_name"] or account["email"] or "R")[0].upper()
+        account["source"] = "rumi_profile" if profile else ("rumi_oauth" if token_payload else "fallback")
+        return account
+
+    def _read_rumi_profile(self) -> dict[str, Any]:
+        profile_path = self._rumi_root() / "user_data" / "settings" / "profile.json"
+        try:
+            profile = json.loads(profile_path.read_text(encoding="utf-8"))
+            return profile if isinstance(profile, dict) else {}
+        except Exception:
+            return {}
+
+    def _read_rumi_oauth_payload(self) -> dict[str, Any]:
+        token_path = self._rumi_root() / "user_data" / "settings" / "oauth_tokens.json"
+        try:
+            token_data = json.loads(token_path.read_text(encoding="utf-8"))
+            token = str(token_data.get("access_token", ""))
+            payload_segment = token.split(".")[1]
+            padding = "=" * (-len(payload_segment) % 4)
+            decoded = base64.urlsafe_b64decode((payload_segment + padding).encode("ascii"))
+            payload = json.loads(decoded.decode("utf-8"))
+            return payload if isinstance(payload, dict) else {}
+        except Exception:
+            return {}
 
     def _shell(
         self,

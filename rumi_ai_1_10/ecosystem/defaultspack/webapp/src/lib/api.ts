@@ -108,6 +108,14 @@ export type UICatalog = {
     id: string;
     name: string;
     icon?: string;
+    account?: {
+      display_name?: string;
+      email?: string;
+      plan_label?: string;
+      avatar_url?: string;
+      initial?: string;
+      source?: string;
+    };
   };
   shell?: {
     layout?: {

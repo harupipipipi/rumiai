@@ -48,6 +48,8 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("PUT", "/api/prompts/{name}", block_module="blocks.prompt.update", path_inject={"name": "name"}),
     HttpRouteSpec("DELETE", "/api/prompts/{name}", block_module="blocks.prompt.delete", path_inject={"name": "name"}),
     HttpRouteSpec("POST", "/api/prompts/convert", block_module="blocks.prompt.convert"),
+    HttpRouteSpec("GET", "/api/tools", block_module="blocks.tool.list"),
+    HttpRouteSpec("POST", "/api/tools/invoke", block_module="blocks.tool.invoke"),
     HttpRouteSpec("POST", "/api/tools/create", block_module="blocks.tool.create"),
     HttpRouteSpec("PUT", "/api/tools/{name}", block_module="blocks.tool.update", path_inject={"name": "name"}),
     HttpRouteSpec("DELETE", "/api/tools/{name}", block_module="blocks.tool.delete", path_inject={"name": "name"}),

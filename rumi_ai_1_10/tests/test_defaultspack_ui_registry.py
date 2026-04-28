@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import base64
 import sys
 import tempfile
 import unittest
@@ -15,6 +16,14 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 
 class TestDefaultspackUiRegistry(unittest.TestCase):
+    @staticmethod
+    def _jwt(payload):
+        def encode(obj):
+            raw = json.dumps(obj, separators=(",", ":")).encode("utf-8")
+            return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+        return f"{encode({'alg': 'none'})}.{encode(payload)}."
+
     def test_catalog_merges_tool_registry_and_extension_manifest(self):
         from domain.frontend.registry import FrontendRegistry
 
@@ -100,6 +109,73 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertIn("ai_chat", binding_part_ids)
         self.assertEqual(catalog["app"]["icon"], "/static/assets/icons/defaultspack-icon.png")
         self.assertEqual(catalog["diagnostics"], [])
+
+    def test_catalog_syncs_rumi_account_from_oauth_payload(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rumi_root = Path(tmpdir) / "rumi_ai_1_10"
+            pack_root = rumi_root / "ecosystem" / "defaultspack"
+            token_path = rumi_root / "user_data" / "settings" / "oauth_tokens.json"
+            token_path.parent.mkdir(parents=True, exist_ok=True)
+            token_path.write_text(
+                json.dumps(
+                    {
+                        "access_token": self._jwt(
+                            {
+                                "email": "user@example.test",
+                                "user_metadata": {
+                                    "full_name": "Rumi User",
+                                    "avatar_url": "https://example.test/avatar.png",
+                                },
+                                "app_metadata": {"plan": "Pro Plan"},
+                            }
+                        )
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+                catalog = FrontendRegistry(pack_root=pack_root).build_catalog()
+
+        account = catalog["app"]["account"]
+        self.assertEqual(account["display_name"], "Rumi User")
+        self.assertEqual(account["email"], "user@example.test")
+        self.assertEqual(account["plan_label"], "Pro Plan")
+        self.assertEqual(account["avatar_url"], "https://example.test/avatar.png")
+        self.assertEqual(account["source"], "rumi_oauth")
+
+    def test_catalog_prefers_rumi_profile_for_account(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rumi_root = Path(tmpdir) / "rumi_ai_1_10"
+            pack_root = rumi_root / "ecosystem" / "defaultspack"
+            profile_path = rumi_root / "user_data" / "settings" / "profile.json"
+            profile_path.parent.mkdir(parents=True, exist_ok=True)
+            profile_path.write_text(
+                json.dumps(
+                    {
+                        "username": "Profile Name",
+                        "language": "ja",
+                        "icon": "https://example.test/profile.png",
+                        "plan": "Team Plan",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+                catalog = FrontendRegistry(pack_root=pack_root).build_catalog()
+
+        account = catalog["app"]["account"]
+        self.assertEqual(account["display_name"], "Profile Name")
+        self.assertEqual(account["plan_label"], "Team Plan")
+        self.assertEqual(account["avatar_url"], "https://example.test/profile.png")
+        self.assertEqual(account["source"], "rumi_profile")
 
     def test_malformed_frontend_shell_config_falls_back(self):
         from domain.frontend.registry import FrontendRegistry
@@ -260,6 +336,36 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
 
         self.assertEqual(result["block_module"], "blocks.ai.provider_key")
         self.assertEqual(server.payload["_method"], "POST")
+
+    def test_fallback_http_routes_include_tools_list(self):
+        from transport.registry import build_fallback_http_routes
+
+        class FakeServer:
+            def _invoke_fallback_block(self, block_module, request_data, path_params, inject=None):
+                return {"block_module": block_module, "request_data": request_data}
+
+            def _handle_health(self, request_data, path_params):
+                return {}
+
+            def _handle_context_info(self, request_data, path_params):
+                return {}
+
+            def _handle_static(self, request_data, path_params):
+                return {}
+
+            def _handle_static_file(self, request_data, path_params):
+                return {}
+
+        routes = build_fallback_http_routes(FakeServer())
+        tools_route = next(
+            handler
+            for method, pattern, handler, _source, _inject in routes
+            if method == "GET" and pattern.match("/api/tools")
+        )
+        result = tools_route({}, {})
+
+        self.assertEqual(result["block_module"], "blocks.tool.list")
+        self.assertEqual(result["request_data"]["_method"], "GET")
 
     def test_default_conversation_model_uses_openrouter_when_unconfigured(self):
         from domain.chat import store as chat_store
