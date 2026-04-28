@@ -395,7 +395,7 @@ class KernelFlowExecutionMixin:
 
             ctx = resolve_runtime_profile_context(
                 ctx,
-                interface_registry=self.interface_registry,
+                interface_registry=getattr(self, "interface_registry", None),
             )
         except Exception:
             pass
