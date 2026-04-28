@@ -18,6 +18,7 @@ class FrontendRegistry:
     def __init__(self, pack_root: Path | None = None) -> None:
         self._pack_root = pack_root or Path(__file__).resolve().parents[2]
         self._extensions_dir = self._pack_root / "user_data" / "shared" / "frontend_extensions"
+        self._shell_path = self._pack_root / "user_data" / "shared" / "frontend_shell.json"
         self._settings_path = self._pack_root / "user_data" / "shared" / "frontend_settings.json"
 
     def build_catalog(self) -> dict[str, Any]:
@@ -25,6 +26,7 @@ class FrontendRegistry:
         ui_surfaces = self._load_ui_surfaces()
         return {
             "app": self._app_metadata(ui_surfaces),
+            "shell": self._shell(ui_surfaces, extensions),
             "parts": self._parts(ui_surfaces, extensions),
             "component_bindings": self._component_bindings(ui_surfaces, extensions),
             "sidebar": {
@@ -104,12 +106,72 @@ class FrontendRegistry:
                 app = self._deep_merge(app, config["app"])
         return app
 
+    def _shell(
+        self,
+        ui_surfaces: list[dict[str, Any]],
+        extensions: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        shell = {
+            "layout": {
+                "id": "default_chat_shell",
+                "regions": [
+                    {"id": "title_bar", "part_id": "app_chrome", "renderer": "title_bar", "slot": "top", "order": 10, "enabled": True},
+                    {"id": "history", "part_id": "conversation_history", "renderer": "history_board", "slot": "left", "order": 20, "enabled": True},
+                    {"id": "chat_header", "part_id": "ai_chat", "renderer": "chat_header", "slot": "main", "order": 30, "enabled": True},
+                    {"id": "chat_messages", "part_id": "ai_chat", "renderer": "chat_messages", "slot": "main", "order": 40, "enabled": True},
+                    {"id": "composer", "part_id": "ai_chat", "renderer": "composer", "slot": "bottom", "order": 50, "enabled": True},
+                    {"id": "activity_preview", "part_id": "activity_preview", "renderer": "activity_preview", "slot": "right", "order": 60, "enabled": True},
+                    {"id": "right_sidebar", "part_id": "extension_sidebar", "renderer": "right_sidebar", "slot": "right", "order": 70, "enabled": True},
+                    {"id": "settings_modal", "part_id": "settings", "renderer": "settings_modal", "slot": "overlay", "order": 80, "enabled": True},
+                ],
+            },
+            "renderers": [
+                {"id": "title_bar", "component": "TitleBar", "regions": ["title_bar"], "fallback": "hidden"},
+                {"id": "history_board", "component": "HistoryBoard", "regions": ["history"], "fallback": "hidden"},
+                {"id": "chat_header", "component": "ChatHeader", "regions": ["chat_header"], "fallback": "hidden"},
+                {"id": "chat_messages", "component": "ChatMessages", "regions": ["chat_messages"], "fallback": "plain_text"},
+                {"id": "composer", "component": "Composer", "regions": ["composer"], "fallback": "hidden"},
+                {"id": "activity_preview", "component": "ToolPreviewPanel", "regions": ["activity_preview"], "fallback": "hidden"},
+                {"id": "right_sidebar", "component": "RightSidebar", "regions": ["right_sidebar"], "fallback": "hidden"},
+                {"id": "settings_modal", "component": "SettingsModal", "regions": ["settings_modal"], "fallback": "hidden"},
+            ],
+        }
+        user_shell = self._load_shell_config()
+        for manifest in [*ui_surfaces, user_shell, *extensions]:
+            config = manifest.get("config", manifest)
+            if not isinstance(config, dict):
+                continue
+            if isinstance(config.get("shell_layout"), dict):
+                shell["layout"] = self._deep_merge(shell["layout"], config["shell_layout"])
+            renderers = config.get("shell_renderers")
+            if isinstance(renderers, list):
+                shell["renderers"] = self._dedupe_by_key(
+                    [*shell["renderers"], *(item for item in renderers if isinstance(item, dict))],
+                    "id",
+                )
+        return shell
+
     def _parts(
         self,
         ui_surfaces: list[dict[str, Any]],
         extensions: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         parts: list[dict[str, Any]] = [
+            {
+                "id": "app_chrome",
+                "kind": "shell",
+                "label": "App Chrome",
+                "uses": ["frontend"],
+                "schema": {"type": "object", "properties": {"app": {"type": "object"}, "shell": {"type": "object"}}},
+            },
+            {
+                "id": "conversation_history",
+                "kind": "navigation",
+                "label": "Conversation History",
+                "uses": ["chat"],
+                "contracts": {"conversations": "/api/chat/conversations"},
+                "schema": {"type": "object", "properties": {"items": {"type": "array"}, "active_id": {"type": ["string", "null"]}}},
+            },
             {
                 "id": "ai_chat",
                 "kind": "chat",
@@ -120,6 +182,15 @@ class FrontendRegistry:
                     "catalog": "/api/ui/catalog",
                     "settings": "/api/ui/settings",
                 },
+                "schema": {
+                    "type": "object",
+                    "required": ["conversation", "messages"],
+                    "properties": {
+                        "conversation": {"type": ["object", "null"]},
+                        "messages": {"type": "array"},
+                        "composer": {"type": "object"},
+                    },
+                },
             },
             {
                 "id": "activity_preview",
@@ -129,6 +200,32 @@ class FrontendRegistry:
                 "contracts": {
                     "preview": "/api/ui/conversations/{conversation_id}/preview",
                 },
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "tool_timeline": {"type": "array"},
+                        "plan_steps": {"type": "array"},
+                        "approvals": {"type": "array"},
+                        "attachments": {"type": "array"},
+                        "audio": {"type": "array"},
+                    },
+                },
+            },
+            {
+                "id": "extension_sidebar",
+                "kind": "sidebar",
+                "label": "Extension Sidebar",
+                "uses": ["tool", "frontend"],
+                "contracts": {"catalog": "/api/ui/catalog", "settings": "/api/ui/settings"},
+                "schema": {"type": "object", "properties": {"items": {"type": "array"}, "filters": {"type": "array"}}},
+            },
+            {
+                "id": "settings",
+                "kind": "settings",
+                "label": "Settings",
+                "uses": ["frontend"],
+                "contracts": {"settings": "/api/ui/settings"},
+                "schema": {"type": "object", "properties": {"sections": {"type": "array"}, "values": {"type": "object"}}},
             },
         ]
         parts.extend(self._config_list(ui_surfaces, "parts"))
@@ -370,7 +467,7 @@ class FrontendRegistry:
         renderers.extend(self._config_list(ui_surfaces, "chat_renderers"))
         renderers.extend(self._config_list(extensions, "chat_renderers"))
 
-        return renderers
+        return self._dedupe_by_key(renderers, "id")
 
     def _extension_points(self) -> list[dict[str, Any]]:
         return [
@@ -398,6 +495,16 @@ class FrontendRegistry:
                 "id": "chat_renderers",
                 "path": "user_data/shared/frontend_extensions/*.ui.json",
                 "description": "Metadata describing custom block/widget renderers.",
+            },
+            {
+                "id": "shell_layout",
+                "path": "extensions/ui/*/manifest.json config.shell_layout or user_data/shared/frontend_shell.json",
+                "description": "Declarative layout regions for the replaceable shell.",
+            },
+            {
+                "id": "shell_renderers",
+                "path": "extensions/ui/*/manifest.json config.shell_renderers or user_data/shared/frontend_extensions/*.ui.json",
+                "description": "Renderer IDs and component names bound to shell regions.",
             },
         ]
 
@@ -524,6 +631,15 @@ class FrontendRegistry:
             except (OSError, json.JSONDecodeError):
                 continue
         return extensions
+
+    def _load_shell_config(self) -> dict[str, Any]:
+        if not self._shell_path.exists():
+            return {}
+        try:
+            config = json.loads(self._shell_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return config if isinstance(config, dict) else {}
 
     def _config_list(self, manifests: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
         values: list[dict[str, Any]] = []

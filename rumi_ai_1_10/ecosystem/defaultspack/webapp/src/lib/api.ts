@@ -82,11 +82,34 @@ export type SettingsSection = {
   fields: SidebarField[];
 };
 
+export type ShellRegion = {
+  id: string;
+  part_id?: string;
+  renderer?: string;
+  slot?: string;
+  order?: number;
+  enabled?: boolean;
+};
+
+export type ShellRenderer = {
+  id: string;
+  component: string;
+  regions?: string[];
+  fallback?: string;
+};
+
 export type UICatalog = {
   app?: {
     id: string;
     name: string;
     icon?: string;
+  };
+  shell?: {
+    layout?: {
+      id: string;
+      regions?: ShellRegion[];
+    };
+    renderers?: ShellRenderer[];
   };
   parts?: Array<{
     id: string;
@@ -94,6 +117,7 @@ export type UICatalog = {
     label?: string;
     uses?: string[];
     contracts?: Record<string, string>;
+    schema?: Record<string, unknown>;
   }>;
   component_bindings?: Array<{
     part_id: string;

@@ -22,10 +22,16 @@ defaultspack is a Rumi-provided pack desktop app. Its frontend must stay a repla
 - [x] Add fallback HTTP routes for standalone mode.
 - [x] Add UI surface config slots for parts and component bindings.
 - [x] Keep frontend access through typed API contracts.
+- [x] Add shell layout / shell renderer contracts to the UI catalog.
+- [x] Let `user_data/shared/frontend_shell.json` override shell layout without editing React.
+- [x] Add schema-bearing parts for app chrome, history, chat, preview, sidebar, and settings.
+- [x] Gate visible React regions through the shell layout contract.
 
 ## Next Slice
 
-- [ ] Move each visible React area into a swappable renderer registry.
-- [ ] Let user_data provide the entire shell layout.
-- [ ] Add richer part schemas for tool timelines, plan steps, approvals, attachments, and audio.
+- [ ] Split each visible React area into its own small renderer module under `webapp/src/renderers/`.
+- [ ] Add lazy custom renderer loading for trusted local bundles, with error boundaries and fallback renderers.
+- [ ] Add validation diagnostics for malformed `parts`, `component_bindings`, `shell_layout`, and `shell_renderers`.
+- [ ] Add explicit schemas for tool timelines, plan steps, approvals, attachments, and audio payloads beyond the first preview contract.
+- [ ] Wire the viewer / Grant flow to launch packs with `desktop_app.execute`.
 - [ ] Add a native webview wrapper if defaultspack should open outside the system browser.

@@ -30,6 +30,7 @@ import { RightSidebar } from "./components/RightSidebar";
 import { ToolPreviewPanel, type ToolPreviewItem, type ToolPreviewMode } from "./components/ToolPreview";
 import { api, type ChatContentBlock, type ChatMessage, type Conversation, type SettingsSection, type SidebarItem, type UICatalog } from "./lib/api";
 import { deriveConversationTitle, formatRelativeTime, messageToText } from "./lib/chat";
+import { hasShellRegion } from "./lib/uiShell";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -301,6 +302,7 @@ export default function App() {
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
   const showActivityInMessages = settingsValues.general?.show_activity_in_messages !== false;
   const sidebarItems: SidebarItem[] = catalog?.sidebar.items ?? [];
+  const showRegion = (regionId: string) => !catalog?.shell || hasShellRegion(catalog, regionId);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -483,44 +485,52 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-screen w-full bg-[#09090b] text-zinc-300 font-sans overflow-hidden selection:bg-zinc-800">
-      <TitleBar appName={catalog?.app?.name} appIcon={catalog?.app?.icon} />
+      {showRegion("title_bar") && <TitleBar appName={catalog?.app?.name} appIcon={catalog?.app?.icon} />}
 
       <div className="flex flex-1 min-h-0">
-        <HistoryBoard
-          activeChatId={activeConversationId}
-          chatItems={chatItems}
-          onChatSelect={handleHistoryClick}
-          onNewTask={handleNewTask}
-          onSettingsClick={() => setIsSettingsOpen(true)}
-        />
+        {showRegion("history") && (
+          <HistoryBoard
+            activeChatId={activeConversationId}
+            chatItems={chatItems}
+            onChatSelect={handleHistoryClick}
+            onNewTask={handleNewTask}
+            onSettingsClick={() => setIsSettingsOpen(true)}
+          />
+        )}
 
         <main className="flex-1 flex min-w-0 bg-[#09090b] relative">
           <div className={cn("flex-1 flex flex-col min-w-0", showPreview && "border-r border-zinc-800/40")}>
-            <header className="h-11 flex items-center px-4 border-b border-zinc-800/60 justify-between bg-[#09090b]/80 backdrop-blur-md z-10 flex-shrink-0">
-              <div className="flex items-center gap-2">
-                <Hash size={14} className="text-zinc-600" />
-                <h2 className="text-zinc-200 font-medium text-sm truncate">{activeChatTitle}</h2>
-              </div>
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => setShowPreview((value) => !value)}
-                  className={cn("p-1.5 rounded-md transition-colors", showPreview ? "text-zinc-200 bg-zinc-800" : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800")}
-                  title={showPreview ? "Hide preview" : "Show preview"}
-                >
-                  {showPreview ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}
-                </button>
-                <button onClick={() => setIsSettingsOpen(true)} className="p-1.5 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded-md transition-colors">
-                  <Settings size={14} />
-                </button>
-                <button className="p-1.5 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded-md transition-colors">
-                  <MoreHorizontal size={14} />
-                </button>
-              </div>
-            </header>
+            {showRegion("chat_header") && (
+              <header className="h-11 flex items-center px-4 border-b border-zinc-800/60 justify-between bg-[#09090b]/80 backdrop-blur-md z-10 flex-shrink-0">
+                <div className="flex items-center gap-2">
+                  <Hash size={14} className="text-zinc-600" />
+                  <h2 className="text-zinc-200 font-medium text-sm truncate">{activeChatTitle}</h2>
+                </div>
+                <div className="flex items-center gap-1">
+                  {showRegion("activity_preview") && (
+                    <button
+                      onClick={() => setShowPreview((value) => !value)}
+                      className={cn("p-1.5 rounded-md transition-colors", showPreview ? "text-zinc-200 bg-zinc-800" : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800")}
+                      title={showPreview ? "Hide preview" : "Show preview"}
+                    >
+                      {showPreview ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}
+                    </button>
+                  )}
+                  {showRegion("settings_modal") && (
+                    <button onClick={() => setIsSettingsOpen(true)} className="p-1.5 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded-md transition-colors">
+                      <Settings size={14} />
+                    </button>
+                  )}
+                  <button className="p-1.5 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded-md transition-colors">
+                    <MoreHorizontal size={14} />
+                  </button>
+                </div>
+              </header>
+            )}
 
             {error && <div className="mx-4 mt-4 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-200">{error}</div>}
 
-            {isLoading ? (
+            {!showRegion("chat_messages") ? null : isLoading ? (
               <div className="flex-1 flex items-center justify-center">
                 <Loader2 size={18} className="animate-spin text-zinc-500" />
               </div>
@@ -591,7 +601,7 @@ export default function App() {
               </div>
             )}
 
-            <div className="p-2.5 bg-[#09090b] flex-shrink-0">
+            {showRegion("composer") && <div className="p-2.5 bg-[#09090b] flex-shrink-0">
               <div className="max-w-3xl mx-auto">
                 <form onSubmit={handleSubmit} className="relative flex flex-col bg-zinc-900 border border-zinc-800 rounded-lg overflow-hidden focus-within:border-zinc-700 transition-colors">
                   <textarea
@@ -622,10 +632,10 @@ export default function App() {
                   </div>
                 </form>
               </div>
-            </div>
+            </div>}
           </div>
 
-          {showPreview && (
+          {showRegion("activity_preview") && showPreview && (
             <div className="w-[380px] flex-shrink-0 h-full">
               <ToolPreviewPanel
                 previews={previews}
@@ -639,17 +649,19 @@ export default function App() {
           )}
         </main>
 
-        <RightSidebar
-          items={sidebarItems}
-          settingsValues={settingsValues}
-          settingsSections={settingsSections}
-          onSettingChange={handleSettingChange}
-          onOpenSettings={() => setIsSettingsOpen(true)}
-        />
+        {showRegion("right_sidebar") && (
+          <RightSidebar
+            items={sidebarItems}
+            settingsValues={settingsValues}
+            settingsSections={settingsSections}
+            onSettingChange={handleSettingChange}
+            onOpenSettings={() => setIsSettingsOpen(true)}
+          />
+        )}
       </div>
 
       <AnimatePresence>
-        {isSettingsOpen && (
+        {showRegion("settings_modal") && isSettingsOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center">
             <motion.div
               initial={{ opacity: 0 }}

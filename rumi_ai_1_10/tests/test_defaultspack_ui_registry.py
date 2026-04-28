@@ -42,8 +42,26 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                             }
                         ],
                         "chat_renderers": [
+                            {"id": "text", "component": "CustomText", "block_types": ["text"]},
                             {"id": "custom-renderer", "component": "Custom", "block_types": ["custom"]}
                         ],
+                        "shell_renderers": [
+                            {"id": "composer", "component": "CustomComposer", "regions": ["composer"]}
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (pack_root / "user_data" / "shared" / "frontend_shell.json").write_text(
+                json.dumps(
+                    {
+                        "shell_layout": {
+                            "id": "compact",
+                            "regions": [
+                                {"id": "composer", "renderer": "composer", "order": 5, "enabled": True},
+                                {"id": "history", "renderer": "history_board", "order": 20, "enabled": False},
+                            ],
+                        }
                     }
                 ),
                 encoding="utf-8",
@@ -56,17 +74,47 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
 
         sidebar_ids = {item["id"] for item in catalog["sidebar"]["items"]}
         section_ids = {section["id"] for section in catalog["settings"]["sections"]}
-        renderer_ids = {renderer["id"] for renderer in catalog["chat_rendering"]["renderers"]}
+        renderers = {renderer["id"]: renderer for renderer in catalog["chat_rendering"]["renderers"]}
+        shell_renderers = {renderer["id"]: renderer for renderer in catalog["shell"]["renderers"]}
+        regions = {region["id"]: region for region in catalog["shell"]["layout"]["regions"]}
         part_ids = {part["id"] for part in catalog["parts"]}
+        parts = {part["id"]: part for part in catalog["parts"]}
         binding_part_ids = {binding["part_id"] for binding in catalog["component_bindings"]}
 
         self.assertIn("web_search", sidebar_ids)
         self.assertIn("custom-widget", sidebar_ids)
         self.assertIn("custom", section_ids)
-        self.assertIn("custom-renderer", renderer_ids)
+        self.assertIn("custom-renderer", renderers)
+        self.assertEqual(renderers["text"]["component"], "CustomText")
+        self.assertEqual(shell_renderers["composer"]["component"], "CustomComposer")
+        self.assertEqual(catalog["shell"]["layout"]["id"], "compact")
+        self.assertEqual(regions["composer"]["order"], 5)
+        self.assertFalse(regions["history"]["enabled"])
         self.assertIn("ai_chat", part_ids)
+        self.assertIn("conversation_history", part_ids)
+        self.assertIn("extension_sidebar", part_ids)
+        self.assertIn("tool_timeline", parts["activity_preview"]["schema"]["properties"])
+        self.assertIn("approvals", parts["activity_preview"]["schema"]["properties"])
+        self.assertIn("audio", parts["activity_preview"]["schema"]["properties"])
+        self.assertIn("messages", parts["ai_chat"]["schema"]["properties"])
         self.assertIn("ai_chat", binding_part_ids)
         self.assertEqual(catalog["app"]["icon"], "/static/assets/icons/defaultspack-icon.png")
+
+    def test_malformed_frontend_shell_config_falls_back(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            shell_path = pack_root / "user_data" / "shared" / "frontend_shell.json"
+            shell_path.parent.mkdir(parents=True, exist_ok=True)
+            shell_path.write_text("{not json", encoding="utf-8")
+
+            with patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+                catalog = FrontendRegistry(pack_root=pack_root).build_catalog()
+
+        self.assertEqual(catalog["shell"]["layout"]["id"], "default_chat_shell")
+        self.assertTrue(any(region["id"] == "chat_messages" for region in catalog["shell"]["layout"]["regions"]))
 
     def test_update_settings_persists_values(self):
         from domain.frontend.registry import FrontendRegistry

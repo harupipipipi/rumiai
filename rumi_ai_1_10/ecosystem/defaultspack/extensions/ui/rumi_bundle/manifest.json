@@ -20,7 +20,59 @@
       "name": "Rumi Defaultspack",
       "icon": "/static/assets/icons/defaultspack-icon.png"
     },
+    "shell_layout": {
+      "id": "default_chat_shell",
+      "regions": [
+        { "id": "title_bar", "part_id": "app_chrome", "renderer": "title_bar", "slot": "top", "order": 10, "enabled": true },
+        { "id": "history", "part_id": "conversation_history", "renderer": "history_board", "slot": "left", "order": 20, "enabled": true },
+        { "id": "chat_header", "part_id": "ai_chat", "renderer": "chat_header", "slot": "main", "order": 30, "enabled": true },
+        { "id": "chat_messages", "part_id": "ai_chat", "renderer": "chat_messages", "slot": "main", "order": 40, "enabled": true },
+        { "id": "composer", "part_id": "ai_chat", "renderer": "composer", "slot": "bottom", "order": 50, "enabled": true },
+        { "id": "activity_preview", "part_id": "activity_preview", "renderer": "activity_preview", "slot": "right", "order": 60, "enabled": true },
+        { "id": "right_sidebar", "part_id": "extension_sidebar", "renderer": "right_sidebar", "slot": "right", "order": 70, "enabled": true },
+        { "id": "settings_modal", "part_id": "settings", "renderer": "settings_modal", "slot": "overlay", "order": 80, "enabled": true }
+      ]
+    },
+    "shell_renderers": [
+      { "id": "title_bar", "component": "TitleBar", "regions": ["title_bar"], "fallback": "hidden" },
+      { "id": "history_board", "component": "HistoryBoard", "regions": ["history"], "fallback": "hidden" },
+      { "id": "chat_header", "component": "ChatHeader", "regions": ["chat_header"], "fallback": "hidden" },
+      { "id": "chat_messages", "component": "ChatMessages", "regions": ["chat_messages"], "fallback": "plain_text" },
+      { "id": "composer", "component": "Composer", "regions": ["composer"], "fallback": "hidden" },
+      { "id": "activity_preview", "component": "ToolPreviewPanel", "regions": ["activity_preview"], "fallback": "hidden" },
+      { "id": "right_sidebar", "component": "RightSidebar", "regions": ["right_sidebar"], "fallback": "hidden" },
+      { "id": "settings_modal", "component": "SettingsModal", "regions": ["settings_modal"], "fallback": "hidden" }
+    ],
     "parts": [
+      {
+        "id": "app_chrome",
+        "kind": "shell",
+        "label": "App Chrome",
+        "uses": ["frontend"],
+        "schema": {
+          "type": "object",
+          "properties": {
+            "app": { "type": "object" },
+            "shell": { "type": "object" }
+          }
+        }
+      },
+      {
+        "id": "conversation_history",
+        "kind": "navigation",
+        "label": "Conversation History",
+        "uses": ["chat"],
+        "contracts": {
+          "conversations": "/api/chat/conversations"
+        },
+        "schema": {
+          "type": "object",
+          "properties": {
+            "items": { "type": "array" },
+            "active_id": { "type": ["string", "null"] }
+          }
+        }
+      },
       {
         "id": "ai_chat",
         "kind": "chat",
@@ -30,6 +82,15 @@
           "conversation": "/api/chat/conversations",
           "catalog": "/api/ui/catalog",
           "settings": "/api/ui/settings"
+        },
+        "schema": {
+          "type": "object",
+          "required": ["conversation", "messages"],
+          "properties": {
+            "conversation": { "type": ["object", "null"] },
+            "messages": { "type": "array" },
+            "composer": { "type": "object" }
+          }
         }
       },
       {
@@ -39,6 +100,49 @@
         "uses": ["chat", "dev", "tool", "knowledge", "memory", "media"],
         "contracts": {
           "preview": "/api/ui/conversations/{conversation_id}/preview"
+        },
+        "schema": {
+          "type": "object",
+          "properties": {
+            "tool_timeline": { "type": "array" },
+            "plan_steps": { "type": "array" },
+            "approvals": { "type": "array" },
+            "attachments": { "type": "array" },
+            "audio": { "type": "array" }
+          }
+        }
+      },
+      {
+        "id": "extension_sidebar",
+        "kind": "sidebar",
+        "label": "Extension Sidebar",
+        "uses": ["tool", "frontend"],
+        "contracts": {
+          "catalog": "/api/ui/catalog",
+          "settings": "/api/ui/settings"
+        },
+        "schema": {
+          "type": "object",
+          "properties": {
+            "items": { "type": "array" },
+            "filters": { "type": "array" }
+          }
+        }
+      },
+      {
+        "id": "settings",
+        "kind": "settings",
+        "label": "Settings",
+        "uses": ["frontend"],
+        "contracts": {
+          "settings": "/api/ui/settings"
+        },
+        "schema": {
+          "type": "object",
+          "properties": {
+            "sections": { "type": "array" },
+            "values": { "type": "object" }
+          }
         }
       }
     ],
