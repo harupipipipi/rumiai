@@ -212,6 +212,63 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertNotIn("or-secret", settings_text)
         self.assertTrue(has_secret)
 
+    def test_openrouter_key_status_is_derived_from_secret_store(self):
+        from core_runtime.secrets_store import SecretsStore
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            settings_path = pack_root / "user_data" / "shared" / "frontend_settings.json"
+            settings_path.parent.mkdir(parents=True, exist_ok=True)
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "models": {
+                            "openrouter_api_key": "must-not-persist",
+                            "openrouter_api_key_configured": False,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            store = SecretsStore(str(pack_root / "user_data" / "secrets"))
+            store.set_secret("OPENROUTER_API_KEY", "or-secret", actor="test")
+
+            with patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "openrouter/tencent/hy3-preview:free"}]
+                values = FrontendRegistry(pack_root=pack_root).get_settings()["values"]
+
+        self.assertEqual(values["models"]["openrouter_api_key"], "")
+        self.assertTrue(values["models"]["openrouter_api_key_configured"])
+
+    def test_fallback_http_routes_inject_method_for_block_handlers(self):
+        from transport.registry import HttpRouteSpec, build_http_routes_from_specs
+
+        class FakeServer:
+            payload = None
+
+            def _invoke_fallback_block(self, block_module, request_data, path_params, inject=None):
+                self.payload = request_data
+                return {"block_module": block_module, "path_params": path_params, "inject": inject}
+
+        server = FakeServer()
+        routes = build_http_routes_from_specs(
+            server,
+            [HttpRouteSpec("POST", "/api/ai/provider-key", block_module="blocks.ai.provider_key")],
+        )
+        result = routes[0][2]({"provider_id": "openrouter"}, {})
+
+        self.assertEqual(result["block_module"], "blocks.ai.provider_key")
+        self.assertEqual(server.payload["_method"], "POST")
+
+    def test_default_conversation_model_uses_openrouter_when_unconfigured(self):
+        from domain.chat import store as chat_store
+
+        self.assertEqual(
+            chat_store._default_conversation_model(Path("/tmp/defaultspack-settings-does-not-exist.json")),
+            "openrouter/tencent/hy3-preview:free",
+        )
+
     def test_model_settings_are_editable_contracts(self):
         from domain.frontend.registry import FrontendRegistry
 

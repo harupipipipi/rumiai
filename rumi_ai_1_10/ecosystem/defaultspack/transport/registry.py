@@ -101,10 +101,19 @@ def build_http_routes_from_specs(server: Any, specs: List[HttpRouteSpec]):
         )
         compiled = re.compile("^" + regex_pattern + "$")
         if spec.block_module:
-            def _handler(request_data, path_params, *, block_module=spec.block_module, path_inject=dict(spec.path_inject)):
+            def _handler(
+                request_data,
+                path_params,
+                *,
+                block_module=spec.block_module,
+                path_inject=dict(spec.path_inject),
+                route_method=spec.method,
+            ):
+                payload = dict(request_data or {})
+                payload.setdefault("_method", route_method)
                 return server._invoke_fallback_block(
                     block_module,
-                    request_data,
+                    payload,
                     path_params,
                     path_inject,
                 )

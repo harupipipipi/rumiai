@@ -505,6 +505,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                 context["_facade"] = self.server_ref.facade
                 result = handler(request_data, context)
             else:
+                request_data.setdefault("_method", method)
                 # Fallback: original handler signature (request_data, path_params)
                 result = handler(request_data, path_params)
 

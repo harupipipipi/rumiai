@@ -60,6 +60,7 @@ class FrontendRegistry:
         current = self._read_settings()
         sanitized_patch = self._sanitize_settings_patch(patch or {})
         merged = self._deep_merge(current, sanitized_patch)
+        merged = self._refresh_derived_settings(merged)
         self._settings_path.parent.mkdir(parents=True, exist_ok=True)
         self._settings_path.write_text(
             json.dumps(merged, ensure_ascii=False, indent=2),
@@ -811,7 +812,7 @@ class FrontendRegistry:
             except (OSError, json.JSONDecodeError):
                 saved = {}
             values = self._deep_merge(values, saved)
-        return values
+        return self._refresh_derived_settings(values)
 
     def _default_settings(self) -> dict[str, Any]:
         return {
@@ -913,3 +914,14 @@ class FrontendRegistry:
                 )
             models["openrouter_api_key"] = ""
         return sanitized
+
+    def _refresh_derived_settings(self, values: dict[str, Any]) -> dict[str, Any]:
+        refreshed = deepcopy(values)
+        models = refreshed.setdefault("models", {})
+        if isinstance(models, dict):
+            models["openrouter_api_key"] = ""
+            models["openrouter_api_key_configured"] = provider_has_api_key(
+                "openrouter",
+                pack_root=self._pack_root,
+            )
+        return refreshed
