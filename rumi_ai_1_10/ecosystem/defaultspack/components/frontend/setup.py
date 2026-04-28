@@ -51,8 +51,15 @@ def run(context: dict | None = None) -> dict:
             "_source_component": source_component,
         },
     )
+    from blocks.ui.setup import run as register_ui_routes
+    ui_result = register_ui_routes(
+        {
+            **context,
+            "_source_component": source_component or "defaultspack:frontend:ui",
+        }
+    )
 
     return {
         "status": "ok",
-        "registered": ["io.http.server"],
+        "registered": ["io.http.server", *ui_result.get("registered", [])],
     }

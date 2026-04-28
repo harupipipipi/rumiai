@@ -56,6 +56,17 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/api/dev/prompt-history", block_module="blocks.dev.prompt_history"),
     HttpRouteSpec("POST", "/api/dev/edit-prompt", block_module="blocks.dev.edit_prompt_live"),
     HttpRouteSpec("POST", "/api/dev/replay", block_module="blocks.dev.replay"),
+    HttpRouteSpec("GET", "/api/ui/catalog", block_module="blocks.ui.catalog"),
+    HttpRouteSpec("GET", "/api/ui/settings", block_module="blocks.ui.settings"),
+    HttpRouteSpec("PUT", "/api/ui/settings", block_module="blocks.ui.settings"),
+    HttpRouteSpec("GET", "/api/ui/conversations/{id}/preview", block_module="blocks.ui.conversation_preview", path_inject={"id": "conversation_id"}),
+    HttpRouteSpec("GET", "/api/health", handler_name="_handle_health"),
+    HttpRouteSpec("GET", "/api/context", handler_name="_handle_context_info"),
+    HttpRouteSpec("GET", "/", handler_name="_handle_static"),
+    HttpRouteSpec("GET", "/static/{path}", handler_name="_handle_static_file"),
+]
+
+_ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/api/health", handler_name="_handle_health"),
     HttpRouteSpec("GET", "/api/context", handler_name="_handle_context_info"),
     HttpRouteSpec("GET", "/", handler_name="_handle_static"),
@@ -76,10 +87,16 @@ class TransportRegistry:
         return self._registry.get(transport_id)
 
 
-def build_fallback_http_routes(server: Any):
+def build_http_routes_from_specs(server: Any, specs: List[HttpRouteSpec]):
     routes = []
-    for spec in _FALLBACK_HTTP_ROUTE_SPECS:
-        regex_pattern = re.sub(r"\{(\w+)\}", r"(?P<\1>[^/]+)", spec.pattern)
+    for spec in specs:
+        regex_pattern = re.sub(
+            r"\{(\w+)\}",
+            lambda match: r"(?P<{}>.+)".format(match.group(1))
+            if match.group(1) == "path"
+            else r"(?P<{}>[^/]+)".format(match.group(1)),
+            spec.pattern,
+        )
         compiled = re.compile("^" + regex_pattern + "$")
         if spec.block_module:
             def _handler(request_data, path_params, *, block_module=spec.block_module, path_inject=dict(spec.path_inject)):
@@ -94,3 +111,19 @@ def build_fallback_http_routes(server: Any):
             handler = getattr(server, spec.handler_name)
         routes.append((spec.method, compiled, handler, "fallback", dict(spec.path_inject)))
     return routes
+
+
+def build_always_available_http_routes(server: Any):
+    return build_http_routes_from_specs(server, _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS)
+
+
+def build_fallback_http_routes(server: Any):
+    fallback_specs = [
+        spec
+        for spec in _FALLBACK_HTTP_ROUTE_SPECS
+        if spec.pattern not in {item.pattern for item in _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS}
+    ]
+    return build_http_routes_from_specs(
+        server,
+        fallback_specs + _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS,
+    )

@@ -14,6 +14,41 @@
     "port_source": {
       "env": "RUMI_DEFAULTSPACK_PORT",
       "default": 8766
-    }
+    },
+    "app": {
+      "id": "defaultspack",
+      "name": "Rumi Defaultspack",
+      "icon": "/static/assets/icons/defaultspack-icon.png"
+    },
+    "parts": [
+      {
+        "id": "ai_chat",
+        "kind": "chat",
+        "label": "AI Chat",
+        "uses": ["chat", "ai_client", "prompt", "memory", "tool", "frontend"],
+        "contracts": {
+          "conversation": "/api/chat/conversations",
+          "catalog": "/api/ui/catalog",
+          "settings": "/api/ui/settings"
+        }
+      },
+      {
+        "id": "activity_preview",
+        "kind": "preview",
+        "label": "Activity Preview",
+        "uses": ["chat", "dev", "tool", "knowledge", "memory", "media"],
+        "contracts": {
+          "preview": "/api/ui/conversations/{conversation_id}/preview"
+        }
+      }
+    ],
+    "component_bindings": [
+      {
+        "part_id": "ai_chat",
+        "component": "chat",
+        "requires": ["ai_client"],
+        "optional": ["prompt", "memory", "tool", "agent"]
+      }
+    ]
   }
 }

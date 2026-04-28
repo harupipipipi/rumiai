@@ -483,7 +483,7 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-screen w-full bg-[#09090b] text-zinc-300 font-sans overflow-hidden selection:bg-zinc-800">
-      <TitleBar />
+      <TitleBar appName={catalog?.app?.name} appIcon={catalog?.app?.icon} />
 
       <div className="flex flex-1 min-h-0">
         <HistoryBoard
@@ -668,7 +668,7 @@ export default function App() {
                 <div>
                   <h2 className="text-lg font-medium text-zinc-100">Settings</h2>
                   <p className="text-xs text-zinc-500 mt-1">
-                    backend registry: {catalog?.extension_points.length ?? 0} extension points, {health?.pack ?? "defaultspack"}
+                    backend registry: {catalog?.extension_points.length ?? 0} extension points, {catalog?.parts?.length ?? 0} parts, {health?.pack ?? "defaultspack"}
                   </p>
                 </div>
                 <button onClick={() => setIsSettingsOpen(false)} className="text-zinc-500 hover:text-zinc-300">
@@ -714,9 +714,26 @@ export default function App() {
 
                 <section className="space-y-4">
                   <div>
+                    <h3 className="text-sm font-medium text-zinc-100">Parts</h3>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {(catalog?.parts ?? []).map((part) => (
+                      <div key={part.id} className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-4 space-y-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-sm text-zinc-200">{part.label ?? part.id}</div>
+                          <div className="text-[10px] text-zinc-500 font-mono">{part.kind}</div>
+                        </div>
+                        <div className="text-[11px] text-zinc-500 font-mono break-all">{(part.uses ?? []).join(", ")}</div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="space-y-4">
+                  <div>
                     <h3 className="text-sm font-medium text-zinc-100">System Status</h3>
                   </div>
-                  <textarea className="w-full h-32 bg-zinc-900 border border-zinc-800 rounded-lg p-3 text-sm text-zinc-300 resize-none focus:border-zinc-600 outline-none font-mono" value={JSON.stringify({ health, previewCount: previews.length, chatRenderers: catalog?.chat_rendering.renderers ?? [] }, null, 2)} readOnly />
+                  <textarea className="w-full h-32 bg-zinc-900 border border-zinc-800 rounded-lg p-3 text-sm text-zinc-300 resize-none focus:border-zinc-600 outline-none font-mono" value={JSON.stringify({ health, previewCount: previews.length, chatRenderers: catalog?.chat_rendering.renderers ?? [], componentBindings: catalog?.component_bindings ?? [] }, null, 2)} readOnly />
                 </section>
               </div>
             </motion.div>

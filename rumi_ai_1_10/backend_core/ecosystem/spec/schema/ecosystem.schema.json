@@ -162,6 +162,72 @@
       ],
       "additionalProperties": false
     },
+    "capabilities": {
+      "type": "array",
+      "description": "Pack-level capabilities requested by this Pack.",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "desktop_app": {
+      "type": "object",
+      "description": "Pack desktop app launch metadata.",
+      "required": [
+        "command"
+      ],
+      "properties": {
+        "command": {
+          "type": "string",
+          "minLength": 1
+        },
+        "working_dir": {
+          "type": "string"
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "window": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "width": {
+              "type": "integer"
+            },
+            "height": {
+              "type": "integer"
+            },
+            "icon": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": true
+        },
+        "platforms": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "darwin",
+              "win32",
+              "linux"
+            ]
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "components": {
       "type": "object",
       "description": "Pack内のComponentの定義マップ。キーはComponent識別子。",

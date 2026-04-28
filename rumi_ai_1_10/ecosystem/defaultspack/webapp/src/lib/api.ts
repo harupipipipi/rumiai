@@ -83,6 +83,24 @@ export type SettingsSection = {
 };
 
 export type UICatalog = {
+  app?: {
+    id: string;
+    name: string;
+    icon?: string;
+  };
+  parts?: Array<{
+    id: string;
+    kind: string;
+    label?: string;
+    uses?: string[];
+    contracts?: Record<string, string>;
+  }>;
+  component_bindings?: Array<{
+    part_id: string;
+    component: string;
+    requires?: string[];
+    optional?: string[];
+  }>;
   sidebar: {
     filters: { id: "all" | SidebarCategory; label: string }[];
     items: SidebarItem[];

@@ -8,6 +8,7 @@ from typing import Any
 from domain.ai_client.client import AIClient
 from domain.chat.store import ChatStore
 from domain.dev.inspector import Inspector
+from domain.extensions.runtime import get_extension_registry
 from domain.tool.registry import ToolRegistry
 
 
@@ -21,24 +22,29 @@ class FrontendRegistry:
 
     def build_catalog(self) -> dict[str, Any]:
         extensions = self._load_extensions()
+        ui_surfaces = self._load_ui_surfaces()
         return {
+            "app": self._app_metadata(ui_surfaces),
+            "parts": self._parts(ui_surfaces, extensions),
+            "component_bindings": self._component_bindings(ui_surfaces, extensions),
             "sidebar": {
                 "filters": self._sidebar_filters(),
-                "items": self._sidebar_items(extensions),
+                "items": self._sidebar_items(ui_surfaces, extensions),
             },
             "settings": {
-                "sections": self._settings_sections(extensions),
+                "sections": self._settings_sections(ui_surfaces, extensions),
                 "values": self._read_settings(),
             },
             "chat_rendering": {
-                "renderers": self._chat_renderers(extensions),
+                "renderers": self._chat_renderers(ui_surfaces, extensions),
             },
             "extension_points": self._extension_points(),
         }
 
     def get_settings(self) -> dict[str, Any]:
+        ui_surfaces = self._load_ui_surfaces()
         return {
-            "sections": self._settings_sections(self._load_extensions()),
+            "sections": self._settings_sections(ui_surfaces, self._load_extensions()),
             "values": self._read_settings(),
         }
 
@@ -86,7 +92,71 @@ class FrontendRegistry:
             {"id": "integration", "label": "Integrations"},
         ]
 
-    def _sidebar_items(self, extensions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _app_metadata(self, ui_surfaces: list[dict[str, Any]]) -> dict[str, Any]:
+        app: dict[str, Any] = {
+            "id": "defaultspack",
+            "name": "Rumi Defaultspack",
+            "icon": "/static/assets/icons/defaultspack-icon.png",
+        }
+        for surface in ui_surfaces:
+            config = surface.get("config", {})
+            if isinstance(config, dict) and isinstance(config.get("app"), dict):
+                app = self._deep_merge(app, config["app"])
+        return app
+
+    def _parts(
+        self,
+        ui_surfaces: list[dict[str, Any]],
+        extensions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        parts: list[dict[str, Any]] = [
+            {
+                "id": "ai_chat",
+                "kind": "chat",
+                "label": "AI Chat",
+                "uses": ["chat", "ai_client", "prompt", "memory", "tool", "frontend"],
+                "contracts": {
+                    "conversation": "/api/chat/conversations",
+                    "catalog": "/api/ui/catalog",
+                    "settings": "/api/ui/settings",
+                },
+            },
+            {
+                "id": "activity_preview",
+                "kind": "preview",
+                "label": "Activity Preview",
+                "uses": ["chat", "dev", "tool", "knowledge", "memory", "media"],
+                "contracts": {
+                    "preview": "/api/ui/conversations/{conversation_id}/preview",
+                },
+            },
+        ]
+        parts.extend(self._config_list(ui_surfaces, "parts"))
+        parts.extend(self._config_list(extensions, "parts"))
+        return self._dedupe_by_key(parts, "id")
+
+    def _component_bindings(
+        self,
+        ui_surfaces: list[dict[str, Any]],
+        extensions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        bindings: list[dict[str, Any]] = [
+            {
+                "part_id": "ai_chat",
+                "component": "chat",
+                "requires": ["ai_client"],
+                "optional": ["prompt", "memory", "tool", "agent"],
+            }
+        ]
+        bindings.extend(self._config_list(ui_surfaces, "component_bindings"))
+        bindings.extend(self._config_list(extensions, "component_bindings"))
+        return self._dedupe_by_key(bindings, "part_id")
+
+    def _sidebar_items(
+        self,
+        ui_surfaces: list[dict[str, Any]],
+        extensions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
         registry = ToolRegistry()
         items: list[dict[str, Any]] = []
 
@@ -180,13 +250,16 @@ class FrontendRegistry:
             ]
         )
 
-        for extension in extensions:
-            for item in extension.get("sidebar_items", []):
-                items.append(item)
+        items.extend(self._config_list(ui_surfaces, "sidebar_items"))
+        items.extend(self._config_list(extensions, "sidebar_items"))
 
-        return items
+        return self._dedupe_by_key(items, "id")
 
-    def _settings_sections(self, extensions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _settings_sections(
+        self,
+        ui_surfaces: list[dict[str, Any]],
+        extensions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
         sections = [
             {
                 "id": "general",
@@ -277,12 +350,16 @@ class FrontendRegistry:
             },
         ]
 
-        for extension in extensions:
-            sections.extend(extension.get("settings_sections", []))
+        sections.extend(self._config_list(ui_surfaces, "settings_sections"))
+        sections.extend(self._config_list(extensions, "settings_sections"))
 
         return sections
 
-    def _chat_renderers(self, extensions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _chat_renderers(
+        self,
+        ui_surfaces: list[dict[str, Any]],
+        extensions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
         renderers = [
             {"id": "text", "block_types": ["text", "markdown"], "component": "MarkdownBlock", "fallback": "plain_text"},
             {"id": "code", "block_types": ["code"], "component": "CodeBlock", "fallback": "plain_text"},
@@ -290,13 +367,23 @@ class FrontendRegistry:
             {"id": "widget", "block_types": [], "widget_types": ["*"], "component": "WidgetCard", "fallback": "json"},
         ]
 
-        for extension in extensions:
-            renderers.extend(extension.get("chat_renderers", []))
+        renderers.extend(self._config_list(ui_surfaces, "chat_renderers"))
+        renderers.extend(self._config_list(extensions, "chat_renderers"))
 
         return renderers
 
     def _extension_points(self) -> list[dict[str, Any]]:
         return [
+            {
+                "id": "parts",
+                "path": "extensions/ui/*/manifest.json config.parts",
+                "description": "Small frontend parts and the component contracts they use.",
+            },
+            {
+                "id": "component_bindings",
+                "path": "extensions/ui/*/manifest.json config.component_bindings",
+                "description": "Declarative component-to-part usage rules.",
+            },
             {
                 "id": "sidebar_items",
                 "path": "user_data/shared/frontend_extensions/*.ui.json",
@@ -420,6 +507,13 @@ class FrontendRegistry:
                 )
         return previews
 
+    def _load_ui_surfaces(self) -> list[dict[str, Any]]:
+        try:
+            surfaces = get_extension_registry().ui_surfaces().list(enabled_only=True)
+        except Exception:
+            surfaces = []
+        return [surface for surface in surfaces if isinstance(surface, dict)]
+
     def _load_extensions(self) -> list[dict[str, Any]]:
         if not self._extensions_dir.exists():
             return []
@@ -430,6 +524,30 @@ class FrontendRegistry:
             except (OSError, json.JSONDecodeError):
                 continue
         return extensions
+
+    def _config_list(self, manifests: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
+        values: list[dict[str, Any]] = []
+        for manifest in manifests:
+            config = manifest.get("config", manifest)
+            if not isinstance(config, dict):
+                continue
+            items = config.get(key, [])
+            if not isinstance(items, list):
+                continue
+            values.extend(item for item in items if isinstance(item, dict))
+        return values
+
+    def _dedupe_by_key(self, items: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
+        deduped: dict[str, dict[str, Any]] = {}
+        order: list[str] = []
+        for item in items:
+            value = str(item.get(key, "")).strip()
+            if not value:
+                value = f"__index_{len(order)}"
+            if value not in deduped:
+                order.append(value)
+            deduped[value] = item
+        return [deduped[value] for value in order]
 
     def _read_settings(self) -> dict[str, Any]:
         values = self._default_settings()
