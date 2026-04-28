@@ -35,7 +35,45 @@ fn stage_runtime_bundle() -> io::Result<()> {
         copy_dir_recursive(&bundled_src, &staged_root.join("bundled"))?;
     }
 
+    stage_pack_shell(&repo_root, &staged_root)?;
+
     Ok(())
+}
+
+fn stage_pack_shell(repo_root: &Path, staged_root: &Path) -> io::Result<()> {
+    let Some(pack_shell) = find_pack_shell_binary(repo_root) else {
+        return Ok(());
+    };
+    let bundled_dir = staged_root.join("bundled");
+    fs::create_dir_all(&bundled_dir)?;
+    fs::copy(pack_shell, bundled_dir.join(pack_shell_binary_name()))?;
+    Ok(())
+}
+
+fn find_pack_shell_binary(repo_root: &Path) -> Option<PathBuf> {
+    let binary_name = pack_shell_binary_name();
+    [
+        repo_root
+            .join("pack-shell")
+            .join("target")
+            .join("release")
+            .join(binary_name),
+        repo_root
+            .join("pack-shell")
+            .join("target")
+            .join("debug")
+            .join(binary_name),
+    ]
+    .into_iter()
+    .find(|candidate| candidate.is_file())
+}
+
+fn pack_shell_binary_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "pack-shell.exe"
+    } else {
+        "pack-shell"
+    }
 }
 
 fn reset_dir(path: &Path) -> io::Result<()> {

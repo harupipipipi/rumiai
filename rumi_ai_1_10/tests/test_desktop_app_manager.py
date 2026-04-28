@@ -6,11 +6,13 @@ Popen arguments after the --command / RUMI_API_TOKEN fix.
 from __future__ import annotations
 
 import os
+import json
 from unittest import mock
 
 import pytest
 
 from core_runtime.desktop_app_manager import DesktopAppManager
+import core_runtime.desktop_app_manager as desktop_app_manager
 
 
 @pytest.fixture
@@ -131,6 +133,72 @@ class TestLaunchAppArguments:
 
         assert result["success"] is False
         assert "not registered" in result["error"].lower()
+
+    def test_resolve_pack_shell_prefers_bundled_runtime_copy(self, tmp_path):
+        """Bundled Tauri runtime should resolve app/bundled/pack-shell."""
+        repo_dir = tmp_path / "rumi_ai_1_10"
+        bundled_shell = repo_dir / "bundled" / desktop_app_manager._pack_shell_binary_name()
+        bundled_shell.parent.mkdir(parents=True)
+        bundled_shell.write_text("#!/bin/sh\n", encoding="utf-8")
+        bundled_shell.chmod(0o755)
+
+        env_clean = {
+            k: v
+            for k, v in os.environ.items()
+            if k not in {"RUMI_PACK_SHELL_PATH", "PATH"}
+        }
+        with mock.patch.object(desktop_app_manager, "_default_repo_dir", return_value=str(repo_dir)):
+            with mock.patch.dict(os.environ, env_clean, clear=True):
+                assert desktop_app_manager._resolve_pack_shell_path() == str(bundled_shell)
+
+    @mock.patch("subprocess.Popen")
+    def test_launch_app_lazily_registers_repo_local_pack(
+        self, mock_popen, tmp_path
+    ):
+        """Viewer launch can start a repo-local desktop_app before metadata exists."""
+        repo_dir = tmp_path / "rumi_ai_1_10"
+        pack_dir = repo_dir / "ecosystem" / "autopack"
+        pack_dir.mkdir(parents=True)
+        (pack_dir / "ecosystem.json").write_text(
+            json.dumps(
+                {
+                    "pack_id": "autopack",
+                    "desktop_app": {
+                        "command": "python app.py",
+                        "env": {"AUTOPACK_PORT": "9999"},
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        pack_shell = tmp_path / "pack-shell"
+        pack_shell.write_text("#!/bin/sh\n", encoding="utf-8")
+        pack_shell.chmod(0o755)
+
+        mock_proc = mock.MagicMock()
+        mock_proc.poll.return_value = None
+        mock_proc.pid = 12345
+        mock_popen.return_value = mock_proc
+
+        manager = DesktopAppManager(repo_dir=str(repo_dir))
+        with mock.patch.dict(os.environ, {"RUMI_PACK_SHELL_PATH": str(pack_shell)}):
+            with mock.patch.object(manager, "_create_shortcut", return_value=str(tmp_path / "Autopack.app")):
+                result = manager.launch_app("autopack", api_token="issued-token")
+
+        assert result["success"] is True
+        assert result["launch_mode"] == "direct"
+        meta_path = repo_dir / "user_data" / "apps" / "autopack.json"
+        assert meta_path.is_file()
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        assert meta["pack_dir"] == str(pack_dir)
+
+        cmd_list = mock_popen.call_args[0][0]
+        assert cmd_list == ["python", "app.py"]
+        env = mock_popen.call_args.kwargs["env"]
+        assert env["RUMI_API_TOKEN"] == "issued-token"
+        assert env["RUMI_TOKEN"] == "issued-token"
+        assert env["AUTOPACK_PORT"] == "9999"
 
     @mock.patch("subprocess.Popen")
     @mock.patch("os.path.isfile", return_value=True)
