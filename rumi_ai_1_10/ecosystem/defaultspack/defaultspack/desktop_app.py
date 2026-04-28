@@ -6,7 +6,6 @@ import sys
 import time
 import urllib.error
 import urllib.request
-import webbrowser
 from pathlib import Path
 
 
@@ -56,8 +55,13 @@ def main() -> int:
         server = None
     _wait_until_ready(url)
 
-    if os.environ.get("RUMI_DEFAULTSPACK_OPEN_BROWSER", "1") != "0":
-        webbrowser.open(url)
+    from defaultspack.native_webview import open_desktop_surface
+
+    surface_result = open_desktop_surface(url, title="Rumi Defaultspack")
+    if surface_result == "webview":
+        if server is not None:
+            server.stop()
+        return 0
 
     stop = False
 

@@ -96,6 +96,9 @@ export type ShellRenderer = {
   component: string;
   regions?: string[];
   fallback?: string;
+  module?: string;
+  export?: string;
+  trust?: "local";
 };
 
 export type UICatalog = {
@@ -146,6 +149,12 @@ export type UICatalog = {
     id: string;
     path: string;
     description: string;
+  }>;
+  diagnostics?: Array<{
+    level: "info" | "warning" | "error" | string;
+    code: string;
+    message: string;
+    source: string;
   }>;
 };
 

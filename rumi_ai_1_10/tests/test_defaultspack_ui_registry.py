@@ -99,6 +99,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertIn("messages", parts["ai_chat"]["schema"]["properties"])
         self.assertIn("ai_chat", binding_part_ids)
         self.assertEqual(catalog["app"]["icon"], "/static/assets/icons/defaultspack-icon.png")
+        self.assertEqual(catalog["diagnostics"], [])
 
     def test_malformed_frontend_shell_config_falls_back(self):
         from domain.frontend.registry import FrontendRegistry
@@ -115,6 +116,62 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
 
         self.assertEqual(catalog["shell"]["layout"]["id"], "default_chat_shell")
         self.assertTrue(any(region["id"] == "chat_messages" for region in catalog["shell"]["layout"]["regions"]))
+        self.assertTrue(any(item["code"] == "frontend_shell_invalid_json" for item in catalog["diagnostics"]))
+
+    def test_catalog_reports_frontend_contract_diagnostics(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            ext_dir = pack_root / "user_data" / "shared" / "frontend_extensions"
+            ext_dir.mkdir(parents=True, exist_ok=True)
+            (ext_dir / "bad.ui.json").write_text(
+                json.dumps(
+                    {
+                        "parts": [
+                            {"id": "bad_part", "kind": "", "schema": []},
+                        ],
+                        "component_bindings": [
+                            {"part_id": "missing_part", "component": "", "requires": "ai_client"},
+                        ],
+                        "shell_renderers": [
+                            {"id": "bad_renderer", "component": "", "regions": "composer"},
+                            {"id": "remote_renderer", "component": "Remote", "module": "https://example.com/remote.js"},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (pack_root / "user_data" / "shared" / "frontend_shell.json").write_text(
+                json.dumps(
+                    {
+                        "shell_layout": {
+                            "regions": [
+                                {"id": "bad_region", "part_id": "missing_part", "renderer": "missing_renderer", "order": "first"},
+                            ]
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+                catalog = FrontendRegistry(pack_root=pack_root).build_catalog()
+
+        codes = {item["code"] for item in catalog["diagnostics"]}
+        self.assertIn("part_missing_kind", codes)
+        self.assertIn("part_invalid_schema", codes)
+        self.assertIn("binding_unknown_part", codes)
+        self.assertIn("binding_missing_component", codes)
+        self.assertIn("binding_invalid_requires", codes)
+        self.assertIn("shell_region_unknown_part", codes)
+        self.assertIn("shell_region_unknown_renderer", codes)
+        self.assertIn("shell_region_invalid_order", codes)
+        self.assertIn("shell_renderer_missing_component", codes)
+        self.assertIn("shell_renderer_invalid_regions", codes)
+        self.assertIn("shell_renderer_untrusted_module", codes)
+        self.assertIn("shell_renderer_missing_local_trust", codes)
 
     def test_update_settings_persists_values(self):
         from domain.frontend.registry import FrontendRegistry

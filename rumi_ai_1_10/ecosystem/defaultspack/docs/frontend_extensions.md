@@ -31,15 +31,25 @@
 }
 ```
 
-`shell_renderers` は renderer ID と frontend component 名の契約を表す。現段階では trusted builtin renderer だけを実行し、未知の renderer は fallback metadata として扱う。
+`shell_renderers` は renderer ID と frontend component 名の契約を表す。builtin renderer は `webapp/src/renderers/` に分かれており、`module` と `trust: "local"` を指定した同一 origin の `/static/renderers/`, `/static/assets/renderers/`, `/static/user_renderers/` 配下だけ lazy load できる。読み込み失敗時は error boundary で builtin fallback に戻る。
 
 ```json
 {
   "shell_renderers": [
-    { "id": "composer", "component": "Composer", "regions": ["composer"], "fallback": "hidden" }
+    {
+      "id": "composer",
+      "component": "Composer",
+      "regions": ["composer"],
+      "fallback": "hidden",
+      "module": "/static/renderers/custom-composer.js",
+      "export": "default",
+      "trust": "local"
+    }
   ]
 }
 ```
+
+`/api/ui/catalog` は壊れた `parts`, `component_bindings`, `shell_layout`, `shell_renderers` を `diagnostics` として返す。frontend は診断を表示・記録できるが、manifest 全体を強制的には拒否しない。
 
 ### 1. 右バーに項目を追加する
 

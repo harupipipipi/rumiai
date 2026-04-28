@@ -2,7 +2,7 @@
 
 `rumi_bundle` は `defaultspack` に同梱する standalone frontend bundle です。
 
-`defaultspack/ecosystem.json` の `desktop_app` から `defaultspack/desktop_app.py` を起動し、pack-shell から受け取った環境変数を使って `http://127.0.0.1:${RUMI_DEFAULTSPACK_PORT}` を開きます。
+`defaultspack/ecosystem.json` の `desktop_app` から `defaultspack/desktop_app.py` を起動し、pack-shell から受け取った環境変数を使って `http://127.0.0.1:${RUMI_DEFAULTSPACK_PORT}` を開きます。既定はブラウザ表示で、`RUMI_DEFAULTSPACK_SURFACE=webview` を指定し pywebview が利用できる場合だけ native WebView で開きます。
 
 ## 置き場所
 
@@ -17,11 +17,12 @@
 - `entry_url`: `http://127.0.0.1:${RUMI_DEFAULTSPACK_PORT}`
 - `port_source.default`: `8766`
 - `app.icon`: `/static/assets/icons/defaultspack-icon.png`
-- `parts`: `ai_chat`, `activity_preview`
+- `parts`: `app_chrome`, `conversation_history`, `ai_chat`, `activity_preview`, `extension_sidebar`, `settings`
 - `component_bindings`: `ai_chat` が `chat` を使い、`ai_client` を要求する
+- `diagnostics`: malformed frontend contract を警告として返す
 
 ## 分割の考え方
 
-frontend は component を直接 import しません。`/api/ui/catalog` から受け取る `parts` と `component_bindings` に従い、知っている renderer だけを描画します。
+frontend の visible areas は `webapp/src/renderers/` に分割されています。`/api/ui/catalog` から受け取る `parts`, `component_bindings`, `shell.layout`, `shell.renderers` に従い、知っている renderer または trusted local renderer bundle だけを描画します。
 
 見た目を一掃する場合も、`extensions/ui/rumi_bundle/manifest.json` と `user_data/shared/frontend_extensions/*.ui.json` の契約を残せば、同じ backend component を別 UI に載せ替えられます。

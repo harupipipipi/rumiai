@@ -101,6 +101,28 @@ class DesktopAppManager:
 
         return {"success": True, "shortcut_path": shortcut_path}
 
+    def register_from_ecosystem(self, ecosystem_path: str) -> Dict[str, Any]:
+        """ecosystem.json の desktop_app セクションからアプリを登録する。"""
+        try:
+            with open(ecosystem_path, "r", encoding="utf-8") as f:
+                ecosystem = json.load(f)
+        except Exception as e:
+            return {"success": False, "error": f"Failed to read ecosystem.json: {e}"}
+
+        pack_id = ecosystem.get("pack_id") or ecosystem.get("id")
+        if not pack_id or not isinstance(pack_id, str):
+            return {"success": False, "error": "ecosystem.json pack_id is required"}
+
+        desktop_app_config = ecosystem.get("desktop_app")
+        if not isinstance(desktop_app_config, dict):
+            return {"success": False, "error": f"No desktop_app configured for pack: {pack_id}"}
+
+        return self.register_app(
+            pack_id=pack_id,
+            desktop_app_config=desktop_app_config,
+            pack_dir=str(Path(ecosystem_path).resolve().parent),
+        )
+
     def unregister_app(self, pack_id: str) -> Dict[str, Any]:
         """登録済みアプリを解除し、ショートカットを削除する。"""
         # 実行中なら停止
@@ -118,7 +140,7 @@ class DesktopAppManager:
 
         return {"success": True}
 
-    def launch_app(self, pack_id: str) -> Dict[str, Any]:
+    def launch_app(self, pack_id: str, api_token: Optional[str] = None) -> Dict[str, Any]:
         """Pack のデスクトップアプリを起動する。"""
         if pack_id in self._running:
             proc = self._running[pack_id]
@@ -140,7 +162,7 @@ class DesktopAppManager:
             return {"success": False, "error": f"No command configured for app: {pack_id}"}
 
         requires_api_token = meta.get("requires_api_token", True)
-        api_token = os.environ.get(_PACK_API_TOKEN_ENV, "")
+        api_token = api_token or os.environ.get(_PACK_API_TOKEN_ENV, "")
         if requires_api_token and not api_token:
             return {
                 "success": False,

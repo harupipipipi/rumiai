@@ -22,13 +22,17 @@ class FrontendRegistry:
         self._settings_path = self._pack_root / "user_data" / "shared" / "frontend_settings.json"
 
     def build_catalog(self) -> dict[str, Any]:
+        self._load_diagnostics: list[dict[str, Any]] = []
         extensions = self._load_extensions()
         ui_surfaces = self._load_ui_surfaces()
+        shell = self._shell(ui_surfaces, extensions)
+        parts = self._parts(ui_surfaces, extensions)
+        component_bindings = self._component_bindings(ui_surfaces, extensions)
         return {
             "app": self._app_metadata(ui_surfaces),
-            "shell": self._shell(ui_surfaces, extensions),
-            "parts": self._parts(ui_surfaces, extensions),
-            "component_bindings": self._component_bindings(ui_surfaces, extensions),
+            "shell": shell,
+            "parts": parts,
+            "component_bindings": component_bindings,
             "sidebar": {
                 "filters": self._sidebar_filters(),
                 "items": self._sidebar_items(ui_surfaces, extensions),
@@ -41,6 +45,7 @@ class FrontendRegistry:
                 "renderers": self._chat_renderers(ui_surfaces, extensions),
             },
             "extension_points": self._extension_points(),
+            "diagnostics": self._diagnostics(shell, parts, component_bindings),
         }
 
     def get_settings(self) -> dict[str, Any]:
@@ -627,8 +632,14 @@ class FrontendRegistry:
         extensions = []
         for path in sorted(self._extensions_dir.glob("*.ui.json")):
             try:
-                extensions.append(json.loads(path.read_text(encoding="utf-8")))
-            except (OSError, json.JSONDecodeError):
+                extension = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(extension, dict):
+                    extension["_source"] = str(path)
+                    extensions.append(extension)
+                else:
+                    self._add_diagnostic("warning", "frontend_extension_not_object", f"{path} must contain a JSON object.", str(path))
+            except (OSError, json.JSONDecodeError) as exc:
+                self._add_diagnostic("warning", "frontend_extension_invalid_json", str(exc), str(path))
                 continue
         return extensions
 
@@ -637,9 +648,111 @@ class FrontendRegistry:
             return {}
         try:
             config = json.loads(self._shell_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError) as exc:
+            self._add_diagnostic("warning", "frontend_shell_invalid_json", str(exc), str(self._shell_path))
             return {}
-        return config if isinstance(config, dict) else {}
+        if not isinstance(config, dict):
+            self._add_diagnostic("warning", "frontend_shell_not_object", "frontend_shell.json must contain a JSON object.", str(self._shell_path))
+            return {}
+        return config
+
+    def _diagnostics(
+        self,
+        shell: dict[str, Any],
+        parts: list[dict[str, Any]],
+        component_bindings: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        diagnostics = list(getattr(self, "_load_diagnostics", []))
+
+        part_ids = {str(part.get("id", "")).strip() for part in parts if str(part.get("id", "")).strip()}
+        renderer_ids = {
+            str(renderer.get("id", "")).strip()
+            for renderer in shell.get("renderers", [])
+            if isinstance(renderer, dict) and str(renderer.get("id", "")).strip()
+        }
+
+        seen_parts: set[str] = set()
+        for index, part in enumerate(parts):
+            part_id = str(part.get("id", "")).strip()
+            source = str(part.get("_source", "catalog.parts"))
+            if not part_id:
+                diagnostics.append(self._diagnostic("warning", "part_missing_id", f"parts[{index}] is missing id.", source))
+            elif part_id in seen_parts:
+                diagnostics.append(self._diagnostic("warning", "part_duplicate_id", f"part id '{part_id}' is duplicated; the last definition wins.", source))
+            seen_parts.add(part_id)
+            if not isinstance(part.get("kind"), str) or not str(part.get("kind", "")).strip():
+                diagnostics.append(self._diagnostic("warning", "part_missing_kind", f"part '{part_id or index}' is missing kind.", source))
+            if "schema" in part and not isinstance(part.get("schema"), dict):
+                diagnostics.append(self._diagnostic("warning", "part_invalid_schema", f"part '{part_id or index}' schema must be an object.", source))
+
+        for index, binding in enumerate(component_bindings):
+            source = str(binding.get("_source", "catalog.component_bindings"))
+            part_id = str(binding.get("part_id", "")).strip()
+            if not part_id:
+                diagnostics.append(self._diagnostic("warning", "binding_missing_part_id", f"component_bindings[{index}] is missing part_id.", source))
+            elif part_id not in part_ids:
+                diagnostics.append(self._diagnostic("warning", "binding_unknown_part", f"component binding references unknown part '{part_id}'.", source))
+            if not isinstance(binding.get("component"), str) or not str(binding.get("component", "")).strip():
+                diagnostics.append(self._diagnostic("warning", "binding_missing_component", f"component binding for '{part_id or index}' is missing component.", source))
+            for key in ("requires", "optional"):
+                if key in binding and not isinstance(binding.get(key), list):
+                    diagnostics.append(self._diagnostic("warning", f"binding_invalid_{key}", f"component binding '{part_id or index}' {key} must be a list.", source))
+
+        layout = shell.get("layout", {})
+        regions = layout.get("regions", []) if isinstance(layout, dict) else []
+        if not isinstance(regions, list):
+            diagnostics.append(self._diagnostic("warning", "shell_regions_not_list", "shell_layout.regions must be a list.", "catalog.shell.layout"))
+            regions = []
+
+        for index, region in enumerate(regions):
+            if not isinstance(region, dict):
+                diagnostics.append(self._diagnostic("warning", "shell_region_not_object", f"shell_layout.regions[{index}] must be an object.", "catalog.shell.layout"))
+                continue
+            region_id = str(region.get("id", "")).strip()
+            part_id = str(region.get("part_id", "")).strip()
+            renderer_id = str(region.get("renderer", "")).strip()
+            source = str(region.get("_source", "catalog.shell.layout"))
+            if not region_id:
+                diagnostics.append(self._diagnostic("warning", "shell_region_missing_id", f"shell_layout.regions[{index}] is missing id.", source))
+            if part_id and part_id not in part_ids:
+                diagnostics.append(self._diagnostic("warning", "shell_region_unknown_part", f"region '{region_id or index}' references unknown part '{part_id}'.", source))
+            if renderer_id and renderer_id not in renderer_ids:
+                diagnostics.append(self._diagnostic("warning", "shell_region_unknown_renderer", f"region '{region_id or index}' references unknown renderer '{renderer_id}'.", source))
+            if "order" in region and not isinstance(region.get("order"), (int, float)):
+                diagnostics.append(self._diagnostic("warning", "shell_region_invalid_order", f"region '{region_id or index}' order must be numeric.", source))
+
+        for index, renderer in enumerate(shell.get("renderers", [])):
+            if not isinstance(renderer, dict):
+                diagnostics.append(self._diagnostic("warning", "shell_renderer_not_object", f"shell.renderers[{index}] must be an object.", "catalog.shell.renderers"))
+                continue
+            renderer_id = str(renderer.get("id", "")).strip()
+            source = str(renderer.get("_source", "catalog.shell.renderers"))
+            if not renderer_id:
+                diagnostics.append(self._diagnostic("warning", "shell_renderer_missing_id", f"shell.renderers[{index}] is missing id.", source))
+            if not isinstance(renderer.get("component"), str) or not str(renderer.get("component", "")).strip():
+                diagnostics.append(self._diagnostic("warning", "shell_renderer_missing_component", f"shell renderer '{renderer_id or index}' is missing component.", source))
+            if "regions" in renderer and not isinstance(renderer.get("regions"), list):
+                diagnostics.append(self._diagnostic("warning", "shell_renderer_invalid_regions", f"shell renderer '{renderer_id or index}' regions must be a list.", source))
+            module = renderer.get("module")
+            if module is not None and not self._is_trusted_renderer_module(module):
+                diagnostics.append(self._diagnostic("warning", "shell_renderer_untrusted_module", f"shell renderer '{renderer_id or index}' module must be a trusted static renderer path.", source))
+            if module is not None and renderer.get("trust") != "local":
+                diagnostics.append(self._diagnostic("warning", "shell_renderer_missing_local_trust", f"shell renderer '{renderer_id or index}' module requires trust='local'.", source))
+
+        return diagnostics
+
+    def _is_trusted_renderer_module(self, module: Any) -> bool:
+        if not isinstance(module, str):
+            return False
+        return module.startswith(("/static/renderers/", "/static/assets/renderers/", "/static/user_renderers/"))
+
+    def _add_diagnostic(self, level: str, code: str, message: str, source: str) -> None:
+        if not hasattr(self, "_load_diagnostics"):
+            self._load_diagnostics = []
+        self._load_diagnostics.append(self._diagnostic(level, code, message, source))
+
+    def _diagnostic(self, level: str, code: str, message: str, source: str) -> dict[str, str]:
+        return {"level": level, "code": code, "message": message, "source": source}
 
     def _config_list(self, manifests: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
         values: list[dict[str, Any]] = []

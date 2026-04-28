@@ -26,12 +26,15 @@ defaultspack is a Rumi-provided pack desktop app. Its frontend must stay a repla
 - [x] Let `user_data/shared/frontend_shell.json` override shell layout without editing React.
 - [x] Add schema-bearing parts for app chrome, history, chat, preview, sidebar, and settings.
 - [x] Gate visible React regions through the shell layout contract.
+- [x] Split each visible React area into its own small renderer module under `webapp/src/renderers/`.
+- [x] Add lazy custom renderer loading for trusted local bundles, with error boundaries and fallback renderers.
+- [x] Add validation diagnostics for malformed `parts`, `component_bindings`, `shell_layout`, and `shell_renderers`.
+- [x] Add explicit schemas for tool timelines, plan steps, approvals, attachments, and audio payloads in the preview contract.
+- [x] Wire the Grant flow to `desktop_app.execute` through DI, permissions config, token issuance, and kernel desktop handlers.
+- [x] Add a native webview wrapper option via `RUMI_DEFAULTSPACK_SURFACE=webview`.
 
-## Next Slice
+## Product Follow-up Notes
 
-- [ ] Split each visible React area into its own small renderer module under `webapp/src/renderers/`.
-- [ ] Add lazy custom renderer loading for trusted local bundles, with error boundaries and fallback renderers.
-- [ ] Add validation diagnostics for malformed `parts`, `component_bindings`, `shell_layout`, and `shell_renderers`.
-- [ ] Add explicit schemas for tool timelines, plan steps, approvals, attachments, and audio payloads beyond the first preview contract.
-- [ ] Wire the viewer / Grant flow to launch packs with `desktop_app.execute`.
-- [ ] Add a native webview wrapper if defaultspack should open outside the system browser.
+- Replace the temporary built-in renderer visuals after the product UI direction is set.
+- Package `pywebview` only if native WebView becomes the default; current default remains browser fallback.
+- Add an end-to-end viewer click path once the viewer UI chooses where desktop apps are launched from.
