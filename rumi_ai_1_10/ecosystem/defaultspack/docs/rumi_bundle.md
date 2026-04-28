@@ -2,7 +2,7 @@
 
 `rumi_bundle` は `defaultspack` に同梱する standalone frontend bundle です。
 
-`defaultspack/ecosystem.json` の `desktop_app` から `defaultspack/desktop_app.py` を起動し、pack-shell から受け取った環境変数を使って `http://127.0.0.1:${RUMI_DEFAULTSPACK_PORT}` を開きます。既定はブラウザ表示で、`RUMI_DEFAULTSPACK_SURFACE=webview` を指定し pywebview が利用できる場合だけ native WebView で開きます。
+`defaultspack/ecosystem.json` の `desktop_app` から `defaultspack/desktop_app.py` を起動し、pack-shell から受け取った環境変数を使って `http://127.0.0.1:${RUMI_DEFAULTSPACK_PORT}` を開きます。既定は `RUMI_DEFAULTSPACK_SURFACE=webview` で、pywebview が利用できる場合は native WebView アプリとして開きます。pywebview が無い環境ではブラウザ表示へフォールバックします。
 
 ## 置き場所
 

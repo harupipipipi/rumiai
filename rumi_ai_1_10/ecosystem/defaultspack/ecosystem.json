@@ -239,7 +239,8 @@
     "working_dir": "",
     "env": {
       "DEFAULTS_HTTP_PORT": "8766",
-      "RUMI_DEFAULTSPACK_PORT": "8766"
+      "RUMI_DEFAULTSPACK_PORT": "8766",
+      "RUMI_DEFAULTSPACK_SURFACE": "webview"
     },
     "capabilities": [
       "desktop_app.execute"

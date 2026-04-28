@@ -58,10 +58,6 @@ def main() -> int:
     from defaultspack.native_webview import open_desktop_surface
 
     surface_result = open_desktop_surface(url, title="Rumi Defaultspack")
-    if surface_result == "webview":
-        if server is not None:
-            server.stop()
-        return 0
 
     stop = False
 
