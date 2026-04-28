@@ -46,13 +46,15 @@ export type SidebarFieldOption = {
 export type SidebarField = {
   id: string;
   label: string;
-  type: "text" | "textarea" | "number" | "toggle" | "select" | "readonly";
+  type: "text" | "textarea" | "number" | "toggle" | "select" | "readonly" | "secret";
   default?: unknown;
   required?: boolean;
   help?: string;
   min?: number;
   max?: number;
   options?: SidebarFieldOption[];
+  provider_id?: string;
+  configured_field?: string;
 };
 
 export type SidebarItem = {
@@ -264,6 +266,13 @@ export const api = {
     return request<{ values: Record<string, Record<string, unknown>> }>("/api/ui/settings", {
       method: "PUT",
       body: JSON.stringify({ values }),
+    });
+  },
+
+  saveProviderApiKey(providerId: string, value: string) {
+    return request<{ provider_id: string; configured: boolean }>("/api/ai/provider-key", {
+      method: "POST",
+      body: JSON.stringify({ provider_id: providerId, value }),
     });
   },
 

@@ -6,6 +6,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from ...extensions.loading import import_entrypoint
 from ...extensions.runtime import get_extension_registry
+from ..api_key_store import load_provider_api_keys_into_env, provider_has_api_key
 from .openai_compatible_provider import OpenAICompatibleProvider
 from .provider_catalog import OPENAI_COMPATIBLE_PROVIDER_CLASSES
 
@@ -145,13 +146,13 @@ _CURATED_PROVIDER_METADATA: Dict[str, Dict[str, Any]] = {
     "openrouter": {
         "display_name": "OpenRouter",
         "kind": "aggregator",
-        "description": "Aggregator for many provider-backed models.",
+        "description": "OpenRouter gateway limited to Tencent Hy3 preview free.",
         "env_vars": ["OPENROUTER_API_KEY"],
         "base_url_envs": ["OPENROUTER_BASE_URL"],
-        "catalog_only": True,
-        "supports_invoke": False,
-        "default_model": "gpt-4o-mini",
-        "capabilities": ["chat", "tool_calls", "vision"],
+        "catalog_only": False,
+        "supports_invoke": True,
+        "default_model": "tencent/hy3-preview:free",
+        "capabilities": ["chat", "streaming"],
     },
     "deepseek": {
         "display_name": "DeepSeek",
@@ -316,9 +317,7 @@ _CURATED_PROVIDER_MODELS: Dict[str, List[Dict[str, Any]]] = {
         {"model_id": "grok-vision-beta", "name": "Grok Vision", "type": "vision"},
     ],
     "openrouter": [
-        {"model_id": "gpt-4o-mini", "name": "GPT-4o Mini", "type": "chat"},
-        {"model_id": "claude-sonnet-4", "name": "Claude Sonnet 4", "type": "chat"},
-        {"model_id": "deepseek-r1", "name": "DeepSeek R1", "type": "reasoning"},
+        {"model_id": "tencent/hy3-preview:free", "name": "Tencent Hy3 preview (free)", "type": "chat"},
     ],
     "deepseek": [
         {"model_id": "deepseek-chat", "name": "DeepSeek Chat", "type": "chat"},
@@ -372,7 +371,7 @@ _BEST_MODEL_BY_PROVIDER = {
     "groq": "llama-3.3-70b-versatile",
     "mistral": "mistral-large-latest",
     "xai": "grok-2-latest",
-    "openrouter": "gpt-4o-mini",
+    "openrouter": "tencent/hy3-preview:free",
     "deepseek": "deepseek-chat",
     "perplexity": "sonar-pro",
     "together": "llama-3.1-70b-instruct-turbo",
@@ -535,6 +534,9 @@ def _merge_provider_entry(provider_id: str, manifest: Optional[Dict[str, Any]] =
 
 
 def _provider_is_configured(entry: Dict[str, Any]) -> tuple[bool, Optional[str]]:
+    provider_id = str(entry.get("provider_id", "")).strip()
+    if provider_id and provider_has_api_key(provider_id):
+        return True, "defaultspack_secret"
     for env_name in entry.get("env_vars", []):
         if _truthy_env(env_name):
             return True, env_name
@@ -882,6 +884,8 @@ def _credentials_ready(manifest: Dict[str, Any], provider_id: str) -> bool:
     )
     if any(_truthy_env(name) for name in api_envs + base_url_envs):
         return True
+    if provider_has_api_key(provider_id):
+        return True
     if not bool(manifest.get("credential_required", True)):
         return not api_envs and not base_url_envs
     return False
@@ -911,6 +915,7 @@ def _instantiate_manifest_provider(manifest: Dict[str, Any]):
 
 def detect_available_providers():
     """Detect manifest-driven runtime providers, then fall back to legacy shims."""
+    load_provider_api_keys_into_env()
     available = {}
     manifests = _provider_manifest_map()
     for provider_id, manifest in manifests.items():

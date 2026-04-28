@@ -187,8 +187,11 @@ class OpenAICompatibleProvider(OpenAIProvider):
         display_name = str(raw.get("display_name") or raw.get("name") or model_id)
         normalized = {
             "id": qualified_model_id,
+            "model_id": model_id,
+            "provider_id": self.provider_id,
             "provider": self.provider_id,
             "name": display_name,
+            "display_name": display_name,
             "type": str(raw.get("type", "chat")),
         }
         defaults = dict(raw.get("defaults", {}))

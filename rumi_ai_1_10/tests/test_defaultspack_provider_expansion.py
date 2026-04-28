@@ -81,6 +81,23 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
         self.assertIn("mistral/mistral-large-latest", model_ids)
         self.assertIn("mistral/mistral-embed", model_ids)
 
+    def test_ai_client_lists_only_supported_openrouter_model(self):
+        from domain.ai_client.client import AIClient
+
+        AIClient._instance = None
+        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "or-key"}, clear=True):
+            client = AIClient()
+
+        try:
+            models = client.list_models(provider="openrouter")
+            provider, model_name = client.resolve_provider("openrouter/tencent/hy3-preview:free")
+        finally:
+            AIClient._instance = None
+
+        self.assertEqual({item["id"] for item in models}, {"openrouter/tencent/hy3-preview:free"})
+        self.assertEqual(model_name, "tencent/hy3-preview:free")
+        self.assertEqual(getattr(provider, "provider_id", ""), "openrouter")
+
 
 if __name__ == "__main__":
     unittest.main()

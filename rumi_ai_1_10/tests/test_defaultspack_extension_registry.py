@@ -219,62 +219,21 @@ def test_extension_registry_lists_rumi_bundle_ui_surface():
     assert surfaces["rumi_bundle"]["config"]["port_source"]["default"] == 8766
 
 
-def test_openrouter_provider_refreshes_and_caches_models(tmp_path: Path, monkeypatch):
-    cache_file = tmp_path / "openrouter_models_cache.json"
+def test_openrouter_provider_lists_only_hy3_preview_free(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "dummy-token")
-    monkeypatch.setattr(
-        OpenRouterProvider,
-        "_resolve_cache_path",
-        staticmethod(lambda: cache_file),
-    )
-    remote_models = [
-        {
-            "id": "openrouter/openrouter/auto",
-            "name": "Auto",
-            "provider": "openrouter",
-            "type": "chat",
-        }
-    ]
-    monkeypatch.setattr(
-        OpenRouterProvider,
-        "_fetch_remote_models",
-        lambda self: list(remote_models),
-    )
 
     provider = OpenRouterProvider()
     models = provider.list_models()
-    assert models == remote_models
-    payload = json.loads(cache_file.read_text(encoding="utf-8"))
-    assert payload["models"] == remote_models
+    assert [model["id"] for model in models] == ["openrouter/tencent/hy3-preview:free"]
+    assert models[0]["model_id"] == "tencent/hy3-preview:free"
 
 
-def test_openrouter_provider_uses_cache_when_remote_unavailable(
-    tmp_path: Path,
-    monkeypatch,
-):
-    cache_file = tmp_path / "openrouter_models_cache.json"
-    cached_models = [
-        {
-            "id": "openrouter/meta-llama/llama-3.1-8b-instruct",
-            "name": "Llama 3.1 8B",
-            "provider": "openrouter",
-            "type": "chat",
-        }
-    ]
-    cache_file.write_text(
-        json.dumps({"last_synced_epoch": 1, "models": cached_models}, ensure_ascii=False),
-        encoding="utf-8",
-    )
+def test_openrouter_provider_rejects_non_allowlisted_model(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "dummy-token")
-    monkeypatch.setattr(
-        OpenRouterProvider,
-        "_resolve_cache_path",
-        staticmethod(lambda: cache_file),
-    )
-    monkeypatch.setattr(OpenRouterProvider, "_fetch_remote_models", lambda self: [])
 
     provider = OpenRouterProvider()
-    assert provider.list_models() == cached_models
+    with pytest.raises(RuntimeError, match="tencent/hy3-preview:free"):
+        provider.complete("openai/gpt-4o-mini", [{"role": "user", "content": "hi"}], [], {})
 
 
 def test_detect_available_providers_uses_manifest_registry(monkeypatch):
@@ -333,15 +292,14 @@ def test_openai_compatible_provider_uses_model_manifests():
         manifest,
         model_manifests=model_manifests,
     )
-    assert provider.list_models() == [
-        {
-            "id": "generic_openai_like/latest-model",
-            "name": "Latest Model",
-            "provider": "generic_openai_like",
-            "type": "chat",
-            "defaults": {"chat": True},
-        }
-    ]
+    models = provider.list_models()
+    assert len(models) == 1
+    assert models[0]["id"] == "generic_openai_like/latest-model"
+    assert models[0]["model_id"] == "latest-model"
+    assert models[0]["provider"] == "generic_openai_like"
+    assert models[0]["provider_id"] == "generic_openai_like"
+    assert models[0]["name"] == "Latest Model"
+    assert models[0]["defaults"] == {"chat": True}
 
 
 def test_prompt_manager_lists_extension_prompts(monkeypatch, tmp_path: Path):

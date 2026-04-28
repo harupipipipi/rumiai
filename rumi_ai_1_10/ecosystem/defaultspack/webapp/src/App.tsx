@@ -226,14 +226,23 @@ export default function App() {
 
   const handleSettingChange = (sectionId: string, fieldId: string, value: unknown) => {
     setSettingsValues((current) => {
+      const section = settingsSections.find((item) => item.id === sectionId);
+      const field = section?.fields.find((item) => item.id === fieldId);
       const next = {
         ...current,
         [sectionId]: {
           ...(current[sectionId] ?? {}),
-          [fieldId]: value,
+          [fieldId]: field?.type === "secret" ? "" : value,
         },
       };
-      void api.updateUiSettings(next).then((result) => setSettingsValues(result.values)).catch(console.error);
+      if (field?.type === "secret") {
+        const providerId = field.provider_id ?? fieldId.replace(/_api_key$/, "");
+        void api.saveProviderApiKey(providerId, String(value ?? ""))
+          .then(() => refreshCatalog())
+          .catch(console.error);
+      } else {
+        void api.updateUiSettings(next).then((result) => setSettingsValues(result.values)).catch(console.error);
+      }
       return next;
     });
   };

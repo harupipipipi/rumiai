@@ -125,10 +125,10 @@ _PROVIDER_CATALOG: Tuple[ProviderCatalogEntry, ...] = (
         provider_id="openrouter",
         display_name="OpenRouter",
         category="gateway",
-        description="Multi-provider gateway with normalized model IDs.",
+        description="OpenRouter gateway limited to Tencent Hy3 preview free.",
         env_vars=("OPENROUTER_API_KEY",),
         openai_compatible=True,
-        capabilities=("chat", "stream", "vision", "reasoning", "tool_use"),
+        capabilities=("chat", "stream"),
         base_url_envs=("OPENROUTER_BASE_URL",),
     ),
     ProviderCatalogEntry(

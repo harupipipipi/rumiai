@@ -189,6 +189,29 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertTrue(reloaded["preview"]["auto_open"])
         self.assertEqual(reloaded["preview"]["max_items"], 5)
 
+    def test_update_settings_stores_openrouter_key_as_secret(self):
+        from core_runtime.secrets_store import SecretsStore
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            with patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "openrouter/tencent/hy3-preview:free"}]
+                registry = FrontendRegistry(pack_root=pack_root)
+                values = registry.update_settings({"models": {"openrouter_api_key": "or-secret"}})
+                reloaded = registry.get_settings()["values"]
+
+            settings_path = pack_root / "user_data" / "shared" / "frontend_settings.json"
+            settings_text = settings_path.read_text(encoding="utf-8")
+            store = SecretsStore(str(pack_root / "user_data" / "secrets"))
+            has_secret = store.has_secret("OPENROUTER_API_KEY")
+
+        self.assertTrue(values["models"]["openrouter_api_key_configured"])
+        self.assertEqual(values["models"]["openrouter_api_key"], "")
+        self.assertEqual(reloaded["models"]["openrouter_api_key"], "")
+        self.assertNotIn("or-secret", settings_text)
+        self.assertTrue(has_secret)
+
     def test_conversation_preview_uses_inspector_and_message_widgets(self):
         from domain.chat.store import ChatStore
         from domain.dev.inspector import Inspector

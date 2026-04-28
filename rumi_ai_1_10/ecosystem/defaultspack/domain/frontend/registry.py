@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from domain.ai_client.client import AIClient
+from domain.ai_client.api_key_store import provider_has_api_key, set_provider_api_key
 from domain.chat.store import ChatStore
 from domain.dev.inspector import Inspector
 from domain.extensions.runtime import get_extension_registry
@@ -57,7 +58,8 @@ class FrontendRegistry:
 
     def update_settings(self, patch: dict[str, Any] | None) -> dict[str, Any]:
         current = self._read_settings()
-        merged = self._deep_merge(current, patch or {})
+        sanitized_patch = self._sanitize_settings_patch(patch or {})
+        merged = self._deep_merge(current, sanitized_patch)
         self._settings_path.parent.mkdir(parents=True, exist_ok=True)
         self._settings_path.write_text(
             json.dumps(merged, ensure_ascii=False, indent=2),
@@ -445,8 +447,23 @@ class FrontendRegistry:
                         "id": "preferred_model",
                         "label": "Preferred Model",
                         "type": "select",
-                        "default": "stub/default",
+                        "default": "openrouter/tencent/hy3-preview:free",
                         "options": self._model_options(),
+                    },
+                    {
+                        "id": "openrouter_api_key",
+                        "label": "OpenRouter API Key",
+                        "type": "secret",
+                        "default": "",
+                        "provider_id": "openrouter",
+                        "configured_field": "openrouter_api_key_configured",
+                        "help": "保存後も値は再表示されません。",
+                    },
+                    {
+                        "id": "openrouter_api_key_configured",
+                        "label": "OpenRouter Key Saved",
+                        "type": "readonly",
+                        "default": provider_has_api_key("openrouter", pack_root=self._pack_root),
                     },
                 ],
             },
@@ -793,7 +810,12 @@ class FrontendRegistry:
             "general": {"composer_placeholder": "メッセージを入力...", "show_activity_in_messages": True},
             "preview": {"auto_open": False, "default_mode": "auto", "max_items": 12},
             "chat_rendering": {"render_markdown": True, "show_widgets": True, "unknown_block_strategy": "json"},
-            "models": {"detected_provider_count": len(self._list_provider_models()), "preferred_model": "stub/default"},
+            "models": {
+                "detected_provider_count": len(self._list_provider_models()),
+                "preferred_model": "openrouter/tencent/hy3-preview:free",
+                "openrouter_api_key": "",
+                "openrouter_api_key_configured": provider_has_api_key("openrouter", pack_root=self._pack_root),
+            },
         }
 
     def _model_options(self) -> list[dict[str, str]]:
@@ -849,3 +871,23 @@ class FrontendRegistry:
             else:
                 result[key] = value
         return result
+
+    def _sanitize_settings_patch(self, patch: dict[str, Any]) -> dict[str, Any]:
+        sanitized = deepcopy(patch)
+        models = sanitized.get("models")
+        if isinstance(models, dict):
+            raw_key = models.pop("openrouter_api_key", None)
+            if isinstance(raw_key, str) and raw_key.strip():
+                result = set_provider_api_key(
+                    "openrouter",
+                    raw_key,
+                    pack_root=self._pack_root,
+                )
+                models["openrouter_api_key_configured"] = bool(result.get("success"))
+            else:
+                models["openrouter_api_key_configured"] = provider_has_api_key(
+                    "openrouter",
+                    pack_root=self._pack_root,
+                )
+            models["openrouter_api_key"] = ""
+        return sanitized

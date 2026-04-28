@@ -1,0 +1,15 @@
+{
+  "id": "openrouter/tencent/hy3-preview:free",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "openrouter",
+  "model_id": "tencent/hy3-preview:free",
+  "display_name": "Tencent Hy3 preview (free)",
+  "type": "chat",
+  "enabled": true,
+  "priority": 1,
+  "defaults": {
+    "chat": true,
+    "fast": true
+  }
+}

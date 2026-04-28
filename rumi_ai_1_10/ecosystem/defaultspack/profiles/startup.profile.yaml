@@ -40,7 +40,7 @@ disabled_nodes: []
 
 node_settings:
   defaultspack.ai_client:
-    default_model: openrouter/auto
+    default_model: openrouter/tencent/hy3-preview:free
 
 policy:
   write_actions_require_approval: true

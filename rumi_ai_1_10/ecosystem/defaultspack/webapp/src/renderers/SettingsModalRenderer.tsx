@@ -1,4 +1,4 @@
-import { type ReactElement } from "react";
+import { useState, type ReactElement } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { X } from "lucide-react";
 
@@ -17,10 +17,28 @@ function SettingsField({
   value: unknown;
   onChange: (sectionId: string, fieldId: string, value: unknown) => void;
 }) {
+  const [secretDraft, setSecretDraft] = useState("");
   const commonLabel = <span className="text-sm text-zinc-300">{field.label}</span>;
 
   let control: ReactElement;
   switch (field.type) {
+    case "secret":
+      control = (
+        <input
+          type="password"
+          autoComplete="off"
+          value={secretDraft}
+          placeholder={Boolean(value) ? "Saved" : "Not set"}
+          onChange={(event) => setSecretDraft(event.target.value)}
+          onBlur={() => {
+            if (!secretDraft.trim()) return;
+            onChange(sectionId, field.id, secretDraft);
+            setSecretDraft("");
+          }}
+          className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none min-w-[240px]"
+        />
+      );
+      break;
     case "toggle":
       control = (
         <button
@@ -144,7 +162,11 @@ export function SettingsModalRenderer({
                         key={`${section.id}.${field.id}`}
                         sectionId={section.id}
                         field={field}
-                        value={settingsValues[section.id]?.[field.id] ?? field.default}
+                        value={
+                          field.type === "secret" && field.configured_field
+                            ? settingsValues[section.id]?.[field.configured_field]
+                            : settingsValues[section.id]?.[field.id] ?? field.default
+                        }
                         onChange={onSettingChange}
                       />
                     ))}
