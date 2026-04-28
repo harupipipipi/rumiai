@@ -1,0 +1,15 @@
+profile_id: example_pack.profile
+version: rumi.profile.v1
+kind: runtime_profile
+
+default_graph: example_pack.graph
+
+enabled_nodes:
+  - rumi.start
+  - defaultspack.agent
+  - example_pack.search
+
+policy:
+  write_actions_require_approval: true
+  allow_shell: false
+  allow_file_write: false

@@ -346,11 +346,22 @@ export interface CapabilityGraphsResponseData {
   diagnostics: ApiCapabilityDiagnostic[];
 }
 
+export interface CapabilityGraphResponseData {
+  graph: ApiCapabilityGraph;
+}
+
 export interface CapabilityGraphCompileResponseData {
   ok: boolean;
   graph_id: string;
   profile_id: string;
   runtime_profile?: Record<string, unknown> | null;
+  diagnostics: ApiCapabilityDiagnostic[];
+}
+
+export interface CapabilityGraphSaveResponseData {
+  graph: ApiCapabilityGraph;
+  created: boolean;
+  path: string;
   diagnostics: ApiCapabilityDiagnostic[];
 }
 

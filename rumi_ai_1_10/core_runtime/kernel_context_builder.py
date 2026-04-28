@@ -125,6 +125,15 @@ class KernelContextBuilder:
             logger.warning("Failed to update lifecycle references: %s", e)
 
         ctx.setdefault("_disabled_targets", {"packs": set(), "components": set()})
+        try:
+            from .runtime_profile_resolver import resolve_runtime_profile_context
+
+            ctx = resolve_runtime_profile_context(
+                ctx,
+                interface_registry=self._interface_registry,
+            )
+        except Exception:
+            pass
 
         # core_runtime 内部サービス群
         ctx["permission_manager"] = self._try_get_service(

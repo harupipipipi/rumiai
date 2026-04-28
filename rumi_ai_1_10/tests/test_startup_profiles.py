@@ -550,6 +550,50 @@ def test_launch_profile_soft_fails_when_capability_graph_is_missing(tmp_path: Pa
     assert active.metadata["startup_capability_graph"]["ok"] is False
 
 
+def test_launch_profile_strict_compile_failure_does_not_mutate_launch_state(tmp_path: Path):
+    repo_defaultspack = Path(__file__).resolve().parents[1] / "ecosystem" / "defaultspack"
+    eco_root = tmp_path / "ecosystem"
+    shutil.copytree(repo_defaultspack, eco_root / "defaultspack")
+    manager = StartupProfileManager(
+        storage_path=tmp_path / "startup_profiles.json",
+        interface_registry=InterfaceRegistry(),
+        approval_manager=_FakeApprovalManager(reason_by_pack={"defaultspack": None}),
+        ecosystem_dir=str(eco_root),
+    )
+    active = _FakeActiveEcosystem()
+
+    created = manager.create_profile(
+        {
+            "profile_id": "strict_runtime",
+            "name": "Strict Runtime",
+            "default_graph": "missing.graph",
+            "capability_profile_id": "defaultspack.startup",
+            "launch_capability_graph": True,
+            "policy": {"require_capability_graph_compile": True},
+        }
+    )
+    before = manager.list_profiles_payload()
+
+    with patch(
+        "backend_core.ecosystem.active_ecosystem.get_active_ecosystem_manager",
+        return_value=active,
+    ) as mock_active_manager:
+        with patch("core_runtime.api.control_panel_handlers.request_kernel_restart") as mock_restart:
+            response = manager.launch_profile(created["profile"]["profile_id"])
+
+    after = manager.list_profiles_payload()
+    assert response["status_code"] == 400
+    assert response["launched"] is False
+    assert response["capability_graph"]["ok"] is False
+    assert after["active_profile_id"] == before["active_profile_id"] == "default-profile"
+    assert after["last_launched_profile_id"] == before["last_launched_profile_id"]
+    assert active.metadata == {}
+    assert active.interface_overrides == {}
+    assert active.overrides == {}
+    mock_active_manager.assert_not_called()
+    mock_restart.assert_not_called()
+
+
 def test_launch_profile_skips_capability_graph_when_not_opted_in(tmp_path: Path):
     manager = StartupProfileManager(
         storage_path=tmp_path / "startup_profiles.json",

@@ -89,6 +89,7 @@ class CapabilityGraphCompiler:
             self._run_node_compile_handler(instance, instances=instances, context=context)
         for edge in graph.edges:
             self._run_edge_binding_handler(edge, instances=instances, context=context)
+        _apply_runtime_policy(context)
 
         ok = not any(item.get("level") == "error" for item in context.diagnostics)
         if ok and register and self.interface_registry is not None:
@@ -278,6 +279,7 @@ def _make_runtime_profile(
         "runtime_profile_id": f"{profile.profile_id}.{graph.graph_id}",
         "profile_id": profile.profile_id,
         "graph_id": graph.graph_id,
+        "policy": dict(profile.policy),
         "graph": graph.to_dict(),
         "profile": profile.to_dict(),
         "nodes": node_instances,
@@ -287,6 +289,60 @@ def _make_runtime_profile(
             "compiler": "core_runtime.capability_graph_compiler",
         },
     }
+
+
+def _apply_runtime_policy(context: CompileContext) -> None:
+    runtime_profile = context.runtime_profile
+    runtime_profile["policy"] = dict(context.profile.policy)
+    defaultspack = runtime_profile.get("defaultspack")
+    if not isinstance(defaultspack, dict):
+        return
+    bundles = defaultspack.get("tools")
+    if not isinstance(bundles, dict):
+        return
+
+    for instance in context.graph.nodes:
+        settings = context.profile.node_settings.get(instance.ref, {})
+        allowed_actions = settings.get("allowed_actions") if isinstance(settings, dict) else None
+        if not isinstance(allowed_actions, list):
+            continue
+        allowed = {str(action) for action in allowed_actions if action}
+        bundle = bundles.get(instance.id)
+        if not isinstance(bundle, dict):
+            continue
+        for key in ("tools", "tool_ids", "tool_names"):
+            values = bundle.get(key)
+            if isinstance(values, list):
+                filtered = [str(value) for value in values if str(value) in allowed]
+                if len(filtered) != len(values):
+                    bundle[key] = filtered
+                    context.diagnose(
+                        "info",
+                        "node_allowed_actions_filtered",
+                        f"Node '{instance.ref}' tools were filtered by allowed_actions",
+                        node_instance_id=instance.id,
+                        node_ref=instance.ref,
+                        allowed_actions=sorted(allowed),
+                    )
+        definitions = bundle.get("definitions")
+        if isinstance(definitions, list):
+            filtered_defs = [
+                item for item in definitions
+                if _tool_name(item) in allowed
+            ]
+            if len(filtered_defs) != len(definitions):
+                bundle["definitions"] = filtered_defs
+
+
+def _tool_name(tool: Any) -> str:
+    if isinstance(tool, str):
+        return tool
+    if isinstance(tool, dict):
+        fn = tool.get("function")
+        if isinstance(fn, dict) and fn.get("name"):
+            return str(fn["name"])
+        return str(tool.get("name") or tool.get("tool_id") or "")
+    return ""
 
 
 def compile_capability_graph(

@@ -1,0 +1,33 @@
+profile_id: sample_toolpack.profile
+version: rumi.profile.v1
+kind: runtime_profile
+locale: en
+
+display_name:
+  en: Sample Toolpack Profile
+
+default_graph: sample_toolpack_to_default_agent
+
+enabled_nodes:
+  - rumi.start
+  - defaultspack.agent
+  - defaultspack.ai_client
+  - sample_toolpack.search
+  - sample_toolpack.write_guard
+
+disabled_nodes: []
+
+node_settings:
+  sample_toolpack.search:
+    allowed_actions:
+      - sample_search
+
+policy:
+  write_actions_require_approval: true
+  allow_shell: false
+  allow_file_write: false
+  max_tool_calls: 3
+
+metadata:
+  pack_id: sample_toolpack
+  category: fixture

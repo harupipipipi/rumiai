@@ -28,7 +28,7 @@ def adapt_tool_definition(tool: Any) -> Any:
     parameters = schema.get("parameters") if isinstance(schema.get("parameters"), dict) else schema
     if not isinstance(parameters, dict) or not parameters:
         parameters = {"type": "object", "properties": {}, "required": []}
-    return {
+    adapted = {
         "type": "function",
         "function": {
             "name": name,
@@ -36,6 +36,10 @@ def adapt_tool_definition(tool: Any) -> Any:
             "parameters": parameters,
         },
     }
+    for key in ("metadata", "category", "action_type", "write_action"):
+        if key in tool:
+            adapted[key] = tool[key]
+    return adapted
 
 
 def adapt_tool_definitions(tools: Iterable[Any]) -> List[Any]:
@@ -53,13 +57,47 @@ def filter_tool_definitions_for_runtime_profile(
         agent_id,
         normalized,
     )
+    policy = _policy_from_runtime_profile(runtime_profile)
     if enforced is None:
-        return normalized
-    return [
+        return [
+            tool for tool in normalized
+            if not is_tool_rejected_by_policy(tool, policy)
+        ]
+    filtered = [
         tool
         for tool in normalized
         if tool_name_from_definition(tool) in enforced
     ]
+    return [
+        tool for tool in filtered
+        if not is_tool_rejected_by_policy(tool, policy)
+    ]
+
+
+def resolve_runtime_profile_context(context: Dict[str, Any]) -> Dict[str, Any]:
+    """Resolve runtime_profile_key into runtime_profile when possible."""
+    resolved = dict(context or {})
+    if isinstance(resolved.get("capability_profile"), dict):
+        resolved.setdefault("runtime_profile", resolved["capability_profile"])
+        return resolved
+    if isinstance(resolved.get("runtime_profile"), dict):
+        return resolved
+    key = resolved.get("runtime_profile_key") or resolved.get("_runtime_profile_key")
+    registry = resolved.get("interface_registry")
+    if isinstance(key, str) and key and registry is not None:
+        getter = getattr(registry, "get", None)
+        if callable(getter):
+            profile = getter(key)
+            if isinstance(profile, dict):
+                resolved["runtime_profile"] = profile
+                resolved["_runtime_profile_key"] = key
+                return resolved
+    try:
+        from core_runtime.runtime_profile_resolver import resolve_runtime_profile_context as core_resolve
+
+        return core_resolve(resolved, interface_registry=registry)
+    except Exception:
+        return resolved
 
 
 def connected_tool_names(
@@ -115,6 +153,61 @@ def max_tool_calls(context: Dict[str, Any]) -> Optional[int]:
     return None
 
 
+def is_tool_rejected_by_policy(tool: Any, policy: Optional[Dict[str, Any]]) -> bool:
+    if not isinstance(policy, dict):
+        return False
+    category = _tool_metadata_value(tool, "category")
+    action_type = _tool_metadata_value(tool, "action_type")
+    if policy.get("allow_shell") is False and (category == "shell" or action_type == "shell"):
+        return True
+    if policy.get("allow_file_write") is False and (
+        category in {"file_write", "filesystem_write"}
+        or action_type in {"write", "file_write", "delete", "create", "update"}
+    ):
+        return True
+    return False
+
+
+def tool_requires_approval_by_policy(tool: Any, policy: Optional[Dict[str, Any]]) -> bool:
+    if not isinstance(policy, dict) or policy.get("write_actions_require_approval") is not True:
+        return False
+    return _tool_metadata_value(tool, "write_action") is True or _tool_metadata_value(tool, "action_type") in {
+        "write",
+        "file_write",
+        "delete",
+        "create",
+        "update",
+    }
+
+
+def policy_from_context(context: Dict[str, Any]) -> Dict[str, Any]:
+    policy = context.get("profile_policy")
+    if isinstance(policy, dict):
+        return policy
+    runtime_profile = context.get("runtime_profile")
+    return _policy_from_runtime_profile(runtime_profile)
+
+
+def _policy_from_runtime_profile(runtime_profile: Any) -> Dict[str, Any]:
+    if isinstance(runtime_profile, dict) and isinstance(runtime_profile.get("policy"), dict):
+        return dict(runtime_profile["policy"])
+    return {}
+
+
+def _tool_metadata_value(tool: Any, key: str) -> Any:
+    if not isinstance(tool, dict):
+        return None
+    if key in tool:
+        return tool.get(key)
+    metadata = tool.get("metadata")
+    if isinstance(metadata, dict):
+        return metadata.get(key)
+    execution = tool.get("execution")
+    if isinstance(execution, dict):
+        return execution.get(key)
+    return None
+
+
 def _runtime_profile_tool_names(
     runtime_profile: Optional[Dict[str, Any]],
     agent_id: Optional[str],
@@ -141,11 +234,15 @@ def _runtime_profile_tool_names(
             bundle_names = _tool_names_from_bundle_record(bundle_record)
             if bundle_names:
                 names.update(bundle_names)
-            else:
+            elif not _bundle_record_has_concrete_tool_list(bundle_record):
                 names.update(supplied_names)
             continue
         names.add(ref)
     return names
+
+
+def _bundle_record_has_concrete_tool_list(record: Dict[str, Any]) -> bool:
+    return any(isinstance(record.get(key), list) for key in ("tools", "tool_ids", "tool_names", "definitions"))
 
 
 def _runtime_profile_tool_refs(

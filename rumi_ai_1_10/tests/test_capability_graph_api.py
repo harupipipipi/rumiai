@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 from core_runtime.pack_api_server import PackAPIHandler
 
@@ -247,6 +246,26 @@ def test_graph_compile_preview_requires_profile_and_does_not_register_by_default
         "kernel:graph.compile",
         {"graph_id": "coding_graph", "profile_id": "coding", "register": False},
     ) in fake_kernel.calls
+
+
+def test_draft_graph_validation_error_returns_400_diagnostics() -> None:
+    handler = _handler(kernel=FakeKernel())
+
+    result = handler._capability_validate_draft_graph({"graph_id": "bad id"}, None)
+
+    assert result["status_code"] == 400
+    assert result["ok"] is False
+    assert result["diagnostics"][0]["code"] == "invalid_graph"
+
+
+def test_graph_save_validation_error_returns_400_diagnostics() -> None:
+    handler = _handler(kernel=FakeKernel())
+
+    result = handler._capability_save_graph({"graph_id": "bad id"}, create=True)
+
+    assert result["status_code"] == 400
+    assert result["ok"] is False
+    assert result["diagnostics"][0]["code"] == "invalid_graph"
 
 
 def test_core_control_panel_registers_capability_graph_api_routes() -> None:

@@ -18,7 +18,9 @@ import type {
   SetupStatusResponseData,
   HealthResponseData,
   CapabilityGraphsResponseData,
+  CapabilityGraphResponseData,
   CapabilityGraphCompileResponseData,
+  CapabilityGraphSaveResponseData,
   CapabilityNodesResponseData,
   CapabilityProfileCloneResponseData,
   CapabilityProfileNodesResponseData,
@@ -500,15 +502,22 @@ export function fetchCapabilityGraphs(): Promise<CapabilityGraphsResponseData> {
   return apiFetch<CapabilityGraphsResponseData>('/api/panel/graphs');
 }
 
+export function fetchCapabilityGraph(graphId: string): Promise<CapabilityGraphResponseData> {
+  return apiFetch<CapabilityGraphResponseData>(
+    `/api/panel/graphs/${encodeURIComponent(graphId)}`,
+  );
+}
+
 export function validateCapabilityGraph(
   graphId: string,
   profileId: string,
+  graph?: Record<string, unknown>,
 ): Promise<CapabilityGraphCompileResponseData> {
   return apiFetch<CapabilityGraphCompileResponseData>(
     `/api/panel/graphs/${encodeURIComponent(graphId)}/validate`,
     {
       method: 'POST',
-      body: JSON.stringify({profile_id: profileId}),
+      body: JSON.stringify({profile_id: profileId, graph}),
     },
   );
 }
@@ -516,12 +525,33 @@ export function validateCapabilityGraph(
 export function compileCapabilityGraph(
   graphId: string,
   profileId: string,
+  graph?: Record<string, unknown>,
 ): Promise<CapabilityGraphCompileResponseData> {
   return apiFetch<CapabilityGraphCompileResponseData>(
     `/api/panel/graphs/${encodeURIComponent(graphId)}/compile`,
     {
       method: 'POST',
-      body: JSON.stringify({profile_id: profileId, register: false}),
+      body: JSON.stringify({profile_id: profileId, register: false, graph}),
+    },
+  );
+}
+
+export function saveCapabilityGraph(
+  graph: Record<string, unknown>,
+  create = false,
+): Promise<CapabilityGraphSaveResponseData> {
+  const graphId = String(graph.graph_id ?? '');
+  if (create) {
+    return apiFetch<CapabilityGraphSaveResponseData>('/api/panel/graphs', {
+      method: 'POST',
+      body: JSON.stringify({graph}),
+    });
+  }
+  return apiFetch<CapabilityGraphSaveResponseData>(
+    `/api/panel/graphs/${encodeURIComponent(graphId)}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({graph}),
     },
   );
 }

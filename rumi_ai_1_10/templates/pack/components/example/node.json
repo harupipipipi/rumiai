@@ -1,0 +1,13 @@
+{
+  "version": "rumi.node.v1",
+  "nodes": [
+    {
+      "node_id": "example_pack.example_component",
+      "display_name": {"en": "Example Component"},
+      "ports": [],
+      "metadata": {
+        "category": "component"
+      }
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "version": "rumi.node.v1",
+  "nodes": [
+    {
+      "node_id": "sample_toolpack.search",
+      "component_id": "search",
+      "display_name": {"ja": "サンプル検索", "en": "Sample Search"},
+      "ports": [
+        {
+          "id": "tools",
+          "direction": "output",
+          "standards": ["rumi.tool.bundle", "sample_toolpack.search_tools.v1"],
+          "multiple": true
+        }
+      ],
+      "bindings": {
+        "compile": "sample_toolpack:search.compile_node"
+      },
+      "metadata": {
+        "category": "toolpack",
+        "write_actions": false
+      }
+    }
+  ]
+}

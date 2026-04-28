@@ -7,8 +7,8 @@ DEFAULTSPACK_ROOT = Path(__file__).resolve().parents[1] / "ecosystem" / "default
 if str(DEFAULTSPACK_ROOT) not in sys.path:
     sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
-from domain.agent.engine import AgentEngine
-from domain.tool.schema_adapter import adapt_tool_definition
+from domain.agent.engine import AgentEngine  # noqa: E402
+from domain.tool.schema_adapter import adapt_tool_definition, runtime_profile_enforced_tool_names  # noqa: E402
 
 
 def _tool(name: str) -> dict:
@@ -235,6 +235,35 @@ def test_runtime_profile_tool_bundle_filters_provider_tools_to_bundle_names() ->
         "web_search",
         "calculator",
     ]
+
+
+def test_runtime_profile_empty_tool_bundle_does_not_fallback_to_supplied_tools() -> None:
+    engine = AgentEngine()
+    seen = {}
+    runtime_profile = _compiled_bundle_runtime_profile(bundle_tools=[])
+    tools = [_tool("read"), _tool("write")]
+
+    def fake_ai(messages, model, context, tools=None):
+        seen["tools"] = tools
+        return _text_response()
+
+    engine._ai_complete = fake_ai
+
+    enforced = runtime_profile_enforced_tool_names(runtime_profile, "agent", tools)
+    result = engine.execute(
+        "read then write",
+        tools,
+        "stub/model",
+        None,
+        {
+            "runtime_profile": runtime_profile,
+            "agent_id": "agent",
+        },
+    )
+
+    assert enforced == set()
+    assert result["status"] == "completed"
+    assert seen["tools"] == []
 
 
 def test_agent_approve_preserves_tools_for_followup_completion() -> None:
