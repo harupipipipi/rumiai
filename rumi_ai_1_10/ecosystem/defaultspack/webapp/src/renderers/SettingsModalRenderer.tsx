@@ -18,25 +18,55 @@ function SettingsField({
   onChange: (sectionId: string, fieldId: string, value: unknown) => void;
 }) {
   const [secretDraft, setSecretDraft] = useState("");
+  const [secretState, setSecretState] = useState<"idle" | "saved">("idle");
   const commonLabel = <span className="text-sm text-zinc-300">{field.label}</span>;
+  const isSecretConfigured = Boolean(value);
 
   let control: ReactElement;
   switch (field.type) {
     case "secret":
       control = (
-        <input
-          type="password"
-          autoComplete="off"
-          value={secretDraft}
-          placeholder={Boolean(value) ? "Saved" : "Not set"}
-          onChange={(event) => setSecretDraft(event.target.value)}
-          onBlur={() => {
-            if (!secretDraft.trim()) return;
-            onChange(sectionId, field.id, secretDraft);
-            setSecretDraft("");
-          }}
-          className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none min-w-[240px]"
-        />
+        <div className="flex items-center gap-2 min-w-[320px]">
+          <input
+            type="password"
+            autoComplete="off"
+            value={secretDraft}
+            placeholder={isSecretConfigured ? "Saved" : "Not set"}
+            onChange={(event) => {
+              setSecretDraft(event.target.value);
+              setSecretState("idle");
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" || !secretDraft.trim()) return;
+              event.preventDefault();
+              onChange(sectionId, field.id, secretDraft);
+              setSecretDraft("");
+              setSecretState("saved");
+            }}
+            className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none"
+          />
+          <button
+            type="button"
+            disabled={!secretDraft.trim()}
+            onClick={() => {
+              if (!secretDraft.trim()) return;
+              onChange(sectionId, field.id, secretDraft);
+              setSecretDraft("");
+              setSecretState("saved");
+            }}
+            className={cn(
+              "px-3 py-2 rounded-lg text-xs border transition-colors",
+              secretDraft.trim()
+                ? "bg-zinc-100 text-zinc-950 border-zinc-100"
+                : "bg-zinc-900 text-zinc-600 border-zinc-800 cursor-not-allowed",
+            )}
+          >
+            Save
+          </button>
+          <span className="w-14 text-[11px] text-zinc-500">
+            {secretState === "saved" || isSecretConfigured ? "Saved" : ""}
+          </span>
+        </div>
       );
       break;
     case "toggle":

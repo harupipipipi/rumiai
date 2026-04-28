@@ -92,6 +92,7 @@ export default function App() {
   const activeChatTitle = activeConversation?.title ?? "New Conversation";
   const isNewConversation = activeConversation === null || activeConversation.messages.length === 0;
   const placeholder = String(settingsValues.general?.composer_placeholder ?? "メッセージを入力...");
+  const preferredModel = String(settingsValues.models?.preferred_model ?? "openrouter/tencent/hy3-preview:free").trim();
   const unknownBlockStrategy = String(settingsValues.chat_rendering?.unknown_block_strategy ?? "json");
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
   const showActivityInMessages = settingsValues.general?.show_activity_in_messages !== false;
@@ -258,7 +259,9 @@ export default function App() {
     try {
       let conversation = activeConversation;
       if (!conversation) {
-        conversation = await api.createConversation();
+        conversation = await api.createConversation({
+          model: preferredModel || "stub/default",
+        });
         setActiveConversationId(conversation.id);
       }
 

@@ -212,6 +212,35 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertNotIn("or-secret", settings_text)
         self.assertTrue(has_secret)
 
+    def test_model_settings_are_editable_contracts(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            with patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "openrouter/tencent/hy3-preview:free"}]
+                registry = FrontendRegistry(pack_root=pack_root)
+                settings = registry.get_settings()
+                values = registry.update_settings(
+                    {
+                        "models": {
+                            "preferred_model": "openrouter/tencent/hy3-preview:free",
+                            "model_profile": '{"name":"hy3","strengths":["general"]}',
+                        }
+                    }
+                )
+
+        model_fields = {
+            field["id"]: field
+            for section in settings["sections"]
+            if section["id"] == "models"
+            for field in section["fields"]
+        }
+        self.assertEqual(model_fields["preferred_model"]["type"], "text")
+        self.assertEqual(model_fields["model_profile"]["type"], "textarea")
+        self.assertEqual(values["models"]["preferred_model"], "openrouter/tencent/hy3-preview:free")
+        self.assertIn("strengths", values["models"]["model_profile"])
+
     def test_conversation_preview_uses_inspector_and_message_widgets(self):
         from domain.chat.store import ChatStore
         from domain.dev.inspector import Inspector

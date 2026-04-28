@@ -435,7 +435,7 @@ class FrontendRegistry:
             {
                 "id": "models",
                 "label": "Models & Providers",
-                "description": "現在検出されている provider と model catalog の参照。",
+                "description": "AI provider, default model, and model profile settings.",
                 "fields": [
                     {
                         "id": "detected_provider_count",
@@ -446,9 +446,17 @@ class FrontendRegistry:
                     {
                         "id": "preferred_model",
                         "label": "Preferred Model",
-                        "type": "select",
+                        "type": "text",
                         "default": "openrouter/tencent/hy3-preview:free",
                         "options": self._model_options(),
+                        "help": "新しい会話に渡す model。例: openrouter/tencent/hy3-preview:free",
+                    },
+                    {
+                        "id": "model_profile",
+                        "label": "Model Profile",
+                        "type": "textarea",
+                        "default": self._default_model_profile_text(),
+                        "help": "モデルの特性メモ。routing/profile API とつなぐ前の editable contract として保存します。",
                     },
                     {
                         "id": "openrouter_api_key",
@@ -813,6 +821,7 @@ class FrontendRegistry:
             "models": {
                 "detected_provider_count": len(self._list_provider_models()),
                 "preferred_model": "openrouter/tencent/hy3-preview:free",
+                "model_profile": self._default_model_profile_text(),
                 "openrouter_api_key": "",
                 "openrouter_api_key_configured": provider_has_api_key("openrouter", pack_root=self._pack_root),
             },
@@ -829,6 +838,19 @@ class FrontendRegistry:
             return client.list_models()
         except Exception:
             return [{"id": "stub/default", "name": "stub/default"}]
+
+    def _default_model_profile_text(self) -> str:
+        return json.dumps(
+            {
+                "name": "Tencent HY3 Preview Free",
+                "provider": "openrouter",
+                "model_id": "tencent/hy3-preview:free",
+                "traits": ["free", "preview"],
+                "strengths": ["general"],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
 
     def _schema_to_fields(self, schema: dict[str, Any]) -> list[dict[str, Any]]:
         properties = schema.get("properties", {}) if isinstance(schema, dict) else {}

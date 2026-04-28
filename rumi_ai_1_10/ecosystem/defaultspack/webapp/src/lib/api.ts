@@ -213,10 +213,10 @@ export const api = {
     return request<Conversation>(`/api/chat/conversations/${id}`);
   },
 
-  createConversation() {
+  createConversation(options?: { model?: string; system_prompt_id?: string | null; agent_id?: string | null; tags?: string[] }) {
     return request<Conversation>("/api/chat/conversations", {
       method: "POST",
-      body: JSON.stringify({}),
+      body: JSON.stringify(options ?? {}),
     });
   },
 
