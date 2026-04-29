@@ -1,0 +1,13 @@
+id: artifact
+name: Artifact Generation
+description: Local artifact creation, versioning, preview, export, and workspace save.
+local_only: true
+requires_network: false
+risk_level: medium
+permissions: [artifact.read, artifact.write, artifact.export]
+handlers:
+  - blocks.artifact.create
+  - blocks.artifact.list
+  - blocks.artifact.get
+types: [markdown, text, code, json, yaml, html, csv, report, changelog, implementation_plan]
+operations: [create, update, preview, export, save_to_workspace]

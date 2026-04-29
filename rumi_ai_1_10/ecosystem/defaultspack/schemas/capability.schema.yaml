@@ -1,0 +1,9 @@
+id: string
+name: string
+description: string
+permissions: list[string]
+handlers: list[string]
+requires_network: boolean
+requires_approval: boolean
+local_only: boolean
+risk_level: enum[low, medium, high, critical]

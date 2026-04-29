@@ -1,0 +1,6 @@
+id: openclaw_like
+name: OpenClaw-like Open Agent Runtime
+profile: defaultspack.local_agent
+enabled_capabilities: [local_file, terminal, git, tool, safety, local_model]
+ui_panels: [chat, tool_calls, terminal, file_tree]
+behavior: [open_runtime, manifest_tools, local_extensibility]

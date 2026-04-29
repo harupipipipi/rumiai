@@ -1,0 +1,10 @@
+id: project
+name: Project Workspace
+description: Project configuration, instructions, tools, model profile, task board, and artifacts.
+local_only: true
+requires_network: false
+risk_level: low
+permissions: [project.read, project.write, project.task.read, project.task.write]
+handlers:
+  - blocks.memory.project_context
+operations: [create_project, open_project, update_instructions, attach_files, set_profile, set_tools, list_tasks]

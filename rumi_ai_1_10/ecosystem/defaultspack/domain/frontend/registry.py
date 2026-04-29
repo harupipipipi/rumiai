@@ -8,6 +8,7 @@ from typing import Any
 
 from domain.ai_client.client import AIClient
 from domain.ai_client.api_key_store import provider_has_api_key, set_provider_api_key
+from domain.capability.catalog import CapabilityCatalog
 from domain.chat.store import ChatStore
 from domain.dev.inspector import Inspector
 from domain.extensions.runtime import get_extension_registry
@@ -32,6 +33,7 @@ class FrontendRegistry:
         component_bindings = self._component_bindings(ui_surfaces, extensions)
         return {
             "app": self._app_metadata(ui_surfaces),
+            "agent_service": CapabilityCatalog(self._pack_root).manifest(),
             "shell": shell,
             "parts": parts,
             "component_bindings": component_bindings,
@@ -368,6 +370,22 @@ class FrontendRegistry:
 
         items.extend(
             [
+                {
+                    "id": "agent-service-capabilities",
+                    "label": "Capabilities",
+                    "category": "system",
+                    "description": "defaultspack の local-first capability catalog。",
+                    "tags": ["agent", "capability", "local-first"],
+                    "origin": {"kind": "builtin", "path": "capabilities/"},
+                    "panel": {
+                        "kind": "info",
+                        "title": "Agent Service Capabilities",
+                        "notes": [
+                            "/api/capabilities と /api/agent-service/manifest で同じ定義を取得できます。",
+                            "capability yaml は他 pack から置き換え可能な標準語彙です。",
+                        ],
+                    },
+                },
                 {
                     "id": "knowledge-context",
                     "label": "Knowledge",

@@ -1,0 +1,14 @@
+profile_id: defaultspack.artifact_agent
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+display_name:
+  ja: 成果物生成エージェント
+  en: Artifact Agent
+enabled_capabilities: [artifact, local_file, project, memory, safety, local_model]
+prompt_set: artifact_writer
+policy:
+  save_to_workspace: true
+  overwrite_requires_approval: true
+  diff_preview_required: true
+  supported_artifact_types: [markdown, text, code, json, yaml, html, csv, report, changelog, implementation_plan]

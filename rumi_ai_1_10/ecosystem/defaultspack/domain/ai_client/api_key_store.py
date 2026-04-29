@@ -15,6 +15,9 @@ def _pack_root() -> Path:
 
 
 def _secrets_dir(pack_root: Path | None = None) -> Path:
+    override = os.environ.get("RUMI_DEFAULTSPACK_SECRETS_DIR", "").strip()
+    if override:
+        return Path(override)
     return (pack_root or _pack_root()) / "user_data" / "secrets"
 
 

@@ -1,0 +1,16 @@
+id: memory
+name: Memory and Personalization
+description: Local user, project, session, and file memory.
+local_only: true
+requires_network: false
+risk_level: medium
+permissions: [memory.read, memory.write, memory.delete, memory.export, memory.import]
+handlers:
+  - blocks.memory.store
+  - blocks.memory.recall
+  - blocks.memory.project_context
+scopes: [user, project, session, file]
+operations: [read, write, update, delete, export, import, review]
+approval:
+  write_user_memory: true
+  delete_memory: true

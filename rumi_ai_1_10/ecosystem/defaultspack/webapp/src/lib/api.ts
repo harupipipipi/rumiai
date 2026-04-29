@@ -117,6 +117,18 @@ export type UICatalog = {
       source?: string;
     };
   };
+  agent_service?: {
+    service_id?: string;
+    version?: string;
+    local_first?: boolean;
+    core_requires_api_key?: boolean;
+    default_profile?: string;
+    counts?: Record<string, number>;
+    capabilities?: Array<Record<string, unknown>>;
+    profiles?: Array<Record<string, unknown>>;
+    presets?: Array<Record<string, unknown>>;
+    policy?: Record<string, unknown>;
+  };
   shell?: {
     layout?: {
       id: string;

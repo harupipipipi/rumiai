@@ -1,0 +1,9 @@
+task:
+  title: Compare AI agent services
+  goal: AI agent系サービスを比較する
+  source_policy:
+    official_docs: required
+    reddit: user_voice_only
+    web: optional
+  output:
+    type: markdown

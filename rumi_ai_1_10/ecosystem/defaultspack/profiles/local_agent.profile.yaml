@@ -1,0 +1,24 @@
+profile_id: defaultspack.local_agent
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+display_name:
+  ja: ローカルAIエージェント
+  en: Local AI Agent
+description:
+  ja: API必須にせず、ローカルモデル・ローカルファイル・承認付きツール実行を前提にしたAI agentプリセット。
+  en: Local-first AI agent preset with workspace files, planning, tools, memory, and approval.
+surfaces:
+  preferred: desktop
+  enabled: [desktop, cli]
+enabled_capabilities: [local_file, terminal, git, memory, project, artifact, compact, local_model, safety]
+prompt_set: local_agent
+policy:
+  network_default: deny
+  write_actions_require_approval: true
+  delete_actions_require_approval: true
+  terminal_actions_require_approval: true
+  git_push_requires_approval: true
+  audit_level: strict
+  compact_context: true
+  local_first: true

@@ -32,6 +32,10 @@ def _reset_singletons(monkeypatch, tmp_path):
         "RUMI_DEFAULTSPACK_TOOL_PERMISSION_POLICY_PATH",
         str(tmp_path / "tool_permission_policy.json"),
     )
+    monkeypatch.setenv(
+        "RUMI_DEFAULTSPACK_SECRETS_DIR",
+        str(tmp_path / "secrets"),
+    )
     for env_name in (
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",

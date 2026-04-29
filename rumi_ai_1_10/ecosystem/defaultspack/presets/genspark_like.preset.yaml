@@ -1,0 +1,6 @@
+id: genspark_like
+name: Genspark-like Research Report
+profile: defaultspack.research_agent
+enabled_capabilities: [research, artifact, local_file, compact]
+ui_panels: [chat, source_cards, artifacts, comparison_table]
+behavior: [source_synthesis, report_generation, comparison_tables]
