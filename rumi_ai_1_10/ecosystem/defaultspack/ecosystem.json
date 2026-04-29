@@ -251,6 +251,55 @@
         ]
       }
     },
+    "artifact": {
+      "type": "artifact",
+      "id": "artifact",
+      "path": "blocks/artifact",
+      "connectivity": {
+        "provides": [
+          "defaults.artifact.list",
+          "defaultspack.artifact.list",
+          "defaults.artifact.create",
+          "defaultspack.artifact.create",
+          "defaults.artifact.get",
+          "defaultspack.artifact.get"
+        ]
+      }
+    },
+    "research": {
+      "type": "research",
+      "id": "research",
+      "path": "blocks/research",
+      "connectivity": {
+        "provides": [
+          "defaults.research.local_search",
+          "defaultspack.research.local_search",
+          "defaults.research.web_search",
+          "defaultspack.research.web_search",
+          "defaults.research.reddit_search",
+          "defaultspack.research.reddit_search",
+          "defaults.research.report",
+          "defaultspack.research.report"
+        ]
+      }
+    },
+    "share": {
+      "type": "artifact",
+      "id": "share",
+      "path": "blocks/share",
+      "connectivity": {
+        "provides": [
+          "defaults.share.list",
+          "defaultspack.share.list",
+          "defaults.share.create",
+          "defaultspack.share.create",
+          "defaults.share.get",
+          "defaultspack.share.get",
+          "defaults.share.revoke",
+          "defaultspack.share.revoke"
+        ]
+      }
+    },
     "media": {
       "type": "media",
       "id": "media",
@@ -308,6 +357,9 @@
   "load_order": [
     "memory:memory",
     "knowledge:knowledge",
+    "research:research",
+    "artifact:artifact",
+    "artifact:share",
     "prompt:prompt",
     "media:media",
     "ai_client:ai_client",

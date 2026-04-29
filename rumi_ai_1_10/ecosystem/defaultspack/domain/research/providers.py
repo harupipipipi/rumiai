@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import ipaddress
 import re
+import socket
 import time
 import urllib.parse
 import urllib.request
@@ -10,9 +12,48 @@ from typing import Any, Callable
 
 
 FetchFn = Callable[[str, float], str]
+MAX_RESPONSE_BYTES = 1024 * 1024
+ALLOWED_CONTENT_PREFIXES = (
+    "application/json",
+    "application/x-json",
+    "text/html",
+    "text/plain",
+)
+
+
+def _validate_public_http_url(url: str) -> str:
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("only http/https URLs are allowed")
+    if not parsed.hostname:
+        raise ValueError("URL hostname is required")
+    host = parsed.hostname.strip("[]")
+    try:
+        addresses = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise ValueError("URL hostname could not be resolved") from exc
+    for family, _, _, _, sockaddr in addresses:
+        ip = ipaddress.ip_address(sockaddr[0])
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            raise ValueError("URL resolves to a non-public address")
+    return urllib.parse.urlunparse(parsed)
+
+
+class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _validate_public_http_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 def _default_fetch(url: str, timeout: float) -> str:
+    url = _validate_public_http_url(url)
     request = urllib.request.Request(
         url,
         headers={
@@ -20,9 +61,17 @@ def _default_fetch(url: str, timeout: float) -> str:
             "Accept": "application/json,text/html;q=0.9,*/*;q=0.8",
         },
     )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    opener = urllib.request.build_opener(_SafeRedirectHandler)
+    with opener.open(request, timeout=timeout) as response:
+        _validate_public_http_url(response.geturl())
+        content_type = (response.headers.get_content_type() or "").lower()
+        if content_type and not content_type.startswith(ALLOWED_CONTENT_PREFIXES):
+            raise ValueError("unsupported response content-type: " + content_type)
         charset = response.headers.get_content_charset() or "utf-8"
-        return response.read().decode(charset, errors="replace")
+        body = response.read(MAX_RESPONSE_BYTES + 1)
+        if len(body) > MAX_RESPONSE_BYTES:
+            raise ValueError("response exceeds 1 MiB limit")
+        return body.decode(charset, errors="replace")
 
 
 def _strip_html(value: str, limit: int = 500) -> str:

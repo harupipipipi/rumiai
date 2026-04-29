@@ -514,7 +514,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             else:
                 status_code = 200
                 if isinstance(result, dict) and result.get("status") == "error":
-                    status_code = 400
+                    status_code = int(result.pop("_http_status", 400))
                 self._send_json(status_code, result)
         except Exception as exc:
             self._send_json(500, error("internal server error: " + str(exc)))

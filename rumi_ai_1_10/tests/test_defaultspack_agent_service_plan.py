@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import importlib
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -9,6 +11,38 @@ DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+
+
+class _RouteRegistry:
+    def __init__(self):
+        self.routes = []
+
+    def register(self, key, value, meta=None):
+        if key == "io.http.route":
+            self.routes.append(value)
+
+    def get(self, *args, **kwargs):
+        return None
+
+    def get_interface(self, key, strategy=None):
+        if key == "io.http.route":
+            return self.routes
+        return None
+
+
+def _collect_defaultspack_routes():
+    registry = _RouteRegistry()
+    ecosystem = json.loads((DEFAULTSPACK_ROOT / "ecosystem.json").read_text(encoding="utf-8"))
+    for entry in ecosystem["load_order"]:
+        _, component_id = entry.split(":", 1)
+        component = ecosystem["components"][component_id]
+        module_name = component["path"].replace("/", ".") + ".setup"
+        try:
+            setup = importlib.import_module(module_name)
+        except ModuleNotFoundError:
+            continue
+        setup.run({"interface_registry": registry, "_source_component": entry})
+    return registry
 
 
 def test_capability_catalog_loads_plan_manifest():
@@ -46,6 +80,46 @@ def test_fallback_routes_expose_agent_service_and_coding_surfaces():
     assert ("POST", "/api/share", "blocks.share.create") in routes
 
 
+def test_transport_direct_routes_json_has_interface_registry_parity():
+    ecosystem_routes = json.loads((DEFAULTSPACK_ROOT / "routes.json").read_text(encoding="utf-8"))["routes"]
+    contract_routes = {
+        (route["method"], route["path"])
+        for route in ecosystem_routes
+        if route.get("flow_id") == "transport_direct"
+    }
+    registry = _collect_defaultspack_routes()
+    registered_routes = {(route["method"], route["pattern"]) for route in registry.routes}
+
+    assert contract_routes <= registered_routes
+
+
+def test_frontend_sidebar_api_routes_match_in_registry_mode():
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+
+    registry = _collect_defaultspack_routes()
+
+    class Facade:
+        def get_interface(self, key, strategy=None):
+            return registry.get_interface(key, strategy=strategy)
+
+    server = DefaultsHttpServer(Facade())
+    expected = [
+        ("GET", "/api/artifacts"),
+        ("POST", "/api/share"),
+        ("POST", "/api/tools/browser-computer"),
+        ("POST", "/api/research/web-search"),
+        ("POST", "/api/research/reddit-search"),
+        ("GET", "/api/agent/schedules"),
+        ("GET", "/api/chat/channels"),
+        ("GET", "/api/capabilities/local_file"),
+    ]
+
+    for method, path in expected:
+        handler, _, source, _ = server._match_route(method, path)
+        assert handler is not None, (method, path)
+        assert source == "registry"
+
+
 def test_research_providers_use_shared_source_schema():
     from domain.research.providers import ExternalWebProvider, RedditProvider
 
@@ -66,6 +140,15 @@ def test_research_providers_use_shared_source_schema():
     assert reddit.search("hello", allow_network=False).network_enabled is False
 
 
+def test_external_web_provider_rejects_private_network_urls():
+    from domain.research.providers import ExternalWebProvider
+
+    result = ExternalWebProvider().search("http://127.0.0.1:8766/private", allow_network=True)
+
+    assert result.sources == []
+    assert "non-public" in result.summary
+
+
 def test_browser_computer_controller_gates_desktop_actions():
     from domain.tool.browser_computer import BrowserComputerController
 
@@ -74,7 +157,23 @@ def test_browser_computer_controller_gates_desktop_actions():
     assert controller.run("browser.session")["action"] == "browser.session"
     assert controller.run("browser.open_url", {"url": "https://example.test", "dry_run": True})["dry_run"] is True
     assert controller.run("computer.screenshot", {"dry_run": True})["requires_approval"] is False
-    assert controller.run("computer.click", {"x": 1, "y": 2})["requires_approval"] is True
+    approval = controller.run("computer.click", {"x": 1, "y": 2})
+    assert approval["requires_approval"] is True
+    assert approval["approval_token"]
+    assert controller.run("computer.click", {"x": 1, "y": 2, "approved": True})["requires_approval"] is True
+
+
+def test_capability_detail_endpoint_returns_one_manifest_and_404_for_unknown():
+    from blocks.capability.manifest import run
+
+    result = run({"capability_id": "local_file"})
+    assert result["status"] == "ok"
+    assert result["data"]["id"] == "local_file"
+
+    missing = run({"capability_id": "missing-capability"})
+    assert missing["status"] == "error"
+    assert missing["error"]["code"] == "NOT_FOUND"
+    assert missing["_http_status"] == 404
 
 
 def test_share_store_creates_lists_and_revokes_local_links(tmp_path):
@@ -161,3 +260,10 @@ def test_artifact_store_is_local_and_versioned(tmp_path):
     assert artifact["content_ref"] == "user_data/artifacts/plans/plan.md"
     assert store.list()[0]["artifact_id"] == artifact["artifact_id"]
     assert store.get(artifact["artifact_id"])["content"] == "# Plan\n"
+
+    try:
+        store.create("markdown", "Escape", "nope", path="../escape.md")
+    except ValueError as exc:
+        assert "escapes artifact root" in str(exc)
+    else:
+        raise AssertionError("artifact store allowed path traversal")

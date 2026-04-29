@@ -40,6 +40,7 @@ def run(context):
         # ---- Tool read/invoke routes ----
         ("GET", "/api/tools", _lazy("blocks.tool.list"), {}),
         ("POST", "/api/tools/invoke", _lazy("blocks.tool.invoke"), {}),
+        ("POST", "/api/tools/browser-computer", _lazy("blocks.tool.browser_computer"), {}),
         # ---- Capability catalog routes ----
         ("GET", "/api/capabilities", _lazy("blocks.capability.list"), {}),
         ("GET", "/api/capabilities/{id}", _lazy("blocks.capability.manifest"), {"id": "capability_id"}),

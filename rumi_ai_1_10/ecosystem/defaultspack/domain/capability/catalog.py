@@ -40,6 +40,12 @@ class CapabilityCatalog:
             items = [item for item in items if item.get("risk_level") == risk_level]
         return items
 
+    def capability(self, capability_id: str) -> Optional[Dict[str, Any]]:
+        for item in self.capabilities():
+            if item.get("id") == capability_id or item.get("capability_id") == capability_id:
+                return item
+        return None
+
     def profiles(self) -> List[Dict[str, Any]]:
         return self._load_yaml_dir("profiles", ".profile.yaml")
 
