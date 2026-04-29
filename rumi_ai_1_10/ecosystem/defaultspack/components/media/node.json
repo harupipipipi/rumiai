@@ -1,0 +1,16 @@
+{
+  "version": "rumi.node.v1",
+  "nodes": [
+    {
+      "node_id": "defaultspack.media",
+      "kind": "ecosystem.component",
+      "display_name": {"ja": "メディア", "en": "Media"},
+      "description": {"ja": "画像、文書、clipboard、screenshot を扱うマルチモーダルノード。", "en": "Image, document, clipboard, and screenshot multimodal node."},
+      "ports": [
+        {"id": "input", "direction": "input", "standards": ["rumi.media.input"], "aliases": ["image", "document"], "multiple": true, "required": false},
+        {"id": "output", "direction": "output", "standards": ["rumi.media.output"], "aliases": ["parsed", "image"], "multiple": true, "required": false}
+      ],
+      "metadata": {"pack_id": "defaultspack", "component": "media", "icon": "image", "category": "multimodal"}
+    }
+  ]
+}

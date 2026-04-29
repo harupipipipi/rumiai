@@ -1,0 +1,17 @@
+id: artifact
+name: Artifact Generation
+description: Markdown, text, code, JSON, YAML, HTML, CSV, report, changelog, and implementation-plan outputs.
+local_only: true
+requires_network: false
+risk_level: medium
+permissions:
+  - artifact.create
+  - artifact.update
+  - file.workspace.write
+handlers:
+  - defaults.coding.file_create
+  - defaults.coding.file_write
+types: [markdown, text, code, json, yaml, html, csv, report, changelog, implementation_plan]
+operations: [create, update, preview, export, save_to_workspace]
+approval:
+  save_to_workspace: true

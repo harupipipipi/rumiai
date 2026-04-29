@@ -1,0 +1,8 @@
+artifact_id: string
+type: enum[markdown, text, code, json, yaml, html, csv, report]
+title: string
+path: string
+content_ref: string
+created_by: string
+source_task: string
+version: integer

@@ -1,0 +1,8 @@
+id: manus_like
+name: Manus-like Task Agent
+profile: defaultspack.local_research_writer
+capabilities: [local_file, terminal, research, artifact, browser_optional, safety]
+features: [autonomous_task_execution, step_log, deliverable_workflow, browser_optional]
+policy:
+  browser_requires_approval: true
+  network_default: deny

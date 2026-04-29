@@ -1,0 +1,24 @@
+id: local_file
+name: Local File Workspace
+description: Workspace-scoped file reading, writing, creation, search, patch preview, snapshots, and restore.
+local_only: true
+requires_network: false
+risk_level: high
+permissions:
+  - file.workspace.read
+  - file.workspace.write
+  - file.create
+  - file.delete
+  - file.search
+handlers:
+  - defaults.coding.file_read
+  - defaults.coding.file_write
+  - defaults.coding.file_create
+  - defaults.coding.file_delete
+  - defaults.coding.file_search
+  - defaults.coding.file_list
+operations: [read, write, create, delete, rename, move, list, search, patch, diff, snapshot, restore]
+approval:
+  write: true
+  delete: true
+  overwrite: true

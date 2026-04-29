@@ -1,0 +1,15 @@
+profile_id: defaultspack.artifact_agent
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+display_name:
+  ja: Artifact Agent
+  en: Artifact Agent
+description:
+  ja: Markdown/code/JSON/YAML/HTML/CSV/report を workspace artifact として生成する。
+enabled_capabilities: [artifact, local_file, compact, safety]
+prompt_set: artifact_writer
+policy:
+  save_to_workspace_requires_approval: true
+  overwrite_requires_approval: true
+  diff_preview_required: true

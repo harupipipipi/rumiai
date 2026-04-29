@@ -1,0 +1,7 @@
+id: openclaw_like
+name: OpenClaw-like Open Agent Runtime
+profile: defaultspack.local_agent
+capabilities: [tool, local_file, terminal, browser_optional, local_model, safety]
+features: [open_runtime, extensible_tools, mcp_like_manifest, computer_use_optional]
+policy:
+  extension_review_required: true

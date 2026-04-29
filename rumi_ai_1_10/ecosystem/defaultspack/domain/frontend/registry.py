@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from domain.ai_client.client import AIClient
+from domain.capability.catalog import CapabilityCatalog
 from domain.chat.store import ChatStore
 from domain.dev.inspector import Inspector
 from domain.tool.registry import ToolRegistry
@@ -84,6 +85,7 @@ class FrontendRegistry:
             {"id": "widget", "label": "Widgets"},
             {"id": "system", "label": "System"},
             {"id": "integration", "label": "Integrations"},
+            {"id": "capability", "label": "Capabilities"},
         ]
 
     def _sidebar_items(self, extensions: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -109,6 +111,50 @@ class FrontendRegistry:
                         "notes": [
                             "Tool schema is read from ToolRegistry.",
                             "Add or update tools under user_data/shared/tools/ via API.",
+                        ],
+                    },
+                }
+            )
+
+        for capability in CapabilityCatalog(self._pack_root).list_capabilities():
+            status = "Local" if capability.get("local_only") is True else "Optional"
+            if capability.get("requires_network") is True:
+                status = "Network"
+            elif capability.get("requires_network") == "optional":
+                status = "Optional"
+            items.append(
+                {
+                    "id": f"capability-{capability['id']}",
+                    "label": capability.get("name", capability["id"]),
+                    "category": "capability",
+                    "description": capability.get("description", ""),
+                    "badge": str(capability.get("risk_level", "")).upper(),
+                    "tags": ["capability", *capability.get("operations", [])],
+                    "origin": {"kind": "capability_catalog", "path": capability.get("source_path")},
+                    "panel": {
+                        "kind": "capability",
+                        "title": capability.get("name", capability["id"]),
+                        "fields": [
+                            {"id": "id", "label": "ID", "type": "readonly", "default": capability["id"]},
+                            {"id": "status", "label": "Status", "type": "readonly", "default": status},
+                            {
+                                "id": "requires_approval",
+                                "label": "Requires Approval",
+                                "type": "toggle",
+                                "default": capability.get("requires_approval", False),
+                                "help": "Manifest-derived default. Runtime policy can further restrict this capability.",
+                            },
+                            {
+                                "id": "requires_network",
+                                "label": "Network",
+                                "type": "readonly",
+                                "default": capability.get("requires_network", False),
+                            },
+                        ],
+                        "notes": [
+                            f"Operations: {', '.join(capability.get('operations', [])) or 'none'}",
+                            f"Permissions: {', '.join(capability.get('permissions', [])) or 'none'}",
+                            f"Handlers: {', '.join(capability.get('handlers', [])) or 'none'}",
                         ],
                     },
                 }
@@ -272,6 +318,22 @@ class FrontendRegistry:
                         "type": "select",
                         "default": "stub/default",
                         "options": self._model_options(),
+                    },
+                ],
+            },
+            {
+                "id": "capabilities",
+                "label": "Capabilities",
+                "description": "local-first capability catalog と approval-first policy の表示設定。",
+                "fields": [
+                    {"id": "local_only", "label": "Local Only First", "type": "toggle", "default": True},
+                    {"id": "show_optional_network", "label": "Show Optional Network", "type": "toggle", "default": False},
+                    {"id": "approval_first", "label": "Approval First", "type": "toggle", "default": True},
+                    {
+                        "id": "capability_count",
+                        "label": "Catalog Entries",
+                        "type": "readonly",
+                        "default": CapabilityCatalog(self._pack_root).summary()["count"],
                     },
                 ],
             },
@@ -447,6 +509,11 @@ class FrontendRegistry:
             "preview": {"auto_open": False, "default_mode": "auto", "max_items": 12},
             "chat_rendering": {"render_markdown": True, "show_widgets": True, "unknown_block_strategy": "json"},
             "models": {"detected_provider_count": len(self._list_provider_models()), "preferred_model": "stub/default"},
+            "capabilities": {
+                "local_only": True,
+                "show_optional_network": False,
+                "approval_first": True,
+            },
         }
 
     def _model_options(self) -> list[dict[str, str]]:

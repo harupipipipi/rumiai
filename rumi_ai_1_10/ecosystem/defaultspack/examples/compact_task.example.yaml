@@ -1,0 +1,4 @@
+task:
+  title: Compact current coding session
+  compact:
+    include: [goal, changed_files, decisions, blockers, next_steps]

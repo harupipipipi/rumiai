@@ -1,0 +1,20 @@
+id: terminal
+name: Local Terminal
+description: Local command execution with streaming output, working directory control, replay, and risk labels.
+local_only: true
+requires_network: false
+risk_level: high
+permissions:
+  - terminal.execute
+  - terminal.stream
+  - terminal.session
+handlers:
+  - defaults.coding.terminal_exec
+  - defaults.coding.terminal_stream
+operations: [exec, stream, cancel, replay, summarize_output]
+approval:
+  execute: true
+risk_levels:
+  low: [ls, pwd, cat]
+  medium: [npm test, python script.py]
+  high: [rm, chmod, curl, git push]

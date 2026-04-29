@@ -1,0 +1,9 @@
+project_id: string
+name: string
+root_path: string
+instructions: string
+memory_refs: list[string]
+tool_policy: string
+model_profile: string
+created_at: string
+updated_at: string

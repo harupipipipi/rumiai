@@ -19,6 +19,7 @@ import {
   Wrench,
   X,
   GitBranch,
+  ShieldCheck,
 } from "lucide-react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
@@ -40,6 +41,7 @@ const CATEGORY_META: Record<SidebarCategory | "all", { label: string; icon: Reac
   widget: { label: "Widgets", icon: <LayoutGrid size={14} /> },
   system: { label: "System", icon: <Settings size={14} /> },
   integration: { label: "Integrations", icon: <Blocks size={14} /> },
+  capability: { label: "Capabilities", icon: <ShieldCheck size={14} /> },
 };
 
 const ITEM_ICONS: Record<string, ReactElement> = {
@@ -73,6 +75,7 @@ function iconForItem(item: SidebarItem) {
     widget: <LayoutGrid size={20} />,
     system: <Cpu size={20} />,
     integration: <Blocks size={20} />,
+    capability: <ShieldCheck size={20} />,
   };
   return byCategory[item.category];
 }
@@ -83,6 +86,7 @@ function categoryColor(cat: SidebarCategory, variant: "bg" | "indicator" | "dot"
     widget: { bg: "bg-blue-500", indicator: "bg-blue-500", dot: "bg-blue-500/60", badge: "bg-blue-500/20 text-blue-400" },
     system: { bg: "bg-amber-500", indicator: "bg-amber-500", dot: "bg-amber-500/60", badge: "bg-amber-500/20 text-amber-400" },
     integration: { bg: "bg-violet-500", indicator: "bg-violet-500", dot: "bg-violet-500/60", badge: "bg-violet-500/20 text-violet-400" },
+    capability: { bg: "bg-cyan-500", indicator: "bg-cyan-500", dot: "bg-cyan-500/60", badge: "bg-cyan-500/20 text-cyan-300" },
   };
   return map[cat]?.[variant] ?? "";
 }
@@ -272,7 +276,7 @@ function CategorySwitcher({
               <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">表示フィルター</p>
             </div>
             <div className="py-1">
-              {(["all", "tool", "widget", "system", "integration"] as const).map((filterId) => {
+              {(["all", "tool", "widget", "system", "integration", "capability"] as const).map((filterId) => {
                 const count = counts[filterId] ?? 0;
                 if (filterId !== "all" && count === 0) return null;
                 return (

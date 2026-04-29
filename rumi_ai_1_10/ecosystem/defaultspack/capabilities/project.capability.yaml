@@ -1,0 +1,15 @@
+id: project
+name: Project Workspace
+description: Project config, instructions, attached files, task board, timeline, tools, model profile, and artifacts.
+local_only: true
+requires_network: false
+risk_level: medium
+permissions:
+  - project.read
+  - project.write
+handlers:
+  - defaults.memory.project_context
+  - defaults.prompt.system
+operations: [create_project, open_project, update_instructions, attach_files, set_profile, set_tools, list_tasks]
+approval:
+  update_instructions: true

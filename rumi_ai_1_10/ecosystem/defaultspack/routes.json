@@ -89,6 +89,60 @@
       "path": "/api/packs/defaultspack/planning/{id}/status",
       "flow_id": "planning_agent",
       "description": "Get planning agent status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/capabilities",
+      "flow_id": "transport_direct",
+      "description": "List defaultspack local-first capability manifests"
+    },
+    {
+      "method": "GET",
+      "path": "/api/capabilities/{id}",
+      "flow_id": "transport_direct",
+      "description": "Get one defaultspack capability manifest"
+    },
+    {
+      "method": "POST",
+      "path": "/api/coding/files/read",
+      "flow_id": "transport_direct",
+      "description": "Read a workspace file"
+    },
+    {
+      "method": "POST",
+      "path": "/api/coding/files/write",
+      "flow_id": "transport_direct",
+      "description": "Write a workspace file with approval policy metadata"
+    },
+    {
+      "method": "POST",
+      "path": "/api/coding/terminal/exec",
+      "flow_id": "transport_direct",
+      "description": "Execute a local terminal command"
+    },
+    {
+      "method": "GET",
+      "path": "/api/coding/git/status",
+      "flow_id": "transport_direct",
+      "description": "Read git status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/coding/git/diff",
+      "flow_id": "transport_direct",
+      "description": "Read git diff"
+    },
+    {
+      "method": "POST",
+      "path": "/api/research/local-search",
+      "flow_id": "transport_direct",
+      "description": "Search local knowledge as research sources"
+    },
+    {
+      "method": "POST",
+      "path": "/api/research/report",
+      "flow_id": "transport_direct",
+      "description": "Generate a local-first research report artifact"
     }
   ]
 }

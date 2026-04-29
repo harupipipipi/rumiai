@@ -1,0 +1,14 @@
+id: compact
+name: Context Compact
+description: Conversation, task, file, codebase, and research summarization with pinned context and restore logs.
+local_only: true
+requires_network: false
+risk_level: low
+permissions:
+  - context.read
+  - context.compact
+handlers:
+  - defaults.chat.summarize_and_trim
+  - defaults.chat.auto_trim
+operations: [compact_conversation, compact_task_state, compact_file_summary, compact_codebase_summary, pin_context, restore_context]
+approval: {}

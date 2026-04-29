@@ -1,0 +1,9 @@
+project:
+  name: sample-local-agent-project
+  root_path: ./workspace/sample
+  profile: defaultspack.local_agent
+  instructions: |
+    ローカル完結で作業する。外部APIは使わない。
+  memory:
+    - scope: project
+      content: 日本語で短く報告する。

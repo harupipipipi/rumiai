@@ -1,0 +1,12 @@
+id: string
+name: string
+category: string
+description: string
+inspired_by: list[string]
+local_possible: boolean
+requires_api: boolean
+priority: enum[P0, P1, P2, P3]
+status: enum[planned, stubbed, implemented, deprecated]
+defaultspack_target: list[string]
+permissions: list[string]
+risks: list[string]

@@ -1,0 +1,17 @@
+profile_id: defaultspack.compact_coding
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+display_name:
+  ja: Compact Coding
+  en: Compact Coding
+description:
+  ja: 長時間のローカル開発向け。file/git/terminal と高頻度 compact を有効化する。
+enabled_capabilities: [local_file, terminal, git, compact, memory, safety]
+prompt_set: coding_agent
+policy:
+  network_default: deny
+  compact_context: true
+  compact_frequency: high
+  terminal_actions_require_approval: true
+  write_actions_require_approval: true

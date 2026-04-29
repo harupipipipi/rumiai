@@ -1,0 +1,15 @@
+id: safety
+name: Safety Permission Audit
+description: Permission catalog, risk classification, approval gates, audit logs, sandbox roots, and secret redaction.
+local_only: true
+requires_network: false
+risk_level: critical
+permissions:
+  - safety.policy
+  - audit.write
+handlers:
+  - defaults.tool.consent_check
+  - defaults.tool.consent_confirm
+operations: [classify_risk, request_approval, write_audit_log, redact_secrets, enforce_workspace_root, deny_network_by_default]
+approval:
+  policy_change: true

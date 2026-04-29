@@ -1,0 +1,16 @@
+profile_id: defaultspack.local_research_writer
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+display_name:
+  ja: Local Research Writer
+  en: Local Research Writer
+description:
+  ja: ローカル調査、memory、compact、artifact 生成を組み合わせる文書作成 profile。
+enabled_capabilities: [research, artifact, local_file, memory, compact, safety]
+prompt_set: research_writer
+policy:
+  local_first: true
+  network_default: deny
+  optional_web_requires_approval: true
+  save_to_workspace_requires_approval: true

@@ -1,0 +1,15 @@
+profile_id: defaultspack.research_agent
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+display_name:
+  ja: Research Agent
+  en: Research Agent
+description:
+  ja: ローカル文書検索、source card、claim/citation 分離、比較表生成を優先する調査 profile。
+enabled_capabilities: [research, knowledge, artifact, compact, safety]
+prompt_set: research_agent
+policy:
+  local_document_search_first: true
+  optional_web_requires_approval: true
+  cite_claims: true

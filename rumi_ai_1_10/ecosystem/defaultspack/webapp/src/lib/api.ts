@@ -36,7 +36,7 @@ export type Conversation = {
   messages: ChatMessage[];
 };
 
-export type SidebarCategory = "tool" | "widget" | "system" | "integration";
+export type SidebarCategory = "tool" | "widget" | "system" | "integration" | "capability";
 
 export type SidebarFieldOption = {
   value: string | number | boolean;
