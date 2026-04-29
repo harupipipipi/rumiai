@@ -1,0 +1,11 @@
+id: safety
+name: Safety Permission Audit
+description: Permission, approval, risk classification, audit, sandbox root enforcement, and secret redaction.
+local_only: true
+requires_network: false
+risk_level: critical
+permissions: [permission.read, permission.write, audit.write, safety.classify]
+handlers:
+  - blocks.tool.permissions
+  - blocks.tool.consent_check
+operations: [classify_risk, request_approval, write_audit_log, redact_secrets, enforce_workspace_root, deny_network_by_default]

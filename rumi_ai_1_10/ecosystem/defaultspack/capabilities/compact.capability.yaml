@@ -1,0 +1,11 @@
+id: compact
+name: Context Compact
+description: Local conversation, task, file, codebase, and research context compression.
+local_only: true
+requires_network: false
+risk_level: low
+permissions: [context.read, context.write, context.compact]
+handlers:
+  - blocks.context.compact
+  - blocks.context.restore
+operations: [compact_conversation, compact_task_state, compact_file_summary, compact_codebase_summary, pin_context, restore_context]

@@ -1,0 +1,15 @@
+profile_id: defaultspack.research_agent
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+display_name:
+  ja: ローカル調査エージェント
+  en: Research Agent
+enabled_capabilities: [research, local_file, artifact, memory, compact, safety]
+prompt_set: research_agent
+policy:
+  local_sources_first: true
+  web_provider: optional
+  official_docs_preferred: true
+  reddit_as_user_voice_only: true
+  network_default: deny

@@ -1,0 +1,17 @@
+id: git
+name: Git Integration
+description: Local git status, diff, log, add, commit, restore, stash, apply, and optional push.
+local_only: true
+requires_network: false
+risk_level: high
+permissions: [git.status, git.diff, git.commit, git.push]
+handlers:
+  - blocks.coding.git_status
+  - blocks.coding.git_diff
+  - blocks.coding.git_commit
+  - blocks.coding.git_push
+operations: [status, diff, log, branch, add, commit, restore, checkout, stash, apply, push]
+approval:
+  commit: true
+  push: true
+  restore: true

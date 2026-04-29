@@ -109,6 +109,9 @@ class KernelRuntimeHandlersMixin:
             "kernel:capability.list": self._h_capability_list,
             # Pending export ハンドラ (G-2)
             "kernel:pending.export": self._h_pending_export,
+            # Desktop app handlers (V-4)
+            "kernel:desktop.launch": self._h_desktop_launch,
+            "kernel:desktop.stop": self._h_desktop_stop,
         }
 
     # ------------------------------------------------------------------

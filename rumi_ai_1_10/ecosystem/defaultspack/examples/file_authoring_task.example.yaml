@@ -1,0 +1,7 @@
+task:
+  title: Create implementation plan
+  goal: defaultspackにAI agent機能追加計画書を作る
+  output:
+    type: markdown
+    path: docs/local_agent_implementation_plan.md
+  tools: [local_file.create, local_file.write]

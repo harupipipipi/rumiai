@@ -9,6 +9,7 @@ defaults の ai_client モジュールは以下のプロバイダーに対応す
 | `openai` | OpenAI API（GPT-4o, GPT-4o-mini, o3, o4-mini 等） |
 | `anthropic` | Anthropic API（Claude Opus 4, Sonnet 4, Haiku 3 等） |
 | `google` | Google Gemini API（Gemini 2.5 Pro, Gemini 2.5 Flash 等） |
+| `openrouter` | OpenRouter API（defaultspack では `tencent/hy3-preview:free` のみ） |
 | `stub` | テスト用スタブ。固定レスポンスを返す |
 | `rumi` | rumi 独自のメタプロバイダー（パイプライン、ルーティング、評価） |
 
@@ -41,6 +42,18 @@ GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
 # オプション:
 GOOGLE_PROJECT_ID=my-project
 GOOGLE_REGION=us-central1
+```
+
+### OpenRouter
+
+defaultspack の OpenRouter 統合は、現時点では `tencent/hy3-preview:free` だけを実行対象にする。
+API キーはデスクトップ UI の Settings から保存できる。値は `user_data/secrets/OPENROUTER_API_KEY.json`
+に暗号化保存され、フロントエンドには保存済みかどうかだけが返る。
+
+```bash
+OPENROUTER_API_KEY=sk-or-...
+# オプション:
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 ```
 
 ### stub

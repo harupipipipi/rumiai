@@ -1,0 +1,9 @@
+memory_id: string
+scope: enum[user, project, session, file]
+type: enum[preference, instruction, fact, style, decision]
+content: string
+source: string
+confidence: number
+created_at: string
+updated_at: string
+user_editable: boolean

@@ -1,0 +1,7 @@
+research_id: string
+query: string
+sources: list[source]
+claims: list[claim]
+comparison_tables: list[object]
+summary: string
+open_questions: list[string]

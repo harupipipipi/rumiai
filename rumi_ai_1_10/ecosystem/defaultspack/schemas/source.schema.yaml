@@ -1,0 +1,8 @@
+source_id: string
+type: enum[local_file, web, reddit, official_doc, github, note]
+title: string
+url: string
+path: string
+retrieved_at: string
+trust_level: enum[low, medium, high, official]
+summary: string

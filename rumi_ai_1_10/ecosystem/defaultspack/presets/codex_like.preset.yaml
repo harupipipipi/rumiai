@@ -1,0 +1,6 @@
+id: codex_like
+name: Codex-like Local Coding
+profile: defaultspack.compact_coding
+enabled_capabilities: [local_file, terminal, git, safety, compact]
+ui_panels: [chat, plan, tool_calls, diff, terminal]
+behavior: [plan_before_edit, run_tests, summarize_diff, commit_helper]

@@ -1,6 +1,6 @@
 # defaultspack Frontend Extensions
 
-`defaultspack` の standalone frontend は「具体 UI を本体が知る」のではなく、backend が返す registry を読んで右バー・設定・chat renderer を構成する。
+`defaultspack` の standalone frontend は「具体 UI を本体が知る」のではなく、backend が返す registry を読んで shell layout・右バー・設定・chat renderer を構成する。
 
 ## まず知っておくこと
 
@@ -9,8 +9,47 @@
 - right sidebar は `webapp/src/components/RightSidebar.tsx`
 - settings は `/api/ui/settings`
 - preview feed は `/api/ui/conversations/{id}/preview`
+- shell layout は `user_data/shared/frontend_shell.json` から差し替えられる
 
 ## 拡張ポイント
+
+### 0. Shell layout を差し替える
+
+`user_data/shared/frontend_shell.json` に `shell_layout` を置くと、既存 React を編集せずに表示 region を並べ替えたり無効化できる。
+
+```json
+{
+  "shell_layout": {
+    "id": "compact",
+    "regions": [
+      { "id": "title_bar", "part_id": "app_chrome", "renderer": "title_bar", "slot": "top", "order": 10, "enabled": true },
+      { "id": "history", "part_id": "conversation_history", "renderer": "history_board", "slot": "left", "order": 20, "enabled": false },
+      { "id": "chat_messages", "part_id": "ai_chat", "renderer": "chat_messages", "slot": "main", "order": 40, "enabled": true },
+      { "id": "composer", "part_id": "ai_chat", "renderer": "composer", "slot": "bottom", "order": 50, "enabled": true }
+    ]
+  }
+}
+```
+
+`shell_renderers` は renderer ID と frontend component 名の契約を表す。builtin renderer は `webapp/src/renderers/` に分かれており、`module` と `trust: "local"` を指定した同一 origin の `/static/renderers/`, `/static/assets/renderers/`, `/static/user_renderers/` 配下だけ lazy load できる。読み込み失敗時は error boundary で builtin fallback に戻る。
+
+```json
+{
+  "shell_renderers": [
+    {
+      "id": "composer",
+      "component": "Composer",
+      "regions": ["composer"],
+      "fallback": "hidden",
+      "module": "/static/renderers/custom-composer.js",
+      "export": "default",
+      "trust": "local"
+    }
+  ]
+}
+```
+
+`/api/ui/catalog` は壊れた `parts`, `component_bindings`, `shell_layout`, `shell_renderers` を `diagnostics` として返す。frontend は診断を表示・記録できるが、manifest 全体を強制的には拒否しない。
 
 ### 1. 右バーに項目を追加する
 
@@ -93,7 +132,7 @@ registry は `chat_renderers` で「どの block/widget type をどの renderer 
 }
 ```
 
-この metadata 自体は契約で、実際の renderer 実装は `webapp/src/App.tsx` に追加する。
+この metadata 自体は契約で、実際の renderer 実装は builtin renderer registry に追加する。
 
 今の builtin renderer:
 

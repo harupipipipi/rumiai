@@ -14,7 +14,7 @@ def run(input_data, context=None):
         {"status":"ok","data":{"branch":str,"clean":bool,"staged":[str],"modified":[str],"untracked":[str]}}
     """
     try:
-        git = GitOps()
+        git = GitOps(input_data.get("workspace_root"))
         result = git.status()
         return ok(result)
     except Exception as e:

@@ -1,7 +1,7 @@
 """
 desktop_app_manager.py — Pack デスクトップアプリのライフサイクル管理
 
-Phase V-4: desktop_app:execute capability のバックエンド。
+Phase V-4: desktop_app.execute capability のバックエンド。
 Pack のデスクトップアプリ（pack-shell 経由）の登録・起動・停止・ショートカット生成を管理する。
 """
 from __future__ import annotations
@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shlex
 import stat
 import subprocess
 import sys
@@ -25,11 +26,33 @@ _PACK_API_TOKEN_ENV = "RUMI_API_TOKEN"
 _APPS_SUBDIR = "user_data/apps"
 
 
+def _default_repo_dir() -> str:
+    """Resolve the rumi_ai_1_10 root for viewer-launched kernel processes."""
+    return str(Path(__file__).resolve().parents[1])
+
+
+def _pack_shell_binary_name() -> str:
+    return "pack-shell.exe" if sys.platform == "win32" else "pack-shell"
+
+
 def _resolve_pack_shell_path() -> Optional[str]:
     """pack-shell バイナリのパスを解決する。"""
     env_path = os.environ.get(_PACK_SHELL_PATH_ENV)
     if env_path and os.path.isfile(env_path):
         return env_path
+
+    repo_dir = Path(_default_repo_dir())
+    repo_root = repo_dir.parent
+    binary_name = _pack_shell_binary_name()
+    candidates = [
+        repo_dir / "bundled" / binary_name,
+        repo_root / "pack-shell" / "target" / "release" / binary_name,
+        repo_root / "pack-shell" / "target" / "debug" / binary_name,
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+
     # フォールバック: PATH から検索
     import shutil
     found = shutil.which("pack-shell")
@@ -40,7 +63,7 @@ class DesktopAppManager:
     """Pack デスクトップアプリのライフサイクルマネージャ。"""
 
     def __init__(self, repo_dir: Optional[str] = None):
-        self._repo_dir = repo_dir or os.environ.get("REPO", "")
+        self._repo_dir = repo_dir or os.environ.get("REPO") or _default_repo_dir()
         self._apps_dir = os.path.join(self._repo_dir, _APPS_SUBDIR) if self._repo_dir else ""
         self._running: Dict[str, subprocess.Popen] = {}
 
@@ -101,6 +124,28 @@ class DesktopAppManager:
 
         return {"success": True, "shortcut_path": shortcut_path}
 
+    def register_from_ecosystem(self, ecosystem_path: str) -> Dict[str, Any]:
+        """ecosystem.json の desktop_app セクションからアプリを登録する。"""
+        try:
+            with open(ecosystem_path, "r", encoding="utf-8") as f:
+                ecosystem = json.load(f)
+        except Exception as e:
+            return {"success": False, "error": f"Failed to read ecosystem.json: {e}"}
+
+        pack_id = ecosystem.get("pack_id") or ecosystem.get("id")
+        if not pack_id or not isinstance(pack_id, str):
+            return {"success": False, "error": "ecosystem.json pack_id is required"}
+
+        desktop_app_config = ecosystem.get("desktop_app")
+        if not isinstance(desktop_app_config, dict):
+            return {"success": False, "error": f"No desktop_app configured for pack: {pack_id}"}
+
+        return self.register_app(
+            pack_id=pack_id,
+            desktop_app_config=desktop_app_config,
+            pack_dir=str(Path(ecosystem_path).resolve().parent),
+        )
+
     def unregister_app(self, pack_id: str) -> Dict[str, Any]:
         """登録済みアプリを解除し、ショートカットを削除する。"""
         # 実行中なら停止
@@ -118,7 +163,7 @@ class DesktopAppManager:
 
         return {"success": True}
 
-    def launch_app(self, pack_id: str) -> Dict[str, Any]:
+    def launch_app(self, pack_id: str, api_token: Optional[str] = None) -> Dict[str, Any]:
         """Pack のデスクトップアプリを起動する。"""
         if pack_id in self._running:
             proc = self._running[pack_id]
@@ -127,21 +172,23 @@ class DesktopAppManager:
 
         meta = self._load_meta(pack_id)
         if meta is None:
-            return {"success": False, "error": f"App not registered: {pack_id}"}
-
-        pack_shell = meta.get("pack_shell", "")
-        if not pack_shell or not os.path.isfile(pack_shell):
-            pack_shell = _resolve_pack_shell_path()
-            if not pack_shell:
-                return {"success": False, "error": "pack-shell binary not found"}
+            registration = self._register_known_pack_if_available(pack_id)
+            if registration.get("success"):
+                meta = self._load_meta(pack_id)
+            if meta is None:
+                detail = registration.get("error")
+                if detail:
+                    return {"success": False, "error": f"App not registered: {pack_id} ({detail})"}
+                return {"success": False, "error": f"App not registered: {pack_id}"}
 
         command = meta.get("command", "")
         if not command:
             return {"success": False, "error": f"No command configured for app: {pack_id}"}
 
         requires_api_token = meta.get("requires_api_token", True)
-        api_token = os.environ.get(_PACK_API_TOKEN_ENV, "")
-        if requires_api_token and not api_token:
+        issued_desktop_token = api_token
+        effective_api_token = api_token or os.environ.get(_PACK_API_TOKEN_ENV, "")
+        if requires_api_token and not effective_api_token:
             return {
                 "success": False,
                 "error": (
@@ -153,10 +200,22 @@ class DesktopAppManager:
         env = dict(os.environ)
         env.update(meta.get("env", {}))
         env["RUMI_PACK_ID"] = pack_id
-        if api_token:
-            env[_PACK_API_TOKEN_ENV] = api_token
+        if effective_api_token:
+            env[_PACK_API_TOKEN_ENV] = effective_api_token
+        if issued_desktop_token:
+            env["RUMI_TOKEN"] = issued_desktop_token
+            env.setdefault("RUMI_PORT", "8765")
 
         working_dir = meta.get("working_dir") or meta.get("pack_dir", "")
+        if issued_desktop_token:
+            return self._launch_direct(pack_id, command, working_dir, env)
+
+        pack_shell = meta.get("pack_shell", "")
+        if not pack_shell or not os.path.isfile(pack_shell):
+            pack_shell = _resolve_pack_shell_path()
+            if not pack_shell:
+                return {"success": False, "error": "pack-shell binary not found"}
+
         popen_args = [pack_shell, "run", pack_id, "--command", command]
         if working_dir:
             popen_args.extend(["--working-dir", working_dir])
@@ -171,6 +230,34 @@ class DesktopAppManager:
             )
             self._running[pack_id] = proc
             return {"success": True, "status": "launched", "pid": proc.pid}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _launch_direct(
+        self,
+        pack_id: str,
+        command: str,
+        working_dir: str,
+        env: Dict[str, str],
+    ) -> Dict[str, Any]:
+        """Launch with a pre-issued desktop token instead of re-entering pack-shell."""
+        try:
+            popen_args = shlex.split(command)
+        except ValueError as e:
+            return {"success": False, "error": f"Failed to parse command: {e}"}
+        if not popen_args:
+            return {"success": False, "error": f"No command configured for app: {pack_id}"}
+
+        try:
+            proc = subprocess.Popen(
+                popen_args,
+                cwd=working_dir or None,
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self._running[pack_id] = proc
+            return {"success": True, "status": "launched", "pid": proc.pid, "launch_mode": "direct"}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
@@ -198,7 +285,7 @@ class DesktopAppManager:
 
     def list_registered_apps(self) -> List[Dict[str, Any]]:
         """登録済みアプリの一覧を返す。"""
-        result = []
+        result: List[Dict[str, Any]] = []
         if not self._apps_dir or not os.path.isdir(self._apps_dir):
             return result
         for fname in os.listdir(self._apps_dir):
@@ -407,3 +494,16 @@ class DesktopAppManager:
                 return json.load(f)
         except Exception:
             return None
+
+    def _register_known_pack_if_available(self, pack_id: str) -> Dict[str, Any]:
+        """Register a repo-local pack desktop app lazily on first launch."""
+        if not self._repo_dir:
+            return {"success": False, "error": "repo dir is not configured"}
+
+        ecosystem_path = Path(self._repo_dir) / "ecosystem" / pack_id / "ecosystem.json"
+        if not ecosystem_path.is_file():
+            return {
+                "success": False,
+                "error": f"ecosystem.json not found for pack: {pack_id}",
+            }
+        return self.register_from_ecosystem(str(ecosystem_path))

@@ -15,6 +15,11 @@
     "port_source": {
       "env": "RUMI_DEFAULTSPACK_PORT",
       "default": 8766
+    },
+    "app": {
+      "id": "defaultspack",
+      "name": "Rumi Defaultspack",
+      "icon": "/static/assets/icons/defaultspack-icon.png"
     }
   }
 }

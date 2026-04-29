@@ -1,0 +1,6 @@
+id: manus_like
+name: Manus-like Task Agent
+profile: defaultspack.local_research_writer
+enabled_capabilities: [local_file, terminal, artifact, research, safety, browser_optional]
+ui_panels: [chat, plan, tool_calls, source_cards, artifacts]
+behavior: [step_log, deliverable_oriented, browser_optional]

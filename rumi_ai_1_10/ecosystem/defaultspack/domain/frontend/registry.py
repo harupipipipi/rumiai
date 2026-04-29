@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import base64
 import json
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 from domain.ai_client.client import AIClient
+from domain.ai_client.api_key_store import provider_has_api_key, set_provider_api_key
+from domain.capability.catalog import CapabilityCatalog
 from domain.chat.store import ChatStore
 from domain.dev.inspector import Inspector
+from domain.extensions.runtime import get_extension_registry
 from domain.tool.registry import ToolRegistry
 
 
@@ -17,34 +21,49 @@ class FrontendRegistry:
     def __init__(self, pack_root: Path | None = None) -> None:
         self._pack_root = pack_root or Path(__file__).resolve().parents[2]
         self._extensions_dir = self._pack_root / "user_data" / "shared" / "frontend_extensions"
+        self._shell_path = self._pack_root / "user_data" / "shared" / "frontend_shell.json"
         self._settings_path = self._pack_root / "user_data" / "shared" / "frontend_settings.json"
 
     def build_catalog(self) -> dict[str, Any]:
+        self._load_diagnostics: list[dict[str, Any]] = []
         extensions = self._load_extensions()
+        ui_surfaces = self._load_ui_surfaces()
+        shell = self._shell(ui_surfaces, extensions)
+        parts = self._parts(ui_surfaces, extensions)
+        component_bindings = self._component_bindings(ui_surfaces, extensions)
         return {
+            "app": self._app_metadata(ui_surfaces),
+            "agent_service": CapabilityCatalog(self._pack_root).manifest(),
+            "shell": shell,
+            "parts": parts,
+            "component_bindings": component_bindings,
             "sidebar": {
                 "filters": self._sidebar_filters(),
-                "items": self._sidebar_items(extensions),
+                "items": self._sidebar_items(ui_surfaces, extensions),
             },
             "settings": {
-                "sections": self._settings_sections(extensions),
+                "sections": self._settings_sections(ui_surfaces, extensions),
                 "values": self._read_settings(),
             },
             "chat_rendering": {
-                "renderers": self._chat_renderers(extensions),
+                "renderers": self._chat_renderers(ui_surfaces, extensions),
             },
             "extension_points": self._extension_points(),
+            "diagnostics": self._diagnostics(shell, parts, component_bindings),
         }
 
     def get_settings(self) -> dict[str, Any]:
+        ui_surfaces = self._load_ui_surfaces()
         return {
-            "sections": self._settings_sections(self._load_extensions()),
+            "sections": self._settings_sections(ui_surfaces, self._load_extensions()),
             "values": self._read_settings(),
         }
 
     def update_settings(self, patch: dict[str, Any] | None) -> dict[str, Any]:
         current = self._read_settings()
-        merged = self._deep_merge(current, patch or {})
+        sanitized_patch = self._sanitize_settings_patch(patch or {})
+        merged = self._deep_merge(current, sanitized_patch)
+        merged = self._refresh_derived_settings(merged)
         self._settings_path.parent.mkdir(parents=True, exist_ok=True)
         self._settings_path.write_text(
             json.dumps(merged, ensure_ascii=False, indent=2),
@@ -86,7 +105,242 @@ class FrontendRegistry:
             {"id": "integration", "label": "Integrations"},
         ]
 
-    def _sidebar_items(self, extensions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _app_metadata(self, ui_surfaces: list[dict[str, Any]]) -> dict[str, Any]:
+        app: dict[str, Any] = {
+            "id": "defaultspack",
+            "name": "Rumi Defaultspack",
+            "icon": "/static/assets/icons/defaultspack-icon.png",
+            "account": self._rumi_account_metadata(),
+        }
+        for surface in ui_surfaces:
+            config = surface.get("config", {})
+            if isinstance(config, dict) and isinstance(config.get("app"), dict):
+                app = self._deep_merge(app, config["app"])
+        return app
+
+    def _rumi_root(self) -> Path:
+        return self._pack_root.parents[1]
+
+    def _rumi_account_metadata(self) -> dict[str, Any]:
+        account: dict[str, Any] = {
+            "display_name": "Rumi",
+            "email": "",
+            "plan_label": "Local Account",
+            "avatar_url": "",
+            "initial": "R",
+            "source": "fallback",
+        }
+        token_payload = self._read_rumi_oauth_payload()
+        profile = self._read_rumi_profile()
+        user_metadata = token_payload.get("user_metadata", {}) if isinstance(token_payload, dict) else {}
+        app_metadata = token_payload.get("app_metadata", {}) if isinstance(token_payload, dict) else {}
+        email = str(token_payload.get("email") or user_metadata.get("email") or "").strip()
+        display_name = str(
+            profile.get("username")
+            or user_metadata.get("full_name")
+            or user_metadata.get("name")
+            or token_payload.get("name")
+            or ""
+        ).strip()
+        if not display_name and email:
+            display_name = email.split("@", 1)[0]
+        avatar_url = str(
+            profile.get("icon")
+            or user_metadata.get("avatar_url")
+            or user_metadata.get("picture")
+            or token_payload.get("picture")
+            or ""
+        ).strip()
+        plan_label = str(
+            profile.get("plan")
+            or profile.get("subscription_plan")
+            or token_payload.get("plan")
+            or token_payload.get("subscription_plan")
+            or app_metadata.get("plan")
+            or app_metadata.get("subscription_plan")
+            or "Rumi Account"
+        ).strip()
+        if display_name:
+            account["display_name"] = display_name
+        if email:
+            account["email"] = email
+        if avatar_url:
+            account["avatar_url"] = avatar_url
+        if plan_label:
+            account["plan_label"] = plan_label
+        account["initial"] = str(account["display_name"] or account["email"] or "R")[0].upper()
+        account["source"] = "rumi_profile" if profile else ("rumi_oauth" if token_payload else "fallback")
+        return account
+
+    def _read_rumi_profile(self) -> dict[str, Any]:
+        profile_path = self._rumi_root() / "user_data" / "settings" / "profile.json"
+        try:
+            profile = json.loads(profile_path.read_text(encoding="utf-8"))
+            return profile if isinstance(profile, dict) else {}
+        except Exception:
+            return {}
+
+    def _read_rumi_oauth_payload(self) -> dict[str, Any]:
+        token_path = self._rumi_root() / "user_data" / "settings" / "oauth_tokens.json"
+        try:
+            token_data = json.loads(token_path.read_text(encoding="utf-8"))
+            token = str(token_data.get("access_token", ""))
+            payload_segment = token.split(".")[1]
+            padding = "=" * (-len(payload_segment) % 4)
+            decoded = base64.urlsafe_b64decode((payload_segment + padding).encode("ascii"))
+            payload = json.loads(decoded.decode("utf-8"))
+            return payload if isinstance(payload, dict) else {}
+        except Exception:
+            return {}
+
+    def _shell(
+        self,
+        ui_surfaces: list[dict[str, Any]],
+        extensions: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        shell = {
+            "layout": {
+                "id": "default_chat_shell",
+                "regions": [
+                    {"id": "title_bar", "part_id": "app_chrome", "renderer": "title_bar", "slot": "top", "order": 10, "enabled": True},
+                    {"id": "history", "part_id": "conversation_history", "renderer": "history_board", "slot": "left", "order": 20, "enabled": True},
+                    {"id": "chat_header", "part_id": "ai_chat", "renderer": "chat_header", "slot": "main", "order": 30, "enabled": True},
+                    {"id": "chat_messages", "part_id": "ai_chat", "renderer": "chat_messages", "slot": "main", "order": 40, "enabled": True},
+                    {"id": "composer", "part_id": "ai_chat", "renderer": "composer", "slot": "bottom", "order": 50, "enabled": True},
+                    {"id": "activity_preview", "part_id": "activity_preview", "renderer": "activity_preview", "slot": "right", "order": 60, "enabled": True},
+                    {"id": "right_sidebar", "part_id": "extension_sidebar", "renderer": "right_sidebar", "slot": "right", "order": 70, "enabled": True},
+                    {"id": "settings_modal", "part_id": "settings", "renderer": "settings_modal", "slot": "overlay", "order": 80, "enabled": True},
+                ],
+            },
+            "renderers": [
+                {"id": "title_bar", "component": "TitleBar", "regions": ["title_bar"], "fallback": "hidden"},
+                {"id": "history_board", "component": "HistoryBoard", "regions": ["history"], "fallback": "hidden"},
+                {"id": "chat_header", "component": "ChatHeader", "regions": ["chat_header"], "fallback": "hidden"},
+                {"id": "chat_messages", "component": "ChatMessages", "regions": ["chat_messages"], "fallback": "plain_text"},
+                {"id": "composer", "component": "Composer", "regions": ["composer"], "fallback": "hidden"},
+                {"id": "activity_preview", "component": "ToolPreviewPanel", "regions": ["activity_preview"], "fallback": "hidden"},
+                {"id": "right_sidebar", "component": "RightSidebar", "regions": ["right_sidebar"], "fallback": "hidden"},
+                {"id": "settings_modal", "component": "SettingsModal", "regions": ["settings_modal"], "fallback": "hidden"},
+            ],
+        }
+        user_shell = self._load_shell_config()
+        for manifest in [*ui_surfaces, user_shell, *extensions]:
+            config = manifest.get("config", manifest)
+            if not isinstance(config, dict):
+                continue
+            if isinstance(config.get("shell_layout"), dict):
+                shell["layout"] = self._deep_merge(shell["layout"], config["shell_layout"])
+            renderers = config.get("shell_renderers")
+            if isinstance(renderers, list):
+                shell["renderers"] = self._dedupe_by_key(
+                    [*shell["renderers"], *(item for item in renderers if isinstance(item, dict))],
+                    "id",
+                )
+        return shell
+
+    def _parts(
+        self,
+        ui_surfaces: list[dict[str, Any]],
+        extensions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        parts: list[dict[str, Any]] = [
+            {
+                "id": "app_chrome",
+                "kind": "shell",
+                "label": "App Chrome",
+                "uses": ["frontend"],
+                "schema": {"type": "object", "properties": {"app": {"type": "object"}, "shell": {"type": "object"}}},
+            },
+            {
+                "id": "conversation_history",
+                "kind": "navigation",
+                "label": "Conversation History",
+                "uses": ["chat"],
+                "contracts": {"conversations": "/api/chat/conversations"},
+                "schema": {"type": "object", "properties": {"items": {"type": "array"}, "active_id": {"type": ["string", "null"]}}},
+            },
+            {
+                "id": "ai_chat",
+                "kind": "chat",
+                "label": "AI Chat",
+                "uses": ["chat", "ai_client", "prompt", "memory", "tool", "frontend"],
+                "contracts": {
+                    "conversation": "/api/chat/conversations",
+                    "catalog": "/api/ui/catalog",
+                    "settings": "/api/ui/settings",
+                },
+                "schema": {
+                    "type": "object",
+                    "required": ["conversation", "messages"],
+                    "properties": {
+                        "conversation": {"type": ["object", "null"]},
+                        "messages": {"type": "array"},
+                        "composer": {"type": "object"},
+                    },
+                },
+            },
+            {
+                "id": "activity_preview",
+                "kind": "preview",
+                "label": "Activity Preview",
+                "uses": ["chat", "dev", "tool", "knowledge", "memory", "media"],
+                "contracts": {
+                    "preview": "/api/ui/conversations/{conversation_id}/preview",
+                },
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "tool_timeline": {"type": "array"},
+                        "plan_steps": {"type": "array"},
+                        "approvals": {"type": "array"},
+                        "attachments": {"type": "array"},
+                        "audio": {"type": "array"},
+                    },
+                },
+            },
+            {
+                "id": "extension_sidebar",
+                "kind": "sidebar",
+                "label": "Extension Sidebar",
+                "uses": ["tool", "frontend"],
+                "contracts": {"catalog": "/api/ui/catalog", "settings": "/api/ui/settings"},
+                "schema": {"type": "object", "properties": {"items": {"type": "array"}, "filters": {"type": "array"}}},
+            },
+            {
+                "id": "settings",
+                "kind": "settings",
+                "label": "Settings",
+                "uses": ["frontend"],
+                "contracts": {"settings": "/api/ui/settings"},
+                "schema": {"type": "object", "properties": {"sections": {"type": "array"}, "values": {"type": "object"}}},
+            },
+        ]
+        parts.extend(self._config_list(ui_surfaces, "parts"))
+        parts.extend(self._config_list(extensions, "parts"))
+        return self._dedupe_by_key(parts, "id")
+
+    def _component_bindings(
+        self,
+        ui_surfaces: list[dict[str, Any]],
+        extensions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        bindings: list[dict[str, Any]] = [
+            {
+                "part_id": "ai_chat",
+                "component": "chat",
+                "requires": ["ai_client"],
+                "optional": ["prompt", "memory", "tool", "agent"],
+            }
+        ]
+        bindings.extend(self._config_list(ui_surfaces, "component_bindings"))
+        bindings.extend(self._config_list(extensions, "component_bindings"))
+        return self._dedupe_by_key(bindings, "part_id")
+
+    def _sidebar_items(
+        self,
+        ui_surfaces: list[dict[str, Any]],
+        extensions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
         registry = ToolRegistry()
         items: list[dict[str, Any]] = []
 
@@ -116,6 +370,22 @@ class FrontendRegistry:
 
         items.extend(
             [
+                {
+                    "id": "agent-service-capabilities",
+                    "label": "Capabilities",
+                    "category": "system",
+                    "description": "defaultspack の local-first capability catalog。",
+                    "tags": ["agent", "capability", "local-first"],
+                    "origin": {"kind": "builtin", "path": "capabilities/"},
+                    "panel": {
+                        "kind": "info",
+                        "title": "Agent Service Capabilities",
+                        "notes": [
+                            "/api/capabilities と /api/agent-service/manifest で同じ定義を取得できます。",
+                            "capability yaml は他 pack から置き換え可能な標準語彙です。",
+                        ],
+                    },
+                },
                 {
                     "id": "knowledge-context",
                     "label": "Knowledge",
@@ -180,13 +450,16 @@ class FrontendRegistry:
             ]
         )
 
-        for extension in extensions:
-            for item in extension.get("sidebar_items", []):
-                items.append(item)
+        items.extend(self._config_list(ui_surfaces, "sidebar_items"))
+        items.extend(self._config_list(extensions, "sidebar_items"))
 
-        return items
+        return self._dedupe_by_key(items, "id")
 
-    def _settings_sections(self, extensions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _settings_sections(
+        self,
+        ui_surfaces: list[dict[str, Any]],
+        extensions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
         sections = [
             {
                 "id": "general",
@@ -258,7 +531,7 @@ class FrontendRegistry:
             {
                 "id": "models",
                 "label": "Models & Providers",
-                "description": "現在検出されている provider と model catalog の参照。",
+                "description": "AI provider, default model, and model profile settings.",
                 "fields": [
                     {
                         "id": "detected_provider_count",
@@ -269,20 +542,47 @@ class FrontendRegistry:
                     {
                         "id": "preferred_model",
                         "label": "Preferred Model",
-                        "type": "select",
-                        "default": "stub/default",
+                        "type": "text",
+                        "default": "openrouter/tencent/hy3-preview:free",
                         "options": self._model_options(),
+                        "help": "新しい会話に渡す model。例: openrouter/tencent/hy3-preview:free",
+                    },
+                    {
+                        "id": "model_profile",
+                        "label": "Model Profile",
+                        "type": "textarea",
+                        "default": self._default_model_profile_text(),
+                        "help": "モデルの特性メモ。routing/profile API とつなぐ前の editable contract として保存します。",
+                    },
+                    {
+                        "id": "openrouter_api_key",
+                        "label": "OpenRouter API Key",
+                        "type": "secret",
+                        "default": "",
+                        "provider_id": "openrouter",
+                        "configured_field": "openrouter_api_key_configured",
+                        "help": "保存後も値は再表示されません。",
+                    },
+                    {
+                        "id": "openrouter_api_key_configured",
+                        "label": "OpenRouter Key Saved",
+                        "type": "readonly",
+                        "default": provider_has_api_key("openrouter", pack_root=self._pack_root),
                     },
                 ],
             },
         ]
 
-        for extension in extensions:
-            sections.extend(extension.get("settings_sections", []))
+        sections.extend(self._config_list(ui_surfaces, "settings_sections"))
+        sections.extend(self._config_list(extensions, "settings_sections"))
 
         return sections
 
-    def _chat_renderers(self, extensions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _chat_renderers(
+        self,
+        ui_surfaces: list[dict[str, Any]],
+        extensions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
         renderers = [
             {"id": "text", "block_types": ["text", "markdown"], "component": "MarkdownBlock", "fallback": "plain_text"},
             {"id": "code", "block_types": ["code"], "component": "CodeBlock", "fallback": "plain_text"},
@@ -290,13 +590,23 @@ class FrontendRegistry:
             {"id": "widget", "block_types": [], "widget_types": ["*"], "component": "WidgetCard", "fallback": "json"},
         ]
 
-        for extension in extensions:
-            renderers.extend(extension.get("chat_renderers", []))
+        renderers.extend(self._config_list(ui_surfaces, "chat_renderers"))
+        renderers.extend(self._config_list(extensions, "chat_renderers"))
 
-        return renderers
+        return self._dedupe_by_key(renderers, "id")
 
     def _extension_points(self) -> list[dict[str, Any]]:
         return [
+            {
+                "id": "parts",
+                "path": "extensions/ui/*/manifest.json config.parts",
+                "description": "Small frontend parts and the component contracts they use.",
+            },
+            {
+                "id": "component_bindings",
+                "path": "extensions/ui/*/manifest.json config.component_bindings",
+                "description": "Declarative component-to-part usage rules.",
+            },
             {
                 "id": "sidebar_items",
                 "path": "user_data/shared/frontend_extensions/*.ui.json",
@@ -311,6 +621,16 @@ class FrontendRegistry:
                 "id": "chat_renderers",
                 "path": "user_data/shared/frontend_extensions/*.ui.json",
                 "description": "Metadata describing custom block/widget renderers.",
+            },
+            {
+                "id": "shell_layout",
+                "path": "extensions/ui/*/manifest.json config.shell_layout or user_data/shared/frontend_shell.json",
+                "description": "Declarative layout regions for the replaceable shell.",
+            },
+            {
+                "id": "shell_renderers",
+                "path": "extensions/ui/*/manifest.json config.shell_renderers or user_data/shared/frontend_extensions/*.ui.json",
+                "description": "Renderer IDs and component names bound to shell regions.",
             },
         ]
 
@@ -420,16 +740,164 @@ class FrontendRegistry:
                 )
         return previews
 
+    def _load_ui_surfaces(self) -> list[dict[str, Any]]:
+        try:
+            surfaces = get_extension_registry().ui_surfaces().list(enabled_only=True)
+        except Exception:
+            surfaces = []
+        return [surface for surface in surfaces if isinstance(surface, dict)]
+
     def _load_extensions(self) -> list[dict[str, Any]]:
         if not self._extensions_dir.exists():
             return []
         extensions = []
         for path in sorted(self._extensions_dir.glob("*.ui.json")):
             try:
-                extensions.append(json.loads(path.read_text(encoding="utf-8")))
-            except (OSError, json.JSONDecodeError):
+                extension = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(extension, dict):
+                    extension["_source"] = str(path)
+                    extensions.append(extension)
+                else:
+                    self._add_diagnostic("warning", "frontend_extension_not_object", f"{path} must contain a JSON object.", str(path))
+            except (OSError, json.JSONDecodeError) as exc:
+                self._add_diagnostic("warning", "frontend_extension_invalid_json", str(exc), str(path))
                 continue
         return extensions
+
+    def _load_shell_config(self) -> dict[str, Any]:
+        if not self._shell_path.exists():
+            return {}
+        try:
+            config = json.loads(self._shell_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            self._add_diagnostic("warning", "frontend_shell_invalid_json", str(exc), str(self._shell_path))
+            return {}
+        if not isinstance(config, dict):
+            self._add_diagnostic("warning", "frontend_shell_not_object", "frontend_shell.json must contain a JSON object.", str(self._shell_path))
+            return {}
+        return config
+
+    def _diagnostics(
+        self,
+        shell: dict[str, Any],
+        parts: list[dict[str, Any]],
+        component_bindings: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        diagnostics = list(getattr(self, "_load_diagnostics", []))
+
+        part_ids = {str(part.get("id", "")).strip() for part in parts if str(part.get("id", "")).strip()}
+        renderer_ids = {
+            str(renderer.get("id", "")).strip()
+            for renderer in shell.get("renderers", [])
+            if isinstance(renderer, dict) and str(renderer.get("id", "")).strip()
+        }
+
+        seen_parts: set[str] = set()
+        for index, part in enumerate(parts):
+            part_id = str(part.get("id", "")).strip()
+            source = str(part.get("_source", "catalog.parts"))
+            if not part_id:
+                diagnostics.append(self._diagnostic("warning", "part_missing_id", f"parts[{index}] is missing id.", source))
+            elif part_id in seen_parts:
+                diagnostics.append(self._diagnostic("warning", "part_duplicate_id", f"part id '{part_id}' is duplicated; the last definition wins.", source))
+            seen_parts.add(part_id)
+            if not isinstance(part.get("kind"), str) or not str(part.get("kind", "")).strip():
+                diagnostics.append(self._diagnostic("warning", "part_missing_kind", f"part '{part_id or index}' is missing kind.", source))
+            if "schema" in part and not isinstance(part.get("schema"), dict):
+                diagnostics.append(self._diagnostic("warning", "part_invalid_schema", f"part '{part_id or index}' schema must be an object.", source))
+
+        for index, binding in enumerate(component_bindings):
+            source = str(binding.get("_source", "catalog.component_bindings"))
+            part_id = str(binding.get("part_id", "")).strip()
+            if not part_id:
+                diagnostics.append(self._diagnostic("warning", "binding_missing_part_id", f"component_bindings[{index}] is missing part_id.", source))
+            elif part_id not in part_ids:
+                diagnostics.append(self._diagnostic("warning", "binding_unknown_part", f"component binding references unknown part '{part_id}'.", source))
+            if not isinstance(binding.get("component"), str) or not str(binding.get("component", "")).strip():
+                diagnostics.append(self._diagnostic("warning", "binding_missing_component", f"component binding for '{part_id or index}' is missing component.", source))
+            for key in ("requires", "optional"):
+                if key in binding and not isinstance(binding.get(key), list):
+                    diagnostics.append(self._diagnostic("warning", f"binding_invalid_{key}", f"component binding '{part_id or index}' {key} must be a list.", source))
+
+        layout = shell.get("layout", {})
+        regions = layout.get("regions", []) if isinstance(layout, dict) else []
+        if not isinstance(regions, list):
+            diagnostics.append(self._diagnostic("warning", "shell_regions_not_list", "shell_layout.regions must be a list.", "catalog.shell.layout"))
+            regions = []
+
+        for index, region in enumerate(regions):
+            if not isinstance(region, dict):
+                diagnostics.append(self._diagnostic("warning", "shell_region_not_object", f"shell_layout.regions[{index}] must be an object.", "catalog.shell.layout"))
+                continue
+            region_id = str(region.get("id", "")).strip()
+            part_id = str(region.get("part_id", "")).strip()
+            renderer_id = str(region.get("renderer", "")).strip()
+            source = str(region.get("_source", "catalog.shell.layout"))
+            if not region_id:
+                diagnostics.append(self._diagnostic("warning", "shell_region_missing_id", f"shell_layout.regions[{index}] is missing id.", source))
+            if part_id and part_id not in part_ids:
+                diagnostics.append(self._diagnostic("warning", "shell_region_unknown_part", f"region '{region_id or index}' references unknown part '{part_id}'.", source))
+            if renderer_id and renderer_id not in renderer_ids:
+                diagnostics.append(self._diagnostic("warning", "shell_region_unknown_renderer", f"region '{region_id or index}' references unknown renderer '{renderer_id}'.", source))
+            if "order" in region and not isinstance(region.get("order"), (int, float)):
+                diagnostics.append(self._diagnostic("warning", "shell_region_invalid_order", f"region '{region_id or index}' order must be numeric.", source))
+
+        for index, renderer in enumerate(shell.get("renderers", [])):
+            if not isinstance(renderer, dict):
+                diagnostics.append(self._diagnostic("warning", "shell_renderer_not_object", f"shell.renderers[{index}] must be an object.", "catalog.shell.renderers"))
+                continue
+            renderer_id = str(renderer.get("id", "")).strip()
+            source = str(renderer.get("_source", "catalog.shell.renderers"))
+            if not renderer_id:
+                diagnostics.append(self._diagnostic("warning", "shell_renderer_missing_id", f"shell.renderers[{index}] is missing id.", source))
+            if not isinstance(renderer.get("component"), str) or not str(renderer.get("component", "")).strip():
+                diagnostics.append(self._diagnostic("warning", "shell_renderer_missing_component", f"shell renderer '{renderer_id or index}' is missing component.", source))
+            if "regions" in renderer and not isinstance(renderer.get("regions"), list):
+                diagnostics.append(self._diagnostic("warning", "shell_renderer_invalid_regions", f"shell renderer '{renderer_id or index}' regions must be a list.", source))
+            module = renderer.get("module")
+            if module is not None and not self._is_trusted_renderer_module(module):
+                diagnostics.append(self._diagnostic("warning", "shell_renderer_untrusted_module", f"shell renderer '{renderer_id or index}' module must be a trusted static renderer path.", source))
+            if module is not None and renderer.get("trust") != "local":
+                diagnostics.append(self._diagnostic("warning", "shell_renderer_missing_local_trust", f"shell renderer '{renderer_id or index}' module requires trust='local'.", source))
+
+        return diagnostics
+
+    def _is_trusted_renderer_module(self, module: Any) -> bool:
+        if not isinstance(module, str):
+            return False
+        return module.startswith(("/static/renderers/", "/static/assets/renderers/", "/static/user_renderers/"))
+
+    def _add_diagnostic(self, level: str, code: str, message: str, source: str) -> None:
+        if not hasattr(self, "_load_diagnostics"):
+            self._load_diagnostics = []
+        self._load_diagnostics.append(self._diagnostic(level, code, message, source))
+
+    def _diagnostic(self, level: str, code: str, message: str, source: str) -> dict[str, str]:
+        return {"level": level, "code": code, "message": message, "source": source}
+
+    def _config_list(self, manifests: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
+        values: list[dict[str, Any]] = []
+        for manifest in manifests:
+            config = manifest.get("config", manifest)
+            if not isinstance(config, dict):
+                continue
+            items = config.get(key, [])
+            if not isinstance(items, list):
+                continue
+            values.extend(item for item in items if isinstance(item, dict))
+        return values
+
+    def _dedupe_by_key(self, items: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
+        deduped: dict[str, dict[str, Any]] = {}
+        order: list[str] = []
+        for item in items:
+            value = str(item.get(key, "")).strip()
+            if not value:
+                value = f"__index_{len(order)}"
+            if value not in deduped:
+                order.append(value)
+            deduped[value] = item
+        return [deduped[value] for value in order]
 
     def _read_settings(self) -> dict[str, Any]:
         values = self._default_settings()
@@ -439,14 +907,20 @@ class FrontendRegistry:
             except (OSError, json.JSONDecodeError):
                 saved = {}
             values = self._deep_merge(values, saved)
-        return values
+        return self._refresh_derived_settings(values)
 
     def _default_settings(self) -> dict[str, Any]:
         return {
             "general": {"composer_placeholder": "メッセージを入力...", "show_activity_in_messages": True},
             "preview": {"auto_open": False, "default_mode": "auto", "max_items": 12},
             "chat_rendering": {"render_markdown": True, "show_widgets": True, "unknown_block_strategy": "json"},
-            "models": {"detected_provider_count": len(self._list_provider_models()), "preferred_model": "stub/default"},
+            "models": {
+                "detected_provider_count": len(self._list_provider_models()),
+                "preferred_model": "openrouter/tencent/hy3-preview:free",
+                "model_profile": self._default_model_profile_text(),
+                "openrouter_api_key": "",
+                "openrouter_api_key_configured": provider_has_api_key("openrouter", pack_root=self._pack_root),
+            },
         }
 
     def _model_options(self) -> list[dict[str, str]]:
@@ -460,6 +934,19 @@ class FrontendRegistry:
             return client.list_models()
         except Exception:
             return [{"id": "stub/default", "name": "stub/default"}]
+
+    def _default_model_profile_text(self) -> str:
+        return json.dumps(
+            {
+                "name": "Tencent HY3 Preview Free",
+                "provider": "openrouter",
+                "model_id": "tencent/hy3-preview:free",
+                "traits": ["free", "preview"],
+                "strengths": ["general"],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
 
     def _schema_to_fields(self, schema: dict[str, Any]) -> list[dict[str, Any]]:
         properties = schema.get("properties", {}) if isinstance(schema, dict) else {}
@@ -502,3 +989,34 @@ class FrontendRegistry:
             else:
                 result[key] = value
         return result
+
+    def _sanitize_settings_patch(self, patch: dict[str, Any]) -> dict[str, Any]:
+        sanitized = deepcopy(patch)
+        models = sanitized.get("models")
+        if isinstance(models, dict):
+            raw_key = models.pop("openrouter_api_key", None)
+            if isinstance(raw_key, str) and raw_key.strip():
+                result = set_provider_api_key(
+                    "openrouter",
+                    raw_key,
+                    pack_root=self._pack_root,
+                )
+                models["openrouter_api_key_configured"] = bool(result.get("success"))
+            else:
+                models["openrouter_api_key_configured"] = provider_has_api_key(
+                    "openrouter",
+                    pack_root=self._pack_root,
+                )
+            models["openrouter_api_key"] = ""
+        return sanitized
+
+    def _refresh_derived_settings(self, values: dict[str, Any]) -> dict[str, Any]:
+        refreshed = deepcopy(values)
+        models = refreshed.setdefault("models", {})
+        if isinstance(models, dict):
+            models["openrouter_api_key"] = ""
+            models["openrouter_api_key_configured"] = provider_has_api_key(
+                "openrouter",
+                pack_root=self._pack_root,
+            )
+        return refreshed

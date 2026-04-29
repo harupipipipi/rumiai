@@ -231,6 +231,32 @@
   "capability_bindings": {
     "register": "ecosystem.defaultspack.capability_bindings.register_defaultspack_binding_handlers"
   },
+  "capabilities": [
+    "desktop_app.execute"
+  ],
+  "desktop_app": {
+    "command": "python defaultspack/desktop_app.py",
+    "working_dir": "",
+    "env": {
+      "DEFAULTS_HTTP_PORT": "8766",
+      "RUMI_DEFAULTSPACK_PORT": "8766",
+      "RUMI_DEFAULTSPACK_SURFACE": "webview"
+    },
+    "capabilities": [
+      "desktop_app.execute"
+    ],
+    "window": {
+      "title": "Rumi Defaultspack",
+      "width": 1280,
+      "height": 800,
+      "icon": "assets/icons/defaultspack-icon.png"
+    },
+    "platforms": [
+      "darwin",
+      "win32",
+      "linux"
+    ]
+  },
   "api_routes": [
     {
       "method": "GET",

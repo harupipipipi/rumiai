@@ -1,0 +1,8 @@
+plan_id: string
+goal: string
+constraints: list[string]
+assumptions: list[string]
+steps: list[agent_step]
+requires_approval: boolean
+created_at: string
+status: enum[draft, approved, running, completed, failed, aborted]

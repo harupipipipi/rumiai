@@ -26,7 +26,7 @@
 - Viewer に何かを表示するには `viewer:display` capability が必要（capability ベースの権限管理）
 - 権限さえあればどの Pack でも Viewer を使える
 - `core_viewer_capability` は `core_docker_capability` や `core_communication_capability` と同じ位置づけ
-- Pack が独自のデスクトップアプリ（Tauri/Electron 等）を提供することも可能だが、それは「危険な権限」（`desktop_app:execute`）として扱われ、明示的なユーザー承認が必要
+- Pack が独自のデスクトップアプリ（Tauri/Electron 等）を提供することも可能だが、それは「危険な権限」（`desktop_app.execute`）として扱われ、明示的なユーザー承認が必要
 - ほとんどの Pack は安全な Viewer 経由を使うはず
 
 **ユーザー体験:**
@@ -77,7 +77,7 @@ Rumi Viewer 起動
 **Phase V-4: Pack デスクトップアプリ対応（オプション）**
 - [ ] ecosystem.json に `desktop_app` セクション追加
 - [ ] `desktop_app.command` で任意コマンドを宣言可能
-- [ ] `desktop_app:execute` capability（危険な権限、明示的承認必要）
+- [ ] `desktop_app.execute` capability（危険な権限、明示的承認必要）
 - [ ] pack-shell バイナリ（Kernel 自動起動 + token 取得 + コマンド実行）
 - [ ] .app / .lnk 生成（PackAppRegistrar）
 

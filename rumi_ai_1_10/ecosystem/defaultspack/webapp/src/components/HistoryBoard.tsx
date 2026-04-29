@@ -54,6 +54,15 @@ export type ChatGroup = {
   isCollapsed?: boolean;
 };
 
+export type AccountInfo = {
+  display_name?: string;
+  email?: string;
+  plan_label?: string;
+  avatar_url?: string;
+  initial?: string;
+  source?: string;
+};
+
 // ============================================================
 // External data adapters
 // ============================================================
@@ -666,12 +675,13 @@ function ExtractDropZone() {
 interface HistoryBoardProps {
   activeChatId: string | null;
   chatItems: ChatItem[];
+  account?: AccountInfo;
   onChatSelect: (chatId: string) => void;
   onNewTask: () => void;
   onSettingsClick: () => void;
 }
 
-export function HistoryBoard({ activeChatId, chatItems, onChatSelect, onNewTask, onSettingsClick }: HistoryBoardProps) {
+export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, onNewTask, onSettingsClick }: HistoryBoardProps) {
   const [groups, setGroups] = useState<ChatGroup[]>(() => buildGroupsFromChats(chatItems));
 
   useEffect(() => {
@@ -890,6 +900,11 @@ export function HistoryBoard({ activeChatId, chatItems, onChatSelect, onNewTask,
   ];
 
   const collisionDetection = createCustomCollision(activeType);
+  const accountName = account?.display_name || account?.email || 'Rumi';
+  const accountPlan = account?.plan_label || 'Rumi Account';
+  const accountInitial = account?.initial || accountName.charAt(0).toUpperCase();
+  const accountIcon = account?.avatar_url || '';
+  const accountIconIsImage = /^(https?:|data:image|\/)/.test(accountIcon);
 
   return (
     <DndContext
@@ -948,12 +963,16 @@ export function HistoryBoard({ activeChatId, chatItems, onChatSelect, onNewTask,
         {/* Fixed Account Bar */}
         <div className="absolute bottom-0 left-0 right-0 h-12 px-3 border-t border-zinc-800/60 bg-[#09090b]/95 backdrop-blur-sm z-30 flex items-center">
           <div className="flex items-center gap-2.5 px-1 w-full">
-            <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-zinc-700 to-zinc-600 flex-shrink-0 flex items-center justify-center text-white text-[10px] font-medium">
-              U
-            </div>
+            {accountIcon && accountIconIsImage ? (
+              <img src={accountIcon} alt="" className="w-7 h-7 rounded-full object-cover flex-shrink-0 bg-zinc-800" />
+            ) : (
+              <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-zinc-700 to-zinc-600 flex-shrink-0 flex items-center justify-center text-white text-[10px] font-medium">
+                {accountIcon || accountInitial}
+              </div>
+            )}
             <div className="flex-1 overflow-hidden min-w-0">
-              <p className="text-xs font-medium text-zinc-200 truncate">User Account</p>
-              <p className="text-[10px] text-zinc-500 truncate">Pro Plan</p>
+              <p className="text-xs font-medium text-zinc-200 truncate">{accountName}</p>
+              <p className="text-[10px] text-zinc-500 truncate">{accountPlan}</p>
             </div>
             <button
               onClick={onSettingsClick}
