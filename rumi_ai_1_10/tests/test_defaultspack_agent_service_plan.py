@@ -60,6 +60,32 @@ def test_capability_catalog_loads_plan_manifest():
     assert {"local_file", "terminal", "git", "safety", "artifact", "compact", "research"} <= capability_ids
 
 
+def test_chat_store_persists_conversations_to_user_data(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(tags=["persisted"])
+    message = store.add_message(
+        conversation["id"],
+        {"role": "user", "content": [{"type": "text", "text": "hello persistence"}]},
+    )
+
+    assert storage_path.is_file()
+    payload = json.loads(storage_path.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == 1
+    assert conversation["id"] in payload["conversations"]
+    assert payload["conversations"][conversation["id"]]["messages"][0]["id"] == message["id"]
+
+    ChatStore._instance = None
+    reloaded = ChatStore()
+    assert reloaded.get_conversation(conversation["id"])["messages"][0]["raw_text"] == "hello persistence"
+    ChatStore._instance = None
+
+
 def test_fallback_routes_expose_agent_service_and_coding_surfaces():
     from ecosystem.defaultspack.transport.registry import _FALLBACK_HTTP_ROUTE_SPECS
 

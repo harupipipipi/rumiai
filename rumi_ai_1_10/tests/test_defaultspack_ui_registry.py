@@ -419,35 +419,40 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         from domain.dev.inspector import Inspector
         from domain.frontend.registry import FrontendRegistry
 
-        store = ChatStore()
-        store._conversations = {}
-        inspector = Inspector()
-        inspector.clear()
-
-        conversation = store.create_conversation()
-        store.add_message(
-            conversation["id"],
-            {
-                "role": "assistant",
-                "content": [{"type": "code", "filename": "demo.py", "language": "python", "text": "print('hi')"}],
-                "widget": {"type": "indicator", "label": "Running"},
-            },
-        )
-        inspector.log_request(
-            request_id="req-1",
-            conversation_id=conversation["id"],
-            tools_called=["web_search"],
-            context_info={
-                "knowledge_results": [{"content": "Knowledge body", "metadata": {"title": "Knowledge"}}],
-                "memory_results": [{"content": "Memory body", "score": 0.8}],
-            },
-        )
-
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch("domain.frontend.registry.AIClient") as mock_client:
-                mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
-                registry = FrontendRegistry(pack_root=Path(tmpdir))
-                preview = registry.build_conversation_preview(conversation["id"])
+            chat_path = Path(tmpdir) / "chat" / "conversations.json"
+            with patch.dict("os.environ", {"RUMI_DEFAULTSPACK_CHAT_STORE_PATH": str(chat_path)}):
+                ChatStore._instance = None
+                store = ChatStore()
+                inspector = Inspector()
+                inspector.clear()
+
+                conversation = store.create_conversation()
+                store.add_message(
+                    conversation["id"],
+                    {
+                        "role": "assistant",
+                        "content": [{"type": "code", "filename": "demo.py", "language": "python", "text": "print('hi')"}],
+                        "widget": {"type": "indicator", "label": "Running"},
+                    },
+                )
+                inspector.log_request(
+                    request_id="req-1",
+                    conversation_id=conversation["id"],
+                    tools_called=["web_search"],
+                    context_info={
+                        "knowledge_results": [{"content": "Knowledge body", "metadata": {"title": "Knowledge"}}],
+                        "memory_results": [{"content": "Memory body", "score": 0.8}],
+                    },
+                )
+
+                with patch("domain.frontend.registry.AIClient") as mock_client:
+                    mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+                    registry = FrontendRegistry(pack_root=Path(tmpdir))
+                    preview = registry.build_conversation_preview(conversation["id"])
+                ChatStore._instance = None
+
+        ChatStore._instance = None
 
         preview_ids = {item["id"] for item in preview["previews"]}
         self.assertTrue(any(item.startswith("tool-web_search") for item in preview_ids))

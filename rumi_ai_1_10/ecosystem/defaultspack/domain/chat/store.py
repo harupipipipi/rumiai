@@ -2,6 +2,7 @@ import time
 import copy
 import uuid
 import json
+import os
 from pathlib import Path
 
 DEFAULT_CHAT_MODEL = "openrouter/tencent/hy3-preview:free"
@@ -43,10 +44,49 @@ class ChatStore:
     _instance = None
 
     def __new__(cls):
+        storage_path = cls._default_storage_path()
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            cls._instance._conversations = {}
+            cls._instance._storage_path = storage_path
+            cls._instance._conversations = cls._instance._load_conversations()
+        elif cls._instance._storage_path != storage_path:
+            cls._instance._storage_path = storage_path
+            cls._instance._conversations = cls._instance._load_conversations()
         return cls._instance
+
+    @staticmethod
+    def _default_storage_path():
+        override = os.environ.get("RUMI_DEFAULTSPACK_CHAT_STORE_PATH")
+        if override:
+            return Path(override)
+        return Path(__file__).resolve().parents[2] / "user_data" / "shared" / "chat" / "conversations.json"
+
+    def _load_conversations(self):
+        try:
+            data = json.loads(self._storage_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {}
+        except Exception:
+            return {}
+        conversations = data.get("conversations") if isinstance(data, dict) else data
+        if not isinstance(conversations, dict):
+            return {}
+        return {
+            str(conversation_id): conversation
+            for conversation_id, conversation in conversations.items()
+            if isinstance(conversation, dict)
+        }
+
+    def _save_conversations(self):
+        self._storage_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "schema_version": 1,
+            "updated_at": _now_ms(),
+            "conversations": self._conversations,
+        }
+        tmp_path = self._storage_path.with_suffix(self._storage_path.suffix + ".tmp")
+        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp_path.replace(self._storage_path)
 
     # ----------------------------------------------------------
     # Conversation CRUD
@@ -69,6 +109,7 @@ class ChatStore:
             "messages": [],
         }
         self._conversations[cid] = conv
+        self._save_conversations()
         return copy.deepcopy(conv)
 
     def get_conversation(self, conversation_id):
@@ -101,11 +142,13 @@ class ChatStore:
             if key not in protected:
                 conv[key] = value
         conv["updated_at"] = _now_ms()
+        self._save_conversations()
         return copy.deepcopy(conv)
 
     def delete_conversation(self, conversation_id):
         if conversation_id in self._conversations:
             del self._conversations[conversation_id]
+            self._save_conversations()
             return True
         return False
 
@@ -143,6 +186,7 @@ class ChatStore:
         conv["messages"].append(msg)
         conv["current_node_id"] = msg["id"]
         conv["updated_at"] = _now_ms()
+        self._save_conversations()
         return copy.deepcopy(msg)
 
     def get_message(self, conversation_id, message_id):
@@ -165,6 +209,7 @@ class ChatStore:
                     if key not in protected:
                         msg[key] = value
                 conv["updated_at"] = _now_ms()
+                self._save_conversations()
                 return copy.deepcopy(msg)
         return None
 
@@ -190,6 +235,7 @@ class ChatStore:
         if conv["current_node_id"] == message_id:
             conv["current_node_id"] = parent_id
         conv["updated_at"] = _now_ms()
+        self._save_conversations()
         return True
 
     # ----------------------------------------------------------
@@ -252,6 +298,7 @@ class ChatStore:
             else:
                 conv["current_node_id"] = None
         conv["updated_at"] = _now_ms()
+        self._save_conversations()
         return deleted_count
 
     def insert_message_at(self, conversation_id, message_dict, position_index,
@@ -306,6 +353,7 @@ class ChatStore:
             m["sequence_number"] = i + 1
         conv["current_node_id"] = conv["messages"][-1]["id"]
         conv["updated_at"] = _now_ms()
+        self._save_conversations()
         return copy.deepcopy(msg)
 
     # ----------------------------------------------------------
@@ -379,6 +427,7 @@ class ChatStore:
             new_conv_obj["current_node_id"] = new_msg_id
             prev_new_id = new_msg_id
         new_conv_obj["updated_at"] = _now_ms()
+        self._save_conversations()
         return copy.deepcopy(new_conv_obj)
 
     # ----------------------------------------------------------
