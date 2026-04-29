@@ -38,6 +38,56 @@ def test_fallback_routes_expose_agent_service_and_coding_surfaces():
     assert ("POST", "/api/context/compact", "blocks.context.compact") in routes
     assert ("POST", "/api/artifacts", "blocks.artifact.create") in routes
     assert ("POST", "/api/research/local-search", "blocks.research.local_search") in routes
+    assert ("POST", "/api/research/web-search", "blocks.research.web_search") in routes
+    assert ("POST", "/api/research/reddit-search", "blocks.research.reddit_search") in routes
+    assert ("POST", "/api/tools/browser-computer", "blocks.tool.browser_computer") in routes
+    assert ("GET", "/api/agent/schedules", "blocks.agent.scheduler.list") in routes
+    assert ("GET", "/api/chat/channels", "blocks.chat.channel.list") in routes
+    assert ("POST", "/api/share", "blocks.share.create") in routes
+
+
+def test_research_providers_use_shared_source_schema():
+    from domain.research.providers import ExternalWebProvider, RedditProvider
+
+    html = '<html><title>Example</title><a class="result__a" href="https://example.test">Example</a><div class="result__snippet">Snippet</div></html>'
+    web = ExternalWebProvider(fetcher=lambda url, timeout: html)
+    web_result = web.search("example", allow_network=True)
+
+    assert web_result.sources[0]["type"] == "external_web"
+    assert web_result.sources[0]["provider"] == "external_web"
+    assert web.search("example", allow_network=False).network_enabled is False
+
+    reddit_payload = '{"data":{"children":[{"data":{"id":"abc","title":"Hello","permalink":"/r/test/comments/abc/hello","subreddit":"test","score":3,"num_comments":2,"selftext":"Body"}}]}}'
+    reddit = RedditProvider(fetcher=lambda url, timeout: reddit_payload)
+    reddit_result = reddit.search("hello", subreddit="test")
+
+    assert reddit_result.sources[0]["type"] == "reddit_post"
+    assert reddit_result.sources[0]["provider"] == "reddit"
+    assert reddit.search("hello", allow_network=False).network_enabled is False
+
+
+def test_browser_computer_controller_gates_desktop_actions():
+    from domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController()
+
+    assert controller.run("browser.session")["action"] == "browser.session"
+    assert controller.run("browser.open_url", {"url": "https://example.test", "dry_run": True})["dry_run"] is True
+    assert controller.run("computer.screenshot", {"dry_run": True})["requires_approval"] is False
+    assert controller.run("computer.click", {"x": 1, "y": 2})["requires_approval"] is True
+
+
+def test_share_store_creates_lists_and_revokes_local_links(tmp_path):
+    from domain.share.store import ShareStore
+
+    store = ShareStore(tmp_path)
+    record = store.create({"target_type": "conversation", "target_id": "c1", "content": "hello"})
+
+    assert record["share_url"].startswith("/api/share/")
+    assert store.get(record["token"])["content"] == "hello"
+    assert len(store.list()) == 1
+    assert store.revoke(record["token"]) is True
+    assert store.get(record["token"]) is None
 
 
 def test_file_ops_diff_patch_snapshot_restore(tmp_path):

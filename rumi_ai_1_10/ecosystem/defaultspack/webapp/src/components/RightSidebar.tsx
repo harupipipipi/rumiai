@@ -20,12 +20,20 @@ import {
   X,
   GitBranch,
   ShieldCheck,
+  Download,
+  Share2,
+  Play,
+  CalendarClock,
+  MessageSquareText,
+  Monitor,
+  Archive,
 } from "lucide-react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
 import type {
   SettingsSection,
+  SidebarAction,
   SidebarCategory,
   SidebarField,
   SidebarItem,
@@ -45,6 +53,8 @@ const CATEGORY_META: Record<SidebarCategory | "all", { label: string; icon: Reac
 };
 
 const ITEM_ICONS: Record<string, ReactElement> = {
+  artifacts: <Archive size={20} />,
+  browser_computer: <Monitor size={20} />,
   calculator: <BrainCircuit size={20} />,
   code: <Terminal size={20} />,
   file_reader: <FileText size={20} />,
@@ -64,6 +74,23 @@ const ITEM_ICONS: Record<string, ReactElement> = {
   web: <Globe size={20} />,
   web_search: <Search size={20} />,
 };
+
+const ACTION_ICONS: Record<string, ReactElement> = {
+  artifacts: <Archive size={13} />,
+  browser: <Monitor size={13} />,
+  channels: <MessageSquareText size={13} />,
+  export: <Download size={13} />,
+  play: <Play size={13} />,
+  reddit: <Search size={13} />,
+  schedules: <CalendarClock size={13} />,
+  share: <Share2 size={13} />,
+  web: <Globe size={13} />,
+};
+
+function actionIcon(action: SidebarAction) {
+  const key = action.icon || action.id.split(".")[0] || "play";
+  return ACTION_ICONS[key] ?? <Play size={13} />;
+}
 
 function iconForItem(item: SidebarItem) {
   const direct = item.id.toLowerCase();
@@ -172,13 +199,16 @@ function SidebarPanel({
   item,
   settingsValues,
   onSettingChange,
+  onPanelAction,
 }: {
   item: SidebarItem;
   settingsValues: Record<string, Record<string, unknown>>;
   onSettingChange: (sectionId: string, fieldId: string, value: unknown) => void;
+  onPanelAction?: (item: SidebarItem, action: SidebarAction) => void;
 }) {
   const panel = item.panel;
   const fields = panel?.fields ?? [];
+  const actions = panel?.actions ?? [];
 
   return (
     <div className="space-y-4">
@@ -225,6 +255,25 @@ function SidebarPanel({
                 <p className="text-[11px] text-zinc-300 font-mono">{model.id}</p>
                 {model.name && <p className="text-[10px] text-zinc-500 mt-0.5">{model.name}</p>}
               </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {actions.length > 0 && (
+        <div>
+          <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-2">Actions</h4>
+          <div className="grid grid-cols-1 gap-1.5">
+            {actions.map((action) => (
+              <button
+                key={action.id}
+                onClick={() => onPanelAction?.(item, action)}
+                className="h-8 px-2.5 rounded border border-zinc-800/70 bg-zinc-900/40 text-zinc-300 hover:bg-zinc-800/70 hover:text-zinc-100 transition-colors flex items-center gap-2 text-xs text-left"
+                title={action.label}
+              >
+                <span className="text-zinc-500 flex-shrink-0">{actionIcon(action)}</span>
+                <span className="truncate">{action.label}</span>
+              </button>
             ))}
           </div>
         </div>
@@ -308,12 +357,14 @@ export function RightSidebar({
   settingsSections,
   onSettingChange,
   onOpenSettings,
+  onPanelAction,
 }: {
   items: SidebarItem[];
   settingsValues: Record<string, Record<string, unknown>>;
   settingsSections: SettingsSection[];
   onSettingChange: (sectionId: string, fieldId: string, value: unknown) => void;
   onOpenSettings: () => void;
+  onPanelAction?: (item: SidebarItem, action: SidebarAction) => void;
 }) {
   const [activePanel, setActivePanel] = useState<string | null>(items[0]?.id ?? null);
   const [categoryFilter, setCategoryFilter] = useState<"all" | SidebarCategory>("all");
@@ -364,7 +415,7 @@ export function RightSidebar({
           </div>
 
           <div className="flex-1 overflow-y-auto p-3">
-            <SidebarPanel item={activeItem} settingsValues={settingsValues} onSettingChange={onSettingChange} />
+            <SidebarPanel item={activeItem} settingsValues={settingsValues} onSettingChange={onSettingChange} onPanelAction={onPanelAction} />
           </div>
         </div>
       )}

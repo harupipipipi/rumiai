@@ -1,0 +1,28 @@
+{
+  "id": "browser_computer",
+  "category": "tool",
+  "version": "1",
+  "display_name": "Browser / Computer",
+  "description": "Open browser URLs, inspect sessions, and run approved desktop actions.",
+  "enabled": true,
+  "config": {
+    "name": "browser_computer",
+    "summary": "Approved browser and computer actions",
+    "tags": ["browser", "computer", "approval"],
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["browser.open_url", "browser.session", "computer.screenshot", "computer.click", "computer.type", "computer.key", "computer.scroll"]
+          },
+          "payload": {"type": "object"}
+        },
+        "required": ["action"]
+      }
+    },
+    "execution": {"type": "local"},
+    "handler": "domain.tool.executor:ToolExecutor.execute"
+  }
+}

@@ -91,8 +91,18 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         binding_part_ids = {binding["part_id"] for binding in catalog["component_bindings"]}
 
         self.assertIn("web_search", sidebar_ids)
+        self.assertIn("artifacts", sidebar_ids)
+        self.assertIn("research-providers", sidebar_ids)
+        self.assertIn("browser-computer", sidebar_ids)
+        self.assertIn("scheduled-tasks", sidebar_ids)
+        self.assertIn("collaboration", sidebar_ids)
+        self.assertIn("share-export", sidebar_ids)
         self.assertIn("custom-widget", sidebar_ids)
         self.assertIn("custom", section_ids)
+        self.assertIn("research", section_ids)
+        self.assertIn("browser_computer", section_ids)
+        self.assertIn("collaboration", section_ids)
+        self.assertIn("share", section_ids)
         self.assertIn("custom-renderer", renderers)
         self.assertEqual(renderers["text"]["component"], "CustomText")
         self.assertEqual(shell_renderers["composer"]["component"], "CustomComposer")

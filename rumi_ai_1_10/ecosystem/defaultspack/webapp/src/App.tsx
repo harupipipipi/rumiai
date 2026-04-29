@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import type { ChatItem } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
-import { api, type ChatContentBlock, type ChatMessage, type Conversation, type SettingsSection, type SidebarItem, type UICatalog } from "./lib/api";
+import { api, type ChatContentBlock, type ChatMessage, type Conversation, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
 import { deriveConversationTitle, formatRelativeTime, messageToText } from "./lib/chat";
 import { cn } from "./lib/cn";
 import { hasShellRegion } from "./lib/uiShell";
@@ -82,6 +82,21 @@ function optimisticUserMessage(conversationId: string, text: string): ChatMessag
     finish_reason: null,
     usage: null,
     widget: null,
+  };
+}
+
+function previewFromAction(action: SidebarAction, title: string, data: unknown): ToolPreviewItem {
+  const content = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+  return {
+    id: `sidebar-${action.id}-${Date.now()}`,
+    toolStepId: action.id,
+    timestamp: Date.now(),
+    data: {
+      type: "file",
+      filename: `${title}.json`,
+      size: "sidebar action",
+      content,
+    },
   };
 }
 
@@ -265,6 +280,57 @@ export default function App() {
     });
   };
 
+  const pushActionPreview = (action: SidebarAction, title: string, data: unknown) => {
+    const preview = previewFromAction(action, title, data);
+    setPreviews((current) => [preview, ...current].slice(0, 30));
+    setActivePreviewId(preview.id);
+    setShowPreview(true);
+  };
+
+  const handlePanelAction = async (item: SidebarItem, action: SidebarAction) => {
+    setError(null);
+    try {
+      let result: unknown;
+      if (action.id === "conversation.export") {
+        if (!activeConversationId) throw new Error("エクスポートする会話がありません。");
+        result = await api.exportConversation(activeConversationId, String(action.payload?.format ?? "markdown"));
+      } else if (action.id === "conversation.share") {
+        if (!activeConversationId) throw new Error("共有する会話がありません。");
+        const exported = await api.exportConversation(activeConversationId, "markdown");
+        result = await api.createShare({
+          target_type: "conversation",
+          target_id: activeConversationId,
+          title: activeChatTitle,
+          content: exported.content,
+          visibility: "local",
+        });
+      } else if (action.id === "artifacts.list") {
+        result = await api.listArtifacts();
+      } else if (action.id === "research.web") {
+        result = await api.webSearch(String(input || activeChatTitle || "rumi"), false);
+      } else if (action.id === "research.reddit") {
+        result = await api.redditSearch(String(input || activeChatTitle || "rumi"), false);
+      } else if (action.id === "browser.session") {
+        result = await api.browserComputer("browser.session", { dry_run: true });
+      } else if (action.id === "browser.screenshot.dry_run") {
+        result = await api.browserComputer("computer.screenshot", { dry_run: true });
+      } else if (action.id === "schedules.list") {
+        result = await api.listSchedules();
+      } else if (action.id === "channels.list") {
+        result = await api.listChannels();
+      } else if (action.endpoint) {
+        result = await fetch(action.endpoint, { method: action.method ?? "GET" }).then((response) => response.json());
+      } else {
+        result = { item: item.id, action: action.id, status: "ready" };
+      }
+      pushActionPreview(action, action.label, result);
+      const text = typeof result === "string" ? result : JSON.stringify(result, null, 2);
+      void navigator.clipboard?.writeText(text).catch(() => undefined);
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "サイドバー操作に失敗しました。");
+    }
+  };
+
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     if (!input.trim() || isGenerating) return;
@@ -399,6 +465,7 @@ export default function App() {
             settingsSections={settingsSections}
             onSettingChange={handleSettingChange}
             onOpenSettings={() => setIsSettingsOpen(true)}
+            onPanelAction={handlePanelAction}
           />
         )}
       </div>

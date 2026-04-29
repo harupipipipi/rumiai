@@ -57,6 +57,16 @@ export type SidebarField = {
   configured_field?: string;
 };
 
+export type SidebarAction = {
+  id: string;
+  label: string;
+  icon?: string;
+  method?: "GET" | "POST" | "PUT" | "DELETE";
+  endpoint?: string;
+  payload?: Record<string, unknown>;
+  preview_type?: "web" | "code" | "file" | "image";
+};
+
 export type SidebarItem = {
   id: string;
   label: string;
@@ -74,6 +84,7 @@ export type SidebarItem = {
     fields?: SidebarField[];
     notes?: string[];
     models?: { id: string; name?: string }[];
+    actions?: SidebarAction[];
   };
 };
 
@@ -300,5 +311,55 @@ export const api = {
     return request<{ conversation_id: string; previews: ToolPreviewItem[]; summary: Record<string, number> }>(
       `/api/ui/conversations/${conversationId}/preview`,
     );
+  },
+
+  exportConversation(conversationId: string, format = "markdown") {
+    return request<{ content: string; format?: string }>(
+      `/api/chat/conversations/${conversationId}/export`,
+      {
+        method: "POST",
+        body: JSON.stringify({ format }),
+      },
+    );
+  },
+
+  listArtifacts() {
+    return request<Record<string, unknown>>("/api/artifacts");
+  },
+
+  webSearch(query: string, allowNetwork = false) {
+    return request<Record<string, unknown>>("/api/research/web-search", {
+      method: "POST",
+      body: JSON.stringify({ query, allow_network: allowNetwork, limit: 5 }),
+    });
+  },
+
+  redditSearch(query: string, allowNetwork = false) {
+    return request<Record<string, unknown>>("/api/research/reddit-search", {
+      method: "POST",
+      body: JSON.stringify({ query, allow_network: allowNetwork, limit: 5 }),
+    });
+  },
+
+  browserComputer(action: string, payload?: Record<string, unknown>) {
+    return request<Record<string, unknown>>("/api/tools/browser-computer", {
+      method: "POST",
+      body: JSON.stringify({ action, payload: payload ?? {} }),
+    });
+  },
+
+  listSchedules() {
+    return request<Record<string, unknown>>("/api/agent/schedules");
+  },
+
+  listChannels() {
+    return request<Record<string, unknown>>("/api/chat/channels");
+  },
+
+  createShare(payload: Record<string, unknown>) {
+    return request<Record<string, unknown>>("/api/share", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
   },
 };

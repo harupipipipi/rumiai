@@ -200,11 +200,46 @@ class ToolExecutor:
         ローカルツール実行（最小動作版: 固定レスポンスを返す）
         """
         if tool_name == "web_search":
+            from domain.research.providers import ExternalWebProvider
+
             query = arguments.get("query", "")
+            result = ExternalWebProvider().search(
+                query,
+                limit=int(arguments.get("limit", 5)),
+                allow_network=bool(arguments.get("allow_network", True)),
+            )
             return {
-                "result": "Search results for: {}".format(query),
+                "result": result.summary,
                 "is_error": False,
-                "widget": None
+                "widget": {"type": "research_sources", **result.as_dict()}
+            }
+        elif tool_name == "reddit_search":
+            from domain.research.providers import RedditProvider
+
+            query = arguments.get("query", "")
+            result = RedditProvider().search(
+                query,
+                subreddit=arguments.get("subreddit"),
+                sort=arguments.get("sort", "relevance"),
+                limit=int(arguments.get("limit", 10)),
+                allow_network=bool(arguments.get("allow_network", True)),
+            )
+            return {
+                "result": result.summary,
+                "is_error": False,
+                "widget": {"type": "research_sources", **result.as_dict()}
+            }
+        elif tool_name == "browser_computer":
+            from domain.tool.browser_computer import BrowserComputerController
+
+            result = BrowserComputerController().run(
+                str(arguments.get("action", "browser.session")),
+                dict(arguments.get("payload") or {}),
+            )
+            return {
+                "result": str(result),
+                "is_error": False,
+                "widget": {"type": "browser_computer", **result}
             }
         elif tool_name == "calculator":
             expression = arguments.get("expression", "")

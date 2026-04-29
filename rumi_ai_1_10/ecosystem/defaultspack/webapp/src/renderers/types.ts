@@ -1,6 +1,6 @@
 import type { FormEvent, MutableRefObject } from "react";
 
-import type { ChatContentBlock, SettingsSection, SidebarItem, UICatalog } from "../lib/api";
+import type { ChatContentBlock, SettingsSection, SidebarAction, SidebarItem, UICatalog } from "../lib/api";
 import type { ChatItem } from "../components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "../components/ToolPreview";
 
@@ -78,6 +78,7 @@ export type RightSidebarRendererProps = {
   settingsSections: SettingsSection[];
   onSettingChange: SettingChangeHandler;
   onOpenSettings: () => void;
+  onPanelAction?: (item: SidebarItem, action: SidebarAction) => void;
 };
 
 export type SettingsModalRendererProps = {
