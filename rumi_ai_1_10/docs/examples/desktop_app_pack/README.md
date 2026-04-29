@@ -1,6 +1,6 @@
 # Desktop App Pack
 
-Rumi AI OS の **desktop_app:execute** capability を使うサンプル Pack です。
+Rumi AI OS の **desktop_app.execute** capability を使うサンプル Pack です。
 独立したデスクトップウィンドウ（tkinter）でアプリを起動します。
 
 Pack 開発者がコピーして改造できるテンプレートとしても機能します。
@@ -18,9 +18,9 @@ desktop_app_pack/
 
 ---
 
-## desktop_app:execute capability とは
+## desktop_app.execute capability とは
 
-`desktop_app:execute` は Rumi AI OS の core capability の一つで、Pack が **独立したデスクトップウィンドウ** でアプリケーションを起動するための権限です。
+`desktop_app.execute` は Rumi AI OS の core capability の一つで、Pack が **独立したデスクトップウィンドウ** でアプリケーションを起動するための権限です。
 
 Viewer 内のフロントエンド表示（`viewer:display`）とは異なり:
 
@@ -65,7 +65,7 @@ Kernel の API または管理画面から Pack を承認してください。
 ### 5. Grant を取得する
 
 `desktop_app.execute` permission の Grant が必要です。
-**注意**: `desktop_app:execute` は `dangerous: true` に設定されています。Grant の承認はデスクトップアプリがホスト OS 上で任意のプロセスを起動する許可を意味します。
+**注意**: `desktop_app.execute` は `dangerous: true` に設定されています。Grant の承認はデスクトップアプリがホスト OS 上で任意のプロセスを起動する許可を意味します。
 
 ### 6. pack-shell でアプリを起動する
 

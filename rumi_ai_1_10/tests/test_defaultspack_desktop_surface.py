@@ -43,6 +43,32 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
         self.assertEqual(result, "webview_unavailable")
         mock_open.assert_called_once_with("http://127.0.0.1:8766/")
 
+    def test_desktop_app_main_stops_server_after_blocking_webview_closes(self):
+        from defaultspack import desktop_app
+
+        class FakeServer:
+            def __init__(self, facade=None):
+                self.started = False
+                self.stopped = False
+
+            def start(self):
+                self.started = True
+
+            def stop(self):
+                self.stopped = True
+
+        fake_server = FakeServer()
+
+        with patch.dict(os.environ, {"RUMI_DEFAULTSPACK_OPEN_BROWSER": "1", "RUMI_DEFAULTSPACK_SURFACE": "webview"}, clear=True):
+            with patch("transport.http.DefaultsHttpServer", return_value=fake_server):
+                with patch.object(desktop_app, "_wait_until_ready", return_value=True):
+                    with patch("defaultspack.native_webview.open_desktop_surface", return_value="webview"):
+                        result = desktop_app.main()
+
+        self.assertEqual(result, 0)
+        self.assertTrue(fake_server.started)
+        self.assertTrue(fake_server.stopped)
+
 
 if __name__ == "__main__":
     unittest.main()

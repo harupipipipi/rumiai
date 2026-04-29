@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import sys
 from pathlib import Path
 from unittest import mock
@@ -96,6 +97,99 @@ def test_desktop_capability_can_launch_registered_pack_with_issued_token():
     assert result["app"]["status"] == "launched"
     mock_launch.assert_called_once()
     assert mock_launch.call_args.kwargs["api_token"] == result["token"]
+
+
+def test_desktop_capability_denies_empty_allowed_packs():
+    from core_runtime.desktop_capability import DesktopCapabilityHandler
+
+    handler = DesktopCapabilityHandler()
+    result = handler.handle_execute(
+        principal_id="defaultspack",
+        args={"pack_id": "defaultspack", "action": "launch"},
+        grant_config={"allowed_packs": []},
+    )
+
+    assert result == {"error": "Pack not allowed for desktop app execution: defaultspack"}
+
+
+def test_desktop_capability_allows_only_explicit_pack_list():
+    from core_runtime.desktop_capability import DesktopCapabilityHandler
+
+    handler = DesktopCapabilityHandler()
+
+    with mock.patch("core_runtime.desktop_app_manager.DesktopAppManager.launch_app") as mock_launch:
+        mock_launch.return_value = {"success": True, "status": "launched", "pid": 123}
+        allowed = handler.handle_execute(
+            principal_id="defaultspack",
+            args={"pack_id": "defaultspack", "action": "launch"},
+            grant_config={"allowed_packs": ["defaultspack"]},
+        )
+        denied = handler.handle_execute(
+            principal_id="otherpack",
+            args={"pack_id": "otherpack", "action": "launch"},
+            grant_config={"allowed_packs": ["defaultspack"]},
+        )
+
+    assert allowed["app"]["success"] is True
+    assert denied == {"error": "Pack not allowed for desktop app execution: otherpack"}
+
+
+def test_desktop_capability_explicit_wildcard_allows_any_pack():
+    from core_runtime.desktop_capability import DesktopCapabilityHandler
+
+    handler = DesktopCapabilityHandler()
+    result = handler.handle_execute(
+        principal_id="otherpack",
+        args={"pack_id": "otherpack", "action": "token"},
+        grant_config={"allowed_packs": ["*"]},
+    )
+
+    assert result["expires_in"] == DesktopCapabilityHandler.DEFAULT_TOKEN_LIFETIME
+    assert handler.verify_token(result["token"])["pack_id"] == "otherpack"
+
+
+def test_desktop_capability_launch_then_stop_uses_same_manager(tmp_path):
+    from core_runtime.desktop_app_manager import DesktopAppManager
+    from core_runtime.desktop_capability import DesktopCapabilityHandler
+
+    repo_dir = tmp_path / "repo"
+    apps_dir = repo_dir / "user_data" / "apps"
+    apps_dir.mkdir(parents=True)
+    pack_dir = tmp_path / "pack"
+    pack_dir.mkdir()
+    (apps_dir / "defaultspack.json").write_text(
+        json.dumps(
+            {
+                "pack_id": "defaultspack",
+                "command": (
+                    f"{shlex.quote(sys.executable)} -c "
+                    "\"import time; time.sleep(60)\""
+                ),
+                "pack_dir": str(pack_dir),
+                "requires_api_token": True,
+                "env": {},
+                "working_dir": str(pack_dir),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    manager = DesktopAppManager(repo_dir=str(repo_dir))
+    handler = DesktopCapabilityHandler(desktop_app_manager=manager)
+
+    launch = handler.handle_execute(
+        principal_id="defaultspack",
+        args={"pack_id": "defaultspack", "action": "launch"},
+        grant_config={"allowed_packs": ["defaultspack"]},
+    )
+    assert launch["app"]["success"] is True
+
+    stop = handler.handle_execute(
+        principal_id="defaultspack",
+        args={"pack_id": "defaultspack", "action": "stop"},
+        grant_config={"allowed_packs": ["defaultspack"]},
+    )
+    assert stop["app"] == {"success": True, "status": "stopped"}
 
 
 @pytest.mark.parametrize("action", ["stop", "status"])

@@ -12,7 +12,10 @@ import hashlib
 import secrets
 import threading
 import time
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
+
+if TYPE_CHECKING:
+    from .desktop_app_manager import DesktopAppManager
 
 
 class DesktopCapabilityHandler:
@@ -22,9 +25,14 @@ class DesktopCapabilityHandler:
     ABSOLUTE_MAX_TOKEN_LIFETIME = 86400
     DEFAULT_PORT = 8765
 
-    def __init__(self) -> None:
+    def __init__(self, desktop_app_manager: Optional["DesktopAppManager"] = None) -> None:
         self._lock = threading.Lock()
         self._active_tokens: Dict[str, Dict[str, Any]] = {}
+        if desktop_app_manager is None:
+            from .desktop_app_manager import DesktopAppManager
+
+            desktop_app_manager = DesktopAppManager()
+        self._desktop_app_manager = desktop_app_manager
 
     @staticmethod
     def _generate_token() -> str:
@@ -57,7 +65,7 @@ class DesktopCapabilityHandler:
             return {"error": "pack_id is required"}
 
         allowed_packs = grant_config.get("allowed_packs", [])
-        if allowed_packs and target_pack_id not in allowed_packs:
+        if not self._is_pack_allowed(target_pack_id, allowed_packs):
             return {"error": f"Pack not allowed for desktop app execution: {target_pack_id}"}
 
         token_lifetime = self._effective_token_lifetime(grant_config)
@@ -98,12 +106,16 @@ class DesktopCapabilityHandler:
                 "port": info["port"],
             }
 
-    def _desktop_action(self, action: str, pack_id: str, token: str) -> dict:
-        from .desktop_app_manager import DesktopAppManager
+    @staticmethod
+    def _is_pack_allowed(target_pack_id: str, allowed_packs: Any) -> bool:
+        if not isinstance(allowed_packs, list) or not allowed_packs:
+            return False
+        normalized = {pack_id for pack_id in allowed_packs if isinstance(pack_id, str)}
+        return "*" in normalized or target_pack_id in normalized
 
-        manager = DesktopAppManager()
+    def _desktop_action(self, action: str, pack_id: str, token: str) -> dict:
         if action == "launch":
-            return manager.launch_app(pack_id, api_token=token)
+            return self._desktop_app_manager.launch_app(pack_id, api_token=token)
         if action == "stop":
-            return manager.stop_app(pack_id)
-        return {"success": True, "registered_apps": manager.list_registered_apps()}
+            return self._desktop_app_manager.stop_app(pack_id)
+        return {"success": True, "registered_apps": self._desktop_app_manager.list_registered_apps()}

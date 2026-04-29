@@ -1,7 +1,7 @@
 """
 desktop_app_manager.py — Pack デスクトップアプリのライフサイクル管理
 
-Phase V-4: desktop_app:execute capability のバックエンド。
+Phase V-4: desktop_app.execute capability のバックエンド。
 Pack のデスクトップアプリ（pack-shell 経由）の登録・起動・停止・ショートカット生成を管理する。
 """
 from __future__ import annotations
