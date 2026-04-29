@@ -285,7 +285,7 @@ class DesktopAppManager:
 
     def list_registered_apps(self) -> List[Dict[str, Any]]:
         """登録済みアプリの一覧を返す。"""
-        result = []
+        result: List[Dict[str, Any]] = []
         if not self._apps_dir or not os.path.isdir(self._apps_dir):
             return result
         for fname in os.listdir(self._apps_dir):
