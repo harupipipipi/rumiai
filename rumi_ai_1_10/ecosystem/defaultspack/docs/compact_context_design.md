@@ -1,5 +1,15 @@
 # Compact Context Design
 
-Compact output preserves goal, constraints, current plan, completed steps, changed files, decisions, verification, pinned context, dropped context, and next action. Conversation compact uses chat history; task compact uses agent state; file/codebase compact uses local file summaries.
+Compact stores a small continuation packet:
 
-Restore should show what was lost, what is pinned, and which files or artifacts anchor the resumed task.
+- goal
+- current task state
+- decisions
+- changed files
+- tool and terminal results
+- pinned context
+- dropped context log
+- blockers
+- next steps
+
+The compact packet is local data. A model may help summarize it, but the feature must also work with a deterministic fallback that extracts recent messages, plan state, and artifact metadata.

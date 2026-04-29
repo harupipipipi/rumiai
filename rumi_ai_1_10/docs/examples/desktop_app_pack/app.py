@@ -2,7 +2,7 @@
 """
 Desktop App Pack — サンプルデスクトップアプリ
 
-Rumi AI OS の desktop_app:execute capability を使ったデスクトップアプリのサンプルです。
+Rumi AI OS の desktop_app.execute capability を使ったデスクトップアプリのサンプルです。
 pack-shell 経由で起動されると、環境変数 RUMI_TOKEN, RUMI_PORT, RUMI_PACK_ID が
 自動的に設定されます。
 

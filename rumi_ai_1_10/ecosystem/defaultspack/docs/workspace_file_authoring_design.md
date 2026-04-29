@@ -1,5 +1,14 @@
 # Workspace File Authoring Design
 
-File authoring uses workspace-root enforcement, file tree/listing, create/write/patch/delete, diff preview, snapshots, restore, and artifact save. Existing coding blocks cover basic operations; capability manifests describe approval requirements and UI metadata.
+All paths resolve under a workspace root.
 
-Deletes and overwrites require approval. Patch previews should be shown before write actions.
+Operations:
+
+- list, read, search, glob
+- create, write, patch
+- rename, move, delete
+- diff preview
+- snapshot and restore
+- artifact save
+
+Write-like operations return preview metadata and risk classification. Delete, overwrite, and restore require approval.

@@ -1,16 +1,12 @@
 id: research
 name: Research Agent
-description: Local document research, source cards, claim extraction, comparison tables, citations, and optional providers.
-local_only: false
+description: Local source collection, claim extraction, comparison, citation, and optional web providers.
+local_only: partial
 requires_network: optional
 risk_level: medium
-permissions:
-  - research.local_search
-  - research.source_collect
+permissions: [research.local.read, research.source.write, research.web.optional]
 handlers:
-  - defaults.knowledge.search
-  - defaults.knowledge.get
+  - blocks.research.local_search
+  - blocks.research.report
 operations: [local_search, source_collect, claim_extract, compare, summarize, cite]
 optional_providers: [web_search, reddit, browser]
-approval:
-  network_provider: true

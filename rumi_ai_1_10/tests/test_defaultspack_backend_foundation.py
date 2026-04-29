@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 
 import pytest
@@ -23,14 +24,14 @@ class _FakeInterfaceRegistry:
 @pytest.fixture(autouse=True)
 def _reset_singletons(monkeypatch, tmp_path):
     from ecosystem.defaultspack.backend.tool import permission_policy as permission_policy_module
-    from ecosystem.defaultspack.domain.ai_client.client import AIClient
-    from ecosystem.defaultspack.domain.tool.runtime_creator import RuntimeToolCreator
-    from ecosystem.defaultspack.domain.tool.mcp_client import McpClient
-    from ecosystem.defaultspack.domain.tool.registry import ToolRegistry
 
     monkeypatch.setenv(
         "RUMI_DEFAULTSPACK_TOOL_PERMISSION_POLICY_PATH",
         str(tmp_path / "tool_permission_policy.json"),
+    )
+    monkeypatch.setenv(
+        "RUMI_DEFAULTSPACK_SECRETS_DIR",
+        str(tmp_path / "secrets"),
     )
     for env_name in (
         "OPENAI_API_KEY",
@@ -73,16 +74,28 @@ def _reset_singletons(monkeypatch, tmp_path):
     ):
         monkeypatch.delenv(env_name, raising=False)
     permission_policy_module._POLICY_STORE = None
-    AIClient._instance = None
-    RuntimeToolCreator._instance = None
-    ToolRegistry._instance = None
-    McpClient._instance = None
+    _reset_defaultspack_domain_singletons()
     yield
     permission_policy_module._POLICY_STORE = None
-    AIClient._instance = None
-    RuntimeToolCreator._instance = None
-    ToolRegistry._instance = None
-    McpClient._instance = None
+    _reset_defaultspack_domain_singletons()
+
+
+def _reset_defaultspack_domain_singletons() -> None:
+    for module_name, class_name in (
+        ("ecosystem.defaultspack.domain.ai_client.client", "AIClient"),
+        ("domain.ai_client.client", "AIClient"),
+        ("ecosystem.defaultspack.domain.tool.runtime_creator", "RuntimeToolCreator"),
+        ("domain.tool.runtime_creator", "RuntimeToolCreator"),
+        ("ecosystem.defaultspack.domain.tool.mcp_client", "McpClient"),
+        ("domain.tool.mcp_client", "McpClient"),
+        ("ecosystem.defaultspack.domain.tool.registry", "ToolRegistry"),
+        ("domain.tool.registry", "ToolRegistry"),
+    ):
+        try:
+            cls = getattr(importlib.import_module(module_name), class_name)
+        except Exception:
+            continue
+        cls._instance = None
 
 
 def test_ai_and_tool_setup_register_new_foundation_routes():

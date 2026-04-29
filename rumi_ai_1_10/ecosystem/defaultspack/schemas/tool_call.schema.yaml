@@ -2,7 +2,7 @@ tool_call_id: string
 tool_id: string
 args: object
 preview: string
-risk_level: string
+risk_level: enum[low, medium, high, critical]
 approval_status: enum[not_required, pending, approved, rejected]
 started_at: string
 finished_at: string

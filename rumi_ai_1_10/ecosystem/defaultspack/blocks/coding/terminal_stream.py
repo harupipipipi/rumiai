@@ -1,4 +1,4 @@
-"""defaults.coding.terminal_stream — ターミナルストリーム実行ブロック（スタブ）"""
+"""defaults.coding.terminal_stream — ターミナルストリーム実行ブロック"""
 
 from blocks._common import ok, error
 from domain.coding.terminal import Terminal
@@ -21,8 +21,8 @@ def run(input_data, context=None):
     cwd = input_data.get("cwd")
 
     try:
-        terminal = Terminal()
-        result = terminal.stream(command, cwd=cwd)
+        terminal = Terminal(input_data.get("workspace_root"))
+        result = terminal.stream(command, cwd=cwd, approved=bool(input_data.get("approved", False)))
         return ok(result)
     except Exception as e:
         return error(str(e), code="STREAM_ERROR")

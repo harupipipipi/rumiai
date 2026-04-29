@@ -1,8 +1,6 @@
 id: codex_like
-name: Codex-like Local Coding Agent
+name: Codex-like Local Coding
 profile: defaultspack.compact_coding
-capabilities: [local_file, terminal, git, compact, safety]
-features: [plan_before_edit, diff_preview, tests, commit_helper, pr_summary]
-policy:
-  terminal_approval: true
-  git_push_approval: true
+enabled_capabilities: [local_file, terminal, git, safety, compact]
+ui_panels: [chat, plan, tool_calls, diff, terminal]
+behavior: [plan_before_edit, run_tests, summarize_diff, commit_helper]

@@ -1,11 +1,11 @@
-"""defaults.coding.terminal_exec — ターミナルコマンド実行ブロック（スタブ）"""
+"""defaults.coding.terminal_exec — ターミナルコマンド実行ブロック"""
 
 from blocks._common import ok, error
 from domain.coding.terminal import Terminal
 
 
 def run(input_data, context=None):
-    """コマンドを実行する（スタブ）。
+    """コマンドを実行する。
 
     input_data:
         command (str): 実行するコマンド
@@ -23,8 +23,14 @@ def run(input_data, context=None):
     timeout = input_data.get("timeout", 30)
 
     try:
-        terminal = Terminal()
-        result = terminal.execute(command, cwd=cwd, timeout=timeout)
+        terminal = Terminal(input_data.get("workspace_root"))
+        result = terminal.execute(
+            command,
+            cwd=cwd,
+            timeout=timeout,
+            env=input_data.get("env"),
+            approved=bool(input_data.get("approved", False)),
+        )
         return ok(result)
     except Exception as e:
         return error(str(e), code="EXEC_ERROR")

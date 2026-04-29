@@ -1,5 +1,22 @@
 # UI Agent Experience Design
 
-The defaultspack webapp exposes chat, right sidebar, tool panels, widget metadata, settings, and preview cards through `/api/ui/catalog`. UI integration should surface plan panels, tool call panels, file/diff previews, terminal output, artifacts, memory, approvals, model selection, compact controls, run history, and source cards.
+The UI is a replaceable shell built from parts.
 
-Right sidebar items are registry-driven so new tools, widgets, capabilities, and integrations can appear without option-specific frontend code.
+Expected panels:
+
+- chat
+- plan
+- tool calls
+- file tree
+- diff viewer
+- terminal
+- artifacts
+- memory
+- project settings
+- approval dialog
+- model selector
+- compact button
+- run history
+- source cards
+
+The frontend receives capability, renderer, settings, model, tool, and account metadata from catalog APIs. It should not hard-code pack internals.

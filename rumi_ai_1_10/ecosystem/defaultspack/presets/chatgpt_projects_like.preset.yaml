@@ -1,7 +1,6 @@
 id: chatgpt_projects_like
 name: ChatGPT Projects-like Workspace
 profile: defaultspack.local_agent
-capabilities: [project, memory, artifact, local_file, compact, safety]
-features: [project_files, project_memory, custom_instructions, artifacts, multi_session_context]
-policy:
-  memory_review_required: true
+enabled_capabilities: [project, memory, artifact, local_file, compact]
+ui_panels: [chat, project_settings, artifacts, memory]
+behavior: [project_memory, custom_instructions, multi_session_context]

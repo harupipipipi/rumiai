@@ -1,17 +1,11 @@
 id: browser_optional
 name: Browser and Computer Use
-description: Optional browser open, screenshot, click, type, extraction, download, and session restore capability.
+description: Optional browser and screen operation capability with approval and audit.
 local_only: true
 requires_network: optional
 risk_level: high
-permissions:
-  - browser.open
-  - browser.screenshot
-  - browser.input
-  - browser.download
-handlers:
-  - defaults.tool.container.create
-  - defaults.tool.container.screenshot
+permissions: [browser.open, browser.screenshot, browser.input, browser.download]
+handlers: []
 operations: [open, screenshot, click, type, extract, download, session_save, session_restore]
 approval:
   network: true

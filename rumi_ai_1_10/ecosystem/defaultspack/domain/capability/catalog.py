@@ -1,72 +1,118 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List, Optional
 
 import yaml
 
 
 class CapabilityCatalog:
-    """Load local-first defaultspack capability manifests."""
+    """Loads defaultspack's local-first service manifests."""
 
-    def __init__(self, pack_root: Path | None = None) -> None:
-        self._pack_root = pack_root or Path(__file__).resolve().parents[2]
-        self._capabilities_dir = self._pack_root / "capabilities"
+    def __init__(self, pack_root: Optional[Path] = None) -> None:
+        self.pack_root = Path(pack_root) if pack_root is not None else Path(__file__).resolve().parents[2]
 
-    def list_capabilities(
-        self,
-        *,
-        local_only: bool | None = None,
-        risk_level: str | None = None,
-        requires_network: bool | None = None,
-    ) -> list[dict[str, Any]]:
-        capabilities = [self._normalize(path) for path in sorted(self._capabilities_dir.glob("*.capability.yaml"))]
+    def _load_yaml_dir(self, directory_name: str, suffix: str) -> List[Dict[str, Any]]:
+        directory = self.pack_root / directory_name
+        if not directory.is_dir():
+            return []
+        items: List[Dict[str, Any]] = []
+        for path in sorted(directory.glob("*" + suffix)):
+            try:
+                data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            except Exception as exc:
+                data = {"id": path.stem, "error": str(exc)}
+            if isinstance(data, dict):
+                data.setdefault("id", path.name.replace(suffix, ""))
+                data["_source_path"] = str(path.relative_to(self.pack_root))
+                items.append(data)
+        return items
+
+    def capabilities(self, local_only: Any = None, risk_level: Optional[str] = None) -> List[Dict[str, Any]]:
+        items = self._load_yaml_dir("capabilities", ".capability.yaml")
         if local_only is not None:
-            capabilities = [item for item in capabilities if bool(item.get("local_only")) is local_only]
+            expected = local_only
+            if isinstance(expected, str):
+                expected = expected.lower() in {"1", "true", "yes"}
+            items = [item for item in items if item.get("local_only") == expected]
         if risk_level:
-            capabilities = [item for item in capabilities if item.get("risk_level") == risk_level]
-        if requires_network is not None:
-            capabilities = [item for item in capabilities if bool(item.get("requires_network")) is requires_network]
-        return capabilities
+            items = [item for item in items if item.get("risk_level") == risk_level]
+        return items
 
-    def get(self, capability_id: str) -> dict[str, Any] | None:
-        for capability in self.list_capabilities():
-            if capability.get("id") == capability_id:
-                return capability
+    def profiles(self) -> List[Dict[str, Any]]:
+        return self._load_yaml_dir("profiles", ".profile.yaml")
+
+    def presets(self) -> List[Dict[str, Any]]:
+        return self._load_yaml_dir("presets", ".preset.yaml")
+
+    def schemas(self) -> List[Dict[str, Any]]:
+        return self._load_yaml_dir("schemas", ".schema.yaml")
+
+    def examples(self) -> List[Dict[str, Any]]:
+        return self._load_yaml_dir("examples", ".example.yaml")
+
+    def prompts(self) -> List[Dict[str, Any]]:
+        prompt_dir = self.pack_root / "prompts"
+        if not prompt_dir.is_dir():
+            return []
+        prompts: List[Dict[str, Any]] = []
+        for path in sorted(prompt_dir.glob("*.system.md")):
+            text = path.read_text(encoding="utf-8")
+            prompts.append(
+                {
+                    "id": path.name.replace(".system.md", ""),
+                    "name": path.stem.replace(".system", ""),
+                    "content_ref": str(path.relative_to(self.pack_root)),
+                    "preview": text.strip().splitlines()[0] if text.strip() else "",
+                }
+            )
+        return prompts
+
+    def feature_catalog(self) -> Dict[str, Any]:
+        path = self.pack_root / "docs" / "ai_agent_services_feature_catalog.md"
+        return {
+            "content_ref": str(path.relative_to(self.pack_root)),
+            "exists": path.is_file(),
+        }
+
+    def profile(self, profile_id: str) -> Optional[Dict[str, Any]]:
+        for profile in self.profiles():
+            if profile.get("profile_id") == profile_id or profile.get("id") == profile_id:
+                return profile
         return None
 
-    def summary(self) -> dict[str, Any]:
-        capabilities = self.list_capabilities()
-        risk_counts: dict[str, int] = {}
-        for capability in capabilities:
-            risk = str(capability.get("risk_level", "low"))
-            risk_counts[risk] = risk_counts.get(risk, 0) + 1
+    def manifest(self) -> Dict[str, Any]:
+        capabilities = self.capabilities()
+        profiles = self.profiles()
+        presets = self.presets()
         return {
-            "count": len(capabilities),
-            "local_only_count": sum(1 for item in capabilities if item.get("local_only") is True),
-            "network_optional_count": sum(1 for item in capabilities if item.get("requires_network") == "optional"),
-            "requires_network_count": sum(1 for item in capabilities if item.get("requires_network") is True),
-            "risk_counts": risk_counts,
+            "service_id": "defaultspack.ai_agent_service",
+            "version": "rumi.defaultspack.agent_service.v1",
+            "local_first": True,
+            "core_requires_api_key": False,
+            "default_profile": "defaultspack.local_agent",
+            "counts": {
+                "capabilities": len(capabilities),
+                "profiles": len(profiles),
+                "presets": len(presets),
+                "schemas": len(self.schemas()),
+                "prompts": len(self.prompts()),
+                "examples": len(self.examples()),
+            },
+            "capabilities": capabilities,
+            "profiles": profiles,
+            "presets": presets,
+            "feature_catalog": self.feature_catalog(),
+            "policy": {
+                "network_default": "deny",
+                "write_actions_require_approval": True,
+                "delete_actions_require_approval": True,
+                "terminal_actions_require_approval": True,
+                "git_push_requires_approval": True,
+                "secrets_redacted": True,
+            },
         }
 
-    def _normalize(self, path: Path) -> dict[str, Any]:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        permissions = list(raw.get("permissions", []))
-        operations = list(raw.get("operations", []))
-        approval = raw.get("approval", {}) or {}
-        risk_level = raw.get("risk_level")
-        if not risk_level:
-            risk_level = "high" if any(approval.values()) else "low"
-        return {
-            **raw,
-            "id": raw.get("id") or path.stem.replace(".capability", ""),
-            "name": raw.get("name") or raw.get("id") or path.stem,
-            "description": raw.get("description", ""),
-            "permissions": permissions,
-            "operations": operations,
-            "requires_network": raw.get("requires_network", False),
-            "requires_approval": bool(raw.get("requires_approval", False) or any(approval.values())),
-            "local_only": raw.get("local_only", False),
-            "risk_level": risk_level,
-            "source_path": str(path.relative_to(self._pack_root)),
-        }
+    def to_json(self) -> str:
+        return json.dumps(self.manifest(), ensure_ascii=False, indent=2)

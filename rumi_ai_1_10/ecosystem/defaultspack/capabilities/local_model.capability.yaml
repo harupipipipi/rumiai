@@ -1,19 +1,16 @@
 id: local_model
 name: Local Model Provider
-description: Local provider interfaces for Ollama, llama.cpp, LM Studio, vLLM, and OpenAI-compatible endpoints.
+description: Local provider interface for Ollama, llama.cpp, LM Studio, and OpenAI-compatible local endpoints.
 local_only: true
 requires_network: false
 risk_level: low
-permissions:
-  - model.local.connect
+permissions: [llm.local.call, llm.local.models]
 handlers:
-  - defaults.ai.models
-  - defaults.ai.providers
-providers: [ollama, llama_cpp, lm_studio, vllm, openai_compatible_local]
-operations: [list_models, complete, stream, embed]
+  - blocks.ai.models
+  - blocks.ai.providers
+providers: [ollama, llama_cpp, lm_studio, openai_compatible_local]
 metadata:
   supports_tools: boolean
   supports_vision: boolean
   supports_embeddings: boolean
   context_length: integer
-approval: {}

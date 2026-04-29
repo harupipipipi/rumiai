@@ -21,7 +21,20 @@ export default defineConfig({
     rollupOptions: {
       output: {
         entryFileNames: "shell-app.js",
-        chunkFileNames: "shell-app.js",
+        chunkFileNames: "shell-[name].js",
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return undefined;
+          if (id.includes("react-markdown") || id.includes("micromark") || id.includes("remark") || id.includes("mdast") || id.includes("hast")) {
+            return "markdown";
+          }
+          if (id.includes("motion")) {
+            return "motion";
+          }
+          if (id.includes("lucide-react")) {
+            return "icons";
+          }
+          return "vendor";
+        },
         assetFileNames: (assetInfo) => {
           if ((assetInfo.names ?? []).some((name) => name.endsWith(".css"))) {
             return "shell-app.css";

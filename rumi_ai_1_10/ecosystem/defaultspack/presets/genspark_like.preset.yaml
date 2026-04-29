@@ -1,7 +1,6 @@
 id: genspark_like
-name: Genspark-like Research Report Agent
+name: Genspark-like Research Report
 profile: defaultspack.research_agent
-capabilities: [research, artifact, knowledge, compact, safety]
-features: [research_report, source_cards, comparison_tables, generated_pages]
-policy:
-  cite_claims: true
+enabled_capabilities: [research, artifact, local_file, compact]
+ui_panels: [chat, source_cards, artifacts, comparison_table]
+behavior: [source_synthesis, report_generation, comparison_tables]

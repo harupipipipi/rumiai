@@ -63,14 +63,54 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("PUT", "/api/prompts/{name}", block_module="blocks.prompt.update", path_inject={"name": "name"}),
     HttpRouteSpec("DELETE", "/api/prompts/{name}", block_module="blocks.prompt.delete", path_inject={"name": "name"}),
     HttpRouteSpec("POST", "/api/prompts/convert", block_module="blocks.prompt.convert"),
+    HttpRouteSpec("GET", "/api/tools", block_module="blocks.tool.list"),
+    HttpRouteSpec("POST", "/api/tools/invoke", block_module="blocks.tool.invoke"),
     HttpRouteSpec("POST", "/api/tools/create", block_module="blocks.tool.create"),
     HttpRouteSpec("PUT", "/api/tools/{name}", block_module="blocks.tool.update", path_inject={"name": "name"}),
     HttpRouteSpec("DELETE", "/api/tools/{name}", block_module="blocks.tool.delete", path_inject={"name": "name"}),
     HttpRouteSpec("GET", "/api/tools/{name}/export", block_module="blocks.tool.export", path_inject={"name": "name"}),
+    HttpRouteSpec("GET", "/api/capabilities", block_module="blocks.capability.list"),
+    HttpRouteSpec("GET", "/api/agent-service/manifest", block_module="blocks.capability.manifest"),
+    HttpRouteSpec("GET", "/api/coding/files", block_module="blocks.coding.file_list"),
+    HttpRouteSpec("POST", "/api/coding/files/read", block_module="blocks.coding.file_read"),
+    HttpRouteSpec("POST", "/api/coding/files/write", block_module="blocks.coding.file_write"),
+    HttpRouteSpec("POST", "/api/coding/files/create", block_module="blocks.coding.file_create"),
+    HttpRouteSpec("POST", "/api/coding/files/delete", block_module="blocks.coding.file_delete"),
+    HttpRouteSpec("POST", "/api/coding/files/search", block_module="blocks.coding.file_search"),
+    HttpRouteSpec("POST", "/api/coding/files/diff", block_module="blocks.coding.file_diff"),
+    HttpRouteSpec("POST", "/api/coding/files/patch", block_module="blocks.coding.file_patch"),
+    HttpRouteSpec("POST", "/api/coding/files/snapshot", block_module="blocks.coding.file_snapshot"),
+    HttpRouteSpec("POST", "/api/coding/files/restore", block_module="blocks.coding.file_restore"),
+    HttpRouteSpec("POST", "/api/coding/terminal/exec", block_module="blocks.coding.terminal_exec"),
+    HttpRouteSpec("POST", "/api/coding/terminal/stream", block_module="blocks.coding.terminal_stream"),
+    HttpRouteSpec("GET", "/api/coding/git/status", block_module="blocks.coding.git_status"),
+    HttpRouteSpec("POST", "/api/coding/git/diff", block_module="blocks.coding.git_diff"),
+    HttpRouteSpec("POST", "/api/coding/git/commit", block_module="blocks.coding.git_commit"),
+    HttpRouteSpec("POST", "/api/coding/git/push", block_module="blocks.coding.git_push"),
+    HttpRouteSpec("POST", "/api/context/compact", block_module="blocks.context.compact"),
+    HttpRouteSpec("POST", "/api/context/restore", block_module="blocks.context.restore"),
+    HttpRouteSpec("GET", "/api/artifacts", block_module="blocks.artifact.list"),
+    HttpRouteSpec("POST", "/api/artifacts", block_module="blocks.artifact.create"),
+    HttpRouteSpec("GET", "/api/artifacts/{id}", block_module="blocks.artifact.get", path_inject={"id": "artifact_id"}),
+    HttpRouteSpec("POST", "/api/research/local-search", block_module="blocks.research.local_search"),
+    HttpRouteSpec("POST", "/api/research/report", block_module="blocks.research.report"),
     HttpRouteSpec("GET", "/api/dev/inspect", block_module="blocks.dev.inspect"),
     HttpRouteSpec("GET", "/api/dev/prompt-history", block_module="blocks.dev.prompt_history"),
     HttpRouteSpec("POST", "/api/dev/edit-prompt", block_module="blocks.dev.edit_prompt_live"),
     HttpRouteSpec("POST", "/api/dev/replay", block_module="blocks.dev.replay"),
+    HttpRouteSpec("GET", "/api/ai/provider-key", block_module="blocks.ai.provider_key"),
+    HttpRouteSpec("POST", "/api/ai/provider-key", block_module="blocks.ai.provider_key"),
+    HttpRouteSpec("GET", "/api/ui/catalog", block_module="blocks.ui.catalog"),
+    HttpRouteSpec("GET", "/api/ui/settings", block_module="blocks.ui.settings"),
+    HttpRouteSpec("PUT", "/api/ui/settings", block_module="blocks.ui.settings"),
+    HttpRouteSpec("GET", "/api/ui/conversations/{id}/preview", block_module="blocks.ui.conversation_preview", path_inject={"id": "conversation_id"}),
+    HttpRouteSpec("GET", "/api/health", handler_name="_handle_health"),
+    HttpRouteSpec("GET", "/api/context", handler_name="_handle_context_info"),
+    HttpRouteSpec("GET", "/", handler_name="_handle_static"),
+    HttpRouteSpec("GET", "/static/{path}", handler_name="_handle_static_file"),
+]
+
+_ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/api/health", handler_name="_handle_health"),
     HttpRouteSpec("GET", "/api/context", handler_name="_handle_context_info"),
     HttpRouteSpec("GET", "/", handler_name="_handle_static"),
@@ -91,16 +131,31 @@ class TransportRegistry:
         return self._registry.get(transport_id)
 
 
-def build_fallback_http_routes(server: Any):
+def build_http_routes_from_specs(server: Any, specs: List[HttpRouteSpec]):
     routes = []
-    for spec in _FALLBACK_HTTP_ROUTE_SPECS:
-        regex_pattern = re.sub(r"\{(\w+)\}", r"(?P<\1>[^/]+)", spec.pattern)
+    for spec in specs:
+        regex_pattern = re.sub(
+            r"\{(\w+)\}",
+            lambda match: r"(?P<{}>.+)".format(match.group(1))
+            if match.group(1) == "path"
+            else r"(?P<{}>[^/]+)".format(match.group(1)),
+            spec.pattern,
+        )
         compiled = re.compile("^" + regex_pattern + "$")
         if spec.block_module:
-            def _handler(request_data, path_params, *, block_module=spec.block_module, path_inject=dict(spec.path_inject)):
+            def _handler(
+                request_data,
+                path_params,
+                *,
+                block_module=spec.block_module,
+                path_inject=dict(spec.path_inject),
+                route_method=spec.method,
+            ):
+                payload = dict(request_data or {})
+                payload.setdefault("_method", route_method)
                 return server._invoke_fallback_block(
                     block_module,
-                    request_data,
+                    payload,
                     path_params,
                     path_inject,
                 )
@@ -109,3 +164,19 @@ def build_fallback_http_routes(server: Any):
             handler = getattr(server, spec.handler_name)
         routes.append((spec.method, compiled, handler, "fallback", dict(spec.path_inject)))
     return routes
+
+
+def build_always_available_http_routes(server: Any):
+    return build_http_routes_from_specs(server, _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS)
+
+
+def build_fallback_http_routes(server: Any):
+    fallback_specs = [
+        spec
+        for spec in _FALLBACK_HTTP_ROUTE_SPECS
+        if spec.pattern not in {item.pattern for item in _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS}
+    ]
+    return build_http_routes_from_specs(
+        server,
+        fallback_specs + _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS,
+    )

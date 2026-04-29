@@ -1,5 +1,18 @@
 # Memory Personalization Design
 
-Memory scopes are user, project, session, and file. Memory types are preference, instruction, fact, style, and decision. User-scope writes and deletes require review. Project memory is loaded with project instructions and may feed prompts, retrieval, and coding style.
+Memory scopes:
 
-Memory must be exportable, importable, editable, and removable.
+- user: durable preferences and identity-adjacent settings.
+- project: repository or workspace instructions.
+- session: temporary task facts.
+- file: summaries tied to local files.
+
+Memory types:
+
+- preference
+- instruction
+- fact
+- style
+- decision
+
+User memory writes and memory deletes require review. Project memory may be imported/exported with project config.

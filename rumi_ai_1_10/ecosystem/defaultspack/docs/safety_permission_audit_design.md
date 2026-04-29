@@ -1,5 +1,14 @@
 # Safety Permission Audit Design
 
-Safety uses permission catalogs, allow/deny/ask policies, risk labels, approval gates, audit logs, sandbox root enforcement, secret redaction, and environment masking.
+Safety primitives:
 
-Default risky actions are writes, deletes, terminal commands, network use, git push, memory deletion, and policy changes. The `safety` capability describes these operations for UI and tool policy.
+- permission catalog
+- allow, ask, deny policy
+- risk classification
+- approval gates
+- workspace root enforcement
+- network deny by default
+- secret redaction
+- audit log
+
+Audit records include timestamp, actor, capability, operation, risk level, decision, and redacted arguments. Secret values are never written to audit records.

@@ -1,5 +1,5 @@
 artifact_id: string
-type: enum[markdown, text, code, json, yaml, html, csv, report]
+type: enum[markdown, text, code, json, yaml, html, csv, report, changelog, implementation_plan]
 title: string
 path: string
 content_ref: string

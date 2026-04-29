@@ -3,6 +3,6 @@ title: string
 description: string
 tool_calls: list[tool_call]
 expected_output: string
-risk_level: string
+risk_level: enum[low, medium, high, critical]
 requires_approval: boolean
 status: enum[pending, approved, running, done, failed, skipped]

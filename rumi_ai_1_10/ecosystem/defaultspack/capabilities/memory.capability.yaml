@@ -1,21 +1,16 @@
 id: memory
 name: Memory and Personalization
-description: User, project, session, and file memory with review, delete, export, and import paths.
+description: Local user, project, session, and file memory.
 local_only: true
 requires_network: false
 risk_level: medium
-permissions:
-  - memory.read
-  - memory.write
-  - memory.delete
+permissions: [memory.read, memory.write, memory.delete, memory.export, memory.import]
 handlers:
-  - defaults.memory.store
-  - defaults.memory.recall
-  - defaults.memory.project_context
-  - defaults.memory.vector_store
-  - defaults.memory.vector_query
+  - blocks.memory.store
+  - blocks.memory.recall
+  - blocks.memory.project_context
 scopes: [user, project, session, file]
-operations: [read, write, update, delete, export, import]
+operations: [read, write, update, delete, export, import, review]
 approval:
   write_user_memory: true
   delete_memory: true

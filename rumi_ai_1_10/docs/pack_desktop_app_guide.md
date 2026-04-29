@@ -12,7 +12,7 @@
 
 Pack デスクトップアプリは、Rumi AI OS の **capability ベースの権限システム** を通じて、独立したデスクトップウィンドウでアプリケーションを動作させる仕組みです。
 
-Rumi Viewer（Tauri ベースの WebView UI）内にフロントエンドを表示する `viewer:display` capability とは異なり、`desktop_app:execute` capability は **OS ネイティブのウィンドウ** でアプリを起動します。tkinter, Qt, Electron, Tauri など任意のGUIフレームワークが使えます。
+Rumi Viewer（Tauri ベースの WebView UI）内にフロントエンドを表示する `viewer:display` capability とは異なり、`desktop_app.execute` capability は **OS ネイティブのウィンドウ** でアプリを起動します。tkinter, Qt, Electron, Tauri など任意のGUIフレームワークが使えます。
 
 ### 1.2 アーキテクチャ
 
@@ -111,11 +111,11 @@ Kernel の `PackImporter` は `desktop_app` セクションを以下のルール
 
 ---
 
-## 4. desktop_app:execute capability
+## 4. desktop_app.execute capability
 
 ### 4.1 概要
 
-`desktop_app:execute` は `core_desktop_capability` Pack が提供する capability です。デスクトップアプリの起動・停止・ステータス確認を制御します。
+`desktop_app.execute` は `core_desktop_capability` Pack が提供する capability です。デスクトップアプリの起動・停止・ステータス確認を制御します。
 
 ### 4.2 manifest.json
 
@@ -125,9 +125,9 @@ Kernel の `PackImporter` は `desktop_app` セクションを以下のルール
   "description": "デスクトップアプリケーションを起動・管理する",
   "requires": ["desktop_app.execute"],
   "grant_config": {
-    "permission_id": "desktop_app:execute",
+    "permission_id": "desktop_app.execute",
     "dangerous": true,
-    "allowed_packs": [],
+    "allowed_packs": ["my_desktop_pack"],
     "max_token_lifetime": 3600
   },
   "input_schema": {
@@ -161,9 +161,9 @@ Kernel の `PackImporter` は `desktop_app` セクションを以下のルール
 
 ### 4.3 dangerous フラグ
 
-`desktop_app:execute` は `dangerous: true` に設定されています。これは、デスクトップアプリがホスト OS 上で **任意のプロセスを起動する** ため、高い権限を持つことを意味します。Docker 隔離された Python Function とは異なり、デスクトップアプリはホストのファイルシステムやネットワークに直接アクセスできます。
+`desktop_app.execute` は `dangerous: true` に設定されています。これは、デスクトップアプリがホスト OS 上で **任意のプロセスを起動する** ため、高い権限を持つことを意味します。Docker 隔離された Python Function とは異なり、デスクトップアプリはホストのファイルシステムやネットワークに直接アクセスできます。
 
-そのため、ユーザーは Pack をインストールする際に、`desktop_app:execute` の Grant を明示的に承認する必要があります。
+そのため、ユーザーは Pack をインストールする際に、`desktop_app.execute` の Grant を明示的に承認する必要があります。
 
 ### 4.4 action
 
@@ -379,7 +379,7 @@ pack-shell がアプリに渡す環境変数:
 
 ### 8.1 なぜ dangerous なのか
 
-`desktop_app:execute` は以下の理由で `dangerous: true` に設定されています:
+`desktop_app.execute` は以下の理由で `dangerous: true` に設定されています:
 
 - デスクトップアプリは **ホスト OS 上で直接実行される**（Docker 隔離なし）
 - ファイルシステム、ネットワーク、他のプロセスへのアクセスが可能
@@ -392,6 +392,8 @@ Pack は悪意前提で設計されています。デスクトップアプリの
 ### 8.3 トークンの有効期限
 
 `POST /api/desktop/token` で発行されるトークンは短期間（デフォルト 3600 秒 = 1 時間）で失効します。`max_token_lifetime` は `grant_config` で制御されます。
+
+`allowed_packs` は fail-closed です。空配列 `[]`、未指定、または不正な型はどの Pack も許可しません。全 Pack を明示的に許可する必要がある検証用途では `["*"]` を指定できますが、通常は起動対象の Pack ID を列挙してください。
 
 ### 8.4 推奨事項
 

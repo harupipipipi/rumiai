@@ -1,5 +1,14 @@
 # Local First Policy
 
-Core defaultspack behavior must work without API keys. Workspace file access stays inside the configured root. Network access is denied by default. External web, SaaS, cloud model, Reddit, browser-network, and GitHub API integrations are optional providers.
+defaultspack core is usable without cloud API keys.
 
-Writes, deletes, terminal execution, network access, git push, memory deletion, and policy changes require approval. Audit logs must redact secrets, mask environment variables, and include risk labels.
+Policy:
+
+- workspace files only unless a pack explicitly grants a broader capability.
+- network is denied by default.
+- cloud model providers are optional adapters.
+- file write, overwrite, delete, terminal execution, and git push require approval metadata.
+- secrets are stored in the Rumi secret store and are never exposed in UI catalogs.
+- audit records contain action, risk, decision, and redacted arguments.
+
+Core may include local file, terminal, git, local model provider interface, memory, project, compact, artifacts, safety, permission, and audit. External search, Reddit, browser network, GitHub API, SaaS integrations, and cloud schedules stay optional.

@@ -55,7 +55,7 @@
     ]
   },
   "grant_config": {
-    "permission_id": "desktop_app:execute",
+    "permission_id": "desktop_app.execute",
     "dangerous": true,
     "allowed_packs": [],
     "max_token_lifetime": 3600

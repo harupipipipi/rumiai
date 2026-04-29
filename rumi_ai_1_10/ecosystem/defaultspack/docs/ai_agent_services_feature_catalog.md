@@ -1,20 +1,26 @@
 # AI Agent Services Feature Catalog
 
-This catalog maps modern agent-service features into defaultspack targets. Core features stay local-first; network, SaaS, and API-key features are optional providers.
+defaultspack の標準語彙として、現代 AI agent 系サービスの機能をローカル優先で整理する。
 
-| id | category | local | api | priority | status | defaultspack target |
-| --- | --- | --- | --- | --- | --- | --- |
-| plan_mode | agent_core | yes | no | P0 | implemented | schemas/agent_plan.schema.yaml, prompts/planner.system.md |
-| step_execution | agent_core | yes | no | P0 | implemented | blocks/agent, domain/agent |
-| approve_reject_retry | safety | yes | no | P0 | implemented | blocks/agent, blocks/tool |
-| workspace_files | file_workspace | yes | no | P0 | implemented | blocks/coding, capabilities/local_file.capability.yaml |
-| terminal_exec | terminal | yes | no | P0 | implemented | blocks/coding/terminal_exec.py |
-| git_status_diff_commit | git | yes | no | P0 | implemented | blocks/coding/git_*.py |
-| memory | memory | yes | no | P1 | implemented | blocks/memory, capabilities/memory.capability.yaml |
-| project_workspace | project | yes | no | P1 | cataloged | profiles/local_agent.profile.yaml |
-| context_compact | compact | yes | no | P0 | implemented | blocks/chat/summarize_and_trim.py |
-| artifacts | artifact | yes | no | P1 | cataloged | schemas/artifact.schema.yaml |
-| local_research | research | yes | no | P2 | partial | blocks/knowledge, capabilities/research.capability.yaml |
-| browser_use | browser_optional | partial | optional | P3 | optional | capabilities/browser_optional.capability.yaml |
-| local_model | model | yes | no | P0 | implemented | extensions/llm/providers/* |
-| safety_audit | safety | yes | no | P0 | implemented | blocks/tool, user_data/audit |
+| id | category | inspired_by | local | api | priority | status | defaultspack target |
+|---|---|---|---:|---:|---|---|---|
+| plan_mode | agent_core | Codex, Claude Code, Manus | yes | no | P0 | implemented | `schemas/agent_plan.schema.yaml`, `prompts/planner.system.md` |
+| step_execution | agent_core | Codex, Manus | yes | no | P0 | implemented | `schemas/agent_step.schema.yaml`, `blocks/agent/*` |
+| approval_workflow | safety | Codex, Claude Code | yes | no | P0 | implemented | `schemas/tool_call.schema.yaml`, `capabilities/safety.capability.yaml` |
+| local_file_workspace | workspace | Codex, Claude Code, Cursor | yes | no | P0 | implemented | `capabilities/local_file.capability.yaml`, `blocks/coding/*` |
+| terminal_shell | terminal | Codex, Claude Code | yes | no | P0 | implemented | `capabilities/terminal.capability.yaml` |
+| git_integration | git | Codex, Claude Code, Cursor | yes | partial | P0 | implemented | `capabilities/git.capability.yaml` |
+| memory | personalization | ChatGPT, Claude Projects | yes | no | P1 | implemented | `capabilities/memory.capability.yaml` |
+| project_workspace | project | ChatGPT Projects, Cursor | yes | no | P1 | implemented | `schemas/project.schema.yaml` |
+| compact_context | context | Claude Code, ChatGPT | yes | no | P1 | implemented | `capabilities/compact.capability.yaml` |
+| artifacts | artifacts | Claude, ChatGPT, Genspark | yes | no | P1 | implemented | `schemas/artifact.schema.yaml` |
+| local_research | research | Genspark, Manus | partial | no | P2 | implemented | `schemas/research_result.schema.yaml` |
+| browser_optional | optional_browser | Manus, OpenClaw | partial | optional | P3 | planned | `capabilities/browser_optional.capability.yaml` |
+| local_model_provider | model | OpenClaw, Ollama apps | yes | no | P0 | implemented | `capabilities/local_model.capability.yaml` |
+
+Rules:
+
+- core features must work without a cloud API key.
+- network and external SaaS providers are optional adapters.
+- file write, delete, terminal, and git push require a policy gate.
+- UI receives capabilities and component contracts from catalog APIs, not hard-coded assumptions.

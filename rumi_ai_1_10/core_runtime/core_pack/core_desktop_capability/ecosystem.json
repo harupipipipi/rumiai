@@ -7,7 +7,7 @@
   },
   "metadata": {
     "name": "Core Desktop App Capability",
-    "description": "Rumi AI OS core pack that provides desktop_app:execute capability. Packs request desktop_app.execute via capability system and Rumi manages execution grants and token issuance for Pack Shell desktop applications.",
+    "description": "Rumi AI OS core pack that provides desktop_app.execute capability. Packs request desktop_app.execute via capability system and Rumi manages execution grants and token issuance for Pack Shell desktop applications.",
     "author": "Rumi AI Team",
     "license": "MIT",
     "is_core_pack": true

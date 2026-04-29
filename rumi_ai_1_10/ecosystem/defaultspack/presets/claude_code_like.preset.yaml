@@ -1,7 +1,6 @@
 id: claude_code_like
 name: Claude Code-like Workspace Agent
 profile: defaultspack.compact_coding
-capabilities: [local_file, terminal, git, memory, project, compact, safety]
-features: [plan_mode, todo_tracking, project_instructions, codebase_awareness]
-policy:
-  compact_context: true
+enabled_capabilities: [local_file, terminal, git, project, memory, compact, safety]
+ui_panels: [chat, plan, file_tree, terminal, memory]
+behavior: [todo_tracking, project_instructions, compact_context]

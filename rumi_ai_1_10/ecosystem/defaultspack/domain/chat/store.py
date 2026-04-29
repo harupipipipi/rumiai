@@ -2,9 +2,20 @@ import time
 import copy
 import uuid
 import json
+from pathlib import Path
+
+DEFAULT_CHAT_MODEL = "openrouter/tencent/hy3-preview:free"
 
 
-def _default_conversation_model():
+def _default_conversation_model(settings_path=None):
+    try:
+        path = settings_path or Path(__file__).resolve().parents[2] / "user_data" / "shared" / "frontend_settings.json"
+        settings = json.loads(Path(path).read_text(encoding="utf-8"))
+        preferred_model = settings.get("models", {}).get("preferred_model")
+        if isinstance(preferred_model, str) and preferred_model.strip():
+            return preferred_model.strip()
+    except Exception:
+        pass
     try:
         from domain.ai_client.profile_loader import ProfileLoader
 
@@ -12,10 +23,12 @@ def _default_conversation_model():
         provider = profile.get("provider")
         model = profile.get("model")
         if provider and model:
-            return "{}/{}".format(provider, model)
+            candidate = "{}/{}".format(provider, model)
+            if not candidate.startswith("stub/"):
+                return candidate
     except Exception:
         pass
-    return "stub/default"
+    return DEFAULT_CHAT_MODEL
 
 
 def _gen_id():

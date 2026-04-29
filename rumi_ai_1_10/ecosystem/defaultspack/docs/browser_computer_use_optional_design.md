@@ -1,5 +1,14 @@
 # Browser Computer Use Optional Design
 
-Browser/computer use is optional. Capabilities include open, screenshot, click, type, text extraction, download, session save, and session restore. External sites require network approval. Downloads require explicit approval and audit entries.
+Browser and computer use are optional capabilities.
 
-The core pack can expose the manifest and UI hooks without requiring browser providers.
+Operations:
+
+- browser open
+- screenshot
+- click, type, key, scroll
+- extract text
+- download
+- session save and restore
+
+Network navigation, downloads, and external site interaction require approval and audit. The core catalog describes this capability but does not require any browser provider.

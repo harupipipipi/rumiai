@@ -16,7 +16,7 @@ def run(input_data, context=None):
     ref = input_data.get("ref")
 
     try:
-        git = GitOps()
+        git = GitOps(input_data.get("workspace_root"))
         result = git.diff(ref=ref)
         return ok(result)
     except Exception as e:

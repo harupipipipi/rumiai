@@ -9,15 +9,15 @@
   "entrypoint": "domain.ai_client.providers.openrouter_provider:OpenRouterProvider",
   "api_key_env": "OPENROUTER_API_KEY",
   "base_url_env": "OPENROUTER_BASE_URL",
-  "credential_required": false,
-  "default_model": "auto",
+  "credential_required": true,
+  "default_model": "tencent/hy3-preview:free",
   "capabilities": {
-    "native_tool_calling": true,
-    "vision": true,
-    "embeddings": true,
+    "native_tool_calling": false,
+    "vision": false,
+    "embeddings": false,
     "streaming": true
   },
   "config": {
-    "model_sync": "remote_with_cache"
+    "model_sync": "fixed_allowlist"
   }
 }

@@ -1,5 +1,9 @@
 # Artifact Generation Design
 
-Artifacts are durable outputs generated from conversations or agent runs. Supported types are markdown, text, code, json, yaml, html, csv, report, changelog, and implementation_plan.
+Artifacts are local deliverables with metadata:
 
-Each artifact has an id, type, title, path, content reference, source task, creator, and version. Saving to workspace goes through local file capability and approval policy.
+- markdown, text, code
+- json, yaml, html, csv
+- report, changelog, implementation plan
+
+Each artifact has `artifact_id`, `type`, `title`, `path`, `content_ref`, `created_by`, `source_task`, and `version`. Artifact save uses the local file capability and can be exported later by optional adapters.

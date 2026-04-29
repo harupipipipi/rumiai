@@ -10,7 +10,7 @@ import threading
 import http.server
 
 from bridge.block_adapter import invoke_block
-from transport.registry import build_fallback_http_routes
+from transport.registry import build_always_available_http_routes, build_fallback_http_routes
 
 
 class DefaultsHttpServer:
@@ -54,7 +54,11 @@ class DefaultsHttpServer:
                         path_inject = entry.get("path_inject", {})
                         if method and pattern and callable(handler):
                             regex_pattern = re.sub(
-                                r"\{(\w+)\}", r"(?P<\1>[^/]+)", pattern
+                                r"\{(\w+)\}",
+                                lambda match: r"(?P<{}>.+)".format(match.group(1))
+                                if match.group(1) == "path"
+                                else r"(?P<{}>[^/]+)".format(match.group(1)),
+                                pattern,
                             )
                             regex_pattern = "^" + regex_pattern + "$"
                             compiled = re.compile(regex_pattern)
@@ -68,7 +72,7 @@ class DefaultsHttpServer:
                 )
 
         if registry_routes:
-            self._routes = registry_routes
+            self._routes = registry_routes + build_always_available_http_routes(self)
             print(
                 "[defaults] Route registry: loaded "
                 + str(len(registry_routes))
@@ -421,9 +425,12 @@ class DefaultsHttpServer:
         safe_path = os.path.normpath(rel_path)
         if safe_path.startswith("..") or os.path.isabs(safe_path):
             return error("invalid path")
-        file_path = os.path.join(
-            os.path.dirname(__file__), "..", "ui", safe_path
-        )
+        pack_root = os.path.normpath(os.path.join(os.path.dirname(__file__), ".."))
+        file_path = os.path.join(pack_root, "ui", safe_path)
+        if not os.path.isfile(file_path) and (
+            safe_path == "assets" or safe_path.startswith("assets" + os.sep)
+        ):
+            file_path = os.path.join(pack_root, safe_path)
         if not os.path.isfile(file_path):
             return error("file not found: " + rel_path)
         ext = os.path.splitext(file_path)[1].lower()
@@ -444,10 +451,8 @@ class DefaultsHttpServer:
             with open(file_path, "r", encoding="utf-8") as f:
                 body = f.read()
         else:
-            import base64
             with open(file_path, "rb") as f:
-                body = base64.b64encode(f.read()).decode("ascii")
-            ct = ct + "; _base64=true"
+                body = f.read()
         return {"_static": True, "content_type": ct, "body": body}
 
 
@@ -500,6 +505,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                 context["_facade"] = self.server_ref.facade
                 result = handler(request_data, context)
             else:
+                request_data.setdefault("_method", method)
                 # Fallback: original handler signature (request_data, path_params)
                 result = handler(request_data, path_params)
 
@@ -520,7 +526,10 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except BrokenPipeError:
+            pass
 
     def _send_static(self, status_code, content_type, body):
         if isinstance(body, str):
@@ -532,7 +541,10 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body_bytes)))
         self.end_headers()
-        self.wfile.write(body_bytes)
+        try:
+            self.wfile.write(body_bytes)
+        except BrokenPipeError:
+            pass
 
     def _send_cors_headers(self):
         self.send_header("Access-Control-Allow-Origin", "*")

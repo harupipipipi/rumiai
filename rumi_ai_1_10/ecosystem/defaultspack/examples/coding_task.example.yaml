@@ -1,8 +1,4 @@
 task:
   title: Add compact context schema
   goal: compact_context用のschemaを追加する
-  steps:
-    - read existing schemas
-    - create schema file
-    - run validation
-    - show diff
+  steps: [read existing schemas, create schema file, run validation, show diff]

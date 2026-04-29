@@ -60,6 +60,31 @@ class TestEcosystemSchema:
         }
         errors = validate_ecosystem(data, raise_on_error=False)
         assert errors == []
+
+    def test_valid_desktop_app_fields(self):
+        """desktop_app 定義と capabilities が canonical schema でも有効"""
+        data = {
+            "pack_id": "defaultspack",
+            "pack_identity": "rumi:ecosystem/defaultspack",
+            "version": "2.0.0",
+            "vocabulary": {"types": ["chat", "frontend"]},
+            "capabilities": ["desktop_app.execute"],
+            "desktop_app": {
+                "command": "python defaultspack/desktop_app.py",
+                "working_dir": "",
+                "env": {"RUMI_DEFAULTSPACK_PORT": "8766"},
+                "capabilities": ["desktop_app.execute"],
+                "window": {
+                    "title": "Rumi Defaultspack",
+                    "width": 1280,
+                    "height": 800,
+                    "icon": "assets/icons/defaultspack-icon.png",
+                },
+                "platforms": ["darwin", "win32", "linux"],
+            },
+        }
+        errors = validate_ecosystem(data, raise_on_error=False)
+        assert errors == []
     
     def test_missing_required_fields(self):
         """必須フィールドが欠けている場合"""

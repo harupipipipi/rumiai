@@ -1,15 +1,28 @@
 # Local Agent Implementation Plan
 
-P0 is now represented by `profiles/local_agent.profile.yaml`, local-first prompts, schemas, and capability manifests. Existing blocks provide chat, agent, coding, tool, memory, knowledge, prompt, media, frontend, and dev behavior.
+## P0
 
-## Phases
+- Capability catalog: load `capabilities/*.capability.yaml` and expose `/api/capabilities`.
+- Local agent profile: load `profiles/local_agent.profile.yaml` and expose it in `/api/agent-service/manifest`.
+- Plan and step: use `schemas/agent_plan.schema.yaml`, `schemas/agent_step.schema.yaml`, and `blocks.agent.plan`.
+- File workspace: keep all operations inside workspace root; expose read, write, create, delete, list, search, diff, snapshot, restore.
+- Terminal and git: classify risk, require approval fields for execution, and audit attempted actions.
+- Safety: default network deny, redact secrets, and record audit metadata.
 
-1. Catalog: load `capabilities/*.capability.yaml` through `domain/capability/catalog.py`.
-2. Profile: enable `defaultspack.local_agent` with local_file, terminal, git, memory, project, artifact, compact, local_model, and safety.
-3. Plan and step: use `schemas/agent_plan.schema.yaml`, `schemas/agent_step.schema.yaml`, and existing `blocks/agent`.
-4. File authoring: use existing coding blocks, artifact schemas, diff previews, and rollback-oriented prompts.
-5. Terminal and git: use coding terminal/git blocks with safety policy.
-6. Memory and project: use memory blocks plus project profile metadata.
-7. Compact: use chat summarize/auto_trim and compact prompt.
-8. Research and artifact: keep local search in knowledge and optional providers behind approval.
-9. UI: expose tools, widgets, capabilities, settings, and previews through the frontend registry.
+## P1
+
+- Memory and project context: local JSON/file storage with review and delete operations.
+- Compact: rolling summaries, pinned context, and restore notes.
+- Artifacts: create local markdown/text/code/json/yaml/html/csv artifacts with metadata.
+
+## P2
+
+- Research: local sources first, optional web/browser providers later.
+- UI: panels for plan, tool calls, file tree, diff, terminal, artifacts, memory, and approvals.
+
+## Tests
+
+- Validate catalog file loading.
+- Verify routes exist in fallback HTTP registry.
+- Verify profile and capability policy metadata.
+- Verify workspace safety and approval metadata for risky operations.

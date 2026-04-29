@@ -39,6 +39,9 @@ defaults 単体で既存の AI サービス（ChatGPT / Claude / Cursor / Devin�
 
 | やりたいこと | 読む場所 |
 |---|---|
+| AI agent service defaults の全体像を見たい | `docs/ai_agent_services_feature_catalog.md`, `docs/local_agent_implementation_plan.md` |
+| ローカル優先・承認・安全方針を見たい | `docs/local_first_policy.md`, `docs/safety_permission_audit_design.md` |
+| capability / profile / preset を機械可読に見たい | `/api/agent-service/manifest`, `/api/capabilities`, `capabilities/`, `profiles/`, `presets/` |
 | defaultspack を standalone で起動したい | `docs/getting-started.md` |
 | 8766 のフロントエンドを直したい | `webapp/` |
 | rumi_bundle の metadata を見たい | `docs/rumi_bundle.md` |

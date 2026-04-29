@@ -169,6 +169,16 @@ class TestDesktopAppSchemaValidation(unittest.TestCase):
         self.assertTrue(ok, f"Validation failed: {msg}")
         self.assertIsNotNone(parsed)
 
+    def test_bundled_defaultspack_declares_desktop_app(self):
+        """Bundled defaultspack is a Rumi-provided desktop app pack."""
+        eco_path = _REPO_DIR / "ecosystem" / "defaultspack" / "ecosystem.json"
+        ok, msg, parsed = self._importer._validate_ecosystem_json(eco_path)
+        self.assertTrue(ok, f"Validation failed: {msg}")
+        self.assertIsNotNone(parsed)
+        desktop_app = parsed["desktop_app"]
+        self.assertEqual(desktop_app["command"], "python defaultspack/desktop_app.py")
+        self.assertIn("desktop_app.execute", desktop_app["capabilities"])
+
 
 if __name__ == "__main__":
     unittest.main()

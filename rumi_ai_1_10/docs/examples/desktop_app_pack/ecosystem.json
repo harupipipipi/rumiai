@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "metadata": {
     "name": "Desktop App Pack",
-    "description": "Rumi AI OS のデスクトップアプリサンプル。desktop_app:execute capability を使って独立したデスクトップウィンドウでアプリを起動します。",
+    "description": "Rumi AI OS のデスクトップアプリサンプル。desktop_app.execute capability を使って独立したデスクトップウィンドウでアプリを起動します。",
     "author": "Rumi AI Team",
     "license": "MIT",
     "is_core_pack": false

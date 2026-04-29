@@ -1,10 +1,10 @@
 id: local_only_safe
 name: Local Only Safe
 profile: defaultspack.local_agent
-capabilities: [local_file, local_model, memory, project, compact, safety]
-features: [network_deny, local_model_only, approval_first]
+enabled_capabilities: [local_file, memory, project, artifact, compact, safety, local_model]
+disabled_capabilities: [browser_optional]
 policy:
   network_default: deny
-  browser_enabled: false
+  terminal_requires_approval: true
   git_push_enabled: false
-  terminal_approval: true
+  cloud_model_required: false

@@ -1,5 +1,16 @@
 # Terminal Git Agent Design
 
-Terminal execution supports command, cwd, env, streaming output, cancellation, history, replay, and output summaries. Commands are labeled low, medium, high, or critical risk before approval.
+Terminal risk:
 
-Git supports status, diff, log, add, commit, restore, stash, apply, and optional push. Push is network-affecting and always approval-gated.
+- low: read-only commands such as `pwd`, `ls`, `cat`, `git status`.
+- medium: local test/build commands.
+- high: writes, installs, chmod, rm, network, and git push.
+- critical: destructive commands outside workspace or secret exfiltration patterns.
+
+Git operations:
+
+- status, diff, log are safe reads.
+- add, commit, restore, stash require confirmation metadata.
+- push requires network approval and audit.
+
+Output is summarized for UI while raw output remains available in run history.
