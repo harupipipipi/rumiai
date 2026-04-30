@@ -16,6 +16,13 @@ type BrowserApproval = {
   token: string;
 };
 
+type PendingChatRequest = {
+  conversationId: string;
+  startedAt: number;
+  status: string;
+  toolNames: string[];
+};
+
 function useLocalStorage<T>(key: string, defaultValue: T): [T, (v: T | ((prev: T) => T)) => void] {
   const [value, setValue] = useState<T>(() => {
     try {
@@ -31,6 +38,14 @@ function useLocalStorage<T>(key: string, defaultValue: T): [T, (v: T | ((prev: T
   }, [key, value]);
 
   return [value, setValue];
+}
+
+function writeJsonLocalStorage<T>(key: string, value: T) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Storage may be unavailable in restricted browser contexts.
+  }
 }
 
 function formatBoardDate(updatedAt: number): string {
@@ -165,13 +180,42 @@ function contextUsageFor(conversation: Conversation | null, profile: ModelProfil
 function composerExtensionItems(items: SidebarItem[]): ComposerExtensionItem[] {
   return items
     .filter((item) => item.category === "tool" || item.category === "capability")
-    .slice(0, 6)
     .map((item) => ({
       id: item.id,
       label: item.label,
       category: item.category,
       description: item.description,
+      tags: item.tags ?? [],
     }));
+}
+
+function chatIdFromLocation(): string | null {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("chat") || null;
+}
+
+function isPendingInLocation(): boolean {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("pending") === "1";
+}
+
+function replaceChatIdInUrl(conversationId: string | null, pending?: boolean) {
+  const url = new URL(window.location.href);
+  if (conversationId) {
+    url.searchParams.set("chat", conversationId);
+  } else {
+    url.searchParams.delete("chat");
+  }
+  if (pending === true) {
+    url.searchParams.set("pending", "1");
+  } else if (pending === false || !conversationId) {
+    url.searchParams.delete("pending");
+  }
+  const next = `${url.pathname}${url.search}${url.hash}`;
+  const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  if (next !== current) {
+    window.history.pushState({ conversationId }, "", next);
+  }
 }
 
 function pendingBrowserApproval(messages: ChatUiMessage[]): BrowserApproval | null {
@@ -213,8 +257,12 @@ export default function App() {
   const [previews, setPreviews] = useState<ToolPreviewItem[]>([]);
   const [health, setHealth] = useState<{ status: string; pack: string; ts: string } | null>(null);
   const [activeSidebarItemId, setActiveSidebarItemId] = useState<string | null>(null);
+  const [sidebarSelectionTick, setSidebarSelectionTick] = useState(0);
   const [yoloMode, setYoloMode] = useLocalStorage("rumi-yolo-mode", false);
+  const pendingStorageKey = "rumi-pending-chat-requests";
+  const [pendingRequests, setPendingRequests] = useLocalStorage<Record<string, PendingChatRequest>>(pendingStorageKey, {});
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const isUnloadingRef = useRef(false);
 
   const sidebarItems: SidebarItem[] = catalog?.sidebar.items ?? [];
   const chatItems = conversations.map(toChatItem);
@@ -230,6 +278,10 @@ export default function App() {
   const selectedThinkingLevel = String(thinkingLevels[profileKey(activeProfile, preferredModel)] ?? activeProfile?.default_thinking_level ?? "medium");
   const contextUsage = contextUsageFor(activeConversation, activeProfile);
   const composerExtensions = composerExtensionItems(sidebarItems);
+  const pendingRequest = activeConversationId ? pendingRequests[activeConversationId] : null;
+  const isConversationPending = Boolean(
+    pendingRequest && Date.now() - pendingRequest.startedAt < 10 * 60_000,
+  );
   const browserApproval = pendingBrowserApproval(messages);
   const composerCommands = [
     {
@@ -244,9 +296,44 @@ export default function App() {
   const showActivityInMessages = settingsValues.general?.show_activity_in_messages !== false;
   const showRegion = (regionId: string) => !catalog?.shell || hasShellRegion(catalog, regionId);
 
+  const updatePendingRequests = (updater: (current: Record<string, PendingChatRequest>) => Record<string, PendingChatRequest>) => {
+    setPendingRequests((current) => {
+      const next = updater(current);
+      writeJsonLocalStorage(pendingStorageKey, next);
+      return next;
+    });
+  };
+
+  const rememberPendingRequest = (request: PendingChatRequest) => {
+    updatePendingRequests((current) => ({
+      ...current,
+      [request.conversationId]: request,
+    }));
+  };
+
+  const forgetPendingRequest = (conversationId: string) => {
+    updatePendingRequests((current) => {
+      const next = { ...current };
+      delete next[conversationId];
+      return next;
+    });
+  };
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isGenerating]);
+
+  useEffect(() => {
+    const markUnloading = () => {
+      isUnloadingRef.current = true;
+    };
+    window.addEventListener("beforeunload", markUnloading);
+    window.addEventListener("pagehide", markUnloading);
+    return () => {
+      window.removeEventListener("beforeunload", markUnloading);
+      window.removeEventListener("pagehide", markUnloading);
+    };
+  }, []);
 
   async function refreshHealth() {
     try {
@@ -290,16 +377,18 @@ export default function App() {
     }
   }
 
-  async function loadConversation(conversationId: string | null) {
+  async function loadConversation(conversationId: string | null, updateUrl = true) {
     if (!conversationId) {
       setActiveConversationId(null);
       setActiveConversation(null);
       await refreshPreview(null);
+      if (updateUrl) replaceChatIdInUrl(null, false);
       return;
     }
     const conversation = await api.getConversation(conversationId);
     setActiveConversationId(conversationId);
     setActiveConversation(conversation);
+    if (updateUrl) replaceChatIdInUrl(conversationId);
     await refreshPreview(conversationId);
   }
 
@@ -307,7 +396,7 @@ export default function App() {
     const result = await api.listConversations();
     setConversations(result.conversations);
 
-    const targetId = preferredId ?? activeConversationId ?? result.conversations[0]?.id ?? null;
+    const targetId = preferredId ?? activeConversationId ?? chatIdFromLocation() ?? result.conversations[0]?.id ?? null;
     if (!targetId) {
       setActiveConversationId(null);
       setActiveConversation(null);
@@ -330,6 +419,15 @@ export default function App() {
       setIsLoading(true);
       try {
         await Promise.all([refreshHealth(), refreshCatalog()]);
+        const pendingConversationId = chatIdFromLocation();
+        if (pendingConversationId && isPendingInLocation()) {
+          rememberPendingRequest({
+            conversationId: pendingConversationId,
+            startedAt: Date.now(),
+            status: "Processing...",
+            toolNames: [],
+          });
+        }
         if (!cancelled) {
           await refreshConversations(null);
         }
@@ -355,15 +453,62 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const handlePopState = () => {
+      setError(null);
+      void loadConversation(chatIdFromLocation(), false).catch((loadError) => {
+        setError(loadError instanceof Error ? loadError.message : "会話の読み込みに失敗しました。");
+      });
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  useEffect(() => {
     if (!activeConversationId) return;
     void refreshPreview(activeConversationId);
   }, [settingsValues.preview?.max_items, settingsValues.preview?.auto_open, activeConversationId]);
+
+  useEffect(() => {
+    if (!activeConversationId || !isConversationPending) return;
+    setIsGenerating(true);
+    const interval = window.setInterval(() => {
+      void api.getConversation(activeConversationId).then((conversation) => {
+        setActiveConversation(conversation);
+        const latest = conversation.messages[conversation.messages.length - 1];
+        if (latest && latest.role !== "user") {
+          forgetPendingRequest(activeConversationId);
+          replaceChatIdInUrl(activeConversationId, false);
+          setIsGenerating(false);
+          void refreshConversations(conversation.id);
+        }
+      }).catch(console.error);
+    }, 1500);
+    return () => window.clearInterval(interval);
+  }, [activeConversationId, isConversationPending]);
+
+  useEffect(() => {
+    const staleIds = Object.entries(pendingRequests)
+      .filter(([, request]) => Date.now() - request.startedAt >= 10 * 60_000)
+      .map(([id]) => id);
+    if (staleIds.length === 0) return;
+    updatePendingRequests((current) => {
+      const next = { ...current };
+      for (const id of staleIds) delete next[id];
+      return next;
+    });
+    if (activeConversationId && staleIds.includes(activeConversationId)) {
+      setIsGenerating(false);
+      replaceChatIdInUrl(activeConversationId, false);
+    }
+  }, [pendingRequests, activeConversationId]);
 
   const handleNewTask = () => {
     setActiveConversationId(null);
     setActiveConversation(null);
     setPreviews([]);
     setError(null);
+    setIsGenerating(false);
+    replaceChatIdInUrl(null, false);
   };
 
   const handleHistoryClick = (conversationId: string) => {
@@ -428,6 +573,7 @@ export default function App() {
 
   const handleComposerExtensionSelect = (item: ComposerExtensionItem) => {
     setActiveSidebarItemId(item.id);
+    setSidebarSelectionTick((value) => value + 1);
   };
 
   const handleComposerCommand = (commandId: string) => {
@@ -516,6 +662,7 @@ export default function App() {
     setIsGenerating(true);
     setError(null);
     setInput("");
+    let submittedConversationId: string | null = null;
 
     try {
       let conversation = activeConversation;
@@ -525,6 +672,14 @@ export default function App() {
         });
         setActiveConversationId(conversation.id);
       }
+      submittedConversationId = conversation.id;
+      rememberPendingRequest({
+        conversationId: conversation.id,
+        startedAt: Date.now(),
+        status: `${activeProfile?.display_name ?? preferredModel} が思考中`,
+        toolNames: composerExtensions.map((item) => item.label || item.id),
+      });
+      replaceChatIdInUrl(conversation.id, true);
 
       const title =
         conversation.title === "New Conversation"
@@ -545,11 +700,12 @@ export default function App() {
         const withoutCurrent = current.filter((candidate) => candidate.id !== conversation.id);
         return [item, ...withoutCurrent];
       });
-
       await api.sendMessage(conversation.id, userText, {
         thinking_level: activeProfile?.supports_thinking ? selectedThinkingLevel : null,
         tool_policy: yoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : undefined,
       });
+      forgetPendingRequest(conversation.id);
+      replaceChatIdInUrl(conversation.id, false);
 
       if (title !== conversation.title) {
         await api.updateConversation(conversation.id, { title });
@@ -558,6 +714,9 @@ export default function App() {
       await refreshConversations(conversation.id);
     } catch (submitError) {
       console.error("Chat error:", submitError);
+      if (submittedConversationId && !isUnloadingRef.current && document.visibilityState !== "hidden") {
+        forgetPendingRequest(submittedConversationId);
+      }
       setInput(userText);
       setError(
         submitError instanceof Error
@@ -606,7 +765,9 @@ export default function App() {
               isMessagesRegionVisible={showRegion("chat_messages")}
               isLoading={isLoading}
               isNewConversation={isNewConversation}
-              isGenerating={isGenerating}
+              isGenerating={isGenerating || isConversationPending}
+              pendingStatus={pendingRequest?.status ?? null}
+              pendingToolNames={pendingRequest?.toolNames ?? []}
               messages={messages}
               messagesEndRef={messagesEndRef}
               unknownBlockStrategy={unknownBlockStrategy}
@@ -637,7 +798,7 @@ export default function App() {
               <Renderers.composer
                 input={input}
                 placeholder={placeholder}
-                isGenerating={isGenerating}
+                isGenerating={isGenerating || isConversationPending}
                 selectedProfile={activeProfile}
                 favoriteProfiles={favoriteProfiles}
                 thinkingLevel={activeProfile?.supports_thinking ? selectedThinkingLevel : null}
@@ -672,7 +833,7 @@ export default function App() {
         {showRegion("right_sidebar") && (
           <Renderers.rightSidebar
             items={sidebarItems}
-            activeItemId={activeSidebarItemId}
+            activeItemId={activeSidebarItemId ? `${activeSidebarItemId}:${sidebarSelectionTick}` : null}
             settingsValues={settingsValues}
             settingsSections={settingsSections}
             onSettingChange={handleSettingChange}

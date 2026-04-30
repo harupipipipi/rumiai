@@ -2,6 +2,7 @@ import { ChevronDown, Folder, Loader2, Mic, Paperclip, Plus, Send, Sparkles, Wre
 import { useMemo, useState } from "react";
 
 import type { ComposerRendererProps } from "./types";
+import type { ComposerExtensionItem } from "./types";
 
 const THINKING_LABELS: Record<string, string> = {
   low: "低",
@@ -15,6 +16,69 @@ function compactProfileName(name: string): string {
     .replace(/^Claude\s+/i, "")
     .replace(/\s*\(.*?\)\s*/g, " ")
     .trim();
+}
+
+type ToolGroup = {
+  id: string;
+  label: string;
+  description: string;
+  items: ComposerExtensionItem[];
+};
+
+function toolGroupFor(item: ComposerExtensionItem): Omit<ToolGroup, "items"> {
+  const haystack = `${item.id} ${item.label} ${item.description ?? ""} ${(item.tags ?? []).join(" ")}`.toLowerCase();
+  if (/(search|research|web|reddit|knowledge|local)/.test(haystack)) {
+    return { id: "research", label: "調べる", description: "web/search/knowledge 系" };
+  }
+  if (/(file|coding|code|artifact|patch|write|create|read)/.test(haystack)) {
+    return { id: "build", label: "作る・編集", description: "ファイル作成、修正、読み取り" };
+  }
+  if (/(browser|computer|screen|screenshot)/.test(haystack)) {
+    return { id: "operate", label: "操作する", description: "browser/computer 操作" };
+  }
+  if (/(terminal|shell|command|git)/.test(haystack)) {
+    return { id: "terminal", label: "コマンド", description: "terminal/git 実行" };
+  }
+  return { id: "other", label: "その他", description: "追加 tool" };
+}
+
+function groupToolItems(items: ComposerExtensionItem[]): ToolGroup[] {
+  const groups = new Map<string, ToolGroup>();
+  for (const item of items) {
+    const meta = toolGroupFor(item);
+    const current = groups.get(meta.id) ?? { ...meta, items: [] };
+    current.items.push(item);
+    groups.set(meta.id, current);
+  }
+  return [...groups.values()].filter((group) => group.items.length > 0);
+}
+
+function ToolItemList({
+  items,
+  onSelect,
+}: {
+  items: ComposerExtensionItem[];
+  onSelect: (item: ComposerExtensionItem) => void;
+}) {
+  if (items.length === 0) {
+    return <div className="px-3 py-2 text-xs text-zinc-500">tool がありません</div>;
+  }
+  return (
+    <div className="grid gap-1">
+      {items.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          disabled={item.disabled}
+          onClick={() => onSelect(item)}
+          className="rounded-lg px-3 py-2 text-left transition-colors hover:bg-zinc-900 disabled:opacity-50"
+        >
+          <span className="block truncate text-sm text-zinc-100">{item.label}</span>
+          {item.description && <span className="block truncate text-[11px] text-zinc-500">{item.description}</span>}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 export function ComposerRenderer({
@@ -38,6 +102,7 @@ export function ComposerRenderer({
 }: ComposerRendererProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [openFolder, setOpenFolder] = useState<"tools" | "models" | "commands">("tools");
+  const [openToolGroup, setOpenToolGroup] = useState<string | null>(null);
   const profileName = selectedProfile?.display_name ?? selectedProfile?.profile_id ?? "model";
   const levels = selectedProfile?.supports_thinking ? (selectedProfile.thinking_levels?.length ? selectedProfile.thinking_levels : ["low", "medium", "high"]) : [];
   const contextDegrees = Math.round(contextUsage.ratio * 360);
@@ -45,6 +110,9 @@ export function ComposerRenderer({
     ? `${contextUsage.usedTokens} tokens / unlimited`
     : `${contextUsage.usedTokens} / ${contextUsage.maxContext || "unknown"} tokens`;
   const toolItems = useMemo(() => [...inlineExtensions, ...belowExtensions], [inlineExtensions, belowExtensions]);
+  const toolGroups = useMemo(() => groupToolItems(toolItems), [toolItems]);
+  const activeToolGroup = toolGroups.find((group) => group.id === openToolGroup) ?? toolGroups[0] ?? null;
+  const showToolGroups = toolItems.length > 4;
   const slashQuery = input.startsWith("/") ? input.slice(1).trim().toLowerCase() : "";
   const matchedCommands = input.startsWith("/")
     ? commands.filter((command) => {
@@ -105,23 +173,38 @@ export function ComposerRenderer({
                   ))}
                 </div>
                 <div className="max-h-72 overflow-y-auto p-2">
-                  {openFolder === "tools" && (
-                    <div className="grid gap-1">
-                      {toolItems.map((item) => (
-                        <button
-                          key={item.id}
-                          type="button"
-                          disabled={item.disabled}
-                          onClick={() => {
-                            onExtensionSelect?.(item);
-                            setMenuOpen(false);
-                          }}
-                          className="rounded-lg px-3 py-2 text-left hover:bg-zinc-900 disabled:opacity-50"
-                        >
-                          <span className="block truncate text-sm text-zinc-100">{item.label}</span>
-                          {item.description && <span className="block truncate text-[11px] text-zinc-500">{item.description}</span>}
-                        </button>
-                      ))}
+                  {openFolder === "tools" && !showToolGroups && (
+                    <ToolItemList items={toolItems} onSelect={(item) => {
+                      onExtensionSelect?.(item);
+                      setMenuOpen(false);
+                    }} />
+                  )}
+                  {openFolder === "tools" && showToolGroups && (
+                    <div className="grid grid-cols-[150px_minmax(0,1fr)] gap-2 max-[640px]:grid-cols-1">
+                      <div className="grid content-start gap-1">
+                        {toolGroups.map((group) => (
+                          <button
+                            key={group.id}
+                            type="button"
+                            onClick={() => setOpenToolGroup(group.id)}
+                            className={`rounded-lg px-3 py-2 text-left transition-colors ${activeToolGroup?.id === group.id ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"}`}
+                          >
+                            <span className="block truncate text-sm">{group.label}</span>
+                            <span className="block truncate text-[10px] text-zinc-500">{group.items.length} tools</span>
+                          </button>
+                        ))}
+                      </div>
+                      <div className="min-w-0">
+                        {activeToolGroup && (
+                          <>
+                            <div className="mb-1.5 px-2 text-[10px] text-zinc-500">{activeToolGroup.description}</div>
+                            <ToolItemList items={activeToolGroup.items} onSelect={(item) => {
+                              onExtensionSelect?.(item);
+                              setMenuOpen(false);
+                            }} />
+                          </>
+                        )}
+                      </div>
                     </div>
                   )}
                   {openFolder === "models" && (

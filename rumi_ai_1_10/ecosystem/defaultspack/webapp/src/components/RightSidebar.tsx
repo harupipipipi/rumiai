@@ -372,8 +372,9 @@ export function RightSidebar({
   const [categoryFilter, setCategoryFilter] = useState<"all" | SidebarCategory>("all");
 
   useEffect(() => {
-    if (activeItemId && items.some((item) => item.id === activeItemId)) {
-      setActivePanel(activeItemId);
+    const requestedId = activeItemId?.split(":").slice(0, -1).join(":") || activeItemId;
+    if (requestedId && items.some((item) => item.id === requestedId)) {
+      setActivePanel(requestedId);
     }
   }, [activeItemId, items]);
 
@@ -396,9 +397,9 @@ export function RightSidebar({
   const activeItem = items.find((item) => item.id === activePanel) ?? null;
 
   return (
-    <aside className="flex-shrink-0 border-l border-zinc-800/60 bg-[#09090b] hidden lg:flex h-full">
+    <aside className="flex-shrink-0 border-l border-zinc-800/60 bg-[#09090b] hidden md:flex h-full transition-[width,opacity] duration-200 ease-out">
       {activeItem && (
-        <div className="w-[280px] flex flex-col border-r border-zinc-800/40 bg-[#0a0a0c]">
+        <div className="w-[260px] xl:w-[280px] flex flex-col border-r border-zinc-800/40 bg-[#0a0a0c] animate-in slide-in-from-right-2 duration-200">
           <div className="h-12 flex items-center justify-between px-3 border-b border-zinc-800/60 flex-shrink-0">
             <div className="flex items-center gap-2 min-w-0 overflow-hidden">
               <div className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", categoryColor(activeItem.category, "bg"))} />
@@ -437,7 +438,7 @@ export function RightSidebar({
             <button
               key={item.id}
               onClick={() => setActivePanel((current) => (current === item.id ? null : item.id))}
-              className={cn("w-10 h-10 rounded-lg flex items-center justify-center relative transition-all group/btn flex-shrink-0", activePanel === item.id ? "bg-zinc-800 text-zinc-100" : "text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800/50")}
+              className={cn("w-10 h-10 rounded-lg flex items-center justify-center relative transition-all duration-150 ease-out group/btn flex-shrink-0 hover:scale-[1.03] active:scale-95", activePanel === item.id ? "bg-zinc-800 text-zinc-100" : "text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800/50")}
               title={item.label}
             >
               {iconForItem(item)}

@@ -27,8 +27,9 @@ function WelcomeScreen({ onSuggestionClick }: { onSuggestionClick: (text: string
           {suggestions.map((suggestion) => (
             <button
               key={suggestion.label}
+              onMouseDown={(event) => event.preventDefault()}
               onClick={() => onSuggestionClick(suggestion.text)}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 hover:border-zinc-700 transition-all text-xs text-zinc-400 hover:text-zinc-200"
+              className="select-none flex items-center gap-1.5 px-3 py-2 rounded-lg border border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 hover:border-zinc-700 transition-all text-xs text-zinc-400 hover:text-zinc-200"
             >
               {suggestion.icon}
               <span>{suggestion.label}</span>
@@ -36,6 +37,45 @@ function WelcomeScreen({ onSuggestionClick }: { onSuggestionClick: (text: string
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+function ActivityTimeline({ message }: { message: { events?: ChatMessagesRendererProps["messages"][number]["events"]; toolLogs?: ChatMessagesRendererProps["messages"][number]["toolLogs"] } }) {
+  const eventItems = (message.events ?? [])
+    .filter((event) => event.phase === "tool_call" || event.phase === "tool_result" || event.phase === "tools_attached" || event.phase === "thinking")
+    .map((event, index) => ({
+      id: `event-${index}`,
+      label: event.message || event.phase || event.type,
+      muted: event.phase === "tool_result",
+    }));
+  const loggedNames = new Set(eventItems.map((item) => item.label));
+  const logItems = (message.toolLogs ?? [])
+    .map((log, index) => ({
+      id: `log-${index}`,
+      label: `${log.tool_name ?? "tool"} を使用しました`,
+      muted: true,
+    }))
+    .filter((item) => !loggedNames.has(item.label));
+  const items = [...eventItems, ...logItems].slice(0, 8);
+  if (items.length === 0) return null;
+
+  return (
+    <div className="mb-2 flex flex-wrap gap-1.5">
+      {items.map((item) => (
+        <span
+          key={item.id}
+          className={cn(
+            "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px]",
+            item.muted
+              ? "border-zinc-800 bg-zinc-900/40 text-zinc-500"
+              : "border-emerald-500/20 bg-emerald-500/10 text-emerald-300",
+          )}
+        >
+          <Activity size={9} />
+          <span className="max-w-[220px] truncate">{item.label}</span>
+        </span>
+      ))}
     </div>
   );
 }
@@ -92,6 +132,8 @@ export function ChatMessagesRenderer({
   isLoading,
   isNewConversation,
   isGenerating,
+  pendingStatus,
+  pendingToolNames = [],
   messages,
   messagesEndRef,
   unknownBlockStrategy,
@@ -141,6 +183,7 @@ export function ChatMessagesRenderer({
                         <span>{message.metadata.toolUsed}</span>
                       </div>
                     )}
+                    {message.role === "agent" && showActivityInMessages && <ActivityTimeline message={message} />}
 
                     <div className="markdown-body text-[13px] leading-relaxed break-words space-y-3">
                       {message.content.length > 0
@@ -163,9 +206,25 @@ export function ChatMessagesRenderer({
                     <Zap size={10} className="fill-black" />
                   </div>
                 </div>
-                <div className="text-zinc-400 text-[13px] flex items-center gap-2">
-                  <Loader2 size={12} className="animate-spin" />
-                  Processing...
+                <div className="text-zinc-400 text-[13px] flex flex-col gap-1">
+                  <div className="flex items-center gap-2">
+                    <Loader2 size={12} className="animate-spin" />
+                    <span>{pendingStatus || "Processing..."}</span>
+                  </div>
+                  {pendingToolNames.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 pl-5">
+                      {pendingToolNames.slice(0, 4).map((name) => (
+                        <span key={name} className="rounded-full border border-zinc-800 bg-zinc-900/50 px-2 py-0.5 text-[10px] text-zinc-500">
+                          {name}
+                        </span>
+                      ))}
+                      {pendingToolNames.length > 4 && (
+                        <span className="rounded-full border border-zinc-800 bg-zinc-900/50 px-2 py-0.5 text-[10px] text-zinc-500">
+                          +{pendingToolNames.length - 4}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             )}

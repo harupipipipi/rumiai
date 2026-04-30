@@ -26,6 +26,7 @@ export type ComposerExtensionItem = {
   label: string;
   category?: string;
   description?: string;
+  tags?: string[];
   disabled?: boolean;
 };
 
@@ -74,6 +75,8 @@ export type ChatMessagesRendererProps = {
   isLoading: boolean;
   isNewConversation: boolean;
   isGenerating: boolean;
+  pendingStatus?: string | null;
+  pendingToolNames?: string[];
   messages: ChatUiMessage[];
   messagesEndRef: MutableRefObject<HTMLDivElement | null>;
   unknownBlockStrategy: string;
