@@ -155,37 +155,42 @@ export function ChatMessagesRenderer({
         <div className="flex-1 overflow-y-auto px-4 py-3">
           <div className="max-w-3xl mx-auto space-y-4">
             {messages.map((message) => (
-              <div key={message.id} className={cn("flex gap-2.5", message.role === "user" ? "flex-row-reverse" : "")}>
+              <div key={message.id} className={cn("flex gap-3", message.role === "user" ? "flex-row-reverse" : "")}>
                 {message.role === "agent" && (
-                  <div className="flex-shrink-0 mt-1">
-                    <div className="w-5 h-5 rounded bg-white text-black flex items-center justify-center">
-                      <Zap size={10} className="fill-black" />
+                  <div className="flex-shrink-0 mt-1 shadow-sm rounded-full bg-gradient-to-tr from-zinc-800 to-zinc-700 p-[1px]">
+                    <div className="w-8 h-8 rounded-full bg-zinc-950 flex items-center justify-center">
+                      <Zap size={14} className="text-zinc-200 fill-zinc-200" />
                     </div>
                   </div>
                 )}
 
-                <div className={cn("flex flex-col min-w-0", message.role === "user" ? "items-end max-w-[75%]" : "items-start flex-1")}>
+                <div className={cn("flex flex-col min-w-0 pt-1", message.role === "user" ? "items-end max-w-[80%]" : "items-start flex-1")}>
                   {message.role === "agent" && (
-                    <div className="flex items-center gap-1.5 mb-0.5">
-                      <span className="text-[10px] font-medium text-zinc-500">Rumi</span>
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="text-xs font-semibold text-zinc-300 tracking-wide">Rumi</span>
                       {message.metadata?.executionTime && (
-                        <span className="text-[9px] text-zinc-600 font-mono flex items-center gap-0.5">
-                          <Clock size={8} /> {message.metadata.executionTime}
+                        <span className="text-[10px] text-zinc-500 font-mono flex items-center gap-1">
+                          <Clock size={10} /> {message.metadata.executionTime}
                         </span>
                       )}
                     </div>
                   )}
 
-                  <div className={cn("rounded-lg max-w-full", message.role === "user" ? "bg-zinc-800 text-zinc-100 px-3 py-2 rounded-tr-sm text-[13px]" : "text-zinc-300")}>
+                  <div className={cn(
+                    "rounded-2xl max-w-full sm:px-4 px-3 py-3 text-[14px]", 
+                    message.role === "user" 
+                      ? "bg-zinc-800/80 text-zinc-100 rounded-tr-sm shadow-sm border border-zinc-700/50" 
+                      : "text-zinc-200 bg-transparent"
+                  )}>
                     {message.role === "agent" && showActivityInMessages && message.metadata?.toolUsed && (
-                      <div className="flex items-center gap-1 text-[10px] text-zinc-500 mb-1 font-mono">
-                        <Activity size={9} />
+                      <div className="flex items-center gap-1.5 text-[11px] text-zinc-400 mb-2 font-mono bg-zinc-900/50 inline-flex px-2 py-1 rounded-md border border-zinc-800/50">
+                        <Activity size={10} />
                         <span>{message.metadata.toolUsed}</span>
                       </div>
                     )}
                     {message.role === "agent" && showActivityInMessages && <ActivityTimeline message={message} />}
 
-                    <div className="markdown-body text-[13px] leading-relaxed break-words space-y-3">
+                    <div className="markdown-body leading-relaxed break-words space-y-4">
                       {message.content.length > 0
                         ? message.content.map((block, index) => (
                             <MessageBlock key={`${message.id}-${index}`} block={block} unknownStrategy={unknownBlockStrategy} />
@@ -200,16 +205,15 @@ export function ChatMessagesRenderer({
             ))}
 
             {isGenerating && (
-              <div className="flex gap-2.5">
-                <div className="flex-shrink-0 mt-1">
-                  <div className="w-5 h-5 rounded bg-white text-black flex items-center justify-center">
-                    <Zap size={10} className="fill-black" />
+              <div className="flex gap-3">
+                <div className="flex-shrink-0 mt-1 shadow-sm rounded-full bg-gradient-to-tr from-zinc-800 to-zinc-700 p-[1px]">
+                  <div className="w-8 h-8 rounded-full bg-zinc-950 flex items-center justify-center">
+                    <Loader2 size={14} className="text-zinc-400 animate-spin" />
                   </div>
                 </div>
-                <div className="text-zinc-400 text-[13px] flex flex-col gap-1">
+                <div className="text-zinc-400 text-[13px] flex flex-col gap-1 mt-1.5">
                   <div className="flex items-center gap-2">
-                    <Loader2 size={12} className="animate-spin" />
-                    <span>{pendingStatus || "Processing..."}</span>
+                    <span className="animate-pulse">{pendingStatus || "Processing..."}</span>
                   </div>
                   {pendingToolNames.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 pl-5">
