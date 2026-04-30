@@ -509,16 +509,14 @@ export default function App() {
 
       <div className="flex flex-1 min-h-0">
         {showRegion("history") && (
-          <div className="hidden lg:flex min-h-0">
-            <Renderers.historyBoard
-              activeChatId={activeConversationId}
-              chatItems={chatItems}
-              account={catalog?.app?.account}
-              onChatSelect={handleHistoryClick}
-              onNewTask={handleNewTask}
-              onSettingsClick={() => setIsSettingsOpen(true)}
-            />
-          </div>
+          <Renderers.historyBoard
+            activeChatId={activeConversationId}
+            chatItems={chatItems}
+            account={catalog?.app?.account}
+            onChatSelect={handleHistoryClick}
+            onNewTask={handleNewTask}
+            onSettingsClick={() => setIsSettingsOpen(true)}
+          />
         )}
 
         <main className="flex-1 flex min-w-0 bg-[#09090b] relative">
@@ -580,16 +578,14 @@ export default function App() {
         </main>
 
         {showRegion("right_sidebar") && (
-          <div className="hidden 2xl:flex min-h-0">
-            <Renderers.rightSidebar
-              items={sidebarItems}
-              settingsValues={settingsValues}
-              settingsSections={settingsSections}
-              onSettingChange={handleSettingChange}
-              onOpenSettings={() => setIsSettingsOpen(true)}
-              onPanelAction={handlePanelAction}
-            />
-          </div>
+          <Renderers.rightSidebar
+            items={sidebarItems}
+            settingsValues={settingsValues}
+            settingsSections={settingsSections}
+            onSettingChange={handleSettingChange}
+            onOpenSettings={() => setIsSettingsOpen(true)}
+            onPanelAction={handlePanelAction}
+          />
         )}
       </div>
 

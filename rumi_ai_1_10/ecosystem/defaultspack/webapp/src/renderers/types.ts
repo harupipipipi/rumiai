@@ -12,6 +12,7 @@ export type ChatUiMessage = {
   widget?: Record<string, unknown> | null;
   metadata?: {
     executionTime?: string;
+    toolUsed?: string;
     modelName?: string;
     thinkingLabel?: string;
     attachedToolCount?: number;

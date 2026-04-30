@@ -1,4 +1,4 @@
-import { Activity, Clock, FileText, Globe, Image as ImageIcon, Loader2, Sparkles, Terminal, Wrench } from "lucide-react";
+import { Activity, Clock, FileText, Globe, Image as ImageIcon, Loader2, Sparkles, Terminal, Zap } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 
 import { cn } from "../lib/cn";
@@ -17,6 +17,9 @@ function WelcomeScreen({ onSuggestionClick }: { onSuggestionClick: (text: string
     <div className="flex-1 flex items-center justify-center px-5">
       <div className="max-w-md w-full text-center">
         <div className="mb-6">
+          <div className="w-9 h-9 rounded-lg bg-white text-black flex items-center justify-center mx-auto mb-3">
+            <Zap size={18} className="fill-black" />
+          </div>
           <h1 className="text-xl font-semibold text-zinc-100 mb-1">何を作りましょうか？</h1>
           <p className="text-xs text-zinc-500">registry から拡張される chat shell</p>
         </div>
@@ -83,35 +86,6 @@ function WidgetCard({ widget }: { widget: Record<string, unknown> }) {
   );
 }
 
-function ActivityRows({ message }: { message: ChatMessagesRendererProps["messages"][number] }) {
-  const events = message.events ?? [];
-  const toolLogs = message.toolLogs ?? [];
-  if (events.length === 0 && toolLogs.length === 0 && !message.metadata?.attachedToolCount) return null;
-
-  return (
-    <div className="mb-2 space-y-1 text-[12px] text-zinc-500">
-      {message.metadata?.attachedToolCount ? (
-        <div className="inline-flex items-center gap-1.5">
-          <Wrench size={12} />
-          <span>{message.metadata.attachedToolCount} tools connected</span>
-        </div>
-      ) : null}
-      {events.map((event, index) => (
-        <div key={`${message.id}-event-${index}`} className="flex items-center gap-1.5">
-          {event.type === "tool_call" || event.type === "tool_result" ? <Wrench size={12} /> : <Activity size={12} />}
-          <span>{event.message || event.phase || event.type}</span>
-        </div>
-      ))}
-      {toolLogs.map((log, index) => (
-        <details key={`${message.id}-tool-${index}`} className="rounded-md border border-zinc-800 bg-zinc-900/50 px-2 py-1">
-          <summary className="cursor-pointer text-zinc-400">{log.tool_name || "tool"} log</summary>
-          <pre className="mt-1 overflow-x-auto text-[11px] text-zinc-500">{JSON.stringify(log, null, 2)}</pre>
-        </details>
-      ))}
-    </div>
-  );
-}
-
 export function ChatMessagesRenderer({
   error,
   isMessagesRegionVisible,
@@ -139,13 +113,21 @@ export function ChatMessagesRenderer({
         <div className="flex-1 overflow-y-auto px-4 py-3">
           <div className="max-w-3xl mx-auto space-y-4">
             {messages.map((message) => (
-              <div key={message.id} className={cn("flex", message.role === "user" ? "justify-end" : "justify-start")}>
+              <div key={message.id} className={cn("flex gap-2.5", message.role === "user" ? "flex-row-reverse" : "")}>
+                {message.role === "agent" && (
+                  <div className="flex-shrink-0 mt-1">
+                    <div className="w-5 h-5 rounded bg-white text-black flex items-center justify-center">
+                      <Zap size={10} className="fill-black" />
+                    </div>
+                  </div>
+                )}
+
                 <div className={cn("flex flex-col min-w-0", message.role === "user" ? "items-end max-w-[75%]" : "items-start flex-1")}>
                   {message.role === "agent" && (
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <span className="text-[12px] font-medium text-zinc-400">{message.metadata?.modelName || "Rumi"}</span>
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      <span className="text-[10px] font-medium text-zinc-500">Rumi</span>
                       {message.metadata?.executionTime && (
-                        <span className="text-[10px] text-zinc-600 font-mono flex items-center gap-0.5">
+                        <span className="text-[9px] text-zinc-600 font-mono flex items-center gap-0.5">
                           <Clock size={8} /> {message.metadata.executionTime}
                         </span>
                       )}
@@ -153,7 +135,12 @@ export function ChatMessagesRenderer({
                   )}
 
                   <div className={cn("rounded-lg max-w-full", message.role === "user" ? "bg-zinc-800 text-zinc-100 px-3 py-2 rounded-tr-sm text-[13px]" : "text-zinc-300")}>
-                    {message.role === "agent" && showActivityInMessages && <ActivityRows message={message} />}
+                    {message.role === "agent" && showActivityInMessages && message.metadata?.toolUsed && (
+                      <div className="flex items-center gap-1 text-[10px] text-zinc-500 mb-1 font-mono">
+                        <Activity size={9} />
+                        <span>{message.metadata.toolUsed}</span>
+                      </div>
+                    )}
 
                     <div className="markdown-body text-[13px] leading-relaxed break-words space-y-3">
                       {message.content.length > 0
@@ -170,10 +157,15 @@ export function ChatMessagesRenderer({
             ))}
 
             {isGenerating && (
-              <div className="flex justify-start">
+              <div className="flex gap-2.5">
+                <div className="flex-shrink-0 mt-1">
+                  <div className="w-5 h-5 rounded bg-white text-black flex items-center justify-center">
+                    <Zap size={10} className="fill-black" />
+                  </div>
+                </div>
                 <div className="text-zinc-400 text-[13px] flex items-center gap-2">
-                  <Loader2 size={13} className="animate-spin" />
-                  <span>思考中</span>
+                  <Loader2 size={12} className="animate-spin" />
+                  Processing...
                 </div>
               </div>
             )}
