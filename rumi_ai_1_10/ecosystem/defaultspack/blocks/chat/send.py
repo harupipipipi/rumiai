@@ -42,7 +42,7 @@ def _has_real_provider(client, model):
     return not isinstance(provider, StubProvider)
 
 
-def _ai_direct_complete(model, messages):
+def _ai_direct_complete(model, messages, tools=None, params=None):
     """AIClient を直接呼び出して complete を実行する。
     APIキー未設定等で実プロバイダーがない場合は明示的エラーを返す。
 
@@ -54,7 +54,7 @@ def _ai_direct_complete(model, messages):
         client = AIClient()
         if not _has_real_provider(client, model):
             return None, "AI provider API key not configured"
-        response = client.complete(model, messages)
+        response = client.complete(model, messages, tools or [], params or {})
         return response, None
     except RuntimeError as exc:
         return None, "AI request failed: " + str(exc)
@@ -108,6 +108,35 @@ def _tool_arguments(block):
     return value if isinstance(value, dict) else {}
 
 
+def _append_assistant_tool_use_message(messages, tool_uses):
+    tool_calls = []
+    for block in tool_uses:
+        tool_name = str(block.get("name") or block.get("tool_name") or "")
+        if not tool_name:
+            continue
+        tool_call_id = str(block.get("id") or block.get("tool_call_id") or gen_id())
+        arguments = _tool_arguments(block)
+        tool_calls.append(
+            {
+                "id": tool_call_id,
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "arguments": json.dumps(arguments, ensure_ascii=False),
+                },
+            }
+        )
+    if not tool_calls:
+        return
+    messages.append(
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": tool_calls,
+        }
+    )
+
+
 def _append_tool_result_message(messages, tool_name, result, tool_call_id=""):
     result_text = ""
     if isinstance(result, dict):
@@ -123,9 +152,35 @@ def _append_tool_result_message(messages, tool_name, result, tool_call_id=""):
             "role": "tool",
             "name": tool_name,
             "tool_call_id": tool_call_id,
-            "content": [{"type": "tool_result", "tool_name": tool_name, "text": result_text}],
+            "content": result_text,
         }
     )
+
+
+def _tool_visibility_message(tools):
+    names = []
+    for tool in tools or []:
+        name = tool_name_from_definition(tool)
+        if not name:
+            continue
+        description = ""
+        if isinstance(tool, dict):
+            function_def = tool.get("function")
+            if isinstance(function_def, dict):
+                description = str(function_def.get("description") or "")
+            description = description or str(tool.get("description") or tool.get("summary") or "")
+        label = name if not description else "{}: {}".format(name, description)
+        names.append(label)
+    if not names:
+        return None
+    return {
+        "role": "system",
+        "content": (
+            "Available tools are connected for this turn. "
+            "Use them when they are relevant, and do not claim that no tools are available. "
+            "Connected tools: " + "; ".join(names)
+        ),
+    }
 
 
 def _complete_with_tools(model, messages, tools, context, call_handler, params):
@@ -142,6 +197,10 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
         )
 
     working_messages = list(messages)
+    tool_context_message = _tool_visibility_message(tools)
+    if tool_context_message is not None:
+        insert_at = 1 if working_messages and working_messages[0].get("role") == "system" else 0
+        working_messages.insert(insert_at, tool_context_message)
     response = None
     limit = max_tool_calls(context or {})
     if limit is None:
@@ -163,7 +222,7 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
             if isinstance(response, dict) and response.get("status") == "ok":
                 response = response.get("data", {})
         else:
-            response, ai_error = _ai_direct_complete(model, working_messages)
+            response, ai_error = _ai_direct_complete(model, working_messages, tools, params)
             if ai_error is not None:
                 raise RuntimeError(ai_error)
 
@@ -173,6 +232,7 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
         if not tool_uses or step_index >= limit:
             break
 
+        _append_assistant_tool_use_message(working_messages, tool_uses)
         for block in tool_uses:
             tool_name = str(block.get("name") or block.get("tool_name") or "")
             if not tool_name:

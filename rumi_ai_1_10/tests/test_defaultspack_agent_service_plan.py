@@ -130,6 +130,112 @@ def test_chat_send_attaches_tools_and_persists_activity_events(tmp_path, monkeyp
     ChatStore._instance = None
 
 
+def test_direct_chat_completion_forwards_tools_and_tool_context(monkeypatch):
+    import blocks.chat.send as send
+
+    captured = {}
+
+    class DummyClient:
+        def resolve_provider(self, model):
+            return object(), model
+
+        def complete(self, model, messages, tools=None, params=None):
+            captured["model"] = model
+            captured["messages"] = messages
+            captured["tools"] = tools
+            captured["params"] = params
+            return {
+                "content": [{"type": "text", "text": "ok"}],
+                "finish_reason": "stop",
+                "usage": {},
+            }
+
+    monkeypatch.setattr(send, "AIClient", DummyClient)
+
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "calculator",
+                "description": "Evaluate arithmetic.",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
+    response = send._complete_with_tools(
+        "openrouter/test-model",
+        [{"role": "user", "content": "2+2"}],
+        tools,
+        {},
+        None,
+        {"temperature": 0},
+    )
+
+    assert captured["tools"] == tools
+    assert captured["params"]["temperature"] == 0
+    assert "calculator" in captured["messages"][0]["content"]
+    assert response["metadata"]["attached_tools"] == ["calculator"]
+
+
+def test_chat_tool_loop_replays_openai_tool_call_messages():
+    import blocks.chat.send as send
+
+    seen_messages = []
+
+    def call_handler(name, payload):
+        if name == "defaults.ai.complete":
+            seen_messages.append(payload["messages"])
+            if len(seen_messages) == 1:
+                return {
+                    "status": "ok",
+                    "data": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "call_1",
+                                "name": "calculator",
+                                "input": "{\"expression\":\"2+2\"}",
+                            }
+                        ],
+                        "finish_reason": "tool_calls",
+                    },
+                }
+            return {
+                "status": "ok",
+                "data": {
+                    "content": [{"type": "text", "text": "tool result used"}],
+                    "finish_reason": "stop",
+                },
+            }
+        if name == "defaults.tool.invoke":
+            return {"status": "ok", "data": {"result": "4"}}
+        raise AssertionError(name)
+
+    response = send._complete_with_tools(
+        "openrouter/test-model",
+        [{"role": "user", "content": "2+2"}],
+        [{"type": "function", "function": {"name": "calculator", "parameters": {"type": "object"}}}],
+        {},
+        call_handler,
+        {"max_tool_calls": 3},
+    )
+
+    assert response["content"][0]["text"] == "tool result used"
+    assert seen_messages[1][-2]["role"] == "assistant"
+    assert seen_messages[1][-2]["tool_calls"][0]["function"]["name"] == "calculator"
+    assert seen_messages[1][-1]["role"] == "tool"
+    assert seen_messages[1][-1]["tool_call_id"] == "call_1"
+
+
+def test_builtin_calculator_returns_real_arithmetic_result():
+    from domain.tool.executor import ToolExecutor
+
+    result = ToolExecutor().execute("calculator", {"expression": "2 + 2 * 3"}, {})
+
+    assert result["is_error"] is False
+    assert result["result"] == "Calculated: 2 + 2 * 3 = 8"
+
+
 def test_fallback_routes_expose_agent_service_and_coding_surfaces():
     from ecosystem.defaultspack.transport.registry import _FALLBACK_HTTP_ROUTE_SPECS
 

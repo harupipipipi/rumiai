@@ -134,6 +134,25 @@ class OpenAIProvider(BaseProvider):
         for msg in messages:
             role = msg.get("role", "user")
             content = msg.get("content", "")
+            if role == "assistant" and msg.get("tool_calls"):
+                converted.append(
+                    {
+                        "role": "assistant",
+                        "content": content if isinstance(content, str) else "",
+                        "tool_calls": msg.get("tool_calls", []),
+                    }
+                )
+                continue
+            if role == "tool":
+                converted.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": msg.get("tool_call_id", ""),
+                        "name": msg.get("name", ""),
+                        "content": content if isinstance(content, str) else json.dumps(content, ensure_ascii=False),
+                    }
+                )
+                continue
             if isinstance(content, list):
                 parts = []
                 for c in content:

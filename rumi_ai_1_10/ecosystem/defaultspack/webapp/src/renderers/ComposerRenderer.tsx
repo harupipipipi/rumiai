@@ -41,13 +41,13 @@ export function ComposerRenderer({
   return (
     <div className="px-5 pb-5 pt-2 bg-[#09090b] flex-shrink-0 max-[640px]:px-2 max-[640px]:pb-2">
       <div className="max-w-5xl mx-auto">
-        <form onSubmit={onSubmit} className="relative flex flex-col bg-[#2b2b2d] border border-zinc-700/30 rounded-[28px] overflow-hidden shadow-2xl shadow-black/20 focus-within:border-zinc-500/60 transition-colors max-[640px]:rounded-2xl">
+        <form onSubmit={onSubmit} className="relative flex flex-col bg-[#2b2b2d] border border-zinc-700/30 rounded-[24px] overflow-hidden shadow-2xl shadow-black/20 focus-within:border-zinc-500/60 transition-colors max-[640px]:rounded-2xl">
           <textarea
             value={input}
             onChange={(event) => onInputChange(event.target.value)}
             placeholder={placeholder}
             disabled={isGenerating}
-            className="w-full bg-transparent border-none outline-none text-zinc-100 px-7 pt-7 pb-3 text-[16px] resize-none min-h-[96px] max-h-[220px] placeholder:text-zinc-500 disabled:opacity-50 max-[640px]:min-h-[56px] max-[640px]:px-3 max-[640px]:pt-3 max-[640px]:pb-1 max-[640px]:text-[13px]"
+            className="w-full bg-transparent border-none outline-none text-zinc-100 px-6 pt-5 pb-2 text-[16px] resize-none min-h-[66px] max-h-[150px] placeholder:text-zinc-500 disabled:opacity-50 max-[640px]:min-h-[46px] max-[640px]:px-3 max-[640px]:pt-3 max-[640px]:pb-1 max-[640px]:text-[13px]"
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
@@ -55,12 +55,12 @@ export function ComposerRenderer({
               }
             }}
           />
-          <div className="flex flex-col gap-3 px-5 pb-4 pt-1 sm:flex-row sm:items-center sm:justify-between max-[640px]:flex-row max-[640px]:items-center max-[640px]:gap-1.5 max-[640px]:px-2 max-[640px]:pb-2">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <button type="button" disabled={isGenerating} title="追加" className="h-9 w-9 flex items-center justify-center text-zinc-300 hover:text-zinc-50 hover:bg-zinc-700/70 rounded-full transition-colors disabled:opacity-50 max-[640px]:h-7 max-[640px]:w-7">
+          <div className="flex items-center justify-between gap-2 px-4 pb-3 pt-0 max-[640px]:gap-1.5 max-[640px]:px-2 max-[640px]:pb-2">
+            <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
+              <button type="button" disabled={isGenerating} title="追加" className="h-8 w-8 flex flex-shrink-0 items-center justify-center text-zinc-300 hover:text-zinc-50 hover:bg-zinc-700/70 rounded-full transition-colors disabled:opacity-50 max-[640px]:h-7 max-[640px]:w-7">
                 <Plus size={20} />
               </button>
-              <button type="button" disabled={isGenerating} title="添付" className="h-9 w-9 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/70 rounded-full transition-colors disabled:opacity-50 max-[640px]:hidden">
+              <button type="button" disabled={isGenerating} title="添付" className="h-8 w-8 flex flex-shrink-0 items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/70 rounded-full transition-colors disabled:opacity-50 max-[640px]:hidden">
                 <Paperclip size={18} />
               </button>
               {inlineExtensions.map((item) => (
@@ -69,17 +69,17 @@ export function ComposerRenderer({
                   type="button"
                   disabled={isGenerating || item.disabled}
                   title={item.description ?? item.label}
-                  className="hidden h-8 max-w-[140px] truncate rounded-full border border-zinc-700/70 px-3 text-[12px] text-zinc-300 hover:bg-zinc-700/60 hover:text-zinc-50 disabled:opacity-50 sm:inline-flex sm:items-center"
+                  className="hidden h-7 max-w-[120px] flex-shrink truncate rounded-full border border-zinc-700/70 px-2.5 text-[12px] text-zinc-300 hover:bg-zinc-700/60 hover:text-zinc-50 disabled:opacity-50 lg:inline-flex lg:items-center"
                 >
                   {item.label}
                 </button>
               ))}
-              <button type="button" disabled={isGenerating} title="音声入力" className="h-9 w-9 flex items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/70 rounded-full transition-colors disabled:opacity-50 max-[640px]:hidden">
+              <button type="button" disabled={isGenerating} title="音声入力" className="h-8 w-8 flex flex-shrink-0 items-center justify-center text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/70 rounded-full transition-colors disabled:opacity-50 max-[640px]:hidden">
                 <Mic size={18} />
               </button>
             </div>
-            <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2 max-[640px]:gap-1">
-              <div title={contextTitle} className="h-6 w-6 rounded-full p-[3px] max-[640px]:hidden" style={{ background: `conic-gradient(#a1a1aa ${contextDegrees}deg, #52525b ${contextDegrees}deg)` }}>
+            <div className="flex flex-shrink-0 items-center justify-end gap-1.5">
+              <div title={contextTitle} className="h-6 w-6 flex-shrink-0 rounded-full p-[3px] max-[640px]:hidden" style={{ background: `conic-gradient(#a1a1aa ${contextDegrees}deg, #52525b ${contextDegrees}deg)` }}>
                 <div className="h-full w-full rounded-full bg-[#2b2b2d]" />
               </div>
               {favoriteProfiles.length > 1 ? (
@@ -87,7 +87,7 @@ export function ComposerRenderer({
                   value={selectedProfile?.profile_id ?? selectedProfile?.qualified_model_id ?? ""}
                   onChange={(event) => onModelProfileSelect(event.target.value)}
                   disabled={isGenerating}
-                  className="max-w-[180px] bg-transparent text-[15px] font-semibold text-zinc-100 outline-none disabled:opacity-50 max-[640px]:hidden"
+                  className="max-w-[170px] bg-transparent text-[14px] font-semibold text-zinc-100 outline-none disabled:opacity-50 max-[640px]:hidden"
                   title="モデルプロファイル"
                 >
                   {favoriteProfiles.map((profile) => (
@@ -97,7 +97,7 @@ export function ComposerRenderer({
                   ))}
                 </select>
               ) : (
-                <span className="max-w-[160px] truncate text-[15px] font-semibold text-zinc-100 max-[640px]:hidden" title={profileName}>
+                <span className="max-w-[150px] truncate text-[14px] font-semibold text-zinc-100 max-[640px]:hidden" title={profileName}>
                   {compactProfileName(profileName)}
                 </span>
               )}
@@ -106,7 +106,7 @@ export function ComposerRenderer({
                   value={thinkingLevel ?? levels[0]}
                   onChange={(event) => onThinkingLevelChange(event.target.value)}
                   disabled={isGenerating}
-                  className="bg-transparent text-[15px] text-zinc-300 outline-none disabled:opacity-50 max-[640px]:hidden"
+                  className="bg-transparent text-[14px] text-zinc-300 outline-none disabled:opacity-50 max-[640px]:hidden"
                   title="Thinking level"
                 >
                   {levels.map((level) => (
@@ -117,7 +117,7 @@ export function ComposerRenderer({
                 </select>
               )}
               <ChevronDown size={16} className="text-zinc-400 max-[640px]:hidden" />
-              <button type="submit" disabled={!input.trim() || isGenerating} title="送信" className="flex items-center justify-center w-11 h-11 bg-zinc-200 text-black rounded-full disabled:opacity-30 disabled:cursor-not-allowed hover:bg-white transition-colors max-[640px]:h-8 max-[640px]:w-8">
+              <button type="submit" disabled={!input.trim() || isGenerating} title="送信" className="flex flex-shrink-0 items-center justify-center w-10 h-10 bg-zinc-200 text-black rounded-full disabled:opacity-30 disabled:cursor-not-allowed hover:bg-white transition-colors max-[640px]:h-8 max-[640px]:w-8">
                 {isGenerating ? <Loader2 size={18} className="animate-spin" /> : <Send size={20} />}
               </button>
             </div>

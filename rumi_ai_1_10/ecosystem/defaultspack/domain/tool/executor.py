@@ -243,8 +243,15 @@ class ToolExecutor:
             }
         elif tool_name == "calculator":
             expression = arguments.get("expression", "")
+            calculation = _safe_calculate(expression)
+            if calculation["is_error"]:
+                return {
+                    "result": calculation["error"],
+                    "is_error": True,
+                    "widget": None,
+                }
             return {
-                "result": "Calculated: {} = (stub)".format(expression),
+                "result": "Calculated: {} = {}".format(expression, calculation["result"]),
                 "is_error": False,
                 "widget": None
             }
@@ -261,3 +268,42 @@ class ToolExecutor:
                 "is_error": False,
                 "widget": None
             }
+
+
+def _safe_calculate(expression):
+    import ast
+    import operator
+
+    operators = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.FloorDiv: operator.floordiv,
+        ast.Mod: operator.mod,
+        ast.Pow: operator.pow,
+        ast.USub: operator.neg,
+        ast.UAdd: operator.pos,
+    }
+
+    def evaluate(node):
+        if isinstance(node, ast.Expression):
+            return evaluate(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return node.value
+        if isinstance(node, ast.BinOp) and type(node.op) in operators:
+            left = evaluate(node.left)
+            right = evaluate(node.right)
+            if isinstance(node.op, ast.Pow) and abs(right) > 100:
+                raise ValueError("Exponent is too large")
+            return operators[type(node.op)](left, right)
+        if isinstance(node, ast.UnaryOp) and type(node.op) in operators:
+            return operators[type(node.op)](evaluate(node.operand))
+        raise ValueError("Unsupported calculator expression")
+
+    try:
+        parsed = ast.parse(str(expression or ""), mode="eval")
+        result = evaluate(parsed)
+    except Exception as exc:
+        return {"is_error": True, "error": "Calculator error: {}".format(exc)}
+    return {"is_error": False, "result": result}
