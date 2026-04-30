@@ -353,6 +353,7 @@ function CategorySwitcher({
 
 export function RightSidebar({
   items,
+  activeItemId,
   settingsValues,
   settingsSections,
   onSettingChange,
@@ -360,6 +361,7 @@ export function RightSidebar({
   onPanelAction,
 }: {
   items: SidebarItem[];
+  activeItemId?: string | null;
   settingsValues: Record<string, Record<string, unknown>>;
   settingsSections: SettingsSection[];
   onSettingChange: (sectionId: string, fieldId: string, value: unknown) => void;
@@ -368,6 +370,12 @@ export function RightSidebar({
 }) {
   const [activePanel, setActivePanel] = useState<string | null>(items[0]?.id ?? null);
   const [categoryFilter, setCategoryFilter] = useState<"all" | SidebarCategory>("all");
+
+  useEffect(() => {
+    if (activeItemId && items.some((item) => item.id === activeItemId)) {
+      setActivePanel(activeItemId);
+    }
+  }, [activeItemId, items]);
 
   useEffect(() => {
     if (activePanel && items.some((item) => item.id === activePanel)) {

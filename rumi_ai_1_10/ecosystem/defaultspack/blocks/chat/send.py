@@ -364,9 +364,16 @@ def run(input_data, context):
         standard_messages.insert(0, {"role": "system", "content": system_prompt})
 
     call_handler = context.get("call_handler") if context else None
-    raw_tools, provider_tools, tool_context = _available_tools(context or {}, input_data)
-    tools_called = [tool_name_from_definition(tool) for tool in raw_tools if tool_name_from_definition(tool)]
     params = dict(input_data.get("params") or {})
+    request_context = dict(context or {})
+    tool_policy = params.get("tool_policy")
+    if isinstance(tool_policy, dict):
+        request_context["profile_policy"] = {
+            **(request_context.get("profile_policy") if isinstance(request_context.get("profile_policy"), dict) else {}),
+            **tool_policy,
+        }
+    raw_tools, provider_tools, tool_context = _available_tools(request_context, input_data)
+    tools_called = [tool_name_from_definition(tool) for tool in raw_tools if tool_name_from_definition(tool)]
     try:
         response = _complete_with_tools(
             model,

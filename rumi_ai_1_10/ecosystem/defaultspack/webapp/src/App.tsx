@@ -10,6 +10,12 @@ import { resolveDefaultspackRenderers } from "./renderers/defaultspackRenderers"
 import { RendererBoundary } from "./renderers/trustedRendererLoader";
 import type { ChatUiMessage, ComposerExtensionItem, ContextUsageInfo } from "./renderers/types";
 
+type BrowserApproval = {
+  action: string;
+  payload: Record<string, unknown>;
+  token: string;
+};
+
 function useLocalStorage<T>(key: string, defaultValue: T): [T, (v: T | ((prev: T) => T)) => void] {
   const [value, setValue] = useState<T>(() => {
     try {
@@ -168,6 +174,26 @@ function composerExtensionItems(items: SidebarItem[]): ComposerExtensionItem[] {
     }));
 }
 
+function pendingBrowserApproval(messages: ChatUiMessage[]): BrowserApproval | null {
+  for (const message of [...messages].reverse()) {
+    for (const log of [...(message.toolLogs ?? [])].reverse()) {
+      if (log.tool_name !== "browser_computer") continue;
+      const result = log.result as Record<string, unknown> | undefined;
+      const data = (result?.data ?? result) as Record<string, unknown> | undefined;
+      const widget = data?.widget as Record<string, unknown> | undefined;
+      const candidate = (widget?.requires_approval ? widget : data) as Record<string, unknown> | undefined;
+      if (!candidate?.requires_approval || !candidate.approval_token) continue;
+      const rawPayload = candidate.payload;
+      return {
+        action: String(candidate.action ?? "browser.session"),
+        payload: rawPayload && typeof rawPayload === "object" ? rawPayload as Record<string, unknown> : {},
+        token: String(candidate.approval_token),
+      };
+    }
+  }
+  return null;
+}
+
 export default function App() {
   const [catalog, setCatalog] = useState<UICatalog | null>(null);
   const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
@@ -186,6 +212,8 @@ export default function App() {
   const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
   const [previews, setPreviews] = useState<ToolPreviewItem[]>([]);
   const [health, setHealth] = useState<{ status: string; pack: string; ts: string } | null>(null);
+  const [activeSidebarItemId, setActiveSidebarItemId] = useState<string | null>(null);
+  const [yoloMode, setYoloMode] = useLocalStorage("rumi-yolo-mode", false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const sidebarItems: SidebarItem[] = catalog?.sidebar.items ?? [];
@@ -202,6 +230,15 @@ export default function App() {
   const selectedThinkingLevel = String(thinkingLevels[profileKey(activeProfile, preferredModel)] ?? activeProfile?.default_thinking_level ?? "medium");
   const contextUsage = contextUsageFor(activeConversation, activeProfile);
   const composerExtensions = composerExtensionItems(sidebarItems);
+  const browserApproval = pendingBrowserApproval(messages);
+  const composerCommands = [
+    {
+      id: "yolo",
+      label: "yolo",
+      description: "このチャットの tool 承認を自動化",
+      enabled: yoloMode,
+    },
+  ];
   const unknownBlockStrategy = String(settingsValues.chat_rendering?.unknown_block_strategy ?? "json");
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
   const showActivityInMessages = settingsValues.general?.show_activity_in_messages !== false;
@@ -389,6 +426,37 @@ export default function App() {
     });
   };
 
+  const handleComposerExtensionSelect = (item: ComposerExtensionItem) => {
+    setActiveSidebarItemId(item.id);
+  };
+
+  const handleComposerCommand = (commandId: string) => {
+    if (commandId === "yolo") {
+      setYoloMode((value) => !value);
+    }
+  };
+
+  const approveBrowserAction = async () => {
+    if (!browserApproval) return;
+    setError(null);
+    try {
+      const result = await api.browserComputer(browserApproval.action, {
+        ...browserApproval.payload,
+        approval_token: browserApproval.token,
+      });
+      pushActionPreview(
+        { id: "browser.approval", label: "Approved Browser Action", icon: "browser" },
+        "browser-approval",
+        result,
+      );
+      if (activeConversationId) {
+        await refreshPreview(activeConversationId);
+      }
+    } catch (approvalError) {
+      setError(approvalError instanceof Error ? approvalError.message : "browser/computer の承認に失敗しました。");
+    }
+  };
+
   const pushActionPreview = (action: SidebarAction, title: string, data: unknown) => {
     const preview = previewFromAction(action, title, data);
     setPreviews((current) => [preview, ...current].slice(0, 30));
@@ -480,6 +548,7 @@ export default function App() {
 
       await api.sendMessage(conversation.id, userText, {
         thinking_level: activeProfile?.supports_thinking ? selectedThinkingLevel : null,
+        tool_policy: yoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : undefined,
       });
 
       if (title !== conversation.title) {
@@ -547,6 +616,24 @@ export default function App() {
             />
 
             {showRegion("composer") && (
+              <div className="relative">
+                {browserApproval && !yoloMode && (
+                  <div className="pointer-events-auto absolute bottom-full left-1/2 z-30 mb-2 w-[min(520px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-orange-500/30 bg-zinc-950 p-3 shadow-2xl">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-zinc-100">{browserApproval.action} の承認が必要です</p>
+                        <p className="truncate text-[11px] text-zinc-500">{JSON.stringify(browserApproval.payload)}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={approveBrowserAction}
+                        className="h-8 flex-shrink-0 rounded-lg bg-zinc-100 px-3 text-xs font-semibold text-zinc-950 hover:bg-white"
+                      >
+                        許可
+                      </button>
+                    </div>
+                  </div>
+                )}
               <Renderers.composer
                 input={input}
                 placeholder={placeholder}
@@ -555,13 +642,18 @@ export default function App() {
                 favoriteProfiles={favoriteProfiles}
                 thinkingLevel={activeProfile?.supports_thinking ? selectedThinkingLevel : null}
                 contextUsage={contextUsage}
-                inlineExtensions={composerExtensions.slice(0, 3)}
-                belowExtensions={composerExtensions.slice(3)}
+                inlineExtensions={composerExtensions}
+                belowExtensions={[]}
+                commands={composerCommands}
+                yoloMode={yoloMode}
+                onExtensionSelect={handleComposerExtensionSelect}
+                onCommandSelect={handleComposerCommand}
                 onModelProfileSelect={handleModelProfileSelect}
                 onThinkingLevelChange={handleThinkingLevelChange}
                 onInputChange={setInput}
                 onSubmit={handleSubmit}
               />
+              </div>
             )}
           </div>
 
@@ -580,6 +672,7 @@ export default function App() {
         {showRegion("right_sidebar") && (
           <Renderers.rightSidebar
             items={sidebarItems}
+            activeItemId={activeSidebarItemId}
             settingsValues={settingsValues}
             settingsSections={settingsSections}
             onSettingChange={handleSettingChange}

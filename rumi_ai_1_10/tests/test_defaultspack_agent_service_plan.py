@@ -236,6 +236,50 @@ def test_builtin_calculator_returns_real_arithmetic_result():
     assert result["result"] == "Calculated: 2 + 2 * 3 = 8"
 
 
+def test_coding_tools_are_exposed_through_tool_registry():
+    from domain.tool.registry import ToolRegistry
+
+    ToolRegistry._instance = None
+    registry = ToolRegistry()
+    names = {tool["tool_id"] for tool in registry.list_tools()}
+
+    assert {
+        "coding_file_read",
+        "coding_file_write",
+        "coding_file_patch",
+        "coding_terminal_exec",
+        "coding_git_status",
+    } <= names
+
+
+def test_tool_executor_dispatches_coding_handler_with_yolo_policy(tmp_path, monkeypatch):
+    from domain.tool.executor import ToolExecutor
+    from domain.tool.registry import ToolRegistry
+
+    ToolRegistry._instance = None
+    monkeypatch.chdir(tmp_path)
+    result = ToolExecutor().execute(
+        "coding_file_create",
+        {"path": "created.txt", "content": "hello"},
+        {"profile_policy": {"yolo_mode": True}},
+    )
+
+    assert result["is_error"] is False
+    assert json.loads(result["result"])["created"] is True
+    assert (tmp_path / "created.txt").read_text(encoding="utf-8") == "hello"
+
+    ToolRegistry._instance = None
+    approval = ToolExecutor().execute(
+        "coding_file_write",
+        {"path": "needs-approval.txt", "content": "blocked"},
+        {},
+    )
+
+    assert approval["is_error"] is False
+    assert approval["widget"]["approval_required"] is True
+    assert not (tmp_path / "needs-approval.txt").exists()
+
+
 def test_fallback_routes_expose_agent_service_and_coding_surfaces():
     from ecosystem.defaultspack.transport.registry import _FALLBACK_HTTP_ROUTE_SPECS
 

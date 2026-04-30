@@ -1,0 +1,27 @@
+{
+  "id": "coding_file_list",
+  "category": "tool",
+  "version": "1",
+  "display_name": "List Files",
+  "description": "List files under a workspace directory.",
+  "enabled": true,
+  "config": {
+    "name": "coding_file_list",
+    "summary": "List workspace files",
+    "tags": ["coding", "file", "read"],
+    "tool_category": "filesystem",
+    "action_type": "read",
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "directory": {"type": "string"},
+          "recursive": {"type": "boolean"}
+        },
+        "required": []
+      }
+    },
+    "execution": {"type": "local"},
+    "handler": "blocks.coding.file_list:run"
+  }
+}

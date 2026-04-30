@@ -1,0 +1,29 @@
+{
+  "id": "coding_file_create",
+  "category": "tool",
+  "version": "1",
+  "display_name": "Create File",
+  "description": "Create a workspace file after approval.",
+  "enabled": true,
+  "config": {
+    "name": "coding_file_create",
+    "summary": "Create a workspace file",
+    "tags": ["coding", "file", "write"],
+    "tool_category": "filesystem_write",
+    "action_type": "create",
+    "write_action": true,
+    "requires_approval": true,
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string"},
+          "content": {"type": "string"}
+        },
+        "required": ["path"]
+      }
+    },
+    "execution": {"type": "local"},
+    "handler": "blocks.coding.file_create:run"
+  }
+}

@@ -143,9 +143,17 @@ class ToolRegistry:
                 )
             ),
             "execution": execution,
+            "category": str(config.get("tool_category", config.get("category", ""))),
+            "action_type": str(config.get("action_type", "")),
+            "write_action": bool(config.get("write_action", False)),
+            "requires_approval": bool(config.get("requires_approval", False)),
             "metadata": {
                 "source": "extension",
                 "manifest_path": manifest.get("source_path", ""),
+                "category": str(config.get("tool_category", config.get("category", ""))),
+                "action_type": str(config.get("action_type", "")),
+                "write_action": bool(config.get("write_action", False)),
+                "requires_approval": bool(config.get("requires_approval", False)),
             },
         }
 

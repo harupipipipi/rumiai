@@ -1,0 +1,27 @@
+{
+  "id": "coding_file_search",
+  "category": "tool",
+  "version": "1",
+  "display_name": "Search Files",
+  "description": "Search workspace files with a glob pattern.",
+  "enabled": true,
+  "config": {
+    "name": "coding_file_search",
+    "summary": "Search workspace files",
+    "tags": ["coding", "file", "search"],
+    "tool_category": "filesystem",
+    "action_type": "read",
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pattern": {"type": "string"},
+          "directory": {"type": "string"}
+        },
+        "required": ["pattern"]
+      }
+    },
+    "execution": {"type": "local"},
+    "handler": "blocks.coding.file_search:run"
+  }
+}

@@ -301,7 +301,7 @@ export const api = {
     });
   },
 
-  sendMessage(conversationId: string, text: string, options?: { thinking_level?: string | null }) {
+  sendMessage(conversationId: string, text: string, options?: { thinking_level?: string | null; tool_policy?: Record<string, unknown> }) {
     return request<ChatMessage>(
       `/api/chat/conversations/${conversationId}/messages`,
       {
@@ -313,6 +313,7 @@ export const api = {
           },
           params: {
             thinking_level: options?.thinking_level ?? undefined,
+            tool_policy: options?.tool_policy ?? undefined,
           },
         }),
       },

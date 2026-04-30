@@ -102,6 +102,10 @@ class ToolExecutor:
         if exec_type == "prompt":
             return self._execute_prompt(tool_def, arguments, context)
 
+        handler = str(execution.get("handler") or "")
+        if handler and not handler.endswith(":ToolExecutor.execute"):
+            return self._execute_handler(tool_def, arguments, context)
+
         return self._execute_local(tool_name, arguments, context)
 
     def _execute_dynamic(self, tool_def, arguments, context):
@@ -195,6 +199,68 @@ class ToolExecutor:
             "widget": None,
         }
 
+    def _execute_handler(self, tool_def, arguments, context):
+        import importlib
+        import json
+
+        execution = tool_def.get("execution", {})
+        handler = str(execution.get("handler") or "")
+        if ":" not in handler:
+            return {
+                "result": "Tool handler '{}' must use module:callable format".format(handler),
+                "is_error": True,
+                "widget": None,
+            }
+
+        policy = policy_from_context(context if isinstance(context, dict) else {})
+        next_arguments = dict(arguments or {})
+        if bool(policy.get("yolo_mode")):
+            next_arguments["approved"] = True
+        elif _requires_approval(tool_def) and not next_arguments.get("approved"):
+            return {
+                "result": "Tool '{}' requires approval".format(tool_def.get("name", tool_def.get("tool_id", "tool"))),
+                "is_error": False,
+                "widget": {
+                    "type": "approval_request",
+                    "tool_name": tool_def.get("name", tool_def.get("tool_id", "tool")),
+                    "approval_required": True,
+                    "risk_level": "high" if _is_shell_or_git(tool_def) else "medium",
+                    "arguments": next_arguments,
+                },
+            }
+
+        module_name, attr_name = handler.split(":", 1)
+        try:
+            module = importlib.import_module(module_name)
+            callable_obj = getattr(module, attr_name)
+            result = callable_obj(next_arguments, context)
+        except Exception as exc:
+            return {
+                "result": "Tool handler execution failed: {}".format(exc),
+                "is_error": True,
+                "widget": None,
+            }
+
+        if not isinstance(result, dict):
+            return {"result": str(result), "is_error": False, "widget": None}
+
+        if result.get("status") == "error":
+            error_info = result.get("error", {})
+            return {
+                "result": str(error_info.get("message") if isinstance(error_info, dict) else error_info),
+                "is_error": True,
+                "widget": result,
+            }
+
+        data = result.get("data", result)
+        result_text = data if isinstance(data, str) else json.dumps(data, ensure_ascii=False)
+        is_approval = isinstance(data, dict) and bool(data.get("approval_required"))
+        return {
+            "result": result_text,
+            "is_error": False,
+            "widget": {"type": "approval_request", **data} if is_approval else result,
+        }
+
     def _execute_local(self, tool_name, arguments, context):
         """
         ローカルツール実行（最小動作版: 固定レスポンスを返す）
@@ -232,9 +298,11 @@ class ToolExecutor:
         elif tool_name == "browser_computer":
             from domain.tool.browser_computer import BrowserComputerController
 
+            policy = policy_from_context(context if isinstance(context, dict) else {})
             result = BrowserComputerController().run(
                 str(arguments.get("action", "browser.session")),
                 dict(arguments.get("payload") or {}),
+                yolo_mode=bool(policy.get("yolo_mode")),
             )
             return {
                 "result": str(result),
@@ -307,3 +375,25 @@ def _safe_calculate(expression):
     except Exception as exc:
         return {"is_error": True, "error": "Calculator error: {}".format(exc)}
     return {"is_error": False, "result": result}
+
+
+def _tool_value(tool_def, key):
+    if key in tool_def:
+        return tool_def.get(key)
+    metadata = tool_def.get("metadata")
+    if isinstance(metadata, dict) and key in metadata:
+        return metadata.get(key)
+    execution = tool_def.get("execution")
+    if isinstance(execution, dict):
+        return execution.get(key)
+    return None
+
+
+def _requires_approval(tool_def):
+    return bool(_tool_value(tool_def, "requires_approval") or _tool_value(tool_def, "write_action"))
+
+
+def _is_shell_or_git(tool_def):
+    action_type = str(_tool_value(tool_def, "action_type") or "")
+    category = str(_tool_value(tool_def, "category") or "")
+    return action_type == "shell" or category in {"shell", "git"}

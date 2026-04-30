@@ -29,6 +29,13 @@ export type ComposerExtensionItem = {
   disabled?: boolean;
 };
 
+export type ComposerCommandItem = {
+  id: string;
+  label: string;
+  description?: string;
+  enabled?: boolean;
+};
+
 export type ContextUsageInfo = {
   usedTokens: number;
   maxContext: number;
@@ -85,6 +92,10 @@ export type ComposerRendererProps = {
   contextUsage: ContextUsageInfo;
   inlineExtensions: ComposerExtensionItem[];
   belowExtensions: ComposerExtensionItem[];
+  commands?: ComposerCommandItem[];
+  yoloMode?: boolean;
+  onExtensionSelect?: (item: ComposerExtensionItem) => void;
+  onCommandSelect?: (commandId: string) => void;
   onModelProfileSelect: (profileId: string) => void;
   onThinkingLevelChange: (level: string | null) => void;
   onInputChange: (value: string) => void;
@@ -102,6 +113,7 @@ export type ToolPreviewPanelRendererProps = {
 
 export type RightSidebarRendererProps = {
   items: SidebarItem[];
+  activeItemId?: string | null;
   settingsValues: Record<string, Record<string, unknown>>;
   settingsSections: SettingsSection[];
   onSettingChange: SettingChangeHandler;

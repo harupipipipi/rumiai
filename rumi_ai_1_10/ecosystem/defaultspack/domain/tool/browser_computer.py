@@ -19,24 +19,24 @@ class BrowserComputerController:
         self._session_path = pack_root / "user_data" / "shared" / "browser_sessions.json"
         self._approval_path = pack_root / "user_data" / "shared" / "browser_computer_approvals.json"
 
-    def run(self, action: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    def run(self, action: str, payload: dict[str, Any] | None = None, *, yolo_mode: bool = False) -> dict[str, Any]:
         payload = payload or {}
         if action == "browser.open_url":
-            return self._open_url(str(payload.get("url", "")), payload=payload, dry_run=bool(payload.get("dry_run")))
+            return self._open_url(str(payload.get("url", "")), payload=payload, dry_run=bool(payload.get("dry_run")), yolo_mode=yolo_mode)
         if action == "browser.session":
             return {"action": action, "session": self._read_sessions()}
         if action == "computer.screenshot":
-            return self._screenshot(payload=payload, dry_run=bool(payload.get("dry_run")))
+            return self._screenshot(payload=payload, dry_run=bool(payload.get("dry_run")), yolo_mode=yolo_mode)
         if action in {"computer.click", "computer.type", "computer.key", "computer.scroll"}:
-            return self._desktop_action(action, payload)
+            return self._desktop_action(action, payload, yolo_mode=yolo_mode)
         raise ValueError(f"Unsupported browser/computer action: {action}")
 
-    def _open_url(self, url: str, *, payload: dict[str, Any], dry_run: bool) -> dict[str, Any]:
+    def _open_url(self, url: str, *, payload: dict[str, Any], dry_run: bool, yolo_mode: bool) -> dict[str, Any]:
         if not url.startswith(("http://", "https://", "file://")):
             raise ValueError("'url' must start with http://, https://, or file://")
         if dry_run:
             return {"action": "browser.open_url", "url": url, "dry_run": True, "requires_approval": False}
-        approved = self._consume_approval(payload, "browser.open_url", {"url": url})
+        approved = yolo_mode or self._consume_approval(payload, "browser.open_url", {"url": url})
         if not approved:
             return self._approval_required("browser.open_url", {"url": url})
         webbrowser.open(url)
@@ -46,10 +46,10 @@ class BrowserComputerController:
         self._write_sessions(sessions)
         return {"action": "browser.open_url", "url": url, "opened": True}
 
-    def _screenshot(self, *, payload: dict[str, Any], dry_run: bool) -> dict[str, Any]:
+    def _screenshot(self, *, payload: dict[str, Any], dry_run: bool, yolo_mode: bool) -> dict[str, Any]:
         if dry_run:
             return {"action": "computer.screenshot", "dry_run": True, "requires_approval": False}
-        approved = self._consume_approval(payload, "computer.screenshot", {})
+        approved = yolo_mode or self._consume_approval(payload, "computer.screenshot", {})
         if not approved:
             return self._approval_required("computer.screenshot", {})
         if platform.system() != "Darwin":
@@ -59,12 +59,12 @@ class BrowserComputerController:
         subprocess.run(["screencapture", "-x", str(path)], check=True)
         return {"action": "computer.screenshot", "path": str(path), "mime_type": "image/png"}
 
-    def _desktop_action(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def _desktop_action(self, action: str, payload: dict[str, Any], *, yolo_mode: bool) -> dict[str, Any]:
         dry_run = bool(payload.get("dry_run"))
         if dry_run:
             return {"action": action, "dry_run": True, "requires_approval": False, "payload": payload}
         approval_payload = self._safe_payload(payload)
-        if not self._consume_approval(payload, action, approval_payload):
+        if not (yolo_mode or self._consume_approval(payload, action, approval_payload)):
             return self._approval_required(action, approval_payload)
         if platform.system() != "Darwin":
             return {"action": action, "supported": False, "reason": "AppleScript desktop control is only supported on macOS."}
