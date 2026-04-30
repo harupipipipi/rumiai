@@ -277,13 +277,15 @@ _CANONICAL_MODEL_NAMES: Dict[str, str] = {
 
 _CATALOG_MODELS: Dict[str, Tuple[Dict[str, Any], ...]] = {
     "openai": (
-        {"id": "openai/gpt-4o", "name": "GPT-4o", "provider": "openai", "type": "chat"},
-        {"id": "openai/gpt-4o-mini", "name": "GPT-4o mini", "provider": "openai", "type": "chat"},
+        {"id": "openai/gpt-5.4", "name": "GPT-5.4", "provider": "openai", "type": "chat", "max_context": 400000, "supports_thinking": True},
+        {"id": "openai/gpt-5.4-mini", "name": "GPT-5.4 mini", "provider": "openai", "type": "chat", "max_context": 400000, "supports_thinking": True},
+        {"id": "openai/gpt-4o", "name": "GPT-4o", "provider": "openai", "type": "chat", "max_context": 128000},
+        {"id": "openai/gpt-4o-mini", "name": "GPT-4o mini", "provider": "openai", "type": "chat", "max_context": 128000},
     ),
     "stub": (
-        {"id": "stub/default", "name": "Stub Default Model", "provider": "stub", "type": "chat"},
-        {"id": "stub/fast", "name": "Stub Fast Model", "provider": "stub", "type": "chat"},
-        {"id": "stub/large", "name": "Stub Large Model", "provider": "stub", "type": "chat"},
+        {"id": "stub/default", "name": "Stub Default Model", "provider": "stub", "type": "chat", "max_context": -1},
+        {"id": "stub/fast", "name": "Stub Fast Model", "provider": "stub", "type": "chat", "max_context": 32000},
+        {"id": "stub/large", "name": "Stub Large Model", "provider": "stub", "type": "chat", "max_context": 128000},
     ),
     "xai": (
         {"id": "xai/grok-2-latest", "name": "Grok 2", "provider": "xai", "type": "chat"},
@@ -306,8 +308,9 @@ _CATALOG_MODELS: Dict[str, Tuple[Dict[str, Any], ...]] = {
         {"id": "deepseek/deepseek-reasoner", "name": "DeepSeek Reasoner", "provider": "deepseek", "type": "chat"},
     ),
     "openrouter": (
-        {"id": "openrouter/openai/gpt-4o", "name": "GPT-4o via OpenRouter", "provider": "openrouter", "type": "chat"},
-        {"id": "openrouter/anthropic/claude-3.5-sonnet", "name": "Claude Sonnet via OpenRouter", "provider": "openrouter", "type": "chat"},
+        {"id": "openrouter/tencent/hy3-preview:free", "name": "Tencent Hy3 preview (free)", "provider": "openrouter", "type": "chat", "max_context": 32000},
+        {"id": "openrouter/openai/gpt-4o", "name": "GPT-4o via OpenRouter", "provider": "openrouter", "type": "chat", "max_context": 128000},
+        {"id": "openrouter/anthropic/claude-3.5-sonnet", "name": "Claude Sonnet via OpenRouter", "provider": "openrouter", "type": "chat", "max_context": 200000, "supports_thinking": True},
     ),
     "together": (
         {"id": "together/meta-llama/Llama-3.3-70B-Instruct-Turbo", "name": "Llama 3.3 70B Turbo", "provider": "together", "type": "chat"},
@@ -356,7 +359,7 @@ def _env_detected(entry: ProviderCatalogEntry) -> Tuple[bool, List[str]]:
 
 def _load_known_models(entry: ProviderCatalogEntry) -> List[Dict[str, Any]]:
     loaded: List[Dict[str, Any]] = []
-    seen: set[str] = set()
+    by_key: Dict[str, Dict[str, Any]] = {}
 
     def _append(items: Sequence[Dict[str, Any]]) -> None:
         for model in items:
@@ -364,9 +367,19 @@ def _load_known_models(entry: ProviderCatalogEntry) -> List[Dict[str, Any]]:
                 continue
             copied = dict(model)
             key = str(copied.get("id", "") or copied.get("model_id", "") or "").strip()
-            if not key or key in seen:
+            if not key:
                 continue
-            seen.add(key)
+            existing = by_key.get(key)
+            if existing is not None:
+                existing.update(
+                    {
+                        field: value
+                        for field, value in copied.items()
+                        if value is not None and value != ""
+                    }
+                )
+                continue
+            by_key[key] = copied
             loaded.append(copied)
 
     if entry.module_path and entry.class_name:
@@ -396,6 +409,26 @@ def _normalize_model_payload(model: Dict[str, Any], entry: ProviderCatalogEntry,
         "catalog_only": not bool(entry.module_path and entry.class_name),
         "local": entry.local,
     }
+    max_context = model.get("max_context", model.get("max_context_tokens", model.get("context_window", -1)))
+    try:
+        max_context = int(max_context)
+    except (TypeError, ValueError):
+        max_context = -1
+    model_type = str(model.get("type") or "chat").lower()
+    if "supports_thinking" in model:
+        supports_thinking = bool(model.get("supports_thinking"))
+    else:
+        supports_thinking = bool(
+            model_type in {"chat", "reasoning"}
+            and (
+                model.get("reasoning")
+                or model_type == "reasoning"
+                or "reasoning" in entry.capabilities
+            )
+        )
+    thinking_levels = model.get("thinking_levels")
+    if not isinstance(thinking_levels, list):
+        thinking_levels = ["low", "medium", "high"] if supports_thinking else []
     return {
         **model,
         "id": raw_id or f"{provider_id}/{model_id}",
@@ -407,6 +440,11 @@ def _normalize_model_payload(model: Dict[str, Any], entry: ProviderCatalogEntry,
         "qualified_model_id": raw_id or f"{provider_id}/{model_id}",
         "same_model_across_providers_key": canonical_model_id,
         "availability": availability,
+        "max_context": max_context,
+        "max_context_tokens": max_context,
+        "supports_thinking": supports_thinking,
+        "thinking_levels": thinking_levels,
+        "default_thinking_level": model.get("default_thinking_level", "medium" if supports_thinking else None),
         "provider_category": entry.category,
         "provider_local": entry.local,
         "metadata": {
@@ -414,6 +452,9 @@ def _normalize_model_payload(model: Dict[str, Any], entry: ProviderCatalogEntry,
             "provider_display_name": entry.display_name,
             "provider_category": entry.category,
             "provider_local": entry.local,
+            "max_context": max_context,
+            "supports_thinking": supports_thinking,
+            "thinking_levels": thinking_levels,
         },
     }
 
@@ -516,6 +557,11 @@ def list_profile_catalog() -> List[Dict[str, Any]]:
                 "family_id": model["family_id"],
                 "qualified_model_id": model["qualified_model_id"],
                 "same_model_across_providers_key": model["same_model_across_providers_key"],
+                "max_context": model["max_context"],
+                "max_context_tokens": model["max_context_tokens"],
+                "supports_thinking": model["supports_thinking"],
+                "thinking_levels": model["thinking_levels"],
+                "default_thinking_level": model["default_thinking_level"],
                 "availability": model["availability"],
                 "provider_category": model["provider_category"],
                 "local": model["provider_local"],

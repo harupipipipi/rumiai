@@ -67,6 +67,50 @@ def test_chat_store_persists_conversations_to_user_data(tmp_path, monkeypatch):
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
     ChatStore._instance = None
 
+
+def test_model_profiles_expose_required_context_and_thinking_metadata():
+    from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_profile_catalog
+
+    profiles = list_profile_catalog()
+    by_id = {profile["profile_id"]: profile for profile in profiles}
+
+    assert by_id["stub/default"]["max_context"] == -1
+    assert isinstance(by_id["openrouter/tencent/hy3-preview:free"]["max_context"], int)
+    assert "supports_thinking" in by_id["openrouter/tencent/hy3-preview:free"]
+    assert isinstance(by_id["openai/gpt-5.4"]["thinking_levels"], list)
+
+
+def test_chat_send_attaches_tools_and_persists_activity_events(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from blocks.chat.send import run
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    result = run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "hello with tools"},
+            "params": {"thinking_level": "medium"},
+        },
+        {},
+    )
+
+    assert result["status"] == "ok"
+    assistant = result["data"]
+    assert assistant["metadata"]["model"] == "stub/default"
+    assert assistant["metadata"]["attached_tool_count"] >= 1
+    assert assistant["metadata"]["thinking_level"] == "medium"
+    assert any(event["phase"] == "tools_attached" for event in assistant["events"])
+
+    persisted = json.loads(storage_path.read_text(encoding="utf-8"))
+    stored_assistant = persisted["conversations"][conversation["id"]]["messages"][-1]
+    assert stored_assistant["metadata"]["attached_tool_count"] == assistant["metadata"]["attached_tool_count"]
+    ChatStore._instance = None
+
     store = ChatStore()
     conversation = store.create_conversation(tags=["persisted"])
     message = store.add_message(
@@ -101,6 +145,7 @@ def test_fallback_routes_expose_agent_service_and_coding_surfaces():
     assert ("POST", "/api/research/web-search", "blocks.research.web_search") in routes
     assert ("POST", "/api/research/reddit-search", "blocks.research.reddit_search") in routes
     assert ("POST", "/api/tools/browser-computer", "blocks.tool.browser_computer") in routes
+    assert ("GET", "/api/ai/profiles", "blocks.ai.profiles") in routes
     assert ("GET", "/api/agent/schedules", "blocks.agent.scheduler.list") in routes
     assert ("GET", "/api/chat/channels", "blocks.chat.channel.list") in routes
     assert ("POST", "/api/share", "blocks.share.create") in routes
@@ -135,6 +180,7 @@ def test_frontend_sidebar_api_routes_match_in_registry_mode():
         ("POST", "/api/tools/browser-computer"),
         ("POST", "/api/research/web-search"),
         ("POST", "/api/research/reddit-search"),
+        ("GET", "/api/ai/profiles"),
         ("GET", "/api/agent/schedules"),
         ("GET", "/api/chat/channels"),
         ("GET", "/api/capabilities/local_file"),

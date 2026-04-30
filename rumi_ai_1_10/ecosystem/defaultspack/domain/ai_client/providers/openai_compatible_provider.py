@@ -98,6 +98,13 @@ class OpenAICompatibleProvider(OpenAIProvider):
                 "type": item.get("type", "chat"),
                 "defaults": dict(item.get("defaults", {})),
                 "metadata": dict(item.get("metadata", {})),
+                "capabilities": dict(item.get("capabilities", {})),
+                "context_window": item.get("context_window", item.get("max_context", item.get("max_context_tokens", 0))),
+                "max_context": item.get("max_context", item.get("max_context_tokens", item.get("context_window", 0))),
+                "max_context_tokens": item.get("max_context_tokens", item.get("max_context", item.get("context_window", 0))),
+                "supports_thinking": bool(item.get("supports_thinking", False)),
+                "thinking_levels": list(item.get("thinking_levels", [])),
+                "default_thinking_level": item.get("default_thinking_level"),
             }
         known_models = list(known_model_map.values())
         if not known_models:
@@ -196,13 +203,16 @@ class OpenAICompatibleProvider(OpenAIProvider):
         }
         defaults = dict(raw.get("defaults", {}))
         metadata = dict(raw.get("metadata", {}))
-        capabilities = list(raw.get("capabilities", []))
+        capabilities = raw.get("capabilities", [])
         if defaults:
             normalized["defaults"] = defaults
         if metadata:
             normalized["metadata"] = metadata
         if capabilities:
             normalized["capabilities"] = capabilities
+        for key in ("context_window", "max_context", "max_context_tokens", "supports_thinking", "thinking_levels", "default_thinking_level"):
+            if key in raw:
+                normalized[key] = raw[key]
         return normalized
 
     def list_models(self):

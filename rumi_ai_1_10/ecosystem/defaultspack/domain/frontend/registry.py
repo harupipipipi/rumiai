@@ -663,6 +663,20 @@ class FrontendRegistry:
                         "help": "新しい会話に渡す model。例: openrouter/tencent/hy3-preview:free",
                     },
                     {
+                        "id": "favorite_profiles",
+                        "label": "Favorite Profiles",
+                        "type": "textarea",
+                        "default": "openrouter/tencent/hy3-preview:free\nstub/default",
+                        "help": "Composer に表示する profile_id を改行または JSON 配列で保存します。",
+                    },
+                    {
+                        "id": "thinking_level_by_profile",
+                        "label": "Thinking Levels",
+                        "type": "textarea",
+                        "default": '{"openrouter/tencent/hy3-preview:free":"medium"}',
+                        "help": "profile_id ごとの thinking level。未対応モデルでは無視されます。",
+                    },
+                    {
                         "id": "model_profile",
                         "label": "Model Profile",
                         "type": "textarea",
@@ -772,6 +786,21 @@ class FrontendRegistry:
                 "id": "chat_renderers",
                 "path": "user_data/shared/frontend_extensions/*.ui.json",
                 "description": "Metadata describing custom block/widget renderers.",
+            },
+            {
+                "id": "composer.inline",
+                "path": "user_data/shared/frontend_extensions/*.ui.json config.composer.inline",
+                "description": "Small action buttons rendered inside the composer control row.",
+            },
+            {
+                "id": "composer.below",
+                "path": "user_data/shared/frontend_extensions/*.ui.json config.composer.below",
+                "description": "Secondary action buttons rendered below the composer.",
+            },
+            {
+                "id": "chat.activity",
+                "path": "chat message events/tool_logs",
+                "description": "Provider/tool activity records rendered in message history.",
             },
             {
                 "id": "shell_layout",
@@ -1068,6 +1097,8 @@ class FrontendRegistry:
             "models": {
                 "detected_provider_count": len(self._list_provider_models()),
                 "preferred_model": "openrouter/tencent/hy3-preview:free",
+                "favorite_profiles": ["openrouter/tencent/hy3-preview:free", "stub/default"],
+                "thinking_level_by_profile": {"openrouter/tencent/hy3-preview:free": "medium"},
                 "model_profile": self._default_model_profile_text(),
                 "openrouter_api_key": "",
                 "openrouter_api_key_configured": provider_has_api_key("openrouter", pack_root=self._pack_root),
@@ -1092,6 +1123,10 @@ class FrontendRegistry:
                 "name": "Tencent HY3 Preview Free",
                 "provider": "openrouter",
                 "model_id": "tencent/hy3-preview:free",
+                "profile_id": "openrouter/tencent/hy3-preview:free",
+                "max_context": 32000,
+                "supports_thinking": False,
+                "thinking_level": None,
                 "traits": ["free", "preview"],
                 "strengths": ["general"],
             },
@@ -1166,6 +1201,29 @@ class FrontendRegistry:
         models = refreshed.setdefault("models", {})
         if isinstance(models, dict):
             models["openrouter_api_key"] = ""
+            favorite_profiles = models.get("favorite_profiles")
+            if isinstance(favorite_profiles, str):
+                try:
+                    parsed = json.loads(favorite_profiles)
+                    favorite_profiles = parsed
+                except json.JSONDecodeError:
+                    favorite_profiles = [line.strip() for line in favorite_profiles.splitlines()]
+            if not isinstance(favorite_profiles, list):
+                preferred = str(models.get("preferred_model") or "stub/default").strip()
+                favorite_profiles = [preferred] if preferred else ["stub/default"]
+            normalized_favorites = []
+            for item in favorite_profiles:
+                profile_id = str(item or "").strip()
+                if profile_id and profile_id not in normalized_favorites:
+                    normalized_favorites.append(profile_id)
+            models["favorite_profiles"] = normalized_favorites or ["stub/default"]
+            levels = models.get("thinking_level_by_profile")
+            if isinstance(levels, str):
+                try:
+                    levels = json.loads(levels)
+                except json.JSONDecodeError:
+                    levels = {}
+            models["thinking_level_by_profile"] = levels if isinstance(levels, dict) else {}
             models["openrouter_api_key_configured"] = provider_has_api_key(
                 "openrouter",
                 pack_root=self._pack_root,

@@ -2,13 +2,13 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 import type { ChatItem } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
-import { api, type ChatContentBlock, type ChatMessage, type Conversation, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { api, type ChatContentBlock, type ChatMessage, type Conversation, type ModelProfile, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
 import { deriveConversationTitle, formatRelativeTime, messageToText } from "./lib/chat";
 import { cn } from "./lib/cn";
 import { hasShellRegion } from "./lib/uiShell";
 import { resolveDefaultspackRenderers } from "./renderers/defaultspackRenderers";
 import { RendererBoundary } from "./renderers/trustedRendererLoader";
-import type { ChatUiMessage } from "./renderers/types";
+import type { ChatUiMessage, ComposerExtensionItem, ContextUsageInfo } from "./renderers/types";
 
 function useLocalStorage<T>(key: string, defaultValue: T): [T, (v: T | ((prev: T) => T)) => void] {
   const [value, setValue] = useState<T>(() => {
@@ -51,19 +51,25 @@ function normalizeBlocks(message: ChatMessage): ChatContentBlock[] {
   return message.content;
 }
 
-function toUiMessage(message: ChatMessage): ChatUiMessage {
+function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatUiMessage {
   const isUser = message.role === "user";
+  const metadata = message.metadata ?? {};
+  const attachedToolCount = Number(metadata.attached_tool_count ?? 0);
   return {
     id: message.id,
     role: isUser ? "user" : "agent",
     content: normalizeBlocks(message),
     rawText: messageToText(message),
     widget: message.widget,
+    events: message.events ?? [],
+    toolLogs: message.tool_logs ?? [],
     metadata: isUser
       ? undefined
       : {
-          toolUsed: message.finish_reason ? `defaultspack/${message.finish_reason}` : "defaultspack",
           executionTime: formatRelativeTime(message.created_at),
+          modelName: profile?.display_name ?? String(message.model ?? ""),
+          thinkingLabel: String((metadata.thinking as Record<string, unknown> | undefined)?.state ?? ""),
+          attachedToolCount,
         },
   };
 }
@@ -100,8 +106,71 @@ function previewFromAction(action: SidebarAction, title: string, data: unknown):
   };
 }
 
+function profileKey(profile: ModelProfile | null | undefined, fallback: string): string {
+  return profile?.profile_id || profile?.qualified_model_id || fallback;
+}
+
+function findProfile(profiles: ModelProfile[], modelId: string): ModelProfile | null {
+  return profiles.find((profile) => (
+    profile.profile_id === modelId
+    || profile.qualified_model_id === modelId
+    || `${profile.provider_id}/${profile.model_id}` === modelId
+  )) ?? null;
+}
+
+function favoriteModelProfiles(rawFavorites: unknown, profiles: ModelProfile[], preferredModel: string): ModelProfile[] {
+  const favoriteIds = Array.isArray(rawFavorites)
+    ? rawFavorites.map((item) => String(item))
+    : typeof rawFavorites === "string"
+      ? rawFavorites.split(/\r?\n|,/).map((item) => item.trim())
+      : [preferredModel];
+  const uniqueIds = favoriteIds.filter(Boolean).filter((item, index, all) => all.indexOf(item) === index);
+  const selected = uniqueIds
+    .map((profileId) => findProfile(profiles, profileId) ?? {
+      profile_id: profileId,
+      qualified_model_id: profileId,
+      display_name: profileId,
+      max_context: -1,
+      supports_thinking: false,
+      thinking_levels: [],
+    })
+    .filter(Boolean);
+  if (selected.length > 0) return selected;
+  const fallback = findProfile(profiles, preferredModel);
+  return fallback ? [fallback] : [];
+}
+
+function contextUsageFor(conversation: Conversation | null, profile: ModelProfile | null): ContextUsageInfo {
+  const usedTokens = (conversation?.messages ?? []).reduce((total, message) => {
+    const usage = message.usage ?? {};
+    return total + Number(usage.total_tokens ?? usage.input_tokens ?? usage.prompt_tokens ?? 0);
+  }, 0);
+  const maxContext = Number(profile?.max_context_tokens ?? profile?.max_context ?? 0);
+  if (maxContext < 0) {
+    return { usedTokens, maxContext, ratio: 0, label: "∞" };
+  }
+  if (!maxContext) {
+    return { usedTokens, maxContext: 0, ratio: 0, label: "?" };
+  }
+  const ratio = Math.min(1, Math.max(0, usedTokens / maxContext));
+  return { usedTokens, maxContext, ratio, label: `${Math.round(ratio * 100)}%` };
+}
+
+function composerExtensionItems(items: SidebarItem[]): ComposerExtensionItem[] {
+  return items
+    .filter((item) => item.category === "tool" || item.category === "capability")
+    .slice(0, 6)
+    .map((item) => ({
+      id: item.id,
+      label: item.label,
+      category: item.category,
+      description: item.description,
+    }));
+}
+
 export default function App() {
   const [catalog, setCatalog] = useState<UICatalog | null>(null);
+  const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
   const [settingsSections, setSettingsSections] = useState<SettingsSection[]>([]);
   const [settingsValues, setSettingsValues] = useState<Record<string, Record<string, unknown>>>({});
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -119,16 +188,23 @@ export default function App() {
   const [health, setHealth] = useState<{ status: string; pack: string; ts: string } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  const sidebarItems: SidebarItem[] = catalog?.sidebar.items ?? [];
   const chatItems = conversations.map(toChatItem);
-  const messages = activeConversation ? activeConversation.messages.map(toUiMessage) : [];
+  const activeModelId = activeConversation?.model ?? String(settingsValues.models?.preferred_model ?? "openrouter/tencent/hy3-preview:free").trim();
+  const activeProfile = findProfile(modelProfiles, activeModelId);
+  const messages = activeConversation ? activeConversation.messages.map((message) => toUiMessage(message, activeProfile)) : [];
   const activeChatTitle = activeConversation?.title ?? "New Conversation";
   const isNewConversation = activeConversation === null || activeConversation.messages.length === 0;
   const placeholder = String(settingsValues.general?.composer_placeholder ?? "メッセージを入力...");
-  const preferredModel = String(settingsValues.models?.preferred_model ?? "openrouter/tencent/hy3-preview:free").trim();
+  const preferredModel = activeModelId;
+  const favoriteProfiles = favoriteModelProfiles(settingsValues.models?.favorite_profiles, modelProfiles, preferredModel);
+  const thinkingLevels = (settingsValues.models?.thinking_level_by_profile ?? {}) as Record<string, unknown>;
+  const selectedThinkingLevel = String(thinkingLevels[profileKey(activeProfile, preferredModel)] ?? activeProfile?.default_thinking_level ?? "medium");
+  const contextUsage = contextUsageFor(activeConversation, activeProfile);
+  const composerExtensions = composerExtensionItems(sidebarItems);
   const unknownBlockStrategy = String(settingsValues.chat_rendering?.unknown_block_strategy ?? "json");
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
   const showActivityInMessages = settingsValues.general?.show_activity_in_messages !== false;
-  const sidebarItems: SidebarItem[] = catalog?.sidebar.items ?? [];
   const showRegion = (regionId: string) => !catalog?.shell || hasShellRegion(catalog, regionId);
 
   useEffect(() => {
@@ -144,8 +220,9 @@ export default function App() {
   }
 
   async function refreshCatalog() {
-    const [nextCatalog, nextSettings] = await Promise.all([api.uiCatalog(), api.uiSettings()]);
+    const [nextCatalog, nextSettings, profilesResult] = await Promise.all([api.uiCatalog(), api.uiSettings(), api.listModelProfiles()]);
     setCatalog(nextCatalog);
+    setModelProfiles(profilesResult.profiles);
     setSettingsSections(nextSettings.sections);
     setSettingsValues(nextSettings.values);
     const defaultMode = nextSettings.values.preview?.default_mode;
@@ -280,6 +357,38 @@ export default function App() {
     });
   };
 
+  const updateModelSettings = (updates: Record<string, unknown>) => {
+    const next = {
+      ...settingsValues,
+      models: {
+        ...(settingsValues.models ?? {}),
+        ...updates,
+      },
+    };
+    setSettingsValues(next);
+    void api.updateUiSettings(next).then((result) => setSettingsValues(result.values)).catch(console.error);
+  };
+
+  const handleModelProfileSelect = (profileId: string) => {
+    updateModelSettings({ preferred_model: profileId });
+    if (activeConversationId) {
+      void api.updateConversation(activeConversationId, { model: profileId }).then((conversation) => {
+        setActiveConversation(conversation);
+        void refreshConversations(conversation.id);
+      }).catch(console.error);
+    }
+  };
+
+  const handleThinkingLevelChange = (level: string | null) => {
+    const key = profileKey(activeProfile, preferredModel);
+    updateModelSettings({
+      thinking_level_by_profile: {
+        ...thinkingLevels,
+        [key]: level,
+      },
+    });
+  };
+
   const pushActionPreview = (action: SidebarAction, title: string, data: unknown) => {
     const preview = previewFromAction(action, title, data);
     setPreviews((current) => [preview, ...current].slice(0, 30));
@@ -369,7 +478,9 @@ export default function App() {
         return [item, ...withoutCurrent];
       });
 
-      await api.sendMessage(conversation.id, userText);
+      await api.sendMessage(conversation.id, userText, {
+        thinking_level: activeProfile?.supports_thinking ? selectedThinkingLevel : null,
+      });
 
       if (title !== conversation.title) {
         await api.updateConversation(conversation.id, { title });
@@ -398,14 +509,16 @@ export default function App() {
 
       <div className="flex flex-1 min-h-0">
         {showRegion("history") && (
-          <Renderers.historyBoard
-            activeChatId={activeConversationId}
-            chatItems={chatItems}
-            account={catalog?.app?.account}
-            onChatSelect={handleHistoryClick}
-            onNewTask={handleNewTask}
-            onSettingsClick={() => setIsSettingsOpen(true)}
-          />
+          <div className="hidden lg:flex min-h-0">
+            <Renderers.historyBoard
+              activeChatId={activeConversationId}
+              chatItems={chatItems}
+              account={catalog?.app?.account}
+              onChatSelect={handleHistoryClick}
+              onNewTask={handleNewTask}
+              onSettingsClick={() => setIsSettingsOpen(true)}
+            />
+          </div>
         )}
 
         <main className="flex-1 flex min-w-0 bg-[#09090b] relative">
@@ -440,6 +553,14 @@ export default function App() {
                 input={input}
                 placeholder={placeholder}
                 isGenerating={isGenerating}
+                selectedProfile={activeProfile}
+                favoriteProfiles={favoriteProfiles}
+                thinkingLevel={activeProfile?.supports_thinking ? selectedThinkingLevel : null}
+                contextUsage={contextUsage}
+                inlineExtensions={composerExtensions.slice(0, 3)}
+                belowExtensions={composerExtensions.slice(3)}
+                onModelProfileSelect={handleModelProfileSelect}
+                onThinkingLevelChange={handleThinkingLevelChange}
                 onInputChange={setInput}
                 onSubmit={handleSubmit}
               />
@@ -459,14 +580,16 @@ export default function App() {
         </main>
 
         {showRegion("right_sidebar") && (
-          <Renderers.rightSidebar
-            items={sidebarItems}
-            settingsValues={settingsValues}
-            settingsSections={settingsSections}
-            onSettingChange={handleSettingChange}
-            onOpenSettings={() => setIsSettingsOpen(true)}
-            onPanelAction={handlePanelAction}
-          />
+          <div className="hidden 2xl:flex min-h-0">
+            <Renderers.rightSidebar
+              items={sidebarItems}
+              settingsValues={settingsValues}
+              settingsSections={settingsSections}
+              onSettingChange={handleSettingChange}
+              onOpenSettings={() => setIsSettingsOpen(true)}
+              onPanelAction={handlePanelAction}
+            />
+          </div>
         )}
       </div>
 

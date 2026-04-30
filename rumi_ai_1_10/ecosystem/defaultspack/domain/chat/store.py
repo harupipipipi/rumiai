@@ -173,7 +173,7 @@ class ChatStore:
             msg["created_at"] = _now_ms()
         if "raw_text" not in msg or msg["raw_text"] is None:
             msg["raw_text"] = self._extract_raw_text(msg.get("content", []))
-        for field in ("finish_reason", "usage", "widget"):
+        for field in ("finish_reason", "usage", "widget", "metadata", "events", "tool_logs"):
             if field not in msg:
                 msg[field] = None
         parent_id = msg["parent_id"]

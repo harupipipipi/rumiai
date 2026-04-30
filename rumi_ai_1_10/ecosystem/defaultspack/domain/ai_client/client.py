@@ -103,6 +103,9 @@ class AIClient:
             metadata = {}
             capabilities = []
             context_window = 0
+            max_context = 0
+            supports_thinking = False
+            thinking_levels = []
         elif isinstance(raw, dict):
             qualified_model_id = str(raw.get("id", "")).strip()
             model_id = str(raw.get("model_id", "")).strip()
@@ -118,8 +121,25 @@ class AIClient:
             model_type = str(raw.get("type", "chat"))
             defaults = dict(raw.get("defaults", {}))
             metadata = dict(raw.get("metadata", {}))
-            capabilities = list(raw.get("capabilities", []))
-            context_window = int(raw.get("context_window", 0) or 0)
+            raw_capabilities = raw.get("capabilities", [])
+            if isinstance(raw_capabilities, dict):
+                capabilities = [key for key, value in raw_capabilities.items() if value]
+                capability_map = dict(raw_capabilities)
+            else:
+                capabilities = list(raw_capabilities or [])
+                capability_map = {str(key): True for key in capabilities}
+            context_window = int(raw.get("context_window", raw.get("max_context", raw.get("max_context_tokens", 0))) or 0)
+            max_context = int(raw.get("max_context", raw.get("max_context_tokens", context_window)) or 0)
+            supports_thinking = bool(
+                raw.get("supports_thinking")
+                or capability_map.get("thinking")
+                or capability_map.get("reasoning")
+                or metadata.get("supports_thinking")
+                or model_type == "reasoning"
+            )
+            thinking_levels = list(raw.get("thinking_levels") or metadata.get("thinking_levels") or [])
+            if supports_thinking and not thinking_levels:
+                thinking_levels = ["low", "medium", "high"]
         else:
             return None
 
@@ -135,6 +155,11 @@ class AIClient:
             "display_name": display_name,
             "type": model_type,
             "context_window": context_window,
+            "max_context": max_context,
+            "max_context_tokens": max_context,
+            "supports_thinking": supports_thinking,
+            "thinking_levels": thinking_levels,
+            "default_thinking_level": raw.get("default_thinking_level", metadata.get("default_thinking_level", "medium" if supports_thinking else None)) if isinstance(raw, dict) else None,
             "capabilities": capabilities,
             "availability": dict(provider_entry.get("availability", {})),
             "supports_invoke": bool(
@@ -149,6 +174,9 @@ class AIClient:
                 "provider_display_name": provider_entry.get("display_name", provider_id),
                 "provider_kind": provider_entry.get("kind", ""),
                 "availability_status": provider_entry.get("availability", {}).get("status"),
+                "max_context": max_context,
+                "supports_thinking": supports_thinking,
+                "thinking_levels": thinking_levels,
             }
         )
         return normalized

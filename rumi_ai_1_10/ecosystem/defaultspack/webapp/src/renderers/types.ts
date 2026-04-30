@@ -1,6 +1,6 @@
 import type { FormEvent, MutableRefObject } from "react";
 
-import type { ChatContentBlock, SettingsSection, SidebarAction, SidebarItem, UICatalog } from "../lib/api";
+import type { ChatActivityEvent, ChatContentBlock, ModelProfile, SettingsSection, SidebarAction, SidebarItem, ToolLogEntry, UICatalog } from "../lib/api";
 import type { ChatItem } from "../components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "../components/ToolPreview";
 
@@ -11,9 +11,28 @@ export type ChatUiMessage = {
   rawText: string;
   widget?: Record<string, unknown> | null;
   metadata?: {
-    toolUsed?: string;
     executionTime?: string;
+    modelName?: string;
+    thinkingLabel?: string;
+    attachedToolCount?: number;
   };
+  events?: ChatActivityEvent[];
+  toolLogs?: ToolLogEntry[];
+};
+
+export type ComposerExtensionItem = {
+  id: string;
+  label: string;
+  category?: string;
+  description?: string;
+  disabled?: boolean;
+};
+
+export type ContextUsageInfo = {
+  usedTokens: number;
+  maxContext: number;
+  ratio: number;
+  label: string;
 };
 
 export type SettingChangeHandler = (sectionId: string, fieldId: string, value: unknown) => void;
@@ -59,6 +78,14 @@ export type ComposerRendererProps = {
   input: string;
   placeholder: string;
   isGenerating: boolean;
+  selectedProfile: ModelProfile | null;
+  favoriteProfiles: ModelProfile[];
+  thinkingLevel: string | null;
+  contextUsage: ContextUsageInfo;
+  inlineExtensions: ComposerExtensionItem[];
+  belowExtensions: ComposerExtensionItem[];
+  onModelProfileSelect: (profileId: string) => void;
+  onThinkingLevelChange: (level: string | null) => void;
   onInputChange: (value: string) => void;
   onSubmit: (event: FormEvent) => void;
 };

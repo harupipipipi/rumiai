@@ -19,6 +19,43 @@ export type ChatMessage = {
   finish_reason?: string | null;
   usage?: Record<string, number> | null;
   widget?: Record<string, unknown> | null;
+  metadata?: Record<string, unknown> | null;
+  events?: ChatActivityEvent[] | null;
+  tool_logs?: ToolLogEntry[] | null;
+  model?: string | null;
+};
+
+export type ChatActivityEvent = {
+  type: string;
+  message?: string;
+  phase?: string;
+  timestamp?: number | string;
+  tool_name?: string;
+  model?: string;
+  [key: string]: unknown;
+};
+
+export type ToolLogEntry = {
+  tool_name?: string;
+  arguments?: Record<string, unknown>;
+  result?: unknown;
+  timestamp?: number | string;
+  [key: string]: unknown;
+};
+
+export type ModelProfile = {
+  profile_id: string;
+  display_name: string;
+  provider_id?: string;
+  model_id?: string;
+  qualified_model_id?: string;
+  max_context?: number;
+  max_context_tokens?: number;
+  supports_thinking?: boolean;
+  thinking_levels?: string[];
+  default_thinking_level?: string | null;
+  availability?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
 };
 
 export type Conversation = {
@@ -264,7 +301,7 @@ export const api = {
     });
   },
 
-  sendMessage(conversationId: string, text: string) {
+  sendMessage(conversationId: string, text: string, options?: { thinking_level?: string | null }) {
     return request<ChatMessage>(
       `/api/chat/conversations/${conversationId}/messages`,
       {
@@ -274,9 +311,16 @@ export const api = {
             role: "user",
             content: text,
           },
+          params: {
+            thinking_level: options?.thinking_level ?? undefined,
+          },
         }),
       },
     );
+  },
+
+  listModelProfiles() {
+    return request<{ profiles: ModelProfile[]; count: number }>("/api/ai/profiles");
   },
 
   health() {

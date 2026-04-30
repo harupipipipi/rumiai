@@ -143,5 +143,17 @@ def validate_manifest(
         normalized["defaults"] = _as_dict(manifest.get("defaults"), "manifest.defaults")
         normalized["priority"] = int(manifest.get("priority", 100))
         normalized["type"] = str(manifest.get("type", "chat"))
+        for numeric_key in ("context_window", "max_context", "max_context_tokens"):
+            if numeric_key in manifest:
+                normalized[numeric_key] = int(manifest.get(numeric_key, 0))
+        if "supports_thinking" in manifest:
+            normalized["supports_thinking"] = bool(manifest.get("supports_thinking"))
+        if "thinking_levels" in manifest:
+            levels = manifest.get("thinking_levels")
+            if not isinstance(levels, list):
+                raise ManifestValidationError("manifest.thinking_levels must be an array")
+            normalized["thinking_levels"] = [str(level) for level in levels]
+        if "default_thinking_level" in manifest:
+            normalized["default_thinking_level"] = str(manifest.get("default_thinking_level") or "")
 
     return normalized
