@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { PanelLeftOpen } from "lucide-react";
 
 import type { ChatItem } from "./components/HistoryBoard";
@@ -9,7 +9,7 @@ import { cn } from "./lib/cn";
 import { hasShellRegion } from "./lib/uiShell";
 import { resolveDefaultspackRenderers } from "./renderers/defaultspackRenderers";
 import { RendererBoundary } from "./renderers/trustedRendererLoader";
-import type { ChatUiMessage, ComposerExtensionItem, ContextUsageInfo } from "./renderers/types";
+import type { AppMode, AttachedFile, ChatUiMessage, CodingContext, ComposerExtensionItem, ContextUsageInfo, DroppedWidget } from "./renderers/types";
 
 type BrowserApproval = {
   action: string;
@@ -274,6 +274,10 @@ export default function App() {
   const [activeSidebarItemId, setActiveSidebarItemId] = useState<string | null>(null);
   const [sidebarSelectionTick, setSidebarSelectionTick] = useState(0);
   const [yoloMode, setYoloMode] = useLocalStorage("rumi-yolo-mode", false);
+  const [mode, setMode] = useLocalStorage<AppMode>("rumi-app-mode", "chat");
+  const [codingContext, setCodingContext] = useState<CodingContext | null>(null);
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [droppedWidgets, setDroppedWidgets] = useState<DroppedWidget[]>([]);
   const pendingStorageKey = "rumi-pending-chat-requests";
   const [pendingRequests, setPendingRequests] = useLocalStorage<Record<string, PendingChatRequest>>(pendingStorageKey, {});
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -305,6 +309,12 @@ export default function App() {
       description: "このチャットの tool 承認を自動化",
       enabled: yoloMode,
     },
+    {
+      id: "coding",
+      label: "coding",
+      description: "コーディングモードに切替",
+      enabled: mode === "coding",
+    },
   ];
   const unknownBlockStrategy = String(settingsValues.chat_rendering?.unknown_block_strategy ?? "json");
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
@@ -334,6 +344,19 @@ export default function App() {
     });
   };
 
+  const loadCodingContext = useCallback(async () => {
+    try {
+      const result = await api.getCodingContext();
+      setCodingContext({
+        branch: result.branch,
+        rootFolder: result.root_folder,
+        files: result.files,
+      });
+    } catch {
+      setCodingContext(null);
+    }
+  }, []);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isGenerating]);
@@ -349,6 +372,12 @@ export default function App() {
       window.removeEventListener("pagehide", markUnloading);
     };
   }, []);
+
+  useEffect(() => {
+    if (mode === "coding") {
+      void loadCodingContext();
+    }
+  }, [mode, loadCodingContext]);
 
   async function refreshHealth() {
     try {
@@ -523,6 +552,8 @@ export default function App() {
     setPreviews([]);
     setError(null);
     setIsGenerating(false);
+    setAttachedFiles([]);
+    setDroppedWidgets([]);
     replaceChatIdInUrl(null, false);
   };
 
@@ -594,7 +625,34 @@ export default function App() {
   const handleComposerCommand = (commandId: string) => {
     if (commandId === "yolo") {
       setYoloMode((value) => !value);
+    } else if (commandId === "coding") {
+      setMode((value) => (value === "coding" ? "chat" : "coding"));
     }
+  };
+
+  const handleModeChange = (newMode: AppMode) => {
+    setMode(newMode);
+  };
+
+  const handleFileAttach = (files: AttachedFile[]) => {
+    setAttachedFiles((prev) => [...prev, ...files]);
+  };
+
+  const handleFileRemove = (fileId: string) => {
+    setAttachedFiles((prev) => prev.filter((f) => f.id !== fileId));
+  };
+
+  const handleDropWidget = (widget: DroppedWidget) => {
+    setDroppedWidgets((prev) => {
+      if (prev.some((w) => w.id === widget.id)) return prev;
+      return [...prev, { ...widget, enabled: widget.enabled ?? true }];
+    });
+  };
+
+  const handleWidgetToggle = (widgetId: string) => {
+    setDroppedWidgets((prev) =>
+      prev.map((w) => (w.id === widgetId ? { ...w, enabled: !w.enabled } : w)),
+    );
   };
 
   const approveBrowserAction = async () => {
@@ -681,6 +739,7 @@ export default function App() {
       setIsNewChatLaunching(true);
     }
     setInput("");
+    setAttachedFiles([]);
     let submittedConversationId: string | null = null;
 
     try {
@@ -764,12 +823,21 @@ export default function App() {
       belowExtensions={[]}
       commands={composerCommands}
       yoloMode={yoloMode}
+      mode={mode}
+      codingContext={codingContext}
+      attachedFiles={attachedFiles}
+      droppedWidgets={droppedWidgets}
       onExtensionSelect={handleComposerExtensionSelect}
       onCommandSelect={handleComposerCommand}
       onModelProfileSelect={handleModelProfileSelect}
       onThinkingLevelChange={handleThinkingLevelChange}
       onInputChange={setInput}
       onSubmit={handleSubmit}
+      onModeChange={handleModeChange}
+      onFileAttach={handleFileAttach}
+      onFileRemove={handleFileRemove}
+      onDropWidget={handleDropWidget}
+      onWidgetToggle={handleWidgetToggle}
     />
   );
 

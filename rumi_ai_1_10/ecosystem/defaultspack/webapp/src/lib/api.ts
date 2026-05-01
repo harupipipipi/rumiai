@@ -407,4 +407,22 @@ export const api = {
       body: JSON.stringify(payload),
     });
   },
+
+  getCodingContext() {
+    return request<{ branch: string | null; root_folder: string | null; files: string[] }>(
+      "/api/coding/context",
+    );
+  },
+
+  listWorkspaceFiles(path?: string) {
+    return request<{ files: Array<{ name: string; path: string; type: "file" | "directory" }> }>(
+      `/api/coding/files${path ? `?path=${encodeURIComponent(path)}` : ""}`,
+    );
+  },
+
+  getGitBranch() {
+    return request<{ branch: string; remote: string | null; dirty: boolean }>(
+      "/api/coding/git/branch",
+    );
+  },
 };

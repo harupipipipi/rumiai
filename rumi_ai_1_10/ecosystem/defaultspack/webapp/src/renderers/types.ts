@@ -99,12 +99,21 @@ export type ComposerRendererProps = {
   belowExtensions: ComposerExtensionItem[];
   commands?: ComposerCommandItem[];
   yoloMode?: boolean;
+  mode?: AppMode;
+  codingContext?: CodingContext | null;
+  attachedFiles?: AttachedFile[];
+  droppedWidgets?: DroppedWidget[];
   onExtensionSelect?: (item: ComposerExtensionItem) => void;
   onCommandSelect?: (commandId: string) => void;
   onModelProfileSelect: (profileId: string) => void;
   onThinkingLevelChange: (level: string | null) => void;
   onInputChange: (value: string) => void;
   onSubmit: (event: FormEvent) => void;
+  onModeChange?: (mode: AppMode) => void;
+  onFileAttach?: (files: AttachedFile[]) => void;
+  onFileRemove?: (fileId: string) => void;
+  onDropWidget?: (widget: DroppedWidget) => void;
+  onWidgetToggle?: (widgetId: string) => void;
 };
 
 export type ToolPreviewPanelRendererProps = {
@@ -135,4 +144,34 @@ export type SettingsModalRendererProps = {
   settingsValues: Record<string, Record<string, unknown>>;
   onClose: () => void;
   onSettingChange: SettingChangeHandler;
+};
+
+export type ToolGroup = {
+  id: string;
+  label: string;
+  description: string;
+  icon?: string;
+  items: ComposerExtensionItem[];
+};
+
+export type AppMode = "chat" | "coding" | "agent";
+
+export type CodingContext = {
+  branch: string | null;
+  rootFolder: string | null;
+  files: string[];
+};
+
+export type AttachedFile = {
+  id: string;
+  name: string;
+  size: number;
+  content?: string;
+};
+
+export type DroppedWidget = {
+  id: string;
+  type: "tool" | "model" | "setting";
+  label: string;
+  enabled?: boolean;
 };
