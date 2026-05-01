@@ -1,6 +1,7 @@
 """defaults.coding.terminal_exec — ターミナルコマンド実行ブロック"""
 
 from blocks._common import ok, error
+from blocks.coding._approval import is_server_approved
 from domain.coding.terminal import Terminal
 
 
@@ -29,7 +30,7 @@ def run(input_data, context=None):
             cwd=cwd,
             timeout=timeout,
             env=input_data.get("env"),
-            approved=bool(input_data.get("approved", False)),
+            approved=is_server_approved(context),
         )
         return ok(result)
     except Exception as e:

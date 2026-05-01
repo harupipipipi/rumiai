@@ -214,9 +214,12 @@ class ToolExecutor:
 
         policy = policy_from_context(context if isinstance(context, dict) else {})
         next_arguments = dict(arguments or {})
+        next_context = dict(context or {}) if isinstance(context, dict) else {}
         if bool(policy.get("yolo_mode")):
-            next_arguments["approved"] = True
-        elif _requires_approval(tool_def) and not next_arguments.get("approved"):
+            next_context["_tool_server_approved"] = True
+        elif _is_policy_allow_context(context):
+            next_context["_tool_server_approved"] = True
+        elif _requires_approval(tool_def):
             return {
                 "result": "Tool '{}' requires approval".format(tool_def.get("name", tool_def.get("tool_id", "tool"))),
                 "is_error": False,
@@ -233,7 +236,7 @@ class ToolExecutor:
         try:
             module = importlib.import_module(module_name)
             callable_obj = getattr(module, attr_name)
-            result = callable_obj(next_arguments, context)
+            result = callable_obj(next_arguments, next_context)
         except Exception as exc:
             return {
                 "result": "Tool handler execution failed: {}".format(exc),
@@ -397,3 +400,10 @@ def _is_shell_or_git(tool_def):
     action_type = str(_tool_value(tool_def, "action_type") or "")
     category = str(_tool_value(tool_def, "category") or "")
     return action_type == "shell" or category in {"shell", "git"}
+
+
+def _is_policy_allow_context(context):
+    if not isinstance(context, dict):
+        return False
+    decision = context.get("_tool_permission_decision")
+    return isinstance(decision, dict) and decision.get("action") == "allow" and bool(decision.get("allowed"))

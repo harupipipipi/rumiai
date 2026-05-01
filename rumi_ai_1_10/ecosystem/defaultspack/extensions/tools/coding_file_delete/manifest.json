@@ -1,0 +1,28 @@
+{
+  "id": "coding_file_delete",
+  "category": "tool",
+  "version": "1",
+  "display_name": "Delete File",
+  "description": "Delete a workspace file after approval.",
+  "enabled": true,
+  "config": {
+    "name": "coding_file_delete",
+    "summary": "Delete a workspace file",
+    "tags": ["coding", "file", "delete"],
+    "tool_category": "filesystem_write",
+    "action_type": "delete",
+    "write_action": true,
+    "requires_approval": true,
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string"}
+        },
+        "required": ["path"]
+      }
+    },
+    "execution": {"type": "local"},
+    "handler": "blocks.coding.file_delete:run"
+  }
+}

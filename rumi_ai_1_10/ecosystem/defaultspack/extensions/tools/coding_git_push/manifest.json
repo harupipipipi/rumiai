@@ -1,0 +1,29 @@
+{
+  "id": "coding_git_push",
+  "category": "tool",
+  "version": "1",
+  "display_name": "Git Push",
+  "description": "Push local git commits after approval.",
+  "enabled": true,
+  "config": {
+    "name": "coding_git_push",
+    "summary": "Push git commits",
+    "tags": ["coding", "git", "network", "write"],
+    "tool_category": "git",
+    "action_type": "push",
+    "write_action": true,
+    "requires_approval": true,
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "remote": {"type": "string"},
+          "branch": {"type": "string"}
+        },
+        "required": []
+      }
+    },
+    "execution": {"type": "local"},
+    "handler": "blocks.coding.git_push:run"
+  }
+}

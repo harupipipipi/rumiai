@@ -280,6 +280,67 @@ def test_tool_executor_dispatches_coding_handler_with_yolo_policy(tmp_path, monk
     assert not (tmp_path / "needs-approval.txt").exists()
 
 
+def test_coding_handlers_do_not_trust_body_approved_flag(tmp_path, monkeypatch):
+    from blocks.coding.file_write import run as file_write_run
+    from blocks.coding.terminal_exec import run as terminal_exec_run
+
+    monkeypatch.chdir(tmp_path)
+
+    write = file_write_run({"path": "pwned.txt", "content": "blocked", "approved": True}, {})
+    assert write["status"] == "ok"
+    assert write["data"]["approval_required"] is True
+    assert not (tmp_path / "pwned.txt").exists()
+
+    command = "python3 -c 'open(\"terminal-pwned.txt\", \"w\").write(\"blocked\")'"
+    terminal = terminal_exec_run({"command": command, "approved": True}, {})
+    assert terminal["status"] == "ok"
+    assert terminal["data"]["approval_required"] is True
+    assert terminal["data"]["exit_code"] is None
+    assert not (tmp_path / "terminal-pwned.txt").exists()
+
+
+def test_coding_handlers_accept_only_server_approval_context(tmp_path, monkeypatch):
+    from blocks.coding.file_write import run as file_write_run
+
+    monkeypatch.chdir(tmp_path)
+
+    result = file_write_run(
+        {"path": "approved.txt", "content": "ok"},
+        {"_tool_server_approved": True},
+    )
+
+    assert result["status"] == "ok"
+    assert result["data"]["written"] is True
+    assert (tmp_path / "approved.txt").read_text(encoding="utf-8") == "ok"
+
+
+def test_direct_coding_route_cannot_execute_with_forged_approved(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    registry = _collect_defaultspack_routes()
+    route = next(
+        item
+        for item in registry.routes
+        if item["method"] == "POST" and item["pattern"] == "/api/coding/files/write"
+    )
+
+    result = route["handler"](
+        {"path": "direct-pwned.txt", "content": "blocked", "approved": True},
+        {"flow_id": "transport_direct"},
+    )
+
+    assert result["status"] == "ok"
+    assert result["data"]["approval_required"] is True
+    assert not (tmp_path / "direct-pwned.txt").exists()
+
+
+def test_sensitive_coding_routes_do_not_use_wildcard_cors():
+    from ecosystem.defaultspack.transport.http import _is_sensitive_coding_path
+
+    assert _is_sensitive_coding_path("/api/coding/terminal/exec") is True
+    assert _is_sensitive_coding_path("/api/coding/files/write") is True
+    assert _is_sensitive_coding_path("/api/coding/files/read") is False
+
+
 def test_fallback_routes_expose_agent_service_and_coding_surfaces():
     from ecosystem.defaultspack.transport.registry import _FALLBACK_HTTP_ROUTE_SPECS
 

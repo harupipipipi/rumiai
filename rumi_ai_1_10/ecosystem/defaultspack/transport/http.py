@@ -456,6 +456,23 @@ class DefaultsHttpServer:
         return {"_static": True, "content_type": ct, "body": body}
 
 
+_SENSITIVE_CODING_PATHS = {
+    "/api/coding/files/write",
+    "/api/coding/files/create",
+    "/api/coding/files/delete",
+    "/api/coding/files/patch",
+    "/api/coding/files/restore",
+    "/api/coding/terminal/exec",
+    "/api/coding/terminal/stream",
+    "/api/coding/git/commit",
+    "/api/coding/git/push",
+}
+
+
+def _is_sensitive_coding_path(path):
+    return path in _SENSITIVE_CODING_PATHS
+
+
 class _RequestHandler(http.server.BaseHTTPRequestHandler):
     server_ref = None
     protocol_version = "HTTP/1.1"
@@ -547,6 +564,10 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             pass
 
     def _send_cors_headers(self):
+        if _is_sensitive_coding_path(self.path.split("?")[0]):
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+            return
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
