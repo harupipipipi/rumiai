@@ -64,12 +64,22 @@ export function Sidebar() {
               to={link.to}
               title={!isSidebarOpen ? link.label : undefined}
               className={cn(
-                "flex items-center rounded-lg transition-colors font-medium text-sm",
-                isSidebarOpen ? "w-full gap-3 px-3 py-2" : "justify-center p-2.5",
-                isActive ? "bg-accent text-accent-fg shadow-sm" : "text-text-muted hover:bg-bg-hover hover:text-text-main"
+                "group relative flex items-center rounded-xl transition-all duration-200 font-medium text-sm",
+                isSidebarOpen ? "w-full gap-3 px-3 py-2.5" : "justify-center p-3 mt-1",
+                isActive 
+                  ? "bg-accent/10 text-accent" 
+                  : "text-text-muted hover:bg-bg-hover/80 hover:text-text-main"
               )}
             >
-              <link.icon className="w-5 h-5" />
+              {isActive && isSidebarOpen && (
+                <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-accent rounded-r-full" />
+              )}
+              <div className={cn(
+                "p-1 rounded-md transition-colors",
+                isActive && !isSidebarOpen ? "bg-accent/10" : ""
+              )}>
+                <link.icon className={cn("w-5 h-5", isActive ? "text-accent" : "group-hover:text-text-main")} />
+              </div>
               {isSidebarOpen && <span>{link.label}</span>}
             </Link>
           );

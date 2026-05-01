@@ -17,7 +17,6 @@ import {
   Settings,
   Terminal,
   Wrench,
-  X,
   GitBranch,
   ShieldCheck,
   Download,
@@ -368,7 +367,7 @@ export function RightSidebar({
   onOpenSettings: () => void;
   onPanelAction?: (item: SidebarItem, action: SidebarAction) => void;
 }) {
-  const [activePanel, setActivePanel] = useState<string | null>(items[0]?.id ?? null);
+  const [activePanel, setActivePanel] = useState<string | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<"all" | SidebarCategory>("all");
 
   useEffect(() => {
@@ -379,10 +378,12 @@ export function RightSidebar({
   }, [activeItemId, items]);
 
   useEffect(() => {
-    if (activePanel && items.some((item) => item.id === activePanel)) {
+    if (!activePanel) {
       return;
     }
-    setActivePanel(items[0]?.id ?? null);
+    if (!items.some((item) => item.id === activePanel)) {
+      setActivePanel(null);
+    }
   }, [activePanel, items]);
 
   const counts = useMemo(() => {
@@ -406,9 +407,6 @@ export function RightSidebar({
               <h3 className="text-sm font-medium text-zinc-100 truncate">{activeItem.label}</h3>
               {activeItem.badge && <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded-full font-bold flex-shrink-0">{activeItem.badge}</span>}
             </div>
-            <button onClick={() => setActivePanel(null)} className="p-1 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 rounded transition-colors flex-shrink-0">
-              <X size={14} />
-            </button>
           </div>
 
           {activeItem.description && (

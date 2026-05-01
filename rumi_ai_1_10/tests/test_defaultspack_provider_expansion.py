@@ -98,6 +98,24 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
         self.assertEqual(model_name, "tencent/hy3-preview:free")
         self.assertEqual(getattr(provider, "provider_id", ""), "openrouter")
 
+    def test_ai_client_does_not_stub_unconfigured_openrouter_completion(self):
+        from domain.ai_client.client import AIClient
+
+        AIClient._instance = None
+        with patch.dict(os.environ, {}, clear=True):
+            client = AIClient()
+
+        try:
+            with self.assertRaisesRegex(RuntimeError, "openrouter: provider is not configured"):
+                client.complete(
+                    "openrouter/tencent/hy3-preview:free",
+                    [{"role": "user", "content": "hello"}],
+                    [],
+                    {},
+                )
+        finally:
+            AIClient._instance = None
+
 
 if __name__ == "__main__":
     unittest.main()

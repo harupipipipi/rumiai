@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { PanelLeftOpen } from "lucide-react";
 
 import type { ChatItem } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
@@ -131,6 +132,18 @@ function profileKey(profile: ModelProfile | null | undefined, fallback: string):
   return profile?.profile_id || profile?.qualified_model_id || fallback;
 }
 
+function getNewConversationPlaceholder(): string {
+  const hour = new Date().getHours();
+  if (hour < 5) return "夜更かし中ですね。今日はどうしましたか？";
+  if (hour < 11) return "おはようございます。今日はどうしましたか？";
+  if (hour < 17) return "今日はどうしましたか？";
+  return "こんばんは。今日はどうしましたか？";
+}
+
+function getNewConversationGreeting(): string {
+  return "今日は何をしましょう？";
+}
+
 function findProfile(profiles: ModelProfile[], modelId: string): ModelProfile | null {
   return profiles.find((profile) => (
     profile.profile_id === modelId
@@ -252,6 +265,8 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useLocalStorage("rumi-show-preview", false);
+  const [isHistoryMinimized, setIsHistoryMinimized] = useLocalStorage("rumi-history-minimized", false);
+  const [isNewChatLaunching, setIsNewChatLaunching] = useState(false);
   const [previewMode, setPreviewMode] = useLocalStorage<ToolPreviewMode>("rumi-preview-mode", "auto");
   const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
   const [previews, setPreviews] = useState<ToolPreviewItem[]>([]);
@@ -659,8 +674,12 @@ export default function App() {
     if (!input.trim() || isGenerating) return;
 
     const userText = input.trim();
+    const wasNewConversation = isNewConversation;
     setIsGenerating(true);
     setError(null);
+    if (wasNewConversation) {
+      setIsNewChatLaunching(true);
+    }
     setInput("");
     let submittedConversationId: string | null = null;
 
@@ -723,12 +742,36 @@ export default function App() {
           ? submitError.message
           : "メッセージ送信に失敗しました。",
       );
+      setIsNewChatLaunching(false);
     } finally {
       setIsGenerating(false);
+      setIsNewChatLaunching(false);
     }
   };
 
   const Renderers = useMemo(() => resolveDefaultspackRenderers(catalog), [catalog]);
+  const renderComposer = (isCentered = false) => (
+    <Renderers.composer
+      input={input}
+      placeholder={isCentered ? getNewConversationPlaceholder() : placeholder}
+      isNewConversation={isCentered}
+      isGenerating={isGenerating || isConversationPending}
+      selectedProfile={activeProfile}
+      favoriteProfiles={favoriteProfiles}
+      thinkingLevel={activeProfile?.supports_thinking ? selectedThinkingLevel : null}
+      contextUsage={contextUsage}
+      inlineExtensions={composerExtensions}
+      belowExtensions={[]}
+      commands={composerCommands}
+      yoloMode={yoloMode}
+      onExtensionSelect={handleComposerExtensionSelect}
+      onCommandSelect={handleComposerCommand}
+      onModelProfileSelect={handleModelProfileSelect}
+      onThinkingLevelChange={handleThinkingLevelChange}
+      onInputChange={setInput}
+      onSubmit={handleSubmit}
+    />
+  );
 
   return (
     <RendererBoundary>
@@ -736,7 +779,7 @@ export default function App() {
       {showRegion("title_bar") && <Renderers.titleBar appName={catalog?.app?.name} appIcon={catalog?.app?.icon} />}
 
       <div className="flex flex-1 min-h-0">
-        {showRegion("history") && (
+        {showRegion("history") && !isHistoryMinimized && (
           <Renderers.historyBoard
             activeChatId={activeConversationId}
             chatItems={chatItems}
@@ -744,7 +787,21 @@ export default function App() {
             onChatSelect={handleHistoryClick}
             onNewTask={handleNewTask}
             onSettingsClick={() => setIsSettingsOpen(true)}
+            onMinimize={() => setIsHistoryMinimized(true)}
           />
+        )}
+
+        {showRegion("history") && isHistoryMinimized && (
+          <div className="rumi-history-rail flex w-12 flex-shrink-0 flex-col items-center border-r border-zinc-800/60 bg-[#09090b] py-2">
+            <button
+              type="button"
+              onClick={() => setIsHistoryMinimized(false)}
+              className="flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+              title="チャット欄を開く"
+            >
+              <PanelLeftOpen size={17} />
+            </button>
+          </div>
         )}
 
         <main className="flex-1 flex min-w-0 bg-[#09090b] relative">
@@ -760,23 +817,34 @@ export default function App() {
               />
             )}
 
-            <Renderers.chatMessages
-              error={error}
-              isMessagesRegionVisible={showRegion("chat_messages")}
-              isLoading={isLoading}
-              isNewConversation={isNewConversation}
-              isGenerating={isGenerating || isConversationPending}
-              pendingStatus={pendingRequest?.status ?? null}
-              pendingToolNames={pendingRequest?.toolNames ?? []}
-              messages={messages}
-              messagesEndRef={messagesEndRef}
-              unknownBlockStrategy={unknownBlockStrategy}
-              showActivityInMessages={showActivityInMessages}
-              showWidgets={showWidgets}
-              onSuggestionClick={(text) => setInput(text)}
-            />
+            {isNewConversation && !isLoading ? (
+              <div className={cn("rumi-new-chat-stage flex flex-1 items-center justify-center px-5 pb-[10vh]", isNewChatLaunching && "is-launching")}>
+                <div className="w-full">
+                  <h1 className="rumi-greeting mx-auto mb-7 max-w-[620px] px-4 text-center text-[clamp(21px,2.1vw,30px)] font-semibold leading-tight text-zinc-200">
+                    {getNewConversationGreeting()}
+                  </h1>
+                  {renderComposer(true)}
+                </div>
+              </div>
+            ) : (
+              <Renderers.chatMessages
+                error={error}
+                isMessagesRegionVisible={showRegion("chat_messages")}
+                isLoading={isLoading}
+                isNewConversation={isNewConversation}
+                isGenerating={isGenerating || isConversationPending}
+                pendingStatus={pendingRequest?.status ?? null}
+                pendingToolNames={pendingRequest?.toolNames ?? []}
+                messages={messages}
+                messagesEndRef={messagesEndRef}
+                unknownBlockStrategy={unknownBlockStrategy}
+                showActivityInMessages={showActivityInMessages}
+                showWidgets={showWidgets}
+                onSuggestionClick={(text) => setInput(text)}
+              />
+            )}
 
-            {showRegion("composer") && (
+            {showRegion("composer") && !isNewConversation && (
               <div className="relative">
                 {browserApproval && !yoloMode && (
                   <div className="pointer-events-auto absolute bottom-full left-1/2 z-30 mb-2 w-[min(520px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-orange-500/30 bg-zinc-950 p-3 shadow-2xl">
@@ -795,25 +863,7 @@ export default function App() {
                     </div>
                   </div>
                 )}
-              <Renderers.composer
-                input={input}
-                placeholder={placeholder}
-                isGenerating={isGenerating || isConversationPending}
-                selectedProfile={activeProfile}
-                favoriteProfiles={favoriteProfiles}
-                thinkingLevel={activeProfile?.supports_thinking ? selectedThinkingLevel : null}
-                contextUsage={contextUsage}
-                inlineExtensions={composerExtensions}
-                belowExtensions={[]}
-                commands={composerCommands}
-                yoloMode={yoloMode}
-                onExtensionSelect={handleComposerExtensionSelect}
-                onCommandSelect={handleComposerCommand}
-                onModelProfileSelect={handleModelProfileSelect}
-                onThinkingLevelChange={handleThinkingLevelChange}
-                onInputChange={setInput}
-                onSubmit={handleSubmit}
-              />
+              {renderComposer(false)}
               </div>
             )}
           </div>

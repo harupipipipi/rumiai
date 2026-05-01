@@ -58,6 +58,7 @@ export type HistoryBoardRendererProps = {
   onChatSelect: (conversationId: string) => void;
   onNewTask: () => void;
   onSettingsClick: () => void;
+  onMinimize?: () => void;
 };
 
 export type ChatHeaderRendererProps = {
@@ -88,6 +89,7 @@ export type ChatMessagesRendererProps = {
 export type ComposerRendererProps = {
   input: string;
   placeholder: string;
+  isNewConversation?: boolean;
   isGenerating: boolean;
   selectedProfile: ModelProfile | null;
   favoriteProfiles: ModelProfile[];
