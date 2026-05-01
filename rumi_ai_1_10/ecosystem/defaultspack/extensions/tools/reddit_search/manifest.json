@@ -1,0 +1,28 @@
+{
+  "id": "reddit_search",
+  "category": "tool",
+  "version": "1",
+  "display_name": "Reddit Search",
+  "description": "Search Reddit posts through the research provider interface.",
+  "enabled": true,
+  "config": {
+    "name": "reddit_search",
+    "summary": "Reddit provider search",
+    "tags": ["research", "reddit", "community"],
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {"type": "string"},
+          "subreddit": {"type": "string"},
+          "sort": {"type": "string", "enum": ["relevance", "hot", "top", "new", "comments"]},
+          "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+          "allow_network": {"type": "boolean"}
+        },
+        "required": ["query"]
+      }
+    },
+    "execution": {"type": "local"},
+    "handler": "domain.tool.executor:ToolExecutor.execute"
+  }
+}

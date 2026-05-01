@@ -18,6 +18,18 @@ class ArtifactStore:
         self.root.mkdir(parents=True, exist_ok=True)
         self.index_path = self.root / "index.json"
 
+    def _artifact_path(self, user_path: str) -> Path:
+        root = self.root.resolve()
+        normalized = str(user_path or "").replace("\\", "/").lstrip("/")
+        target = (root / normalized).resolve()
+        try:
+            target.relative_to(root)
+        except ValueError as exc:
+            raise ValueError("artifact path escapes artifact root") from exc
+        if target == root:
+            raise ValueError("artifact path must point to a file")
+        return target
+
     def _load_index(self) -> List[Dict[str, Any]]:
         if not self.index_path.is_file():
             return []
@@ -32,8 +44,8 @@ class ArtifactStore:
 
     def create(self, artifact_type: str, title: str, content: str, path: Optional[str] = None, source_task: str = "") -> Dict[str, Any]:
         artifact_id = "artifact_" + str(uuid.uuid4())
-        safe_name = (path or artifact_id + ".md").replace("..", "").lstrip("/")
-        content_path = self.root / safe_name
+        content_path = self._artifact_path(path or artifact_id + ".md")
+        safe_name = str(content_path.relative_to(self.root.resolve()))
         content_path.parent.mkdir(parents=True, exist_ok=True)
         content_path.write_text(content, encoding="utf-8")
         item = {

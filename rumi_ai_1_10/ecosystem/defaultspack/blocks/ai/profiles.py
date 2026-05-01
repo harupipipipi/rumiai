@@ -4,7 +4,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import ok
-from backend.ai_client.provider_catalog import list_profile_catalog
+from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_profile_catalog
 
 
 def run(input_data, context):

@@ -89,6 +89,120 @@
       "path": "/api/packs/defaultspack/planning/{id}/status",
       "flow_id": "planning_agent",
       "description": "Get planning agent status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/capabilities",
+      "flow_id": "transport_direct",
+      "description": "List defaultspack local-first capability manifests"
+    },
+    {
+      "method": "GET",
+      "path": "/api/capabilities/{id}",
+      "flow_id": "transport_direct",
+      "description": "Get one defaultspack capability manifest"
+    },
+    {
+      "method": "GET",
+      "path": "/api/artifacts",
+      "flow_id": "transport_direct",
+      "description": "List local artifacts"
+    },
+    {
+      "method": "POST",
+      "path": "/api/artifacts",
+      "flow_id": "transport_direct",
+      "description": "Create a local artifact"
+    },
+    {
+      "method": "GET",
+      "path": "/api/artifacts/{id}",
+      "flow_id": "transport_direct",
+      "description": "Get one local artifact"
+    },
+    {
+      "method": "GET",
+      "path": "/api/share",
+      "flow_id": "transport_direct",
+      "description": "List local share links"
+    },
+    {
+      "method": "POST",
+      "path": "/api/share",
+      "flow_id": "transport_direct",
+      "description": "Create a local share link"
+    },
+    {
+      "method": "GET",
+      "path": "/api/share/{token}",
+      "flow_id": "transport_direct",
+      "description": "Read a local share link"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/share/{token}",
+      "flow_id": "transport_direct",
+      "description": "Revoke a local share link"
+    },
+    {
+      "method": "POST",
+      "path": "/api/coding/files/read",
+      "flow_id": "transport_direct",
+      "description": "Read a workspace file"
+    },
+    {
+      "method": "POST",
+      "path": "/api/coding/files/write",
+      "flow_id": "transport_direct",
+      "description": "Write a workspace file with approval policy metadata"
+    },
+    {
+      "method": "POST",
+      "path": "/api/coding/terminal/exec",
+      "flow_id": "transport_direct",
+      "description": "Execute a local terminal command"
+    },
+    {
+      "method": "GET",
+      "path": "/api/coding/git/status",
+      "flow_id": "transport_direct",
+      "description": "Read git status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/coding/git/diff",
+      "flow_id": "transport_direct",
+      "description": "Read git diff"
+    },
+    {
+      "method": "POST",
+      "path": "/api/research/local-search",
+      "flow_id": "transport_direct",
+      "description": "Search local knowledge as research sources"
+    },
+    {
+      "method": "POST",
+      "path": "/api/research/web-search",
+      "flow_id": "transport_direct",
+      "description": "Search optional external web sources"
+    },
+    {
+      "method": "POST",
+      "path": "/api/research/reddit-search",
+      "flow_id": "transport_direct",
+      "description": "Search optional Reddit sources"
+    },
+    {
+      "method": "POST",
+      "path": "/api/research/report",
+      "flow_id": "transport_direct",
+      "description": "Generate a local-first research report artifact"
+    },
+    {
+      "method": "POST",
+      "path": "/api/tools/browser-computer",
+      "flow_id": "transport_direct",
+      "description": "Run browser/computer capability actions with server approval"
     }
   ]
 }

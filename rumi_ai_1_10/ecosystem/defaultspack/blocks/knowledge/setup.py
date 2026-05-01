@@ -31,6 +31,8 @@ def run(context):
         ("POST", "/api/packs/defaultspack/knowledge", _lazy("blocks.knowledge.create"), {}),
         ("GET", "/api/packs/defaultspack/knowledge", _lazy("blocks.knowledge.list"), {}),
         ("POST", "/api/packs/defaultspack/knowledge/search", _lazy("blocks.knowledge.search"), {}),
+        ("POST", "/api/research/local-search", _lazy("blocks.research.local_search"), {}),
+        ("POST", "/api/research/report", _lazy("blocks.research.report"), {}),
         ("GET", "/api/packs/defaultspack/knowledge/{id}", _lazy("blocks.knowledge.get"), {"id": "id"}),
         ("PUT", "/api/packs/defaultspack/knowledge/{id}", _lazy("blocks.knowledge.update"), {"id": "id"}),
         ("DELETE", "/api/packs/defaultspack/knowledge/{id}", _lazy("blocks.knowledge.delete"), {"id": "id"}),

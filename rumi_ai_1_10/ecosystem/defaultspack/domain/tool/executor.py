@@ -102,6 +102,10 @@ class ToolExecutor:
         if exec_type == "prompt":
             return self._execute_prompt(tool_def, arguments, context)
 
+        handler = str(execution.get("handler") or "")
+        if handler and not handler.endswith(":ToolExecutor.execute"):
+            return self._execute_handler(tool_def, arguments, context)
+
         return self._execute_local(tool_name, arguments, context)
 
     def _execute_dynamic(self, tool_def, arguments, context):
@@ -195,21 +199,130 @@ class ToolExecutor:
             "widget": None,
         }
 
+    def _execute_handler(self, tool_def, arguments, context):
+        import importlib
+        import json
+
+        execution = tool_def.get("execution", {})
+        handler = str(execution.get("handler") or "")
+        if ":" not in handler:
+            return {
+                "result": "Tool handler '{}' must use module:callable format".format(handler),
+                "is_error": True,
+                "widget": None,
+            }
+
+        policy = policy_from_context(context if isinstance(context, dict) else {})
+        next_arguments = dict(arguments or {})
+        next_context = dict(context or {}) if isinstance(context, dict) else {}
+        if bool(policy.get("yolo_mode")):
+            next_context["_tool_server_approved"] = True
+        elif _is_policy_allow_context(context):
+            next_context["_tool_server_approved"] = True
+        elif _requires_approval(tool_def):
+            return {
+                "result": "Tool '{}' requires approval".format(tool_def.get("name", tool_def.get("tool_id", "tool"))),
+                "is_error": False,
+                "widget": {
+                    "type": "approval_request",
+                    "tool_name": tool_def.get("name", tool_def.get("tool_id", "tool")),
+                    "approval_required": True,
+                    "risk_level": "high" if _is_shell_or_git(tool_def) else "medium",
+                    "arguments": next_arguments,
+                },
+            }
+
+        module_name, attr_name = handler.split(":", 1)
+        try:
+            module = importlib.import_module(module_name)
+            callable_obj = getattr(module, attr_name)
+            result = callable_obj(next_arguments, next_context)
+        except Exception as exc:
+            return {
+                "result": "Tool handler execution failed: {}".format(exc),
+                "is_error": True,
+                "widget": None,
+            }
+
+        if not isinstance(result, dict):
+            return {"result": str(result), "is_error": False, "widget": None}
+
+        if result.get("status") == "error":
+            error_info = result.get("error", {})
+            return {
+                "result": str(error_info.get("message") if isinstance(error_info, dict) else error_info),
+                "is_error": True,
+                "widget": result,
+            }
+
+        data = result.get("data", result)
+        result_text = data if isinstance(data, str) else json.dumps(data, ensure_ascii=False)
+        is_approval = isinstance(data, dict) and bool(data.get("approval_required"))
+        return {
+            "result": result_text,
+            "is_error": False,
+            "widget": {"type": "approval_request", **data} if is_approval else result,
+        }
+
     def _execute_local(self, tool_name, arguments, context):
         """
         ローカルツール実行（最小動作版: 固定レスポンスを返す）
         """
         if tool_name == "web_search":
+            from domain.research.providers import ExternalWebProvider
+
             query = arguments.get("query", "")
+            result = ExternalWebProvider().search(
+                query,
+                limit=int(arguments.get("limit", 5)),
+                allow_network=bool(arguments.get("allow_network", True)),
+            )
             return {
-                "result": "Search results for: {}".format(query),
+                "result": result.summary,
                 "is_error": False,
-                "widget": None
+                "widget": {"type": "research_sources", **result.as_dict()}
+            }
+        elif tool_name == "reddit_search":
+            from domain.research.providers import RedditProvider
+
+            query = arguments.get("query", "")
+            result = RedditProvider().search(
+                query,
+                subreddit=arguments.get("subreddit"),
+                sort=arguments.get("sort", "relevance"),
+                limit=int(arguments.get("limit", 10)),
+                allow_network=bool(arguments.get("allow_network", True)),
+            )
+            return {
+                "result": result.summary,
+                "is_error": False,
+                "widget": {"type": "research_sources", **result.as_dict()}
+            }
+        elif tool_name == "browser_computer":
+            from domain.tool.browser_computer import BrowserComputerController
+
+            policy = policy_from_context(context if isinstance(context, dict) else {})
+            result = BrowserComputerController().run(
+                str(arguments.get("action", "browser.session")),
+                dict(arguments.get("payload") or {}),
+                yolo_mode=bool(policy.get("yolo_mode")),
+            )
+            return {
+                "result": str(result),
+                "is_error": False,
+                "widget": {"type": "browser_computer", **result}
             }
         elif tool_name == "calculator":
             expression = arguments.get("expression", "")
+            calculation = _safe_calculate(expression)
+            if calculation["is_error"]:
+                return {
+                    "result": calculation["error"],
+                    "is_error": True,
+                    "widget": None,
+                }
             return {
-                "result": "Calculated: {} = (stub)".format(expression),
+                "result": "Calculated: {} = {}".format(expression, calculation["result"]),
                 "is_error": False,
                 "widget": None
             }
@@ -226,3 +339,71 @@ class ToolExecutor:
                 "is_error": False,
                 "widget": None
             }
+
+
+def _safe_calculate(expression):
+    import ast
+    import operator
+
+    operators = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.FloorDiv: operator.floordiv,
+        ast.Mod: operator.mod,
+        ast.Pow: operator.pow,
+        ast.USub: operator.neg,
+        ast.UAdd: operator.pos,
+    }
+
+    def evaluate(node):
+        if isinstance(node, ast.Expression):
+            return evaluate(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return node.value
+        if isinstance(node, ast.BinOp) and type(node.op) in operators:
+            left = evaluate(node.left)
+            right = evaluate(node.right)
+            if isinstance(node.op, ast.Pow) and abs(right) > 100:
+                raise ValueError("Exponent is too large")
+            return operators[type(node.op)](left, right)
+        if isinstance(node, ast.UnaryOp) and type(node.op) in operators:
+            return operators[type(node.op)](evaluate(node.operand))
+        raise ValueError("Unsupported calculator expression")
+
+    try:
+        parsed = ast.parse(str(expression or ""), mode="eval")
+        result = evaluate(parsed)
+    except Exception as exc:
+        return {"is_error": True, "error": "Calculator error: {}".format(exc)}
+    return {"is_error": False, "result": result}
+
+
+def _tool_value(tool_def, key):
+    if key in tool_def:
+        return tool_def.get(key)
+    metadata = tool_def.get("metadata")
+    if isinstance(metadata, dict) and key in metadata:
+        return metadata.get(key)
+    execution = tool_def.get("execution")
+    if isinstance(execution, dict):
+        return execution.get(key)
+    return None
+
+
+def _requires_approval(tool_def):
+    return bool(_tool_value(tool_def, "requires_approval") or _tool_value(tool_def, "write_action"))
+
+
+def _is_shell_or_git(tool_def):
+    action_type = str(_tool_value(tool_def, "action_type") or "")
+    category = str(_tool_value(tool_def, "category") or "")
+    return action_type == "shell" or category in {"shell", "git"}
+
+
+def _is_policy_allow_context(context):
+    if not isinstance(context, dict):
+        return False
+    decision = context.get("_tool_permission_decision")
+    return isinstance(decision, dict) and decision.get("action") == "allow" and bool(decision.get("allowed"))

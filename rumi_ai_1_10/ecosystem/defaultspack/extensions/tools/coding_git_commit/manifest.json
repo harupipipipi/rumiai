@@ -1,0 +1,29 @@
+{
+  "id": "coding_git_commit",
+  "category": "tool",
+  "version": "1",
+  "display_name": "Git Commit",
+  "description": "Create a local git commit after approval.",
+  "enabled": true,
+  "config": {
+    "name": "coding_git_commit",
+    "summary": "Create a git commit",
+    "tags": ["coding", "git", "write"],
+    "tool_category": "git",
+    "action_type": "commit",
+    "write_action": true,
+    "requires_approval": true,
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "message": {"type": "string"},
+          "all_tracked": {"type": "boolean"}
+        },
+        "required": ["message"]
+      }
+    },
+    "execution": {"type": "local"},
+    "handler": "blocks.coding.git_commit:run"
+  }
+}

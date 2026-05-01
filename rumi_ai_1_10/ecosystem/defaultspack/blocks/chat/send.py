@@ -1,5 +1,6 @@
 import sys
 import os
+import json
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from blocks._common import ok, error, gen_id, timestamp
 
@@ -10,6 +11,16 @@ from domain.chat.message_builder import build_assistant_message
 from domain.dev.inspector import Inspector
 from domain.prompt.manager import get_manager
 from blocks.chat._context_helpers import extract_user_text, enrich_messages
+from domain.tool.registry import ToolRegistry
+from domain.tool.schema_adapter import (
+    adapt_tool_definitions,
+    build_tool_execution_context,
+    connected_tool_names,
+    filter_tool_definitions_for_runtime_profile,
+    max_tool_calls,
+    resolve_runtime_profile_context,
+    tool_name_from_definition,
+)
 
 
 def _stub_response():
@@ -31,7 +42,7 @@ def _has_real_provider(client, model):
     return not isinstance(provider, StubProvider)
 
 
-def _ai_direct_complete(model, messages):
+def _ai_direct_complete(model, messages, tools=None, params=None):
     """AIClient を直接呼び出して complete を実行する。
     APIキー未設定等で実プロバイダーがない場合は明示的エラーを返す。
 
@@ -43,12 +54,249 @@ def _ai_direct_complete(model, messages):
         client = AIClient()
         if not _has_real_provider(client, model):
             return None, "AI provider API key not configured"
-        response = client.complete(model, messages)
+        response = client.complete(model, messages, tools or [], params or {})
         return response, None
     except RuntimeError as exc:
         return None, "AI request failed: " + str(exc)
-    except Exception as exc:
-        return None, "AI request failed: " + str(exc)
+
+
+def _event(event_type, message, **extra):
+    payload = {
+        "type": event_type,
+        "message": message,
+        "timestamp": timestamp(),
+    }
+    payload.update(extra)
+    return payload
+
+
+def _available_tools(context, input_data):
+    raw_tools = input_data.get("tools")
+    if isinstance(raw_tools, list):
+        tools = raw_tools
+    else:
+        try:
+            tools = ToolRegistry().list_tools()
+        except Exception:
+            tools = []
+    resolved_context = resolve_runtime_profile_context(context or {})
+    runtime_profile = resolved_context.get("runtime_profile")
+    agent_id = input_data.get("agent_id")
+    filtered = filter_tool_definitions_for_runtime_profile(tools, runtime_profile, agent_id=agent_id)
+    return filtered, adapt_tool_definitions(filtered), resolved_context
+
+
+def _tool_use_blocks(response):
+    blocks = response.get("content", []) if isinstance(response, dict) else []
+    if not isinstance(blocks, list):
+        return []
+    return [
+        block
+        for block in blocks
+        if isinstance(block, dict) and block.get("type") in {"tool_use", "tool_call"}
+    ]
+
+
+def _tool_arguments(block):
+    value = block.get("input", block.get("arguments", {}))
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {"value": parsed}
+        except json.JSONDecodeError:
+            return {"value": value}
+    return value if isinstance(value, dict) else {}
+
+
+def _append_assistant_tool_use_message(messages, tool_uses):
+    tool_calls = []
+    for block in tool_uses:
+        tool_name = str(block.get("name") or block.get("tool_name") or "")
+        if not tool_name:
+            continue
+        tool_call_id = str(block.get("id") or block.get("tool_call_id") or gen_id())
+        arguments = _tool_arguments(block)
+        tool_calls.append(
+            {
+                "id": tool_call_id,
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "arguments": json.dumps(arguments, ensure_ascii=False),
+                },
+            }
+        )
+    if not tool_calls:
+        return
+    messages.append(
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": tool_calls,
+        }
+    )
+
+
+def _append_tool_result_message(messages, tool_name, result, tool_call_id=""):
+    result_text = ""
+    if isinstance(result, dict):
+        data = result.get("data", result)
+        if isinstance(data, dict):
+            result_text = str(data.get("result", data.get("summary", json.dumps(data, ensure_ascii=False))))
+        else:
+            result_text = str(data)
+    else:
+        result_text = str(result)
+    messages.append(
+        {
+            "role": "tool",
+            "name": tool_name,
+            "tool_call_id": tool_call_id,
+            "content": result_text,
+        }
+    )
+
+
+def _tool_visibility_message(tools):
+    names = []
+    for tool in tools or []:
+        name = tool_name_from_definition(tool)
+        if not name:
+            continue
+        description = ""
+        if isinstance(tool, dict):
+            function_def = tool.get("function")
+            if isinstance(function_def, dict):
+                description = str(function_def.get("description") or "")
+            description = description or str(tool.get("description") or tool.get("summary") or "")
+        label = name if not description else "{}: {}".format(name, description)
+        names.append(label)
+    if not names:
+        return None
+    return {
+        "role": "system",
+        "content": (
+            "Available tools are connected for this turn. "
+            "Use them when they are relevant, and do not claim that no tools are available. "
+            "Connected tools: " + "; ".join(names)
+        ),
+    }
+
+
+def _complete_with_tools(model, messages, tools, context, call_handler, params):
+    events = [_event("status", "{} が考えています".format(model), phase="thinking", model=model)]
+    tool_logs = []
+    if tools:
+        events.append(
+            _event(
+                "status",
+                "{} 個の tool を接続しました".format(len(tools)),
+                phase="tools_attached",
+                tool_count=len(tools),
+            )
+        )
+
+    working_messages = list(messages)
+    tool_context_message = _tool_visibility_message(tools)
+    if tool_context_message is not None:
+        insert_at = 1 if working_messages and working_messages[0].get("role") == "system" else 0
+        working_messages.insert(insert_at, tool_context_message)
+    response = None
+    limit = max_tool_calls(context or {})
+    if limit is None:
+        limit = int(params.get("max_tool_calls", 4) or 4)
+    connected_names = connected_tool_names(tools, context.get("runtime_profile") if isinstance(context, dict) else None)
+
+    for step_index in range(max(1, limit + 1)):
+        ai_params = {
+            "model": model,
+            "messages": working_messages,
+            "tools": tools,
+            "params": params,
+        }
+        if call_handler is not None:
+            response = call_handler("defaults.ai.complete", ai_params)
+            if isinstance(response, dict) and response.get("status") == "error":
+                err = response.get("error", {})
+                raise RuntimeError(str(err.get("message") or "AI request failed"))
+            if isinstance(response, dict) and response.get("status") == "ok":
+                response = response.get("data", {})
+        else:
+            response, ai_error = _ai_direct_complete(model, working_messages, tools, params)
+            if ai_error is not None:
+                raise RuntimeError(ai_error)
+
+        if not isinstance(response, dict):
+            response = _stub_response()
+        tool_uses = _tool_use_blocks(response)
+        if not tool_uses or step_index >= limit:
+            break
+
+        _append_assistant_tool_use_message(working_messages, tool_uses)
+        for block in tool_uses:
+            tool_name = str(block.get("name") or block.get("tool_name") or "")
+            if not tool_name:
+                continue
+            arguments = _tool_arguments(block)
+            events.append(
+                _event(
+                    "tool_call",
+                    "{} を使用中".format(tool_name),
+                    phase="tool_call",
+                    tool_name=tool_name,
+                    arguments=arguments,
+                )
+            )
+            invoke_context = build_tool_execution_context(context or {}, tool_name, connected_names)
+            if call_handler is not None:
+                result = call_handler(
+                    "defaults.tool.invoke",
+                    {"tool_name": tool_name, "arguments": arguments},
+                )
+            else:
+                from domain.tool.executor import ToolExecutor
+
+                executed = ToolExecutor().execute(tool_name, arguments, invoke_context)
+                result = {"status": "ok", "data": executed}
+            log = {
+                "tool_name": tool_name,
+                "arguments": arguments,
+                "result": result,
+                "timestamp": timestamp(),
+            }
+            tool_logs.append(log)
+            events.append(
+                _event(
+                    "tool_result",
+                    "{} の結果を受け取りました".format(tool_name),
+                    phase="tool_result",
+                    tool_name=tool_name,
+                    is_error=isinstance(result, dict) and result.get("status") == "error",
+                )
+            )
+            _append_tool_result_message(
+                working_messages,
+                tool_name,
+                result,
+                str(block.get("id") or block.get("tool_call_id") or ""),
+            )
+
+    response = response or _stub_response()
+    existing_events = response.get("events", [])
+    response["events"] = events + (existing_events if isinstance(existing_events, list) else [])
+    response["tool_logs"] = tool_logs
+    metadata = dict(response.get("metadata", {}))
+    metadata.update(
+        {
+            "model": model,
+            "attached_tool_count": len(tools),
+            "attached_tools": [tool_name_from_definition(tool) for tool in tools if tool_name_from_definition(tool)],
+            "thinking": {"state": "completed"},
+            "thinking_level": params.get("thinking_level"),
+        }
+    )
+    response["metadata"] = metadata
+    return response
 
 
 def run(input_data, context):
@@ -116,23 +364,29 @@ def run(input_data, context):
         standard_messages.insert(0, {"role": "system", "content": system_prompt})
 
     call_handler = context.get("call_handler") if context else None
-    tools_called = []
-    if call_handler is not None:
-        try:
-            ai_params = {
-                "model": model,
-                "messages": standard_messages,
-                "tools": [],
-                "params": {},
-            }
-            response = call_handler("defaults.ai.complete", ai_params)
-        except Exception:
-            response = _stub_response()
-    else:
-        # フォールバック: AIClient を直接呼び出す
-        response, ai_error = _ai_direct_complete(model, standard_messages)
-        if ai_error is not None:
-            return error(ai_error, "AI_ERROR")
+    params = dict(input_data.get("params") or {})
+    request_context = dict(context or {})
+    tool_policy = params.get("tool_policy")
+    if isinstance(tool_policy, dict):
+        request_context["profile_policy"] = {
+            **(request_context.get("profile_policy") if isinstance(request_context.get("profile_policy"), dict) else {}),
+            **tool_policy,
+        }
+    raw_tools, provider_tools, tool_context = _available_tools(request_context, input_data)
+    tools_called = [tool_name_from_definition(tool) for tool in raw_tools if tool_name_from_definition(tool)]
+    try:
+        response = _complete_with_tools(
+            model,
+            standard_messages,
+            provider_tools,
+            tool_context,
+            call_handler,
+            params,
+        )
+    except RuntimeError as exc:
+        return error(str(exc), "AI_ERROR")
+    except Exception as exc:
+        return error("AI request failed: " + str(exc), "AI_ERROR")
 
     # P1-4: Inspector にリクエストログを記録
     try:

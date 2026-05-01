@@ -19,12 +19,21 @@ import {
   Wrench,
   X,
   GitBranch,
+  ShieldCheck,
+  Download,
+  Share2,
+  Play,
+  CalendarClock,
+  MessageSquareText,
+  Monitor,
+  Archive,
 } from "lucide-react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
 import type {
   SettingsSection,
+  SidebarAction,
   SidebarCategory,
   SidebarField,
   SidebarItem,
@@ -40,9 +49,12 @@ const CATEGORY_META: Record<SidebarCategory | "all", { label: string; icon: Reac
   widget: { label: "Widgets", icon: <LayoutGrid size={14} /> },
   system: { label: "System", icon: <Settings size={14} /> },
   integration: { label: "Integrations", icon: <Blocks size={14} /> },
+  capability: { label: "Capabilities", icon: <ShieldCheck size={14} /> },
 };
 
 const ITEM_ICONS: Record<string, ReactElement> = {
+  artifacts: <Archive size={20} />,
+  browser_computer: <Monitor size={20} />,
   calculator: <BrainCircuit size={20} />,
   code: <Terminal size={20} />,
   file_reader: <FileText size={20} />,
@@ -63,6 +75,23 @@ const ITEM_ICONS: Record<string, ReactElement> = {
   web_search: <Search size={20} />,
 };
 
+const ACTION_ICONS: Record<string, ReactElement> = {
+  artifacts: <Archive size={13} />,
+  browser: <Monitor size={13} />,
+  channels: <MessageSquareText size={13} />,
+  export: <Download size={13} />,
+  play: <Play size={13} />,
+  reddit: <Search size={13} />,
+  schedules: <CalendarClock size={13} />,
+  share: <Share2 size={13} />,
+  web: <Globe size={13} />,
+};
+
+function actionIcon(action: SidebarAction) {
+  const key = action.icon || action.id.split(".")[0] || "play";
+  return ACTION_ICONS[key] ?? <Play size={13} />;
+}
+
 function iconForItem(item: SidebarItem) {
   const direct = item.id.toLowerCase();
   if (ITEM_ICONS[direct]) return ITEM_ICONS[direct];
@@ -73,6 +102,7 @@ function iconForItem(item: SidebarItem) {
     widget: <LayoutGrid size={20} />,
     system: <Cpu size={20} />,
     integration: <Blocks size={20} />,
+    capability: <ShieldCheck size={20} />,
   };
   return byCategory[item.category];
 }
@@ -83,6 +113,7 @@ function categoryColor(cat: SidebarCategory, variant: "bg" | "indicator" | "dot"
     widget: { bg: "bg-blue-500", indicator: "bg-blue-500", dot: "bg-blue-500/60", badge: "bg-blue-500/20 text-blue-400" },
     system: { bg: "bg-amber-500", indicator: "bg-amber-500", dot: "bg-amber-500/60", badge: "bg-amber-500/20 text-amber-400" },
     integration: { bg: "bg-violet-500", indicator: "bg-violet-500", dot: "bg-violet-500/60", badge: "bg-violet-500/20 text-violet-400" },
+    capability: { bg: "bg-cyan-500", indicator: "bg-cyan-500", dot: "bg-cyan-500/60", badge: "bg-cyan-500/20 text-cyan-300" },
   };
   return map[cat]?.[variant] ?? "";
 }
@@ -168,13 +199,16 @@ function SidebarPanel({
   item,
   settingsValues,
   onSettingChange,
+  onPanelAction,
 }: {
   item: SidebarItem;
   settingsValues: Record<string, Record<string, unknown>>;
   onSettingChange: (sectionId: string, fieldId: string, value: unknown) => void;
+  onPanelAction?: (item: SidebarItem, action: SidebarAction) => void;
 }) {
   const panel = item.panel;
   const fields = panel?.fields ?? [];
+  const actions = panel?.actions ?? [];
 
   return (
     <div className="space-y-4">
@@ -226,6 +260,25 @@ function SidebarPanel({
         </div>
       )}
 
+      {actions.length > 0 && (
+        <div>
+          <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-2">Actions</h4>
+          <div className="grid grid-cols-1 gap-1.5">
+            {actions.map((action) => (
+              <button
+                key={action.id}
+                onClick={() => onPanelAction?.(item, action)}
+                className="h-8 px-2.5 rounded border border-zinc-800/70 bg-zinc-900/40 text-zinc-300 hover:bg-zinc-800/70 hover:text-zinc-100 transition-colors flex items-center gap-2 text-xs text-left"
+                title={action.label}
+              >
+                <span className="text-zinc-500 flex-shrink-0">{actionIcon(action)}</span>
+                <span className="truncate">{action.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {panel?.notes && panel.notes.length > 0 && (
         <div>
           <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-2">Notes</h4>
@@ -272,7 +325,7 @@ function CategorySwitcher({
               <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">表示フィルター</p>
             </div>
             <div className="py-1">
-              {(["all", "tool", "widget", "system", "integration"] as const).map((filterId) => {
+              {(["all", "tool", "widget", "system", "integration", "capability"] as const).map((filterId) => {
                 const count = counts[filterId] ?? 0;
                 if (filterId !== "all" && count === 0) return null;
                 return (
@@ -300,19 +353,30 @@ function CategorySwitcher({
 
 export function RightSidebar({
   items,
+  activeItemId,
   settingsValues,
   settingsSections,
   onSettingChange,
   onOpenSettings,
+  onPanelAction,
 }: {
   items: SidebarItem[];
+  activeItemId?: string | null;
   settingsValues: Record<string, Record<string, unknown>>;
   settingsSections: SettingsSection[];
   onSettingChange: (sectionId: string, fieldId: string, value: unknown) => void;
   onOpenSettings: () => void;
+  onPanelAction?: (item: SidebarItem, action: SidebarAction) => void;
 }) {
   const [activePanel, setActivePanel] = useState<string | null>(items[0]?.id ?? null);
   const [categoryFilter, setCategoryFilter] = useState<"all" | SidebarCategory>("all");
+
+  useEffect(() => {
+    const requestedId = activeItemId?.split(":").slice(0, -1).join(":") || activeItemId;
+    if (requestedId && items.some((item) => item.id === requestedId)) {
+      setActivePanel(requestedId);
+    }
+  }, [activeItemId, items]);
 
   useEffect(() => {
     if (activePanel && items.some((item) => item.id === activePanel)) {
@@ -333,9 +397,9 @@ export function RightSidebar({
   const activeItem = items.find((item) => item.id === activePanel) ?? null;
 
   return (
-    <aside className="flex-shrink-0 border-l border-zinc-800/60 bg-[#09090b] hidden lg:flex h-full">
+    <aside className="flex-shrink-0 border-l border-zinc-800/60 bg-[#09090b] hidden md:flex h-full transition-[width,opacity] duration-200 ease-out">
       {activeItem && (
-        <div className="w-[280px] flex flex-col border-r border-zinc-800/40 bg-[#0a0a0c]">
+        <div className="w-[260px] xl:w-[280px] flex flex-col border-r border-zinc-800/40 bg-[#0a0a0c] animate-in slide-in-from-right-2 duration-200">
           <div className="h-12 flex items-center justify-between px-3 border-b border-zinc-800/60 flex-shrink-0">
             <div className="flex items-center gap-2 min-w-0 overflow-hidden">
               <div className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", categoryColor(activeItem.category, "bg"))} />
@@ -360,7 +424,7 @@ export function RightSidebar({
           </div>
 
           <div className="flex-1 overflow-y-auto p-3">
-            <SidebarPanel item={activeItem} settingsValues={settingsValues} onSettingChange={onSettingChange} />
+            <SidebarPanel item={activeItem} settingsValues={settingsValues} onSettingChange={onSettingChange} onPanelAction={onPanelAction} />
           </div>
         </div>
       )}
@@ -374,7 +438,7 @@ export function RightSidebar({
             <button
               key={item.id}
               onClick={() => setActivePanel((current) => (current === item.id ? null : item.id))}
-              className={cn("w-10 h-10 rounded-lg flex items-center justify-center relative transition-all group/btn flex-shrink-0", activePanel === item.id ? "bg-zinc-800 text-zinc-100" : "text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800/50")}
+              className={cn("w-10 h-10 rounded-lg flex items-center justify-center relative transition-all duration-150 ease-out group/btn flex-shrink-0 hover:scale-[1.03] active:scale-95", activePanel === item.id ? "bg-zinc-800 text-zinc-100" : "text-zinc-600 hover:text-zinc-300 hover:bg-zinc-800/50")}
               title={item.label}
             >
               {iconForItem(item)}

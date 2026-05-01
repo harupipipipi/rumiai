@@ -14,7 +14,12 @@
       "knowledge",
       "media",
       "frontend",
-      "dev"
+      "dev",
+      "capability",
+      "artifact",
+      "research",
+      "project",
+      "compact"
     ]
   },
   "components": {
@@ -25,23 +30,41 @@
       "connectivity": {
         "provides": [
           "defaults.chat.create_conversation",
+          "defaultspack.chat.create_conversation",
           "defaults.chat.get_conversation",
+          "defaultspack.chat.get_conversation",
           "defaults.chat.list_conversations",
+          "defaultspack.chat.list_conversations",
           "defaults.chat.update_conversation",
+          "defaultspack.chat.update_conversation",
           "defaults.chat.delete_conversation",
+          "defaultspack.chat.delete_conversation",
           "defaults.chat.export_conversation",
+          "defaultspack.chat.export_conversation",
           "defaults.chat.send",
+          "defaultspack.chat.send",
           "defaults.chat.stream",
+          "defaultspack.chat.stream",
           "defaults.chat.add_message",
+          "defaultspack.chat.add_message",
           "defaults.chat.get_message",
+          "defaultspack.chat.get_message",
           "defaults.chat.update_message",
+          "defaultspack.chat.update_message",
           "defaults.chat.delete_message",
+          "defaultspack.chat.delete_message",
           "defaults.chat.branch",
+          "defaultspack.chat.branch",
           "defaults.chat.search",
+          "defaultspack.chat.search",
           "defaults.chat.stop",
+          "defaultspack.chat.stop",
           "defaults.chat.regenerate",
+          "defaultspack.chat.regenerate",
           "defaults.chat.summarize_and_trim",
-          "defaults.chat.auto_trim"
+          "defaultspack.chat.summarize_and_trim",
+          "defaults.chat.auto_trim",
+          "defaultspack.chat.auto_trim"
         ]
       }
     },
@@ -52,15 +75,25 @@
       "connectivity": {
         "provides": [
           "defaults.agent.execute",
+          "defaultspack.agent.execute",
           "defaults.agent.approve",
+          "defaultspack.agent.approve",
           "defaults.agent.reject",
+          "defaultspack.agent.reject",
           "defaults.agent.cancel",
+          "defaultspack.agent.cancel",
           "defaults.agent.status",
+          "defaultspack.agent.status",
           "defaults.agent.plan",
+          "defaultspack.agent.plan",
           "defaults.agent.add_instruction",
+          "defaultspack.agent.add_instruction",
           "defaults.agent.multi_execute",
+          "defaultspack.agent.multi_execute",
           "defaults.agent.multi_status",
-          "defaults.agent.multi_message"
+          "defaultspack.agent.multi_status",
+          "defaults.agent.multi_message",
+          "defaultspack.agent.multi_message"
         ]
       }
     },
@@ -71,17 +104,29 @@
       "connectivity": {
         "provides": [
           "defaults.coding.file_read",
+          "defaultspack.coding.file_read",
           "defaults.coding.file_write",
+          "defaultspack.coding.file_write",
           "defaults.coding.file_create",
+          "defaultspack.coding.file_create",
           "defaults.coding.file_delete",
+          "defaultspack.coding.file_delete",
           "defaults.coding.file_search",
+          "defaultspack.coding.file_search",
           "defaults.coding.file_list",
+          "defaultspack.coding.file_list",
           "defaults.coding.terminal_exec",
+          "defaultspack.coding.terminal_exec",
           "defaults.coding.terminal_stream",
+          "defaultspack.coding.terminal_stream",
           "defaults.coding.git_status",
+          "defaultspack.coding.git_status",
           "defaults.coding.git_diff",
+          "defaultspack.coding.git_diff",
           "defaults.coding.git_commit",
-          "defaults.coding.git_push"
+          "defaultspack.coding.git_commit",
+          "defaults.coding.git_push",
+          "defaultspack.coding.git_push"
         ]
       }
     },
@@ -92,14 +137,23 @@
       "connectivity": {
         "provides": [
           "defaults.ai.complete",
+          "defaultspack.ai.complete",
           "defaults.ai.stream",
+          "defaultspack.ai.stream",
           "defaults.ai.models",
+          "defaultspack.ai.models",
           "defaults.ai.providers",
+          "defaultspack.ai.providers",
           "defaults.ai.embed",
+          "defaultspack.ai.embed",
           "defaults.ai.image_gen",
+          "defaultspack.ai.image_gen",
           "defaults.ai.image_analyze",
+          "defaultspack.ai.image_analyze",
           "defaults.ai.transcribe",
-          "defaults.ai.tts"
+          "defaultspack.ai.transcribe",
+          "defaults.ai.tts",
+          "defaultspack.ai.tts"
         ]
       }
     },
@@ -110,16 +164,27 @@
       "connectivity": {
         "provides": [
           "defaults.tool.invoke",
+          "defaultspack.tool.invoke",
           "defaults.tool.list",
+          "defaultspack.tool.list",
           "defaults.tool.schema",
+          "defaultspack.tool.schema",
           "defaults.tool.mcp_connect",
+          "defaultspack.tool.mcp_connect",
           "defaults.tool.mcp_list",
+          "defaultspack.tool.mcp_list",
           "defaults.tool.create",
+          "defaultspack.tool.create",
           "defaults.tool.update",
+          "defaultspack.tool.update",
           "defaults.tool.delete",
+          "defaultspack.tool.delete",
           "defaults.tool.export",
+          "defaultspack.tool.export",
           "defaults.tool.consent_check",
-          "defaults.tool.consent_confirm"
+          "defaultspack.tool.consent_check",
+          "defaults.tool.consent_confirm",
+          "defaultspack.tool.consent_confirm"
         ]
       }
     },
@@ -130,12 +195,19 @@
       "connectivity": {
         "provides": [
           "defaults.prompt.render",
+          "defaultspack.prompt.render",
           "defaults.prompt.list",
+          "defaultspack.prompt.list",
           "defaults.prompt.create",
+          "defaultspack.prompt.create",
           "defaults.prompt.system",
+          "defaultspack.prompt.system",
           "defaults.prompt.update",
+          "defaultspack.prompt.update",
           "defaults.prompt.delete",
-          "defaults.prompt.convert"
+          "defaultspack.prompt.delete",
+          "defaults.prompt.convert",
+          "defaultspack.prompt.convert"
         ]
       }
     },
@@ -146,10 +218,15 @@
       "connectivity": {
         "provides": [
           "defaults.memory.store",
+          "defaultspack.memory.store",
           "defaults.memory.recall",
+          "defaultspack.memory.recall",
           "defaults.memory.project_context",
+          "defaultspack.memory.project_context",
           "defaults.memory.vector_store",
-          "defaults.memory.vector_query"
+          "defaultspack.memory.vector_store",
+          "defaults.memory.vector_query",
+          "defaultspack.memory.vector_query"
         ]
       }
     },
@@ -160,11 +237,66 @@
       "connectivity": {
         "provides": [
           "defaults.knowledge.create",
+          "defaultspack.knowledge.create",
           "defaults.knowledge.get",
+          "defaultspack.knowledge.get",
           "defaults.knowledge.list",
+          "defaultspack.knowledge.list",
           "defaults.knowledge.search",
+          "defaultspack.knowledge.search",
           "defaults.knowledge.update",
-          "defaults.knowledge.delete"
+          "defaultspack.knowledge.update",
+          "defaults.knowledge.delete",
+          "defaultspack.knowledge.delete"
+        ]
+      }
+    },
+    "artifact": {
+      "type": "artifact",
+      "id": "artifact",
+      "path": "blocks/artifact",
+      "connectivity": {
+        "provides": [
+          "defaults.artifact.list",
+          "defaultspack.artifact.list",
+          "defaults.artifact.create",
+          "defaultspack.artifact.create",
+          "defaults.artifact.get",
+          "defaultspack.artifact.get"
+        ]
+      }
+    },
+    "research": {
+      "type": "research",
+      "id": "research",
+      "path": "blocks/research",
+      "connectivity": {
+        "provides": [
+          "defaults.research.local_search",
+          "defaultspack.research.local_search",
+          "defaults.research.web_search",
+          "defaultspack.research.web_search",
+          "defaults.research.reddit_search",
+          "defaultspack.research.reddit_search",
+          "defaults.research.report",
+          "defaultspack.research.report"
+        ]
+      }
+    },
+    "share": {
+      "type": "artifact",
+      "id": "share",
+      "path": "blocks/share",
+      "connectivity": {
+        "provides": [
+          "defaults.share.list",
+          "defaultspack.share.list",
+          "defaults.share.create",
+          "defaultspack.share.create",
+          "defaults.share.get",
+          "defaultspack.share.get",
+          "defaults.share.revoke",
+          "defaultspack.share.revoke"
         ]
       }
     },
@@ -175,11 +307,17 @@
       "connectivity": {
         "provides": [
           "defaults.media.image_read",
+          "defaultspack.media.image_read",
           "defaults.media.image_transform",
+          "defaultspack.media.image_transform",
           "defaults.media.doc_parse",
+          "defaultspack.media.doc_parse",
           "defaults.media.clipboard_read",
+          "defaultspack.media.clipboard_read",
           "defaults.media.clipboard_write",
-          "defaults.media.screenshot"
+          "defaultspack.media.clipboard_write",
+          "defaults.media.screenshot",
+          "defaultspack.media.screenshot"
         ]
       }
     },
@@ -190,8 +328,11 @@
       "connectivity": {
         "provides": [
           "defaults.frontend.start",
+          "defaultspack.frontend.start",
           "defaults.frontend.stop",
-          "defaults.frontend.emit"
+          "defaultspack.frontend.stop",
+          "defaults.frontend.emit",
+          "defaultspack.frontend.emit"
         ]
       }
     },
@@ -202,9 +343,13 @@
       "connectivity": {
         "provides": [
           "defaults.dev.inspect",
+          "defaultspack.dev.inspect",
           "defaults.dev.prompt_history",
+          "defaultspack.dev.prompt_history",
           "defaults.dev.edit_prompt_live",
-          "defaults.dev.replay"
+          "defaultspack.dev.edit_prompt_live",
+          "defaults.dev.replay",
+          "defaultspack.dev.replay"
         ]
       }
     }
@@ -212,6 +357,9 @@
   "load_order": [
     "memory:memory",
     "knowledge:knowledge",
+    "research:research",
+    "artifact:artifact",
+    "artifact:share",
     "prompt:prompt",
     "media:media",
     "ai_client:ai_client",
@@ -267,35 +415,55 @@
       "method": "GET",
       "path_pattern": "/api/defaultspack/modules/{id}",
       "function_id": "get_module",
-      "path_param_map": {"module_id": "id"}
+      "path_param_map": {
+        "module_id": "id"
+      }
     },
     {
       "method": "POST",
       "path_pattern": "/api/defaultspack/modules/{id}/enable",
       "function_id": "set_module_state",
-      "args": {"state": "enabled"},
-      "path_param_map": {"module_id": "id"}
+      "args": {
+        "state": "enabled"
+      },
+      "path_param_map": {
+        "module_id": "id"
+      }
     },
     {
       "method": "POST",
       "path_pattern": "/api/defaultspack/modules/{id}/disable",
       "function_id": "set_module_state",
-      "args": {"state": "disabled"},
-      "path_param_map": {"module_id": "id"}
+      "args": {
+        "state": "disabled"
+      },
+      "path_param_map": {
+        "module_id": "id"
+      }
     },
     {
       "method": "POST",
       "path_pattern": "/api/defaultspack/modules/{id}/reload",
       "function_id": "set_module_state",
-      "args": {"state": "enabled", "reason": "manual_reload"},
-      "path_param_map": {"module_id": "id"}
+      "args": {
+        "state": "enabled",
+        "reason": "manual_reload"
+      },
+      "path_param_map": {
+        "module_id": "id"
+      }
     },
     {
       "method": "POST",
       "path_pattern": "/api/defaultspack/modules/{id}/rollback",
       "function_id": "set_module_state",
-      "args": {"state": "disabled", "reason": "manual_rollback"},
-      "path_param_map": {"module_id": "id"}
+      "args": {
+        "state": "disabled",
+        "reason": "manual_rollback"
+      },
+      "path_param_map": {
+        "module_id": "id"
+      }
     },
     {
       "method": "GET",
@@ -311,7 +479,9 @@
       "method": "GET",
       "path_pattern": "/api/defaultspack/pack-requests/{id}",
       "function_id": "get_pack_request",
-      "path_param_map": {"request_id": "id"}
+      "path_param_map": {
+        "request_id": "id"
+      }
     },
     {
       "method": "POST",
@@ -330,22 +500,32 @@
       "path_pattern": "/api/defaultspack/pack-requests/{id}/approve",
       "function_id": "review_pack_request",
       "pass_body": true,
-      "args": {"decision": "approve"},
-      "path_param_map": {"request_id": "id"}
+      "args": {
+        "decision": "approve"
+      },
+      "path_param_map": {
+        "request_id": "id"
+      }
     },
     {
       "method": "POST",
       "path_pattern": "/api/defaultspack/pack-requests/{id}/reject",
       "function_id": "review_pack_request",
       "pass_body": true,
-      "args": {"decision": "reject"},
-      "path_param_map": {"request_id": "id"}
+      "args": {
+        "decision": "reject"
+      },
+      "path_param_map": {
+        "request_id": "id"
+      }
     },
     {
       "method": "POST",
       "path_pattern": "/api/defaultspack/pack-requests/{id}/rollback",
       "function_id": "rollback_pack_request",
-      "path_param_map": {"request_id": "id"}
+      "path_param_map": {
+        "request_id": "id"
+      }
     }
   ]
 }

@@ -1,6 +1,7 @@
 """defaults.coding.file_create — ファイル新規作成ブロック"""
 
 from blocks._common import ok, error
+from blocks.coding._approval import approval_required, is_server_approved
 from domain.coding.file_ops import FileOps
 
 
@@ -19,6 +20,8 @@ def run(input_data, context=None):
         return error("'path' is required", code="INVALID_INPUT")
 
     content = input_data.get("content", "")
+    if not is_server_approved(context):
+        return ok(approval_required("file.create", "medium", path=path))
 
     try:
         ops = FileOps()

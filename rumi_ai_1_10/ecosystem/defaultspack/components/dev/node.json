@@ -1,0 +1,16 @@
+{
+  "version": "rumi.node.v1",
+  "nodes": [
+    {
+      "node_id": "defaultspack.dev",
+      "kind": "ecosystem.component",
+      "display_name": {"ja": "開発インスペクタ", "en": "Dev Inspector"},
+      "description": {"ja": "prompt、context、replay、usage を確認する開発支援ノード。", "en": "Prompt, context, replay, and usage inspection node."},
+      "ports": [
+        {"id": "request", "direction": "input", "standards": ["rumi.dev.inspect"], "aliases": ["inspect"], "multiple": true, "required": false},
+        {"id": "report", "direction": "output", "standards": ["rumi.dev.report"], "aliases": ["log"], "multiple": true, "required": false}
+      ],
+      "metadata": {"pack_id": "defaultspack", "component": "dev", "icon": "bug", "category": "system"}
+    }
+  ]
+}

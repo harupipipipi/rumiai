@@ -1,0 +1,26 @@
+{
+  "id": "coding_file_read",
+  "category": "tool",
+  "version": "1",
+  "display_name": "Read File",
+  "description": "Read a workspace file through the coding file block.",
+  "enabled": true,
+  "config": {
+    "name": "coding_file_read",
+    "summary": "Read a workspace file",
+    "tags": ["coding", "file", "read"],
+    "tool_category": "filesystem",
+    "action_type": "read",
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string"}
+        },
+        "required": ["path"]
+      }
+    },
+    "execution": {"type": "local"},
+    "handler": "blocks.coding.file_read:run"
+  }
+}

@@ -38,5 +38,9 @@ def build_assistant_message(conversation_id, parent_id, sequence_number, respons
         "finish_reason": response.get("finish_reason", "stop"),
         "usage": response.get("usage", {}),
         "widget": None,
+        "metadata": response.get("metadata", {}),
+        "events": response.get("events", []),
+        "tool_logs": response.get("tool_logs", []),
+        "model": model,
     }
     return msg

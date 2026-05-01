@@ -1,0 +1,29 @@
+{
+  "id": "coding_file_restore",
+  "category": "tool",
+  "version": "1",
+  "display_name": "Restore Files",
+  "description": "Restore workspace files from a snapshot after approval.",
+  "enabled": true,
+  "config": {
+    "name": "coding_file_restore",
+    "summary": "Restore workspace files",
+    "tags": ["coding", "file", "restore"],
+    "tool_category": "filesystem_write",
+    "action_type": "restore",
+    "write_action": true,
+    "requires_approval": true,
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "snapshot_id": {"type": "string"},
+          "paths": {"type": "array", "items": {"type": "string"}}
+        },
+        "required": ["snapshot_id"]
+      }
+    },
+    "execution": {"type": "local"},
+    "handler": "blocks.coding.file_restore:run"
+  }
+}

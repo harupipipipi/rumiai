@@ -1,0 +1,17 @@
+{
+  "version": "rumi.node.v1",
+  "nodes": [
+    {
+      "node_id": "defaultspack.coding",
+      "kind": "ecosystem.component",
+      "display_name": {"ja": "コーディング作業空間", "en": "Coding Workspace"},
+      "description": {"ja": "workspace file、terminal、git 操作をまとめる local-first ノード。", "en": "Local-first workspace file, terminal, and git node."},
+      "ports": [
+        {"id": "workspace", "direction": "input", "standards": ["rumi.workspace.root"], "aliases": ["root", "cwd"], "multiple": false, "required": false},
+        {"id": "operation", "direction": "input", "standards": ["rumi.coding.operation"], "aliases": ["file", "terminal", "git"], "multiple": true, "required": false},
+        {"id": "result", "direction": "output", "standards": ["rumi.coding.result"], "aliases": ["diff", "output"], "multiple": true, "required": false}
+      ],
+      "metadata": {"pack_id": "defaultspack", "component": "coding", "icon": "terminal", "category": "workspace"}
+    }
+  ]
+}

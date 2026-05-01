@@ -1,0 +1,27 @@
+{
+  "id": "coding_git_diff",
+  "category": "tool",
+  "version": "1",
+  "display_name": "Git Diff",
+  "description": "Read git diff for the workspace.",
+  "enabled": true,
+  "config": {
+    "name": "coding_git_diff",
+    "summary": "Read git diff",
+    "tags": ["coding", "git", "read"],
+    "tool_category": "git",
+    "action_type": "read",
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "ref": {"type": "string"},
+          "workspace_root": {"type": "string"}
+        },
+        "required": []
+      }
+    },
+    "execution": {"type": "local"},
+    "handler": "blocks.coding.git_diff:run"
+  }
+}

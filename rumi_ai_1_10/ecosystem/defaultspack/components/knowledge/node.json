@@ -1,0 +1,16 @@
+{
+  "version": "rumi.node.v1",
+  "nodes": [
+    {
+      "node_id": "defaultspack.knowledge",
+      "kind": "ecosystem.component",
+      "display_name": {"ja": "ナレッジ", "en": "Knowledge"},
+      "description": {"ja": "ローカル knowledge CRUD と検索、research source の土台。", "en": "Local knowledge CRUD/search and research source foundation."},
+      "ports": [
+        {"id": "query", "direction": "input", "standards": ["rumi.knowledge.query"], "aliases": ["search"], "multiple": true, "required": false},
+        {"id": "sources", "direction": "output", "standards": ["rumi.research.sources"], "aliases": ["results"], "multiple": true, "required": false}
+      ],
+      "metadata": {"pack_id": "defaultspack", "component": "knowledge", "icon": "search", "category": "memory"}
+    }
+  ]
+}

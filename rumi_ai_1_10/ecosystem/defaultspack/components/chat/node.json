@@ -1,0 +1,17 @@
+{
+  "version": "rumi.node.v1",
+  "nodes": [
+    {
+      "node_id": "defaultspack.chat",
+      "kind": "ecosystem.component",
+      "display_name": {"ja": "チャット", "en": "Chat"},
+      "description": {"ja": "会話、メッセージ、ストリーム、履歴 compact を扱うノード。", "en": "Conversation, message, stream, and compact history node."},
+      "ports": [
+        {"id": "request", "direction": "input", "standards": ["rumi.chat.request"], "aliases": ["message", "conversation"], "multiple": true, "required": false},
+        {"id": "ai", "direction": "input", "standards": ["rumi.ai.client"], "aliases": ["model"], "multiple": false, "required": false},
+        {"id": "response", "direction": "output", "standards": ["rumi.chat.response"], "aliases": ["message", "stream"], "multiple": true, "required": false}
+      ],
+      "metadata": {"pack_id": "defaultspack", "component": "chat", "icon": "message-circle", "category": "runtime"}
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "id": "coding_git_status",
+  "category": "tool",
+  "version": "1",
+  "display_name": "Git Status",
+  "description": "Read git status for the workspace.",
+  "enabled": true,
+  "config": {
+    "name": "coding_git_status",
+    "summary": "Read git status",
+    "tags": ["coding", "git", "read"],
+    "tool_category": "git",
+    "action_type": "read",
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "workspace_root": {"type": "string"}
+        },
+        "required": []
+      }
+    },
+    "execution": {"type": "local"},
+    "handler": "blocks.coding.git_status:run"
+  }
+}

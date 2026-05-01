@@ -1,0 +1,30 @@
+{
+  "id": "coding_file_patch",
+  "category": "tool",
+  "version": "1",
+  "display_name": "Patch File",
+  "description": "Apply an old/new replacement patch after approval.",
+  "enabled": true,
+  "config": {
+    "name": "coding_file_patch",
+    "summary": "Patch a workspace file",
+    "tags": ["coding", "file", "patch"],
+    "tool_category": "filesystem_write",
+    "action_type": "update",
+    "write_action": true,
+    "requires_approval": true,
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string"},
+          "old": {"type": "string"},
+          "new": {"type": "string"}
+        },
+        "required": ["path", "old", "new"]
+      }
+    },
+    "execution": {"type": "local"},
+    "handler": "blocks.coding.file_patch:run"
+  }
+}

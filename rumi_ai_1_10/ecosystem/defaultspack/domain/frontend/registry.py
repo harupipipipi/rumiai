@@ -103,6 +103,7 @@ class FrontendRegistry:
             {"id": "widget", "label": "Widgets"},
             {"id": "system", "label": "System"},
             {"id": "integration", "label": "Integrations"},
+            {"id": "capability", "label": "Capabilities"},
         ]
 
     def _app_metadata(self, ui_surfaces: list[dict[str, Any]]) -> dict[str, Any]:
@@ -283,7 +284,7 @@ class FrontendRegistry:
                 "id": "activity_preview",
                 "kind": "preview",
                 "label": "Activity Preview",
-                "uses": ["chat", "dev", "tool", "knowledge", "memory", "media"],
+                "uses": ["chat", "dev", "tool", "knowledge", "memory", "media", "artifact", "research", "browser", "computer", "collaboration"],
                 "contracts": {
                     "preview": "/api/ui/conversations/{conversation_id}/preview",
                 },
@@ -302,7 +303,7 @@ class FrontendRegistry:
                 "id": "extension_sidebar",
                 "kind": "sidebar",
                 "label": "Extension Sidebar",
-                "uses": ["tool", "frontend"],
+                "uses": ["tool", "widget", "frontend", "artifact", "research", "browser", "computer", "scheduler", "collaboration", "share"],
                 "contracts": {"catalog": "/api/ui/catalog", "settings": "/api/ui/settings"},
                 "schema": {"type": "object", "properties": {"items": {"type": "array"}, "filters": {"type": "array"}}},
             },
@@ -399,6 +400,120 @@ class FrontendRegistry:
                         "notes": [
                             "Conversation preview で knowledge_results を表示します。",
                             "検索実装は blocks/chat/_context_helpers.py にあります。",
+                        ],
+                    },
+                },
+                {
+                    "id": "artifacts",
+                    "label": "Artifacts",
+                    "category": "widget",
+                    "description": "生成物と添付物を共通 artifact contract で扱います。",
+                    "tags": ["artifact", "preview", "export"],
+                    "origin": {"kind": "builtin", "path": "domain/artifact/store.py"},
+                    "panel": {
+                        "kind": "actions",
+                        "title": "Artifacts",
+                        "actions": [
+                            {"id": "artifacts.list", "label": "List Artifacts", "icon": "artifacts"},
+                        ],
+                        "notes": [
+                            "/api/artifacts は UI preview と share/export の共通ソースです。",
+                            "個別 renderer ではなく汎用 artifact item として扱えます。",
+                        ],
+                    },
+                },
+                {
+                    "id": "research-providers",
+                    "label": "Research",
+                    "category": "integration",
+                    "description": "local / external web / Reddit を同じ source schema で扱います。",
+                    "tags": ["research", "web", "reddit"],
+                    "origin": {"kind": "builtin", "path": "domain/research/providers.py"},
+                    "panel": {
+                        "kind": "actions",
+                        "title": "Research Providers",
+                        "actions": [
+                            {"id": "research.web", "label": "Web Provider Dry Run", "icon": "web"},
+                            {"id": "research.reddit", "label": "Reddit Provider Dry Run", "icon": "reddit"},
+                        ],
+                        "notes": [
+                            "右サイドバーからは安全のため network disabled の dry-run を起動します。",
+                            "API では allow_network=true を明示した場合に外部 provider を使います。",
+                        ],
+                    },
+                },
+                {
+                    "id": "browser-computer",
+                    "label": "Browser / Computer",
+                    "category": "capability",
+                    "description": "ブラウザ URL、session、承認済み desktop action を扱う controller。",
+                    "tags": ["browser", "computer", "approval"],
+                    "origin": {"kind": "builtin", "path": "domain/tool/browser_computer.py"},
+                    "panel": {
+                        "kind": "actions",
+                        "title": "Browser / Computer",
+                        "actions": [
+                            {"id": "browser.session", "label": "Inspect Browser Session", "icon": "browser"},
+                            {"id": "browser.screenshot.dry_run", "label": "Screenshot Dry Run", "icon": "browser"},
+                        ],
+                        "notes": [
+                            "実操作は approved=true が必要です。UI の既定 action は dry-run です。",
+                            "同じ controller に open_url/click/type/key/scroll を追加できます。",
+                        ],
+                    },
+                },
+                {
+                    "id": "scheduled-tasks",
+                    "label": "Schedules",
+                    "category": "system",
+                    "description": "agent schedule store と scheduler route。",
+                    "tags": ["agent", "schedule"],
+                    "origin": {"kind": "builtin", "path": "domain/agent/scheduler.py"},
+                    "panel": {
+                        "kind": "actions",
+                        "title": "Scheduled Tasks",
+                        "actions": [
+                            {"id": "schedules.list", "label": "List Schedules", "icon": "schedules"},
+                        ],
+                        "notes": [
+                            "/api/agent/schedules で作成・更新・pause/resume・trigger が可能です。",
+                        ],
+                    },
+                },
+                {
+                    "id": "collaboration",
+                    "label": "Collaboration",
+                    "category": "widget",
+                    "description": "channel と multi-agent collaboration の UI entry。",
+                    "tags": ["channel", "multi-agent", "collaboration"],
+                    "origin": {"kind": "builtin", "path": "domain/agent/inter_agent_comm.py"},
+                    "panel": {
+                        "kind": "actions",
+                        "title": "Collaboration",
+                        "actions": [
+                            {"id": "channels.list", "label": "List Channels", "icon": "channels"},
+                        ],
+                        "notes": [
+                            "channel API は chat block、multi-agent API は agent block から提供されます。",
+                        ],
+                    },
+                },
+                {
+                    "id": "share-export",
+                    "label": "Share / Export",
+                    "category": "integration",
+                    "description": "会話 export と local share link を作成します。",
+                    "tags": ["share", "export"],
+                    "origin": {"kind": "builtin", "path": "domain/share/store.py"},
+                    "panel": {
+                        "kind": "actions",
+                        "title": "Share / Export",
+                        "actions": [
+                            {"id": "conversation.export", "label": "Export Active Conversation", "icon": "export", "payload": {"format": "markdown"}},
+                            {"id": "conversation.share", "label": "Create Local Share Link", "icon": "share"},
+                        ],
+                        "notes": [
+                            "share はローカル token store に保存され、/api/share/{token} で取得できます。",
                         ],
                     },
                 },
@@ -548,6 +663,20 @@ class FrontendRegistry:
                         "help": "新しい会話に渡す model。例: openrouter/tencent/hy3-preview:free",
                     },
                     {
+                        "id": "favorite_profiles",
+                        "label": "Favorite Profiles",
+                        "type": "textarea",
+                        "default": "openrouter/tencent/hy3-preview:free\nstub/default",
+                        "help": "Composer に表示する profile_id を改行または JSON 配列で保存します。",
+                    },
+                    {
+                        "id": "thinking_level_by_profile",
+                        "label": "Thinking Levels",
+                        "type": "textarea",
+                        "default": '{"openrouter/tencent/hy3-preview:free":"medium"}',
+                        "help": "profile_id ごとの thinking level。未対応モデルでは無視されます。",
+                    },
+                    {
                         "id": "model_profile",
                         "label": "Model Profile",
                         "type": "textarea",
@@ -569,6 +698,42 @@ class FrontendRegistry:
                         "type": "readonly",
                         "default": provider_has_api_key("openrouter", pack_root=self._pack_root),
                     },
+                ],
+            },
+            {
+                "id": "research",
+                "label": "Research",
+                "description": "External provider behavior shared by research tools.",
+                "fields": [
+                    {"id": "allow_external_network", "label": "External Network", "type": "toggle", "default": False, "help": "Web/Reddit provider を実ネットワークに接続する既定値。"},
+                    {"id": "default_limit", "label": "Default Limit", "type": "number", "default": 5, "min": 1, "max": 50},
+                ],
+            },
+            {
+                "id": "browser_computer",
+                "label": "Browser / Computer",
+                "description": "Approval defaults for browser and desktop control.",
+                "fields": [
+                    {"id": "dry_run_by_default", "label": "Dry Run By Default", "type": "toggle", "default": True},
+                    {"id": "require_approval", "label": "Require Approval", "type": "toggle", "default": True},
+                ],
+            },
+            {
+                "id": "collaboration",
+                "label": "Collaboration",
+                "description": "Channel and multi-agent UI defaults.",
+                "fields": [
+                    {"id": "show_channel_events", "label": "Show Channel Events", "type": "toggle", "default": True},
+                    {"id": "default_visibility", "label": "Default Visibility", "type": "select", "default": "local", "options": [{"value": "local", "label": "Local"}, {"value": "private", "label": "Private"}, {"value": "unlisted", "label": "Unlisted"}]},
+                ],
+            },
+            {
+                "id": "share",
+                "label": "Share & Export",
+                "description": "Local share link and export defaults.",
+                "fields": [
+                    {"id": "default_format", "label": "Default Format", "type": "select", "default": "markdown", "options": [{"value": "markdown", "label": "Markdown"}, {"value": "json", "label": "JSON"}]},
+                    {"id": "copy_result_to_clipboard", "label": "Copy Result", "type": "toggle", "default": True},
                 ],
             },
         ]
@@ -621,6 +786,21 @@ class FrontendRegistry:
                 "id": "chat_renderers",
                 "path": "user_data/shared/frontend_extensions/*.ui.json",
                 "description": "Metadata describing custom block/widget renderers.",
+            },
+            {
+                "id": "composer.inline",
+                "path": "user_data/shared/frontend_extensions/*.ui.json config.composer.inline",
+                "description": "Small action buttons rendered inside the composer control row.",
+            },
+            {
+                "id": "composer.below",
+                "path": "user_data/shared/frontend_extensions/*.ui.json config.composer.below",
+                "description": "Secondary action buttons rendered below the composer.",
+            },
+            {
+                "id": "chat.activity",
+                "path": "chat message events/tool_logs",
+                "description": "Provider/tool activity records rendered in message history.",
             },
             {
                 "id": "shell_layout",
@@ -917,6 +1097,8 @@ class FrontendRegistry:
             "models": {
                 "detected_provider_count": len(self._list_provider_models()),
                 "preferred_model": "openrouter/tencent/hy3-preview:free",
+                "favorite_profiles": ["openrouter/tencent/hy3-preview:free", "stub/default"],
+                "thinking_level_by_profile": {"openrouter/tencent/hy3-preview:free": "medium"},
                 "model_profile": self._default_model_profile_text(),
                 "openrouter_api_key": "",
                 "openrouter_api_key_configured": provider_has_api_key("openrouter", pack_root=self._pack_root),
@@ -941,6 +1123,10 @@ class FrontendRegistry:
                 "name": "Tencent HY3 Preview Free",
                 "provider": "openrouter",
                 "model_id": "tencent/hy3-preview:free",
+                "profile_id": "openrouter/tencent/hy3-preview:free",
+                "max_context": 32000,
+                "supports_thinking": False,
+                "thinking_level": None,
                 "traits": ["free", "preview"],
                 "strengths": ["general"],
             },
@@ -1015,6 +1201,29 @@ class FrontendRegistry:
         models = refreshed.setdefault("models", {})
         if isinstance(models, dict):
             models["openrouter_api_key"] = ""
+            favorite_profiles = models.get("favorite_profiles")
+            if isinstance(favorite_profiles, str):
+                try:
+                    parsed = json.loads(favorite_profiles)
+                    favorite_profiles = parsed
+                except json.JSONDecodeError:
+                    favorite_profiles = [line.strip() for line in favorite_profiles.splitlines()]
+            if not isinstance(favorite_profiles, list):
+                preferred = str(models.get("preferred_model") or "stub/default").strip()
+                favorite_profiles = [preferred] if preferred else ["stub/default"]
+            normalized_favorites = []
+            for item in favorite_profiles:
+                profile_id = str(item or "").strip()
+                if profile_id and profile_id not in normalized_favorites:
+                    normalized_favorites.append(profile_id)
+            models["favorite_profiles"] = normalized_favorites or ["stub/default"]
+            levels = models.get("thinking_level_by_profile")
+            if isinstance(levels, str):
+                try:
+                    levels = json.loads(levels)
+                except json.JSONDecodeError:
+                    levels = {}
+            models["thinking_level_by_profile"] = levels if isinstance(levels, dict) else {}
             models["openrouter_api_key_configured"] = provider_has_api_key(
                 "openrouter",
                 pack_root=self._pack_root,

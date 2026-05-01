@@ -1,0 +1,29 @@
+{
+  "id": "coding_file_write",
+  "category": "tool",
+  "version": "1",
+  "display_name": "Write File",
+  "description": "Write a workspace file after approval.",
+  "enabled": true,
+  "config": {
+    "name": "coding_file_write",
+    "summary": "Write a workspace file",
+    "tags": ["coding", "file", "write"],
+    "tool_category": "filesystem_write",
+    "action_type": "file_write",
+    "write_action": true,
+    "requires_approval": true,
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string"},
+          "content": {"type": "string"}
+        },
+        "required": ["path", "content"]
+      }
+    },
+    "execution": {"type": "local"},
+    "handler": "blocks.coding.file_write:run"
+  }
+}

@@ -1,6 +1,7 @@
 """defaults.coding.file_delete — ファイル削除ブロック"""
 
 from blocks._common import ok, error
+from blocks.coding._approval import approval_required, is_server_approved
 from domain.coding.file_ops import FileOps
 
 
@@ -16,6 +17,8 @@ def run(input_data, context=None):
     path = input_data.get("path")
     if not path:
         return error("'path' is required", code="INVALID_INPUT")
+    if not is_server_approved(context):
+        return ok(approval_required("file.delete", "high", path=path))
 
     try:
         ops = FileOps()

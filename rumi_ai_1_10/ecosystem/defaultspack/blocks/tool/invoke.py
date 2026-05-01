@@ -41,9 +41,11 @@ def run(input_data, context):
             },
         }
 
+    executor_context = dict(context or {})
+    executor_context["_tool_permission_decision"] = decision
     executor = ToolExecutor()
     try:
-        result = executor.execute(tool_name, arguments, context)
+        result = executor.execute(tool_name, arguments, executor_context)
     except Exception as exc:
         return error("Tool execution failed: {}".format(exc), "EXEC_ERROR")
 
