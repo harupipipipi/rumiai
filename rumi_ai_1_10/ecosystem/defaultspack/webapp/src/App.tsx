@@ -278,6 +278,7 @@ export default function App() {
   const [codingContext, setCodingContext] = useState<CodingContext | null>(null);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [droppedWidgets, setDroppedWidgets] = useState<DroppedWidget[]>([]);
+  const [selectedTools, setSelectedTools] = useState<ComposerExtensionItem[]>([]);
   const pendingStorageKey = "rumi-pending-chat-requests";
   const [pendingRequests, setPendingRequests] = useLocalStorage<Record<string, PendingChatRequest>>(pendingStorageKey, {});
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -620,6 +621,12 @@ export default function App() {
   const handleComposerExtensionSelect = (item: ComposerExtensionItem) => {
     setActiveSidebarItemId(item.id);
     setSidebarSelectionTick((value) => value + 1);
+    setSelectedTools((current) => {
+      if (current.some((selected) => selected.id === item.id)) {
+        return current.filter((selected) => selected.id !== item.id);
+      }
+      return [...current, item];
+    });
   };
 
   const handleComposerCommand = (commandId: string) => {
@@ -741,6 +748,18 @@ export default function App() {
     setInput("");
     setAttachedFiles([]);
     let submittedConversationId: string | null = null;
+    const selectedToolIds = Array.from(
+      new Set([
+        ...selectedTools.map((tool) => tool.id),
+        ...droppedWidgets.filter((widget) => widget.type === "tool" && widget.enabled !== false).map((widget) => widget.id),
+      ]),
+    );
+    const selectedToolLabels = [
+      ...selectedTools.map((item) => item.label || item.id),
+      ...droppedWidgets
+        .filter((widget) => widget.type === "tool" && widget.enabled !== false && !selectedTools.some((tool) => tool.id === widget.id))
+        .map((widget) => widget.label || widget.id),
+    ];
 
     try {
       let conversation = activeConversation;
@@ -755,7 +774,7 @@ export default function App() {
         conversationId: conversation.id,
         startedAt: Date.now(),
         status: `${activeProfile?.display_name ?? preferredModel} が思考中`,
-        toolNames: composerExtensions.map((item) => item.label || item.id),
+        toolNames: selectedToolLabels,
       });
       replaceChatIdInUrl(conversation.id, true);
 
@@ -780,8 +799,23 @@ export default function App() {
       });
       await api.sendMessage(conversation.id, userText, {
         thinking_level: activeProfile?.supports_thinking ? selectedThinkingLevel : null,
-        tool_policy: yoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : undefined,
+        tool_policy: {
+          ...(yoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
+          ...(selectedToolIds.length ? { selected_tools: selectedToolIds } : {}),
+        },
+        attachments: attachedFiles,
+        tools: selectedToolIds,
+        metadata: {
+          attachments: attachedFiles.map(({ name, size, type, truncated }) => ({ name, size, type, truncated })),
+          selected_tools: selectedToolIds,
+          dropped_widgets: droppedWidgets
+            .filter((widget) => widget.enabled !== false)
+            .map(({ id, type, label }) => ({ id, type, label })),
+        },
       });
+      setAttachedFiles([]);
+      setSelectedTools([]);
+      setDroppedWidgets([]);
       forgetPendingRequest(conversation.id);
       replaceChatIdInUrl(conversation.id, false);
 

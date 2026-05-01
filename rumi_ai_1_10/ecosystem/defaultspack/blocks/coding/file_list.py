@@ -18,7 +18,7 @@ def run(input_data, context=None):
     recursive = input_data.get("recursive", False)
 
     try:
-        ops = FileOps()
+        ops = FileOps(input_data.get("workspace_root"))
         files = ops.list_files(directory, recursive=recursive)
         return ok({
             "directory": directory,

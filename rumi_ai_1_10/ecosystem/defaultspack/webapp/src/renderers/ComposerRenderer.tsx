@@ -441,15 +441,22 @@ export function ComposerRenderer({
     const newFiles: AttachedFile[] = await Promise.all(
       Array.from(files).map(async (file) => {
         const text = await file.text();
+        const truncated = text.length > 120_000;
         return {
           id: `file-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           name: file.name,
           size: file.size,
-          content: text.length > 120_000 ? `${text.slice(0, 120_000)}\n...` : text,
+          content: truncated ? text.slice(0, 120_000) : text,
+          type: file.type || "text/plain",
+          truncated,
         };
       }),
     );
     onFileAttach?.(newFiles);
+    const snippets = newFiles.map(
+      (file) => `\n\n添付ファイル: ${file.name}\n\`\`\`\n${file.content ?? ""}${file.truncated ? "\n..." : ""}\n\`\`\``,
+    );
+    onInputChange(`${input}${snippets.join("")}`);
   };
 
   const handleDrop = useCallback(

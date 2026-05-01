@@ -130,6 +130,63 @@ def test_chat_send_attaches_tools_and_persists_activity_events(tmp_path, monkeyp
     ChatStore._instance = None
 
 
+def test_chat_send_persists_user_attachment_metadata(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from blocks.chat.send import run
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    result = run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {
+                "role": "user",
+                "content": "hello\n\n添付ファイル: notes.txt",
+                "attachments": [{"name": "notes.txt", "content": "body", "size": 4}],
+                "metadata": {"selected_tools": ["local_file"]},
+            },
+            "tools": ["local_file"],
+            "params": {"tool_policy": {"selected_tools": ["local_file"]}},
+        },
+        {},
+    )
+
+    assert result["status"] == "ok"
+    persisted = json.loads(storage_path.read_text(encoding="utf-8"))
+    stored_user = persisted["conversations"][conversation["id"]]["messages"][0]
+    assert stored_user["metadata"]["attachments"][0]["name"] == "notes.txt"
+    assert stored_user["metadata"]["selected_tools"] == ["local_file"]
+    ChatStore._instance = None
+
+
+def test_coding_context_and_branch_blocks(tmp_path):
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True, text=True)
+    (tmp_path / "README.md").write_text("# test\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=tmp_path, check=True, capture_output=True, text=True)
+    subprocess.run(
+        ["git", "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "init"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    from blocks.coding.context import run as context_run
+    from blocks.coding.git_branch import run as branch_run
+
+    context_result = context_run({"workspace_root": str(tmp_path)}, {})
+    assert context_result["status"] == "ok"
+    assert any(item["name"] == "README.md" for item in context_result["data"]["files"])
+
+    branch_result = branch_run({"workspace_root": str(tmp_path)}, {})
+    assert branch_result["status"] == "ok"
+    assert branch_result["data"]["branch"] in {"main", "master"}
+
+
 def test_direct_chat_completion_forwards_tools_and_tool_context(monkeypatch):
     import blocks.chat.send as send
 
@@ -348,6 +405,10 @@ def test_fallback_routes_expose_agent_service_and_coding_surfaces():
 
     assert ("GET", "/api/capabilities", "blocks.capability.list") in routes
     assert ("GET", "/api/agent-service/manifest", "blocks.capability.manifest") in routes
+    assert ("GET", "/api/coding/context", "blocks.coding.context") in routes
+    assert ("GET", "/api/coding/files", "blocks.coding.file_list") in routes
+    assert ("GET", "/api/coding/git/branch", "blocks.coding.git_branch") in routes
+    assert ("POST", "/api/coding/git/branch", "blocks.coding.git_branch") in routes
     assert ("POST", "/api/coding/files/diff", "blocks.coding.file_diff") in routes
     assert ("POST", "/api/coding/terminal/exec", "blocks.coding.terminal_exec") in routes
     assert ("POST", "/api/context/compact", "blocks.context.compact") in routes
@@ -391,6 +452,9 @@ def test_frontend_sidebar_api_routes_match_in_registry_mode():
         ("POST", "/api/tools/browser-computer"),
         ("POST", "/api/research/web-search"),
         ("POST", "/api/research/reddit-search"),
+        ("GET", "/api/coding/context"),
+        ("GET", "/api/coding/files"),
+        ("GET", "/api/coding/git/branch"),
         ("GET", "/api/ai/profiles"),
         ("GET", "/api/agent/schedules"),
         ("GET", "/api/chat/channels"),

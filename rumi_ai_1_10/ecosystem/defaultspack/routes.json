@@ -145,6 +145,12 @@
       "description": "Revoke a local share link"
     },
     {
+      "method": "GET",
+      "path": "/api/coding/context",
+      "flow_id": "transport_direct",
+      "description": "Read coding workspace context"
+    },
+    {
       "method": "POST",
       "path": "/api/coding/files/read",
       "flow_id": "transport_direct",
@@ -164,6 +170,12 @@
     },
     {
       "method": "GET",
+      "path": "/api/coding/files",
+      "flow_id": "transport_direct",
+      "description": "List workspace files"
+    },
+    {
+      "method": "GET",
       "path": "/api/coding/git/status",
       "flow_id": "transport_direct",
       "description": "Read git status"
@@ -173,6 +185,18 @@
       "path": "/api/coding/git/diff",
       "flow_id": "transport_direct",
       "description": "Read git diff"
+    },
+    {
+      "method": "GET",
+      "path": "/api/coding/git/branch",
+      "flow_id": "transport_direct",
+      "description": "Read git branch information"
+    },
+    {
+      "method": "POST",
+      "path": "/api/coding/git/branch",
+      "flow_id": "transport_direct",
+      "description": "Switch or create a git branch"
     },
     {
       "method": "POST",

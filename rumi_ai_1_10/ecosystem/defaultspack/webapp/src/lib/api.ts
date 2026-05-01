@@ -25,6 +25,14 @@ export type ChatMessage = {
   model?: string | null;
 };
 
+export type ChatAttachment = {
+  name: string;
+  content: string;
+  size: number;
+  type?: string;
+  truncated?: boolean;
+};
+
 export type ChatActivityEvent = {
   type: string;
   message?: string;
@@ -301,7 +309,17 @@ export const api = {
     });
   },
 
-  sendMessage(conversationId: string, text: string, options?: { thinking_level?: string | null; tool_policy?: Record<string, unknown> }) {
+  sendMessage(
+    conversationId: string,
+    text: string,
+    options?: {
+      thinking_level?: string | null;
+      tool_policy?: Record<string, unknown>;
+      attachments?: ChatAttachment[];
+      tools?: string[];
+      metadata?: Record<string, unknown>;
+    },
+  ) {
     return request<ChatMessage>(
       `/api/chat/conversations/${conversationId}/messages`,
       {
@@ -310,7 +328,10 @@ export const api = {
           message: {
             role: "user",
             content: text,
+            attachments: options?.attachments?.length ? options.attachments : undefined,
+            metadata: options?.metadata,
           },
+          tools: options?.tools?.length ? options.tools : undefined,
           params: {
             thinking_level: options?.thinking_level ?? undefined,
             tool_policy: options?.tool_policy ?? undefined,
