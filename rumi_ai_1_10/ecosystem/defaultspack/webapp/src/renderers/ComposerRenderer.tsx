@@ -95,6 +95,7 @@ export function ComposerRenderer({
   commands = [],
   yoloMode = false,
   onExtensionSelect,
+  onFilesAttach,
   onCommandSelect,
   onModelProfileSelect,
   onThinkingLevelChange,
@@ -133,9 +134,25 @@ export function ComposerRenderer({
     const snippets = await Promise.all(
       Array.from(files).map(async (file) => {
         const text = await file.text();
-        const clippedText = text.length > 120_000 ? `${text.slice(0, 120_000)}\n...` : text;
+        const truncated = text.length > 120_000;
+        const clippedText = truncated ? `${text.slice(0, 120_000)}\n...` : text;
         return `\n\n添付ファイル: ${file.name}\n\`\`\`\n${clippedText}\n\`\`\``;
       }),
+    );
+    onFilesAttach?.(
+      await Promise.all(
+        Array.from(files).map(async (file) => {
+          const text = await file.text();
+          const truncated = text.length > 120_000;
+          return {
+            name: file.name,
+            content: truncated ? text.slice(0, 120_000) : text,
+            size: file.size,
+            type: file.type || "text/plain",
+            truncated,
+          };
+        }),
+      ),
     );
     onInputChange(`${input}${snippets.join("")}`);
   };

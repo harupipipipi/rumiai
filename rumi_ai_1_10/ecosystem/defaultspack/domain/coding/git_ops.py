@@ -50,6 +50,36 @@ class GitOps:
             "porcelain": porcelain,
         }
 
+    def branch(self, action="current", name=None, create=False):
+        """ブランチ情報の取得、またはブランチ切り替えを行う。"""
+        action = action or "current"
+        if action == "current":
+            current = self._run(["rev-parse", "--abbrev-ref", "HEAD"]).strip()
+            branches = [
+                line.strip().lstrip("* ").strip()
+                for line in self._run(["branch", "--format", "%(refname:short)"]).splitlines()
+                if line.strip()
+            ]
+            return {"branch": current, "branches": branches}
+        if action == "list":
+            current = self._run(["rev-parse", "--abbrev-ref", "HEAD"]).strip()
+            branches = [
+                line.strip()
+                for line in self._run(["branch", "--format", "%(refname:short)"]).splitlines()
+                if line.strip()
+            ]
+            return {"branch": current, "branches": branches}
+        if action == "switch":
+            if not name:
+                raise ValueError("branch name is required")
+            args = ["switch"]
+            if create:
+                args.append("-c")
+            args.append(name)
+            output = self._run(args)
+            return {"branch": name, "switched": True, "created": bool(create), "output": output}
+        raise ValueError("unsupported branch action: " + str(action))
+
     def diff(self, ref=None):
         """差分を返す。"""
         args = ["diff"]

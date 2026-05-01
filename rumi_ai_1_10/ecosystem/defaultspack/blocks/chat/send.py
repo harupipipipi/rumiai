@@ -322,9 +322,15 @@ def run(input_data, context):
     content = message.get("content", [])
     if isinstance(content, str):
         content = [{"type": "text", "text": content}]
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    attachments = message.get("attachments")
+    if isinstance(attachments, list):
+        metadata = dict(metadata)
+        metadata["attachments"] = attachments
     user_msg_dict = {
         "role": role,
         "content": content,
+        "metadata": metadata or None,
     }
     user_msg = store.add_message(conversation_id, user_msg_dict)
     if user_msg is None:

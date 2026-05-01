@@ -3,7 +3,7 @@ import { PanelLeftOpen } from "lucide-react";
 
 import type { ChatItem } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
-import { api, type ChatContentBlock, type ChatMessage, type Conversation, type ModelProfile, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { api, type ChatAttachment, type ChatContentBlock, type ChatMessage, type Conversation, type ModelProfile, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
 import { deriveConversationTitle, formatRelativeTime, messageToText } from "./lib/chat";
 import { cn } from "./lib/cn";
 import { hasShellRegion } from "./lib/uiShell";
@@ -274,6 +274,8 @@ export default function App() {
   const [activeSidebarItemId, setActiveSidebarItemId] = useState<string | null>(null);
   const [sidebarSelectionTick, setSidebarSelectionTick] = useState(0);
   const [yoloMode, setYoloMode] = useLocalStorage("rumi-yolo-mode", false);
+  const [attachedFiles, setAttachedFiles] = useState<ChatAttachment[]>([]);
+  const [selectedTools, setSelectedTools] = useState<ComposerExtensionItem[]>([]);
   const pendingStorageKey = "rumi-pending-chat-requests";
   const [pendingRequests, setPendingRequests] = useLocalStorage<Record<string, PendingChatRequest>>(pendingStorageKey, {});
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -589,6 +591,12 @@ export default function App() {
   const handleComposerExtensionSelect = (item: ComposerExtensionItem) => {
     setActiveSidebarItemId(item.id);
     setSidebarSelectionTick((value) => value + 1);
+    setSelectedTools((current) => {
+      if (current.some((selected) => selected.id === item.id)) {
+        return current.filter((selected) => selected.id !== item.id);
+      }
+      return [...current, item];
+    });
   };
 
   const handleComposerCommand = (commandId: string) => {
@@ -696,7 +704,7 @@ export default function App() {
         conversationId: conversation.id,
         startedAt: Date.now(),
         status: `${activeProfile?.display_name ?? preferredModel} が思考中`,
-        toolNames: composerExtensions.map((item) => item.label || item.id),
+        toolNames: selectedTools.map((item) => item.label || item.id),
       });
       replaceChatIdInUrl(conversation.id, true);
 
@@ -721,8 +729,19 @@ export default function App() {
       });
       await api.sendMessage(conversation.id, userText, {
         thinking_level: activeProfile?.supports_thinking ? selectedThinkingLevel : null,
-        tool_policy: yoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : undefined,
+        tool_policy: {
+          ...(yoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
+          ...(selectedTools.length ? { selected_tools: selectedTools.map((tool) => tool.id) } : {}),
+        },
+        attachments: attachedFiles,
+        tools: selectedTools.map((tool) => tool.id),
+        metadata: {
+          attachments: attachedFiles.map(({ name, size, type, truncated }) => ({ name, size, type, truncated })),
+          selected_tools: selectedTools.map((tool) => tool.id),
+        },
       });
+      setAttachedFiles([]);
+      setSelectedTools([]);
       forgetPendingRequest(conversation.id);
       replaceChatIdInUrl(conversation.id, false);
 
@@ -765,6 +784,7 @@ export default function App() {
       commands={composerCommands}
       yoloMode={yoloMode}
       onExtensionSelect={handleComposerExtensionSelect}
+      onFilesAttach={(files) => setAttachedFiles((current) => [...current, ...files])}
       onCommandSelect={handleComposerCommand}
       onModelProfileSelect={handleModelProfileSelect}
       onThinkingLevelChange={handleThinkingLevelChange}

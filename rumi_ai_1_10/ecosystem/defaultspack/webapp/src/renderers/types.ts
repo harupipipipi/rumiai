@@ -1,6 +1,6 @@
 import type { FormEvent, MutableRefObject } from "react";
 
-import type { ChatActivityEvent, ChatContentBlock, ModelProfile, SettingsSection, SidebarAction, SidebarItem, ToolLogEntry, UICatalog } from "../lib/api";
+import type { ChatActivityEvent, ChatAttachment, ChatContentBlock, ModelProfile, SettingsSection, SidebarAction, SidebarItem, ToolLogEntry, UICatalog } from "../lib/api";
 import type { ChatItem } from "../components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "../components/ToolPreview";
 
@@ -100,6 +100,7 @@ export type ComposerRendererProps = {
   commands?: ComposerCommandItem[];
   yoloMode?: boolean;
   onExtensionSelect?: (item: ComposerExtensionItem) => void;
+  onFilesAttach?: (files: ChatAttachment[]) => void;
   onCommandSelect?: (commandId: string) => void;
   onModelProfileSelect: (profileId: string) => void;
   onThinkingLevelChange: (level: string | null) => void;
