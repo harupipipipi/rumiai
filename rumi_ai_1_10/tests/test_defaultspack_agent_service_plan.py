@@ -111,3 +111,19 @@ def test_artifact_store_is_local_and_versioned(tmp_path):
     assert artifact["content_ref"] == "user_data/artifacts/plans/plan.md"
     assert store.list()[0]["artifact_id"] == artifact["artifact_id"]
     assert store.get(artifact["artifact_id"])["content"] == "# Plan\n"
+
+
+def test_direct_block_calls_do_not_trust_client_approved_for_privileged_ops(tmp_path):
+    from ecosystem.defaultspack.blocks.coding import file_write, terminal_exec, git_commit
+
+    write_res = file_write.run({"path": "notes.txt", "content": "x", "approved": True}, context=None)
+    assert write_res["status"] == "ok"
+    assert write_res["data"]["approval_required"] is True
+
+    term_res = terminal_exec.run({"command": "python3 -c 'print(42)'", "approved": True, "workspace_root": str(tmp_path)}, context=None)
+    assert term_res["status"] == "ok"
+    assert term_res["data"]["approval_required"] is True
+
+    commit_res = git_commit.run({"message": "x", "approved": True, "workspace_root": str(tmp_path)}, context=None)
+    assert commit_res["status"] == "ok"
+    assert commit_res["data"]["approval_required"] is True

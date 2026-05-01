@@ -1,6 +1,7 @@
 """defaults.coding.terminal_stream — ターミナルストリーム実行ブロック"""
 
 from blocks._common import ok, error
+from blocks.coding._approval import has_server_approval
 from domain.coding.terminal import Terminal
 
 
@@ -22,7 +23,7 @@ def run(input_data, context=None):
 
     try:
         terminal = Terminal(input_data.get("workspace_root"))
-        result = terminal.stream(command, cwd=cwd, approved=bool(input_data.get("approved", False)))
+        result = terminal.stream(command, cwd=cwd, approved=has_server_approval(context))
         return ok(result)
     except Exception as e:
         return error(str(e), code="STREAM_ERROR")

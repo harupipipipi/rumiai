@@ -1,6 +1,7 @@
 """defaults.coding.file_patch — old/new replacement patch."""
 
 from blocks._common import error, ok
+from blocks.coding._approval import has_server_approval
 from domain.coding.file_ops import FileOps
 
 
@@ -12,7 +13,7 @@ def run(input_data, context=None):
         return error("'path' is required", code="INVALID_INPUT")
     if old is None or new is None:
         return error("'old' and 'new' are required", code="INVALID_INPUT")
-    if not input_data.get("approved", False):
+    if not has_server_approval(context):
         return ok(
             {
                 "approval_required": True,

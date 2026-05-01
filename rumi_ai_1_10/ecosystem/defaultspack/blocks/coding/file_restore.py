@@ -1,6 +1,7 @@
 """defaults.coding.file_restore — restore workspace snapshot."""
 
 from blocks._common import error, ok
+from blocks.coding._approval import has_server_approval
 from domain.coding.file_ops import FileOps
 
 
@@ -8,7 +9,7 @@ def run(input_data, context=None):
     snapshot_id = input_data.get("snapshot_id")
     if not snapshot_id:
         return error("'snapshot_id' is required", code="INVALID_INPUT")
-    if not input_data.get("approved", False):
+    if not has_server_approval(context):
         return ok(
             {
                 "approval_required": True,

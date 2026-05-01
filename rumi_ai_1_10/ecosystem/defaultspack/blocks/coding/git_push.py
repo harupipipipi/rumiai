@@ -1,6 +1,7 @@
 """defaults.coding.git_push — Gitプッシュブロック"""
 
 from blocks._common import ok, error
+from blocks.coding._approval import has_server_approval
 from domain.coding.git_ops import GitOps
 
 
@@ -17,7 +18,7 @@ def run(input_data, context=None):
     remote = input_data.get("remote", "origin")
     branch = input_data.get("branch")
 
-    if not input_data.get("approved", False):
+    if not has_server_approval(context):
         return ok({
             "approval_required": True,
             "risk_level": "high",

@@ -16,18 +16,6 @@ def _default_conversation_model(settings_path=None):
             return preferred_model.strip()
     except Exception:
         pass
-    try:
-        from domain.ai_client.profile_loader import ProfileLoader
-
-        profile = ProfileLoader().get("default") or {}
-        provider = profile.get("provider")
-        model = profile.get("model")
-        if provider and model:
-            candidate = "{}/{}".format(provider, model)
-            if not candidate.startswith("stub/"):
-                return candidate
-    except Exception:
-        pass
     return DEFAULT_CHAT_MODEL
 
 
