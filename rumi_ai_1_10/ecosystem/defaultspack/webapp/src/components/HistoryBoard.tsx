@@ -26,7 +26,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import {
   Globe, Terminal, MessageSquare, Plus, ChevronRight, Settings,
-  GripVertical, FolderOpen, Folder, FolderPlus, MessageSquarePlus, X,
+  GripVertical, FolderOpen, Folder, FolderPlus, MessageSquarePlus, PanelLeftClose, X,
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -452,8 +452,13 @@ function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCol
         </button>
       </div>
 
-      {!group.isCollapsed && (
-        <div>
+      <div
+        className={cn(
+          "rumi-history-collapse overflow-hidden",
+          group.isCollapsed && "is-collapsed"
+        )}
+      >
+        <div className="rumi-history-collapse-inner">
           <SortableContext items={group.chats.map(c => c.id)} strategy={verticalListSortingStrategy}>
             {group.chats.map(chat => (
               <SortableChatItem
@@ -480,7 +485,7 @@ function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCol
             />
           ))}
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -501,9 +506,10 @@ interface DroppableColumnProps {
   onUngroup: (groupId: string) => void;
   isDraggedOver: boolean;
   isDragging: boolean;
+  dragHandleProps?: React.HTMLAttributes<HTMLDivElement>;
 }
 
-function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSettingsClick, onRename, onToggleCollapse, onChatRename, onUngroup, isDraggedOver, isDragging }: DroppableColumnProps) {
+function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSettingsClick, onRename, onToggleCollapse, onChatRename, onUngroup, isDraggedOver, isDragging, dragHandleProps }: DroppableColumnProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [title, setTitle] = useState(group.title);
 
@@ -525,7 +531,7 @@ function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSetti
       ref={setDropRef}
       className={cn(
         "flex-shrink-0 border-r border-zinc-800/60 bg-[#09090b] flex flex-col h-full transition-all duration-300",
-        group.isCollapsed ? "w-[48px]" : "w-[280px]",
+        "w-[280px]",
         isDraggedOver && !isDragging && "ring-2 ring-inset ring-emerald-500/50 bg-emerald-500/[0.08]",
       )}
     >
@@ -534,54 +540,63 @@ function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSetti
         onClick={() => onToggleCollapse(group.id)}
         className={cn(
           "h-12 flex items-center px-3 border-b border-zinc-800/60 justify-between hover:bg-zinc-900/50 transition-colors cursor-pointer group/colheader",
-          group.isCollapsed && "px-0 justify-center",
           isDraggedOver && !isDragging && "bg-emerald-500/15"
         )}
       >
         <div className="flex items-center gap-2 text-zinc-100 font-medium flex-1 min-w-0">
-          <ChevronRight size={14} className={cn("transition-transform duration-200 text-zinc-500 flex-shrink-0", !group.isCollapsed && "rotate-90")} />
-          {!group.isCollapsed && (
-            <>
-              <div className="w-5 h-5 rounded bg-zinc-800 text-zinc-400 flex-shrink-0 flex items-center justify-center text-[10px] font-bold border border-zinc-700">
-                {group.title.charAt(0)}
-              </div>
-              {isEditing ? (
-                <input
-                  autoFocus
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  onBlur={handleBlur}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleBlur();
-                    if (e.key === 'Escape') { setIsEditing(false); setTitle(group.title); }
-                  }}
-                  onClick={(e) => e.stopPropagation()}
-                  className="bg-zinc-800 text-zinc-100 text-sm px-1 py-0.5 rounded outline-none w-full border border-emerald-500/50"
-                />
-              ) : (
-                <span
-                  onDoubleClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
-                  className="truncate flex-1 cursor-text select-none hover:text-white transition-colors text-sm"
-                >
-                  {group.title}
-                </span>
-              )}
-              <span className="text-[10px] text-zinc-600 flex-shrink-0">{totalChats}</span>
-            </>
-          )}
-        </div>
-        {!group.isCollapsed && (
-          <div className="flex items-center gap-1 opacity-0 group-hover/colheader:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-            <button onClick={() => onNewTask(group.id)} className="p-1 text-zinc-500 hover:text-emerald-400 transition-colors" title="New chat in group">
-              <Plus size={14} />
-            </button>
+          <div
+            {...dragHandleProps}
+            onClick={(event) => event.stopPropagation()}
+            className={cn(
+              "flex h-6 w-4 flex-shrink-0 items-center justify-center rounded text-zinc-700 transition-all cursor-grab active:cursor-grabbing hover:bg-zinc-800 hover:text-zinc-400",
+              group.isCollapsed ? "opacity-100" : "opacity-0 group-hover/colheader:opacity-100"
+            )}
+            title="Drag group"
+          >
+            <GripVertical size={12} />
           </div>
-        )}
+          <ChevronRight size={14} className={cn("transition-transform duration-200 text-zinc-500 flex-shrink-0", !group.isCollapsed && "rotate-90")} />
+          <div className="w-5 h-5 rounded bg-zinc-800 text-zinc-400 flex-shrink-0 flex items-center justify-center text-[10px] font-bold border border-zinc-700">
+            {group.title.charAt(0)}
+          </div>
+          {isEditing ? (
+            <input
+              autoFocus
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              onBlur={handleBlur}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleBlur();
+                if (e.key === 'Escape') { setIsEditing(false); setTitle(group.title); }
+              }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-zinc-800 text-zinc-100 text-sm px-1 py-0.5 rounded outline-none w-full border border-emerald-500/50"
+            />
+          ) : (
+            <span
+              onDoubleClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
+              className="truncate flex-1 cursor-text select-none hover:text-white transition-colors text-sm"
+            >
+              {group.title}
+            </span>
+          )}
+          <span className="text-[10px] text-zinc-600 flex-shrink-0">{totalChats}</span>
+        </div>
+        <div className="flex items-center gap-1 opacity-0 group-hover/colheader:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+          <button onClick={() => onNewTask(group.id)} className="p-1 text-zinc-500 hover:text-emerald-400 transition-colors" title="New chat in group">
+            <Plus size={14} />
+          </button>
+        </div>
       </div>
 
       {/* Content */}
-      {!group.isCollapsed && (
-        <div className="flex-1 overflow-y-auto px-1 py-2 space-y-0.5">
+      <div
+        className={cn(
+          "rumi-history-collapse flex-1 overflow-hidden",
+          group.isCollapsed && "is-collapsed"
+        )}
+      >
+        <div className="rumi-history-collapse-inner h-full overflow-y-auto px-1 py-2 space-y-0.5">
           <SortableContext items={group.chats.map(c => c.id)} strategy={verticalListSortingStrategy}>
             {group.chats.map(chat => (
               <SortableChatItem
@@ -615,7 +630,7 @@ function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSetti
             </div>
           )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -624,20 +639,16 @@ function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSetti
 // DraggableColumnHandle
 // ============================================================
 
-function DraggableColumnHandle({ group, children }: { group: ChatGroup; children: React.ReactNode }) {
+function DraggableColumnHandle({ group, children }: { group: ChatGroup; children: (dragHandleProps: React.HTMLAttributes<HTMLDivElement>) => React.ReactNode }) {
   const { attributes, listeners, setNodeRef, isDragging } = useSortable({
     id: `drag-col-${group.id}`,
     data: { type: 'ColumnDrag', group },
   });
+  const dragHandleProps = { ...attributes, ...listeners } as React.HTMLAttributes<HTMLDivElement>;
 
   return (
     <div ref={setNodeRef} className={cn("relative", isDragging && "opacity-30")}>
-      <div
-        {...attributes}
-        {...listeners}
-        className="absolute top-0 left-0 right-0 h-12 z-20 cursor-grab active:cursor-grabbing"
-      />
-      <div>{children}</div>
+      <div>{children(dragHandleProps)}</div>
     </div>
   );
 }
@@ -679,13 +690,20 @@ interface HistoryBoardProps {
   onChatSelect: (chatId: string) => void;
   onNewTask: () => void;
   onSettingsClick: () => void;
+  onMinimize?: () => void;
 }
 
-export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, onNewTask, onSettingsClick }: HistoryBoardProps) {
+export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, onNewTask, onSettingsClick, onMinimize }: HistoryBoardProps) {
   const [groups, setGroups] = useState<ChatGroup[]>(() => buildGroupsFromChats(chatItems));
 
   useEffect(() => {
-    setGroups(buildGroupsFromChats(chatItems));
+    setGroups((previousGroups) => {
+      const collapsedById = new Map(previousGroups.map((group) => [group.id, group.isCollapsed]));
+      return buildGroupsFromChats(chatItems).map((group) => ({
+        ...group,
+        isCollapsed: collapsedById.get(group.id) ?? group.isCollapsed,
+      }));
+    });
   }, [chatItems]);
 
   const [activeColumnDrag, setActiveColumnDrag] = useState<ChatGroup | null>(null);
@@ -933,6 +951,16 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
             <FolderPlus size={14} />
             <span>New Group</span>
           </button>
+          {onMinimize && (
+            <button
+              type="button"
+              onClick={onMinimize}
+              className="ml-auto flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+              title="チャット欄を閉じる"
+            >
+              <PanelLeftClose size={15} />
+            </button>
+          )}
         </div>
 
         {/* Columns */}
@@ -940,19 +968,22 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
           <div className="flex flex-1 overflow-x-auto overflow-y-hidden pb-12">
             {groups.map((group) => (
               <DraggableColumnHandle key={group.id} group={group}>
-                <DroppableColumn
-                  group={group}
-                  activeChatId={activeChatId}
-                  onChatSelect={onChatSelect}
-                  onNewTask={handleNewTaskInGroup}
-                  onSettingsClick={onSettingsClick}
-                  onRename={handleRenameGroup}
-                  onToggleCollapse={handleToggleCollapse}
-                  onChatRename={handleRenameChat}
-                  onUngroup={handleUngroup}
-                  isDraggedOver={overColumnId === group.id}
-                  isDragging={activeColumnDrag?.id === group.id}
-                />
+                {(dragHandleProps) => (
+                  <DroppableColumn
+                    group={group}
+                    activeChatId={activeChatId}
+                    onChatSelect={onChatSelect}
+                    onNewTask={handleNewTaskInGroup}
+                    onSettingsClick={onSettingsClick}
+                    onRename={handleRenameGroup}
+                    onToggleCollapse={handleToggleCollapse}
+                    onChatRename={handleRenameChat}
+                    onUngroup={handleUngroup}
+                    isDraggedOver={overColumnId === group.id}
+                    isDragging={activeColumnDrag?.id === group.id}
+                    dragHandleProps={dragHandleProps}
+                  />
+                )}
               </DraggableColumnHandle>
             ))}
 

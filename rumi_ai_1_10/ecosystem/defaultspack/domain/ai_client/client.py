@@ -259,6 +259,17 @@ class AIClient:
 
     def complete(self, model, messages, tools=None, params=None):
         provider, model_name = self.resolve_provider(model)
+        if (
+            provider.__class__.__name__ == "StubProvider"
+            and isinstance(model, str)
+            and "/" in model
+            and not model.startswith("stub/")
+        ):
+            provider_name = model.split("/", 1)[0]
+            raise RuntimeError(
+                f"{provider_name}: provider is not configured. "
+                "Set the provider API key before sending a message."
+            )
         try:
             return provider.complete(model_name, messages, tools or [], params or {})
         except NotImplementedError as e:
@@ -266,6 +277,17 @@ class AIClient:
 
     def stream(self, model, messages, tools=None, params=None):
         provider, model_name = self.resolve_provider(model)
+        if (
+            provider.__class__.__name__ == "StubProvider"
+            and isinstance(model, str)
+            and "/" in model
+            and not model.startswith("stub/")
+        ):
+            provider_name = model.split("/", 1)[0]
+            raise RuntimeError(
+                f"{provider_name}: provider is not configured. "
+                "Set the provider API key before sending a message."
+            )
         try:
             return provider.stream(model_name, messages, tools or [], params or {})
         except NotImplementedError as e:
