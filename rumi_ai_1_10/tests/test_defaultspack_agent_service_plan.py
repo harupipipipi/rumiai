@@ -180,7 +180,13 @@ def test_coding_context_and_branch_blocks(tmp_path):
 
     context_result = context_run({"workspace_root": str(tmp_path)}, {})
     assert context_result["status"] == "ok"
-    assert any(item["name"] == "README.md" for item in context_result["data"]["files"])
+    data = context_result["data"]
+    assert data["branch"] in {"main", "master"}
+    assert data["root_folder"] == str(tmp_path)
+    assert data["files"] == ["README.md"]
+    assert all(isinstance(item, str) for item in data["files"])
+    assert any(item["name"] == "README.md" for item in data["entries"])
+    assert data["git"]["branch"] == data["branch"]
 
     branch_result = branch_run({"workspace_root": str(tmp_path)}, {})
     assert branch_result["status"] == "ok"

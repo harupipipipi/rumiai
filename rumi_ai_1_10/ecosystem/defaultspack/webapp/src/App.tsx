@@ -352,6 +352,8 @@ export default function App() {
         branch: result.branch,
         rootFolder: result.root_folder,
         files: result.files,
+        entries: result.entries,
+        git: result.git,
       });
     } catch {
       setCodingContext(null);

@@ -33,6 +33,32 @@ export type ChatAttachment = {
   truncated?: boolean;
 };
 
+export type CodingContextEntry = {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  size: number;
+};
+
+export type CodingGitStatus = {
+  branch?: string;
+  clean?: boolean;
+  staged?: string[];
+  modified?: string[];
+  untracked?: string[];
+  porcelain?: string;
+  [key: string]: unknown;
+};
+
+export type CodingContextResponse = {
+  branch: string | null;
+  root_folder: string | null;
+  directory?: string;
+  files: string[];
+  entries?: CodingContextEntry[];
+  git?: CodingGitStatus | null;
+};
+
 export type ChatActivityEvent = {
   type: string;
   message?: string;
@@ -430,9 +456,7 @@ export const api = {
   },
 
   getCodingContext() {
-    return request<{ branch: string | null; root_folder: string | null; files: string[] }>(
-      "/api/coding/context",
-    );
+    return request<CodingContextResponse>("/api/coding/context");
   },
 
   listWorkspaceFiles(path?: string) {

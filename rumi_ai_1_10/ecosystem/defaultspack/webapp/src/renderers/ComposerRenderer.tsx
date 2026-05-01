@@ -288,11 +288,7 @@ function AtFileMention({
   onSelect: (file: string) => void;
   onClose: () => void;
 }) {
-  const filtered = useMemo(() => {
-    if (!query) return files.slice(0, 20);
-    const q = query.toLowerCase();
-    return files.filter((f) => f.toLowerCase().includes(q)).slice(0, 20);
-  }, [files, query]);
+  const filtered = useMemo(() => filterAtMentionFiles(files, query), [files, query]);
 
   if (filtered.length === 0) return null;
 
@@ -320,6 +316,12 @@ function AtFileMention({
       </div>
     </>
   );
+}
+
+export function filterAtMentionFiles(files: string[], query: string): string[] {
+  if (!query) return files.slice(0, 20);
+  const q = query.toLowerCase();
+  return files.filter((file) => file.toLowerCase().includes(q)).slice(0, 20);
 }
 
 export function ComposerRenderer({

@@ -1,6 +1,6 @@
 import type { FormEvent, MutableRefObject } from "react";
 
-import type { ChatActivityEvent, ChatAttachment, ChatContentBlock, ModelProfile, SettingsSection, SidebarAction, SidebarItem, ToolLogEntry, UICatalog } from "../lib/api";
+import type { ChatActivityEvent, ChatContentBlock, CodingContextEntry, CodingGitStatus, ModelProfile, SettingsSection, SidebarAction, SidebarItem, ToolLogEntry, UICatalog } from "../lib/api";
 import type { ChatItem } from "../components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "../components/ToolPreview";
 
@@ -104,7 +104,6 @@ export type ComposerRendererProps = {
   attachedFiles?: AttachedFile[];
   droppedWidgets?: DroppedWidget[];
   onExtensionSelect?: (item: ComposerExtensionItem) => void;
-  onFilesAttach?: (files: ChatAttachment[]) => void;
   onCommandSelect?: (commandId: string) => void;
   onModelProfileSelect: (profileId: string) => void;
   onThinkingLevelChange: (level: string | null) => void;
@@ -161,6 +160,8 @@ export type CodingContext = {
   branch: string | null;
   rootFolder: string | null;
   files: string[];
+  entries?: CodingContextEntry[];
+  git?: CodingGitStatus | null;
 };
 
 export type AttachedFile = {
