@@ -299,6 +299,8 @@ export default function App() {
   const selectedThinkingLevel = String(thinkingLevels[profileKey(activeProfile, preferredModel)] ?? activeProfile?.default_thinking_level ?? "medium");
   const contextUsage = contextUsageFor(activeConversation, activeProfile);
   const composerExtensions = composerExtensionItems(sidebarItems);
+  const selectedToolIds = useMemo(() => selectedTools.map((tool) => tool.id), [selectedTools]);
+  const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
   const pendingRequest = activeConversationId ? pendingRequests[activeConversationId] : null;
   const isConversationPending = Boolean(
     pendingRequest && Date.now() - pendingRequest.startedAt < 10 * 60_000,
@@ -624,6 +626,10 @@ export default function App() {
   const handleComposerExtensionSelect = (item: ComposerExtensionItem) => {
     setActiveSidebarItemId(item.id);
     setSidebarSelectionTick((value) => value + 1);
+    toggleSelectedTool(item);
+  };
+
+  const toggleSelectedTool = (item: ComposerExtensionItem) => {
     setSelectedTools((current) => {
       if (current.some((selected) => selected.id === item.id)) {
         return current.filter((selected) => selected.id !== item.id);
@@ -657,12 +663,24 @@ export default function App() {
       if (prev.some((w) => w.id === widget.id)) return prev;
       return [...prev, { ...widget, enabled: widget.enabled ?? true }];
     });
+    if (widget.type === "tool" && widget.enabled !== false) {
+      const item = composerExtensions.find((candidate) => candidate.id === widget.id);
+      if (item) {
+        setSelectedTools((current) => current.some((selected) => selected.id === item.id) ? current : [...current, item]);
+      }
+    }
   };
 
   const handleWidgetToggle = (widgetId: string) => {
-    setDroppedWidgets((prev) =>
-      prev.map((w) => (w.id === widgetId ? { ...w, enabled: !w.enabled } : w)),
-    );
+    const widget = droppedWidgets.find((candidate) => candidate.id === widgetId);
+    if (widget?.type === "tool") {
+      const item = composerExtensions.find((candidate) => candidate.id === widgetId);
+      if (item) {
+        toggleSelectedTool(item);
+        return;
+      }
+    }
+    setDroppedWidgets((prev) => prev.map((w) => (w.id === widgetId ? { ...w, enabled: !w.enabled } : w)));
   };
 
   const approveBrowserAction = async () => {
@@ -751,17 +769,8 @@ export default function App() {
     setInput("");
     setAttachedFiles([]);
     let submittedConversationId: string | null = null;
-    const selectedToolIds = Array.from(
-      new Set([
-        ...selectedTools.map((tool) => tool.id),
-        ...droppedWidgets.filter((widget) => widget.type === "tool" && widget.enabled !== false).map((widget) => widget.id),
-      ]),
-    );
     const selectedToolLabels = [
       ...selectedTools.map((item) => item.label || item.id),
-      ...droppedWidgets
-        .filter((widget) => widget.type === "tool" && widget.enabled !== false && !selectedTools.some((tool) => tool.id === widget.id))
-        .map((widget) => widget.label || widget.id),
     ];
 
     try {
@@ -812,7 +821,7 @@ export default function App() {
           attachments: attachedFiles.map(({ name, size, type, truncated }) => ({ name, size, type, truncated })),
           selected_tools: selectedToolIds,
           dropped_widgets: droppedWidgets
-            .filter((widget) => widget.enabled !== false)
+            .filter((widget) => widget.type === "tool" ? selectedToolIdSet.has(widget.id) : widget.enabled !== false)
             .map(({ id, type, label }) => ({ id, type, label })),
         },
       });
@@ -864,6 +873,7 @@ export default function App() {
       codingContext={codingContext}
       attachedFiles={attachedFiles}
       droppedWidgets={droppedWidgets}
+      selectedToolIds={selectedToolIds}
       onExtensionSelect={handleComposerExtensionSelect}
       onCommandSelect={handleComposerCommand}
       onModelProfileSelect={handleModelProfileSelect}
@@ -991,8 +1001,17 @@ export default function App() {
             activeItemId={activeSidebarItemId ? `${activeSidebarItemId}:${sidebarSelectionTick}` : null}
             settingsValues={settingsValues}
             settingsSections={settingsSections}
+            selectedToolIds={selectedToolIds}
             onSettingChange={handleSettingChange}
             onOpenSettings={() => setIsSettingsOpen(true)}
+            onToolToggle={(item) => toggleSelectedTool({
+              id: item.id,
+              label: item.label,
+              category: item.category,
+              description: item.description,
+              tags: item.tags ?? [],
+              ui: item.ui,
+            })}
             onPanelAction={handlePanelAction}
           />
         )}

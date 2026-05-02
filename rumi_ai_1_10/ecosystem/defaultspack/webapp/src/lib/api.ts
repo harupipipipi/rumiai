@@ -27,7 +27,7 @@ export type ChatMessage = {
 
 export type ChatAttachment = {
   name: string;
-  content: string;
+  content?: string;
   size: number;
   type?: string;
   truncated?: boolean;

@@ -104,6 +104,7 @@ export type ComposerRendererProps = {
   codingContext?: CodingContext | null;
   attachedFiles?: AttachedFile[];
   droppedWidgets?: DroppedWidget[];
+  selectedToolIds?: string[];
   onExtensionSelect?: (item: ComposerExtensionItem) => void;
   onCommandSelect?: (commandId: string) => void;
   onModelProfileSelect: (profileId: string) => void;
@@ -131,8 +132,10 @@ export type RightSidebarRendererProps = {
   activeItemId?: string | null;
   settingsValues: Record<string, Record<string, unknown>>;
   settingsSections: SettingsSection[];
+  selectedToolIds?: string[];
   onSettingChange: SettingChangeHandler;
   onOpenSettings: () => void;
+  onToolToggle?: (item: SidebarItem) => void;
   onPanelAction?: (item: SidebarItem, action: SidebarAction) => void;
 };
 
@@ -169,7 +172,7 @@ export type AttachedFile = {
   id: string;
   name: string;
   size: number;
-  content: string;
+  content?: string;
   type?: string;
   truncated?: boolean;
 };

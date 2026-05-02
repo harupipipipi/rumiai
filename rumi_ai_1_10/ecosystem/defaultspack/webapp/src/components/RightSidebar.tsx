@@ -406,22 +406,26 @@ export function RightSidebar({
   activeItemId,
   settingsValues,
   settingsSections,
+  selectedToolIds = [],
   onSettingChange,
   onOpenSettings,
+  onToolToggle,
   onPanelAction,
 }: {
   items: SidebarItem[];
   activeItemId?: string | null;
   settingsValues: Record<string, Record<string, unknown>>;
   settingsSections: SettingsSection[];
+  selectedToolIds?: string[];
   onSettingChange: (sectionId: string, fieldId: string, value: unknown) => void;
   onOpenSettings: () => void;
+  onToolToggle?: (item: SidebarItem) => void;
   onPanelAction?: (item: SidebarItem, action: SidebarAction) => void;
 }) {
   const [activePanel, setActivePanel] = useState<string | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<"all" | SidebarCategory>("all");
   const [toolGroupFilter, setToolGroupFilter] = useState<string | null>(null);
-  const [toolEnabledState, setToolEnabledState] = useState<Record<string, boolean>>({});
+  const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
 
   useEffect(() => {
     const requestedId = activeItemId?.split(":").slice(0, -1).join(":") || activeItemId;
@@ -472,15 +476,11 @@ export function RightSidebar({
 
   const activeItem = items.find((item) => item.id === activePanel) ?? null;
 
-  const toggleToolEnabled = (itemId: string) => {
-    setToolEnabledState((prev) => ({ ...prev, [itemId]: !(prev[itemId] ?? true) }));
-  };
-
   const handleDragStart = (event: DragEvent, item: SidebarItem) => {
     if (!supportsComposerToggleDrop(item)) return;
     event.dataTransfer.setData(
       "application/rumi-widget",
-      JSON.stringify({ id: item.id, type: "tool", label: item.label, enabled: toolEnabledState[item.id] ?? true, widget_kind: item.ui?.widget_kind }),
+      JSON.stringify({ id: item.id, type: "tool", label: item.label, enabled: selectedToolIdSet.has(item.id), widget_kind: item.ui?.widget_kind }),
     );
     event.dataTransfer.effectAllowed = "copy";
   };
@@ -499,17 +499,19 @@ export function RightSidebar({
                 </span>
               )}
             </div>
-            <button
-              type="button"
-              onClick={() => toggleToolEnabled(activeItem.id)}
-              className={cn(
-                "p-1 rounded transition-colors",
-                toolEnabledState[activeItem.id] ?? true ? "text-emerald-400 hover:bg-emerald-500/10" : "text-zinc-600 hover:bg-zinc-800",
-              )}
-              title={toolEnabledState[activeItem.id] ?? true ? "無効にする" : "有効にする"}
-            >
-              <Power size={14} />
-            </button>
+            {activeItem.category === "tool" && (
+              <button
+                type="button"
+                onClick={() => onToolToggle?.(activeItem)}
+                className={cn(
+                  "p-1 rounded transition-colors",
+                  selectedToolIdSet.has(activeItem.id) ? "text-emerald-400 hover:bg-emerald-500/10" : "text-zinc-600 hover:bg-zinc-800",
+                )}
+                title={selectedToolIdSet.has(activeItem.id) ? "無効にする" : "有効にする"}
+              >
+                <Power size={14} />
+              </button>
+            )}
           </div>
 
           {activeItem.description && (
@@ -568,7 +570,7 @@ export function RightSidebar({
                 "w-9 h-9 rounded-lg flex items-center justify-center relative transition-all duration-150 ease-out group/btn flex-shrink-0 hover:scale-[1.03] active:scale-95",
                 activePanel === item.id
                   ? "bg-zinc-800 text-zinc-100"
-                  : item.category === "tool" && !(toolEnabledState[item.id] ?? true)
+                  : item.category === "tool" && !selectedToolIdSet.has(item.id)
                     ? "text-zinc-700 hover:text-zinc-500 hover:bg-zinc-800/30"
                     : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
               )}
@@ -580,7 +582,7 @@ export function RightSidebar({
                 <div className={cn("absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-r-full", categoryColor(item.category, "indicator"))} />
               )}
 
-              {item.category === "tool" && !(toolEnabledState[item.id] ?? true) && (
+              {item.category === "tool" && !selectedToolIdSet.has(item.id) && (
                 <div className="absolute inset-0 flex items-center justify-center">
                   <div className="w-6 h-px bg-zinc-600 rotate-45" />
                 </div>

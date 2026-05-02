@@ -22,7 +22,10 @@ test("sendMessage serializes attachments and selected tools", async () => {
   try {
     await api.sendMessage("c1", "hello", {
       thinking_level: "medium",
-      attachments: [{ name: "notes.txt", content: "body", size: 4, type: "text/plain" }],
+      attachments: [
+        { name: "notes.txt", content: "body", size: 4, type: "text/plain" },
+        { name: "photo.png", size: 1024, type: "image/png", truncated: false },
+      ],
       tools: ["local_file"],
       tool_policy: { selected_tools: ["local_file"] },
       metadata: { selected_tools: ["local_file"] },
@@ -34,7 +37,10 @@ test("sendMessage serializes attachments and selected tools", async () => {
   assert.deepEqual(requestBody?.message, {
     role: "user",
     content: "hello",
-    attachments: [{ name: "notes.txt", content: "body", size: 4, type: "text/plain" }],
+    attachments: [
+      { name: "notes.txt", content: "body", size: 4, type: "text/plain" },
+      { name: "photo.png", size: 1024, type: "image/png", truncated: false },
+    ],
     metadata: { selected_tools: ["local_file"] },
   });
   assert.deepEqual(requestBody?.tools, ["local_file"]);

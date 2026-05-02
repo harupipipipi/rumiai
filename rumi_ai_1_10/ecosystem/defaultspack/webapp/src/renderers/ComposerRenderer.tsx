@@ -31,6 +31,7 @@ import type {
   ToolGroup,
 } from "./types";
 import type { ModelProfile } from "../lib/api";
+import { buildAttachmentSnippet, fileToAttachment } from "../lib/attachments";
 import { supportsComposerToggleDrop, toolGroupFor } from "../lib/toolUi";
 
 const THINKING_LABELS: Record<string, string> = {
@@ -325,6 +326,7 @@ export function ComposerRenderer({
   codingContext = null,
   attachedFiles = [],
   droppedWidgets = [],
+  selectedToolIds = [],
   onExtensionSelect,
   onCommandSelect,
   onModelProfileSelect,
@@ -358,6 +360,7 @@ export function ComposerRenderer({
       ? `${contextUsage.usedTokens} tokens / unlimited`
       : `${contextUsage.usedTokens} / ${contextUsage.maxContext || "unknown"} tokens`;
   const toolItems = useMemo(() => [...inlineExtensions, ...belowExtensions], [inlineExtensions, belowExtensions]);
+  const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
   const toolGroups = useMemo(() => groupToolItems(toolItems), [toolItems]);
   const activeToolGroup = toolGroups.find((group) => group.id === openToolGroup) ?? toolGroups[0] ?? null;
   const showToolGroups = toolItems.length > 4;
@@ -424,25 +427,12 @@ export function ComposerRenderer({
 
   const attachFiles = async (files: FileList | null) => {
     if (!files?.length) return;
-    const newFiles: AttachedFile[] = await Promise.all(
-      Array.from(files).map(async (file) => {
-        const text = await file.text();
-        const truncated = text.length > 120_000;
-        return {
-          id: `file-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-          name: file.name,
-          size: file.size,
-          content: truncated ? text.slice(0, 120_000) : text,
-          type: file.type || "text/plain",
-          truncated,
-        };
-      }),
-    );
+    const newFiles: AttachedFile[] = await Promise.all(Array.from(files).map(fileToAttachment));
     onFileAttach?.(newFiles);
-    const snippets = newFiles.map(
-      (file) => `\n\n添付ファイル: ${file.name}\n\`\`\`\n${file.content ?? ""}${file.truncated ? "\n..." : ""}\n\`\`\``,
-    );
-    onInputChange(`${input}${snippets.join("")}`);
+    const snippets = newFiles.map(buildAttachmentSnippet).filter(Boolean);
+    if (snippets.length > 0) {
+      onInputChange(`${input}${snippets.join("")}`);
+    }
   };
 
   const handleDrop = useCallback(
@@ -697,7 +687,11 @@ export function ComposerRenderer({
                 <FileChip key={file.id} file={file} onRemove={onFileRemove} />
               ))}
               {droppedWidgets.map((widget) => (
-                <DroppedWidgetChip key={widget.id} widget={widget} onToggle={onWidgetToggle} />
+                <DroppedWidgetChip
+                  key={widget.id}
+                  widget={widget.type === "tool" ? { ...widget, enabled: selectedToolIdSet.has(widget.id) } : widget}
+                  onToggle={onWidgetToggle}
+                />
               ))}
             </div>
           )}

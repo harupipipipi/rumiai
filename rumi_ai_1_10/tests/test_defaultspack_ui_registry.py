@@ -120,6 +120,19 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(catalog["app"]["icon"], "/static/assets/icons/defaultspack-icon.png")
         self.assertEqual(catalog["diagnostics"], [])
 
+    def test_fallback_http_routes_do_not_repeat_method_pattern_pairs(self):
+        from transport.registry import _FALLBACK_HTTP_ROUTE_SPECS
+
+        seen = set()
+        duplicates = []
+        for spec in _FALLBACK_HTTP_ROUTE_SPECS:
+            key = (spec.method, spec.pattern)
+            if key in seen:
+                duplicates.append(key)
+            seen.add(key)
+
+        self.assertEqual(duplicates, [])
+
     def test_catalog_syncs_rumi_account_from_oauth_payload(self):
         from domain.frontend.registry import FrontendRegistry
 
