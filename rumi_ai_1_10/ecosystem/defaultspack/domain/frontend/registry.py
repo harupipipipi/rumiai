@@ -356,6 +356,7 @@ class FrontendRegistry:
                     "description": tool.get("summary", ""),
                     "badge": "Dynamic" if execution_type == "dynamic" else None,
                     "tags": tool.get("tags", []),
+                    "ui": dict(tool.get("ui", {})) if isinstance(tool.get("ui"), dict) else {},
                     "origin": {"kind": "tool_registry", "path": "domain/tool/registry.py"},
                     "panel": {
                         "kind": "schema",

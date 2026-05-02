@@ -31,6 +31,7 @@ import type {
   ToolGroup,
 } from "./types";
 import type { ModelProfile } from "../lib/api";
+import { supportsComposerToggleDrop, toolGroupFor } from "../lib/toolUi";
 
 const THINKING_LABELS: Record<string, string> = {
   low: "低",
@@ -50,23 +51,6 @@ function compactProfileName(name: string): string {
     .replace(/^Claude\s+/i, "")
     .replace(/\s*\(.*?\)\s*/g, " ")
     .trim();
-}
-
-function toolGroupFor(item: ComposerExtensionItem): Omit<ToolGroup, "items"> {
-  const haystack = `${item.id} ${item.label} ${item.description ?? ""} ${(item.tags ?? []).join(" ")}`.toLowerCase();
-  if (/^coding_/.test(item.id) || /(coding|git|terminal|file)/.test(haystack)) {
-    return { id: "coding", label: "Coding", description: "ファイル・Git・ターミナル" };
-  }
-  if (/(search|research|web|reddit|knowledge)/.test(haystack)) {
-    return { id: "research", label: "調べる", description: "web/search/knowledge 系" };
-  }
-  if (/(browser|computer|screen|screenshot)/.test(haystack)) {
-    return { id: "operate", label: "操作する", description: "browser/computer 操作" };
-  }
-  if (/(artifact|memory|prompt|template)/.test(haystack)) {
-    return { id: "manage", label: "管理", description: "artifact/memory/prompt 管理" };
-  }
-  return { id: "other", label: "その他", description: "追加 tool" };
 }
 
 function groupToolItems(items: ComposerExtensionItem[]): ToolGroup[] {
@@ -468,13 +452,17 @@ export function ComposerRenderer({
       if (data) {
         try {
           const widget: DroppedWidget = JSON.parse(data);
+          if (widget.type === "tool") {
+            const item = toolItems.find((candidate) => candidate.id === widget.id);
+            if (!item || !supportsComposerToggleDrop(item)) return;
+          }
           onDropWidget?.(widget);
         } catch {
           // invalid drop data
         }
       }
     },
-    [onDropWidget],
+    [onDropWidget, toolItems],
   );
 
   const handleDragOver = useCallback((event: React.DragEvent) => {

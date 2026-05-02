@@ -28,6 +28,7 @@ export type ComposerExtensionItem = {
   description?: string;
   tags?: string[];
   disabled?: boolean;
+  ui?: SidebarItem["ui"];
 };
 
 export type ComposerCommandItem = {

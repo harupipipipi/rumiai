@@ -9,6 +9,13 @@
     "name": "coding_file_search",
     "summary": "Search workspace files",
     "tags": ["coding", "file", "search"],
+    "ui": {
+      "group_id": "workspace_files",
+      "group_label": "Files",
+      "group_icon": "file",
+      "drop_capabilities": ["composer.toggle_chip"],
+      "widget_kind": "tool_toggle"
+    },
     "tool_category": "filesystem",
     "action_type": "read",
     "schema": {

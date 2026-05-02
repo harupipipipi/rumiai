@@ -9,6 +9,13 @@
     "name": "coding_file_patch",
     "summary": "Patch a workspace file",
     "tags": ["coding", "file", "patch"],
+    "ui": {
+      "group_id": "workspace_files",
+      "group_label": "Files",
+      "group_icon": "file",
+      "drop_capabilities": ["composer.toggle_chip"],
+      "widget_kind": "tool_toggle"
+    },
     "tool_category": "filesystem_write",
     "action_type": "update",
     "write_action": true,

@@ -9,6 +9,13 @@
     "name": "coding_git_status",
     "summary": "Read git status",
     "tags": ["coding", "git", "read"],
+    "ui": {
+      "group_id": "workspace_git",
+      "group_label": "Git",
+      "group_icon": "git",
+      "drop_capabilities": ["composer.toggle_chip"],
+      "widget_kind": "tool_toggle"
+    },
     "tool_category": "git",
     "action_type": "read",
     "schema": {

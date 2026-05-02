@@ -525,6 +525,74 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(asset["body"], b"\x89PNG\r\n")
         self.assertEqual(hidden["status"], "error")
 
+    def test_tool_manifest_ui_metadata_survives_tool_registry_normalization(self):
+        from domain.tool.registry import ToolRegistry
+
+        tool = ToolRegistry._tool_from_manifest(
+            {
+                "id": "oddly_named_manifest",
+                "category": "tool",
+                "description": "declared UI metadata",
+                "config": {
+                    "name": "oddly_named_tool",
+                    "summary": "No legacy grouping keywords",
+                    "ui": {
+                        "group_id": "declared_group",
+                        "group_label": "Declared Group",
+                        "group_icon": "terminal",
+                        "drop_capabilities": ["composer.toggle_chip"],
+                        "widget_kind": "tool_toggle",
+                    },
+                },
+            }
+        )
+
+        self.assertIsNotNone(tool)
+        self.assertEqual(
+            tool["ui"],
+            {
+                "group_id": "declared_group",
+                "group_label": "Declared Group",
+                "group_icon": "terminal",
+                "drop_capabilities": ["composer.toggle_chip"],
+                "widget_kind": "tool_toggle",
+            },
+        )
+
+    def test_frontend_sidebar_items_include_tool_ui_declaration(self):
+        import domain.frontend.registry as frontend_registry
+
+        class FakeToolRegistry:
+            def list_tools(self):
+                return [
+                    {
+                        "tool_id": "oddly_named_tool",
+                        "name": "Oddly Named",
+                        "summary": "No legacy grouping keywords",
+                        "tags": [],
+                        "schema": {"parameters": {"type": "object", "properties": {}, "required": []}},
+                        "execution": {"type": "local"},
+                        "ui": {
+                            "group_id": "declared_group",
+                            "group_label": "Declared Group",
+                            "group_icon": "terminal",
+                            "drop_capabilities": ["composer.toggle_chip"],
+                            "widget_kind": "tool_toggle",
+                        },
+                    }
+                ]
+
+        with patch("domain.frontend.registry.ToolRegistry", FakeToolRegistry):
+            registry = frontend_registry.FrontendRegistry(DEFAULTSPACK_ROOT)
+            items = registry._sidebar_items([], [])
+
+        item = next(candidate for candidate in items if candidate["id"] == "oddly_named_tool")
+
+        self.assertEqual(item["ui"]["group_id"], "declared_group")
+        self.assertEqual(item["ui"]["group_label"], "Declared Group")
+        self.assertEqual(item["ui"]["drop_capabilities"], ["composer.toggle_chip"])
+        self.assertEqual(item["ui"]["widget_kind"], "tool_toggle")
+
 
 if __name__ == "__main__":
     unittest.main()

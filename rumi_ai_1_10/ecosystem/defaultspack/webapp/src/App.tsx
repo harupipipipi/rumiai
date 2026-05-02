@@ -199,6 +199,7 @@ function composerExtensionItems(items: SidebarItem[]): ComposerExtensionItem[] {
       category: item.category,
       description: item.description,
       tags: item.tags ?? [],
+      ui: item.ui,
     }));
 }
 

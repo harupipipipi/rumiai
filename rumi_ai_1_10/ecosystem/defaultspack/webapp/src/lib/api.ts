@@ -138,6 +138,15 @@ export type SidebarAction = {
   preview_type?: "web" | "code" | "file" | "image";
 };
 
+export type ToolUiMetadata = {
+  group_id?: string;
+  group_label?: string;
+  group_icon?: string;
+  item_icon?: string;
+  drop_capabilities?: string[];
+  widget_kind?: string | null;
+};
+
 export type SidebarItem = {
   id: string;
   label: string;
@@ -145,6 +154,7 @@ export type SidebarItem = {
   description?: string;
   badge?: string | null;
   tags?: string[];
+  ui?: ToolUiMetadata;
   origin?: {
     kind: string;
     path?: string;

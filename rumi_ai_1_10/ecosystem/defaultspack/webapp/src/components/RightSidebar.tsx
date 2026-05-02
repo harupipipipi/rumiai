@@ -40,6 +40,7 @@ import type {
   SidebarField,
   SidebarItem,
 } from "../lib/api";
+import { supportsComposerToggleDrop, toolGroupFor } from "../lib/toolUi";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -56,9 +57,12 @@ const CATEGORY_META: Record<SidebarCategory | "all", { label: string; icon: Reac
 
 const TOOL_GROUP_ICONS: Record<string, ReactElement> = {
   coding: <Code2 size={16} />,
+  file: <FileText size={16} />,
+  git: <GitBranch size={16} />,
   research: <Search size={16} />,
   operate: <Monitor size={16} />,
   manage: <Cpu size={16} />,
+  terminal: <Terminal size={16} />,
   other: <Wrench size={16} />,
 };
 
@@ -67,27 +71,18 @@ const TOOL_GROUP_LABELS: Record<string, string> = {
   research: "調べる",
   operate: "操作する",
   manage: "管理",
+  workspace_files: "Files",
+  workspace_git: "Git",
+  workspace_terminal: "Terminal",
   other: "その他",
 };
 
 const ITEM_ICONS: Record<string, ReactElement> = {
   artifacts: <Archive size={18} />,
-  browser_computer: <Monitor size={18} />,
+  browser: <Monitor size={18} />,
   calculator: <BrainCircuit size={18} />,
   code: <Terminal size={18} />,
-  coding_file_read: <FileText size={18} />,
-  coding_file_write: <FileText size={18} />,
-  coding_file_create: <FileText size={18} />,
-  coding_file_delete: <FileText size={18} />,
-  coding_file_list: <FileText size={18} />,
-  coding_file_search: <Search size={18} />,
-  coding_file_patch: <FileText size={18} />,
-  coding_file_restore: <FileText size={18} />,
-  coding_git_status: <GitBranch size={18} />,
-  coding_git_diff: <GitBranch size={18} />,
-  coding_git_commit: <GitBranch size={18} />,
-  coding_git_push: <GitBranch size={18} />,
-  coding_terminal_exec: <Terminal size={18} />,
+  file: <FileText size={18} />,
   file_reader: <FileText size={18} />,
   files: <FileText size={18} />,
   git: <GitBranch size={18} />,
@@ -125,6 +120,10 @@ function actionIcon(action: SidebarAction) {
 }
 
 function iconForItem(item: SidebarItem) {
+  const declaredIcon = item.ui?.item_icon || item.ui?.group_icon;
+  if (declaredIcon && ITEM_ICONS[declaredIcon]) return ITEM_ICONS[declaredIcon];
+
+  // Legacy fallback for pre-ui metadata tools.
   const direct = item.id.toLowerCase();
   if (ITEM_ICONS[direct]) return ITEM_ICONS[direct];
   const normalized = item.label.toLowerCase().replace(/\s+/g, "_");
@@ -141,8 +140,9 @@ function iconForItem(item: SidebarItem) {
 
 function toolGroupId(item: SidebarItem): string {
   if (item.category !== "tool") return "";
+  if (item.ui?.group_id) return item.ui.group_id;
   const haystack = `${item.id} ${item.label} ${item.description ?? ""} ${(item.tags ?? []).join(" ")}`.toLowerCase();
-  if (/^coding_/.test(item.id) || /(coding|git|terminal|file)/.test(haystack)) return "coding";
+  if (/(coding|git|terminal|file)/.test(haystack)) return "coding";
   if (/(search|research|web|reddit|knowledge)/.test(haystack)) return "research";
   if (/(browser|computer|screen|screenshot)/.test(haystack)) return "operate";
   if (/(artifact|memory|prompt|template)/.test(haystack)) return "manage";
@@ -454,7 +454,10 @@ export function RightSidebar({
       list.push(item);
       groups.set(gid, list);
     }
-    return [...groups.entries()].map(([id, groupItems]) => ({ id, items: groupItems, count: groupItems.length }));
+    return [...groups.entries()].map(([id, groupItems]) => {
+      const meta = toolGroupFor(groupItems[0]);
+      return { id, label: meta.label, icon: meta.icon, items: groupItems, count: groupItems.length };
+    });
   }, [toolItems]);
 
   const visibleItems = useMemo(() => {
@@ -474,9 +477,10 @@ export function RightSidebar({
   };
 
   const handleDragStart = (event: DragEvent, item: SidebarItem) => {
+    if (!supportsComposerToggleDrop(item)) return;
     event.dataTransfer.setData(
       "application/rumi-widget",
-      JSON.stringify({ id: item.id, type: "tool", label: item.label, enabled: toolEnabledState[item.id] ?? true }),
+      JSON.stringify({ id: item.id, type: "tool", label: item.label, enabled: toolEnabledState[item.id] ?? true, widget_kind: item.ui?.widget_kind }),
     );
     event.dataTransfer.effectAllowed = "copy";
   };
@@ -537,14 +541,14 @@ export function RightSidebar({
                       ? "bg-emerald-900/40 text-emerald-300 border border-emerald-500/30"
                       : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
                   )}
-                  title={`${TOOL_GROUP_LABELS[group.id] ?? group.id} (${group.count})`}
+                  title={`${group.label || TOOL_GROUP_LABELS[group.id] || group.id} (${group.count})`}
                 >
-                  {TOOL_GROUP_ICONS[group.id] ?? <Wrench size={16} />}
+                  {(group.icon && TOOL_GROUP_ICONS[group.icon]) || TOOL_GROUP_ICONS[group.id] || <Wrench size={16} />}
                   <span className="absolute -top-0.5 -right-0.5 text-[7px] bg-zinc-700 text-zinc-300 px-0.5 rounded-full leading-tight">
                     {group.count}
                   </span>
                   <span className="absolute right-full mr-2 px-2 py-1 bg-zinc-800 text-zinc-200 text-[10px] rounded-md opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap border border-zinc-700 shadow-lg z-50">
-                    {TOOL_GROUP_LABELS[group.id] ?? group.id}
+                    {group.label || TOOL_GROUP_LABELS[group.id] || group.id}
                   </span>
                 </button>
               ))}
@@ -557,8 +561,8 @@ export function RightSidebar({
           {visibleItems.map((item) => (
             <button
               key={item.id}
-              draggable={item.category === "tool"}
-              onDragStart={item.category === "tool" ? (e) => handleDragStart(e, item) : undefined}
+              draggable={supportsComposerToggleDrop(item)}
+              onDragStart={supportsComposerToggleDrop(item) ? (e) => handleDragStart(e, item) : undefined}
               onClick={() => setActivePanel((current) => (current === item.id ? null : item.id))}
               className={cn(
                 "w-9 h-9 rounded-lg flex items-center justify-center relative transition-all duration-150 ease-out group/btn flex-shrink-0 hover:scale-[1.03] active:scale-95",
