@@ -261,6 +261,9 @@ class StartupProfileManager:
         overrides[port_key] = node_id
         profile["node_overrides"] = overrides
         profile["updated_at"] = _now_ts()
+        error = self._validate_profile(profile, catalog)
+        if error:
+            return {"error": error, "status_code": 400}
         state["profiles"][index] = profile
         self._save_state(state)
         return {"profile": profile, "override_set": {"port_key": port_key, "node_id": node_id}}
@@ -645,6 +648,12 @@ class StartupProfileManager:
             return []
 
         node_ref_by_id = {node.id: node.ref for node in graph.nodes}
+        catalog_nodes = {
+            node.get("node_id"): node
+            for pack_info in catalog.get("packs", [])
+            for node in pack_info.get("nodes", [])
+            if node.get("node_id")
+        }
         port_map: Dict[str, Dict[str, Any]] = {}
 
         for edge in graph.edges:
@@ -652,14 +661,23 @@ class StartupProfileManager:
             source_key = edge.source.to_string()
             source_node_id = edge.source.node_id
             source_node_ref = node_ref_by_id.get(source_node_id, "")
+            target_node_ref = node_ref_by_id.get(edge.target.node_id, "")
+            source_node = catalog_nodes.get(source_node_ref, {})
+            target_node = catalog_nodes.get(target_node_ref, {})
+            source_port = self._find_port(source_node.get("ports", []), edge.source.port_id)
+            target_port = self._find_port(target_node.get("ports", []), edge.target.port_id)
 
             if target_key not in port_map:
                 port_map[target_key] = {
                     "port_key": target_key,
                     "node_id": edge.target.node_id,
                     "port_id": edge.target.port_id,
+                    "target_node_ref": target_node_ref,
+                    "target_port": target_port,
                     "source_node_id": source_node_id,
                     "source_node_ref": source_node_ref,
+                    "source_port_id": edge.source.port_id,
+                    "source_port": source_port,
                     "source_ref": source_key,
                 }
 
@@ -716,11 +734,19 @@ class StartupProfileManager:
                     "component_type": node.get("component_type") or node.get("component_id") or node_id.rsplit(".", 1)[-1],
                     "kind": node.get("kind", ""),
                     "metadata": node.get("metadata", {}),
+                    "ports": node.get("ports", []),
                     "display_name": node.get("display_name", {}),
                     "pack_available": pack_info.get("available", False),
                 })
         result.sort(key=lambda n: (n["pack_id"], n["node_id"]))
         return result
+
+    def _find_port(self, ports: List[Dict[str, Any]], port_id: str) -> Dict[str, Any]:
+        for port in ports:
+            current_id = str(port.get("id") or port.get("port_id") or "")
+            if current_id == port_id:
+                return dict(port)
+        return {}
 
     # ------------------------------------------------------------------
     # Validation
@@ -737,9 +763,48 @@ class StartupProfileManager:
         if port_key not in valid_port_keys:
             return f"Port '{port_key}' is not a valid graph port. Valid: {sorted(valid_port_keys)}"
 
-        available_refs = {n["ref"] for n in node_catalog if n.get("pack_available")}
+        available_nodes = {n["ref"]: n for n in node_catalog if n.get("pack_available")}
+        available_refs = set(available_nodes)
         if target_node not in available_refs:
             return f"Node '{target_node}' is not available. Available: {sorted(available_refs)}"
+
+        graph_port = next((p for p in graph_ports if p.get("port_key") == port_key), {})
+        target_port = graph_port.get("target_port") or {}
+        if not target_port:
+            return f"Port '{port_key}' cannot be overridden because its graph target port is unknown"
+
+        target_node_info = available_nodes.get(target_node, {})
+        output_ports = [
+            port
+            for port in target_node_info.get("metadata", {}).get("ports", [])
+            if str(port.get("direction") or "") == "output"
+        ]
+        if not output_ports:
+            output_ports = [
+                port
+                for port in target_node_info.get("ports", [])
+                if str(port.get("direction") or "") == "output"
+            ]
+        compatible = any(
+            can_connect_ports(
+                str(output_port.get("direction") or ""),
+                list(output_port.get("standards") or output_port.get("contracts") or []),
+                str(target_port.get("direction") or ""),
+                list(target_port.get("standards") or target_port.get("contracts") or []),
+            )
+            for output_port in output_ports
+        )
+        if not compatible:
+            required = target_port.get("standards") or target_port.get("contracts") or []
+            provided = sorted({
+                standard
+                for output_port in output_ports
+                for standard in (output_port.get("standards") or output_port.get("contracts") or [])
+            })
+            return (
+                f"Node '{target_node}' does not satisfy port '{port_key}'. "
+                f"Required standards: {list(required)}. Provided standards: {provided}"
+            )
 
         return None
 
@@ -781,6 +846,16 @@ class StartupProfileManager:
             error = self._validate_node_override(port_key, target_node, graph_ports, node_catalog)
             if error:
                 return error
+
+        runtime_bindings = self._resolve_runtime_component_bindings(profile, catalog)
+        conflicts = runtime_bindings.get("conflicts") or []
+        if conflicts:
+            first = conflicts[0]
+            return (
+                f"Component binding conflict for '{first.get('component_type')}': "
+                f"{first.get('existing_component_full_id')} conflicts with "
+                f"{first.get('new_component_full_id')} at {first.get('port_key')}"
+            )
 
         return None
 

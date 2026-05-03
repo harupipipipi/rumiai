@@ -89,14 +89,23 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                 };
             }
             "register_dock" => {
-                let config = app.state::<crate::config::AppConfig>();
-                match crate::dock_registration::register_defaultspack_dock(config) {
-                    Ok(msg) => {
-                        info!("Dock registration: {msg}");
-                    }
-                    Err(e) => {
-                        error!("Dock registration failed: {e}");
-                    }
+                #[cfg(target_os = "macos")]
+                {
+                    let config = app.state::<crate::config::AppConfig>().inner().clone();
+                    std::thread::spawn(move || {
+                        match crate::dock_registration::register_defaultspack_dock_impl(&config) {
+                            Ok(msg) => {
+                                info!("Dock registration: {msg}");
+                            }
+                            Err(e) => {
+                                error!("Dock registration failed: {e}");
+                            }
+                        }
+                    });
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    error!("Dock registration is only supported on macOS");
                 }
             }
             "check_update" => {

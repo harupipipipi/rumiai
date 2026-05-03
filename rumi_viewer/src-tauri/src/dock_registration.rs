@@ -87,6 +87,63 @@ fn resolve_desktop_app_working_dir(desktop_app: &Value, pack_root: &Path) -> Pat
     }
 }
 
+fn shell_quote(value: &str) -> String {
+    if value.is_empty() {
+        return "''".to_string();
+    }
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn shell_quote_path(path: &Path) -> String {
+    shell_quote(&path.to_string_lossy())
+}
+
+fn xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+fn build_launch_script(
+    pack_shell: &Path,
+    token_file: &Path,
+    rumi_home: &Path,
+    venv_dir: &Path,
+    app_working_dir: &Path,
+    command: &str,
+) -> String {
+    format!(
+        r#"#!/bin/bash
+RUMI_HOME={rumi_home}
+VENV_DIR={venv_dir}
+PACK_SHELL={pack_shell}
+TOKEN_FILE={token_file}
+APP_WORKING_DIR={app_working_dir}
+DESKTOP_COMMAND={command}
+
+export PATH="$VENV_DIR/bin:$PATH"
+export RUMI_HOME
+RUMI_API_TOKEN=$(cat "$TOKEN_FILE" 2>/dev/null | tr -d '\n')
+export RUMI_API_TOKEN
+
+exec "$PACK_SHELL" run "defaultspack" \
+  --command "$DESKTOP_COMMAND" \
+  --kernel-cmd "$VENV_DIR/bin/python3 -m app" \
+  --working-dir "$APP_WORKING_DIR" \
+  --timeout 120
+"#,
+        rumi_home = shell_quote_path(rumi_home),
+        venv_dir = shell_quote_path(venv_dir),
+        pack_shell = shell_quote_path(pack_shell),
+        token_file = shell_quote_path(token_file),
+        app_working_dir = shell_quote_path(app_working_dir),
+        command = shell_quote(command),
+    )
+}
+
 /// Generate a macOS .app bundle at `~/Applications/Rumi Defaultspack.app`.
 fn create_macos_app_bundle(
     app_name: &str,
@@ -111,6 +168,7 @@ fn create_macos_app_bundle(
     // Info.plist
     let bundle_id = "ai.rumi.pack.defaultspack";
     let plist_path = contents_dir.join("Info.plist");
+    let escaped_app_name = xml_escape(app_name);
     let plist_content = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -122,7 +180,7 @@ fn create_macos_app_bundle(
     <key>CFBundleIdentifier</key>
     <string>{bundle_id}</string>
     <key>CFBundleName</key>
-    <string>{app_name}</string>
+    <string>{escaped_app_name}</string>
     <key>CFBundleVersion</key>
     <string>1.0.0</string>
     <key>CFBundlePackageType</key>
@@ -135,30 +193,13 @@ fn create_macos_app_bundle(
 
     // Launch script
     let launch_path = macos_dir.join("launch");
-    let launch_script = format!(
-        r#"#!/bin/bash
-RUMI_HOME="{rumi_home}"
-VENV_DIR="{venv_dir}"
-PACK_SHELL="{pack_shell}"
-TOKEN_FILE="{token_file}"
-
-export PATH="$VENV_DIR/bin:$PATH"
-export RUMI_HOME
-RUMI_API_TOKEN=$(cat "$TOKEN_FILE" 2>/dev/null | tr -d '\n')
-export RUMI_API_TOKEN
-
-exec "$PACK_SHELL" run "defaultspack" \
-  --command "{command}" \
-  --kernel-cmd "$VENV_DIR/bin/python3 -m app" \
-  --working-dir "{app_working_dir}" \
-  --timeout 120
-"#,
-        rumi_home = rumi_home.display(),
-        venv_dir = venv_dir.display(),
-        pack_shell = pack_shell.display(),
-        token_file = token_file.display(),
-        app_working_dir = app_working_dir.display(),
-        command = command,
+    let launch_script = build_launch_script(
+        pack_shell,
+        token_file,
+        rumi_home,
+        venv_dir,
+        app_working_dir,
+        command,
     );
     fs::write(&launch_path, &launch_script)
         .with_context(|| format!("failed to write {}", launch_path.display()))?;
@@ -189,7 +230,7 @@ pub fn register_defaultspack_dock(config: tauri::State<'_, AppConfig>) -> Result
     })
 }
 
-fn register_defaultspack_dock_impl(config: &AppConfig) -> AnyResult<String> {
+pub(crate) fn register_defaultspack_dock_impl(config: &AppConfig) -> AnyResult<String> {
     if !cfg!(target_os = "macos") {
         bail!("Dock registration is only supported on macOS");
     }
@@ -304,6 +345,32 @@ mod tests {
         let result = read_desktop_api_token(&path).unwrap();
         assert_eq!(result, "active-token");
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn shell_quote_escapes_paths_and_commands_in_launch_script() {
+        let script = build_launch_script(
+            Path::new("/tmp/Rumi's bin/pack-shell"),
+            Path::new("/tmp/token file"),
+            Path::new("/tmp/rumi home"),
+            Path::new("/tmp/venv dir"),
+            Path::new("/tmp/work $(bad)"),
+            "python -c \"print('hello')\"",
+        );
+
+        assert!(script.contains("PACK_SHELL='/tmp/Rumi'\\''s bin/pack-shell'"));
+        assert!(script.contains("TOKEN_FILE='/tmp/token file'"));
+        assert!(script.contains("APP_WORKING_DIR='/tmp/work $(bad)'"));
+        assert!(script.contains("DESKTOP_COMMAND='python -c \"print('\\''hello'\\'')\"'"));
+        assert!(script.contains("--command \"$DESKTOP_COMMAND\""));
+    }
+
+    #[test]
+    fn xml_escape_escapes_plist_values() {
+        assert_eq!(
+            xml_escape("Rumi & <Default> \"Pack\""),
+            "Rumi &amp; &lt;Default&gt; &quot;Pack&quot;"
+        );
     }
 
     #[test]

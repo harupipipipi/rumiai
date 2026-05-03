@@ -74,6 +74,29 @@ def _write_graph_file(pack_dir: Path, graph_id: str, nodes: list, edges: list) -
     return graph_file
 
 
+def _ports_for_node(node_id: str) -> list[dict]:
+    ports_by_node = {
+        "agent": [
+            {"id": "start", "direction": "input", "standards": ["rumi.flow.start"]},
+            {"id": "ai", "direction": "input", "standards": ["rumi.ai.client"]},
+            {"id": "alt_ai", "direction": "input", "standards": ["rumi.ai.client"]},
+            {"id": "tools", "direction": "input", "standards": ["rumi.tool.bundle"]},
+            {"id": "memory", "direction": "input", "standards": ["rumi.memory.store"]},
+            {"id": "prompt", "direction": "input", "standards": ["rumi.prompt.bundle"]},
+        ],
+        "ai_client": [{"id": "client", "direction": "output", "standards": ["rumi.ai.client"]}],
+        "ai_client_2": [{"id": "client", "direction": "output", "standards": ["rumi.ai.client"]}],
+        "tool": [{"id": "tools", "direction": "output", "standards": ["rumi.tool.bundle"]}],
+        "memory": [{"id": "memory", "direction": "output", "standards": ["rumi.memory.store"]}],
+        "prompt": [{"id": "prompt", "direction": "output", "standards": ["rumi.prompt.bundle"]}],
+        "frontend": [
+            {"id": "surface", "direction": "input", "standards": ["rumi.surface"]},
+            {"id": "surface", "direction": "output", "standards": ["rumi.surface"]},
+        ],
+    }
+    return ports_by_node.get(node_id, [])
+
+
 def _write_node_file(pack_dir: Path, node_id: str, ref: str | None = None) -> Path:
     nodes_dir = pack_dir / "nodes"
     nodes_dir.mkdir(parents=True, exist_ok=True)
@@ -85,7 +108,7 @@ def _write_node_file(pack_dir: Path, node_id: str, ref: str | None = None) -> Pa
                 "node_id": f"{pack_id}.{node_id}",
                 "component_id": node_id,
                 "display_name": {"en": node_id},
-                "ports": [],
+                "ports": _ports_for_node(node_id),
             }
         ],
     }
@@ -403,6 +426,53 @@ def test_set_node_override_rejects_unavailable_node(tmp_path: Path):
 
     assert result["status_code"] == 400
     assert "not available" in result["error"]
+
+
+def test_set_node_override_rejects_incompatible_node_standard(tmp_path: Path):
+    eco_root = tmp_path / "ecosystem"
+    _write_pack(
+        eco_root, "defaultspack",
+        graphs=[_startup_graph("defaultspack")],
+        nodes=["agent", "ai_client", "tool", "memory", "frontend"],
+    )
+    _write_pack(eco_root, "toolpack", nodes=["tool"])
+    locations = _discover_locations(eco_root, ["defaultspack", "toolpack"])
+    manager = StartupProfileManager(storage_path=tmp_path / "startup_profiles.json")
+
+    with patch("core_runtime.startup_profiles.discover_pack_locations", return_value=locations):
+        created = manager.create_profile({"base_pack": "defaultspack"})
+        profile_id = created["profile"]["profile_id"]
+        manager.add_pack_to_profile(profile_id, "toolpack")
+        result = manager.set_node_override(profile_id, "agent.ai", "toolpack.tool")
+
+    assert result["status_code"] == 400
+    assert "does not satisfy port 'agent.ai'" in result["error"]
+    assert "rumi.ai.client" in result["error"]
+
+
+def test_profile_validation_rejects_component_binding_conflict(tmp_path: Path):
+    eco_root = tmp_path / "ecosystem"
+    conflict_graph = _startup_graph("defaultspack")
+    conflict_graph["edges"].append(
+        {"id": "ai_to_agent_alt", "from": "ai.client", "to": "agent.alt_ai", "kind": "binding"}
+    )
+    _write_pack(
+        eco_root, "defaultspack",
+        graphs=[conflict_graph],
+        nodes=["agent", "ai_client", "tool", "memory", "frontend"],
+    )
+    _write_pack(eco_root, "coolpack", nodes=["ai_client"])
+    locations = _discover_locations(eco_root, ["defaultspack", "coolpack"])
+    manager = StartupProfileManager(storage_path=tmp_path / "startup_profiles.json")
+
+    with patch("core_runtime.startup_profiles.discover_pack_locations", return_value=locations):
+        created = manager.create_profile({"base_pack": "defaultspack"})
+        profile_id = created["profile"]["profile_id"]
+        manager.add_pack_to_profile(profile_id, "coolpack")
+        result = manager.set_node_override(profile_id, "agent.alt_ai", "coolpack.ai_client")
+
+    assert result["status_code"] == 400
+    assert "Component binding conflict" in result["error"]
 
 
 def test_clear_node_override(tmp_path: Path):

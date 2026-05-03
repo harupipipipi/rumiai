@@ -2,13 +2,17 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   activateStartupProfile,
+  addPackToStartupProfile,
+  clearStartupProfileNodeOverride,
   createStartupProfile,
   deleteStartupProfile,
   duplicateStartupProfile,
   fetchDashboard,
   fetchStartupProfiles,
   launchStartupProfile,
+  removePackFromStartupProfile,
   restartKernel,
+  setStartupProfileNodeOverride,
   updateStartupProfile,
 } from '@/src/lib/api';
 import type {
@@ -17,9 +21,13 @@ import type {
 } from '@/src/lib/apiTypes';
 import {
   buildStartupProfileView,
+  compatibleNodesForPort,
+  defaultBasePack,
   describeStartupActionError,
   describeStartupIssue,
   filterAndSortStartupProfiles,
+  packLabel,
+  titleCasePortKey,
   type StartupSortMode,
 } from '@/src/lib/startupProfiles';
 import { transformDashboard } from '@/src/lib/transforms';
@@ -198,32 +206,30 @@ export function Dashboard() {
 
   const catalog = payload?.catalog ?? null;
   const profileCount = payload?.profiles.length ?? 0;
-  const slotSpecs = catalog?.slot_specs ?? [];
-  const standardPacks = catalog?.standard_packs ?? [];
-  const selectedStandardPack = standardPacks.find((pack) => pack.pack_id === draft?.standard_pack_id) ?? null;
+  const catalogPacks = catalog?.packs ?? [];
+  const selectedBasePack = catalogPacks.find((pack) => pack.pack_id === draft?.base_pack) ?? null;
+  const defaultCreatePack = defaultBasePack(catalog);
+  const availablePacksToAdd = useMemo(
+    () => catalogPacks.filter((pack) => pack.available && draft && !draft.packs.includes(pack.pack_id)),
+    [catalogPacks, draft],
+  );
 
   const isDirty = useMemo(() => {
     if (!selectedProfile || !draft) return false;
     return JSON.stringify({
       name: selectedProfile.name,
-      standard_pack_id: selectedProfile.standard_pack_id,
-      slots: selectedProfile.slots,
+      base_pack: selectedProfile.base_pack,
+      graph_id: selectedProfile.graph_id,
+      packs: selectedProfile.packs,
+      node_overrides: selectedProfile.node_overrides,
     }) !== JSON.stringify({
       name: draft.name,
-      standard_pack_id: draft.standard_pack_id,
-      slots: draft.slots,
+      base_pack: draft.base_pack,
+      graph_id: draft.graph_id,
+      packs: draft.packs,
+      node_overrides: draft.node_overrides,
     });
   }, [draft, selectedProfile]);
-
-  const selectedCandidatesBySlot = useMemo(() => {
-    if (!catalog || !draft) return {} as Record<string, any>;
-    return Object.fromEntries(
-      slotSpecs.map((slot) => [
-        slot.slot_id,
-        (catalog.slot_candidates[slot.slot_id] ?? []).find((candidate) => candidate.pack_id === draft.slots[slot.slot_id]) ?? null,
-      ]),
-    ) as Record<string, any>;
-  }, [catalog, draft, slotSpecs]);
 
   const setSuccessFeedback = (message: string) => {
     setFeedback({ message, tone: 'success' });
@@ -239,7 +245,13 @@ export function Dashboard() {
     setActionState({ type: 'create' });
     setFeedback(null);
     try {
-      const response = await createStartupProfile({ name: 'New custom profile' });
+      if (!defaultCreatePack) {
+        throw new Error('No available base pack with a startup graph was found.');
+      }
+      const response = await createStartupProfile({
+        name: 'New custom profile',
+        base_pack: defaultCreatePack.pack_id,
+      });
       await refreshProfiles(response.profile.profile_id);
       setSuccessFeedback('Custom profile created. Finish the details and save when ready.');
     } catch (error) {
@@ -256,13 +268,65 @@ export function Dashboard() {
     try {
       await updateStartupProfile(draft.profile_id, {
         name: draft.name,
-        standard_pack_id: draft.standard_pack_id,
-        slots: draft.slots,
+        base_pack: draft.base_pack,
+        graph_id: draft.graph_id,
+        packs: draft.packs,
+        node_overrides: draft.node_overrides,
       });
       await refreshProfiles(draft.profile_id);
       setSuccessFeedback('Profile changes saved.');
     } catch (error) {
       setErrorFeedback(translateActionError(error, 'save this profile'));
+    } finally {
+      setActionState(null);
+    }
+  };
+
+  const handleAddPack = async (packId: string) => {
+    if (!draft || !packId) return;
+    setActionState({ type: 'save', profileId: draft.profile_id });
+    setFeedback(null);
+    try {
+      const response = await addPackToStartupProfile(draft.profile_id, packId);
+      setDraft(response.profile);
+      await refreshProfiles(draft.profile_id);
+      setSuccessFeedback('Pack added to profile.');
+    } catch (error) {
+      setErrorFeedback(translateActionError(error, 'add this pack'));
+    } finally {
+      setActionState(null);
+    }
+  };
+
+  const handleRemovePack = async (packId: string) => {
+    if (!draft || packId === draft.base_pack) return;
+    setActionState({ type: 'save', profileId: draft.profile_id });
+    setFeedback(null);
+    try {
+      const response = await removePackFromStartupProfile(draft.profile_id, packId);
+      setDraft(response.profile);
+      await refreshProfiles(draft.profile_id);
+      setSuccessFeedback('Pack removed from profile.');
+    } catch (error) {
+      setErrorFeedback(translateActionError(error, 'remove this pack'));
+    } finally {
+      setActionState(null);
+    }
+  };
+
+  const handleOverrideChange = async (portKey: string, nodeId: string) => {
+    if (!draft) return;
+    setActionState({ type: 'save', profileId: draft.profile_id });
+    setFeedback(null);
+    try {
+      const response = nodeId
+        ? await setStartupProfileNodeOverride(draft.profile_id, portKey, nodeId)
+        : await clearStartupProfileNodeOverride(draft.profile_id, portKey);
+      setDraft(response.profile);
+      await refreshProfiles(draft.profile_id);
+      setSuccessFeedback(nodeId ? 'Node override saved.' : 'Node override cleared.');
+    } catch (error) {
+      setErrorFeedback(translateActionError(error, 'update this override'));
     } finally {
       setActionState(null);
     }
@@ -518,8 +582,8 @@ export function Dashboard() {
                 </h2>
                 <p className="text-sm leading-6 text-text-muted">
                   {searchQuery
-                    ? 'Try a different profile name, pack name, or slot search.'
-                    : 'Profiles keep your preferred standard pack and slot setup ready for launch.'}
+                    ? 'Try a different profile, pack, node, or graph port search.'
+                    : 'Profiles keep your preferred base pack, graph ports, and node overrides ready for launch.'}
                 </p>
               </div>
               <div className="flex flex-col gap-3 sm:flex-row">
@@ -544,7 +608,7 @@ export function Dashboard() {
         ) : (
           <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {visibleProfiles.map((profileView) => {
-              const { issues, profile, runtimeReady, standardPack, lastLaunched } = profileView;
+              const { issues, profile, runtimeReady, basePack, lastLaunched } = profileView;
               const hasDanger = issues.some((i) => i.severity === 'danger');
               const hasWarning = issues.some((i) => i.severity === 'warning');
               const isActive = payload.active_profile_id === profile.profile_id;
@@ -632,7 +696,7 @@ export function Dashboard() {
                   <div className="mt-4 text-center">
                     <h3 className="font-semibold text-text-main">{profile.name}</h3>
                     <p className="mt-0.5 text-xs text-text-muted">
-                      {standardPack?.display_name || profile.standard_pack_id}
+                      {packLabel(basePack, profile.base_pack)}
                     </p>
                   </div>
 
@@ -701,7 +765,7 @@ export function Dashboard() {
                 </button>
                 <div>
                   <h2 className="text-2xl font-semibold tracking-tight text-text-main">{draft.name}</h2>
-                  <p className="mt-1 text-sm text-text-muted">Edit profile settings and slot assignments.</p>
+                  <p className="mt-1 text-sm text-text-muted">Edit profile settings, profile packs, and graph port overrides.</p>
                 </div>
               </div>
 
@@ -744,7 +808,7 @@ export function Dashboard() {
               <div className="space-y-6">
                 <section className="rounded-2xl border border-border bg-bg-main p-5">
                   <h3 className="text-base font-semibold text-text-main">General settings</h3>
-                  <p className="mt-1 text-sm text-text-muted">Edit the profile name and choose which standard pack anchors the setup.</p>
+                  <p className="mt-1 text-sm text-text-muted">Edit the profile name and choose which base pack anchors the setup.</p>
 
                   <div className="mt-5 grid gap-5 md:grid-cols-2">
                     <label className="space-y-2">
@@ -757,30 +821,39 @@ export function Dashboard() {
                     </label>
 
                     <label className="space-y-2">
-                      <span className="text-xs font-semibold uppercase tracking-wider text-text-muted">Standard pack</span>
+                      <span className="text-xs font-semibold uppercase tracking-wider text-text-muted">Base pack</span>
                       <select
-                        value={draft.standard_pack_id}
-                        onChange={(event) => setDraft({ ...draft, standard_pack_id: event.target.value })}
+                        value={draft.base_pack}
+                        onChange={(event) => {
+                          const nextBasePack = event.target.value;
+                          const nextPack = catalogPacks.find((pack) => pack.pack_id === nextBasePack);
+                          setDraft({
+                            ...draft,
+                            base_pack: nextBasePack,
+                            graph_id: nextPack?.graphs[0]?.graph_id ?? draft.graph_id,
+                            packs: draft.packs.includes(nextBasePack) ? draft.packs : [nextBasePack, ...draft.packs],
+                          });
+                        }}
                         className="w-full rounded-xl border border-border bg-bg-hover px-4 py-3 text-sm text-text-main outline-none transition focus:border-accent"
                       >
-                        {standardPacks.map((pack) => (
+                        {catalogPacks.map((pack) => (
                           <option key={pack.pack_id} value={pack.pack_id} disabled={!pack.available}>
-                            {pack.display_name} {pack.available ? '' : '(unavailable)'}
+                            {packLabel(pack)} {pack.available ? '' : '(unavailable)'}
                           </option>
                         ))}
                       </select>
                     </label>
                   </div>
 
-                  {selectedStandardPack && !selectedStandardPack.runtime_ready ? (
+                  {selectedBasePack && !selectedBasePack.available ? (
                     <div className="mt-5 rounded-2xl border border-amber-900/40 bg-amber-950/20 p-4">
                       <div className="flex items-center gap-2 font-medium text-amber-100">
                         <AlertCircle className="h-4 w-4" />
-                        Standard pack needs attention
+                        Base pack needs attention
                       </div>
                       <ul className="mt-3 space-y-2 text-sm text-amber-200/90">
-                        {selectedStandardPack.runtime_issues.map((issue) => (
-                          <li key={issue}>{describeStartupIssue(issue, selectedStandardPack.display_name).description}</li>
+                        {selectedBasePack.approval_issues.map((issue) => (
+                          <li key={issue}>{describeStartupIssue(issue, packLabel(selectedBasePack)).description}</li>
                         ))}
                       </ul>
                     </div>
@@ -788,52 +861,91 @@ export function Dashboard() {
                 </section>
 
                 <section className="rounded-2xl border border-border bg-bg-main p-5">
-                  <h3 className="text-base font-semibold text-text-main">Slot configuration</h3>
-                  <p className="mt-1 text-sm text-text-muted">Choose the pack used for each slot.</p>
+                  <h3 className="text-base font-semibold text-text-main">Profile packs</h3>
+                  <p className="mt-1 text-sm text-text-muted">Add packs before using their nodes as graph port overrides.</p>
 
                   <div className="mt-5 grid gap-4">
-                    {slotSpecs.map((slot) => {
-                      const candidates = catalog.slot_candidates[slot.slot_id] ?? [];
-                      const selectedCandidate = selectedCandidatesBySlot[slot.slot_id];
-
+                    {draft.packs.map((packId) => {
+                      const pack = catalogPacks.find((item) => item.pack_id === packId) ?? null;
+                      const canRemove = packId !== draft.base_pack;
                       return (
-                        <div key={slot.slot_id} className="rounded-xl border border-border bg-bg-hover/50 p-4">
+                        <div key={packId} className="flex items-center justify-between gap-3 rounded-xl border border-border bg-bg-hover/50 p-4">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-semibold text-text-main">{packLabel(pack, packId)}</div>
+                            <div className="mt-0.5 truncate text-xs text-text-muted">{packId}</div>
+                          </div>
+                          <button
+                            onClick={() => void handleRemovePack(packId)}
+                            disabled={!canRemove || actionState?.profileId === draft.profile_id}
+                            className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-text-muted transition hover:bg-bg-hover hover:text-text-main disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {packId === draft.base_pack ? 'Base' : 'Remove'}
+                          </button>
+                        </div>
+                      );
+                    })}
+                    <label className="space-y-2">
+                      <span className="text-xs font-semibold uppercase tracking-wider text-text-muted">Add pack</span>
+                      <select
+                        value=""
+                        onChange={(event) => void handleAddPack(event.target.value)}
+                        disabled={availablePacksToAdd.length === 0 || actionState?.profileId === draft.profile_id}
+                        className="w-full rounded-xl border border-border bg-bg-hover px-4 py-3 text-sm text-text-main outline-none transition focus:border-accent disabled:opacity-60"
+                      >
+                        <option value="">Select a pack</option>
+                        {availablePacksToAdd.map((pack) => (
+                          <option key={pack.pack_id} value={pack.pack_id}>
+                            {packLabel(pack)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                </section>
+
+                <section className="rounded-2xl border border-border bg-bg-main p-5">
+                  <h3 className="text-base font-semibold text-text-main">Graph port overrides</h3>
+                  <p className="mt-1 text-sm text-text-muted">Override a graph input only with nodes that provide its required standard.</p>
+
+                  <div className="mt-5 grid gap-4">
+                    {draft.graph_ports.map((graphPort) => {
+                      const compatibleNodes = compatibleNodesForPort(catalog, draft, graphPort);
+                      const currentOverride = draft.node_overrides[graphPort.port_key] ?? '';
+                      const defaultNode = graphPort.source_node_ref || graphPort.source_ref;
+                      return (
+                        <div key={graphPort.port_key} className="rounded-xl border border-border bg-bg-hover/50 p-4">
                           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                             <div>
-                              <div className="text-sm font-semibold text-text-main">{slot.label}</div>
-                              <div className="mt-0.5 text-xs text-text-muted">{slot.description}</div>
+                              <div className="text-sm font-semibold text-text-main">{titleCasePortKey(graphPort.port_key)}</div>
+                              <div className="mt-0.5 text-xs text-text-muted">
+                                Default: {defaultNode}
+                              </div>
                             </div>
                             <span className="rounded-full border border-border bg-bg-hover px-2.5 py-0.5 text-[11px] font-medium text-text-muted">
-                              {slot.contract}
+                              {(graphPort.target_port?.standards ?? graphPort.target_port?.contracts ?? []).join(', ') || graphPort.port_key}
                             </span>
                           </div>
 
                           <select
-                            value={draft.slots[slot.slot_id] ?? ''}
-                            onChange={(event) =>
-                              setDraft({
-                                ...draft,
-                                slots: { ...draft.slots, [slot.slot_id]: event.target.value },
-                              })
-                            }
+                            value={currentOverride}
+                            onChange={(event) => void handleOverrideChange(graphPort.port_key, event.target.value)}
+                            disabled={actionState?.profileId === draft.profile_id}
                             className="mt-3 w-full rounded-xl border border-border bg-bg-hover px-4 py-2.5 text-sm text-text-main outline-none transition focus:border-accent"
                           >
-                            {candidates.length === 0 ? <option value="">No compatible packs available</option> : null}
-                            {candidates.map((candidate) => (
-                              <option key={candidate.pack_id} value={candidate.pack_id} disabled={!candidate.runtime_ready}>
-                                {candidate.display_name} {candidate.runtime_ready ? '' : '(needs attention)'}
+                            <option value="">Use graph default ({defaultNode})</option>
+                            {compatibleNodes.map((node) => (
+                              <option key={node.node_id} value={node.node_id}>
+                                {node.node_id}
                               </option>
                             ))}
                           </select>
 
-                          {selectedCandidate && !selectedCandidate.runtime_ready ? (
+                          {compatibleNodes.length === 0 ? (
                             <div className="mt-3 space-y-2 rounded-xl border border-amber-900/30 bg-amber-950/15 p-3 text-sm text-amber-100">
-                              {selectedCandidate.runtime_issues.map((issue: string) => (
-                                <div key={issue} className="flex items-start gap-2">
-                                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                                  <span>{describeStartupIssue(issue, slot.label).description}</span>
-                                </div>
-                              ))}
+                              <div className="flex items-start gap-2">
+                                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                                <span>No compatible nodes are available from this profile's packs.</span>
+                              </div>
                             </div>
                           ) : null}
                         </div>

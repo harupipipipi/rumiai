@@ -85,77 +85,76 @@ export interface PackToggleResponseData {
 }
 
 export interface ApiStartupNodePort {
-  port_id: string;
-  label: string;
+  id?: string;
+  port_id?: string;
+  label?: string;
+  display_name?: Record<string, string>;
   direction: 'input' | 'output';
-  contracts: string[];
-  multi: boolean;
+  standards?: string[];
+  contracts?: string[];
+  multi?: boolean;
+  multiple?: boolean;
 }
 
 export interface ApiStartupNodeDefinition {
   node_id: string;
-  title: string;
-  subtitle: string;
+  ref?: string;
+  title?: string;
+  subtitle?: string;
   kind: string;
-  character: string;
+  component_id?: string;
+  component_type?: string;
+  metadata?: Record<string, unknown>;
+  character?: string;
+  display_name?: Record<string, string>;
   ports: ApiStartupNodePort[];
 }
 
-export interface ApiStartupSlotSpec {
-  slot_id: string;
-  label: string;
-  description: string;
-  contract: string;
-  multi: boolean;
-  interface_key: string;
-  character: string;
-}
-
-export interface ApiStartupStandardPack {
+export interface ApiStartupPack {
   pack_id: string;
-  display_name: string;
+  name: string;
   description: string;
   pack_identity: string;
   available: boolean;
-  runtime_ready: boolean;
-  runtime_issues: string[];
   enabled: boolean;
-  character: string;
-  slots: Array<{
-    slot_id: string;
-    contract: string;
-    label: string;
+  approval_issues: string[];
+  graphs: Array<{
+    graph_id: string;
+    display_name?: Record<string, string>;
+    description?: Record<string, string>;
+    node_count?: number;
+    edge_count?: number;
   }>;
+  nodes: ApiStartupNodeDefinition[];
 }
 
-export interface ApiStartupSlotCandidate {
-  pack_id: string;
-  pack_identity: string;
-  display_name: string;
-  description: string;
-  contracts: string[];
-  component_types: string[];
-  provides: string[];
-  character: string;
-  enabled: boolean;
-  runtime_ready: boolean;
-  runtime_issues: string[];
-  selected_component_id: string;
+export interface ApiStartupGraphPort {
+  port_key: string;
+  node_id: string;
+  port_id: string;
+  target_node_ref?: string;
+  target_port?: ApiStartupNodePort;
+  source_node_id: string;
+  source_node_ref?: string;
+  source_port_id?: string;
+  source_port?: ApiStartupNodePort;
+  source_ref: string;
 }
 
 export interface ApiStartupCatalog {
   version: number;
-  start_node: ApiStartupNodeDefinition;
-  slot_specs: ApiStartupSlotSpec[];
-  standard_packs: ApiStartupStandardPack[];
-  slot_candidates: Record<string, ApiStartupSlotCandidate[]>;
+  packs: ApiStartupPack[];
 }
 
 export interface ApiStartupProfile {
+  version: number;
   profile_id: string;
   name: string;
-  standard_pack_id: string;
-  slots: Record<string, string>;
+  base_pack: string;
+  graph_id: string;
+  graph_ports: ApiStartupGraphPort[];
+  packs: string[];
+  node_overrides: Record<string, string>;
   created_at: number;
   updated_at: number;
 }
@@ -176,6 +175,10 @@ export interface StartupProfileMutationResponseData {
   profile: ApiStartupProfile;
   created?: boolean;
   updated?: boolean;
+  pack_added?: string;
+  pack_removed?: string;
+  override_set?: { port_key: string; node_id: string };
+  override_cleared?: string;
   duplicated?: boolean;
   activated?: boolean;
   launched?: boolean;
@@ -300,6 +303,8 @@ export interface ApiCapabilityProfile {
 export interface ApiCapabilityGraph {
   graph_id: string;
   label: string;
+  display_name?: Record<string, string>;
+  description?: Record<string, string>;
   description_label: string;
   nodes: Array<{id: string; ref: string; display_name?: Record<string, string>; metadata?: Record<string, unknown>}>;
   edges: Array<{id: string; from: string; to: string; kind: string; metadata?: Record<string, unknown>}>;

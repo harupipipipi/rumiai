@@ -5,7 +5,7 @@ import { Card } from '@/src/components/ui/Card';
 import { Badge } from '@/src/components/ui/Badge';
 import { Button } from '@/src/components/ui/Button';
 import { Popover, PopoverTrigger, PopoverContent } from '@/src/components/ui/Popover';
-import type { StartupProfileView } from '@/src/lib/startupProfiles';
+import { packLabel, type StartupProfileView } from '@/src/lib/startupProfiles';
 import { cn } from '@/src/lib/utils';
 
 interface ProfileCardProps {
@@ -31,7 +31,7 @@ export function ProfileCard({
   isBusy,
   actionType,
 }: ProfileCardProps) {
-  const { profile, standardPack, runtimeReady, issues, lastLaunched } = profileView;
+  const { profile, basePack, runtimeReady, issues, lastLaunched } = profileView;
 
   const hasDanger = issues.some((i) => i.severity === 'danger');
   const hasWarning = issues.some((i) => i.severity === 'warning');
@@ -54,7 +54,7 @@ export function ProfileCard({
             <h3 className="font-semibold text-text-main line-clamp-1">{profile.name}</h3>
             <p className="text-xs text-text-muted flex items-center gap-1">
               <Box className="h-3 w-3" />
-              {standardPack?.display_name || 'No Standard Pack'}
+              {packLabel(basePack, profile.base_pack)}
             </p>
           </div>
 
