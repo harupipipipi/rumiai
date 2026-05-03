@@ -10,8 +10,8 @@
     "summary": "Run a workspace command",
     "tags": ["coding", "terminal", "command"],
     "ui": {
-      "group_id": "workspace_terminal",
-      "group_label": "Terminal",
+      "group_id": "coding/terminal/exec",
+      "group_label": "Exec",
       "group_icon": "terminal",
       "drop_capabilities": ["composer.toggle_chip"],
       "widget_kind": "tool_toggle"

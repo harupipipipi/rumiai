@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type DragEvent, type ReactElement } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactElement } from "react";
 import {
   Blocks,
   BrainCircuit,
@@ -136,17 +136,6 @@ function iconForItem(item: SidebarItem) {
     capability: <ShieldCheck size={18} />,
   };
   return byCategory[item.category];
-}
-
-function toolGroupId(item: SidebarItem): string {
-  if (item.category !== "tool") return "";
-  if (item.ui?.group_id) return item.ui.group_id;
-  const haystack = `${item.id} ${item.label} ${item.description ?? ""} ${(item.tags ?? []).join(" ")}`.toLowerCase();
-  if (/(coding|git|terminal|file)/.test(haystack)) return "coding";
-  if (/(search|research|web|reddit|knowledge)/.test(haystack)) return "research";
-  if (/(browser|computer|screen|screenshot)/.test(haystack)) return "operate";
-  if (/(artifact|memory|prompt|template)/.test(haystack)) return "manage";
-  return "other";
 }
 
 function categoryColor(cat: SidebarCategory, variant: "bg" | "indicator" | "dot" | "badge") {
@@ -424,7 +413,9 @@ export function RightSidebar({
 }) {
   const [activePanel, setActivePanel] = useState<string | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<"all" | SidebarCategory>("all");
-  const [toolGroupFilter, setToolGroupFilter] = useState<string | null>(null);
+  const [openToolGroupMenu, setOpenToolGroupMenu] = useState<string | null>(null);
+  const [shortcutItemIds, setShortcutItemIds] = useState<string[]>([]);
+  const toolGroupMenuRef = useRef<HTMLDivElement | null>(null);
   const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
 
   useEffect(() => {
@@ -441,6 +432,30 @@ export function RightSidebar({
     }
   }, [activePanel, items]);
 
+  useEffect(() => {
+    if (!openToolGroupMenu) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (toolGroupMenuRef.current?.contains(target)) return;
+      setOpenToolGroupMenu(null);
+    };
+
+    const handleDocumentKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpenToolGroupMenu(null);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleDocumentKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleDocumentKeyDown);
+    };
+  }, [openToolGroupMenu]);
+
   const counts = useMemo(() => {
     const next: Record<string, number> = { all: items.length };
     for (const item of items) {
@@ -450,29 +465,31 @@ export function RightSidebar({
   }, [items]);
 
   const toolItems = useMemo(() => items.filter((item) => item.category === "tool"), [items]);
+  const groupedToolIds = useMemo(() => new Set(toolItems.map((item) => item.id)), [toolItems]);
+  const shortcutIdSet = useMemo(() => new Set(shortcutItemIds), [shortcutItemIds]);
   const toolGroups = useMemo(() => {
     const groups = new Map<string, SidebarItem[]>();
     for (const item of toolItems) {
-      const gid = toolGroupId(item);
+      const gid = toolGroupFor(item).id;
       const list = groups.get(gid) ?? [];
       list.push(item);
       groups.set(gid, list);
     }
     return [...groups.entries()].map(([id, groupItems]) => {
       const meta = toolGroupFor(groupItems[0]);
-      return { id, label: meta.label, icon: meta.icon, items: groupItems, count: groupItems.length };
+      return { id, label: meta.label, icon: meta.icon, path: meta.path, items: groupItems, count: groupItems.length };
     });
   }, [toolItems]);
 
   const visibleItems = useMemo(() => {
-    let filtered = categoryFilter === "all" ? items : items.filter((item) => item.category === categoryFilter);
-    if (categoryFilter === "all" || categoryFilter === "tool") {
-      if (toolGroupFilter) {
-        filtered = filtered.filter((item) => item.category !== "tool" || toolGroupId(item) === toolGroupFilter);
-      }
+    const base = categoryFilter === "all" ? items : items.filter((item) => item.category === categoryFilter);
+    const filtered = base.filter((item) => item.category !== "tool" || !groupedToolIds.has(item.id) || shortcutIdSet.has(item.id));
+    const active = items.find((item) => item.id === activePanel);
+    if (active && !filtered.some((item) => item.id === active.id)) {
+      return [active, ...filtered];
     }
     return filtered;
-  }, [items, categoryFilter, toolGroupFilter]);
+  }, [items, categoryFilter, groupedToolIds, shortcutIdSet, activePanel]);
 
   const activeItem = items.find((item) => item.id === activePanel) ?? null;
 
@@ -483,6 +500,19 @@ export function RightSidebar({
       JSON.stringify({ id: item.id, type: "tool", label: item.label, enabled: selectedToolIdSet.has(item.id), widget_kind: item.ui?.widget_kind }),
     );
     event.dataTransfer.effectAllowed = "copy";
+  };
+
+  const handleShortcutDragStart = (event: DragEvent, item: SidebarItem) => {
+    handleDragStart(event, item);
+    event.dataTransfer.setData("application/rumi-sidebar-shortcut", item.id);
+  };
+
+  const handleShortcutDrop = (event: DragEvent) => {
+    const itemId = event.dataTransfer.getData("application/rumi-sidebar-shortcut");
+    if (!itemId || shortcutIdSet.has(itemId) || !items.some((item) => item.id === itemId)) return;
+    event.preventDefault();
+    setShortcutItemIds((current) => [...current, itemId]);
+    setOpenToolGroupMenu(null);
   };
 
   return (
@@ -527,39 +557,90 @@ export function RightSidebar({
       )}
 
       <div className="w-11 flex flex-col items-center py-1 gap-px flex-shrink-0">
-        <CategorySwitcher active={categoryFilter} counts={counts} onChange={(id) => { setCategoryFilter(id); setToolGroupFilter(null); }} />
+        <CategorySwitcher active={categoryFilter} counts={counts} onChange={(id) => { setCategoryFilter(id); setOpenToolGroupMenu(null); }} />
         <div className="w-5 h-px bg-zinc-800 my-1" />
 
         {(categoryFilter === "all" || categoryFilter === "tool") && toolGroups.length > 1 && (
           <>
-            <div className="flex flex-col items-center gap-px w-full">
+            <div ref={toolGroupMenuRef} className="flex flex-col items-center gap-px w-full">
               {toolGroups.map((group) => (
-                <button
-                  key={group.id}
-                  onClick={() => setToolGroupFilter((current) => (current === group.id ? null : group.id))}
-                  className={cn(
-                    "w-9 h-9 rounded-lg flex items-center justify-center relative transition-all flex-shrink-0",
-                    toolGroupFilter === group.id
-                      ? "bg-emerald-900/40 text-emerald-300 border border-emerald-500/30"
-                      : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
+                <div key={group.id} className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setOpenToolGroupMenu((current) => (current === group.id ? null : group.id))}
+                    className={cn(
+                      "group/group w-9 h-9 rounded-lg flex items-center justify-center relative transition-all flex-shrink-0",
+                      openToolGroupMenu === group.id
+                        ? "bg-emerald-900/40 text-emerald-300 border border-emerald-500/30"
+                        : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
+                    )}
+                    title={`${group.path?.length ? group.path.join(" / ") : group.label || TOOL_GROUP_LABELS[group.id] || group.id} (${group.count})`}
+                  >
+                    {(group.icon && TOOL_GROUP_ICONS[group.icon]) || TOOL_GROUP_ICONS[group.id] || <Wrench size={16} />}
+                    <span className="absolute -top-0.5 -right-0.5 text-[7px] bg-zinc-700 text-zinc-300 px-0.5 rounded-full leading-tight">
+                      {group.count}
+                    </span>
+                    <span className="absolute right-full mr-2 px-2 py-1 bg-zinc-800 text-zinc-200 text-[10px] rounded-md opacity-0 group-hover/group:opacity-100 pointer-events-none transition-opacity whitespace-nowrap border border-zinc-700 shadow-lg z-40">
+                      {group.path?.length && group.path.length > 1 ? group.path.join(" / ") : group.label || TOOL_GROUP_LABELS[group.id] || group.id}
+                    </span>
+                  </button>
+                  {openToolGroupMenu === group.id && (
+                    <div className="absolute right-full top-0 z-50 mr-2 w-56 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 text-left shadow-2xl">
+                      <div className="border-b border-zinc-800 px-3 py-2">
+                        <p className="truncate text-[11px] font-semibold text-zinc-200">{group.label || TOOL_GROUP_LABELS[group.id] || group.id}</p>
+                        {group.path?.length && group.path.length > 1 && (
+                          <p className="truncate text-[10px] text-zinc-500">{group.path.join(" / ")}</p>
+                        )}
+                        <p className="text-[10px] text-zinc-500">{group.count} tools</p>
+                      </div>
+                      <div className="max-h-64 overflow-y-auto py-1">
+                        {group.items.map((item) => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            draggable={supportsComposerToggleDrop(item)}
+                            onDragStart={supportsComposerToggleDrop(item) ? (event) => handleShortcutDragStart(event, item) : undefined}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setActivePanel(item.id);
+                              setOpenToolGroupMenu(null);
+                            }}
+                            className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-zinc-300 transition-colors hover:bg-zinc-800/80 hover:text-zinc-100"
+                          >
+                            <span className="flex min-w-0 items-center gap-2">
+                              <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-zinc-900 text-zinc-500">
+                                {iconForItem(item)}
+                              </span>
+                              <span className="min-w-0">
+                                <span className="block truncate text-[12px]">{item.label}</span>
+                                {item.description && <span className="block truncate text-[10px] text-zinc-500">{item.description}</span>}
+                              </span>
+                            </span>
+                            {item.category === "tool" && (
+                              <span className={cn("h-1.5 w-1.5 flex-shrink-0 rounded-full", selectedToolIdSet.has(item.id) ? "bg-emerald-400" : "bg-zinc-700")} />
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   )}
-                  title={`${group.label || TOOL_GROUP_LABELS[group.id] || group.id} (${group.count})`}
-                >
-                  {(group.icon && TOOL_GROUP_ICONS[group.icon]) || TOOL_GROUP_ICONS[group.id] || <Wrench size={16} />}
-                  <span className="absolute -top-0.5 -right-0.5 text-[7px] bg-zinc-700 text-zinc-300 px-0.5 rounded-full leading-tight">
-                    {group.count}
-                  </span>
-                  <span className="absolute right-full mr-2 px-2 py-1 bg-zinc-800 text-zinc-200 text-[10px] rounded-md opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap border border-zinc-700 shadow-lg z-50">
-                    {group.label || TOOL_GROUP_LABELS[group.id] || group.id}
-                  </span>
-                </button>
+                </div>
               ))}
             </div>
             <div className="w-5 h-px bg-zinc-800 my-1" />
           </>
         )}
 
-        <div className="flex-1 flex flex-col items-center gap-px overflow-y-auto w-full scrollbar-none">
+        <div
+          className="flex-1 flex flex-col items-center gap-px overflow-y-auto w-full scrollbar-none"
+          onDragOver={(event) => {
+            if (event.dataTransfer.types.includes("application/rumi-sidebar-shortcut")) {
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "copy";
+            }
+          }}
+          onDrop={handleShortcutDrop}
+        >
           {visibleItems.map((item) => (
             <button
               key={item.id}
@@ -569,7 +650,7 @@ export function RightSidebar({
               className={cn(
                 "w-9 h-9 rounded-lg flex items-center justify-center relative transition-all duration-150 ease-out group/btn flex-shrink-0 hover:scale-[1.03] active:scale-95",
                 activePanel === item.id
-                  ? "bg-zinc-800 text-zinc-100"
+                  ? "bg-zinc-800 text-zinc-100 ring-1 ring-zinc-600/70"
                   : item.category === "tool" && !selectedToolIdSet.has(item.id)
                     ? "text-zinc-700 hover:text-zinc-500 hover:bg-zinc-800/30"
                     : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",

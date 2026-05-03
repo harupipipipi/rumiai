@@ -12,6 +12,7 @@ import {
   Mic,
   Paperclip,
   Plus,
+  RefreshCw,
   Search,
   Send,
   Sparkles,
@@ -31,7 +32,7 @@ import type {
   ToolGroup,
 } from "./types";
 import type { ModelProfile } from "../lib/api";
-import { buildAttachmentSnippet, fileToAttachment } from "../lib/attachments";
+import { fileToAttachment } from "../lib/attachments";
 import { supportsComposerToggleDrop, toolGroupFor } from "../lib/toolUi";
 
 const THINKING_LABELS: Record<string, string> = {
@@ -81,6 +82,37 @@ function FileChip({ file, onRemove }: { file: AttachedFile; onRemove?: (id: stri
   );
 }
 
+function FilePreviewCard({ file, onRemove }: { file: AttachedFile; onRemove?: (id: string) => void }) {
+  const ext = file.name.split(".").pop()?.toUpperCase() || "FILE";
+  const lineCount = file.content ? file.content.split(/\r\n|\r|\n/).length : null;
+  const isImage = /^image\//.test(file.type ?? "");
+  return (
+    <div className="group/file relative h-[120px] w-[148px] flex-shrink-0 rounded-xl border border-zinc-600/70 bg-[#272728] p-3 shadow-sm">
+      <div className="flex h-full flex-col justify-between">
+        <div className="min-w-0">
+          <p className="truncate text-[15px] font-medium text-zinc-100">{file.name}</p>
+          <p className="mt-1 text-[12px] text-zinc-500">
+            {lineCount ? `${lineCount}行` : `${Math.max(1, Math.ceil(file.size / 1024))} KB`}
+          </p>
+        </div>
+        <div className="inline-flex h-7 w-fit items-center rounded-md border border-zinc-500/60 px-2 text-[13px] font-semibold text-zinc-300">
+          {isImage ? "IMG" : ext.slice(0, 4)}
+        </div>
+      </div>
+      {onRemove && (
+        <button
+          type="button"
+          onClick={() => onRemove(file.id)}
+          className="absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-zinc-950/80 text-zinc-400 opacity-0 transition-opacity hover:text-zinc-100 group-hover/file:opacity-100"
+          title="削除"
+        >
+          <X size={12} />
+        </button>
+      )}
+    </div>
+  );
+}
+
 function DroppedWidgetChip({ widget, onToggle }: { widget: DroppedWidget; onToggle?: (id: string) => void }) {
   return (
     <span
@@ -95,6 +127,21 @@ function DroppedWidgetChip({ widget, onToggle }: { widget: DroppedWidget; onTogg
       <span className="truncate">{widget.label}</span>
     </span>
   );
+}
+
+export type ComposerDropAction =
+  | { type: "select_model"; profileId: string }
+  | { type: "drop_widget"; widget: DroppedWidget }
+  | { type: "ignore" };
+
+export function resolveComposerWidgetDrop(widget: DroppedWidget, toolItems: ComposerExtensionItem[]): ComposerDropAction {
+  if (widget.type === "model") return { type: "select_model", profileId: widget.id };
+  if (widget.type === "tool") {
+    const item = toolItems.find((candidate) => candidate.id === widget.id);
+    if (!item || !supportsComposerToggleDrop(item)) return { type: "ignore" };
+    return { type: "drop_widget", widget };
+  }
+  return { type: "ignore" };
 }
 
 function ToolItemList({
@@ -186,7 +233,15 @@ function ModelDropdown({
                 <button
                   key={profile.profile_id}
                   type="button"
+                  draggable
                   disabled={isGenerating}
+                  onDragStart={(event) => {
+                    event.dataTransfer.setData(
+                      "application/rumi-widget",
+                      JSON.stringify({ id: profile.profile_id, type: "model", label: profile.display_name }),
+                    );
+                    event.dataTransfer.effectAllowed = "copy";
+                  }}
                   onClick={() => {
                     onSelect(profile.profile_id);
                     onClose();
@@ -316,6 +371,7 @@ export function ComposerRenderer({
   isGenerating,
   selectedProfile,
   favoriteProfiles,
+  modelProfiles = [],
   thinkingLevel,
   contextUsage,
   inlineExtensions,
@@ -338,6 +394,9 @@ export function ComposerRenderer({
   onFileRemove,
   onDropWidget,
   onWidgetToggle,
+  onCodingBranchSwitch,
+  onCodingDirectoryChange,
+  onCodingContextRefresh,
 }: ComposerRendererProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [openFolder, setOpenFolder] = useState<"tools" | "models" | "commands">("tools");
@@ -346,6 +405,10 @@ export function ComposerRenderer({
   const [modeSelectorOpen, setModeSelectorOpen] = useState(false);
   const [atMentionOpen, setAtMentionOpen] = useState(false);
   const [atMentionQuery, setAtMentionQuery] = useState("");
+  const [newBranchName, setNewBranchName] = useState("");
+  const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const profileName = selectedProfile?.display_name ?? selectedProfile?.profile_id ?? "model";
@@ -360,6 +423,7 @@ export function ComposerRenderer({
       ? `${contextUsage.usedTokens} tokens / unlimited`
       : `${contextUsage.usedTokens} / ${contextUsage.maxContext || "unknown"} tokens`;
   const toolItems = useMemo(() => [...inlineExtensions, ...belowExtensions], [inlineExtensions, belowExtensions]);
+  const selectableProfiles = modelProfiles.length > 0 ? modelProfiles : favoriteProfiles;
   const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
   const toolGroups = useMemo(() => groupToolItems(toolItems), [toolItems]);
   const activeToolGroup = toolGroups.find((group) => group.id === openToolGroup) ?? toolGroups[0] ?? null;
@@ -373,6 +437,40 @@ export function ComposerRenderer({
     : [];
   const currentModeMeta = MODE_META[mode];
   const ModeIcon = currentModeMeta.icon;
+  const directoryEntries = (codingContext?.entries ?? []).filter((entry) => entry.is_dir);
+  const branchOptions = codingContext?.branches?.length ? codingContext.branches : codingContext?.branch ? [codingContext.branch] : [];
+  const currentDirectory = codingContext?.directory || ".";
+
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (menuRef.current?.contains(target) || menuButtonRef.current?.contains(target)) return;
+      setMenuOpen(false);
+    };
+
+    const handleDocumentKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleDocumentKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleDocumentKeyDown);
+    };
+  }, [menuOpen]);
+
+  useEffect(() => {
+    setSelectedCommandIndex((current) => {
+      if (matchedCommands.length === 0) return 0;
+      return Math.min(current, matchedCommands.length - 1);
+    });
+  }, [matchedCommands.length]);
 
   const chooseCommand = (commandId: string) => {
     onCommandSelect?.(commandId);
@@ -396,6 +494,10 @@ export function ComposerRenderer({
       } else {
         setAtMentionOpen(false);
         setAtMentionQuery("");
+      }
+
+      if (!value.startsWith("/")) {
+        setSelectedCommandIndex(0);
       }
     },
     [onInputChange, mode, codingContext],
@@ -425,34 +527,38 @@ export function ComposerRenderer({
     [input, onInputChange],
   );
 
-  const attachFiles = async (files: FileList | null) => {
+  const attachFiles = useCallback(async (files: FileList | null) => {
     if (!files?.length) return;
     const newFiles: AttachedFile[] = await Promise.all(Array.from(files).map(fileToAttachment));
     onFileAttach?.(newFiles);
-    const snippets = newFiles.map(buildAttachmentSnippet).filter(Boolean);
-    if (snippets.length > 0) {
-      onInputChange(`${input}${snippets.join("")}`);
-    }
-  };
+  }, [onFileAttach]);
 
   const handleDrop = useCallback(
     (event: React.DragEvent) => {
       event.preventDefault();
+      if (event.dataTransfer.files.length > 0) {
+        void attachFiles(event.dataTransfer.files);
+        return;
+      }
+
       const data = event.dataTransfer.getData("application/rumi-widget");
       if (data) {
         try {
           const widget: DroppedWidget = JSON.parse(data);
-          if (widget.type === "tool") {
-            const item = toolItems.find((candidate) => candidate.id === widget.id);
-            if (!item || !supportsComposerToggleDrop(item)) return;
+          const action = resolveComposerWidgetDrop(widget, toolItems);
+          if (action.type === "drop_widget") {
+            onDropWidget?.(action.widget);
+          } else if (action.type === "select_model") {
+            onModelProfileSelect(action.profileId);
+            setModelDropdownOpen(false);
+            setMenuOpen(false);
           }
-          onDropWidget?.(widget);
         } catch {
           // invalid drop data
         }
       }
     },
-    [onDropWidget, toolItems],
+    [attachFiles, onDropWidget, onModelProfileSelect, toolItems],
   );
 
   const handleDragOver = useCallback((event: React.DragEvent) => {
@@ -462,12 +568,30 @@ export function ComposerRenderer({
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
+      if (matchedCommands.length > 0) {
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          setSelectedCommandIndex((current) => (current + 1) % matchedCommands.length);
+          return;
+        }
+        if (event.key === "ArrowUp") {
+          event.preventDefault();
+          setSelectedCommandIndex((current) => (current - 1 + matchedCommands.length) % matchedCommands.length);
+          return;
+        }
+        if (event.key === "Tab" || event.key === "Enter") {
+          event.preventDefault();
+          chooseCommand(matchedCommands[selectedCommandIndex]?.id ?? matchedCommands[0].id);
+          return;
+        }
+      }
+
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
         onSubmit(event);
       }
     },
-    [onSubmit],
+    [matchedCommands, selectedCommandIndex, onSubmit],
   );
 
   return (
@@ -481,7 +605,7 @@ export function ComposerRenderer({
           onSubmit={onSubmit}
           className={`rumi-composer-frame ${
             isNewConversation
-              ? "rumi-composer-new min-h-[162px] rounded-2xl border-zinc-700/70 bg-[#202021]"
+              ? "rumi-composer-new min-h-[176px] rounded-3xl border-zinc-700/70 bg-[#242423]"
               : "rounded-xl border-zinc-700/30 bg-[#2b2b2d] max-[640px]:rounded-xl"
           } relative flex flex-col border overflow-visible shadow-2xl shadow-black/20 focus-within:border-zinc-500/60`}
         >
@@ -491,12 +615,15 @@ export function ComposerRenderer({
                 Commands
               </div>
               <div className="max-h-56 overflow-y-auto py-1">
-                {matchedCommands.map((command) => (
+                {matchedCommands.map((command, index) => (
                   <button
                     key={command.id}
                     type="button"
+                    onMouseEnter={() => setSelectedCommandIndex(index)}
                     onClick={() => chooseCommand(command.id)}
-                    className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left hover:bg-zinc-900"
+                    className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left ${
+                      index === selectedCommandIndex ? "bg-zinc-800 text-zinc-100" : "hover:bg-zinc-900"
+                    }`}
                   >
                     <span className="min-w-0">
                       <span className="block truncate text-sm text-zinc-100">/{command.label}</span>
@@ -530,7 +657,7 @@ export function ComposerRenderer({
                 className="fixed inset-0 z-20 cursor-default"
                 onClick={() => setMenuOpen(false)}
               />
-              <div className="absolute bottom-[52px] left-4 z-30 grid w-[min(480px,calc(100vw-32px))] grid-cols-[120px_minmax(0,1fr)] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl max-[640px]:left-2 max-[640px]:grid-cols-1">
+              <div ref={menuRef} className="absolute bottom-[52px] left-4 z-30 grid w-[min(480px,calc(100vw-32px))] grid-cols-[120px_minmax(0,1fr)] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl max-[640px]:left-2 max-[640px]:grid-cols-1">
                 <div className="border-r border-zinc-800 bg-zinc-950/90 p-1.5 max-[640px]:flex max-[640px]:border-b max-[640px]:border-r-0">
                   {(
                     [
@@ -579,14 +706,20 @@ export function ComposerRenderer({
                             }`}
                           >
                             <span className="block truncate text-[13px]">{group.label}</span>
-                            <span className="block truncate text-[10px] text-zinc-500">{group.items.length} tools</span>
+                            <span className="block truncate text-[10px] text-zinc-500">
+                              {group.path?.length && group.path.length > 1 ? group.path.join(" / ") : `${group.items.length} tools`}
+                            </span>
                           </button>
                         ))}
                       </div>
                       <div className="min-w-0">
                         {activeToolGroup && (
                           <>
-                            <div className="mb-1 px-2 text-[10px] text-zinc-500">{activeToolGroup.description}</div>
+                            <div className="mb-1 px-2 text-[10px] text-zinc-500">
+                              {activeToolGroup.path?.length && activeToolGroup.path.length > 1
+                                ? activeToolGroup.path.join(" / ")
+                                : activeToolGroup.description}
+                            </div>
                             <ToolItemList
                               items={activeToolGroup.items}
                               onSelect={(item) => {
@@ -601,10 +734,18 @@ export function ComposerRenderer({
                   )}
                   {openFolder === "models" && (
                     <div className="grid gap-0.5">
-                      {favoriteProfiles.map((profile) => (
+                      {selectableProfiles.map((profile) => (
                         <button
                           key={profile.profile_id}
                           type="button"
+                          draggable
+                          onDragStart={(event) => {
+                            event.dataTransfer.setData(
+                              "application/rumi-widget",
+                              JSON.stringify({ id: profile.profile_id, type: "model", label: profile.display_name }),
+                            );
+                            event.dataTransfer.effectAllowed = "copy";
+                          }}
                           onClick={() => {
                             onModelProfileSelect(profile.profile_id);
                             setMenuOpen(false);
@@ -651,6 +792,14 @@ export function ComposerRenderer({
             </>
           )}
 
+          {isNewConversation && attachedFiles.length > 0 && (
+            <div className="flex gap-4 overflow-x-auto px-6 pb-2 pt-5">
+              {attachedFiles.map((file) => (
+                <FilePreviewCard key={file.id} file={file} onRemove={onFileRemove} />
+              ))}
+            </div>
+          )}
+
           <textarea
             ref={textareaRef}
             value={input}
@@ -663,7 +812,7 @@ export function ComposerRenderer({
             disabled={isGenerating}
             className={`${
               isNewConversation
-                ? "rumi-composer-input-new min-h-[94px] px-6 pt-5 text-[17px] font-medium leading-[1.55] placeholder:text-zinc-500"
+                ? "rumi-composer-input-new min-h-[64px] px-6 pt-5 text-[18px] font-medium leading-[1.55] placeholder:text-zinc-500"
                 : "min-h-[34px] px-5 pt-3 text-[15px] max-[640px]:min-h-[32px] max-[640px]:px-3 max-[640px]:pt-2.5 max-[640px]:pb-0 max-[640px]:text-[13px]"
             } w-full bg-transparent border-none outline-none text-zinc-100 pb-0 resize-none max-h-[130px] disabled:opacity-50`}
             onKeyDown={handleKeyDown}
@@ -681,9 +830,9 @@ export function ComposerRenderer({
             }}
           />
 
-          {(attachedFiles.length > 0 || droppedWidgets.length > 0) && (
+          {((!isNewConversation && attachedFiles.length > 0) || droppedWidgets.length > 0) && (
             <div className="px-5 pt-1.5 pb-0.5 flex flex-wrap gap-1 max-[640px]:px-3">
-              {attachedFiles.map((file) => (
+              {!isNewConversation && attachedFiles.map((file) => (
                 <FileChip key={file.id} file={file} onRemove={onFileRemove} />
               ))}
               {droppedWidgets.map((widget) => (
@@ -703,6 +852,7 @@ export function ComposerRenderer({
           >
             <div className="flex min-w-0 items-center gap-1 overflow-hidden">
               <button
+                ref={menuButtonRef}
                 type="button"
                 disabled={isGenerating}
                 title="追加"
@@ -714,7 +864,7 @@ export function ComposerRenderer({
               <button
                 type="button"
                 disabled={isGenerating}
-                title="ファイル添付"
+                title="ファイル添付（複数選択可）"
                 onClick={() => fileInputRef.current?.click()}
                 className={`${
                   isNewConversation
@@ -733,7 +883,7 @@ export function ComposerRenderer({
                 <Mic size={16} />
               </button>
 
-              <div className="relative">
+              <div className="group/mode relative flex">
                 <button
                   type="button"
                   disabled={isGenerating}
@@ -750,6 +900,21 @@ export function ComposerRenderer({
                   <ModeIcon size={14} />
                   <span className="text-[11px] font-medium max-[640px]:hidden">{currentModeMeta.label}</span>
                 </button>
+                {mode !== "chat" && (
+                  <button
+                    type="button"
+                    aria-label="モードを閉じる"
+                    title="Chat に戻す"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setModeSelectorOpen(false);
+                      onModeChange?.("chat");
+                    }}
+                    className="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full border border-zinc-700 bg-zinc-900 text-zinc-400 shadow-sm hover:bg-zinc-800 hover:text-zinc-100 group-hover/mode:flex"
+                  >
+                    <X size={10} />
+                  </button>
+                )}
                 {modeSelectorOpen && (
                   <ModeSelector
                     mode={mode}
@@ -789,7 +954,7 @@ export function ComposerRenderer({
                   </button>
                   {modelDropdownOpen && (
                     <ModelDropdown
-                      profiles={favoriteProfiles}
+                      profiles={selectableProfiles}
                       selectedProfile={selectedProfile}
                       isGenerating={isGenerating}
                       onSelect={onModelProfileSelect}
@@ -831,25 +996,86 @@ export function ComposerRenderer({
           </div>
 
           {mode === "coding" && codingContext && (
-            <div className="px-5 pb-2 pt-0 flex items-center gap-3 text-[11px] text-zinc-500 max-[640px]:px-3 max-[640px]:gap-2">
-              {codingContext.branch && (
-                <span className="inline-flex items-center gap-1">
-                  <GitBranch size={11} />
-                  <span className="font-mono">{codingContext.branch}</span>
-                </span>
-              )}
+            <div className="px-5 pb-2 pt-0 flex flex-wrap items-center gap-2 text-[11px] text-zinc-500 max-[640px]:px-3">
+              <span className="inline-flex min-w-0 items-center gap-1">
+                <GitBranch size={11} />
+                {branchOptions.length > 1 ? (
+                  <select
+                    value={codingContext.branch ?? ""}
+                    onChange={(event) => event.target.value && onCodingBranchSwitch?.(event.target.value, false)}
+                    disabled={isGenerating}
+                    className="max-w-[140px] bg-transparent font-mono text-zinc-400 outline-none hover:text-zinc-200 disabled:opacity-50"
+                    title="ブランチを切り替え"
+                  >
+                    {branchOptions.map((branch) => (
+                      <option key={branch} value={branch} className="bg-zinc-900 text-zinc-100">
+                        {branch}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <span className="font-mono">{codingContext.branch ?? "no git"}</span>
+                )}
+              </span>
+              <form
+                className="inline-flex items-center gap-1"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const branch = newBranchName.trim();
+                  if (!branch) return;
+                  onCodingBranchSwitch?.(branch, true);
+                  setNewBranchName("");
+                }}
+              >
+                <input
+                  value={newBranchName}
+                  onChange={(event) => setNewBranchName(event.target.value)}
+                  disabled={isGenerating}
+                  placeholder="new branch"
+                  className="h-6 w-24 rounded-md border border-zinc-800 bg-zinc-900/40 px-2 font-mono text-[11px] text-zinc-300 outline-none placeholder:text-zinc-700 focus:border-zinc-600 disabled:opacity-50"
+                />
+                <button
+                  type="submit"
+                  disabled={isGenerating || !newBranchName.trim()}
+                  title="ブランチを作成して切り替え"
+                  className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-40"
+                >
+                  <Plus size={12} />
+                </button>
+              </form>
               {codingContext.rootFolder && (
-                <span className="inline-flex items-center gap-1">
+                <span className="inline-flex min-w-0 items-center gap-1">
                   <Folder size={11} />
-                  <span className="font-mono truncate max-w-[200px]">{codingContext.rootFolder}</span>
+                  <span className="max-w-[200px] truncate font-mono">{codingContext.rootFolder}</span>
                 </span>
               )}
-              {codingContext.files.length > 0 && (
-                <span className="inline-flex items-center gap-1">
-                  <FileText size={11} />
-                  <span>{codingContext.files.length} files</span>
-                </span>
-              )}
+              <span className="inline-flex items-center gap-1">
+                <FileText size={11} />
+                <select
+                  value={currentDirectory}
+                  onChange={(event) => onCodingDirectoryChange?.(event.target.value)}
+                  disabled={isGenerating}
+                  className="max-w-[140px] bg-transparent font-mono text-zinc-400 outline-none hover:text-zinc-200 disabled:opacity-50"
+                  title="target folder"
+                >
+                  <option value="." className="bg-zinc-900 text-zinc-100">.</option>
+                  {directoryEntries.map((entry) => (
+                    <option key={entry.path} value={entry.path} className="bg-zinc-900 text-zinc-100">
+                      {entry.path}
+                    </option>
+                  ))}
+                </select>
+                <span>{codingContext.files.length} files</span>
+              </span>
+              <button
+                type="button"
+                onClick={onCodingContextRefresh}
+                disabled={isGenerating}
+                title="coding context を更新"
+                className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-40"
+              >
+                <RefreshCw size={12} />
+              </button>
             </div>
           )}
         </form>

@@ -49,3 +49,30 @@ test("sendMessage serializes attachments and selected tools", async () => {
     tool_policy: { selected_tools: ["local_file"] },
   });
 });
+
+test("coding context and branch helpers use existing API routes", async () => {
+  const seen: Array<{ input: string; body?: unknown }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    seen.push({ input: String(input), body: init?.body ? JSON.parse(String(init.body)) : undefined });
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: String(input).includes("/api/coding/context")
+        ? { branch: "main", root_folder: "/repo", directory: "src", files: [], entries: [], git: null }
+        : { branch: "feature", branches: ["main", "feature"], switched: true, created: true },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.getCodingContext({ directory: "src" });
+    await api.switchGitBranch("feature", true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(seen[0].input, "/api/coding/context?directory=src");
+  assert.deepEqual(seen[1], {
+    input: "/api/coding/git/branch",
+    body: { action: "switch", branch: "feature", create: true },
+  });
+});

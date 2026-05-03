@@ -10,8 +10,8 @@
     "summary": "Patch a workspace file",
     "tags": ["coding", "file", "patch"],
     "ui": {
-      "group_id": "workspace_files",
-      "group_label": "Files",
+      "group_id": "coding/files/write",
+      "group_label": "Write",
       "group_icon": "file",
       "drop_capabilities": ["composer.toggle_chip"],
       "widget_kind": "tool_toggle"

@@ -59,6 +59,16 @@ export type CodingContextResponse = {
   git?: CodingGitStatus | null;
 };
 
+export type CodingBranchResponse = {
+  branch: string;
+  branches: string[];
+  remote?: string | null;
+  dirty?: boolean;
+  switched?: boolean;
+  created?: boolean;
+  output?: string;
+};
+
 export type ChatActivityEvent = {
   type: string;
   message?: string;
@@ -465,19 +475,32 @@ export const api = {
     });
   },
 
-  getCodingContext() {
-    return request<CodingContextResponse>("/api/coding/context");
+  getCodingContext(options?: { directory?: string }) {
+    const params = new URLSearchParams();
+    if (options?.directory) params.set("directory", options.directory);
+    return request<CodingContextResponse>(
+      `/api/coding/context${params.size ? `?${params.toString()}` : ""}`,
+    );
   },
 
-  listWorkspaceFiles(path?: string) {
-    return request<{ files: Array<{ name: string; path: string; type: "file" | "directory" }> }>(
-      `/api/coding/files${path ? `?path=${encodeURIComponent(path)}` : ""}`,
+  listWorkspaceFiles(directory?: string) {
+    const params = new URLSearchParams();
+    if (directory) params.set("directory", directory);
+    return request<{ files: CodingContextEntry[] }>(
+      `/api/coding/files${params.size ? `?${params.toString()}` : ""}`,
     );
   },
 
   getGitBranch() {
-    return request<{ branch: string; remote: string | null; dirty: boolean }>(
+    return request<CodingBranchResponse>(
       "/api/coding/git/branch",
     );
+  },
+
+  switchGitBranch(branch: string, create = false) {
+    return request<CodingBranchResponse>("/api/coding/git/branch", {
+      method: "POST",
+      body: JSON.stringify({ action: "switch", branch, create }),
+    });
   },
 };

@@ -94,6 +94,7 @@ export type ComposerRendererProps = {
   isGenerating: boolean;
   selectedProfile: ModelProfile | null;
   favoriteProfiles: ModelProfile[];
+  modelProfiles?: ModelProfile[];
   thinkingLevel: string | null;
   contextUsage: ContextUsageInfo;
   inlineExtensions: ComposerExtensionItem[];
@@ -116,6 +117,9 @@ export type ComposerRendererProps = {
   onFileRemove?: (fileId: string) => void;
   onDropWidget?: (widget: DroppedWidget) => void;
   onWidgetToggle?: (widgetId: string) => void;
+  onCodingBranchSwitch?: (branch: string, create?: boolean) => void;
+  onCodingDirectoryChange?: (directory: string) => void;
+  onCodingContextRefresh?: () => void;
 };
 
 export type ToolPreviewPanelRendererProps = {
@@ -155,6 +159,7 @@ export type ToolGroup = {
   label: string;
   description: string;
   icon?: string;
+  path?: string[];
   items: ComposerExtensionItem[];
 };
 
@@ -163,6 +168,8 @@ export type AppMode = "chat" | "coding" | "agent";
 export type CodingContext = {
   branch: string | null;
   rootFolder: string | null;
+  directory?: string;
+  branches?: string[];
   files: string[];
   entries?: CodingContextEntry[];
   git?: CodingGitStatus | null;
@@ -179,7 +186,7 @@ export type AttachedFile = {
 
 export type DroppedWidget = {
   id: string;
-  type: "tool" | "model" | "setting";
+  type: "tool" | "model" | "setting" | "button" | "panel" | "selector" | "model_card" | string;
   label: string;
   enabled?: boolean;
 };

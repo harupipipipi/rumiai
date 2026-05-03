@@ -166,6 +166,8 @@ def test_chat_send_persists_user_attachment_metadata(tmp_path, monkeypatch):
 def test_coding_context_and_branch_blocks(tmp_path):
     subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True, text=True)
     (tmp_path / "README.md").write_text("# test\n", encoding="utf-8")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").write_text("print('ok')\n", encoding="utf-8")
     subprocess.run(["git", "add", "README.md"], cwd=tmp_path, check=True, capture_output=True, text=True)
     subprocess.run(
         ["git", "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "init"],
@@ -188,9 +190,28 @@ def test_coding_context_and_branch_blocks(tmp_path):
     assert any(item["name"] == "README.md" for item in data["entries"])
     assert data["git"]["branch"] == data["branch"]
 
+    nested_context_result = context_run({"workspace_root": str(tmp_path), "directory": "src"}, {})
+    assert nested_context_result["status"] == "ok"
+    assert nested_context_result["data"]["directory"] == "src"
+    assert nested_context_result["data"]["files"] == ["src/app.py"]
+
     branch_result = branch_run({"workspace_root": str(tmp_path)}, {})
     assert branch_result["status"] == "ok"
     assert branch_result["data"]["branch"] in {"main", "master"}
+    assert branch_result["data"]["branches"]
+
+    switched_result = branch_run(
+        {"workspace_root": str(tmp_path), "action": "switch", "branch": "feature/footer", "create": True},
+        {},
+    )
+    assert switched_result["status"] == "ok"
+    assert switched_result["data"]["branch"] == "feature/footer"
+    assert switched_result["data"]["switched"] is True
+    assert switched_result["data"]["created"] is True
+
+    list_result = branch_run({"workspace_root": str(tmp_path), "action": "list"}, {})
+    assert list_result["status"] == "ok"
+    assert "feature/footer" in list_result["data"]["branches"]
 
 
 def test_direct_chat_completion_forwards_tools_and_tool_context(monkeypatch):

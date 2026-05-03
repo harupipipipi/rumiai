@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { COMPOSER_TOGGLE_DROP, supportsComposerToggleDrop, toolGroupFor } from "./toolUi";
+import { COMPOSER_TOGGLE_DROP, supportsComposerToggleDrop, toolGroupFor, toolGroupSegments } from "./toolUi";
 
 test("declared tool group wins even when id has no legacy keywords", () => {
   const group = toolGroupFor({
@@ -20,6 +20,22 @@ test("declared tool group wins even when id has no legacy keywords", () => {
   assert.equal(group.label, "Declared Workspace");
   assert.equal(group.icon, "terminal");
   assert.equal(group.isDeclared, true);
+});
+
+test("hierarchical declared tool groups preserve normalized path", () => {
+  const group = toolGroupFor({
+    id: "coding_file_read",
+    label: "Read File",
+    description: "read",
+    tags: [],
+    ui: {
+      group_id: "/coding//files/read/",
+    },
+  });
+
+  assert.equal(group.id, "coding/files/read");
+  assert.deepEqual(group.path, ["coding", "files", "read"]);
+  assert.deepEqual(toolGroupSegments("coding/github/commit"), ["coding", "github", "commit"]);
 });
 
 test("legacy tools without declarations still fall back to heuristic grouping", () => {
@@ -61,6 +77,18 @@ test("composer widget drop is exposed only when explicitly declared", () => {
       id: "half_declared",
       label: "Half Declared",
       ui: {
+        drop_capabilities: [COMPOSER_TOGGLE_DROP],
+      },
+    }),
+    false,
+  );
+
+  assert.equal(
+    supportsComposerToggleDrop({
+      id: "future_widget",
+      label: "Future Widget",
+      ui: {
+        widget_kind: "panel",
         drop_capabilities: [COMPOSER_TOGGLE_DROP],
       },
     }),

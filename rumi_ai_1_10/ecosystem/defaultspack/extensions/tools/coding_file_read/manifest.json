@@ -10,8 +10,8 @@
     "summary": "Read a workspace file",
     "tags": ["coding", "file", "read"],
     "ui": {
-      "group_id": "workspace_files",
-      "group_label": "Files",
+      "group_id": "coding/files/read",
+      "group_label": "Read",
       "group_icon": "file",
       "drop_capabilities": ["composer.toggle_chip"],
       "widget_kind": "tool_toggle"

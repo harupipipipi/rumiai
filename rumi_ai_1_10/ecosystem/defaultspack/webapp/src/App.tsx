@@ -277,6 +277,7 @@ export default function App() {
   const [yoloMode, setYoloMode] = useLocalStorage("rumi-yolo-mode", false);
   const [mode, setMode] = useLocalStorage<AppMode>("rumi-app-mode", "chat");
   const [codingContext, setCodingContext] = useState<CodingContext | null>(null);
+  const [codingDirectory, setCodingDirectory] = useState(".");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [droppedWidgets, setDroppedWidgets] = useState<DroppedWidget[]>([]);
   const [selectedTools, setSelectedTools] = useState<ComposerExtensionItem[]>([]);
@@ -350,10 +351,15 @@ export default function App() {
 
   const loadCodingContext = useCallback(async () => {
     try {
-      const result = await api.getCodingContext();
+      const [result, branchInfo] = await Promise.all([
+        api.getCodingContext({ directory: codingDirectory }),
+        api.getGitBranch().catch(() => null),
+      ]);
       setCodingContext({
         branch: result.branch,
         rootFolder: result.root_folder,
+        directory: result.directory ?? codingDirectory,
+        branches: branchInfo?.branches ?? [],
         files: result.files,
         entries: result.entries,
         git: result.git,
@@ -361,7 +367,7 @@ export default function App() {
     } catch {
       setCodingContext(null);
     }
-  }, []);
+  }, [codingDirectory]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -650,6 +656,16 @@ export default function App() {
     setMode(newMode);
   };
 
+  const handleCodingBranchSwitch = (branch: string, create = false) => {
+    void api.switchGitBranch(branch, create)
+      .then(() => loadCodingContext())
+      .catch((branchError) => setError(branchError instanceof Error ? branchError.message : "ブランチ切り替えに失敗しました。"));
+  };
+
+  const handleCodingDirectoryChange = (directory: string) => {
+    setCodingDirectory(directory || ".");
+  };
+
   const handleFileAttach = (files: AttachedFile[]) => {
     setAttachedFiles((prev) => [...prev, ...files]);
   };
@@ -863,6 +879,7 @@ export default function App() {
       isGenerating={isGenerating || isConversationPending}
       selectedProfile={activeProfile}
       favoriteProfiles={favoriteProfiles}
+      modelProfiles={modelProfiles}
       thinkingLevel={activeProfile?.supports_thinking ? selectedThinkingLevel : null}
       contextUsage={contextUsage}
       inlineExtensions={composerExtensions}
@@ -885,6 +902,9 @@ export default function App() {
       onFileRemove={handleFileRemove}
       onDropWidget={handleDropWidget}
       onWidgetToggle={handleWidgetToggle}
+      onCodingBranchSwitch={handleCodingBranchSwitch}
+      onCodingDirectoryChange={handleCodingDirectoryChange}
+      onCodingContextRefresh={loadCodingContext}
     />
   );
 
@@ -895,15 +915,17 @@ export default function App() {
 
       <div className="flex flex-1 min-h-0">
         {showRegion("history") && !isHistoryMinimized && (
-          <Renderers.historyBoard
-            activeChatId={activeConversationId}
-            chatItems={chatItems}
-            account={catalog?.app?.account}
-            onChatSelect={handleHistoryClick}
-            onNewTask={handleNewTask}
-            onSettingsClick={() => setIsSettingsOpen(true)}
-            onMinimize={() => setIsHistoryMinimized(true)}
-          />
+          <div className="w-[360px] max-w-[36vw] min-w-[300px] flex-shrink-0 border-r border-zinc-800/60 max-[900px]:w-[300px]">
+            <Renderers.historyBoard
+              activeChatId={activeConversationId}
+              chatItems={chatItems}
+              account={catalog?.app?.account}
+              onChatSelect={handleHistoryClick}
+              onNewTask={handleNewTask}
+              onSettingsClick={() => setIsSettingsOpen(true)}
+              onMinimize={() => setIsHistoryMinimized(true)}
+            />
+          </div>
         )}
 
         {showRegion("history") && isHistoryMinimized && (
@@ -935,7 +957,7 @@ export default function App() {
             {isNewConversation && !isLoading ? (
               <div className={cn("rumi-new-chat-stage flex flex-1 items-center justify-center px-5 pb-[10vh]", isNewChatLaunching && "is-launching")}>
                 <div className="w-full">
-                  <h1 className="rumi-greeting mx-auto mb-7 max-w-[620px] px-4 text-center text-[clamp(21px,2.1vw,30px)] font-semibold leading-tight text-zinc-200">
+                  <h1 className="rumi-greeting mx-auto mb-7 max-w-[720px] px-4 text-center text-[clamp(24px,3.2vw,44px)] font-medium leading-tight text-zinc-200">
                     {getNewConversationGreeting()}
                   </h1>
                   {renderComposer(true)}
