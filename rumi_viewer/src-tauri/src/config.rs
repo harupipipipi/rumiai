@@ -157,6 +157,46 @@ impl AppConfig {
     pub fn is_dev_workspace(&self) -> bool {
         self.dev_workspace_root.is_some()
     }
+
+    /// Resolve the best available `pack-shell` binary path.
+    ///
+    /// Checks the bundled copy at `{app_dir}/bundled/pack-shell` first,
+    /// then falls back to the dev workspace build, then `PATH`.
+    pub fn pack_shell_path(&self) -> Option<PathBuf> {
+        let bundled = self.app_dir.join("bundled").join(pack_shell_binary_name());
+        if bundled.exists() {
+            return Some(bundled);
+        }
+
+        if let Some(ref root) = self.dev_workspace_root {
+            let dev_release = root.join("pack-shell").join("target").join("release").join(pack_shell_binary_name());
+            if dev_release.exists() {
+                return Some(dev_release);
+            }
+            let dev_debug = root.join("pack-shell").join("target").join("debug").join(pack_shell_binary_name());
+            if dev_debug.exists() {
+                return Some(dev_debug);
+            }
+        }
+
+        which::which(pack_shell_binary_name()).ok()
+    }
+
+    /// Return the path where the desktop API token is stored.
+    ///
+    /// Layout: `{app_data_dir}/.desktop_api_token`
+    pub fn desktop_api_token_path(&self) -> PathBuf {
+        self.user_data_dir
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| self.user_data_dir.clone())
+            .join(".desktop_api_token")
+    }
+
+    /// Return the path to the defaultspack ecosystem.json.
+    pub fn defaultspack_ecosystem_json(&self) -> PathBuf {
+        self.app_dir.join("ecosystem").join("defaultspack").join("ecosystem.json")
+    }
 }
 
 fn find_dev_workspace_root(resource_dir: &Path) -> Option<PathBuf> {
@@ -175,6 +215,15 @@ fn uv_binary_name() -> &'static str {
         "uv.exe"
     } else {
         "uv"
+    }
+}
+
+/// Return the platform-appropriate file name for the `pack-shell` binary.
+fn pack_shell_binary_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "pack-shell.exe"
+    } else {
+        "pack-shell"
     }
 }
 

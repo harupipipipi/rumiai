@@ -24,6 +24,8 @@ use tauri::{AppHandle, Emitter, Manager};
 use config::AppConfig;
 use kernel_manager::KernelManager;
 
+mod dock_registration;
+
 /// Wrapper around a shared progress string, managed as Tauri State.
 pub struct SetupProgress(pub Arc<Mutex<String>>);
 pub struct ShutdownState(pub Arc<AtomicBool>);
@@ -597,7 +599,8 @@ pub fn run() {
             get_setup_progress,
             restart_kernel,
             reauthorize_panel_session,
-            open_external_url
+            open_external_url,
+            dock_registration::register_defaultspack_dock
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|error| error!("error while running tauri application: {error}"));

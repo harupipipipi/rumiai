@@ -48,10 +48,11 @@ fn show_primary_window(app: &tauri::AppHandle) {
 pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let open_i = MenuItem::with_id(app, "open", "Open", true, None::<&str>)?;
     let restart_i = MenuItem::with_id(app, "restart_kernel", "Restart Kernel", true, None::<&str>)?;
+    let register_dock_i = MenuItem::with_id(app, "register_dock", "Register Defaultspack to Dock", true, None::<&str>)?;
     let update_i = MenuItem::with_id(app, "check_update", "Check for Updates", true, None::<&str>)?;
     let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
 
-    let menu = Menu::with_items(app, &[&open_i, &restart_i, &update_i, &quit_i])?;
+    let menu = Menu::with_items(app, &[&open_i, &restart_i, &register_dock_i, &update_i, &quit_i])?;
 
     let mut tray_builder = TrayIconBuilder::with_id("main-tray")
         .tooltip("Rumi AI")
@@ -73,6 +74,17 @@ pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                         error!("Failed to lock kernel manager: {e}");
                     }
                 };
+            }
+            "register_dock" => {
+                let config = app.state::<crate::config::AppConfig>();
+                match crate::dock_registration::register_defaultspack_dock(config) {
+                    Ok(msg) => {
+                        info!("Dock registration: {msg}");
+                    }
+                    Err(e) => {
+                        error!("Dock registration failed: {e}");
+                    }
+                }
             }
             "check_update" => {
                 std::thread::spawn(|| match updater::check_for_update() {
