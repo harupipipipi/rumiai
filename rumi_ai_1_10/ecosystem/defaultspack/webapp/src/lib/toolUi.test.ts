@@ -1,7 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { COMPOSER_TOGGLE_DROP, supportsComposerToggleDrop, toolGroupFor, toolGroupSegments } from "./toolUi";
+import {
+  COMPOSER_BUTTON_DROP,
+  COMPOSER_PANEL_DROP,
+  COMPOSER_SELECTOR_DROP,
+  COMPOSER_TOGGLE_DROP,
+  supportedComposerDropKind,
+  supportsComposerDrop,
+  supportsComposerToggleDrop,
+  toolGroupFor,
+  toolGroupSegments,
+} from "./toolUi";
 
 test("declared tool group wins even when id has no legacy keywords", () => {
   const group = toolGroupFor({
@@ -93,5 +103,48 @@ test("composer widget drop is exposed only when explicitly declared", () => {
       },
     }),
     false,
+  );
+});
+
+test("composer widget platform supports declared button panel and selector contracts", () => {
+  assert.equal(
+    supportedComposerDropKind({
+      id: "status",
+      label: "Status",
+      ui: { widget_kind: "button", drop_capabilities: [COMPOSER_BUTTON_DROP] },
+    }),
+    "button",
+  );
+  assert.equal(
+    supportedComposerDropKind({
+      id: "providers",
+      label: "Providers",
+      ui: { widget_kind: "panel", drop_capabilities: [COMPOSER_PANEL_DROP] },
+    }),
+    "panel",
+  );
+  assert.equal(
+    supportedComposerDropKind({
+      id: "selector",
+      label: "Selector",
+      ui: { widget_kind: "selector", drop_capabilities: [COMPOSER_SELECTOR_DROP] },
+    }),
+    "selector",
+  );
+  assert.equal(
+    supportsComposerDrop({
+      id: "wrong-cap",
+      label: "Wrong Capability",
+      ui: { widget_kind: "button", drop_capabilities: [COMPOSER_TOGGLE_DROP] },
+    }),
+    false,
+  );
+  assert.equal(
+    supportedComposerDropKind({
+      id: "unknown",
+      label: "Unknown",
+      ui: { widget_kind: "future_widget", drop_capabilities: [COMPOSER_BUTTON_DROP] },
+    }),
+    null,
   );
 });

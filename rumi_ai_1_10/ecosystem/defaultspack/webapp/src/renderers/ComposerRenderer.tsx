@@ -10,13 +10,14 @@ import {
   Loader2,
   MessageSquare,
   Mic,
+  MousePointerClick,
   Paperclip,
+  PanelRightOpen,
   Plus,
   RefreshCw,
   Search,
-  Send,
+  SlidersHorizontal,
   Sparkles,
-  Terminal,
   Wrench,
   X,
 } from "lucide-react";
@@ -33,7 +34,10 @@ import type {
 } from "./types";
 import type { ModelProfile } from "../lib/api";
 import { fileToAttachment } from "../lib/attachments";
-import { supportsComposerToggleDrop, toolGroupFor } from "../lib/toolUi";
+import { resolveComposerWidgetDrop } from "../lib/composerWidgets";
+import { toolGroupFor } from "../lib/toolUi";
+
+export { resolveComposerWidgetDrop } from "../lib/composerWidgets";
 
 const THINKING_LABELS: Record<string, string> = {
   low: "低",
@@ -113,7 +117,34 @@ function FilePreviewCard({ file, onRemove }: { file: AttachedFile; onRemove?: (i
   );
 }
 
-function DroppedWidgetChip({ widget, onToggle }: { widget: DroppedWidget; onToggle?: (id: string) => void }) {
+function DroppedWidgetChip({
+  widget,
+  onAction,
+  onToggle,
+}: {
+  widget: DroppedWidget;
+  onAction?: (widget: DroppedWidget) => void;
+  onToggle?: (id: string) => void;
+}) {
+  if (widget.widgetKind !== "tool_toggle" && widget.type !== "tool") {
+    const Icon = widget.widgetKind === "button"
+      ? MousePointerClick
+      : widget.widgetKind === "selector"
+        ? SlidersHorizontal
+        : PanelRightOpen;
+    return (
+      <button
+        type="button"
+        title={widget.description ?? widget.label}
+        onClick={() => onAction?.(widget)}
+        className="inline-flex max-w-[160px] items-center gap-1 rounded-md border border-zinc-700/60 bg-zinc-800/70 px-2 py-0.5 text-[11px] text-zinc-300 transition-colors hover:bg-zinc-800/80 hover:text-zinc-100"
+      >
+        <Icon size={10} />
+        <span className="truncate">{widget.label}</span>
+      </button>
+    );
+  }
+
   return (
     <span
       className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] cursor-pointer transition-colors ${
@@ -127,21 +158,6 @@ function DroppedWidgetChip({ widget, onToggle }: { widget: DroppedWidget; onTogg
       <span className="truncate">{widget.label}</span>
     </span>
   );
-}
-
-export type ComposerDropAction =
-  | { type: "select_model"; profileId: string }
-  | { type: "drop_widget"; widget: DroppedWidget }
-  | { type: "ignore" };
-
-export function resolveComposerWidgetDrop(widget: DroppedWidget, toolItems: ComposerExtensionItem[]): ComposerDropAction {
-  if (widget.type === "model") return { type: "select_model", profileId: widget.id };
-  if (widget.type === "tool") {
-    const item = toolItems.find((candidate) => candidate.id === widget.id);
-    if (!item || !supportsComposerToggleDrop(item)) return { type: "ignore" };
-    return { type: "drop_widget", widget };
-  }
-  return { type: "ignore" };
 }
 
 function ToolItemList({
@@ -364,6 +380,16 @@ export function filterAtMentionFiles(files: string[], query: string): string[] {
   return files.filter((file) => file.toLowerCase().includes(q)).slice(0, 20);
 }
 
+export function insertAtMentionText(input: string, cursorPos: number, file: string): { value: string; cursor: number } {
+  const textBeforeCursor = input.slice(0, cursorPos);
+  const atIndex = textBeforeCursor.lastIndexOf("@");
+  const insertAt = atIndex >= 0 ? atIndex : cursorPos;
+  const before = input.slice(0, insertAt);
+  const after = input.slice(cursorPos);
+  const value = `${before}@${file} ${after}`;
+  return { value, cursor: insertAt + file.length + 2 };
+}
+
 export function ComposerRenderer({
   input,
   placeholder,
@@ -391,8 +417,10 @@ export function ComposerRenderer({
   onSubmit,
   onModeChange,
   onFileAttach,
+  onAtFileAttach,
   onFileRemove,
   onDropWidget,
+  onWidgetAction,
   onWidgetToggle,
   onCodingBranchSwitch,
   onCodingDirectoryChange,
@@ -509,22 +537,20 @@ export function ComposerRenderer({
       if (!textarea) return;
 
       const cursorPos = textarea.selectionStart;
-      const textBeforeCursor = input.slice(0, cursorPos);
-      const atIndex = textBeforeCursor.lastIndexOf("@");
-      const before = input.slice(0, atIndex);
-      const after = input.slice(cursorPos);
-      const next = `${before}@${file} ${after}`;
-      onInputChange(next);
+      const next = insertAtMentionText(input, cursorPos, file);
+      onInputChange(next.value);
+      if (mode === "coding") {
+        onAtFileAttach?.(file);
+      }
       setAtMentionOpen(false);
       setAtMentionQuery("");
 
       setTimeout(() => {
-        const newPos = atIndex + file.length + 2;
-        textarea.setSelectionRange(newPos, newPos);
+        textarea.setSelectionRange(next.cursor, next.cursor);
         textarea.focus();
       }, 0);
     },
-    [input, onInputChange],
+    [input, mode, onAtFileAttach, onInputChange],
   );
 
   const attachFiles = useCallback(async (files: FileList | null) => {
@@ -839,6 +865,7 @@ export function ComposerRenderer({
                 <DroppedWidgetChip
                   key={widget.id}
                   widget={widget.type === "tool" ? { ...widget, enabled: selectedToolIdSet.has(widget.id) } : widget}
+                  onAction={onWidgetAction}
                   onToggle={onWidgetToggle}
                 />
               ))}
@@ -980,7 +1007,7 @@ export function ComposerRenderer({
               </div>
               <button
                 type="submit"
-                disabled={!input.trim() || isGenerating}
+                disabled={(!input.trim() && attachedFiles.length === 0) || isGenerating}
                 title="送信"
                 className={`rumi-send-button ${
                   isNewConversation ? "h-9 w-9" : "w-8 h-8 max-[640px]:h-7 max-[640px]:w-7"

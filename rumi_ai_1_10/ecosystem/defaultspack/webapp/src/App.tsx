@@ -3,10 +3,12 @@ import { PanelLeftOpen } from "lucide-react";
 
 import type { ChatItem } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
-import { api, type ChatContentBlock, type ChatMessage, type Conversation, type ModelProfile, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { api, type ChatContentBlock, type ChatMessage, type ComposerWidgetAction, type Conversation, type ModelProfile, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
 import { deriveConversationTitle, formatRelativeTime, messageToText } from "./lib/chat";
 import { cn } from "./lib/cn";
+import { canExecuteComposerEndpointAction } from "./lib/composerWidgets";
 import { hasShellRegion } from "./lib/uiShell";
+import { hasWorkspaceAttachment, workspaceFileToAttachment } from "./lib/workspaceAttachments";
 import { resolveDefaultspackRenderers } from "./renderers/defaultspackRenderers";
 import { RendererBoundary } from "./renderers/trustedRendererLoader";
 import type { AppMode, AttachedFile, ChatUiMessage, CodingContext, ComposerExtensionItem, ContextUsageInfo, DroppedWidget } from "./renderers/types";
@@ -670,6 +672,22 @@ export default function App() {
     setAttachedFiles((prev) => [...prev, ...files]);
   };
 
+  const handleAtFileAttach = (path: string) => {
+    if (mode !== "coding") return;
+    if (hasWorkspaceAttachment(attachedFiles, path)) return;
+
+    void api.readWorkspaceFile(path)
+      .then((result) => {
+        setAttachedFiles((prev) => {
+          if (hasWorkspaceAttachment(prev, path)) return prev;
+          return [...prev, workspaceFileToAttachment(result.path || path, result.content, result.size)];
+        });
+      })
+      .catch((readError) => {
+        setError(readError instanceof Error ? readError.message : "workspace file の添付に失敗しました。");
+      });
+  };
+
   const handleFileRemove = (fileId: string) => {
     setAttachedFiles((prev) => prev.filter((f) => f.id !== fileId));
   };
@@ -679,8 +697,9 @@ export default function App() {
       if (prev.some((w) => w.id === widget.id)) return prev;
       return [...prev, { ...widget, enabled: widget.enabled ?? true }];
     });
-    if (widget.type === "tool" && widget.enabled !== false) {
-      const item = composerExtensions.find((candidate) => candidate.id === widget.id);
+    if ((widget.widgetKind === "tool_toggle" || widget.type === "tool") && widget.enabled !== false) {
+      const toolId = widget.sourceItemId || widget.id;
+      const item = composerExtensions.find((candidate) => candidate.id === toolId);
       if (item) {
         setSelectedTools((current) => current.some((selected) => selected.id === item.id) ? current : [...current, item]);
       }
@@ -689,14 +708,73 @@ export default function App() {
 
   const handleWidgetToggle = (widgetId: string) => {
     const widget = droppedWidgets.find((candidate) => candidate.id === widgetId);
-    if (widget?.type === "tool") {
-      const item = composerExtensions.find((candidate) => candidate.id === widgetId);
+    if (widget?.widgetKind === "tool_toggle" || widget?.type === "tool") {
+      const toolId = widget.sourceItemId || widgetId;
+      const item = composerExtensions.find((candidate) => candidate.id === toolId);
       if (item) {
         toggleSelectedTool(item);
         return;
       }
     }
     setDroppedWidgets((prev) => prev.map((w) => (w.id === widgetId ? { ...w, enabled: !w.enabled } : w)));
+  };
+
+  const handleComposerEndpointAction = async (widget: DroppedWidget, action: Extract<ComposerWidgetAction, { type: "call_endpoint" }>) => {
+    if (!canExecuteComposerEndpointAction(action)) {
+      setError("この widget action は安全な /api/ endpoint ではないか、承認が必要なため直接実行できません。");
+      return;
+    }
+
+    const method = action.method ?? "GET";
+    const result = await fetch(action.endpoint, {
+      method,
+      headers: method === "GET" ? undefined : { "Content-Type": "application/json" },
+      body: method === "GET" ? undefined : JSON.stringify(action.payload ?? {}),
+    }).then((response) => response.json());
+
+    if (action.result_surface === "silent") return;
+    pushActionPreview(
+      { id: `composer.${widget.id}`, label: widget.label, icon: widget.icon },
+      widget.label,
+      result,
+    );
+  };
+
+  const handleWidgetAction = (widget: DroppedWidget) => {
+    const action = widget.action;
+
+    if (!action) {
+      const target = widget.sourceItemId || widget.id;
+      setActiveSidebarItemId(target);
+      setSidebarSelectionTick((value) => value + 1);
+      return;
+    }
+
+    if (action.type === "open_panel") {
+      const target = action.target_item_id || widget.sourceItemId || widget.id;
+      setActiveSidebarItemId(target);
+      setSidebarSelectionTick((value) => value + 1);
+      return;
+    }
+
+    if (action.type === "toggle_tool") {
+      const toolId = action.tool_id || widget.sourceItemId || widget.id;
+      const item = composerExtensions.find((candidate) => candidate.id === toolId);
+      if (item) toggleSelectedTool(item);
+      return;
+    }
+
+    if (action.type === "select_model") {
+      if (action.profile_id) handleModelProfileSelect(action.profile_id);
+      return;
+    }
+
+    if (action.type === "call_endpoint") {
+      setError(null);
+      void handleComposerEndpointAction(widget, action).catch((actionError) => {
+        setError(actionError instanceof Error ? actionError.message : "composer widget action に失敗しました。");
+      });
+    }
   };
 
   const approveBrowserAction = async () => {
@@ -773,9 +851,10 @@ export default function App() {
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!input.trim() || isGenerating) return;
+    if ((!input.trim() && attachedFiles.length === 0) || isGenerating) return;
 
-    const userText = input.trim();
+    const userText = input.trim() || "添付ファイルを確認してください。";
+    const submittedAttachments = attachedFiles;
     const wasNewConversation = isNewConversation;
     setIsGenerating(true);
     setError(null);
@@ -831,14 +910,14 @@ export default function App() {
           ...(yoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
           ...(selectedToolIds.length ? { selected_tools: selectedToolIds } : {}),
         },
-        attachments: attachedFiles,
+        attachments: submittedAttachments,
         tools: selectedToolIds,
         metadata: {
-          attachments: attachedFiles.map(({ name, size, type, truncated }) => ({ name, size, type, truncated })),
+          attachments: submittedAttachments.map(({ name, size, type, truncated, source, sourcePath }) => ({ name, size, type, truncated, source, sourcePath })),
           selected_tools: selectedToolIds,
           dropped_widgets: droppedWidgets
-            .filter((widget) => widget.type === "tool" ? selectedToolIdSet.has(widget.id) : widget.enabled !== false)
-            .map(({ id, type, label }) => ({ id, type, label })),
+            .filter((widget) => widget.widgetKind === "tool_toggle" || widget.type === "tool" ? selectedToolIdSet.has(widget.sourceItemId || widget.id) : widget.enabled !== false)
+            .map(({ id, type, label, widgetKind, sourceItemId }) => ({ id, type, label, widgetKind, sourceItemId })),
         },
       });
       setAttachedFiles([]);
@@ -858,6 +937,7 @@ export default function App() {
         forgetPendingRequest(submittedConversationId);
       }
       setInput(userText);
+      setAttachedFiles(submittedAttachments);
       setError(
         submitError instanceof Error
           ? submitError.message
@@ -899,8 +979,10 @@ export default function App() {
       onSubmit={handleSubmit}
       onModeChange={handleModeChange}
       onFileAttach={handleFileAttach}
+      onAtFileAttach={handleAtFileAttach}
       onFileRemove={handleFileRemove}
       onDropWidget={handleDropWidget}
+      onWidgetAction={handleWidgetAction}
       onWidgetToggle={handleWidgetToggle}
       onCodingBranchSwitch={handleCodingBranchSwitch}
       onCodingDirectoryChange={handleCodingDirectoryChange}

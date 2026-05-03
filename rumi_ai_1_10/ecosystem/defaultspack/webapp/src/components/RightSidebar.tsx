@@ -40,7 +40,7 @@ import type {
   SidebarField,
   SidebarItem,
 } from "../lib/api";
-import { supportsComposerToggleDrop, toolGroupFor } from "../lib/toolUi";
+import { supportedComposerDropKind, supportsComposerDrop, toolGroupFor } from "../lib/toolUi";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -494,10 +494,22 @@ export function RightSidebar({
   const activeItem = items.find((item) => item.id === activePanel) ?? null;
 
   const handleDragStart = (event: DragEvent, item: SidebarItem) => {
-    if (!supportsComposerToggleDrop(item)) return;
+    const kind = supportedComposerDropKind(item);
+    if (!kind) return;
+    const type = kind === "tool_toggle" ? "tool" : kind;
     event.dataTransfer.setData(
       "application/rumi-widget",
-      JSON.stringify({ id: item.id, type: "tool", label: item.label, enabled: selectedToolIdSet.has(item.id), widget_kind: item.ui?.widget_kind }),
+      JSON.stringify({
+        id: item.id,
+        type,
+        label: item.ui?.composer_label ?? item.label,
+        description: item.ui?.composer_description ?? item.description,
+        icon: item.ui?.composer_icon ?? item.ui?.item_icon ?? item.ui?.group_icon,
+        widgetKind: kind,
+        action: item.ui?.composer_action,
+        sourceItemId: item.id,
+        enabled: selectedToolIdSet.has(item.id),
+      }),
     );
     event.dataTransfer.effectAllowed = "copy";
   };
@@ -598,8 +610,8 @@ export function RightSidebar({
                           <button
                             key={item.id}
                             type="button"
-                            draggable={supportsComposerToggleDrop(item)}
-                            onDragStart={supportsComposerToggleDrop(item) ? (event) => handleShortcutDragStart(event, item) : undefined}
+                            draggable={supportsComposerDrop(item)}
+                            onDragStart={supportsComposerDrop(item) ? (event) => handleShortcutDragStart(event, item) : undefined}
                             onClick={(event) => {
                               event.stopPropagation();
                               setActivePanel(item.id);
@@ -644,8 +656,8 @@ export function RightSidebar({
           {visibleItems.map((item) => (
             <button
               key={item.id}
-              draggable={supportsComposerToggleDrop(item)}
-              onDragStart={supportsComposerToggleDrop(item) ? (e) => handleDragStart(e, item) : undefined}
+              draggable={supportsComposerDrop(item)}
+              onDragStart={supportsComposerDrop(item) ? (e) => handleDragStart(e, item) : undefined}
               onClick={() => setActivePanel((current) => (current === item.id ? null : item.id))}
               className={cn(
                 "w-9 h-9 rounded-lg flex items-center justify-center relative transition-all duration-150 ease-out group/btn flex-shrink-0 hover:scale-[1.03] active:scale-95",

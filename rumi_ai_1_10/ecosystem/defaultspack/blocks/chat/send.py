@@ -74,16 +74,39 @@ def _event(event_type, message, **extra):
     return payload
 
 
+def _resolve_selected_tools(raw_tools):
+    registry = ToolRegistry()
+    if not isinstance(raw_tools, list):
+        return registry.list_tools(), []
+
+    resolved = []
+    unknown = []
+    for item in raw_tools:
+        if isinstance(item, dict):
+            resolved.append(item)
+            continue
+        if not isinstance(item, str):
+            continue
+        tool_id = item.strip()
+        if not tool_id:
+            continue
+        tool_def = registry.get(tool_id)
+        if tool_def is None:
+            unknown.append(tool_id)
+            continue
+        resolved.append(tool_def)
+    return resolved, unknown
+
+
 def _available_tools(context, input_data):
     raw_tools = input_data.get("tools")
-    if isinstance(raw_tools, list):
-        tools = raw_tools
-    else:
-        try:
-            tools = ToolRegistry().list_tools()
-        except Exception:
-            tools = []
+    try:
+        tools, unknown_tools = _resolve_selected_tools(raw_tools)
+    except Exception:
+        tools, unknown_tools = [], []
     resolved_context = resolve_runtime_profile_context(context or {})
+    if unknown_tools:
+        resolved_context["unknown_selected_tools"] = unknown_tools
     runtime_profile = resolved_context.get("runtime_profile")
     agent_id = input_data.get("agent_id")
     filtered = filter_tool_definitions_for_runtime_profile(tools, runtime_profile, agent_id=agent_id)
@@ -352,19 +375,22 @@ def run(input_data, context):
 
     # --- 空メッセージ検証 ---
     raw_content = message.get("content")
-    if raw_content is None or raw_content == "":
+    attachments = message.get("attachments")
+    has_attachments = isinstance(attachments, list) and len(attachments) > 0
+    if (raw_content is None or raw_content == "") and not has_attachments:
         return error("message content must not be empty", "INVALID_INPUT")
-    if isinstance(raw_content, list) and len(raw_content) == 0:
+    if isinstance(raw_content, list) and len(raw_content) == 0 and not has_attachments:
         return error("message content must not be empty", "INVALID_INPUT")
 
     role = message.get("role", "user")
     content = message.get("content", [])
+    if (content is None or content == "" or content == []) and has_attachments:
+        content = "添付ファイルを確認してください。"
     if isinstance(content, str):
         content = [{"type": "text", "text": content}]
     if isinstance(content, list):
         content = list(content)
     metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
-    attachments = message.get("attachments")
     if isinstance(attachments, list):
         metadata = dict(metadata)
         metadata["attachments"] = attachments
@@ -452,6 +478,7 @@ def run(input_data, context):
                 "source": "blocks.chat.send",
                 "knowledge_results": enrich_info.get("knowledge_results", []),
                 "memory_results": enrich_info.get("memory_results", []),
+                "unknown_selected_tools": tool_context.get("unknown_selected_tools", []),
             },
         )
     except Exception:

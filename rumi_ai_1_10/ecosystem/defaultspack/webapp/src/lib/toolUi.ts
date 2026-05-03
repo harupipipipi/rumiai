@@ -1,6 +1,9 @@
-import type { SidebarItem } from "./api";
+import type { ComposerWidgetKind, SidebarItem } from "./api";
 
 export const COMPOSER_TOGGLE_DROP = "composer.toggle_chip";
+export const COMPOSER_BUTTON_DROP = "composer.action_button";
+export const COMPOSER_PANEL_DROP = "composer.open_panel";
+export const COMPOSER_SELECTOR_DROP = "composer.selector_chip";
 
 export type ToolUiLike = Pick<SidebarItem, "id" | "label" | "description" | "tags" | "ui">;
 
@@ -13,7 +16,7 @@ export type ToolGroupMeta = {
   path: string[];
 };
 
-const SUPPORTED_COMPOSER_WIDGET_KINDS = new Set(["tool_toggle"]);
+const SUPPORTED_COMPOSER_WIDGET_KINDS = new Set<ComposerWidgetKind>(["tool_toggle", "button", "panel", "selector"]);
 
 export function normalizeToolGroupId(groupId: string): string {
   return groupId
@@ -63,11 +66,22 @@ export function toolGroupFor(item: ToolUiLike): ToolGroupMeta {
   return { id: "other", label: "その他", description: "追加 tool", icon: "tool", isDeclared: false, path: ["other"] };
 }
 
-export function supportsComposerToggleDrop(item: ToolUiLike): boolean {
+export function supportedComposerDropKind(item: ToolUiLike): ComposerWidgetKind | null {
   const widgetKind = item.ui?.widget_kind;
-  return Boolean(
-    widgetKind
-    && SUPPORTED_COMPOSER_WIDGET_KINDS.has(widgetKind)
-    && item.ui?.drop_capabilities?.includes(COMPOSER_TOGGLE_DROP),
-  );
+  if (!SUPPORTED_COMPOSER_WIDGET_KINDS.has(widgetKind as ComposerWidgetKind)) return null;
+
+  const capabilities = item.ui?.drop_capabilities ?? [];
+  if (widgetKind === "tool_toggle" && capabilities.includes(COMPOSER_TOGGLE_DROP)) return "tool_toggle";
+  if (widgetKind === "button" && capabilities.includes(COMPOSER_BUTTON_DROP)) return "button";
+  if (widgetKind === "panel" && capabilities.includes(COMPOSER_PANEL_DROP)) return "panel";
+  if (widgetKind === "selector" && capabilities.includes(COMPOSER_SELECTOR_DROP)) return "selector";
+  return null;
+}
+
+export function supportsComposerDrop(item: ToolUiLike): boolean {
+  return supportedComposerDropKind(item) !== null;
+}
+
+export function supportsComposerToggleDrop(item: ToolUiLike): boolean {
+  return supportedComposerDropKind(item) === "tool_toggle";
 }

@@ -1,6 +1,6 @@
 import type { FormEvent, MutableRefObject } from "react";
 
-import type { ChatActivityEvent, ChatContentBlock, CodingContextEntry, CodingGitStatus, ModelProfile, SettingsSection, SidebarAction, SidebarItem, ToolLogEntry, UICatalog } from "../lib/api";
+import type { ChatActivityEvent, ChatContentBlock, CodingContextEntry, CodingGitStatus, ComposerWidgetAction, ModelProfile, SettingsSection, SidebarAction, SidebarItem, ToolLogEntry, UICatalog } from "../lib/api";
 import type { ChatItem } from "../components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "../components/ToolPreview";
 
@@ -114,8 +114,10 @@ export type ComposerRendererProps = {
   onSubmit: (event: FormEvent) => void;
   onModeChange?: (mode: AppMode) => void;
   onFileAttach?: (files: AttachedFile[]) => void;
+  onAtFileAttach?: (path: string) => void;
   onFileRemove?: (fileId: string) => void;
   onDropWidget?: (widget: DroppedWidget) => void;
+  onWidgetAction?: (widget: DroppedWidget) => void;
   onWidgetToggle?: (widgetId: string) => void;
   onCodingBranchSwitch?: (branch: string, create?: boolean) => void;
   onCodingDirectoryChange?: (directory: string) => void;
@@ -182,6 +184,8 @@ export type AttachedFile = {
   content?: string;
   type?: string;
   truncated?: boolean;
+  source?: "local_file" | "workspace";
+  sourcePath?: string;
 };
 
 export type DroppedWidget = {
@@ -189,4 +193,9 @@ export type DroppedWidget = {
   type: "tool" | "model" | "setting" | "button" | "panel" | "selector" | "model_card" | string;
   label: string;
   enabled?: boolean;
+  widgetKind?: string;
+  action?: ComposerWidgetAction;
+  sourceItemId?: string;
+  description?: string;
+  icon?: string;
 };

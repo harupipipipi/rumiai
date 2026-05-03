@@ -13,8 +13,17 @@
       "group_id": "coding/github/status",
       "group_label": "Status",
       "group_icon": "git",
-      "drop_capabilities": ["composer.toggle_chip"],
-      "widget_kind": "tool_toggle"
+      "drop_capabilities": ["composer.action_button"],
+      "widget_kind": "button",
+      "composer_label": "Git Status",
+      "composer_icon": "git",
+      "composer_action": {
+        "type": "call_endpoint",
+        "endpoint": "/api/coding/git/status",
+        "method": "GET",
+        "result_surface": "preview",
+        "requires_approval": false
+      }
     },
     "tool_category": "git",
     "action_type": "read",

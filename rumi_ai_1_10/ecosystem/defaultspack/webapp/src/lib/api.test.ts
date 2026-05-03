@@ -50,7 +50,7 @@ test("sendMessage serializes attachments and selected tools", async () => {
   });
 });
 
-test("coding context and branch helpers use existing API routes", async () => {
+test("coding context, branch, and workspace read helpers use existing API routes", async () => {
   const seen: Array<{ input: string; body?: unknown }> = [];
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -59,13 +59,16 @@ test("coding context and branch helpers use existing API routes", async () => {
       status: "ok",
       data: String(input).includes("/api/coding/context")
         ? { branch: "main", root_folder: "/repo", directory: "src", files: [], entries: [], git: null }
-        : { branch: "feature", branches: ["main", "feature"], switched: true, created: true },
+        : String(input).includes("/api/coding/files/read")
+          ? { path: "README.md", content: "hello", size: 5, encoding: "utf-8" }
+          : { branch: "feature", branches: ["main", "feature"], switched: true, created: true },
     }), { status: 200, headers: { "Content-Type": "application/json" } });
   }) as typeof fetch;
 
   try {
     await api.getCodingContext({ directory: "src" });
     await api.switchGitBranch("feature", true);
+    await api.readWorkspaceFile("README.md");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -74,5 +77,9 @@ test("coding context and branch helpers use existing API routes", async () => {
   assert.deepEqual(seen[1], {
     input: "/api/coding/git/branch",
     body: { action: "switch", branch: "feature", create: true },
+  });
+  assert.deepEqual(seen[2], {
+    input: "/api/coding/files/read",
+    body: { path: "README.md" },
   });
 });

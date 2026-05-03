@@ -31,6 +31,8 @@ export type ChatAttachment = {
   size: number;
   type?: string;
   truncated?: boolean;
+  source?: "local_file" | "workspace";
+  sourcePath?: string;
 };
 
 export type CodingContextEntry = {
@@ -148,13 +150,32 @@ export type SidebarAction = {
   preview_type?: "web" | "code" | "file" | "image";
 };
 
+export type ComposerWidgetKind = "tool_toggle" | "button" | "panel" | "selector";
+
+export type ComposerWidgetAction =
+  | { type: "open_panel"; target_item_id?: string }
+  | {
+      type: "call_endpoint";
+      endpoint: string;
+      method?: "GET" | "POST" | "PUT" | "DELETE";
+      payload?: Record<string, unknown>;
+      result_surface?: "preview" | "chat" | "silent";
+      requires_approval?: boolean;
+    }
+  | { type: "select_model"; profile_id?: string }
+  | { type: "toggle_tool"; tool_id?: string };
+
 export type ToolUiMetadata = {
   group_id?: string;
   group_label?: string;
   group_icon?: string;
   item_icon?: string;
   drop_capabilities?: string[];
-  widget_kind?: string | null;
+  widget_kind?: ComposerWidgetKind | string | null;
+  composer_label?: string;
+  composer_description?: string;
+  composer_icon?: string;
+  composer_action?: ComposerWidgetAction;
 };
 
 export type SidebarItem = {
@@ -489,6 +510,18 @@ export const api = {
     return request<{ files: CodingContextEntry[] }>(
       `/api/coding/files${params.size ? `?${params.toString()}` : ""}`,
     );
+  },
+
+  readWorkspaceFile(path: string) {
+    return request<{
+      path: string;
+      content: string;
+      size?: number;
+      encoding?: string;
+    }>("/api/coding/files/read", {
+      method: "POST",
+      body: JSON.stringify({ path }),
+    });
   },
 
   getGitBranch() {
