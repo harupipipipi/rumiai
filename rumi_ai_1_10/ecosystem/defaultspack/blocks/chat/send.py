@@ -23,6 +23,10 @@ from domain.tool.schema_adapter import (
 )
 
 
+MAX_ATTACHMENT_TEXT_CHARS = 240_000
+MAX_ATTACHMENT_TEXT_CHARS_PER_FILE = 120_000
+
+
 def _stub_response():
     return {
         "content": [{"type": "text", "text": "[stub] AI response placeholder"}],
@@ -299,6 +303,41 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
     return response
 
 
+def _attachment_text_blocks(attachments):
+    if not isinstance(attachments, list):
+        return []
+
+    blocks = []
+    remaining = MAX_ATTACHMENT_TEXT_CHARS
+    for attachment in attachments:
+        if remaining <= 0:
+            break
+        if not isinstance(attachment, dict):
+            continue
+        text = attachment.get("content")
+        if not isinstance(text, str) or not text:
+            continue
+
+        limit = min(MAX_ATTACHMENT_TEXT_CHARS_PER_FILE, remaining)
+        clipped = text[:limit]
+        was_truncated = len(text) > limit or attachment.get("truncated") is True
+        remaining -= len(clipped)
+
+        name = attachment.get("name")
+        if not isinstance(name, str) or not name.strip():
+            name = "unnamed"
+        name = name.strip()[:200]
+
+        suffix = "\n..." if was_truncated else ""
+        blocks.append(
+            {
+                "type": "text",
+                "text": "\n\n添付ファイル: {}\n```\n{}{}\n```".format(name, clipped, suffix),
+            }
+        )
+    return blocks
+
+
 def run(input_data, context):
     store = ChatStore()
     conversation_id = input_data.get("conversation_id")
@@ -322,11 +361,15 @@ def run(input_data, context):
     content = message.get("content", [])
     if isinstance(content, str):
         content = [{"type": "text", "text": content}]
+    if isinstance(content, list):
+        content = list(content)
     metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
     attachments = message.get("attachments")
     if isinstance(attachments, list):
         metadata = dict(metadata)
         metadata["attachments"] = attachments
+        if isinstance(content, list):
+            content.extend(_attachment_text_blocks(attachments))
     user_msg_dict = {
         "role": role,
         "content": content,

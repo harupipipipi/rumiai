@@ -145,8 +145,11 @@ def test_chat_send_persists_user_attachment_metadata(tmp_path, monkeypatch):
             "conversation_id": conversation["id"],
             "message": {
                 "role": "user",
-                "content": "hello\n\n添付ファイル: notes.txt",
-                "attachments": [{"name": "notes.txt", "content": "body", "size": 4}],
+                "content": "hello",
+                "attachments": [
+                    {"name": "notes.md", "content": "hello from attachment", "size": 21, "type": "text/markdown"},
+                    {"name": "photo.png", "size": 128, "type": "image/png"},
+                ],
                 "metadata": {"selected_tools": ["local_file"]},
             },
             "tools": ["local_file"],
@@ -158,8 +161,13 @@ def test_chat_send_persists_user_attachment_metadata(tmp_path, monkeypatch):
     assert result["status"] == "ok"
     persisted = json.loads(storage_path.read_text(encoding="utf-8"))
     stored_user = persisted["conversations"][conversation["id"]]["messages"][0]
-    assert stored_user["metadata"]["attachments"][0]["name"] == "notes.txt"
+    assert stored_user["metadata"]["attachments"][0]["name"] == "notes.md"
+    assert stored_user["metadata"]["attachments"][1]["name"] == "photo.png"
     assert stored_user["metadata"]["selected_tools"] == ["local_file"]
+    user_text = "\n".join(block.get("text", "") for block in stored_user["content"])
+    assert "添付ファイル: notes.md" in user_text
+    assert "hello from attachment" in user_text
+    assert "photo.png" not in user_text
     ChatStore._instance = None
 
 
