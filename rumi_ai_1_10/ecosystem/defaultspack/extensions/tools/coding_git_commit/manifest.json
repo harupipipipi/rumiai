@@ -9,6 +9,13 @@
     "name": "coding_git_commit",
     "summary": "Create a git commit",
     "tags": ["coding", "git", "write"],
+    "ui": {
+      "group_id": "coding/github/commit",
+      "group_label": "Commit",
+      "group_icon": "git",
+      "drop_capabilities": ["composer.toggle_chip"],
+      "widget_kind": "tool_toggle"
+    },
     "tool_category": "git",
     "action_type": "commit",
     "write_action": true,

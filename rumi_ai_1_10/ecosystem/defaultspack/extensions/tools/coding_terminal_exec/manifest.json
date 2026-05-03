@@ -9,6 +9,13 @@
     "name": "coding_terminal_exec",
     "summary": "Run a workspace command",
     "tags": ["coding", "terminal", "command"],
+    "ui": {
+      "group_id": "coding/terminal/exec",
+      "group_label": "Exec",
+      "group_icon": "terminal",
+      "drop_capabilities": ["composer.toggle_chip"],
+      "widget_kind": "tool_toggle"
+    },
     "tool_category": "shell",
     "action_type": "shell",
     "requires_approval": true,

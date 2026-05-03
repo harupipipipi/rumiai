@@ -9,6 +9,13 @@
     "name": "coding_file_list",
     "summary": "List workspace files",
     "tags": ["coding", "file", "read"],
+    "ui": {
+      "group_id": "coding/files/read",
+      "group_label": "Read",
+      "group_icon": "file",
+      "drop_capabilities": ["composer.toggle_chip"],
+      "widget_kind": "tool_toggle"
+    },
     "tool_category": "filesystem",
     "action_type": "read",
     "schema": {

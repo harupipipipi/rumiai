@@ -22,6 +22,7 @@ def run(context):
         return handler
 
     routes = [
+        ("GET", "/api/coding/context", _lazy("blocks.coding.context"), {}),
         ("POST", "/api/coding/files/read", _lazy("blocks.coding.file_read"), {}),
         ("POST", "/api/coding/files/write", _lazy("blocks.coding.file_write"), {}),
         ("POST", "/api/coding/files/create", _lazy("blocks.coding.file_create"), {}),
@@ -32,6 +33,8 @@ def run(context):
         ("POST", "/api/coding/terminal/stream", _lazy("blocks.coding.terminal_stream"), {}),
         ("GET", "/api/coding/git/status", _lazy("blocks.coding.git_status"), {}),
         ("GET", "/api/coding/git/diff", _lazy("blocks.coding.git_diff"), {}),
+        ("GET", "/api/coding/git/branch", _lazy("blocks.coding.git_branch"), {}),
+        ("POST", "/api/coding/git/branch", _lazy("blocks.coding.git_branch"), {}),
         ("POST", "/api/coding/git/commit", _lazy("blocks.coding.git_commit"), {}),
         ("POST", "/api/coding/git/push", _lazy("blocks.coding.git_push"), {}),
     ]

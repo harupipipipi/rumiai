@@ -130,6 +130,284 @@ def test_chat_send_attaches_tools_and_persists_activity_events(tmp_path, monkeyp
     ChatStore._instance = None
 
 
+def test_chat_send_persists_user_attachment_metadata(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from blocks.chat.send import run
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    result = run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {
+                "role": "user",
+                "content": "hello",
+                "attachments": [
+                    {"name": "notes.md", "content": "hello from attachment", "size": 21, "type": "text/markdown"},
+                    {"name": "photo.png", "size": 128, "type": "image/png"},
+                ],
+                "metadata": {"selected_tools": ["local_file"]},
+            },
+            "tools": ["local_file"],
+            "params": {"tool_policy": {"selected_tools": ["local_file"]}},
+        },
+        {},
+    )
+
+    assert result["status"] == "ok"
+    persisted = json.loads(storage_path.read_text(encoding="utf-8"))
+    stored_user = persisted["conversations"][conversation["id"]]["messages"][0]
+    assert stored_user["metadata"]["attachments"][0]["name"] == "notes.md"
+    assert stored_user["metadata"]["attachments"][1]["name"] == "photo.png"
+    assert stored_user["metadata"]["selected_tools"] == ["local_file"]
+    user_text = "\n".join(block.get("text", "") for block in stored_user["content"])
+    assert "添付ファイル: notes.md" in user_text
+    assert "hello from attachment" in user_text
+    assert "photo.png" not in user_text
+    ChatStore._instance = None
+
+
+def test_chat_send_accepts_attachment_only_message(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from blocks.chat.send import run
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    result = run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {
+                "role": "user",
+                "content": "",
+                "attachments": [{"name": "notes.md", "content": "hello", "size": 5, "type": "text/markdown"}],
+            },
+        },
+        {},
+    )
+
+    assert result["status"] == "ok"
+    persisted = json.loads(storage_path.read_text(encoding="utf-8"))
+    stored_user = persisted["conversations"][conversation["id"]]["messages"][0]
+    user_text = "\n".join(block.get("text", "") for block in stored_user["content"])
+    assert "添付ファイルを確認してください。" in user_text
+    assert "添付ファイル: notes.md" in user_text
+    assert "hello" in user_text
+    assert stored_user["metadata"]["attachments"][0]["name"] == "notes.md"
+    ChatStore._instance = None
+
+
+def test_chat_send_includes_workspace_attachment_content(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from blocks.chat.send import run
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    result = run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {
+                "role": "user",
+                "content": "このファイル見て",
+                "attachments": [
+                    {
+                        "name": "README.md",
+                        "content": "# Workspace Notes",
+                        "size": 17,
+                        "type": "text/plain",
+                        "source": "workspace",
+                        "sourcePath": "README.md",
+                    }
+                ],
+            },
+        },
+        {},
+    )
+
+    assert result["status"] == "ok"
+    persisted = json.loads(storage_path.read_text(encoding="utf-8"))
+    stored_user = persisted["conversations"][conversation["id"]]["messages"][0]
+    user_text = "\n".join(block.get("text", "") for block in stored_user["content"])
+    assert "添付ファイル: README.md" in user_text
+    assert "# Workspace Notes" in user_text
+    ChatStore._instance = None
+
+
+def test_chat_send_resolves_selected_tool_ids_before_provider_adaptation(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from domain.tool.registry import ToolRegistry
+    from blocks.chat.send import run
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+    ToolRegistry._instance = None
+
+    captured = {}
+
+    def call_handler(name, payload):
+        if name == "defaults.ai.complete":
+            captured["tools"] = payload["tools"]
+            return {"status": "ok", "data": {"content": [{"type": "text", "text": "ok"}], "finish_reason": "stop"}}
+        raise AssertionError(name)
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    result = run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "read"},
+            "tools": ["coding_file_read"],
+        },
+        {"call_handler": call_handler},
+    )
+
+    assert result["status"] == "ok"
+    assert captured["tools"][0]["type"] == "function"
+    assert captured["tools"][0]["function"]["name"] == "coding_file_read"
+    assert result["data"]["metadata"]["attached_tools"] == ["coding_file_read"]
+    ChatStore._instance = None
+    ToolRegistry._instance = None
+
+
+def test_chat_send_drops_unknown_selected_tool_ids(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from domain.tool.registry import ToolRegistry
+    from blocks.chat.send import run
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+    ToolRegistry._instance = None
+
+    captured = {}
+
+    def call_handler(name, payload):
+        if name == "defaults.ai.complete":
+            captured["tools"] = payload["tools"]
+            return {"status": "ok", "data": {"content": [{"type": "text", "text": "ok"}], "finish_reason": "stop"}}
+        raise AssertionError(name)
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    result = run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "read"},
+            "tools": ["coding_file_read", "missing_tool"],
+        },
+        {"call_handler": call_handler},
+    )
+
+    assert result["status"] == "ok"
+    assert "missing_tool" not in captured["tools"]
+    assert [tool["function"]["name"] for tool in captured["tools"]] == ["coding_file_read"]
+    ChatStore._instance = None
+    ToolRegistry._instance = None
+
+
+def test_chat_send_preserves_dict_tool_definitions(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from blocks.chat.send import run
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    captured = {}
+    tool_def = {
+        "type": "function",
+        "function": {
+            "name": "custom_lookup",
+            "description": "Look up custom data.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    }
+
+    def call_handler(name, payload):
+        if name == "defaults.ai.complete":
+            captured["tools"] = payload["tools"]
+            return {"status": "ok", "data": {"content": [{"type": "text", "text": "ok"}], "finish_reason": "stop"}}
+        raise AssertionError(name)
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    result = run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "lookup"},
+            "tools": [tool_def],
+        },
+        {"call_handler": call_handler},
+    )
+
+    assert result["status"] == "ok"
+    assert captured["tools"] == [tool_def]
+    ChatStore._instance = None
+
+
+def test_coding_context_and_branch_blocks(tmp_path):
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True, text=True)
+    (tmp_path / "README.md").write_text("# test\n", encoding="utf-8")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").write_text("print('ok')\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=tmp_path, check=True, capture_output=True, text=True)
+    subprocess.run(
+        ["git", "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "init"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    from blocks.coding.context import run as context_run
+    from blocks.coding.git_branch import run as branch_run
+
+    context_result = context_run({"workspace_root": str(tmp_path)}, {})
+    assert context_result["status"] == "ok"
+    data = context_result["data"]
+    assert data["branch"] in {"main", "master"}
+    assert data["root_folder"] == str(tmp_path)
+    assert data["files"] == ["README.md"]
+    assert all(isinstance(item, str) for item in data["files"])
+    assert any(item["name"] == "README.md" for item in data["entries"])
+    assert data["git"]["branch"] == data["branch"]
+
+    nested_context_result = context_run({"workspace_root": str(tmp_path), "directory": "src"}, {})
+    assert nested_context_result["status"] == "ok"
+    assert nested_context_result["data"]["directory"] == "src"
+    assert nested_context_result["data"]["files"] == ["src/app.py"]
+
+    branch_result = branch_run({"workspace_root": str(tmp_path)}, {})
+    assert branch_result["status"] == "ok"
+    assert branch_result["data"]["branch"] in {"main", "master"}
+    assert branch_result["data"]["branches"]
+
+    switched_result = branch_run(
+        {"workspace_root": str(tmp_path), "action": "switch", "branch": "feature/footer", "create": True},
+        {},
+    )
+    assert switched_result["status"] == "ok"
+    assert switched_result["data"]["branch"] == "feature/footer"
+    assert switched_result["data"]["switched"] is True
+    assert switched_result["data"]["created"] is True
+
+    list_result = branch_run({"workspace_root": str(tmp_path), "action": "list"}, {})
+    assert list_result["status"] == "ok"
+    assert "feature/footer" in list_result["data"]["branches"]
+
+
 def test_direct_chat_completion_forwards_tools_and_tool_context(monkeypatch):
     import blocks.chat.send as send
 
@@ -348,6 +626,10 @@ def test_fallback_routes_expose_agent_service_and_coding_surfaces():
 
     assert ("GET", "/api/capabilities", "blocks.capability.list") in routes
     assert ("GET", "/api/agent-service/manifest", "blocks.capability.manifest") in routes
+    assert ("GET", "/api/coding/context", "blocks.coding.context") in routes
+    assert ("GET", "/api/coding/files", "blocks.coding.file_list") in routes
+    assert ("GET", "/api/coding/git/branch", "blocks.coding.git_branch") in routes
+    assert ("POST", "/api/coding/git/branch", "blocks.coding.git_branch") in routes
     assert ("POST", "/api/coding/files/diff", "blocks.coding.file_diff") in routes
     assert ("POST", "/api/coding/terminal/exec", "blocks.coding.terminal_exec") in routes
     assert ("POST", "/api/context/compact", "blocks.context.compact") in routes
@@ -391,6 +673,9 @@ def test_frontend_sidebar_api_routes_match_in_registry_mode():
         ("POST", "/api/tools/browser-computer"),
         ("POST", "/api/research/web-search"),
         ("POST", "/api/research/reddit-search"),
+        ("GET", "/api/coding/context"),
+        ("GET", "/api/coding/files"),
+        ("GET", "/api/coding/git/branch"),
         ("GET", "/api/ai/profiles"),
         ("GET", "/api/agent/schedules"),
         ("GET", "/api/chat/channels"),

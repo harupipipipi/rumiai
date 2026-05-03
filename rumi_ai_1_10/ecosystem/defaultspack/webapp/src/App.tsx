@@ -1,15 +1,17 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { PanelLeftOpen } from "lucide-react";
 
 import type { ChatItem } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
-import { api, type ChatContentBlock, type ChatMessage, type Conversation, type ModelProfile, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { api, type ChatContentBlock, type ChatMessage, type ComposerWidgetAction, type Conversation, type ModelProfile, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
 import { deriveConversationTitle, formatRelativeTime, messageToText } from "./lib/chat";
 import { cn } from "./lib/cn";
+import { canExecuteComposerEndpointAction } from "./lib/composerWidgets";
 import { hasShellRegion } from "./lib/uiShell";
+import { hasWorkspaceAttachment, workspaceFileToAttachment } from "./lib/workspaceAttachments";
 import { resolveDefaultspackRenderers } from "./renderers/defaultspackRenderers";
 import { RendererBoundary } from "./renderers/trustedRendererLoader";
-import type { ChatUiMessage, ComposerExtensionItem, ContextUsageInfo } from "./renderers/types";
+import type { AppMode, AttachedFile, ChatUiMessage, CodingContext, ComposerExtensionItem, ContextUsageInfo, DroppedWidget } from "./renderers/types";
 
 type BrowserApproval = {
   action: string;
@@ -199,6 +201,7 @@ function composerExtensionItems(items: SidebarItem[]): ComposerExtensionItem[] {
       category: item.category,
       description: item.description,
       tags: item.tags ?? [],
+      ui: item.ui,
     }));
 }
 
@@ -274,6 +277,12 @@ export default function App() {
   const [activeSidebarItemId, setActiveSidebarItemId] = useState<string | null>(null);
   const [sidebarSelectionTick, setSidebarSelectionTick] = useState(0);
   const [yoloMode, setYoloMode] = useLocalStorage("rumi-yolo-mode", false);
+  const [mode, setMode] = useLocalStorage<AppMode>("rumi-app-mode", "chat");
+  const [codingContext, setCodingContext] = useState<CodingContext | null>(null);
+  const [codingDirectory, setCodingDirectory] = useState(".");
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [droppedWidgets, setDroppedWidgets] = useState<DroppedWidget[]>([]);
+  const [selectedTools, setSelectedTools] = useState<ComposerExtensionItem[]>([]);
   const pendingStorageKey = "rumi-pending-chat-requests";
   const [pendingRequests, setPendingRequests] = useLocalStorage<Record<string, PendingChatRequest>>(pendingStorageKey, {});
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -293,6 +302,8 @@ export default function App() {
   const selectedThinkingLevel = String(thinkingLevels[profileKey(activeProfile, preferredModel)] ?? activeProfile?.default_thinking_level ?? "medium");
   const contextUsage = contextUsageFor(activeConversation, activeProfile);
   const composerExtensions = composerExtensionItems(sidebarItems);
+  const selectedToolIds = useMemo(() => selectedTools.map((tool) => tool.id), [selectedTools]);
+  const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
   const pendingRequest = activeConversationId ? pendingRequests[activeConversationId] : null;
   const isConversationPending = Boolean(
     pendingRequest && Date.now() - pendingRequest.startedAt < 10 * 60_000,
@@ -304,6 +315,12 @@ export default function App() {
       label: "yolo",
       description: "このチャットの tool 承認を自動化",
       enabled: yoloMode,
+    },
+    {
+      id: "coding",
+      label: "coding",
+      description: "コーディングモードに切替",
+      enabled: mode === "coding",
     },
   ];
   const unknownBlockStrategy = String(settingsValues.chat_rendering?.unknown_block_strategy ?? "json");
@@ -334,6 +351,26 @@ export default function App() {
     });
   };
 
+  const loadCodingContext = useCallback(async () => {
+    try {
+      const [result, branchInfo] = await Promise.all([
+        api.getCodingContext({ directory: codingDirectory }),
+        api.getGitBranch().catch(() => null),
+      ]);
+      setCodingContext({
+        branch: result.branch,
+        rootFolder: result.root_folder,
+        directory: result.directory ?? codingDirectory,
+        branches: branchInfo?.branches ?? [],
+        files: result.files,
+        entries: result.entries,
+        git: result.git,
+      });
+    } catch {
+      setCodingContext(null);
+    }
+  }, [codingDirectory]);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isGenerating]);
@@ -349,6 +386,12 @@ export default function App() {
       window.removeEventListener("pagehide", markUnloading);
     };
   }, []);
+
+  useEffect(() => {
+    if (mode === "coding") {
+      void loadCodingContext();
+    }
+  }, [mode, loadCodingContext]);
 
   async function refreshHealth() {
     try {
@@ -523,6 +566,8 @@ export default function App() {
     setPreviews([]);
     setError(null);
     setIsGenerating(false);
+    setAttachedFiles([]);
+    setDroppedWidgets([]);
     replaceChatIdInUrl(null, false);
   };
 
@@ -589,11 +634,146 @@ export default function App() {
   const handleComposerExtensionSelect = (item: ComposerExtensionItem) => {
     setActiveSidebarItemId(item.id);
     setSidebarSelectionTick((value) => value + 1);
+    toggleSelectedTool(item);
+  };
+
+  const toggleSelectedTool = (item: ComposerExtensionItem) => {
+    setSelectedTools((current) => {
+      if (current.some((selected) => selected.id === item.id)) {
+        return current.filter((selected) => selected.id !== item.id);
+      }
+      return [...current, item];
+    });
   };
 
   const handleComposerCommand = (commandId: string) => {
     if (commandId === "yolo") {
       setYoloMode((value) => !value);
+    } else if (commandId === "coding") {
+      setMode((value) => (value === "coding" ? "chat" : "coding"));
+    }
+  };
+
+  const handleModeChange = (newMode: AppMode) => {
+    setMode(newMode);
+  };
+
+  const handleCodingBranchSwitch = (branch: string, create = false) => {
+    void api.switchGitBranch(branch, create)
+      .then(() => loadCodingContext())
+      .catch((branchError) => setError(branchError instanceof Error ? branchError.message : "ブランチ切り替えに失敗しました。"));
+  };
+
+  const handleCodingDirectoryChange = (directory: string) => {
+    setCodingDirectory(directory || ".");
+  };
+
+  const handleFileAttach = (files: AttachedFile[]) => {
+    setAttachedFiles((prev) => [...prev, ...files]);
+  };
+
+  const handleAtFileAttach = (path: string) => {
+    if (mode !== "coding") return;
+    if (hasWorkspaceAttachment(attachedFiles, path)) return;
+
+    void api.readWorkspaceFile(path)
+      .then((result) => {
+        setAttachedFiles((prev) => {
+          if (hasWorkspaceAttachment(prev, path)) return prev;
+          return [...prev, workspaceFileToAttachment(result.path || path, result.content, result.size)];
+        });
+      })
+      .catch((readError) => {
+        setError(readError instanceof Error ? readError.message : "workspace file の添付に失敗しました。");
+      });
+  };
+
+  const handleFileRemove = (fileId: string) => {
+    setAttachedFiles((prev) => prev.filter((f) => f.id !== fileId));
+  };
+
+  const handleDropWidget = (widget: DroppedWidget) => {
+    setDroppedWidgets((prev) => {
+      if (prev.some((w) => w.id === widget.id)) return prev;
+      return [...prev, { ...widget, enabled: widget.enabled ?? true }];
+    });
+    if ((widget.widgetKind === "tool_toggle" || widget.type === "tool") && widget.enabled !== false) {
+      const toolId = widget.sourceItemId || widget.id;
+      const item = composerExtensions.find((candidate) => candidate.id === toolId);
+      if (item) {
+        setSelectedTools((current) => current.some((selected) => selected.id === item.id) ? current : [...current, item]);
+      }
+    }
+  };
+
+  const handleWidgetToggle = (widgetId: string) => {
+    const widget = droppedWidgets.find((candidate) => candidate.id === widgetId);
+    if (widget?.widgetKind === "tool_toggle" || widget?.type === "tool") {
+      const toolId = widget.sourceItemId || widgetId;
+      const item = composerExtensions.find((candidate) => candidate.id === toolId);
+      if (item) {
+        toggleSelectedTool(item);
+        return;
+      }
+    }
+    setDroppedWidgets((prev) => prev.map((w) => (w.id === widgetId ? { ...w, enabled: !w.enabled } : w)));
+  };
+
+  const handleComposerEndpointAction = async (widget: DroppedWidget, action: Extract<ComposerWidgetAction, { type: "call_endpoint" }>) => {
+    if (!canExecuteComposerEndpointAction(action)) {
+      setError("この widget action は安全な /api/ endpoint ではないか、承認が必要なため直接実行できません。");
+      return;
+    }
+
+    const method = action.method ?? "GET";
+    const result = await fetch(action.endpoint, {
+      method,
+      headers: method === "GET" ? undefined : { "Content-Type": "application/json" },
+      body: method === "GET" ? undefined : JSON.stringify(action.payload ?? {}),
+    }).then((response) => response.json());
+
+    if (action.result_surface === "silent") return;
+    pushActionPreview(
+      { id: `composer.${widget.id}`, label: widget.label, icon: widget.icon },
+      widget.label,
+      result,
+    );
+  };
+
+  const handleWidgetAction = (widget: DroppedWidget) => {
+    const action = widget.action;
+
+    if (!action) {
+      const target = widget.sourceItemId || widget.id;
+      setActiveSidebarItemId(target);
+      setSidebarSelectionTick((value) => value + 1);
+      return;
+    }
+
+    if (action.type === "open_panel") {
+      const target = action.target_item_id || widget.sourceItemId || widget.id;
+      setActiveSidebarItemId(target);
+      setSidebarSelectionTick((value) => value + 1);
+      return;
+    }
+
+    if (action.type === "toggle_tool") {
+      const toolId = action.tool_id || widget.sourceItemId || widget.id;
+      const item = composerExtensions.find((candidate) => candidate.id === toolId);
+      if (item) toggleSelectedTool(item);
+      return;
+    }
+
+    if (action.type === "select_model") {
+      if (action.profile_id) handleModelProfileSelect(action.profile_id);
+      return;
+    }
+
+    if (action.type === "call_endpoint") {
+      setError(null);
+      void handleComposerEndpointAction(widget, action).catch((actionError) => {
+        setError(actionError instanceof Error ? actionError.message : "composer widget action に失敗しました。");
+      });
     }
   };
 
@@ -671,9 +851,10 @@ export default function App() {
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!input.trim() || isGenerating) return;
+    if ((!input.trim() && attachedFiles.length === 0) || isGenerating) return;
 
-    const userText = input.trim();
+    const userText = input.trim() || "添付ファイルを確認してください。";
+    const submittedAttachments = attachedFiles;
     const wasNewConversation = isNewConversation;
     setIsGenerating(true);
     setError(null);
@@ -681,7 +862,11 @@ export default function App() {
       setIsNewChatLaunching(true);
     }
     setInput("");
+    setAttachedFiles([]);
     let submittedConversationId: string | null = null;
+    const selectedToolLabels = [
+      ...selectedTools.map((item) => item.label || item.id),
+    ];
 
     try {
       let conversation = activeConversation;
@@ -696,7 +881,7 @@ export default function App() {
         conversationId: conversation.id,
         startedAt: Date.now(),
         status: `${activeProfile?.display_name ?? preferredModel} が思考中`,
-        toolNames: composerExtensions.map((item) => item.label || item.id),
+        toolNames: selectedToolLabels,
       });
       replaceChatIdInUrl(conversation.id, true);
 
@@ -721,8 +906,23 @@ export default function App() {
       });
       await api.sendMessage(conversation.id, userText, {
         thinking_level: activeProfile?.supports_thinking ? selectedThinkingLevel : null,
-        tool_policy: yoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : undefined,
+        tool_policy: {
+          ...(yoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
+          ...(selectedToolIds.length ? { selected_tools: selectedToolIds } : {}),
+        },
+        attachments: submittedAttachments,
+        tools: selectedToolIds,
+        metadata: {
+          attachments: submittedAttachments.map(({ name, size, type, truncated, source, sourcePath }) => ({ name, size, type, truncated, source, sourcePath })),
+          selected_tools: selectedToolIds,
+          dropped_widgets: droppedWidgets
+            .filter((widget) => widget.widgetKind === "tool_toggle" || widget.type === "tool" ? selectedToolIdSet.has(widget.sourceItemId || widget.id) : widget.enabled !== false)
+            .map(({ id, type, label, widgetKind, sourceItemId }) => ({ id, type, label, widgetKind, sourceItemId })),
+        },
       });
+      setAttachedFiles([]);
+      setSelectedTools([]);
+      setDroppedWidgets([]);
       forgetPendingRequest(conversation.id);
       replaceChatIdInUrl(conversation.id, false);
 
@@ -737,6 +937,7 @@ export default function App() {
         forgetPendingRequest(submittedConversationId);
       }
       setInput(userText);
+      setAttachedFiles(submittedAttachments);
       setError(
         submitError instanceof Error
           ? submitError.message
@@ -758,18 +959,34 @@ export default function App() {
       isGenerating={isGenerating || isConversationPending}
       selectedProfile={activeProfile}
       favoriteProfiles={favoriteProfiles}
+      modelProfiles={modelProfiles}
       thinkingLevel={activeProfile?.supports_thinking ? selectedThinkingLevel : null}
       contextUsage={contextUsage}
       inlineExtensions={composerExtensions}
       belowExtensions={[]}
       commands={composerCommands}
       yoloMode={yoloMode}
+      mode={mode}
+      codingContext={codingContext}
+      attachedFiles={attachedFiles}
+      droppedWidgets={droppedWidgets}
+      selectedToolIds={selectedToolIds}
       onExtensionSelect={handleComposerExtensionSelect}
       onCommandSelect={handleComposerCommand}
       onModelProfileSelect={handleModelProfileSelect}
       onThinkingLevelChange={handleThinkingLevelChange}
       onInputChange={setInput}
       onSubmit={handleSubmit}
+      onModeChange={handleModeChange}
+      onFileAttach={handleFileAttach}
+      onAtFileAttach={handleAtFileAttach}
+      onFileRemove={handleFileRemove}
+      onDropWidget={handleDropWidget}
+      onWidgetAction={handleWidgetAction}
+      onWidgetToggle={handleWidgetToggle}
+      onCodingBranchSwitch={handleCodingBranchSwitch}
+      onCodingDirectoryChange={handleCodingDirectoryChange}
+      onCodingContextRefresh={loadCodingContext}
     />
   );
 
@@ -780,15 +997,17 @@ export default function App() {
 
       <div className="flex flex-1 min-h-0">
         {showRegion("history") && !isHistoryMinimized && (
-          <Renderers.historyBoard
-            activeChatId={activeConversationId}
-            chatItems={chatItems}
-            account={catalog?.app?.account}
-            onChatSelect={handleHistoryClick}
-            onNewTask={handleNewTask}
-            onSettingsClick={() => setIsSettingsOpen(true)}
-            onMinimize={() => setIsHistoryMinimized(true)}
-          />
+          <div className="w-[360px] max-w-[36vw] min-w-[300px] flex-shrink-0 border-r border-zinc-800/60 max-[900px]:w-[300px]">
+            <Renderers.historyBoard
+              activeChatId={activeConversationId}
+              chatItems={chatItems}
+              account={catalog?.app?.account}
+              onChatSelect={handleHistoryClick}
+              onNewTask={handleNewTask}
+              onSettingsClick={() => setIsSettingsOpen(true)}
+              onMinimize={() => setIsHistoryMinimized(true)}
+            />
+          </div>
         )}
 
         {showRegion("history") && isHistoryMinimized && (
@@ -820,7 +1039,7 @@ export default function App() {
             {isNewConversation && !isLoading ? (
               <div className={cn("rumi-new-chat-stage flex flex-1 items-center justify-center px-5 pb-[10vh]", isNewChatLaunching && "is-launching")}>
                 <div className="w-full">
-                  <h1 className="rumi-greeting mx-auto mb-7 max-w-[620px] px-4 text-center text-[clamp(21px,2.1vw,30px)] font-semibold leading-tight text-zinc-200">
+                  <h1 className="rumi-greeting mx-auto mb-7 max-w-[720px] px-4 text-center text-[clamp(24px,3.2vw,44px)] font-medium leading-tight text-zinc-200">
                     {getNewConversationGreeting()}
                   </h1>
                   {renderComposer(true)}
@@ -886,8 +1105,17 @@ export default function App() {
             activeItemId={activeSidebarItemId ? `${activeSidebarItemId}:${sidebarSelectionTick}` : null}
             settingsValues={settingsValues}
             settingsSections={settingsSections}
+            selectedToolIds={selectedToolIds}
             onSettingChange={handleSettingChange}
             onOpenSettings={() => setIsSettingsOpen(true)}
+            onToolToggle={(item) => toggleSelectedTool({
+              id: item.id,
+              label: item.label,
+              category: item.category,
+              description: item.description,
+              tags: item.tags ?? [],
+              ui: item.ui,
+            })}
             onPanelAction={handlePanelAction}
           />
         )}

@@ -356,6 +356,7 @@ class FrontendRegistry:
                     "description": tool.get("summary", ""),
                     "badge": "Dynamic" if execution_type == "dynamic" else None,
                     "tags": tool.get("tags", []),
+                    "ui": dict(tool.get("ui", {})) if isinstance(tool.get("ui"), dict) else {},
                     "origin": {"kind": "tool_registry", "path": "domain/tool/registry.py"},
                     "panel": {
                         "kind": "schema",
@@ -555,6 +556,16 @@ class FrontendRegistry:
                     "category": "integration",
                     "description": "現在利用可能な AI provider / model catalog。",
                     "tags": ["provider", "model"],
+                    "ui": {
+                        "widget_kind": "panel",
+                        "drop_capabilities": ["composer.open_panel"],
+                        "composer_label": "AI Library",
+                        "composer_icon": "provider",
+                        "composer_action": {
+                            "type": "open_panel",
+                            "target_item_id": "provider-catalog",
+                        },
+                    },
                     "origin": {"kind": "builtin", "path": "domain/ai_client/client.py"},
                     "panel": {
                         "kind": "models",

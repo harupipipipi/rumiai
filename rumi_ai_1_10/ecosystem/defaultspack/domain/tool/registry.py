@@ -119,6 +119,11 @@ class ToolRegistry:
         tool_id = str(config.get("tool_id", manifest.get("id", ""))).strip()
         if not tool_id:
             return None
+        ui = config.get("ui")
+        if not isinstance(ui, dict):
+            ui = manifest.get("ui")
+        if not isinstance(ui, dict):
+            ui = {}
         execution = dict(config.get("execution", {}))
         handler = str(config.get("handler", "")).strip()
         if not execution:
@@ -147,6 +152,7 @@ class ToolRegistry:
             "action_type": str(config.get("action_type", "")),
             "write_action": bool(config.get("write_action", False)),
             "requires_approval": bool(config.get("requires_approval", False)),
+            "ui": dict(ui),
             "metadata": {
                 "source": "extension",
                 "manifest_path": manifest.get("source_path", ""),

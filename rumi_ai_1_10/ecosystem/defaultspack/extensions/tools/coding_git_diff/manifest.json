@@ -9,6 +9,13 @@
     "name": "coding_git_diff",
     "summary": "Read git diff",
     "tags": ["coding", "git", "read"],
+    "ui": {
+      "group_id": "coding/github/status",
+      "group_label": "Status",
+      "group_icon": "git",
+      "drop_capabilities": ["composer.toggle_chip"],
+      "widget_kind": "tool_toggle"
+    },
     "tool_category": "git",
     "action_type": "read",
     "schema": {

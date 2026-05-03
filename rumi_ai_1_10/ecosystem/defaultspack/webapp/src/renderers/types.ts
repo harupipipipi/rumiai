@@ -1,6 +1,6 @@
 import type { FormEvent, MutableRefObject } from "react";
 
-import type { ChatActivityEvent, ChatContentBlock, ModelProfile, SettingsSection, SidebarAction, SidebarItem, ToolLogEntry, UICatalog } from "../lib/api";
+import type { ChatActivityEvent, ChatContentBlock, CodingContextEntry, CodingGitStatus, ComposerWidgetAction, ModelProfile, SettingsSection, SidebarAction, SidebarItem, ToolLogEntry, UICatalog } from "../lib/api";
 import type { ChatItem } from "../components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "../components/ToolPreview";
 
@@ -28,6 +28,7 @@ export type ComposerExtensionItem = {
   description?: string;
   tags?: string[];
   disabled?: boolean;
+  ui?: SidebarItem["ui"];
 };
 
 export type ComposerCommandItem = {
@@ -93,18 +94,34 @@ export type ComposerRendererProps = {
   isGenerating: boolean;
   selectedProfile: ModelProfile | null;
   favoriteProfiles: ModelProfile[];
+  modelProfiles?: ModelProfile[];
   thinkingLevel: string | null;
   contextUsage: ContextUsageInfo;
   inlineExtensions: ComposerExtensionItem[];
   belowExtensions: ComposerExtensionItem[];
   commands?: ComposerCommandItem[];
   yoloMode?: boolean;
+  mode?: AppMode;
+  codingContext?: CodingContext | null;
+  attachedFiles?: AttachedFile[];
+  droppedWidgets?: DroppedWidget[];
+  selectedToolIds?: string[];
   onExtensionSelect?: (item: ComposerExtensionItem) => void;
   onCommandSelect?: (commandId: string) => void;
   onModelProfileSelect: (profileId: string) => void;
   onThinkingLevelChange: (level: string | null) => void;
   onInputChange: (value: string) => void;
   onSubmit: (event: FormEvent) => void;
+  onModeChange?: (mode: AppMode) => void;
+  onFileAttach?: (files: AttachedFile[]) => void;
+  onAtFileAttach?: (path: string) => void;
+  onFileRemove?: (fileId: string) => void;
+  onDropWidget?: (widget: DroppedWidget) => void;
+  onWidgetAction?: (widget: DroppedWidget) => void;
+  onWidgetToggle?: (widgetId: string) => void;
+  onCodingBranchSwitch?: (branch: string, create?: boolean) => void;
+  onCodingDirectoryChange?: (directory: string) => void;
+  onCodingContextRefresh?: () => void;
 };
 
 export type ToolPreviewPanelRendererProps = {
@@ -121,8 +138,10 @@ export type RightSidebarRendererProps = {
   activeItemId?: string | null;
   settingsValues: Record<string, Record<string, unknown>>;
   settingsSections: SettingsSection[];
+  selectedToolIds?: string[];
   onSettingChange: SettingChangeHandler;
   onOpenSettings: () => void;
+  onToolToggle?: (item: SidebarItem) => void;
   onPanelAction?: (item: SidebarItem, action: SidebarAction) => void;
 };
 
@@ -135,4 +154,48 @@ export type SettingsModalRendererProps = {
   settingsValues: Record<string, Record<string, unknown>>;
   onClose: () => void;
   onSettingChange: SettingChangeHandler;
+};
+
+export type ToolGroup = {
+  id: string;
+  label: string;
+  description: string;
+  icon?: string;
+  path?: string[];
+  items: ComposerExtensionItem[];
+};
+
+export type AppMode = "chat" | "coding" | "agent";
+
+export type CodingContext = {
+  branch: string | null;
+  rootFolder: string | null;
+  directory?: string;
+  branches?: string[];
+  files: string[];
+  entries?: CodingContextEntry[];
+  git?: CodingGitStatus | null;
+};
+
+export type AttachedFile = {
+  id: string;
+  name: string;
+  size: number;
+  content?: string;
+  type?: string;
+  truncated?: boolean;
+  source?: "local_file" | "workspace";
+  sourcePath?: string;
+};
+
+export type DroppedWidget = {
+  id: string;
+  type: "tool" | "model" | "setting" | "button" | "panel" | "selector" | "model_card" | string;
+  label: string;
+  enabled?: boolean;
+  widgetKind?: string;
+  action?: ComposerWidgetAction;
+  sourceItemId?: string;
+  description?: string;
+  icon?: string;
 };

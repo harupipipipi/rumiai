@@ -8,6 +8,7 @@ import re
 import signal
 import threading
 import http.server
+import urllib.parse
 
 from bridge.block_adapter import invoke_block
 from transport.registry import build_always_available_http_routes, build_fallback_http_routes
@@ -496,21 +497,30 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
 
     def _handle_request(self, method):
         try:
-            path = self.path.split("?")[0]
+            parsed_url = urllib.parse.urlsplit(self.path)
+            path = parsed_url.path
             handler, path_params, source, path_inject = self.server_ref._match_route(method, path)
             if handler is None:
                 self._send_json(404, error("not found: " + method + " " + path))
                 return
-            request_data = {}
+            request_data = {
+                key: values[-1]
+                for key, values in urllib.parse.parse_qs(parsed_url.query, keep_blank_values=True).items()
+                if values
+            }
             if method in ("POST", "PUT"):
                 content_length = int(self.headers.get("Content-Length", 0))
                 if content_length > 0:
                     raw_body = self.rfile.read(content_length)
                     try:
-                        request_data = json.loads(raw_body.decode("utf-8"))
+                        body_data = json.loads(raw_body.decode("utf-8"))
                     except (json.JSONDecodeError, UnicodeDecodeError):
                         self._send_json(400, error("invalid JSON body"))
                         return
+                    if not isinstance(body_data, dict):
+                        self._send_json(400, error("JSON body must be an object"))
+                        return
+                    request_data.update(body_data)
 
             if source == "registry":
                 # Inject path parameters into request_data per route config

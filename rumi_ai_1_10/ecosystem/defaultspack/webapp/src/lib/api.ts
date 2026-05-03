@@ -25,6 +25,52 @@ export type ChatMessage = {
   model?: string | null;
 };
 
+export type ChatAttachment = {
+  name: string;
+  content?: string;
+  size: number;
+  type?: string;
+  truncated?: boolean;
+  source?: "local_file" | "workspace";
+  sourcePath?: string;
+};
+
+export type CodingContextEntry = {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  size: number;
+};
+
+export type CodingGitStatus = {
+  branch?: string;
+  clean?: boolean;
+  staged?: string[];
+  modified?: string[];
+  untracked?: string[];
+  porcelain?: string;
+  [key: string]: unknown;
+};
+
+export type CodingContextResponse = {
+  branch: string | null;
+  root_folder: string | null;
+  directory?: string;
+  files: string[];
+  entries?: CodingContextEntry[];
+  git?: CodingGitStatus | null;
+};
+
+export type CodingBranchResponse = {
+  branch: string;
+  branches: string[];
+  remote?: string | null;
+  dirty?: boolean;
+  switched?: boolean;
+  created?: boolean;
+  output?: string;
+};
+
 export type ChatActivityEvent = {
   type: string;
   message?: string;
@@ -104,6 +150,34 @@ export type SidebarAction = {
   preview_type?: "web" | "code" | "file" | "image";
 };
 
+export type ComposerWidgetKind = "tool_toggle" | "button" | "panel" | "selector";
+
+export type ComposerWidgetAction =
+  | { type: "open_panel"; target_item_id?: string }
+  | {
+      type: "call_endpoint";
+      endpoint: string;
+      method?: "GET" | "POST" | "PUT" | "DELETE";
+      payload?: Record<string, unknown>;
+      result_surface?: "preview" | "chat" | "silent";
+      requires_approval?: boolean;
+    }
+  | { type: "select_model"; profile_id?: string }
+  | { type: "toggle_tool"; tool_id?: string };
+
+export type ToolUiMetadata = {
+  group_id?: string;
+  group_label?: string;
+  group_icon?: string;
+  item_icon?: string;
+  drop_capabilities?: string[];
+  widget_kind?: ComposerWidgetKind | string | null;
+  composer_label?: string;
+  composer_description?: string;
+  composer_icon?: string;
+  composer_action?: ComposerWidgetAction;
+};
+
 export type SidebarItem = {
   id: string;
   label: string;
@@ -111,6 +185,7 @@ export type SidebarItem = {
   description?: string;
   badge?: string | null;
   tags?: string[];
+  ui?: ToolUiMetadata;
   origin?: {
     kind: string;
     path?: string;
@@ -301,7 +376,17 @@ export const api = {
     });
   },
 
-  sendMessage(conversationId: string, text: string, options?: { thinking_level?: string | null; tool_policy?: Record<string, unknown> }) {
+  sendMessage(
+    conversationId: string,
+    text: string,
+    options?: {
+      thinking_level?: string | null;
+      tool_policy?: Record<string, unknown>;
+      attachments?: ChatAttachment[];
+      tools?: string[];
+      metadata?: Record<string, unknown>;
+    },
+  ) {
     return request<ChatMessage>(
       `/api/chat/conversations/${conversationId}/messages`,
       {
@@ -310,7 +395,10 @@ export const api = {
           message: {
             role: "user",
             content: text,
+            attachments: options?.attachments?.length ? options.attachments : undefined,
+            metadata: options?.metadata,
           },
+          tools: options?.tools?.length ? options.tools : undefined,
           params: {
             thinking_level: options?.thinking_level ?? undefined,
             tool_policy: options?.tool_policy ?? undefined,
@@ -405,6 +493,47 @@ export const api = {
     return request<Record<string, unknown>>("/api/share", {
       method: "POST",
       body: JSON.stringify(payload),
+    });
+  },
+
+  getCodingContext(options?: { directory?: string }) {
+    const params = new URLSearchParams();
+    if (options?.directory) params.set("directory", options.directory);
+    return request<CodingContextResponse>(
+      `/api/coding/context${params.size ? `?${params.toString()}` : ""}`,
+    );
+  },
+
+  listWorkspaceFiles(directory?: string) {
+    const params = new URLSearchParams();
+    if (directory) params.set("directory", directory);
+    return request<{ files: CodingContextEntry[] }>(
+      `/api/coding/files${params.size ? `?${params.toString()}` : ""}`,
+    );
+  },
+
+  readWorkspaceFile(path: string) {
+    return request<{
+      path: string;
+      content: string;
+      size?: number;
+      encoding?: string;
+    }>("/api/coding/files/read", {
+      method: "POST",
+      body: JSON.stringify({ path }),
+    });
+  },
+
+  getGitBranch() {
+    return request<CodingBranchResponse>(
+      "/api/coding/git/branch",
+    );
+  },
+
+  switchGitBranch(branch: string, create = false) {
+    return request<CodingBranchResponse>("/api/coding/git/branch", {
+      method: "POST",
+      body: JSON.stringify({ action: "switch", branch, create }),
     });
   },
 };

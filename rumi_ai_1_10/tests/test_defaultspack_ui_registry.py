@@ -97,6 +97,10 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertIn("scheduled-tasks", sidebar_ids)
         self.assertIn("collaboration", sidebar_ids)
         self.assertIn("share-export", sidebar_ids)
+        provider_item = next(item for item in catalog["sidebar"]["items"] if item["id"] == "provider-catalog")
+        self.assertEqual(provider_item["ui"]["widget_kind"], "panel")
+        self.assertEqual(provider_item["ui"]["composer_action"]["type"], "open_panel")
+        self.assertEqual(provider_item["ui"]["composer_action"]["target_item_id"], "provider-catalog")
         self.assertIn("custom-widget", sidebar_ids)
         self.assertIn("custom", section_ids)
         self.assertIn("research", section_ids)
@@ -119,6 +123,19 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertIn("ai_chat", binding_part_ids)
         self.assertEqual(catalog["app"]["icon"], "/static/assets/icons/defaultspack-icon.png")
         self.assertEqual(catalog["diagnostics"], [])
+
+    def test_fallback_http_routes_do_not_repeat_method_pattern_pairs(self):
+        from transport.registry import _FALLBACK_HTTP_ROUTE_SPECS
+
+        seen = set()
+        duplicates = []
+        for spec in _FALLBACK_HTTP_ROUTE_SPECS:
+            key = (spec.method, spec.pattern)
+            if key in seen:
+                duplicates.append(key)
+            seen.add(key)
+
+        self.assertEqual(duplicates, [])
 
     def test_catalog_syncs_rumi_account_from_oauth_payload(self):
         from domain.frontend.registry import FrontendRegistry
@@ -524,6 +541,74 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(asset["content_type"], "image/png")
         self.assertEqual(asset["body"], b"\x89PNG\r\n")
         self.assertEqual(hidden["status"], "error")
+
+    def test_tool_manifest_ui_metadata_survives_tool_registry_normalization(self):
+        from domain.tool.registry import ToolRegistry
+
+        tool = ToolRegistry._tool_from_manifest(
+            {
+                "id": "oddly_named_manifest",
+                "category": "tool",
+                "description": "declared UI metadata",
+                "config": {
+                    "name": "oddly_named_tool",
+                    "summary": "No legacy grouping keywords",
+                    "ui": {
+                        "group_id": "declared_group",
+                        "group_label": "Declared Group",
+                        "group_icon": "terminal",
+                        "drop_capabilities": ["composer.toggle_chip"],
+                        "widget_kind": "tool_toggle",
+                    },
+                },
+            }
+        )
+
+        self.assertIsNotNone(tool)
+        self.assertEqual(
+            tool["ui"],
+            {
+                "group_id": "declared_group",
+                "group_label": "Declared Group",
+                "group_icon": "terminal",
+                "drop_capabilities": ["composer.toggle_chip"],
+                "widget_kind": "tool_toggle",
+            },
+        )
+
+    def test_frontend_sidebar_items_include_tool_ui_declaration(self):
+        import domain.frontend.registry as frontend_registry
+
+        class FakeToolRegistry:
+            def list_tools(self):
+                return [
+                    {
+                        "tool_id": "oddly_named_tool",
+                        "name": "Oddly Named",
+                        "summary": "No legacy grouping keywords",
+                        "tags": [],
+                        "schema": {"parameters": {"type": "object", "properties": {}, "required": []}},
+                        "execution": {"type": "local"},
+                        "ui": {
+                            "group_id": "declared_group",
+                            "group_label": "Declared Group",
+                            "group_icon": "terminal",
+                            "drop_capabilities": ["composer.toggle_chip"],
+                            "widget_kind": "tool_toggle",
+                        },
+                    }
+                ]
+
+        with patch("domain.frontend.registry.ToolRegistry", FakeToolRegistry):
+            registry = frontend_registry.FrontendRegistry(DEFAULTSPACK_ROOT)
+            items = registry._sidebar_items([], [])
+
+        item = next(candidate for candidate in items if candidate["id"] == "oddly_named_tool")
+
+        self.assertEqual(item["ui"]["group_id"], "declared_group")
+        self.assertEqual(item["ui"]["group_label"], "Declared Group")
+        self.assertEqual(item["ui"]["drop_capabilities"], ["composer.toggle_chip"])
+        self.assertEqual(item["ui"]["widget_kind"], "tool_toggle")
 
 
 if __name__ == "__main__":
