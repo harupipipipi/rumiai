@@ -169,11 +169,19 @@ impl AppConfig {
         }
 
         if let Some(ref root) = self.dev_workspace_root {
-            let dev_release = root.join("pack-shell").join("target").join("release").join(pack_shell_binary_name());
+            let dev_release = root
+                .join("pack-shell")
+                .join("target")
+                .join("release")
+                .join(pack_shell_binary_name());
             if dev_release.exists() {
                 return Some(dev_release);
             }
-            let dev_debug = root.join("pack-shell").join("target").join("debug").join(pack_shell_binary_name());
+            let dev_debug = root
+                .join("pack-shell")
+                .join("target")
+                .join("debug")
+                .join(pack_shell_binary_name());
             if dev_debug.exists() {
                 return Some(dev_debug);
             }
@@ -195,7 +203,10 @@ impl AppConfig {
 
     /// Return the path to the defaultspack ecosystem.json.
     pub fn defaultspack_ecosystem_json(&self) -> PathBuf {
-        self.app_dir.join("ecosystem").join("defaultspack").join("ecosystem.json")
+        self.app_dir
+            .join("ecosystem")
+            .join("defaultspack")
+            .join("ecosystem.json")
     }
 }
 

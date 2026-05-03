@@ -10,8 +10,8 @@ use tauri::{
 };
 
 use crate::kernel_manager::KernelManager;
-use crate::{refresh_panel_session_for_window, request_app_exit};
 use crate::updater;
+use crate::{refresh_panel_session_for_window, request_app_exit};
 
 /// Helper: clone the Arc<Mutex<KernelManager>> out of Tauri State.
 fn get_km(app: &tauri::AppHandle) -> Arc<Mutex<KernelManager>> {
@@ -48,11 +48,24 @@ fn show_primary_window(app: &tauri::AppHandle) {
 pub fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let open_i = MenuItem::with_id(app, "open", "Open", true, None::<&str>)?;
     let restart_i = MenuItem::with_id(app, "restart_kernel", "Restart Kernel", true, None::<&str>)?;
-    let register_dock_i = MenuItem::with_id(app, "register_dock", "Register Defaultspack to Dock", true, None::<&str>)?;
+    #[cfg(target_os = "macos")]
+    let register_dock_i = MenuItem::with_id(
+        app,
+        "register_dock",
+        "Register Defaultspack to Dock",
+        true,
+        None::<&str>,
+    )?;
     let update_i = MenuItem::with_id(app, "check_update", "Check for Updates", true, None::<&str>)?;
     let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
 
-    let menu = Menu::with_items(app, &[&open_i, &restart_i, &register_dock_i, &update_i, &quit_i])?;
+    #[cfg(target_os = "macos")]
+    let menu = Menu::with_items(
+        app,
+        &[&open_i, &restart_i, &register_dock_i, &update_i, &quit_i],
+    )?;
+    #[cfg(not(target_os = "macos"))]
+    let menu = Menu::with_items(app, &[&open_i, &restart_i, &update_i, &quit_i])?;
 
     let mut tray_builder = TrayIconBuilder::with_id("main-tray")
         .tooltip("Rumi AI")

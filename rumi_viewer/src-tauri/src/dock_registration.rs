@@ -1,6 +1,7 @@
 //! Dock registration: generate a macOS .app bundle for defaultspack.
 
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
@@ -22,9 +23,7 @@ fn read_desktop_api_token(hmac_keys_path: &Path) -> AnyResult<String> {
 
     // Check for Fernet encryption wrapper
     if data.get("encryption").and_then(|v| v.as_str()) == Some("fernet") {
-        bail!(
-            "HMAC keys are encrypted. Decrypt them first or set RUMI_SECURITY_MODE=permissive."
-        );
+        bail!("HMAC keys are encrypted. Decrypt them first or set RUMI_SECURITY_MODE=permissive.");
     }
 
     let keys = data
@@ -33,6 +32,13 @@ fn read_desktop_api_token(hmac_keys_path: &Path) -> AnyResult<String> {
         .context("hmac_keys.json missing 'keys' array")?;
 
     for key_entry in keys {
+        if key_entry
+            .get("is_active")
+            .and_then(|v| v.as_bool())
+            .is_some_and(|is_active| !is_active)
+        {
+            continue;
+        }
         if let Some(key_str) = key_entry.get("key").and_then(|v| v.as_str()) {
             if !key_str.is_empty() {
                 return Ok(key_str.to_string());
@@ -63,6 +69,24 @@ fn read_desktop_app_command(ecosystem_path: &Path) -> AnyResult<(String, Value)>
     Ok((command, desktop_app.clone()))
 }
 
+fn resolve_desktop_app_working_dir(desktop_app: &Value, pack_root: &Path) -> PathBuf {
+    let working_dir = desktop_app
+        .get("working_dir")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    if working_dir.is_empty() {
+        return pack_root.to_path_buf();
+    }
+
+    let path = PathBuf::from(working_dir);
+    if path.is_absolute() {
+        path
+    } else {
+        pack_root.join(path)
+    }
+}
+
 /// Generate a macOS .app bundle at `~/Applications/Rumi Defaultspack.app`.
 fn create_macos_app_bundle(
     app_name: &str,
@@ -70,6 +94,7 @@ fn create_macos_app_bundle(
     token_file: &Path,
     rumi_home: &Path,
     venv_dir: &Path,
+    app_working_dir: &Path,
     command: &str,
 ) -> AnyResult<PathBuf> {
     let safe_name = app_name.replace('/', "_").replace(' ', "_");
@@ -84,7 +109,7 @@ fn create_macos_app_bundle(
         .with_context(|| format!("failed to create {}", macos_dir.display()))?;
 
     // Info.plist
-    let bundle_id = format!("ai.rumi.pack.defaultspack");
+    let bundle_id = "ai.rumi.pack.defaultspack";
     let plist_path = contents_dir.join("Info.plist");
     let plist_content = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -125,13 +150,14 @@ export RUMI_API_TOKEN
 exec "$PACK_SHELL" run "defaultspack" \
   --command "{command}" \
   --kernel-cmd "$VENV_DIR/bin/python3 -m app" \
-  --working-dir "$RUMI_HOME" \
+  --working-dir "{app_working_dir}" \
   --timeout 120
 "#,
         rumi_home = rumi_home.display(),
         venv_dir = venv_dir.display(),
         pack_shell = pack_shell.display(),
         token_file = token_file.display(),
+        app_working_dir = app_working_dir.display(),
         command = command,
     );
     fs::write(&launch_path, &launch_script)
@@ -164,6 +190,10 @@ pub fn register_defaultspack_dock(config: tauri::State<'_, AppConfig>) -> Result
 }
 
 fn register_defaultspack_dock_impl(config: &AppConfig) -> AnyResult<String> {
+    if !cfg!(target_os = "macos") {
+        bail!("Dock registration is only supported on macOS");
+    }
+
     // 1. Resolve pack-shell
     let pack_shell = config
         .pack_shell_path()
@@ -177,14 +207,14 @@ fn register_defaultspack_dock_impl(config: &AppConfig) -> AnyResult<String> {
             ecosystem_path.display()
         );
     }
-    let (command, _desktop_app) = read_desktop_app_command(&ecosystem_path)?;
+    let (command, desktop_app) = read_desktop_app_command(&ecosystem_path)?;
+    let pack_root = ecosystem_path
+        .parent()
+        .context("defaultspack ecosystem.json has no parent directory")?;
+    let app_working_dir = resolve_desktop_app_working_dir(&desktop_app, pack_root);
 
     // 3. Read HMAC key and save as desktop API token
-    let hmac_keys_path = config
-        .rumi_home
-        .join("user_data")
-        .join("settings")
-        .join("hmac_keys.json");
+    let hmac_keys_path = config.rumi_home.join("user_data").join("hmac_keys.json");
     if !hmac_keys_path.exists() {
         bail!(
             "hmac_keys.json not found at {}. Start the Kernel first to generate API keys.",
@@ -214,6 +244,7 @@ fn register_defaultspack_dock_impl(config: &AppConfig) -> AnyResult<String> {
         &token_path,
         &config.rumi_home,
         &config.venv_dir,
+        &app_working_dir,
         &command,
     )?;
 
@@ -261,6 +292,21 @@ mod tests {
     }
 
     #[test]
+    fn read_desktop_api_token_skips_inactive_keys() {
+        let dir = std::env::temp_dir().join("rumi_dock_test_active_key");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("hmac_keys.json");
+        fs::write(
+            &path,
+            r#"{"version":"1.0","keys":[{"key":"old-token","is_active":false},{"key":"active-token","is_active":true}]}"#,
+        )
+        .unwrap();
+        let result = read_desktop_api_token(&path).unwrap();
+        assert_eq!(result, "active-token");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn read_desktop_app_command_parses_ecosystem() {
         let dir = std::env::temp_dir().join("rumi_dock_test_eco");
         fs::create_dir_all(&dir).unwrap();
@@ -273,5 +319,25 @@ mod tests {
         let (cmd, _) = read_desktop_app_command(&path).unwrap();
         assert_eq!(cmd, "python app.py");
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn resolve_desktop_app_working_dir_defaults_to_pack_root() {
+        let pack_root = PathBuf::from("/tmp/defaultspack");
+        let desktop_app: Value = serde_json::from_str(r#"{"working_dir":""}"#).unwrap();
+        assert_eq!(
+            resolve_desktop_app_working_dir(&desktop_app, &pack_root),
+            pack_root
+        );
+    }
+
+    #[test]
+    fn resolve_desktop_app_working_dir_joins_relative_path() {
+        let pack_root = PathBuf::from("/tmp/defaultspack");
+        let desktop_app: Value = serde_json::from_str(r#"{"working_dir":"apps"}"#).unwrap();
+        assert_eq!(
+            resolve_desktop_app_working_dir(&desktop_app, &pack_root),
+            pack_root.join("apps")
+        );
     }
 }

@@ -10,7 +10,7 @@ import pytest
 
 import yaml
 
-from core_runtime.startup_profiles import START_CONTRACT, StartupProfileManager, PROFILE_VERSION
+from core_runtime.startup_profiles import StartupProfileManager, PROFILE_VERSION
 from core_runtime.interface_registry import InterfaceRegistry
 
 
@@ -456,8 +456,8 @@ def test_delete_profile_reassigns_active(tmp_path: Path):
     manager = StartupProfileManager(storage_path=tmp_path / "startup_profiles.json")
 
     with patch("core_runtime.startup_profiles.discover_pack_locations", return_value=locations):
-        created1 = manager.create_profile({"profile_id": "p1", "base_pack": "defaultspack"})
-        created2 = manager.create_profile({"profile_id": "p2", "base_pack": "defaultspack"})
+        manager.create_profile({"profile_id": "p1", "base_pack": "defaultspack"})
+        manager.create_profile({"profile_id": "p2", "base_pack": "defaultspack"})
         manager.activate_profile("p2")
         deleted = manager.delete_profile("p2")
         payload = manager.list_profiles_payload()
@@ -497,7 +497,7 @@ def test_activate_profile(tmp_path: Path):
     manager = StartupProfileManager(storage_path=tmp_path / "startup_profiles.json")
 
     with patch("core_runtime.startup_profiles.discover_pack_locations", return_value=locations):
-        created = manager.create_profile({"profile_id": "my-profile", "base_pack": "defaultspack"})
+        manager.create_profile({"profile_id": "my-profile", "base_pack": "defaultspack"})
         result = manager.activate_profile("my-profile")
         payload = manager.list_profiles_payload()
 
@@ -516,7 +516,7 @@ def test_duplicate_profile(tmp_path: Path):
     manager = StartupProfileManager(storage_path=tmp_path / "startup_profiles.json")
 
     with patch("core_runtime.startup_profiles.discover_pack_locations", return_value=locations):
-        created = manager.create_profile({"profile_id": "original", "base_pack": "defaultspack", "name": "Original"})
+        manager.create_profile({"profile_id": "original", "base_pack": "defaultspack", "name": "Original"})
         result = manager.duplicate_profile("original")
 
     assert result["duplicated"] is True
@@ -536,12 +536,31 @@ def test_update_profile(tmp_path: Path):
     manager = StartupProfileManager(storage_path=tmp_path / "startup_profiles.json")
 
     with patch("core_runtime.startup_profiles.discover_pack_locations", return_value=locations):
-        created = manager.create_profile({"profile_id": "p1", "base_pack": "defaultspack", "name": "Original"})
+        manager.create_profile({"profile_id": "p1", "base_pack": "defaultspack", "name": "Original"})
         updated = manager.update_profile("p1", {"name": "Updated Name"})
 
     assert updated["updated"] is True
     assert updated["profile"]["name"] == "Updated Name"
     assert updated["profile"]["base_pack"] == "defaultspack"
+
+
+def test_update_profile_rejects_missing_base_pack_in_packs(tmp_path: Path):
+    eco_root = tmp_path / "ecosystem"
+    _write_pack(
+        eco_root, "defaultspack",
+        graphs=[_startup_graph("defaultspack")],
+        nodes=["agent", "ai_client", "tool", "memory", "frontend"],
+    )
+    _write_pack(eco_root, "helperpack", nodes=["tool"])
+    locations = _discover_locations(eco_root, ["defaultspack", "helperpack"])
+    manager = StartupProfileManager(storage_path=tmp_path / "startup_profiles.json")
+
+    with patch("core_runtime.startup_profiles.discover_pack_locations", return_value=locations):
+        manager.create_profile({"profile_id": "p1", "base_pack": "defaultspack"})
+        result = manager.update_profile("p1", {"packs": ["helperpack"]})
+
+    assert result["status_code"] == 400
+    assert "must be included" in result["error"]
 
 
 def test_runtime_profile_v2_fields_preserved(tmp_path: Path):
@@ -614,6 +633,9 @@ def test_launch_profile_updates_active_ecosystem(tmp_path: Path):
     assert active.metadata["startup_base_pack"] == "defaultspack"
     assert active.metadata["startup_launched"] is True
     assert "rumiai.startup.base_pack" in active.interface_overrides
+    assert active.overrides["ai_client"] == "defaultspack:ai_client:ai_client"
+    assert active.overrides["tool"] == "defaultspack:tool:tool"
+    assert "start" not in active.overrides
 
 
 def test_launch_profile_with_node_override(tmp_path: Path):
@@ -642,6 +664,7 @@ def test_launch_profile_with_node_override(tmp_path: Path):
 
     assert response["launched"] is True
     assert active.metadata["startup_node_overrides"]["agent.ai"] == "coolpack.ai_client"
+    assert active.overrides["ai_client"] == "coolpack:ai_client:ai_client"
 
 
 def test_launch_profile_compiles_capability_graph_when_opted_in(tmp_path: Path):
@@ -763,6 +786,9 @@ def test_migrate_v2_slot_based_profile(tmp_path: Path):
     assert "defaultspack" in profile["packs"]
     assert isinstance(profile["node_overrides"], dict)
     assert isinstance(profile["graph_ports"], list)
+    saved_state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert saved_state["version"] == PROFILE_VERSION
+    assert saved_state["profiles"][0]["version"] == PROFILE_VERSION
 
 
 def test_empty_state_returns_empty_profiles(tmp_path: Path):

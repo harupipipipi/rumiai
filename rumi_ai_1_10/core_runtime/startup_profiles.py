@@ -34,7 +34,7 @@ def _get_graph_loader():
 def _load_graph_from_yaml(path: Path) -> Optional[Any]:
     """Fallback graph loader using yaml."""
     try:
-        import yaml
+        import yaml  # type: ignore[import-untyped]
     except ImportError:
         return None
     try:
@@ -395,10 +395,10 @@ class StartupProfileManager:
                 state = self._default_state(catalog)
         else:
             state = self._default_state(catalog)
-        state = self._normalize_state(state, catalog)
-        if not path.is_file():
-            self._save_state(state)
-        return state
+        normalized_state = self._normalize_state(state, catalog)
+        if not path.is_file() or normalized_state != state:
+            self._save_state(normalized_state)
+        return normalized_state
 
     def _save_state(self, state: Dict[str, Any]) -> None:
         path = self.storage_path
@@ -608,8 +608,15 @@ class StartupProfileManager:
                 from .node_models import load_node_document
                 definitions = load_node_document(data, source_path=str(f), pack_id=pack_id)
                 for node in definitions:
+                    metadata = dict(node.metadata)
+                    component_id = str(metadata.get("component_id") or node.node_id.rsplit(".", 1)[-1])
+                    component_type = str(metadata.get("component_type") or component_id)
                     result.append({
                         "node_id": node.node_id,
+                        "kind": node.kind,
+                        "component_id": component_id,
+                        "component_type": component_type,
+                        "metadata": metadata,
                         "display_name": dict(node.display_name),
                         "ports": [port.to_dict() for port in node.ports] if hasattr(node, "ports") else [],
                     })
@@ -637,13 +644,14 @@ class StartupProfileManager:
         if graph is None:
             return []
 
-        node_ids = {node.id for node in graph.nodes}
+        node_ref_by_id = {node.id: node.ref for node in graph.nodes}
         port_map: Dict[str, Dict[str, Any]] = {}
 
         for edge in graph.edges:
             target_key = edge.target.to_string()
             source_key = edge.source.to_string()
             source_node_id = edge.source.node_id
+            source_node_ref = node_ref_by_id.get(source_node_id, "")
 
             if target_key not in port_map:
                 port_map[target_key] = {
@@ -651,6 +659,7 @@ class StartupProfileManager:
                     "node_id": edge.target.node_id,
                     "port_id": edge.target.port_id,
                     "source_node_id": source_node_id,
+                    "source_node_ref": source_node_ref,
                     "source_ref": source_key,
                 }
 
@@ -703,6 +712,10 @@ class StartupProfileManager:
                     "node_id": node_id,
                     "ref": node_id,
                     "pack_id": pack_info["pack_id"],
+                    "component_id": node.get("component_id") or node_id.rsplit(".", 1)[-1],
+                    "component_type": node.get("component_type") or node.get("component_id") or node_id.rsplit(".", 1)[-1],
+                    "kind": node.get("kind", ""),
+                    "metadata": node.get("metadata", {}),
                     "display_name": node.get("display_name", {}),
                     "pack_available": pack_info.get("available", False),
                 })
@@ -754,6 +767,8 @@ class StartupProfileManager:
             return f"Graph '{graph_id}' not found in pack '{base_pack}'"
 
         packs = profile.get("packs") or []
+        if base_pack not in packs:
+            return f"Base pack '{base_pack}' must be included in profile packs"
         available_pack_ids = {p["pack_id"] for p in catalog.get("packs", []) if p.get("available")}
         for pack_id in packs:
             if pack_id not in available_pack_ids:
@@ -926,12 +941,16 @@ class StartupProfileManager:
             if override_node_ref and override_node_ref in node_ref_map:
                 resolved_ref = override_node_ref
             else:
-                source_node_id = port.get("source_node_id", "")
-                resolved_ref = f"{base_pack}.{source_node_id}"
+                resolved_ref = str(port.get("source_node_ref") or "")
 
             node_info = node_ref_map.get(resolved_ref, {})
-            component_type = resolved_ref.split(".")[-1] if "." in resolved_ref else ""
-            component_full_id = f"{node_info.get('pack_id', base_pack)}:{component_type}:{component_type}"
+            component_type = str(node_info.get("component_type") or "")
+            component_id = str(node_info.get("component_id") or "")
+            component_full_id = (
+                f"{node_info.get('pack_id', base_pack)}:{component_type}:{component_id}"
+                if component_type and component_id
+                else ""
+            )
 
             port_resolutions[port_key] = {
                 "resolved_node": resolved_ref,
@@ -940,7 +959,7 @@ class StartupProfileManager:
                 "is_override": port_key in node_overrides,
             }
 
-            if component_type:
+            if component_type and component_full_id:
                 existing = component_overrides.get(component_type)
                 if existing and existing != component_full_id:
                     conflicts.append({
