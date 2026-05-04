@@ -584,7 +584,43 @@ class FrontendRegistry:
         items.extend(self._config_list(ui_surfaces, "sidebar_items"))
         items.extend(self._config_list(extensions, "sidebar_items"))
 
-        return self._dedupe_by_key(items, "id")
+        return sorted(self._dedupe_by_key(items, "id"), key=self._sidebar_item_sort_key)
+
+    @staticmethod
+    def _sidebar_item_sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
+        category_order = {
+            "tool": 0,
+            "widget": 1,
+            "capability": 2,
+            "integration": 3,
+            "system": 4,
+        }
+        tool_group_order = {
+            "browser": 0,
+            "computer": 1,
+            "coding/files/read": 10,
+            "coding/files/write": 11,
+            "coding/github/status": 20,
+            "coding/github/commit": 21,
+            "coding/terminal/exec": 30,
+            "build": 40,
+            "terminal": 50,
+            "research": 60,
+            "planning": 70,
+            "agent": 80,
+            "manage": 90,
+            "operate": 100,
+            "other": 999,
+        }
+        category = str(item.get("category", "system"))
+        ui = item.get("ui")
+        ui = ui if isinstance(ui, dict) else {}
+        group_id = str(ui.get("group_id") or "")
+        group_root = group_id.split("/", 1)[0] if group_id else ""
+        group_rank = tool_group_order.get(group_id, tool_group_order.get(group_root, 500))
+        label = str(item.get("label") or item.get("id") or "").casefold()
+        item_id = str(item.get("id") or "").casefold()
+        return (category_order.get(category, 99), group_rank, group_id.casefold(), label, item_id)
 
     def _settings_sections(
         self,

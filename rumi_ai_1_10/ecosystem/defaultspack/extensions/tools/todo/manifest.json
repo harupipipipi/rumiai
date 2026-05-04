@@ -33,6 +33,7 @@
       "group_label": "Planning",
       "composer_label": "Todo",
       "composer_icon": "check-square",
+      "drop_capabilities": ["composer.toggle_chip"],
       "widget_kind": "tool_toggle"
     }
   }

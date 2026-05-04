@@ -50,6 +50,38 @@ test("sendMessage serializes attachments and selected tools", async () => {
   });
 });
 
+test("sendMessage preserves an empty selected tools filter", async () => {
+  let requestBody: any = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        id: "m-empty-tools",
+        role: "assistant",
+        content: "ok",
+        created_at: 1,
+        conversation_id: "c1",
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.sendMessage("c1", "hello", {
+      tools: [],
+      tool_policy: { selected_tools: [] },
+      metadata: { selected_tools: [] },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(requestBody?.tools, []);
+  assert.deepEqual(requestBody?.params?.tool_policy, { selected_tools: [] });
+  assert.deepEqual(requestBody?.message?.metadata, { selected_tools: [] });
+});
+
 test("streamMessage parses SSE deltas and final message", async () => {
   const originalFetch = globalThis.fetch;
   const events: string[] = [];

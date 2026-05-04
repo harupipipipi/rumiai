@@ -37,6 +37,7 @@
       "group_label": "Computer",
       "composer_label": "Computer Use",
       "composer_icon": "monitor",
+      "drop_capabilities": ["composer.toggle_chip"],
       "widget_kind": "tool_toggle"
     }
   }

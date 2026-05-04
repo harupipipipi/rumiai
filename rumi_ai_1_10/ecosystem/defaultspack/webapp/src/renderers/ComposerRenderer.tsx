@@ -37,7 +37,7 @@ import type {
 import type { ModelProfile } from "../lib/api";
 import { fileToAttachment } from "../lib/attachments";
 import { resolveComposerWidgetDrop } from "../lib/composerWidgets";
-import { toolGroupFor } from "../lib/toolUi";
+import { sortedToolGroups, toolGroupFor } from "../lib/toolUi";
 
 export { resolveComposerWidgetDrop } from "../lib/composerWidgets";
 
@@ -104,7 +104,7 @@ function groupToolItems(items: ComposerExtensionItem[]): ToolGroup[] {
     current.items.push(item);
     groups.set(meta.id, current);
   }
-  return [...groups.values()].filter((group) => group.items.length > 0);
+  return sortedToolGroups([...groups.values()].filter((group) => group.items.length > 0));
 }
 
 function FileChip({ file, onRemove }: { file: AttachedFile; onRemove?: (id: string) => void }) {

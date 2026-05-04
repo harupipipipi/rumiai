@@ -40,7 +40,7 @@ import type {
   SidebarField,
   SidebarItem,
 } from "../lib/api";
-import { supportedComposerDropKind, supportsComposerDrop, toolGroupFor } from "../lib/toolUi";
+import { compareToolUiItems, sortedToolGroups, sortedToolUiItems, supportedComposerDropKind, supportsComposerDrop, toolGroupFor } from "../lib/toolUi";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -113,6 +113,29 @@ const ACTION_ICONS: Record<string, ReactElement> = {
   share: <Share2 size={13} />,
   web: <Globe size={13} />,
 };
+
+const SIDEBAR_CATEGORY_ORDER: Record<SidebarCategory, number> = {
+  tool: 0,
+  widget: 1,
+  capability: 2,
+  integration: 3,
+  system: 4,
+};
+
+function compareText(left: string, right: string): number {
+  return left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" });
+}
+
+function compareSidebarItems(left: SidebarItem, right: SidebarItem): number {
+  if (left.category === "tool" && right.category === "tool") {
+    return compareToolUiItems(left, right);
+  }
+  return (
+    SIDEBAR_CATEGORY_ORDER[left.category] - SIDEBAR_CATEGORY_ORDER[right.category]
+    || compareText(left.label || left.id, right.label || right.id)
+    || compareText(left.id, right.id)
+  );
+}
 
 function actionIcon(action: SidebarAction) {
   const key = action.icon || action.id.split(".")[0] || "play";
@@ -458,6 +481,14 @@ export function RightSidebar({
   }, [activePanel, items]);
 
   useEffect(() => {
+    if (!activePanel || categoryFilter === "all") return;
+    const active = items.find((item) => item.id === activePanel);
+    if (active && active.category !== categoryFilter) {
+      setActivePanel(null);
+    }
+  }, [activePanel, categoryFilter, items]);
+
+  useEffect(() => {
     if (!openToolGroupMenu) return;
 
     const handlePointerDown = (event: PointerEvent) => {
@@ -489,7 +520,7 @@ export function RightSidebar({
     return next;
   }, [items]);
 
-  const toolItems = useMemo(() => items.filter((item) => item.category === "tool"), [items]);
+  const toolItems = useMemo(() => sortedToolUiItems(items.filter((item) => item.category === "tool")), [items]);
   const groupedToolIds = useMemo(() => new Set(toolItems.map((item) => item.id)), [toolItems]);
   const shortcutIdSet = useMemo(() => new Set(shortcutItemIds), [shortcutItemIds]);
   const toolGroups = useMemo(() => {
@@ -500,29 +531,20 @@ export function RightSidebar({
       list.push(item);
       groups.set(gid, list);
     }
-    const activeToolGroup = activePanel
-      ? toolItems.find((item) => item.id === activePanel)
-      : null;
-    const activeToolGroupId = activeToolGroup ? toolGroupFor(activeToolGroup).id : null;
-    return [...groups.entries()].map(([id, groupItems]) => {
+    return sortedToolGroups([...groups.entries()].map(([id, groupItems]) => {
       const meta = toolGroupFor(groupItems[0]);
       return { id, label: meta.label, icon: meta.icon, path: meta.path, items: groupItems, count: groupItems.length };
-    }).sort((a, b) => {
-      if (a.id === activeToolGroupId) return -1;
-      if (b.id === activeToolGroupId) return 1;
-      return 0;
-    });
-  }, [activePanel, toolItems]);
+    }));
+  }, [toolItems]);
+
+  const showToolGroups = (categoryFilter === "all" || categoryFilter === "tool") && toolGroups.length > 0;
 
   const visibleItems = useMemo(() => {
     const base = categoryFilter === "all" ? items : items.filter((item) => item.category === categoryFilter);
-    const filtered = base.filter((item) => item.category !== "tool" || !groupedToolIds.has(item.id) || shortcutIdSet.has(item.id));
-    const active = items.find((item) => item.id === activePanel);
-    if (active && active.category !== "tool") {
-      return [active, ...filtered.filter((item) => item.id !== active.id)];
-    }
-    return filtered;
-  }, [items, categoryFilter, groupedToolIds, shortcutIdSet, activePanel]);
+    return [...base]
+      .sort(compareSidebarItems)
+      .filter((item) => item.category !== "tool" || !showToolGroups || !groupedToolIds.has(item.id) || shortcutIdSet.has(item.id));
+  }, [items, categoryFilter, groupedToolIds, shortcutIdSet, showToolGroups]);
 
   const activeItem = items.find((item) => item.id === activePanel) ?? null;
   const activeToolGroupId = activeItem?.category === "tool" ? toolGroupFor(activeItem).id : null;
@@ -616,7 +638,7 @@ export function RightSidebar({
           <CategorySwitcher active={categoryFilter} counts={counts} onChange={(id) => { setCategoryFilter(id); setOpenToolGroupMenu(null); }} />
           <div className="w-5 h-px bg-zinc-800 my-1" />
 
-          {(categoryFilter === "all" || categoryFilter === "tool") && toolGroups.length > 1 && (
+          {showToolGroups && (
             <div ref={toolGroupMenuRef} className="flex flex-col items-center gap-px w-full">
               {toolGroups.map((group) => {
                 const isGroupActive = activeToolGroupId === group.id;
@@ -698,7 +720,7 @@ export function RightSidebar({
             </div>
           )}
 
-          {(categoryFilter === "all" || categoryFilter === "tool") && toolGroups.length > 1 && visibleItems.length > 0 && (
+          {showToolGroups && visibleItems.length > 0 && (
             <div className="w-5 h-px bg-zinc-800 my-1" />
           )}
 

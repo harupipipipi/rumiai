@@ -16,7 +16,44 @@ export type ToolGroupMeta = {
   path: string[];
 };
 
+export type SortableToolGroup = Pick<ToolGroupMeta, "id" | "label"> & {
+  path?: string[];
+  items?: ToolUiLike[];
+};
+
 const SUPPORTED_COMPOSER_WIDGET_KINDS = new Set<ComposerWidgetKind>(["tool_toggle", "button", "panel", "selector"]);
+
+const TOOL_GROUP_ROOT_ORDER = [
+  "browser",
+  "computer",
+  "coding",
+  "build",
+  "terminal",
+  "research",
+  "planning",
+  "agent",
+  "manage",
+  "operate",
+  "other",
+];
+
+const TOOL_GROUP_PATH_ORDER: Record<string, number> = {
+  browser: 0,
+  computer: 1,
+  "coding/files/read": 10,
+  "coding/files/write": 11,
+  "coding/github/status": 20,
+  "coding/github/commit": 21,
+  "coding/terminal/exec": 30,
+  build: 40,
+  terminal: 50,
+  research: 60,
+  planning: 70,
+  agent: 80,
+  manage: 90,
+  operate: 100,
+  other: 999,
+};
 
 export function normalizeToolGroupId(groupId: string): string {
   return groupId
@@ -64,6 +101,58 @@ export function toolGroupFor(item: ToolUiLike): ToolGroupMeta {
     return { id: "terminal", label: "コマンド", description: "terminal/git 実行", icon: "terminal", isDeclared: false, path: ["terminal"] };
   }
   return { id: "other", label: "その他", description: "追加 tool", icon: "tool", isDeclared: false, path: ["other"] };
+}
+
+function compareText(left: string, right: string): number {
+  return left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" });
+}
+
+function groupPath(group: Pick<SortableToolGroup, "id" | "path">): string[] {
+  return group.path?.length ? group.path : toolGroupSegments(group.id);
+}
+
+function groupRank(group: Pick<SortableToolGroup, "id" | "path">): number {
+  const path = groupPath(group);
+  const normalizedPath = path.join("/");
+  if (normalizedPath in TOOL_GROUP_PATH_ORDER) return TOOL_GROUP_PATH_ORDER[normalizedPath];
+  const root = path[0] ?? normalizeToolGroupId(group.id);
+  const rootIndex = TOOL_GROUP_ROOT_ORDER.indexOf(root);
+  return rootIndex === -1 ? 500 : rootIndex * 100;
+}
+
+export function compareToolUiItems<T extends ToolUiLike>(left: T, right: T): number {
+  const leftGroup = toolGroupFor(left);
+  const rightGroup = toolGroupFor(right);
+  return (
+    compareToolGroups(leftGroup, rightGroup)
+    || compareText(left.label || left.id, right.label || right.id)
+    || compareText(left.id, right.id)
+  );
+}
+
+export function compareToolGroups<T extends SortableToolGroup>(left: T, right: T): number {
+  const leftPath = groupPath(left);
+  const rightPath = groupPath(right);
+  return (
+    groupRank(left) - groupRank(right)
+    || compareText(leftPath.join("/"), rightPath.join("/"))
+    || compareText(left.label || left.id, right.label || right.id)
+    || compareText(left.id, right.id)
+  );
+}
+
+export function sortedToolUiItems<T extends ToolUiLike>(items: T[]): T[] {
+  return [...items].sort(compareToolUiItems);
+}
+
+export function sortedToolGroups<T extends SortableToolGroup>(groups: T[]): T[] {
+  return [...groups].map((group) => {
+    const next = { ...group } as T;
+    if (group.items) {
+      (next as SortableToolGroup).items = sortedToolUiItems(group.items);
+    }
+    return next;
+  }).sort(compareToolGroups);
 }
 
 export function supportedComposerDropKind(item: ToolUiLike): ComposerWidgetKind | null {

@@ -387,7 +387,7 @@ function messageRequestBody(
       attachments: options?.attachments?.length ? options.attachments : undefined,
       metadata: options?.metadata,
     },
-    tools: options?.tools?.length ? options.tools : undefined,
+    tools: Array.isArray(options?.tools) ? options.tools : undefined,
     params: {
       thinking_level: options?.thinking_level ?? undefined,
       tool_policy: options?.tool_policy ?? undefined,

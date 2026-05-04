@@ -32,6 +32,7 @@
       "group_label": "Browser",
       "composer_label": "Browser Use",
       "composer_icon": "globe",
+      "drop_capabilities": ["composer.toggle_chip"],
       "widget_kind": "tool_toggle"
     }
   }

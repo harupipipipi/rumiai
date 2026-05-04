@@ -27,6 +27,7 @@
       "group_label": "Agent",
       "composer_label": "Subagent",
       "composer_icon": "bot",
+      "drop_capabilities": ["composer.toggle_chip"],
       "widget_kind": "tool_toggle"
     }
   }
