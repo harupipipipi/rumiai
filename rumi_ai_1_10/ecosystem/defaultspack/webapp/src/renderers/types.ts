@@ -109,9 +109,11 @@ export type ComposerRendererProps = {
   onExtensionSelect?: (item: ComposerExtensionItem) => void;
   onCommandSelect?: (commandId: string) => void;
   onModelProfileSelect: (profileId: string) => void;
+  onProviderApiKeySave?: (providerId: string, value: string) => Promise<void> | void;
   onThinkingLevelChange: (level: string | null) => void;
   onInputChange: (value: string) => void;
   onSubmit: (event: FormEvent) => void;
+  onStopGenerating?: () => void;
   onModeChange?: (mode: AppMode) => void;
   onFileAttach?: (files: AttachedFile[]) => void;
   onAtFileAttach?: (path: string) => void;
@@ -129,8 +131,10 @@ export type ToolPreviewPanelRendererProps = {
   showPreview: boolean;
   previewMode: ToolPreviewMode;
   activePreviewId: string | null;
+  memo?: string;
   onClose: () => void;
   onModeChange: (mode: ToolPreviewMode) => void;
+  onMemoChange?: (value: string) => void;
 };
 
 export type RightSidebarRendererProps = {
@@ -182,6 +186,7 @@ export type AttachedFile = {
   name: string;
   size: number;
   content?: string;
+  dataUrl?: string;
   type?: string;
   truncated?: boolean;
   source?: "local_file" | "workspace";

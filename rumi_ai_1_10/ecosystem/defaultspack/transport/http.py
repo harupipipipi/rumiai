@@ -3,6 +3,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from blocks._common import ok, error, not_implemented, timestamp, gen_id
 
+import base64
+import hmac
 import json
 import re
 import signal
@@ -22,7 +24,16 @@ class DefaultsHttpServer:
         self._server = None
         self._thread = None
         self._routes = []
+        self._load_runtime_secrets()
         self._setup_routes()
+
+    def _load_runtime_secrets(self):
+        try:
+            from domain.integrations.secrets import load_integration_secrets_into_env
+
+            load_integration_secrets_into_env()
+        except Exception:
+            pass
 
     def _setup_routes(self):
         """Build the route table.
@@ -469,9 +480,53 @@ _SENSITIVE_CODING_PATHS = {
     "/api/coding/git/push",
 }
 
+_SENSITIVE_INTEGRATION_PATHS = {
+    "/api/integrations/secrets",
+}
+_SENSITIVE_CHAT_PATH_RE = re.compile(
+    r"^/v1/conversations/[^/]+/run-results/[^/]+/browser-screenshots$"
+)
+
+_LOCAL_ORIGIN_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
 
 def _is_sensitive_coding_path(path):
     return path in _SENSITIVE_CODING_PATHS
+
+
+def _is_sensitive_http_path(path):
+    return (
+        path in _SENSITIVE_CODING_PATHS
+        or path in _SENSITIVE_INTEGRATION_PATHS
+        or _SENSITIVE_CHAT_PATH_RE.match(path) is not None
+    )
+
+
+def _is_allowed_sensitive_origin(origin):
+    if not origin:
+        return True
+    try:
+        parsed = urllib.parse.urlsplit(origin)
+    except Exception:
+        return False
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    return parsed.hostname in _LOCAL_ORIGIN_HOSTS
+
+
+def _configured_local_auth_token():
+    for key in ("RUMI_DEFAULTSPACK_LOCAL_TOKEN", "RUMI_API_TOKEN", "RUMI_TOKEN"):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _bearer_token(headers):
+    auth_header = headers.get("Authorization", "")
+    if not auth_header.lower().startswith("bearer "):
+        return ""
+    return auth_header[7:].strip()
 
 
 class _RequestHandler(http.server.BaseHTTPRequestHandler):
@@ -503,23 +558,39 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             if handler is None:
                 self._send_json(404, error("not found: " + method + " " + path))
                 return
+            sensitive_error = self._sensitive_request_error(method, path)
+            if sensitive_error:
+                self._send_json(sensitive_error[0], error(sensitive_error[1], sensitive_error[2]))
+                return
             request_data = {
                 key: values[-1]
                 for key, values in urllib.parse.parse_qs(parsed_url.query, keep_blank_values=True).items()
                 if values
             }
+            request_data["_headers"] = {str(key): str(value) for key, value in self.headers.items()}
             if method in ("POST", "PUT"):
                 content_length = int(self.headers.get("Content-Length", 0))
                 if content_length > 0:
                     raw_body = self.rfile.read(content_length)
-                    try:
-                        body_data = json.loads(raw_body.decode("utf-8"))
-                    except (json.JSONDecodeError, UnicodeDecodeError):
-                        self._send_json(400, error("invalid JSON body"))
-                        return
-                    if not isinstance(body_data, dict):
-                        self._send_json(400, error("JSON body must be an object"))
-                        return
+                    raw_text = raw_body.decode("utf-8", errors="replace")
+                    request_data["_raw_body"] = raw_text
+                    request_data["_raw_body_base64"] = base64.b64encode(raw_body).decode("ascii")
+                    content_type = str(self.headers.get("Content-Type", "")).lower()
+                    if "application/x-www-form-urlencoded" in content_type:
+                        body_data = {
+                            key: values[-1]
+                            for key, values in urllib.parse.parse_qs(raw_text, keep_blank_values=True).items()
+                            if values
+                        }
+                    else:
+                        try:
+                            body_data = json.loads(raw_text)
+                        except (json.JSONDecodeError, UnicodeDecodeError):
+                            self._send_json(400, error("invalid JSON body"))
+                            return
+                        if not isinstance(body_data, dict):
+                            self._send_json(400, error("JSON body must be an object"))
+                            return
                     request_data.update(body_data)
 
             if source == "registry":
@@ -538,6 +609,8 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
 
             if isinstance(result, dict) and result.get("_static"):
                 self._send_static(200, result.get("content_type", "text/html"), result.get("body", ""))
+            elif isinstance(result, dict) and result.get("_sse"):
+                self._send_sse(result.get("events", []))
             else:
                 status_code = 200
                 if isinstance(result, dict) and result.get("status") == "error":
@@ -558,6 +631,26 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
         except BrokenPipeError:
             pass
 
+    def _send_sse(self, events):
+        self.send_response(200)
+        self._send_cors_headers()
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache, no-transform")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        try:
+            for event in events:
+                if isinstance(event, bytes):
+                    payload = event
+                else:
+                    payload = ("data: " + json.dumps(event, ensure_ascii=False) + "\n\n").encode("utf-8")
+                self.wfile.write(payload)
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        finally:
+            self.close_connection = True
+
     def _send_static(self, status_code, content_type, body):
         if isinstance(body, str):
             body_bytes = body.encode("utf-8")
@@ -573,10 +666,32 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
         except BrokenPipeError:
             pass
 
+    def _sensitive_request_error(self, method, path):
+        if path not in _SENSITIVE_INTEGRATION_PATHS and _SENSITIVE_CHAT_PATH_RE.match(path) is None:
+            return None
+        origin = self.headers.get("Origin", "")
+        if not _is_allowed_sensitive_origin(origin):
+            return (403, "origin not allowed for sensitive integration route", "ORIGIN_DENIED")
+        expected = _configured_local_auth_token()
+        provided = _bearer_token(self.headers)
+        if not expected:
+            return (403, "local auth token is not configured", "AUTH_REQUIRED")
+        if not provided or not hmac.compare_digest(provided, expected):
+            return (401, "local auth token required", "AUTH_REQUIRED")
+        if method.upper() in {"POST", "PUT", "DELETE"} and origin and not self.headers.get("X-Rumi-CSRF", "").strip():
+            return (403, "CSRF header required for sensitive integration mutation", "CSRF_REQUIRED")
+        return None
+
     def _send_cors_headers(self):
-        if _is_sensitive_coding_path(self.path.split("?")[0]):
+        path = self.path.split("?")[0]
+        if _is_sensitive_http_path(path):
+            origin = self.headers.get("Origin", "")
+            if _is_allowed_sensitive_origin(origin):
+                if origin:
+                    self.send_header("Access-Control-Allow-Origin", origin)
+                    self.send_header("Vary", "Origin")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Rumi-CSRF")
             return
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")

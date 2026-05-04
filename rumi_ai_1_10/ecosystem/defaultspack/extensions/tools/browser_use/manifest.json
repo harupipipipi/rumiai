@@ -1,0 +1,39 @@
+{
+  "id": "browser_use",
+  "category": "tool",
+  "version": "1",
+  "display_name": "Browser Use",
+  "description": "Open URLs, inspect browser state, and capture screenshots for vision-capable models.",
+  "enabled": true,
+  "config": {
+    "name": "browser_use",
+    "summary": "ブラウザ操作",
+    "tags": ["browser", "vision", "screenshot"],
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["session", "open_url", "screenshot"],
+            "default": "session"
+          },
+          "url": {"type": "string"},
+          "dry_run": {"type": "boolean"},
+          "approval_token": {"type": "string"},
+          "payload": {"type": "object"}
+        }
+      }
+    },
+    "execution": {"type": "local"},
+    "requires_approval": true,
+    "ui": {
+      "group_id": "browser",
+      "group_label": "Browser",
+      "composer_label": "Browser Use",
+      "composer_icon": "globe",
+      "drop_capabilities": ["composer.toggle_chip"],
+      "widget_kind": "tool_toggle"
+    }
+  }
+}

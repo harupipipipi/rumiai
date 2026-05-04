@@ -174,8 +174,10 @@ class EcosystemInitializer:
             
             result["directories_created"].append(str(active_file))
         
-        # ActiveEcosystemManagerを取得
-        self.active_ecosystem = get_active_ecosystem_manager()
+        # Initializers can target an arbitrary user_data directory during tests,
+        # setup, or embedded runtimes, so bind the manager to this active file
+        # instead of reusing the process-global default.
+        self.active_ecosystem = ActiveEcosystemManager(config_path=str(active_file))
         result["active_ecosystem_loaded"] = True
     
     def _is_assets_empty(self, path: Path) -> bool:

@@ -35,6 +35,274 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
             provider = GoogleProvider()
 
         self.assertEqual(provider._api_key, "google-key")
+        self.assertEqual(
+            provider.BASE_URL,
+            "https://generativelanguage.googleapis.com/v1beta/openai",
+        )
+
+    def test_google_provider_uses_openai_compatible_chat_endpoint(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        captured = {}
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-key"}, clear=True):
+            provider = GoogleProvider()
+
+        def fake_request_json(path, body):
+            captured["path"] = path
+            captured["body"] = body
+            return {
+                "choices": [
+                    {
+                        "message": {"content": "hello from gemini"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 3,
+                    "completion_tokens": 4,
+                    "total_tokens": 7,
+                },
+                "model": "gemini-2.5-flash",
+            }
+
+        provider._request_json = fake_request_json
+        response = provider.complete(
+            "gemini-2.5-flash",
+            [{"role": "user", "content": "hello"}],
+            [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "lookup",
+                        "parameters": {"type": "object", "properties": {}},
+                    },
+                }
+            ],
+            {"temperature": 0.2, "thinking_level": "low"},
+        )
+
+        self.assertEqual(captured["path"], "/chat/completions")
+        self.assertEqual(captured["body"]["model"], "gemini-2.5-flash")
+        self.assertEqual(captured["body"]["messages"], [{"role": "user", "content": "hello"}])
+        self.assertEqual(captured["body"]["tools"][0]["function"]["name"], "lookup")
+        self.assertEqual(captured["body"]["reasoning_effort"], "low")
+        self.assertEqual(response["content"][0]["text"], "hello from gemini")
+
+    def test_google_provider_strips_rumi_tool_metadata_before_request(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        captured = {}
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-key"}, clear=True):
+            provider = GoogleProvider()
+
+        def fake_request_json(path, body):
+            captured["body"] = body
+            return {
+                "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                "usage": {},
+            }
+
+        provider._request_json = fake_request_json
+        provider.complete(
+            "gemma-4-26b-a4b-it",
+            [{"role": "user", "content": "calculate"}],
+            [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "calculator",
+                        "description": "Calculate an expression",
+                        "parameters": {"type": "object", "properties": {"expression": {"type": "string"}}},
+                    },
+                    "metadata": {"source": "extension"},
+                    "category": "math",
+                    "action_type": "read",
+                    "write_action": False,
+                }
+            ],
+            {},
+        )
+
+        tool = captured["body"]["tools"][0]
+        self.assertEqual(set(tool.keys()), {"type", "function"})
+        self.assertEqual(tool["function"]["name"], "calculator")
+        self.assertNotIn("metadata", tool)
+        self.assertNotIn("category", tool)
+        self.assertNotIn("action_type", tool)
+        self.assertNotIn("write_action", tool)
+
+    def test_google_provider_moves_inline_thoughts_to_metadata(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        provider = GoogleProvider()
+        response = provider.parse_response(
+            {
+                "choices": [
+                    {
+                        "message": {"content": "<thought>private plan</thought> visible answer"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {},
+            }
+        )
+
+        self.assertEqual(response["content"][0]["text"], "visible answer")
+        self.assertEqual(response["metadata"]["thinking"]["transcript"], "private plan")
+        self.assertNotIn("<thought>", response["content"][0]["text"])
+
+    def test_google_provider_preserves_multimodal_content_blocks(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        provider = GoogleProvider()
+        messages = provider.build_request(
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "what is in this image?"},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": "data:image/png;base64,iVBORw0KGgo="},
+                        },
+                    ],
+                }
+            ]
+        )
+
+        self.assertEqual(messages[0]["content"][0]["text"], "what is in this image?")
+        self.assertEqual(
+            messages[0]["content"][1]["image_url"]["url"],
+            "data:image/png;base64,iVBORw0KGgo=",
+        )
+
+    def test_google_provider_hides_inline_thought_tags(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        response = GoogleProvider().parse_response(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "<thought>private reasoning</thought>赤",
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {},
+            }
+        )
+
+        self.assertEqual(response["content"][0]["text"], "赤")
+
+    def test_google_provider_caps_gemini_thinking_levels(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        self.assertEqual(
+            GoogleProvider._translate_params({"thinking_level": "xhigh"}, "gemini-3-pro-preview"),
+            {"reasoning_effort": "high"},
+        )
+        self.assertEqual(
+            GoogleProvider._translate_params({"thinking_level": "medium"}, "gemini-3-pro-preview"),
+            {"reasoning_effort": "high"},
+        )
+        self.assertEqual(
+            GoogleProvider._translate_params({"thinking_level": "none"}, "gemini-3-flash-preview"),
+            {"reasoning_effort": "minimal"},
+        )
+        self.assertEqual(
+            GoogleProvider._translate_params({"thinking_level": "none"}, "gemini-2.5-pro"),
+            {},
+        )
+        self.assertEqual(
+            GoogleProvider._translate_params({"thinking_level": "xhigh"}, "gemma-4-31b-it"),
+            {"reasoning_effort": "high"},
+        )
+
+    def test_openai_provider_translates_generic_thinking_level(self):
+        from domain.ai_client.providers.openai_provider import OpenAIProvider
+
+        provider = OpenAIProvider()
+        captured = {}
+
+        def fake_request_json(path, body):
+            captured["path"] = path
+            captured["body"] = body
+            return {
+                "choices": [
+                    {
+                        "message": {"content": "ok"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {},
+            }
+
+        provider._request_json = fake_request_json
+        provider.complete(
+            "gpt-5.4",
+            [{"role": "user", "content": "think"}],
+            [],
+            {"thinking_level": "xhigh"},
+        )
+
+        self.assertEqual(captured["path"], "/chat/completions")
+        self.assertEqual(captured["body"]["reasoning_effort"], "high")
+        self.assertNotIn("thinking_level", captured["body"])
+
+    def test_anthropic_provider_translates_generic_thinking_level(self):
+        from domain.ai_client.providers.anthropic_provider import AnthropicProvider
+
+        provider = AnthropicProvider()
+        captured = {}
+
+        def fake_request_json(path, body):
+            captured["path"] = path
+            captured["body"] = body
+            return {
+                "content": [{"type": "text", "text": "ok"}],
+                "stop_reason": "end_turn",
+                "usage": {},
+            }
+
+        provider._request_json = fake_request_json
+        provider.complete(
+            "claude-sonnet-4-6",
+            [{"role": "user", "content": "think"}],
+            [],
+            {"thinking_level": "xhigh", "max_tokens": 4096},
+        )
+
+        self.assertEqual(captured["path"], "/v1/messages")
+        self.assertEqual(captured["body"]["thinking"]["budget_tokens"], 16384)
+        self.assertGreaterEqual(captured["body"]["max_tokens"], 17408)
+        self.assertNotIn("thinking_level", captured["body"])
+
+    def test_google_provider_key_can_be_saved_as_defaultspack_secret(self):
+        from core_runtime.secrets_store import SecretsStore
+        from domain.ai_client.api_key_store import (
+            load_provider_api_keys_into_env,
+            provider_has_api_key,
+            set_provider_api_key,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            secrets_dir = Path(tmpdir) / "secrets"
+            with patch.dict(os.environ, {"RUMI_DEFAULTSPACK_SECRETS_DIR": str(secrets_dir)}, clear=True):
+                result = set_provider_api_key("google", "google-secret")
+                store = SecretsStore(str(secrets_dir))
+
+                self.assertTrue(result["success"])
+                self.assertEqual(result["key"], "GOOGLE_API_KEY")
+                self.assertTrue(provider_has_api_key("google"))
+                self.assertTrue(store.has_secret("GOOGLE_API_KEY"))
+
+                os.environ.pop("GOOGLE_API_KEY", None)
+                loaded = load_provider_api_keys_into_env()
+
+        self.assertTrue(loaded["google"])
 
     def test_google_provider_loads_profile_models_from_user_data(self):
         from domain.ai_client.providers.google_provider import GoogleProvider
@@ -70,8 +338,28 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
         self.assertIn("google/gemini-3-pro-preview", model_ids)
         self.assertIn("google/gemini-3-flash-preview", model_ids)
         self.assertIn("google/gemma-4-31b-it", model_ids)
+        self.assertIn("google/gemma-4-26b-a4b-it", model_ids)
         self.assertIn("google/gemma-3-27b-it", model_ids)
         self.assertIn("google/gemma-3n-e4b-it", model_ids)
+
+    def test_google_catalog_does_not_expose_xhigh_for_gemini(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        profiles = {item["id"]: item for item in GoogleProvider().list_models()}
+
+        self.assertNotIn("xhigh", profiles["google/gemini-2.5-pro"]["thinking_levels"])
+        self.assertEqual(profiles["google/gemini-3-pro-preview"]["thinking_levels"], ["low", "high"])
+        self.assertEqual(profiles["google/gemma-4-26b-a4b-it"]["thinking_levels"], ["low", "high"])
+
+    def test_google_catalog_marks_gemma_4_as_tool_and_vision_capable(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        profiles = {item["id"]: item for item in GoogleProvider().list_models()}
+
+        self.assertIn("tool_calls", profiles["google/gemma-4-31b-it"]["capabilities"])
+        self.assertIn("vision", profiles["google/gemma-4-31b-it"]["capabilities"])
+        self.assertIn("tool_calls", profiles["google/gemma-4-26b-a4b-it"]["capabilities"])
+        self.assertIn("vision", profiles["google/gemma-4-26b-a4b-it"]["capabilities"])
 
 
 if __name__ == "__main__":

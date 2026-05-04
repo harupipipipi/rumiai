@@ -6,11 +6,13 @@ export function ToolPreviewPanelRenderer({
   showPreview,
   previewMode,
   activePreviewId,
+  memo,
   onClose,
   onModeChange,
+  onMemoChange,
 }: ToolPreviewPanelRendererProps) {
   return (
-    <div className="w-[380px] flex-shrink-0 h-full">
+    <div className="w-[clamp(300px,28vw,380px)] flex-shrink-0 h-full max-[1050px]:w-[300px] max-[900px]:hidden">
       <ToolPreviewPanel
         previews={previews}
         isVisible={showPreview}
@@ -18,6 +20,8 @@ export function ToolPreviewPanelRenderer({
         mode={previewMode}
         onModeChange={onModeChange}
         activePreviewId={activePreviewId}
+        memo={memo}
+        onMemoChange={onMemoChange}
       />
     </div>
   );

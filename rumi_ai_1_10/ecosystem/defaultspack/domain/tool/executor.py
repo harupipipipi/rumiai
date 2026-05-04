@@ -1,6 +1,7 @@
 from .registry import ToolRegistry
 from .mcp_client import McpClient
 from .schema_adapter import is_tool_rejected_by_policy, policy_from_context
+from pathlib import Path
 
 
 # P1-2: サンドボックス用の安全なビルトイン一覧
@@ -64,6 +65,12 @@ class ToolExecutor:
     """ツール実行エンジン"""
 
     def __init__(self):
+        try:
+            from domain.integrations.secrets import load_integration_secrets_into_env
+
+            load_integration_secrets_into_env()
+        except Exception:
+            pass
         self._registry = ToolRegistry()
         self._mcp_client = McpClient()
 
@@ -298,19 +305,41 @@ class ToolExecutor:
                 "is_error": False,
                 "widget": {"type": "research_sources", **result.as_dict()}
             }
-        elif tool_name == "browser_computer":
+        elif tool_name in {"browser_computer", "browser_use", "computer_use"}:
             from domain.tool.browser_computer import BrowserComputerController
 
             policy = policy_from_context(context if isinstance(context, dict) else {})
-            result = BrowserComputerController().run(
-                str(arguments.get("action", "browser.session")),
-                dict(arguments.get("payload") or {}),
+            action, payload = _browser_computer_action_payload(tool_name, arguments)
+            result = BrowserComputerController(artifact_root=_conversation_tool_artifact_root(context)).run(
+                action,
+                payload,
                 yolo_mode=bool(policy.get("yolo_mode")),
             )
+            summary = "{} {} completed".format(tool_name, result.get("action", "action"))
+            if result.get("path"):
+                summary += "; artifact: {}".format(result.get("path"))
             return {
-                "result": str(result),
+                "result": summary,
                 "is_error": False,
-                "widget": {"type": "browser_computer", **result}
+                "widget": {"type": tool_name, **result}
+            }
+        elif tool_name == "todo":
+            from domain.tool.todo import TodoController
+
+            result = TodoController().run(arguments, context if isinstance(context, dict) else {})
+            return {
+                "result": result.get("summary", "todo updated"),
+                "is_error": False,
+                "widget": {"type": "todo", **result},
+            }
+        elif tool_name == "subagent":
+            from domain.tool.subagent import SubagentController
+
+            result = SubagentController().run(arguments, context if isinstance(context, dict) else {})
+            return {
+                "result": result.get("summary", "subagent completed"),
+                "is_error": False,
+                "widget": {"type": "subagent", **result},
             }
         elif tool_name == "calculator":
             expression = arguments.get("expression", "")
@@ -378,6 +407,53 @@ def _safe_calculate(expression):
     except Exception as exc:
         return {"is_error": True, "error": "Calculator error: {}".format(exc)}
     return {"is_error": False, "result": result}
+
+
+def _browser_computer_action_payload(tool_name, arguments):
+    arguments = arguments if isinstance(arguments, dict) else {}
+    if tool_name == "browser_computer":
+        return str(arguments.get("action", "browser.session")), dict(arguments.get("payload") or {})
+
+    raw_payload = dict(arguments.get("payload") or {})
+    raw_action = str(arguments.get("action") or "").strip()
+    if tool_name == "browser_use":
+        action_map = {
+            "": "browser.session",
+            "session": "browser.session",
+            "open_url": "browser.open_url",
+            "open": "browser.open_url",
+            "screenshot": "computer.screenshot",
+        }
+        action = action_map.get(raw_action, raw_action)
+        if "url" in arguments:
+            raw_payload["url"] = arguments.get("url")
+    else:
+        action_map = {
+            "": "computer.screenshot",
+            "screenshot": "computer.screenshot",
+            "click": "computer.click",
+            "type": "computer.type",
+            "key": "computer.key",
+            "scroll": "computer.scroll",
+        }
+        action = action_map.get(raw_action, raw_action)
+        for key in ("x", "y", "text", "key", "amount"):
+            if key in arguments:
+                raw_payload[key] = arguments.get(key)
+    if "dry_run" in arguments:
+        raw_payload["dry_run"] = arguments.get("dry_run")
+    if "approval_token" in arguments:
+        raw_payload["approval_token"] = arguments.get("approval_token")
+    return action, raw_payload
+
+
+def _conversation_tool_artifact_root(context):
+    if not isinstance(context, dict):
+        return None
+    workspace = context.get("conversation_workspace_dir")
+    if not isinstance(workspace, str) or not workspace:
+        return None
+    return Path(workspace) / "tools" / "computer"
 
 
 def _tool_value(tool_def, key):

@@ -6,6 +6,12 @@ import { cn } from "../lib/cn";
 import type { SettingsSection } from "../lib/api";
 import type { SettingsModalRendererProps } from "./types";
 
+function formatReadonlyValue(value: unknown, fallback: unknown): string {
+  const resolved = value ?? fallback ?? "";
+  if (typeof resolved === "boolean") return resolved ? "Saved" : "Not set";
+  return String(resolved);
+}
+
 function SettingsField({
   sectionId,
   field,
@@ -85,7 +91,7 @@ function SettingsField({
         <select
           value={String(value ?? field.default ?? "")}
           onChange={(event) => onChange(sectionId, field.id, event.target.value)}
-          className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none"
+          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none"
         >
           {(field.options ?? []).map((option) => (
             <option key={String(option.value)} value={String(option.value)}>
@@ -108,14 +114,14 @@ function SettingsField({
       );
       break;
     case "readonly":
-      control = <div className="text-sm text-zinc-200 font-mono">{String(value ?? field.default ?? "")}</div>;
+      control = <div className="text-sm text-zinc-300">{formatReadonlyValue(value, field.default)}</div>;
       break;
     case "textarea":
       control = (
         <textarea
           value={String(value ?? field.default ?? "")}
           onChange={(event) => onChange(sectionId, field.id, event.target.value)}
-          className="w-full h-24 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none resize-none"
+          className="w-full h-20 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none resize-none"
         />
       );
       break;
@@ -153,6 +159,29 @@ export function SettingsModalRenderer({
 }: SettingsModalRendererProps) {
   const [activeSectionId, setActiveSectionId] = useState(settingsSections[0]?.id ?? "system");
   const activeSection = settingsSections.find((section) => section.id === activeSectionId) ?? settingsSections[0];
+  const primaryFields = activeSection?.fields.filter((field) => !field.advanced) ?? [];
+  const advancedFields = activeSection?.fields.filter((field) => field.advanced) ?? [];
+
+  const renderField = (field: SettingsSection["fields"][number]) => (
+    <div
+      key={`${activeSection?.id}.${field.id}`}
+      className={cn(
+        "rounded-lg border border-zinc-800 bg-zinc-950/50 p-4",
+        field.type === "textarea" || field.type === "secret" ? "lg:col-span-2" : "",
+      )}
+    >
+      <SettingsField
+        sectionId={activeSection?.id ?? ""}
+        field={field}
+        value={
+          field.type === "secret" && field.configured_field
+            ? settingsValues[activeSection?.id ?? ""]?.[field.configured_field]
+            : settingsValues[activeSection?.id ?? ""]?.[field.id] ?? field.default
+        }
+        onChange={onSettingChange}
+      />
+    </div>
+  );
 
   return (
     <AnimatePresence>
@@ -185,22 +214,25 @@ export function SettingsModalRenderer({
             <div className="grid flex-1 min-h-0 md:grid-cols-[220px_1fr]">
               <nav className="border-b border-zinc-800 bg-zinc-950/50 p-3 md:border-b-0 md:border-r overflow-x-auto md:overflow-y-auto">
                 <div className="flex gap-2 md:flex-col">
-                  {settingsSections.map((section) => (
-                    <button
-                      key={section.id}
-                      type="button"
-                      onClick={() => setActiveSectionId(section.id)}
-                      className={cn(
-                        "flex-shrink-0 rounded-lg px-3 py-2 text-left text-xs transition-colors border",
-                        activeSection?.id === section.id
-                          ? "border-zinc-600 bg-zinc-800 text-zinc-100"
-                          : "border-transparent text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300",
-                      )}
-                    >
-                      <span className="block font-medium">{section.label}</span>
-                      <span className="mt-0.5 block text-[10px] text-zinc-600">{section.fields.length} fields</span>
-                    </button>
-                  ))}
+                  {settingsSections.map((section) => {
+                    const primaryFieldCount = section.fields.filter((field) => !field.advanced).length;
+                    return (
+                      <button
+                        key={section.id}
+                        type="button"
+                        onClick={() => setActiveSectionId(section.id)}
+                        className={cn(
+                          "flex-shrink-0 rounded-lg px-3 py-2 text-left text-xs transition-colors border",
+                          activeSection?.id === section.id
+                            ? "border-zinc-600 bg-zinc-800 text-zinc-100"
+                            : "border-transparent text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300",
+                        )}
+                      >
+                        <span className="block font-medium">{section.label}</span>
+                        <span className="mt-0.5 block text-[10px] text-zinc-600">{primaryFieldCount} controls</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </nav>
 
@@ -212,83 +244,72 @@ export function SettingsModalRenderer({
                       {activeSection.description && <p className="text-xs text-zinc-500 mt-1">{activeSection.description}</p>}
                     </div>
                     <div className="grid gap-4 lg:grid-cols-2">
-                      {activeSection.fields.map((field) => (
-                        <div
-                          key={`${activeSection.id}.${field.id}`}
-                          className={cn(
-                            "rounded-lg border border-zinc-800 bg-zinc-950/50 p-4",
-                            field.type === "textarea" || field.type === "secret" ? "lg:col-span-2" : "",
-                          )}
-                        >
-                          <SettingsField
-                            sectionId={activeSection.id}
-                            field={field}
-                            value={
-                              field.type === "secret" && field.configured_field
-                                ? settingsValues[activeSection.id]?.[field.configured_field]
-                                : settingsValues[activeSection.id]?.[field.id] ?? field.default
-                            }
-                            onChange={onSettingChange}
-                          />
+                      {primaryFields.map(renderField)}
+                    </div>
+                    {advancedFields.length > 0 && (
+                      <details className="rounded-lg border border-zinc-800 bg-zinc-950/40">
+                        <summary className="cursor-pointer list-none px-4 py-3 text-xs font-medium text-zinc-400 transition-colors hover:text-zinc-200">
+                          Advanced settings
+                        </summary>
+                        <div className="grid gap-4 border-t border-zinc-800 p-4 lg:grid-cols-2">
+                          {advancedFields.map(renderField)}
+                        </div>
+                      </details>
+                    )}
+                  </section>
+                )}
+
+              <details className="rounded-lg border border-zinc-800 bg-zinc-950/30">
+                <summary className="cursor-pointer list-none px-4 py-3 text-xs font-medium text-zinc-500 transition-colors hover:text-zinc-300">
+                  Developer diagnostics
+                </summary>
+                <div className="space-y-6 border-t border-zinc-800 p-4">
+                  <section className="space-y-3">
+                    <h3 className="text-sm font-medium text-zinc-100">Extension Points</h3>
+                    <div className="grid gap-3 md:grid-cols-3">
+                      {(catalog?.extension_points ?? []).map((point) => (
+                        <div key={point.id} className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3 space-y-2">
+                          <div className="text-sm text-zinc-200">{point.id}</div>
+                          <div className="text-[11px] text-zinc-500 font-mono break-all">{point.path}</div>
                         </div>
                       ))}
                     </div>
                   </section>
-                )}
 
-              <section className="space-y-4">
-                <div>
-                  <h3 className="text-sm font-medium text-zinc-100">Extension Points</h3>
-                  <p className="text-xs text-zinc-500 mt-1">frontend は registry と schema だけを知る構成です。</p>
-                </div>
-                <div className="grid gap-3 md:grid-cols-3">
-                  {(catalog?.extension_points ?? []).map((point) => (
-                    <div key={point.id} className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-4 space-y-2">
-                      <div className="text-sm text-zinc-200">{point.id}</div>
-                      <div className="text-[11px] text-zinc-500 font-mono break-all">{point.path}</div>
-                      <p className="text-[11px] text-zinc-400 leading-relaxed">{point.description}</p>
+                  <section className="space-y-3">
+                    <h3 className="text-sm font-medium text-zinc-100">Parts</h3>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {(catalog?.parts ?? []).map((part) => (
+                        <div key={part.id} className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3 space-y-2">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-sm text-zinc-200">{part.label ?? part.id}</div>
+                            <div className="text-[10px] text-zinc-500 font-mono">{part.kind}</div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              </section>
+                  </section>
 
-              <section className="space-y-4">
-                <div>
-                  <h3 className="text-sm font-medium text-zinc-100">Parts</h3>
+                  <section className="space-y-3">
+                    <h3 className="text-sm font-medium text-zinc-100">System Status</h3>
+                    <textarea
+                      className="w-full h-28 bg-zinc-900 border border-zinc-800 rounded-lg p-3 text-sm text-zinc-300 resize-none focus:border-zinc-600 outline-none font-mono"
+                      value={JSON.stringify(
+                        {
+                          health,
+                          previewCount: previewsCount,
+                          chatRenderers: catalog?.chat_rendering.renderers ?? [],
+                          componentBindings: catalog?.component_bindings ?? [],
+                          diagnostics: catalog?.diagnostics ?? [],
+                        },
+                        null,
+                        2,
+                      )}
+                      readOnly
+                    />
+                  </section>
                 </div>
-                <div className="grid gap-3 md:grid-cols-2">
-                  {(catalog?.parts ?? []).map((part) => (
-                    <div key={part.id} className="rounded-xl border border-zinc-800 bg-zinc-950/50 p-4 space-y-2">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-sm text-zinc-200">{part.label ?? part.id}</div>
-                        <div className="text-[10px] text-zinc-500 font-mono">{part.kind}</div>
-                      </div>
-                      <div className="text-[11px] text-zinc-500 font-mono break-all">{(part.uses ?? []).join(", ")}</div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              <section className="space-y-4">
-                <div>
-                  <h3 className="text-sm font-medium text-zinc-100">System Status</h3>
-                </div>
-                <textarea
-                  className="w-full h-32 bg-zinc-900 border border-zinc-800 rounded-lg p-3 text-sm text-zinc-300 resize-none focus:border-zinc-600 outline-none font-mono"
-                  value={JSON.stringify(
-                    {
-                      health,
-                      previewCount: previewsCount,
-                      chatRenderers: catalog?.chat_rendering.renderers ?? [],
-                      componentBindings: catalog?.component_bindings ?? [],
-                      diagnostics: catalog?.diagnostics ?? [],
-                    },
-                    null,
-                    2,
-                  )}
-                  readOnly
-                />
-              </section>
+              </details>
               </div>
             </div>
           </motion.div>

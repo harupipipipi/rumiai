@@ -42,6 +42,12 @@ def main() -> int:
     os.environ.setdefault("DEFAULTS_HTTP_HOST", "127.0.0.1")
     os.environ.setdefault("DEFAULTS_HTTP_PORT", os.environ.get("RUMI_DEFAULTSPACK_PORT", "8766"))
     os.environ.setdefault("RUMI_DEFAULTSPACK_PORT", os.environ["DEFAULTS_HTTP_PORT"])
+    try:
+        from domain.integrations.secrets import load_integration_secrets_into_env
+
+        load_integration_secrets_into_env()
+    except Exception:
+        pass
 
     from transport.http import DefaultsHttpServer
 

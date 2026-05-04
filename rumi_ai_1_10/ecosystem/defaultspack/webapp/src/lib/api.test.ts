@@ -50,6 +50,100 @@ test("sendMessage serializes attachments and selected tools", async () => {
   });
 });
 
+test("sendMessage preserves an empty selected tools filter", async () => {
+  let requestBody: any = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        id: "m-empty-tools",
+        role: "assistant",
+        content: "ok",
+        created_at: 1,
+        conversation_id: "c1",
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.sendMessage("c1", "hello", {
+      tools: [],
+      tool_policy: { selected_tools: [] },
+      metadata: { selected_tools: [] },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(requestBody?.tools, []);
+  assert.deepEqual(requestBody?.params?.tool_policy, { selected_tools: [] });
+  assert.deepEqual(requestBody?.message?.metadata, { selected_tools: [] });
+});
+
+test("streamMessage parses SSE deltas and final message", async () => {
+  const originalFetch = globalThis.fetch;
+  const events: string[] = [];
+  let finalId = "";
+  globalThis.fetch = (async () => {
+    const body = [
+      'data: {"type":"delta","delta":"he"}\n\n',
+      'data: {"type":"delta","delta":"llo"}\n\n',
+      'data: {"type":"message","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"hello"}],"created_at":1,"conversation_id":"c1"}}\n\n',
+      'data: {"type":"done","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"hello"}],"created_at":1,"conversation_id":"c1"}}\n\n',
+    ].join("");
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream; charset=utf-8" },
+    });
+  }) as typeof fetch;
+
+  try {
+    const final = await api.streamMessage("c1", "hello", undefined, {
+      onDelta(delta) {
+        events.push(delta);
+      },
+      onMessage(message) {
+        finalId = message.id;
+      },
+    });
+    assert.equal(final?.id, "m2");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(events, ["he", "llo"]);
+  assert.equal(finalId, "m2");
+});
+
+test("streamMessage forwards abort signal to fetch", async () => {
+  const originalFetch = globalThis.fetch;
+  const controller = new AbortController();
+  let seenSignal: AbortSignal | undefined;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    seenSignal = init?.signal ?? undefined;
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        id: "m3",
+        role: "assistant",
+        content: "ok",
+        created_at: 1,
+        conversation_id: "c1",
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.streamMessage("c1", "hello", undefined, { signal: controller.signal });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(seenSignal, controller.signal);
+});
+
 test("coding context, branch, and workspace read helpers use existing API routes", async () => {
   const seen: Array<{ input: string; body?: unknown }> = [];
   const originalFetch = globalThis.fetch;

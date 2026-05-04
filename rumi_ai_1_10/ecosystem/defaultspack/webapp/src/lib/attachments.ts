@@ -1,6 +1,7 @@
 import type { AttachedFile } from "../renderers/types";
 
 const TEXT_TRUNCATE_LIMIT = 120_000;
+const IMAGE_INLINE_LIMIT_BYTES = 8 * 1024 * 1024;
 
 const TEXT_MIME_PREFIXES = ["text/"];
 const TEXT_MIME_TYPES = new Set([
@@ -86,6 +87,25 @@ export async function fileToAttachment(file: File): Promise<AttachedFile> {
     type: file.type || undefined,
     truncated: false,
   };
+
+  if (/^image\//.test(file.type || "")) {
+    if (file.size > IMAGE_INLINE_LIMIT_BYTES) {
+      return {
+        ...base,
+        truncated: true,
+      };
+    }
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(reader.error ?? new Error("画像を読み込めませんでした"));
+      reader.readAsDataURL(file);
+    });
+    return {
+      ...base,
+      dataUrl,
+    };
+  }
 
   if (!isTextLikeFile(file)) {
     return base;

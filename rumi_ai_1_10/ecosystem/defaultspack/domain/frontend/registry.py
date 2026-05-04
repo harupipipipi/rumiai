@@ -455,11 +455,16 @@ class FrontendRegistry:
                         "title": "Browser / Computer",
                         "actions": [
                             {"id": "browser.session", "label": "Inspect Browser Session", "icon": "browser"},
+                            {"id": "browser.profiles.list", "label": "Browser Profiles", "icon": "browser"},
+                            {"id": "browser.profile.create", "label": "Create Managed Profile", "icon": "browser", "payload": {"profile_id": "default", "label": "Default", "set_active": True}},
+                            {"id": "browser.cookies.list", "label": "Managed Cookies", "icon": "browser"},
+                            {"id": "browser.profile.clear_cache.dry_run", "label": "Cache Clear Dry Run", "icon": "browser"},
+                            {"id": "browser.profile.clear_cookies.dry_run", "label": "Cookie Clear Dry Run", "icon": "browser"},
                             {"id": "browser.screenshot.dry_run", "label": "Screenshot Dry Run", "icon": "browser"},
                         ],
                         "notes": [
-                            "実操作は approved=true が必要です。UI の既定 action は dry-run です。",
-                            "同じ controller に open_url/click/type/key/scroll を追加できます。",
+                            "open_url は管理 profile の user-data-dir/cache-dir で起動でき、cookie/cache を保存します。",
+                            "cache/cookie 削除などの破壊的操作は approval token が必要です。UI の削除系 action は dry-run です。",
                         ],
                     },
                 },
@@ -579,7 +584,43 @@ class FrontendRegistry:
         items.extend(self._config_list(ui_surfaces, "sidebar_items"))
         items.extend(self._config_list(extensions, "sidebar_items"))
 
-        return self._dedupe_by_key(items, "id")
+        return sorted(self._dedupe_by_key(items, "id"), key=self._sidebar_item_sort_key)
+
+    @staticmethod
+    def _sidebar_item_sort_key(item: dict[str, Any]) -> tuple[Any, ...]:
+        category_order = {
+            "tool": 0,
+            "widget": 1,
+            "capability": 2,
+            "integration": 3,
+            "system": 4,
+        }
+        tool_group_order = {
+            "browser": 0,
+            "computer": 1,
+            "coding/files/read": 10,
+            "coding/files/write": 11,
+            "coding/github/status": 20,
+            "coding/github/commit": 21,
+            "coding/terminal/exec": 30,
+            "build": 40,
+            "terminal": 50,
+            "research": 60,
+            "planning": 70,
+            "agent": 80,
+            "manage": 90,
+            "operate": 100,
+            "other": 999,
+        }
+        category = str(item.get("category", "system"))
+        ui = item.get("ui")
+        ui = ui if isinstance(ui, dict) else {}
+        group_id = str(ui.get("group_id") or "")
+        group_root = group_id.split("/", 1)[0] if group_id else ""
+        group_rank = tool_group_order.get(group_id, tool_group_order.get(group_root, 500))
+        label = str(item.get("label") or item.get("id") or "").casefold()
+        item_id = str(item.get("id") or "").casefold()
+        return (category_order.get(category, 99), group_rank, group_id.casefold(), label, item_id)
 
     def _settings_sections(
         self,
@@ -645,11 +686,11 @@ class FrontendRegistry:
                         "id": "unknown_block_strategy",
                         "label": "Unknown Block Strategy",
                         "type": "select",
-                        "default": "json",
+                        "default": "hidden",
                         "options": [
-                            {"value": "json", "label": "JSON Fallback"},
                             {"value": "hidden", "label": "Hide"},
                             {"value": "text", "label": "Plain Text"},
+                            {"value": "json", "label": "JSON Fallback"},
                         ],
                     },
                 ],
@@ -657,42 +698,45 @@ class FrontendRegistry:
             {
                 "id": "models",
                 "label": "Models & Providers",
-                "description": "AI provider, default model, and model profile settings.",
+                "description": "会話で使うモデルと provider API key。",
                 "fields": [
-                    {
-                        "id": "detected_provider_count",
-                        "label": "Detected Providers",
-                        "type": "readonly",
-                        "default": len(self._list_provider_models()),
-                    },
                     {
                         "id": "preferred_model",
                         "label": "Preferred Model",
-                        "type": "text",
+                        "type": "select",
                         "default": "openrouter/tencent/hy3-preview:free",
                         "options": self._model_options(),
-                        "help": "新しい会話に渡す model。例: openrouter/tencent/hy3-preview:free",
+                        "help": "新しい会話と composer の既定モデルです。",
                     },
                     {
-                        "id": "favorite_profiles",
-                        "label": "Favorite Profiles",
-                        "type": "textarea",
-                        "default": "openrouter/tencent/hy3-preview:free\nstub/default",
-                        "help": "Composer に表示する profile_id を改行または JSON 配列で保存します。",
+                        "id": "thinking_level",
+                        "label": "Thinking Level",
+                        "type": "select",
+                        "default": "medium",
+                        "options": [
+                            {"value": "none", "label": "Off"},
+                            {"value": "low", "label": "Low"},
+                            {"value": "medium", "label": "Medium"},
+                            {"value": "high", "label": "High"},
+                            {"value": "xhigh", "label": "Extra High"},
+                        ],
+                        "help": "Rumi は none/low/medium/high/xhigh を送り、各 provider が対応する API パラメータへ変換します。Gemini/Gemma では未対応の値を自動で近い値へ落とします。",
                     },
                     {
-                        "id": "thinking_level_by_profile",
-                        "label": "Thinking Levels",
-                        "type": "textarea",
-                        "default": '{"openrouter/tencent/hy3-preview:free":"medium"}',
-                        "help": "profile_id ごとの thinking level。未対応モデルでは無視されます。",
+                        "id": "google_api_key",
+                        "label": "Gemini API Key",
+                        "type": "secret",
+                        "default": "",
+                        "provider_id": "google",
+                        "configured_field": "google_api_key_configured",
+                        "help": "Google AI Studio の Gemini API key。保存後も値は再表示されません。",
                     },
                     {
-                        "id": "model_profile",
-                        "label": "Model Profile",
-                        "type": "textarea",
-                        "default": self._default_model_profile_text(),
-                        "help": "モデルの特性メモ。routing/profile API とつなぐ前の editable contract として保存します。",
+                        "id": "google_api_key_configured",
+                        "label": "Gemini Key",
+                        "type": "readonly",
+                        "default": provider_has_api_key("google", pack_root=self._pack_root),
+                        "advanced": True,
                     },
                     {
                         "id": "openrouter_api_key",
@@ -701,13 +745,45 @@ class FrontendRegistry:
                         "default": "",
                         "provider_id": "openrouter",
                         "configured_field": "openrouter_api_key_configured",
-                        "help": "保存後も値は再表示されません。",
+                        "help": "OpenRouter の API key。Tencent Hy3 preview free 用です。",
                     },
                     {
                         "id": "openrouter_api_key_configured",
-                        "label": "OpenRouter Key Saved",
+                        "label": "OpenRouter Key",
                         "type": "readonly",
                         "default": provider_has_api_key("openrouter", pack_root=self._pack_root),
+                        "advanced": True,
+                    },
+                    {
+                        "id": "favorite_profiles",
+                        "label": "Composer Model Pins",
+                        "type": "textarea",
+                        "default": "openrouter/tencent/hy3-preview:free\nstub/default",
+                        "help": "高度設定: composer に優先表示する profile_id。通常は Preferred Model だけで十分です。",
+                        "advanced": True,
+                    },
+                    {
+                        "id": "thinking_level_by_profile",
+                        "label": "Per-profile Thinking Map",
+                        "type": "textarea",
+                        "default": '{"openrouter/tencent/hy3-preview:free":"medium"}',
+                        "help": "高度設定: profile_id ごとの上書き。通常は Thinking Level を使います。",
+                        "advanced": True,
+                    },
+                    {
+                        "id": "model_profile",
+                        "label": "Model Profile JSON",
+                        "type": "textarea",
+                        "default": self._default_model_profile_text(),
+                        "help": "高度設定: routing/profile API 用の編集 contract。",
+                        "advanced": True,
+                    },
+                    {
+                        "id": "detected_provider_count",
+                        "label": "Detected Providers",
+                        "type": "readonly",
+                        "default": len(self._list_provider_models()),
+                        "advanced": True,
                     },
                 ],
             },
@@ -929,7 +1005,50 @@ class FrontendRegistry:
                         },
                     }
                 )
+        for index, log in enumerate(message.get("tool_logs") or []):
+            if isinstance(log, dict):
+                previews.append(self._preview_from_tool_log(message, log, index))
         return previews
+
+    def _preview_from_tool_log(self, message: dict[str, Any], log: dict[str, Any], index: int) -> dict[str, Any]:
+        timestamp = int(message.get("created_at", 0)) - 200 - index
+        tool_name = str(log.get("tool_name") or "tool")
+        arguments = log.get("arguments") if isinstance(log.get("arguments"), dict) else {}
+        result = log.get("result")
+        input_text = self._preview_text(arguments, 180)
+        result_text = self._preview_text(result, 480)
+        status = "failed" if isinstance(result, dict) and result.get("status") == "error" else "completed"
+        lines = [
+            f"tool: {tool_name}",
+            f"status: {status}",
+        ]
+        if input_text:
+            lines.append(f"input: {input_text}")
+        if result_text:
+            lines.append(f"result: {result_text}")
+        return {
+            "id": f"tool-log-{message.get('id')}-{index}",
+            "toolStepId": tool_name,
+            "timestamp": timestamp,
+            "data": {
+                "type": "file",
+                "filename": f"{tool_name}.tool",
+                "size": status,
+                "content": "\n".join(lines),
+            },
+        }
+
+    def _preview_text(self, value: Any, limit: int) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            text = value
+        elif isinstance(value, (int, float, bool)):
+            text = str(value)
+        else:
+            text = json.dumps(value, ensure_ascii=False, sort_keys=True)
+        text = " ".join(text.split())
+        return text if len(text) <= limit else f"{text[:limit - 1]}…"
 
     def _load_ui_surfaces(self) -> list[dict[str, Any]]:
         try:
@@ -1104,22 +1223,123 @@ class FrontendRegistry:
         return {
             "general": {"composer_placeholder": "メッセージを入力...", "show_activity_in_messages": True},
             "preview": {"auto_open": False, "default_mode": "auto", "max_items": 12},
-            "chat_rendering": {"render_markdown": True, "show_widgets": True, "unknown_block_strategy": "json"},
+            "chat_rendering": {"render_markdown": True, "show_widgets": True, "unknown_block_strategy": "hidden"},
             "models": {
                 "detected_provider_count": len(self._list_provider_models()),
                 "preferred_model": "openrouter/tencent/hy3-preview:free",
+                "thinking_level": "medium",
                 "favorite_profiles": ["openrouter/tencent/hy3-preview:free", "stub/default"],
                 "thinking_level_by_profile": {"openrouter/tencent/hy3-preview:free": "medium"},
                 "model_profile": self._default_model_profile_text(),
+                "google_api_key": "",
+                "google_api_key_configured": provider_has_api_key("google", pack_root=self._pack_root),
                 "openrouter_api_key": "",
                 "openrouter_api_key_configured": provider_has_api_key("openrouter", pack_root=self._pack_root),
             },
         }
 
     def _model_options(self) -> list[dict[str, str]]:
-        return [{"value": model["id"], "label": model["id"]} for model in self._list_provider_models()] or [
-            {"value": "stub/default", "label": "stub/default"}
-        ]
+        profiles = self._selectable_model_profiles()
+        return [
+            {
+                "value": profile["profile_id"],
+                "label": self._model_option_label(profile),
+            }
+            for profile in profiles
+        ] or [{"value": "stub/default", "label": "Stub Default"}]
+
+    def _selectable_model_profiles(self) -> list[dict[str, Any]]:
+        try:
+            from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_profile_catalog
+        except ModuleNotFoundError:
+            try:
+                from backend.ai_client.provider_catalog import list_profile_catalog
+            except ModuleNotFoundError:
+                list_profile_catalog = None
+
+        if list_profile_catalog is not None:
+            profiles = list_profile_catalog()
+        else:
+            profiles = [
+                {
+                    "profile_id": model["id"],
+                    "display_name": model.get("name") or model["id"],
+                    "provider_id": model.get("provider_id") or model.get("provider"),
+                    "model_id": model.get("model_id") or str(model.get("id", "")).split("/", 1)[-1],
+                    "type": model.get("type", "chat"),
+                    "availability": model.get("availability", {}),
+                }
+                for model in self._list_provider_models()
+            ]
+
+        filtered = [profile for profile in profiles if self._is_user_selectable_profile(profile)]
+        filtered.sort(key=self._model_profile_sort_key)
+        return filtered
+
+    def _is_user_selectable_profile(self, profile: dict[str, Any]) -> bool:
+        provider_id = str(profile.get("provider_id") or profile.get("provider") or "").strip()
+        model_id = str(profile.get("model_id") or "").strip()
+        model_type = str(profile.get("type") or "chat").strip().lower()
+        availability = profile.get("availability") if isinstance(profile.get("availability"), dict) else {}
+
+        if model_type and model_type != "chat":
+            return False
+        if provider_id == "rumi":
+            return False
+        if provider_id == "stub":
+            return model_id == "default"
+        if provider_id == "openrouter":
+            return model_id == "tencent/hy3-preview:free"
+        if provider_id == "google":
+            return model_id.startswith(("gemini-", "gemma-"))
+        return bool(
+            availability.get("configured")
+            or availability.get("active")
+            or availability.get("status") in {"configured", "active"}
+        )
+
+    def _model_profile_sort_key(self, profile: dict[str, Any]) -> tuple[int, int, str]:
+        provider_id = str(profile.get("provider_id") or profile.get("provider") or "").strip()
+        model_id = str(profile.get("model_id") or "").strip()
+        provider_order = {
+            "google": 0,
+            "openrouter": 1,
+            "openai": 2,
+            "anthropic": 3,
+            "genspark": 4,
+            "ollama": 7,
+            "lmstudio": 8,
+            "stub": 99,
+        }.get(provider_id, 50)
+        model_order = {
+            "gemini-2.5-pro": 0,
+            "gemini-2.5-flash": 1,
+            "gemini-3-pro-preview": 2,
+            "gemini-3-flash-preview": 3,
+            "gemini-2.5-flash-lite": 4,
+            "gemini-2.0-flash-lite": 5,
+            "gemma-4-31b-it": 6,
+            "gemma-4-26b-a4b-it": 7,
+            "gemma-3-27b-it": 8,
+            "gemma-3n-e4b-it": 9,
+            "tencent/hy3-preview:free": 0,
+            "default": 0,
+        }.get(model_id, 20)
+        return (provider_order, model_order, str(profile.get("display_name") or profile.get("profile_id") or ""))
+
+    def _model_option_label(self, profile: dict[str, Any]) -> str:
+        provider = str(
+            profile.get("provider_display_name")
+            or profile.get("provider_id")
+            or profile.get("provider")
+            or ""
+        ).strip()
+        name = str(profile.get("display_name") or profile.get("profile_id") or "").strip()
+        availability = profile.get("availability") if isinstance(profile.get("availability"), dict) else {}
+        provider_id = str(profile.get("provider_id") or profile.get("provider") or "").strip()
+        requires_key = provider_id in {"google", "openrouter"} and not availability.get("configured")
+        suffix = " - API key required" if requires_key else ""
+        return f"{provider} / {name}{suffix}" if provider else f"{name}{suffix}"
 
     def _list_provider_models(self) -> list[dict[str, Any]]:
         try:
@@ -1191,27 +1411,40 @@ class FrontendRegistry:
         sanitized = deepcopy(patch)
         models = sanitized.get("models")
         if isinstance(models, dict):
-            raw_key = models.pop("openrouter_api_key", None)
-            if isinstance(raw_key, str) and raw_key.strip():
-                result = set_provider_api_key(
-                    "openrouter",
-                    raw_key,
-                    pack_root=self._pack_root,
-                )
-                models["openrouter_api_key_configured"] = bool(result.get("success"))
-            else:
-                models["openrouter_api_key_configured"] = provider_has_api_key(
-                    "openrouter",
-                    pack_root=self._pack_root,
-                )
-            models["openrouter_api_key"] = ""
+            for provider_id, field_id, configured_field in (
+                ("google", "google_api_key", "google_api_key_configured"),
+                ("openrouter", "openrouter_api_key", "openrouter_api_key_configured"),
+            ):
+                raw_key = models.pop(field_id, None)
+                if isinstance(raw_key, str) and raw_key.strip():
+                    result = set_provider_api_key(
+                        provider_id,
+                        raw_key,
+                        pack_root=self._pack_root,
+                    )
+                    models[configured_field] = bool(result.get("success"))
+                else:
+                    models[configured_field] = provider_has_api_key(
+                        provider_id,
+                        pack_root=self._pack_root,
+                    )
+                models[field_id] = ""
         return sanitized
 
     def _refresh_derived_settings(self, values: dict[str, Any]) -> dict[str, Any]:
         refreshed = deepcopy(values)
         models = refreshed.setdefault("models", {})
         if isinstance(models, dict):
+            models["google_api_key"] = ""
+            models["google_api_key_configured"] = provider_has_api_key(
+                "google",
+                pack_root=self._pack_root,
+            )
             models["openrouter_api_key"] = ""
+            models["openrouter_api_key_configured"] = provider_has_api_key(
+                "openrouter",
+                pack_root=self._pack_root,
+            )
             favorite_profiles = models.get("favorite_profiles")
             if isinstance(favorite_profiles, str):
                 try:
@@ -1235,8 +1468,11 @@ class FrontendRegistry:
                 except json.JSONDecodeError:
                     levels = {}
             models["thinking_level_by_profile"] = levels if isinstance(levels, dict) else {}
-            models["openrouter_api_key_configured"] = provider_has_api_key(
-                "openrouter",
-                pack_root=self._pack_root,
-            )
+            thinking_level = str(models.get("thinking_level") or "").strip()
+            valid_thinking_levels = {"none", "low", "medium", "high", "xhigh"}
+            if thinking_level not in valid_thinking_levels:
+                preferred = str(models.get("preferred_model") or "").strip()
+                profile_level = models["thinking_level_by_profile"].get(preferred)
+                thinking_level = str(profile_level or "medium").strip()
+            models["thinking_level"] = thinking_level if thinking_level in valid_thinking_levels else "medium"
         return refreshed

@@ -139,7 +139,7 @@ class AIClient:
             )
             thinking_levels = list(raw.get("thinking_levels") or metadata.get("thinking_levels") or [])
             if supports_thinking and not thinking_levels:
-                thinking_levels = ["low", "medium", "high"]
+                thinking_levels = ["low", "medium", "high", "xhigh"]
         else:
             return None
 
@@ -292,6 +292,15 @@ class AIClient:
             return provider.stream(model_name, messages, tools or [], params or {})
         except NotImplementedError as e:
             raise RuntimeError(str(e)) from None
+
+    def supports_stream(self, model):
+        provider, _ = self.resolve_provider(model)
+        try:
+            from domain.ai_client.base_provider import BaseProvider
+
+            return provider.__class__.stream is not BaseProvider.stream
+        except Exception:
+            return callable(getattr(provider, "stream", None))
 
     def list_models(self, provider=None):
         """登録済みプロバイダーの既知モデル一覧を返す。"""

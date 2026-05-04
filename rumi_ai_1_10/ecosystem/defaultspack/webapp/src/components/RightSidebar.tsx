@@ -40,7 +40,7 @@ import type {
   SidebarField,
   SidebarItem,
 } from "../lib/api";
-import { supportedComposerDropKind, supportsComposerDrop, toolGroupFor } from "../lib/toolUi";
+import { compareToolUiItems, sortedToolGroups, sortedToolUiItems, supportedComposerDropKind, supportsComposerDrop, toolGroupFor } from "../lib/toolUi";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -113,6 +113,29 @@ const ACTION_ICONS: Record<string, ReactElement> = {
   share: <Share2 size={13} />,
   web: <Globe size={13} />,
 };
+
+const SIDEBAR_CATEGORY_ORDER: Record<SidebarCategory, number> = {
+  tool: 0,
+  widget: 1,
+  capability: 2,
+  integration: 3,
+  system: 4,
+};
+
+function compareText(left: string, right: string): number {
+  return left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" });
+}
+
+function compareSidebarItems(left: SidebarItem, right: SidebarItem): number {
+  if (left.category === "tool" && right.category === "tool") {
+    return compareToolUiItems(left, right);
+  }
+  return (
+    SIDEBAR_CATEGORY_ORDER[left.category] - SIDEBAR_CATEGORY_ORDER[right.category]
+    || compareText(left.label || left.id, right.label || right.id)
+    || compareText(left.id, right.id)
+  );
+}
 
 function actionIcon(action: SidebarAction) {
   const key = action.icon || action.id.split(".")[0] || "play";
@@ -239,7 +262,28 @@ function SidebarPanel({
 }) {
   const panel = item.panel;
   const fields = panel?.fields ?? [];
+  const primaryFields = fields.filter((field) => !field.advanced);
+  const advancedFields = fields.filter((field) => field.advanced);
   const actions = panel?.actions ?? [];
+  const renderField = (field: SidebarField) => {
+    const value =
+      settingsValues[item.id]?.[field.id] ??
+      settingsValues.tools?.[`${item.id}.${field.id}`] ??
+      field.default;
+    return (
+      <div key={field.id} className="space-y-1">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] text-zinc-400">{field.label}</span>
+          <FieldControl
+            field={field}
+            value={value}
+            onChange={(nextValue) => onSettingChange(item.id, field.id, nextValue)}
+          />
+        </div>
+        {field.help && <p className="text-[9px] text-zinc-600 leading-relaxed">{field.help}</p>}
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-3">
@@ -253,28 +297,19 @@ function SidebarPanel({
         </div>
       )}
 
-      {fields.length > 0 && (
+      {primaryFields.length > 0 && (
         <div className="space-y-2.5">
-          {fields.map((field) => {
-            const value =
-              settingsValues[item.id]?.[field.id] ??
-              settingsValues.tools?.[`${item.id}.${field.id}`] ??
-              field.default;
-            return (
-              <div key={field.id} className="space-y-1">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[11px] text-zinc-400">{field.label}</span>
-                  <FieldControl
-                    field={field}
-                    value={value}
-                    onChange={(nextValue) => onSettingChange(item.id, field.id, nextValue)}
-                  />
-                </div>
-                {field.help && <p className="text-[9px] text-zinc-600 leading-relaxed">{field.help}</p>}
-              </div>
-            );
-          })}
+          {primaryFields.map(renderField)}
         </div>
+      )}
+
+      {advancedFields.length > 0 && (
+        <details className="rounded-lg border border-zinc-800/70 bg-zinc-950/35 px-2.5 py-2">
+          <summary className="cursor-pointer select-none text-[10px] font-medium text-zinc-500 hover:text-zinc-300">
+            高度な設定
+          </summary>
+          <div className="mt-2 space-y-2.5">{advancedFields.map(renderField)}</div>
+        </details>
       )}
 
       {panel?.models && panel.models.length > 0 && (
@@ -344,22 +379,47 @@ function CategorySwitcher({
   onChange: (id: "all" | SidebarCategory) => void;
 }) {
   const [isOpen, setIsOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
   const current = CATEGORY_META[active];
+  const hasActiveFilter = active !== "all";
+  const rect = buttonRef.current?.getBoundingClientRect();
+  const menuPosition = rect
+    ? {
+        top: `${Math.max(8, rect.top)}px`,
+        right: `${Math.max(8, window.innerWidth - rect.left + 8)}px`,
+      }
+    : undefined;
 
   return (
     <div className="relative">
       <button
+        ref={buttonRef}
+        type="button"
         onClick={() => setIsOpen((value) => !value)}
-        className={cn("w-9 h-9 rounded-lg flex items-center justify-center transition-all", "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/50", isOpen && "bg-zinc-800 text-zinc-100")}
+        aria-expanded={isOpen}
+        aria-pressed={hasActiveFilter}
+        className={cn(
+          "w-9 h-9 rounded-lg flex items-center justify-center transition-all relative",
+          hasActiveFilter
+            ? "bg-zinc-800 text-zinc-100 ring-1 ring-zinc-600/70"
+            : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/50",
+          isOpen && "bg-zinc-800 text-zinc-100",
+        )}
         title={`Filter: ${current.label}`}
       >
         {current.icon}
+        {hasActiveFilter && (
+          <span className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r-full bg-sky-400" />
+        )}
       </button>
 
       {isOpen && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
-          <div className="absolute right-full mr-2 top-0 z-50 bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl overflow-hidden min-w-[150px]">
+          <div
+            className="fixed z-50 bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl overflow-hidden min-w-[150px]"
+            style={menuPosition}
+          >
             <div className="px-2 py-1.5 border-b border-zinc-800/60">
               <p className="text-[9px] font-semibold text-zinc-500 uppercase tracking-wider">表示フィルター</p>
             </div>
@@ -414,6 +474,7 @@ export function RightSidebar({
   const [activePanel, setActivePanel] = useState<string | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<"all" | SidebarCategory>("all");
   const [openToolGroupMenu, setOpenToolGroupMenu] = useState<string | null>(null);
+  const [toolGroupMenuPosition, setToolGroupMenuPosition] = useState<{ top: number; right: number } | null>(null);
   const [shortcutItemIds, setShortcutItemIds] = useState<string[]>([]);
   const toolGroupMenuRef = useRef<HTMLDivElement | null>(null);
   const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
@@ -431,6 +492,14 @@ export function RightSidebar({
       setActivePanel(null);
     }
   }, [activePanel, items]);
+
+  useEffect(() => {
+    if (!activePanel || categoryFilter === "all") return;
+    const active = items.find((item) => item.id === activePanel);
+    if (active && active.category !== categoryFilter) {
+      setActivePanel(null);
+    }
+  }, [activePanel, categoryFilter, items]);
 
   useEffect(() => {
     if (!openToolGroupMenu) return;
@@ -464,7 +533,7 @@ export function RightSidebar({
     return next;
   }, [items]);
 
-  const toolItems = useMemo(() => items.filter((item) => item.category === "tool"), [items]);
+  const toolItems = useMemo(() => sortedToolUiItems(items.filter((item) => item.category === "tool")), [items]);
   const groupedToolIds = useMemo(() => new Set(toolItems.map((item) => item.id)), [toolItems]);
   const shortcutIdSet = useMemo(() => new Set(shortcutItemIds), [shortcutItemIds]);
   const toolGroups = useMemo(() => {
@@ -475,23 +544,23 @@ export function RightSidebar({
       list.push(item);
       groups.set(gid, list);
     }
-    return [...groups.entries()].map(([id, groupItems]) => {
+    return sortedToolGroups([...groups.entries()].map(([id, groupItems]) => {
       const meta = toolGroupFor(groupItems[0]);
       return { id, label: meta.label, icon: meta.icon, path: meta.path, items: groupItems, count: groupItems.length };
-    });
+    }));
   }, [toolItems]);
+
+  const showToolGroups = (categoryFilter === "all" || categoryFilter === "tool") && toolGroups.length > 0;
 
   const visibleItems = useMemo(() => {
     const base = categoryFilter === "all" ? items : items.filter((item) => item.category === categoryFilter);
-    const filtered = base.filter((item) => item.category !== "tool" || !groupedToolIds.has(item.id) || shortcutIdSet.has(item.id));
-    const active = items.find((item) => item.id === activePanel);
-    if (active && !filtered.some((item) => item.id === active.id)) {
-      return [active, ...filtered];
-    }
-    return filtered;
-  }, [items, categoryFilter, groupedToolIds, shortcutIdSet, activePanel]);
+    return [...base]
+      .sort(compareSidebarItems)
+      .filter((item) => item.category !== "tool" || !showToolGroups || !groupedToolIds.has(item.id) || shortcutIdSet.has(item.id));
+  }, [items, categoryFilter, groupedToolIds, shortcutIdSet, showToolGroups]);
 
   const activeItem = items.find((item) => item.id === activePanel) ?? null;
+  const activeToolGroupId = activeItem?.category === "tool" ? toolGroupFor(activeItem).id : null;
 
   const handleDragStart = (event: DragEvent, item: SidebarItem) => {
     const kind = supportedComposerDropKind(item);
@@ -525,6 +594,15 @@ export function RightSidebar({
     event.preventDefault();
     setShortcutItemIds((current) => [...current, itemId]);
     setOpenToolGroupMenu(null);
+  };
+
+  const openToolGroup = (groupId: string, button: HTMLButtonElement) => {
+    const rect = button.getBoundingClientRect();
+    setToolGroupMenuPosition({
+      top: Math.max(8, Math.min(rect.top, window.innerHeight - 300)),
+      right: Math.max(8, window.innerWidth - rect.left + 8),
+    });
+    setOpenToolGroupMenu(groupId);
   };
 
   return (
@@ -568,21 +646,44 @@ export function RightSidebar({
         </div>
       )}
 
-      <div className="w-11 flex flex-col items-center py-1 gap-px flex-shrink-0">
-        <CategorySwitcher active={categoryFilter} counts={counts} onChange={(id) => { setCategoryFilter(id); setOpenToolGroupMenu(null); }} />
-        <div className="w-5 h-px bg-zinc-800 my-1" />
+      <div className="w-11 flex flex-col flex-shrink-0 overflow-hidden">
+        <div
+          className="flex-1 flex flex-col items-center gap-px overflow-y-auto w-full py-1 scrollbar-none"
+          onDragOver={(event) => {
+            if (event.dataTransfer.types.includes("application/rumi-sidebar-shortcut")) {
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "copy";
+            }
+          }}
+          onDrop={handleShortcutDrop}
+        >
+          <CategorySwitcher active={categoryFilter} counts={counts} onChange={(id) => { setCategoryFilter(id); setOpenToolGroupMenu(null); }} />
+          <div className="w-5 h-px bg-zinc-800 my-1" />
 
-        {(categoryFilter === "all" || categoryFilter === "tool") && toolGroups.length > 1 && (
-          <>
+          {showToolGroups && (
             <div ref={toolGroupMenuRef} className="flex flex-col items-center gap-px w-full">
-              {toolGroups.map((group) => (
+              {toolGroups.map((group) => {
+                const isGroupActive = activeToolGroupId === group.id;
+                const isGroupOpen = openToolGroupMenu === group.id;
+                return (
                 <div key={group.id} className="relative">
                   <button
                     type="button"
-                    onClick={() => setOpenToolGroupMenu((current) => (current === group.id ? null : group.id))}
+                    onClick={(event) => {
+                      if (group.items.length === 1) {
+                        setActivePanel(group.items[0].id);
+                        setOpenToolGroupMenu(null);
+                        return;
+                      }
+                      if (openToolGroupMenu === group.id) {
+                        setOpenToolGroupMenu(null);
+                        return;
+                      }
+                      openToolGroup(group.id, event.currentTarget);
+                    }}
                     className={cn(
                       "group/group w-9 h-9 rounded-lg flex items-center justify-center relative transition-all flex-shrink-0",
-                      openToolGroupMenu === group.id
+                      isGroupOpen || isGroupActive
                         ? "bg-emerald-900/40 text-emerald-300 border border-emerald-500/30"
                         : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
                     )}
@@ -595,9 +696,15 @@ export function RightSidebar({
                     <span className="absolute right-full mr-2 px-2 py-1 bg-zinc-800 text-zinc-200 text-[10px] rounded-md opacity-0 group-hover/group:opacity-100 pointer-events-none transition-opacity whitespace-nowrap border border-zinc-700 shadow-lg z-40">
                       {group.path?.length && group.path.length > 1 ? group.path.join(" / ") : group.label || TOOL_GROUP_LABELS[group.id] || group.id}
                     </span>
+                    {(isGroupActive || isGroupOpen) && (
+                      <div className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r-full bg-emerald-500" />
+                    )}
                   </button>
                   {openToolGroupMenu === group.id && (
-                    <div className="absolute right-full top-0 z-50 mr-2 w-56 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 text-left shadow-2xl">
+                    <div
+                      className="fixed z-50 w-56 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 text-left shadow-2xl"
+                      style={toolGroupMenuPosition ? { top: `${toolGroupMenuPosition.top}px`, right: `${toolGroupMenuPosition.right}px` } : undefined}
+                    >
                       <div className="border-b border-zinc-800 px-3 py-2">
                         <p className="truncate text-[11px] font-semibold text-zinc-200">{group.label || TOOL_GROUP_LABELS[group.id] || group.id}</p>
                         {group.path?.length && group.path.length > 1 && (
@@ -637,22 +744,15 @@ export function RightSidebar({
                     </div>
                   )}
                 </div>
-              ))}
+              );
+              })}
             </div>
-            <div className="w-5 h-px bg-zinc-800 my-1" />
-          </>
-        )}
+          )}
 
-        <div
-          className="flex-1 flex flex-col items-center gap-px overflow-y-auto w-full scrollbar-none"
-          onDragOver={(event) => {
-            if (event.dataTransfer.types.includes("application/rumi-sidebar-shortcut")) {
-              event.preventDefault();
-              event.dataTransfer.dropEffect = "copy";
-            }
-          }}
-          onDrop={handleShortcutDrop}
-        >
+          {showToolGroups && visibleItems.length > 0 && (
+            <div className="w-5 h-px bg-zinc-800 my-1" />
+          )}
+
           {visibleItems.map((item) => (
             <button
               key={item.id}
@@ -704,20 +804,20 @@ export function RightSidebar({
               </span>
             </button>
           ))}
+
+          <div className="mt-auto w-5 h-px bg-zinc-800 my-1" />
+
+          <button
+            onClick={onOpenSettings}
+            className="relative w-9 h-9 rounded-lg flex items-center justify-center text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 transition-all group/btn flex-shrink-0"
+            title="Settings"
+          >
+            <Settings size={18} />
+            <span className="absolute right-full mr-2 px-2 py-1 bg-zinc-800 text-zinc-200 text-[10px] rounded-md opacity-0 group-hover/btn:opacity-100 pointer-events-none transition-opacity whitespace-nowrap border border-zinc-700 shadow-lg z-50">
+              Settings
+            </span>
+          </button>
         </div>
-
-        <div className="w-5 h-px bg-zinc-800 my-1" />
-
-        <button
-          onClick={onOpenSettings}
-          className="w-9 h-9 rounded-lg flex items-center justify-center text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 transition-all group/btn flex-shrink-0"
-          title="Settings"
-        >
-          <Settings size={18} />
-          <span className="absolute right-full mr-2 px-2 py-1 bg-zinc-800 text-zinc-200 text-[10px] rounded-md opacity-0 group-hover/btn:opacity-100 pointer-events-none transition-opacity whitespace-nowrap border border-zinc-700 shadow-lg z-50">
-            Settings
-          </span>
-        </button>
       </div>
     </aside>
   );

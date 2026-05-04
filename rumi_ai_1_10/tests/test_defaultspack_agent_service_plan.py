@@ -4,6 +4,7 @@ import subprocess
 import sys
 import importlib
 import json
+import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -130,6 +131,252 @@ def test_chat_send_attaches_tools_and_persists_activity_events(tmp_path, monkeyp
     ChatStore._instance = None
 
 
+def test_chat_store_links_subagent_conversations(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    parent = store.create_conversation(model="stub/default")
+    child = store.create_conversation(
+        model="stub/default",
+        parent_conversation_id=parent["id"],
+        conversation_kind="subagent",
+    )
+
+    parent_after = store.get_conversation(parent["id"])
+    child_after = store.get_conversation(child["id"])
+    assert child_after["parent_conversation_id"] == parent["id"]
+    assert child_after["conversation_kind"] == "subagent"
+    assert child["id"] in parent_after["child_conversation_ids"]
+
+    store.delete_conversation(child["id"])
+    assert child["id"] not in store.get_conversation(parent["id"])["child_conversation_ids"]
+    ChatStore._instance = None
+
+
+def test_todo_tool_persists_in_conversation_workspace(tmp_path):
+    from domain.tool.todo import TodoController
+
+    workspace = tmp_path / "conversation" / "workspace"
+    result = TodoController().run(
+        {"action": "add", "title": "ブラウザ確認", "priority": "high"},
+        {"conversation_workspace_dir": str(workspace)},
+    )
+
+    todo_path = workspace / "todos.json"
+    assert result["todos"][0]["title"] == "ブラウザ確認"
+    assert todo_path.exists()
+    assert json.loads(todo_path.read_text(encoding="utf-8"))["todos"][0]["priority"] == "high"
+
+
+def test_subagent_tool_creates_child_conversation(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from domain.tool.subagent import SubagentController
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    parent = store.create_conversation(model="stub/default")
+    result = SubagentController().run(
+        {"task": "hello from subagent", "title": "Subagent check"},
+        {"conversation_id": parent["id"], "model": "stub/default"},
+    )
+
+    parent_after = store.get_conversation(parent["id"])
+    child = store.get_conversation(result["child_conversation_id"])
+    assert result["child_conversation_id"] in parent_after["child_conversation_ids"]
+    assert child["title"] == "Subagent check"
+    assert [message["role"] for message in child["messages"]] == ["user", "assistant"]
+    ChatStore._instance = None
+
+
+def test_integration_secret_store_reads_chat_tokens_without_env_injection(tmp_path, monkeypatch):
+    from domain.integrations.secrets import (
+        get_integration_secret,
+        load_integration_secrets_into_env,
+        set_integration_secret,
+    )
+
+    secrets_dir = tmp_path / "secrets"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_SECRETS_DIR", str(secrets_dir))
+    monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
+
+    result = set_integration_secret("slack", "SLACK_BOT_TOKEN", "xoxb-test")
+    assert result["success"] is True
+    os.environ.pop("SLACK_BOT_TOKEN", None)
+
+    loaded = load_integration_secrets_into_env()
+    assert loaded["slack"] is True
+    assert "SLACK_BOT_TOKEN" not in os.environ
+    assert get_integration_secret("slack", "SLACK_BOT_TOKEN") == "xoxb-test"
+
+
+def test_unit_executor_does_not_pass_integration_tokens_to_python_fallback(monkeypatch):
+    from core_runtime.unit_executor import UnitExecutor
+
+    monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "line-token")
+    process_env = UnitExecutor._build_subprocess_env()
+
+    assert "LINE_CHANNEL_ACCESS_TOKEN" not in process_env
+
+
+def test_external_integration_routes_are_registered():
+    registry = _collect_defaultspack_routes()
+    patterns = {route["pattern"] for route in registry.routes}
+
+    assert "/api/integrations/slack/events" in patterns
+    assert "/api/integrations/line/webhook" in patterns
+    assert "/api/integrations/discord/interactions" in patterns
+    assert "/api/integrations/secrets" in patterns
+    assert "/v1/conversations/{id}/run-results/{run_id}/browser-screenshots" in patterns
+
+
+def test_slack_event_creates_external_conversation(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from blocks.integrations.slack import run
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    integration_path = tmp_path / "user_data" / "shared" / "integrations" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_INTEGRATIONS_STORE_PATH", str(integration_path))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_SECRETS_DIR", str(tmp_path / "secrets"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_INTEGRATIONS_ALLOW_UNSIGNED_DEV", "1")
+    monkeypatch.delenv("SLACK_SIGNING_SECRET", raising=False)
+    monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
+    ChatStore._instance = None
+
+    result = run(
+        {
+            "type": "event_callback",
+            "team_id": "T1",
+            "event_id": "Ev1",
+            "event": {
+                "type": "message",
+                "channel": "C1",
+                "user": "U1",
+                "ts": "1.0",
+                "text": "hello from slack",
+            },
+            "model": "stub/default",
+            "tools": [],
+        },
+        {},
+    )
+
+    assert result["status"] == "ok"
+    data = result["data"]
+    assert data["status"] == "ok"
+    assert data["reply"]["sent"] is False
+
+    stored = json.loads(storage_path.read_text(encoding="utf-8"))
+    conversation = stored["conversations"][data["conversation_id"]]
+    assert conversation["conversation_kind"] == "external"
+    assert conversation["model"] == "stub/default"
+    assert "integration:slack" in conversation["tags"]
+    assert conversation["messages"][0]["metadata"]["external"]["provider"] == "slack"
+    ChatStore._instance = None
+
+
+def test_slack_event_fails_closed_without_signing_secret(tmp_path, monkeypatch):
+    from blocks.integrations.slack import run
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_SECRETS_DIR", str(tmp_path / "secrets"))
+    monkeypatch.delenv("RUMI_DEFAULTSPACK_INTEGRATIONS_ALLOW_UNSIGNED_DEV", raising=False)
+    monkeypatch.delenv("SLACK_SIGNING_SECRET", raising=False)
+
+    result = run(
+        {
+            "type": "event_callback",
+            "event": {"type": "message", "channel": "C1", "user": "U1", "ts": "1.0", "text": "hello"},
+        },
+        {},
+    )
+
+    assert result["status"] == "error"
+    assert result["_http_status"] == 401
+    assert result["error"]["code"] == "SIGNATURE_INVALID"
+
+
+def test_discord_ping_and_agent_engine_queue_multiple_tool_calls(monkeypatch):
+    from blocks.integrations.discord import run
+    from domain.agent.engine import AgentEngine
+    from domain.agent.execution import AgentExecution
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_INTEGRATIONS_ALLOW_UNSIGNED_DEV", "1")
+    assert run({"type": 1}, {})["type"] == 1
+
+    engine = AgentEngine()
+    parsed = engine._parse_ai_response(
+        {
+            "status": "ok",
+            "data": {
+                "tool_calls": [
+                    {"function": {"name": "calculator", "arguments": "{\"expression\":\"1+1\"}"}},
+                    {"function": {"name": "todo", "arguments": "{\"action\":\"list\"}"}},
+                ]
+            },
+        }
+    )
+    execution = AgentExecution("agent_test", "task", [], "stub/default", "")
+    engine._set_pending_tool_call(execution, parsed)
+
+    assert execution.pending_tool_call["tool_name"] == "calculator"
+    assert [call["tool_name"] for call in execution.queued_tool_calls] == ["todo"]
+
+
+def test_chat_stream_uses_provider_stream_and_persists_message(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from blocks.chat.stream import run
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    result = run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "hello stream"},
+            "tools": [],
+        },
+        {},
+    )
+
+    assert result["_sse"] is True
+    events = list(result["events"])
+    deltas = [event["delta"] for event in events if event.get("type") == "delta"]
+    assert "".join(deltas) == "This is a stub stream response."
+    final = [event["message"] for event in events if event.get("type") == "message"][-1]
+    assert final["role"] == "assistant"
+    assert final["raw_text"] == "This is a stub stream response."
+
+    persisted = json.loads(storage_path.read_text(encoding="utf-8"))
+    messages = persisted["conversations"][conversation["id"]]["messages"]
+    assert [message["role"] for message in messages] == ["user", "assistant"]
+    ChatStore._instance = None
+
+
+def test_inline_thought_stream_filter_separates_thinking():
+    from blocks.chat.stream import _InlineThoughtFilter
+
+    filter_ = _InlineThoughtFilter()
+    visible = [
+        filter_.push("<tho"),
+        filter_.push("ught>private"),
+        filter_.push("</thought>public"),
+        filter_.finish(),
+    ]
+
+    assert "".join(visible) == "public"
+    assert filter_.transcript() == "private"
+
+
 def test_chat_send_persists_user_attachment_metadata(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from blocks.chat.send import run
@@ -164,6 +411,11 @@ def test_chat_send_persists_user_attachment_metadata(tmp_path, monkeypatch):
     assert stored_user["metadata"]["attachments"][0]["name"] == "notes.md"
     assert stored_user["metadata"]["attachments"][1]["name"] == "photo.png"
     assert stored_user["metadata"]["selected_tools"] == ["local_file"]
+    history_path = storage_path.parent / "conversations" / conversation["id"] / "history.json"
+    workspace_path = storage_path.parent / "conversations" / conversation["id"] / "workspace"
+    assert history_path.exists()
+    assert (workspace_path / "attachments" / "notes.md").read_text(encoding="utf-8") == "hello from attachment"
+    assert stored_user["metadata"]["workspace_attachments"][0]["workspace_path"] == "workspace/attachments/notes.md"
     user_text = "\n".join(block.get("text", "") for block in stored_user["content"])
     assert "添付ファイル: notes.md" in user_text
     assert "hello from attachment" in user_text
@@ -505,6 +757,262 @@ def test_chat_tool_loop_replays_openai_tool_call_messages():
     assert seen_messages[1][-1]["tool_call_id"] == "call_1"
 
 
+def test_browser_screenshot_tool_result_adds_image_for_vision_models():
+    import blocks.chat.send as send
+
+    messages = []
+    send._append_tool_result_message(
+        messages,
+        "browser_computer",
+        {
+            "status": "ok",
+            "data": {
+                "result": "screenshot",
+                "action": "computer.screenshot",
+                "data_url": "data:image/png;base64,aGVsbG8=",
+            },
+        },
+        "call_1",
+        model="google/gemma-4-31b-it",
+    )
+
+    assert messages[0]["role"] == "tool"
+    assert messages[1]["role"] == "user"
+    assert messages[1]["content"][1]["image_url"]["url"] == "data:image/png;base64,aGVsbG8="
+
+
+def test_browser_screenshot_tool_result_respects_provider_attachment_opt_out(monkeypatch):
+    import blocks.chat.send as send
+
+    class FakeClient:
+        def _runtime_model_matches(self, model):
+            return [
+                {
+                    "capabilities": ["vision"],
+                    "metadata": {"supports_attachments": False},
+                }
+            ]
+
+    monkeypatch.setattr(send, "AIClient", FakeClient)
+    messages = []
+    send._append_tool_result_message(
+        messages,
+        "browser_computer",
+        {
+            "status": "ok",
+            "data": {
+                "result": "screenshot",
+                "data_url": "data:image/png;base64,aGVsbG8=",
+            },
+        },
+        "call_1",
+        model="provider/no-attachments",
+    )
+
+    assert len(messages) == 1
+    assert messages[0]["role"] == "tool"
+
+
+def test_attachment_image_blocks_validate_actual_data_url_bytes():
+    import blocks.chat.send as send
+
+    tiny_png = "data:image/png;base64,aGVsbG8="
+    too_large_encoded = "A" * (((send.MAX_ATTACHMENT_IMAGE_BYTES + 1 + 2) // 3) * 4)
+    too_large = "data:image/png;base64," + too_large_encoded
+
+    blocks = send._attachment_image_blocks(
+        [
+            {"type": "image/png", "size": 1, "dataUrl": tiny_png},
+            {"type": "image/png", "size": 1, "dataUrl": "data:image/png;base64,not valid"},
+            {"type": "image/png", "size": 1, "dataUrl": too_large},
+        ]
+    )
+
+    assert len(blocks) == 1
+    assert blocks[0]["image_url"]["url"] == tiny_png
+
+
+def test_browser_screenshot_tool_log_compacts_inline_image_data():
+    import blocks.chat.send as send
+
+    compact = send._compact_tool_log_value(
+        {
+            "status": "ok",
+            "data": {
+                "widget": {
+                    "data_url": "data:image/jpeg;base64,abc123",
+                    "model_image_path": "/tmp/screenshot-model.jpg",
+                }
+            },
+        }
+    )
+
+    assert compact["data"]["widget"]["data_url"] == "[image data saved as artifact]"
+    assert compact["data"]["widget"]["model_image_path"] == "/tmp/screenshot-model.jpg"
+    assert send._compact_tool_log_value("see data:image/png;base64,abc123 now") == "see [image data saved as artifact] now"
+
+
+def test_tool_activity_events_and_logs_redact_secret_values():
+    import blocks.chat.send as send
+
+    calls = {"ai": 0}
+
+    def call_handler(name, payload):
+        if name == "defaults.ai.complete":
+            calls["ai"] += 1
+            if calls["ai"] == 1:
+                return {
+                    "status": "ok",
+                    "data": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "call_secret",
+                                "name": "secret_echo",
+                                "input": "{\"api_key\":\"sk-live\",\"query\":\"ok\"}",
+                            }
+                        ],
+                        "finish_reason": "tool_calls",
+                    },
+                }
+            return {
+                "status": "ok",
+                "data": {"content": [{"type": "text", "text": "done"}], "finish_reason": "stop"},
+            }
+        if name == "defaults.tool.invoke":
+            return {"status": "ok", "data": {"token": "secret-token", "result": "safe"}}
+        raise AssertionError(name)
+
+    response = send._complete_with_tools(
+        "stub/default",
+        [{"role": "user", "content": "use tool"}],
+        [{"type": "function", "function": {"name": "secret_echo", "parameters": {"type": "object"}}}],
+        {},
+        call_handler,
+        {"max_tool_calls": 2},
+    )
+    started = [event for event in response["events"] if event["type"] == "tool_call_started"][0]
+    completed = [event for event in response["events"] if event["type"] == "tool_call_completed"][0]
+    log = response["tool_logs"][0]
+
+    assert started["tool_call_id"] == "call_secret"
+    assert completed["tool_call_id"] == "call_secret"
+    assert started["arguments"]["api_key"] == "[redacted]"
+    assert log["arguments"]["api_key"] == "[redacted]"
+    assert log["result"]["data"]["token"] == "[redacted]"
+
+
+def test_browser_screenshots_endpoint_is_conversation_and_owner_scoped(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from blocks.chat.browser_screenshots import run
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    screenshot_path = store.conversation_workspace_dir("placeholder").parent / "placeholder.png"
+    screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+    screenshot_path.write_bytes(b"image-bytes")
+
+    conversation = store.create_conversation(
+        model="stub/default",
+        metadata={"owner_user_id": "user-1"},
+    )
+    other = store.create_conversation(model="stub/default", metadata={"owner_user_id": "user-1"})
+    screenshot_path = store.conversation_workspace_dir(conversation["id"]) / "tools" / "screen.png"
+    screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+    screenshot_path.write_bytes(b"image-bytes")
+    assistant = store.add_message(
+        conversation["id"],
+        {
+            "role": "assistant",
+            "content": [{"type": "text", "text": "done"}],
+            "tool_logs": [
+                {
+                    "tool_name": "browser_computer",
+                    "tool_call_id": "call_1",
+                    "result": {"data": {"path": str(screenshot_path)}},
+                }
+            ],
+        },
+    )
+
+    ok_result = run(
+        {
+            "conversation_id": conversation["id"],
+            "run_id": assistant["id"],
+            "_headers": {"X-Rumi-User-Id": "user-1"},
+        },
+        {},
+    )
+    wrong_conversation = run(
+        {
+            "conversation_id": other["id"],
+            "run_id": assistant["id"],
+            "_headers": {"X-Rumi-User-Id": "user-1"},
+        },
+        {},
+    )
+    wrong_owner = run(
+        {
+            "conversation_id": conversation["id"],
+            "run_id": assistant["id"],
+            "_headers": {"X-Rumi-User-Id": "user-2"},
+        },
+        {},
+    )
+
+    assert ok_result["status"] == "ok"
+    assert ok_result["data"]["screenshots"][0]["data_url"].startswith("data:image/png;base64,")
+    assert wrong_conversation["status"] == "error"
+    assert wrong_conversation["error"]["code"] == "NOT_FOUND"
+    assert wrong_owner["status"] == "error"
+    assert wrong_owner["error"]["code"] == "FORBIDDEN"
+    ChatStore._instance = None
+
+
+def test_chat_store_splits_loaded_inline_thoughts(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    conversation_id = "conv-1"
+    storage_path.parent.mkdir(parents=True)
+    storage_path.write_text(
+        json.dumps(
+            {
+                "conversations": {
+                    conversation_id: {
+                        "id": conversation_id,
+                        "title": "New Conversation",
+                        "created_at": 1,
+                        "updated_at": 1,
+                        "messages": [
+                            {
+                                "id": "msg-1",
+                                "role": "assistant",
+                                "content": [{"type": "text", "text": "<thought>hidden</thought>shown"}],
+                                "raw_text": "<thought>hidden</thought>shown",
+                            }
+                        ],
+                    }
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.get_conversation(conversation_id)
+    message = conversation["messages"][0]
+    assert message["content"][0]["text"] == "shown"
+    assert message["metadata"]["thinking"]["transcript"] == "hidden"
+    ChatStore._instance = None
+
+
 def test_builtin_calculator_returns_real_arithmetic_result():
     from domain.tool.executor import ToolExecutor
 
@@ -527,6 +1035,10 @@ def test_coding_tools_are_exposed_through_tool_registry():
         "coding_file_patch",
         "coding_terminal_exec",
         "coding_git_status",
+        "todo",
+        "subagent",
+        "browser_use",
+        "computer_use",
     } <= names
 
 
@@ -611,12 +1123,14 @@ def test_direct_coding_route_cannot_execute_with_forged_approved(tmp_path, monke
     assert not (tmp_path / "direct-pwned.txt").exists()
 
 
-def test_sensitive_coding_routes_do_not_use_wildcard_cors():
-    from ecosystem.defaultspack.transport.http import _is_sensitive_coding_path
+def test_sensitive_routes_do_not_use_wildcard_cors():
+    from ecosystem.defaultspack.transport.http import _is_sensitive_http_path
 
-    assert _is_sensitive_coding_path("/api/coding/terminal/exec") is True
-    assert _is_sensitive_coding_path("/api/coding/files/write") is True
-    assert _is_sensitive_coding_path("/api/coding/files/read") is False
+    assert _is_sensitive_http_path("/api/coding/terminal/exec") is True
+    assert _is_sensitive_http_path("/api/coding/files/write") is True
+    assert _is_sensitive_http_path("/api/integrations/secrets") is True
+    assert _is_sensitive_http_path("/v1/conversations/c1/run-results/r1/browser-screenshots") is True
+    assert _is_sensitive_http_path("/api/coding/files/read") is False
 
 
 def test_fallback_routes_expose_agent_service_and_coding_surfaces():
@@ -729,6 +1243,118 @@ def test_browser_computer_controller_gates_desktop_actions():
     assert approval["requires_approval"] is True
     assert approval["approval_token"]
     assert controller.run("computer.click", {"x": 1, "y": 2, "approved": True})["requires_approval"] is True
+
+
+def test_browser_computer_manages_persistent_profiles_and_cookie_jars(tmp_path):
+    from domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController()
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._approval_path = tmp_path / "shared" / "browser_computer_approvals.json"
+    controller._browser_root = tmp_path / "shared" / "browser"
+    controller._profile_root = controller._browser_root / "profiles"
+
+    created = controller.run("browser.profile.create", {"profile_id": "Work Login", "label": "Work Login"})
+    assert created["profile"]["id"] == "work-login"
+    assert created["active_profile_id"] == "work-login"
+    assert Path(created["profile"]["profile_dir"]).exists()
+    assert Path(created["profile"]["cache_dir"]).exists()
+
+    imported = controller.run(
+        "browser.cookies.import",
+        {
+            "profile_id": "work-login",
+            "cookies": [
+                {"name": "sid", "value": "secret-token", "domain": "example.test", "path": "/"},
+            ],
+        },
+    )
+    assert imported["count"] == 1
+
+    listed = controller.run("browser.cookies.list", {"profile_id": "work-login"})
+    assert listed["count"] == 1
+    assert listed["cookies"][0]["value"] == "***"
+    assert listed["cookies"][0]["value_redacted"] is True
+
+    revealed = controller.run("browser.cookies.list", {"profile_id": "work-login", "include_values": True})
+    assert revealed["cookies"][0]["value"] == "secret-token"
+
+    dry_delete = controller.run("browser.cookies.delete", {"profile_id": "work-login", "name": "sid", "dry_run": True})
+    assert dry_delete["matches"] == 1
+    approval = controller.run("browser.cookies.delete", {"profile_id": "work-login", "name": "sid"})
+    assert approval["requires_approval"] is True
+    deleted = controller.run(
+        "browser.cookies.delete",
+        {"profile_id": "work-login", "name": "sid", "approval_token": approval["approval_token"]},
+    )
+    assert deleted["deleted"] == 1
+
+
+def test_browser_open_url_uses_managed_profile_launch_plan(tmp_path):
+    from domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController()
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._approval_path = tmp_path / "shared" / "browser_computer_approvals.json"
+    controller._browser_root = tmp_path / "shared" / "browser"
+    controller._profile_root = controller._browser_root / "profiles"
+    fake_browser = tmp_path / "chrome"
+    fake_browser.write_text("#!/bin/sh\n", encoding="utf-8")
+    fake_browser.chmod(0o755)
+    controller._find_browser_executable = lambda: fake_browser
+
+    result = controller.run(
+        "browser.open_url",
+        {"url": "https://example.test", "profile_id": "research", "dry_run": True},
+    )
+
+    assert result["requires_approval"] is False
+    assert result["launch"]["mode"] == "managed_profile"
+    assert result["launch"]["command"][0] == str(fake_browser)
+    assert "--user-data-dir=" in result["launch"]["command"][1]
+    assert "--disk-cache-dir=" in result["launch"]["command"][2]
+    assert result["launch"]["command"][-1] == "https://example.test"
+
+
+def test_browser_profile_cache_and_cookie_clear_are_approval_gated(tmp_path):
+    from domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController()
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._approval_path = tmp_path / "shared" / "browser_computer_approvals.json"
+    controller._browser_root = tmp_path / "shared" / "browser"
+    controller._profile_root = controller._browser_root / "profiles"
+    controller.run("browser.profile.create", {"profile_id": "managed"})
+    cache_file = controller._profile_path("managed") / "cache" / "entry.bin"
+    cache_file.write_bytes(b"cached")
+    cookie_file = controller._profile_path("managed") / "managed_cookies.json"
+    cookie_file.write_text('{"version":1,"cookies":[]}', encoding="utf-8")
+
+    dry_cache = controller.run("browser.profile.clear_cache", {"profile_id": "managed", "dry_run": True})
+    assert dry_cache["size_bytes"] == 6
+    assert cache_file.exists()
+
+    approval = controller.run("browser.profile.clear_cache", {"profile_id": "managed"})
+    assert approval["requires_approval"] is True
+    cleared = controller.run(
+        "browser.profile.clear_cache",
+        {"profile_id": "managed", "approval_token": approval["approval_token"]},
+    )
+    assert cleared["removed"]
+    assert not cache_file.exists()
+
+    cookie_approval = controller.run("browser.profile.clear_cookies", {"profile_id": "managed"})
+    assert cookie_approval["requires_approval"] is True
+    cleared_cookies = controller.run(
+        "browser.profile.clear_cookies",
+        {
+            "profile_id": "managed",
+            "include_managed": True,
+            "approval_token": cookie_approval["approval_token"],
+        },
+    )
+    assert str(cookie_file) in cleared_cookies["removed"]
+    assert not cookie_file.exists()
 
 
 def test_capability_detail_endpoint_returns_one_manifest_and_404_for_unknown():

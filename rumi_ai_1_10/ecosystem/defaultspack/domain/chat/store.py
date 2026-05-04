@@ -3,6 +3,8 @@ import copy
 import uuid
 import json
 import os
+import re
+import base64
 from pathlib import Path
 
 DEFAULT_CHAT_MODEL = "openrouter/tencent/hy3-preview:free"
@@ -17,6 +19,8 @@ def _default_conversation_model(settings_path=None):
             return preferred_model.strip()
     except Exception:
         pass
+    if settings_path is not None:
+        return DEFAULT_CHAT_MODEL
     try:
         from domain.ai_client.profile_loader import ProfileLoader
 
@@ -49,9 +53,13 @@ class ChatStore:
             cls._instance = super().__new__(cls)
             cls._instance._storage_path = storage_path
             cls._instance._conversations = cls._instance._load_conversations()
+            if cls._instance._conversations:
+                cls._instance._save_conversation_files()
         elif cls._instance._storage_path != storage_path:
             cls._instance._storage_path = storage_path
             cls._instance._conversations = cls._instance._load_conversations()
+            if cls._instance._conversations:
+                cls._instance._save_conversation_files()
         return cls._instance
 
     @staticmethod
@@ -71,14 +79,20 @@ class ChatStore:
         conversations = data.get("conversations") if isinstance(data, dict) else data
         if not isinstance(conversations, dict):
             return {}
-        return {
-            str(conversation_id): conversation
-            for conversation_id, conversation in conversations.items()
-            if isinstance(conversation, dict)
-        }
+        loaded = {}
+        for conversation_id, conversation in conversations.items():
+            if not isinstance(conversation, dict):
+                continue
+            self._normalize_conversation(str(conversation_id), conversation)
+            self._sanitize_inline_thought_messages(conversation)
+            loaded[str(conversation_id)] = conversation
+        return loaded
 
     def _save_conversations(self):
         self._storage_path.parent.mkdir(parents=True, exist_ok=True)
+        for conversation in self._conversations.values():
+            if isinstance(conversation, dict):
+                self._sanitize_inline_thought_messages(conversation)
         payload = {
             "schema_version": 1,
             "updated_at": _now_ms(),
@@ -87,13 +101,25 @@ class ChatStore:
         tmp_path = self._storage_path.with_suffix(self._storage_path.suffix + ".tmp")
         tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp_path.replace(self._storage_path)
+        self._save_conversation_files()
 
     # ----------------------------------------------------------
     # Conversation CRUD
     # ----------------------------------------------------------
-    def create_conversation(self, model=None, system_prompt_id=None, agent_id=None, tags=None):
+    def create_conversation(
+        self,
+        model=None,
+        system_prompt_id=None,
+        agent_id=None,
+        tags=None,
+        parent_conversation_id=None,
+        conversation_kind=None,
+        metadata=None,
+        group_id=None,
+    ):
         cid = _gen_id()
         now = _now_ms()
+        parent_id = str(parent_conversation_id) if parent_conversation_id else None
         conv = {
             "id": cid,
             "title": "New Conversation",
@@ -106,9 +132,20 @@ class ChatStore:
             "is_starred": False,
             "is_archived": False,
             "current_node_id": None,
+            "parent_conversation_id": parent_id,
+            "child_conversation_ids": [],
+            "conversation_kind": conversation_kind or ("subagent" if parent_id else "chat"),
+            "group_id": group_id,
+            "metadata": metadata if isinstance(metadata, dict) else {},
             "messages": [],
         }
         self._conversations[cid] = conv
+        if parent_id and parent_id in self._conversations:
+            parent = self._conversations[parent_id]
+            self._normalize_conversation(parent_id, parent)
+            if cid not in parent["child_conversation_ids"]:
+                parent["child_conversation_ids"].append(cid)
+            parent["updated_at"] = now
         self._save_conversations()
         return copy.deepcopy(conv)
 
@@ -147,6 +184,17 @@ class ChatStore:
 
     def delete_conversation(self, conversation_id):
         if conversation_id in self._conversations:
+            conv = self._conversations[conversation_id]
+            parent_id = conv.get("parent_conversation_id") if isinstance(conv, dict) else None
+            if parent_id in self._conversations:
+                parent = self._conversations[parent_id]
+                child_ids = parent.get("child_conversation_ids", [])
+                if isinstance(child_ids, list):
+                    parent["child_conversation_ids"] = [cid for cid in child_ids if cid != conversation_id]
+                    parent["updated_at"] = _now_ms()
+            for candidate in self._conversations.values():
+                if isinstance(candidate, dict) and candidate.get("parent_conversation_id") == conversation_id:
+                    candidate["parent_conversation_id"] = None
             del self._conversations[conversation_id]
             self._save_conversations()
             return True
@@ -187,6 +235,7 @@ class ChatStore:
         conv["current_node_id"] = msg["id"]
         conv["updated_at"] = _now_ms()
         self._save_conversations()
+        self._persist_message_artifacts(conversation_id, msg)
         return copy.deepcopy(msg)
 
     def get_message(self, conversation_id, message_id):
@@ -210,6 +259,7 @@ class ChatStore:
                         msg[key] = value
                 conv["updated_at"] = _now_ms()
                 self._save_conversations()
+                self._persist_message_artifacts(conversation_id, msg)
                 return copy.deepcopy(msg)
         return None
 
@@ -481,3 +531,147 @@ class ChatStore:
             elif isinstance(block, str):
                 parts.append(block)
         return " ".join(parts)
+
+    @staticmethod
+    def _normalize_conversation(conversation_id, conversation):
+        conversation.setdefault("id", conversation_id)
+        conversation.setdefault("title", "New Conversation")
+        conversation.setdefault("created_at", _now_ms())
+        conversation.setdefault("updated_at", conversation.get("created_at", _now_ms()))
+        conversation.setdefault("model", _default_conversation_model())
+        conversation.setdefault("system_prompt_id", None)
+        conversation.setdefault("agent_id", None)
+        conversation.setdefault("tags", [])
+        conversation.setdefault("is_starred", False)
+        conversation.setdefault("is_archived", False)
+        conversation.setdefault("current_node_id", None)
+        conversation.setdefault("parent_conversation_id", None)
+        conversation.setdefault("child_conversation_ids", [])
+        conversation.setdefault("conversation_kind", "subagent" if conversation.get("parent_conversation_id") else "chat")
+        conversation.setdefault("group_id", None)
+        conversation.setdefault("metadata", {})
+        conversation.setdefault("messages", [])
+        if not isinstance(conversation.get("child_conversation_ids"), list):
+            conversation["child_conversation_ids"] = []
+        if not isinstance(conversation.get("metadata"), dict):
+            conversation["metadata"] = {}
+
+    # ----------------------------------------------------------
+    # Per-chat files / workspace artifacts
+    # ----------------------------------------------------------
+    def conversation_dir(self, conversation_id):
+        return self._storage_path.parent / "conversations" / str(conversation_id)
+
+    def conversation_workspace_dir(self, conversation_id):
+        return self.conversation_dir(conversation_id) / "workspace"
+
+    def persist_attachments(self, conversation_id, attachments):
+        if not isinstance(attachments, list):
+            return []
+        refs = []
+        attachment_dir = self.conversation_workspace_dir(conversation_id) / "attachments"
+        attachment_dir.mkdir(parents=True, exist_ok=True)
+        for index, attachment in enumerate(attachments):
+            if not isinstance(attachment, dict):
+                continue
+            name = self._safe_filename(str(attachment.get("name") or f"attachment-{index + 1}"))
+            path = attachment_dir / name
+            suffix = 1
+            while path.exists():
+                path = attachment_dir / f"{Path(name).stem}-{suffix}{Path(name).suffix}"
+                suffix += 1
+            written = False
+            data_url = attachment.get("dataUrl") or attachment.get("data_url")
+            if isinstance(data_url, str) and data_url.startswith("data:") and "," in data_url:
+                try:
+                    path.write_bytes(base64.b64decode(data_url.split(",", 1)[1]))
+                    written = True
+                except Exception:
+                    written = False
+            if not written and isinstance(attachment.get("content"), str):
+                path.write_text(attachment["content"], encoding="utf-8")
+                written = True
+            if not written:
+                path.write_text(json.dumps(self._attachment_manifest(attachment), ensure_ascii=False, indent=2), encoding="utf-8")
+            refs.append(
+                {
+                    "id": attachment.get("id"),
+                    "name": attachment.get("name") or name,
+                    "size": attachment.get("size"),
+                    "type": attachment.get("type"),
+                    "source": attachment.get("source"),
+                    "sourcePath": attachment.get("sourcePath"),
+                    "workspace_path": str(path.relative_to(self.conversation_dir(conversation_id))),
+                }
+            )
+        return refs
+
+    def _save_conversation_files(self):
+        for conversation_id, conversation in self._conversations.items():
+            self._save_conversation_file(str(conversation_id), conversation)
+
+    def _save_conversation_file(self, conversation_id, conversation):
+        conversation_dir = self.conversation_dir(conversation_id)
+        (conversation_dir / "workspace" / "attachments").mkdir(parents=True, exist_ok=True)
+        (conversation_dir / "workspace" / "tools").mkdir(parents=True, exist_ok=True)
+        payload = {
+            "schema_version": 1,
+            "updated_at": _now_ms(),
+            "conversation": conversation,
+        }
+        tmp_path = conversation_dir / "history.json.tmp"
+        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp_path.replace(conversation_dir / "history.json")
+
+    def _persist_message_artifacts(self, conversation_id, msg):
+        if not isinstance(msg, dict):
+            return
+        if msg.get("role") == "assistant" and isinstance(msg.get("tool_logs"), list) and msg["tool_logs"]:
+            tool_dir = self.conversation_workspace_dir(conversation_id) / "tools"
+            tool_dir.mkdir(parents=True, exist_ok=True)
+            path = tool_dir / "{}-tool_logs.json".format(self._safe_filename(str(msg.get("id") or "message")))
+            path.write_text(json.dumps(msg["tool_logs"], ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _sanitize_inline_thought_messages(self, conversation):
+        for msg in conversation.get("messages", []) if isinstance(conversation.get("messages"), list) else []:
+            if not isinstance(msg, dict) or msg.get("role") != "assistant":
+                continue
+            thoughts = []
+            for block in msg.get("content", []) if isinstance(msg.get("content"), list) else []:
+                if not isinstance(block, dict) or block.get("type") != "text":
+                    continue
+                text = str(block.get("text") or "")
+
+                def collect(match):
+                    value = str(match.group(1) or "").strip()
+                    if value:
+                        thoughts.append(value)
+                    return ""
+
+                cleaned = re.sub(r"<thought>(.*?)</thought>", collect, text, flags=re.DOTALL).strip()
+                if cleaned != text:
+                    block["text"] = cleaned
+            if thoughts:
+                metadata = msg.get("metadata") if isinstance(msg.get("metadata"), dict) else {}
+                thinking = metadata.get("thinking") if isinstance(metadata.get("thinking"), dict) else {}
+                metadata["thinking"] = {
+                    **thinking,
+                    "state": "completed",
+                    "transcript": "\n\n".join(thoughts),
+                    "source": "google_inline_thought",
+                }
+                msg["metadata"] = metadata
+                msg["raw_text"] = self._extract_raw_text(msg.get("content", []))
+
+    @staticmethod
+    def _safe_filename(name):
+        cleaned = re.sub(r"[^A-Za-z0-9._ -]+", "_", name).strip(" .")
+        return cleaned[:160] or "attachment"
+
+    @staticmethod
+    def _attachment_manifest(attachment):
+        return {
+            key: attachment.get(key)
+            for key in ("id", "name", "size", "type", "truncated", "source", "sourcePath")
+            if isinstance(attachment, dict) and key in attachment
+        }

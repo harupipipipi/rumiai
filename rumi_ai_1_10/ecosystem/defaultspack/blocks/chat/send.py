@@ -1,6 +1,8 @@
 import sys
 import os
 import json
+import re
+from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from blocks._common import ok, error, gen_id, timestamp
 
@@ -25,6 +27,12 @@ from domain.tool.schema_adapter import (
 
 MAX_ATTACHMENT_TEXT_CHARS = 240_000
 MAX_ATTACHMENT_TEXT_CHARS_PER_FILE = 120_000
+MAX_ATTACHMENT_IMAGE_BYTES = 8 * 1024 * 1024
+_DATA_IMAGE_PREFIX = "data:image/"
+_SECRET_KEY_RE = re.compile(
+    r"(api[_-]?key|authorization|bearer|credential|password|secret|token)",
+    re.IGNORECASE,
+)
 
 
 def _stub_response():
@@ -70,8 +78,28 @@ def _event(event_type, message, **extra):
         "message": message,
         "timestamp": timestamp(),
     }
-    payload.update(extra)
+    payload.update(_redact_sensitive_value(extra))
     return payload
+
+
+def _redact_sensitive_value(value, *, parent_key=""):
+    if isinstance(value, dict):
+        redacted = {}
+        for key, item in value.items():
+            key_text = str(key)
+            if _SECRET_KEY_RE.search(key_text):
+                redacted[key] = "[redacted]"
+            else:
+                redacted[key] = _redact_sensitive_value(item, parent_key=key_text)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_sensitive_value(item, parent_key=parent_key) for item in value]
+    if isinstance(value, str):
+        if parent_key and _SECRET_KEY_RE.search(parent_key):
+            return "[redacted]"
+        if value.startswith("data:image/"):
+            return "[image data saved as artifact]"
+    return value
 
 
 def _resolve_selected_tools(raw_tools):
@@ -164,7 +192,80 @@ def _append_assistant_tool_use_message(messages, tool_uses):
     )
 
 
-def _append_tool_result_message(messages, tool_name, result, tool_call_id=""):
+def _model_supports_vision(model):
+    try:
+        client = AIClient()
+        matches = client._runtime_model_matches(str(model or ""))
+    except Exception:
+        matches = []
+    for match in matches or []:
+        capabilities = match.get("capabilities", [])
+        if isinstance(capabilities, dict):
+            if capabilities.get("vision") or capabilities.get("image_input") or capabilities.get("multimodal"):
+                return True
+        elif any(str(item) in {"vision", "image_input", "multimodal"} for item in capabilities or []):
+            return True
+    return any(token in str(model or "").lower() for token in ("gemini", "gemma", "gpt-4o", "gpt-5"))
+
+
+def _model_supports_attachments(model):
+    try:
+        client = AIClient()
+        matches = client._runtime_model_matches(str(model or ""))
+    except Exception:
+        matches = []
+    for match in matches or []:
+        for source in (
+            match,
+            match.get("metadata", {}) if isinstance(match, dict) else {},
+            match.get("availability", {}) if isinstance(match, dict) else {},
+        ):
+            if isinstance(source, dict) and source.get("supports_attachments") is False:
+                return False
+    return True
+
+
+def _image_data_url_byte_length(data_url):
+    if not isinstance(data_url, str) or not data_url.startswith(_DATA_IMAGE_PREFIX):
+        return None
+    header, separator, encoded = data_url.partition(",")
+    if not separator or ";base64" not in header.lower():
+        return None
+    try:
+        import base64
+
+        return len(base64.b64decode(encoded, validate=True))
+    except Exception:
+        return None
+
+
+def _browser_screenshot_data_url(result):
+    if not isinstance(result, dict):
+        return ""
+    data = result.get("data", result)
+    if not isinstance(data, dict):
+        return ""
+    widget = data.get("widget") if isinstance(data.get("widget"), dict) else {}
+    candidates = [data, widget]
+    for candidate in candidates:
+        data_url = candidate.get("data_url") or candidate.get("dataUrl")
+        byte_length = _image_data_url_byte_length(data_url)
+        if byte_length is not None and byte_length <= MAX_ATTACHMENT_IMAGE_BYTES:
+            return data_url
+    path = data.get("path") or widget.get("path")
+    mime = data.get("mime_type") or widget.get("mime_type") or "image/png"
+    if isinstance(path, str) and path:
+        try:
+            import base64
+
+            encoded = base64.b64encode(Path(path).read_bytes()).decode("ascii")
+            return "data:{};base64,{}".format(mime, encoded)
+        except Exception:
+            return ""
+    return ""
+
+
+def _append_tool_result_message(messages, tool_name, result, tool_call_id="", *, model=""):
     result_text = ""
     if isinstance(result, dict):
         data = result.get("data", result)
@@ -182,6 +283,44 @@ def _append_tool_result_message(messages, tool_name, result, tool_call_id=""):
             "content": result_text,
         }
     )
+    if (
+        tool_name in {"browser_computer", "browser_use", "computer_use"}
+        and _model_supports_vision(model)
+        and _model_supports_attachments(model)
+    ):
+        screenshot = _browser_screenshot_data_url(result)
+        if screenshot:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Browser screenshot captured by browser_computer. Use this image to continue the task.",
+                        },
+                        {"type": "image_url", "image_url": {"url": screenshot}},
+                    ],
+                }
+            )
+
+
+def _compact_tool_log_value(value):
+    value = _redact_sensitive_value(value)
+    if isinstance(value, dict):
+        compact = {}
+        for key, item in value.items():
+            if key in {"data_url", "dataUrl"} and isinstance(item, str) and item.startswith("data:image/"):
+                compact[key] = "[image data saved as artifact]"
+            else:
+                compact[key] = _compact_tool_log_value(item)
+        return compact
+    if isinstance(value, list):
+        return [_compact_tool_log_value(item) for item in value]
+    if isinstance(value, str) and "data:image/" in value:
+        import re
+
+        return re.sub(r"data:image/[A-Za-z0-9.+-]+;base64,[A-Za-z0-9+/=]+", "[image data saved as artifact]", value)
+    return value
 
 
 def _tool_visibility_message(tools):
@@ -264,13 +403,15 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
             tool_name = str(block.get("name") or block.get("tool_name") or "")
             if not tool_name:
                 continue
+            tool_call_id = str(block.get("id") or block.get("tool_call_id") or gen_id())
             arguments = _tool_arguments(block)
             events.append(
                 _event(
-                    "tool_call",
+                    "tool_call_started",
                     "{} を使用中".format(tool_name),
-                    phase="tool_call",
+                    phase="tool_call_started",
                     tool_name=tool_name,
+                    tool_call_id=tool_call_id,
                     arguments=arguments,
                 )
             )
@@ -287,17 +428,19 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
                 result = {"status": "ok", "data": executed}
             log = {
                 "tool_name": tool_name,
-                "arguments": arguments,
-                "result": result,
+                "tool_call_id": tool_call_id,
+                "arguments": _redact_sensitive_value(arguments),
+                "result": _compact_tool_log_value(result),
                 "timestamp": timestamp(),
             }
             tool_logs.append(log)
             events.append(
                 _event(
-                    "tool_result",
+                    "tool_call_completed",
                     "{} の結果を受け取りました".format(tool_name),
-                    phase="tool_result",
+                    phase="tool_call_completed",
                     tool_name=tool_name,
+                    tool_call_id=tool_call_id,
                     is_error=isinstance(result, dict) and result.get("status") == "error",
                 )
             )
@@ -305,7 +448,8 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
                 working_messages,
                 tool_name,
                 result,
-                str(block.get("id") or block.get("tool_call_id") or ""),
+                tool_call_id,
+                model=model,
             )
 
     response = response or _stub_response()
@@ -361,6 +505,52 @@ def _attachment_text_blocks(attachments):
     return blocks
 
 
+def _attachment_image_blocks(attachments):
+    if not isinstance(attachments, list):
+        return []
+
+    blocks = []
+    for attachment in attachments:
+        if not isinstance(attachment, dict):
+            continue
+        mime = str(attachment.get("type") or "").lower()
+        data_url = attachment.get("dataUrl") or attachment.get("data_url")
+        byte_length = _image_data_url_byte_length(data_url)
+        if not mime.startswith("image/") or byte_length is None:
+            continue
+        size = attachment.get("size")
+        if isinstance(size, int) and size > MAX_ATTACHMENT_IMAGE_BYTES:
+            continue
+        if byte_length > MAX_ATTACHMENT_IMAGE_BYTES:
+            continue
+        blocks.append(
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": data_url,
+                },
+            }
+        )
+    return blocks
+
+
+def _sanitize_attachment_metadata(attachments):
+    if not isinstance(attachments, list):
+        return attachments
+    sanitized = []
+    for attachment in attachments:
+        if not isinstance(attachment, dict):
+            continue
+        sanitized.append(
+            {
+                key: attachment.get(key)
+                for key in ("id", "name", "size", "type", "truncated", "source", "sourcePath")
+                if key in attachment
+            }
+        )
+    return sanitized
+
+
 def run(input_data, context):
     store = ChatStore()
     conversation_id = input_data.get("conversation_id")
@@ -393,9 +583,13 @@ def run(input_data, context):
     metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
     if isinstance(attachments, list):
         metadata = dict(metadata)
-        metadata["attachments"] = attachments
+        persisted_attachments = store.persist_attachments(conversation_id, attachments)
+        metadata["attachments"] = _sanitize_attachment_metadata(attachments)
+        if persisted_attachments:
+            metadata["workspace_attachments"] = persisted_attachments
         if isinstance(content, list):
             content.extend(_attachment_text_blocks(attachments))
+            content.extend(_attachment_image_blocks(attachments))
     user_msg_dict = {
         "role": role,
         "content": content,
@@ -441,6 +635,10 @@ def run(input_data, context):
     call_handler = context.get("call_handler") if context else None
     params = dict(input_data.get("params") or {})
     request_context = dict(context or {})
+    request_context["conversation_id"] = conversation_id
+    request_context["conversation_workspace_dir"] = str(store.conversation_workspace_dir(conversation_id))
+    request_context["model"] = model
+    request_context["chat_params"] = params
     tool_policy = params.get("tool_policy")
     if isinstance(tool_policy, dict):
         request_context["profile_policy"] = {

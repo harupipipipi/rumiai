@@ -23,6 +23,10 @@ def convert_to_standard(rumi_messages):
             btype = block.get("type", "text")
             if btype == "text":
                 text_parts.append(block.get("text", ""))
+            elif btype == "image_url":
+                text_parts.append(block)
+            elif btype == "image" and block.get("source"):
+                text_parts.append(block)
             elif btype == "tool_call":
                 tool_calls.append({
                     "id": block.get("id", ""),
@@ -49,15 +53,25 @@ def convert_to_standard(rumi_messages):
             continue
         entry = {"role": role}
         if tool_calls:
-            if text_parts:
-                combined = "\n".join(t for t in text_parts if t)
+            string_parts = [t for t in text_parts if isinstance(t, str) and t]
+            if string_parts:
+                combined = "\n".join(string_parts)
                 entry["content"] = combined if combined else None
             else:
                 entry["content"] = None
             entry["tool_calls"] = tool_calls
         else:
-            combined = "\n".join(t for t in text_parts if t)
-            entry["content"] = combined if combined else ""
+            if any(isinstance(t, dict) for t in text_parts):
+                content = []
+                for part in text_parts:
+                    if isinstance(part, dict):
+                        content.append(part)
+                    elif part:
+                        content.append({"type": "text", "text": part})
+                entry["content"] = content
+            else:
+                combined = "\n".join(t for t in text_parts if t)
+                entry["content"] = combined if combined else ""
         if tool_results:
             for tr in tool_results:
                 standard.append(entry)

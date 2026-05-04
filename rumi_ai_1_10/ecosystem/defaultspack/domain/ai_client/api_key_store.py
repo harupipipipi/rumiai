@@ -6,6 +6,7 @@ from typing import Any, Dict, List
 
 
 PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
+    "google": ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
     "openrouter": ["OPENROUTER_API_KEY"],
 }
 
@@ -41,16 +42,21 @@ def provider_secret_key(provider_id: str) -> str:
     return keys[0] if keys else ""
 
 
+def provider_secret_keys(provider_id: str) -> List[str]:
+    return list(PROVIDER_SECRET_KEYS.get(str(provider_id or "").strip(), []))
+
+
 def provider_has_api_key(provider_id: str, *, pack_root: Path | None = None) -> bool:
-    key = provider_secret_key(provider_id)
-    if not key:
+    keys = provider_secret_keys(provider_id)
+    if not keys:
         return False
-    if os.environ.get(key, "").strip():
-        return True
-    secret_path = _secrets_dir(pack_root) / f"{key}.json"
-    if not secret_path.exists():
-        return False
-    return _get_store(pack_root).has_secret(key)
+    for key in keys:
+        if os.environ.get(key, "").strip():
+            return True
+        secret_path = _secrets_dir(pack_root) / f"{key}.json"
+        if secret_path.exists() and _get_store(pack_root).has_secret(key):
+            return True
+    return False
 
 
 def set_provider_api_key(
@@ -128,6 +134,7 @@ def provider_key_status(*, pack_root: Path | None = None) -> list[dict[str, Any]
         {
             "provider_id": provider_id,
             "key": keys[0],
+            "keys": list(keys),
             "configured": provider_has_api_key(provider_id, pack_root=pack_root),
         }
         for provider_id, keys in sorted(PROVIDER_SECRET_KEYS.items())

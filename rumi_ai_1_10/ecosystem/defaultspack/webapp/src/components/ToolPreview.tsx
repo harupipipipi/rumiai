@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   X, Globe, Terminal, FileText, Image, ExternalLink,
   ChevronLeft, ChevronRight,
-  Eye, EyeOff, Code
+  Eye, EyeOff, Code, NotebookPen
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -60,6 +60,43 @@ export type ToolPreviewItem = {
 };
 
 export type ToolPreviewMode = 'auto' | 'manual';
+
+export const MEMO_PREVIEW_ID = '__memo__';
+
+function matchesPreviewId(item: ToolPreviewItem, previewId?: string | null) {
+  return Boolean(previewId && (item.id === previewId || item.toolStepId === previewId));
+}
+
+export function hasCanvasItems(previews: ToolPreviewItem[], memo?: string | null) {
+  return previews.length > 0 || Boolean(memo?.trim());
+}
+
+export function buildToolPreviewDisplayItems(
+  previews: ToolPreviewItem[],
+  memo?: string,
+  activePreviewId?: string | null,
+): ToolPreviewItem[] {
+  const shouldShowMemo = Boolean(memo?.trim()) || activePreviewId === MEMO_PREVIEW_ID || activePreviewId === 'memo';
+  const memoPreview: ToolPreviewItem | null = shouldShowMemo
+    ? {
+        id: MEMO_PREVIEW_ID,
+        toolStepId: 'memo',
+        timestamp: 0,
+        data: {
+          type: 'file',
+          filename: 'memo.md',
+          size: 'local memo',
+          content: memo ?? '',
+        },
+      }
+    : null;
+  const items = memoPreview ? [memoPreview, ...previews] : [...previews];
+  if (!activePreviewId) return items;
+
+  const active = items.find((item) => matchesPreviewId(item, activePreviewId));
+  if (!active) return items;
+  return [active, ...items.filter((item) => item.id !== active.id)];
+}
 
 // ============================================================
 // Mock preview data
@@ -460,6 +497,7 @@ function CodePreviewContent({ data }: { data: CodePreview }) {
 }
 
 function FilePreviewContent({ data }: { data: FilePreview }) {
+  const looksLikeJson = data.filename.toLowerCase().endsWith('.json') || String(data.content ?? '').trimStart().startsWith('{');
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-3 py-2 bg-zinc-900 border-b border-zinc-800/60 flex-shrink-0">
@@ -469,6 +507,11 @@ function FilePreviewContent({ data }: { data: FilePreview }) {
         </div>
         <span className="text-[10px] text-zinc-600">{data.size}</span>
       </div>
+      {looksLikeJson && (
+        <div className="border-b border-zinc-800/60 bg-zinc-950/60 px-3 py-2 text-[10px] text-zinc-500">
+          JSON の詳細です。必要なときだけ内容を確認してください。
+        </div>
+      )}
       <div className="flex-1 overflow-y-auto">
         <pre className="text-[11px] font-mono leading-[1.6]">
           {(data.content || '').split('\n').map((line, i) => (
@@ -481,6 +524,32 @@ function FilePreviewContent({ data }: { data: FilePreview }) {
           ))}
         </pre>
       </div>
+    </div>
+  );
+}
+
+function MemoPreviewContent({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange?: (value: string) => void;
+}) {
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex items-center justify-between border-b border-zinc-800/60 bg-zinc-900 px-3 py-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <NotebookPen size={12} className="flex-shrink-0 text-zinc-500" />
+          <span className="truncate text-[11px] font-medium text-zinc-300">memo.md</span>
+        </div>
+        <span className="text-[10px] text-zinc-600">local</span>
+      </div>
+      <textarea
+        value={value}
+        onChange={(event) => onChange?.(event.target.value)}
+        placeholder="ここに作業メモを書けます。AI が見ていた path、HTML preview、ブラウザ操作のスクショなどを開いた横で残しておけます。"
+        className="h-full flex-1 resize-none border-none bg-[#0a0a0c] p-4 text-[13px] leading-6 text-zinc-200 outline-none placeholder:text-zinc-700"
+      />
     </div>
   );
 }
@@ -600,6 +669,8 @@ interface ToolPreviewPanelProps {
   mode: ToolPreviewMode;
   onModeChange: (mode: ToolPreviewMode) => void;
   activePreviewId?: string | null;
+  memo?: string;
+  onMemoChange?: (value: string) => void;
 }
 
 export function ToolPreviewPanel({
@@ -609,34 +680,48 @@ export function ToolPreviewPanel({
   mode,
   onModeChange,
   activePreviewId,
+  memo,
+  onMemoChange,
 }: ToolPreviewPanelProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
+  const displayItems = useMemo(
+    () => buildToolPreviewDisplayItems(previews, memo, activePreviewId),
+    [activePreviewId, memo, previews],
+  );
 
   // Jump to active preview when it changes (auto mode)
   useEffect(() => {
     if (mode === 'auto' && activePreviewId) {
-      const idx = previews.findIndex(
-        p => p.id === activePreviewId || p.toolStepId === activePreviewId
+      const idx = displayItems.findIndex(
+        p => matchesPreviewId(p, activePreviewId)
       );
       if (idx !== -1) setCurrentIndex(idx);
     }
-  }, [activePreviewId, mode, previews]);
+  }, [activePreviewId, mode, displayItems]);
 
   // Also jump when clicked in manual mode
   useEffect(() => {
     if (mode === 'manual' && activePreviewId) {
-      const idx = previews.findIndex(
-        p => p.id === activePreviewId || p.toolStepId === activePreviewId
+      const idx = displayItems.findIndex(
+        p => matchesPreviewId(p, activePreviewId)
       );
       if (idx !== -1) setCurrentIndex(idx);
     }
-  }, [activePreviewId, mode, previews]);
+  }, [activePreviewId, mode, displayItems]);
 
-  if (!isVisible || previews.length === 0) return null;
+  useEffect(() => {
+    if (currentIndex >= displayItems.length) {
+      setCurrentIndex(0);
+    }
+  }, [currentIndex, displayItems.length]);
 
-  const current = previews[Math.min(currentIndex, previews.length - 1)];
+  if (!isVisible || displayItems.length === 0) return null;
+
+  const current = displayItems[Math.min(currentIndex, displayItems.length - 1)];
+  const isMemo = current.id === MEMO_PREVIEW_ID;
 
   const renderContent = () => {
+    if (isMemo) return <MemoPreviewContent value={memo ?? ''} onChange={onMemoChange} />;
     switch (current.data.type) {
       case 'web':
         return <WebPreviewContent data={current.data} />;
@@ -650,11 +735,13 @@ export function ToolPreviewPanel({
   };
 
   const typeLabel =
+    isMemo ? 'Memo' :
     current.data.type === 'web' ? 'Web' :
     current.data.type === 'code' ? 'Code' :
     current.data.type === 'file' ? 'File' : 'Image';
 
   const typeIcon =
+    isMemo ? <NotebookPen size={12} className="text-zinc-300" /> :
     current.data.type === 'web' ? <Globe size={12} className="text-emerald-400" /> :
     current.data.type === 'code' ? <Code size={12} className="text-amber-400" /> :
     current.data.type === 'file' ? <FileText size={12} className="text-violet-400" /> :
@@ -668,7 +755,7 @@ export function ToolPreviewPanel({
           {typeIcon}
           <span className="text-[11px] font-medium text-zinc-400">{typeLabel}</span>
           <span className="text-[10px] text-zinc-600 bg-zinc-800 px-1.5 py-0.5 rounded">
-            {currentIndex + 1}/{previews.length}
+            {currentIndex + 1}/{displayItems.length}
           </span>
         </div>
         <div className="flex items-center gap-0.5">
@@ -700,8 +787,8 @@ export function ToolPreviewPanel({
             <ChevronLeft size={14} />
           </button>
           <button
-            onClick={() => setCurrentIndex(i => Math.min(previews.length - 1, i + 1))}
-            disabled={currentIndex === previews.length - 1}
+            onClick={() => setCurrentIndex(i => Math.min(displayItems.length - 1, i + 1))}
+            disabled={currentIndex === displayItems.length - 1}
             className="p-1 text-zinc-600 hover:text-zinc-300 disabled:opacity-20 transition-colors"
           >
             <ChevronRight size={14} />
@@ -722,7 +809,7 @@ export function ToolPreviewPanel({
 
       {/* Bottom tab nav */}
       <PreviewNav
-        items={previews}
+        items={displayItems}
         currentIndex={currentIndex}
         onSelect={setCurrentIndex}
       />

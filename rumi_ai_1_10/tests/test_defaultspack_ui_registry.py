@@ -91,6 +91,10 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         binding_part_ids = {binding["part_id"] for binding in catalog["component_bindings"]}
 
         self.assertIn("web_search", sidebar_ids)
+        self.assertIn("todo", sidebar_ids)
+        self.assertIn("subagent", sidebar_ids)
+        self.assertIn("browser_use", sidebar_ids)
+        self.assertIn("computer_use", sidebar_ids)
         self.assertIn("artifacts", sidebar_ids)
         self.assertIn("research-providers", sidebar_ids)
         self.assertIn("browser-computer", sidebar_ids)
@@ -123,6 +127,34 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertIn("ai_chat", binding_part_ids)
         self.assertEqual(catalog["app"]["icon"], "/static/assets/icons/defaultspack-icon.png")
         self.assertEqual(catalog["diagnostics"], [])
+
+    def test_chat_send_builds_multimodal_attachment_blocks(self):
+        from blocks.chat.send import (
+            _attachment_image_blocks,
+            _sanitize_attachment_metadata,
+        )
+        from domain.chat.message_converter import convert_to_standard
+
+        attachments = [
+            {
+                "id": "image-1",
+                "name": "sample.png",
+                "size": 128,
+                "type": "image/png",
+                "dataUrl": "data:image/png;base64,iVBORw0KGgo=",
+            }
+        ]
+
+        content = [{"type": "text", "text": "画像を見て"}]
+        content.extend(_attachment_image_blocks(attachments))
+        standard = convert_to_standard([{"role": "user", "content": content}])
+
+        self.assertEqual(standard[0]["content"][0]["text"], "画像を見て")
+        self.assertEqual(
+            standard[0]["content"][1]["image_url"]["url"],
+            "data:image/png;base64,iVBORw0KGgo=",
+        )
+        self.assertNotIn("dataUrl", _sanitize_attachment_metadata(attachments)[0])
 
     def test_fallback_http_routes_do_not_repeat_method_pattern_pairs(self):
         from transport.registry import _FALLBACK_HTTP_ROUTE_SPECS
@@ -315,6 +347,29 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertNotIn("or-secret", settings_text)
         self.assertTrue(has_secret)
 
+    def test_update_settings_stores_google_key_as_secret(self):
+        from core_runtime.secrets_store import SecretsStore
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            with patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "google/gemini-2.5-flash"}]
+                registry = FrontendRegistry(pack_root=pack_root)
+                values = registry.update_settings({"models": {"google_api_key": "google-secret"}})
+                reloaded = registry.get_settings()["values"]
+
+            settings_path = pack_root / "user_data" / "shared" / "frontend_settings.json"
+            settings_text = settings_path.read_text(encoding="utf-8")
+            store = SecretsStore(str(pack_root / "user_data" / "secrets"))
+            has_secret = store.has_secret("GOOGLE_API_KEY")
+
+        self.assertTrue(values["models"]["google_api_key_configured"])
+        self.assertEqual(values["models"]["google_api_key"], "")
+        self.assertEqual(reloaded["models"]["google_api_key"], "")
+        self.assertNotIn("google-secret", settings_text)
+        self.assertTrue(has_secret)
+
     def test_openrouter_key_status_is_derived_from_secret_store(self):
         from core_runtime.secrets_store import SecretsStore
         from domain.frontend.registry import FrontendRegistry
@@ -343,6 +398,35 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
 
         self.assertEqual(values["models"]["openrouter_api_key"], "")
         self.assertTrue(values["models"]["openrouter_api_key_configured"])
+
+    def test_google_key_status_is_derived_from_secret_store(self):
+        from core_runtime.secrets_store import SecretsStore
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            settings_path = pack_root / "user_data" / "shared" / "frontend_settings.json"
+            settings_path.parent.mkdir(parents=True, exist_ok=True)
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "models": {
+                            "google_api_key": "must-not-persist",
+                            "google_api_key_configured": False,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            store = SecretsStore(str(pack_root / "user_data" / "secrets"))
+            store.set_secret("GOOGLE_API_KEY", "google-secret", actor="test")
+
+            with patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "google/gemini-2.5-flash"}]
+                values = FrontendRegistry(pack_root=pack_root).get_settings()["values"]
+
+        self.assertEqual(values["models"]["google_api_key"], "")
+        self.assertTrue(values["models"]["google_api_key_configured"])
 
     def test_fallback_http_routes_inject_method_for_block_handlers(self):
         from transport.registry import HttpRouteSpec, build_http_routes_from_specs
@@ -426,7 +510,20 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
             if section["id"] == "models"
             for field in section["fields"]
         }
-        self.assertEqual(model_fields["preferred_model"]["type"], "text")
+        self.assertEqual(model_fields["preferred_model"]["type"], "select")
+        self.assertGreaterEqual(len(model_fields["preferred_model"]["options"]), 1)
+        model_option_values = {option["value"] for option in model_fields["preferred_model"]["options"]}
+        self.assertIn("google/gemini-2.5-flash", model_option_values)
+        self.assertIn("google/gemma-4-26b-a4b-it", model_option_values)
+        self.assertIn("openrouter/tencent/hy3-preview:free", model_option_values)
+        self.assertNotIn("openrouter/openai/gpt-4o", model_option_values)
+        self.assertNotIn("ollama/llama3.2", model_option_values)
+        self.assertEqual(model_fields["thinking_level"]["type"], "select")
+        self.assertIn(
+            "xhigh",
+            {option["value"] for option in model_fields["thinking_level"]["options"]},
+        )
+        self.assertTrue(model_fields["model_profile"]["advanced"])
         self.assertEqual(model_fields["model_profile"]["type"], "textarea")
         self.assertEqual(values["models"]["preferred_model"], "openrouter/tencent/hy3-preview:free")
         self.assertIn("strengths", values["models"]["model_profile"])
@@ -451,6 +548,13 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                         "role": "assistant",
                         "content": [{"type": "code", "filename": "demo.py", "language": "python", "text": "print('hi')"}],
                         "widget": {"type": "indicator", "label": "Running"},
+                        "tool_logs": [
+                            {
+                                "tool_name": "calculator",
+                                "arguments": {"expression": "13829+12312"},
+                                "result": {"summary": "26141"},
+                            }
+                        ],
                     },
                 )
                 inspector.log_request(
@@ -473,6 +577,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
 
         preview_ids = {item["id"] for item in preview["previews"]}
         self.assertTrue(any(item.startswith("tool-web_search") for item in preview_ids))
+        self.assertTrue(any(item.startswith("tool-log-") for item in preview_ids))
         self.assertTrue(any(item.startswith("widget-") for item in preview_ids))
         self.assertTrue(any(item.startswith("code-") for item in preview_ids))
 

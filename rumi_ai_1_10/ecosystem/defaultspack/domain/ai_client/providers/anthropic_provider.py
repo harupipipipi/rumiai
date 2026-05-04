@@ -182,31 +182,51 @@ class AnthropicProvider(BaseProvider):
 
     # ── 9 required methods ──────────────────────────────────────────────
 
-    def complete(self, model, messages, tools, params):
-        system_parts, converted = self.build_request(messages)
-        body = {"model": model, "messages": converted, "max_tokens": params.get("max_tokens", 4096)}
-        if system_parts:
-            body["system"] = system_parts
-        if tools:
-            body["tools"] = tools
-        for k in ("temperature", "top_p", "top_k", "stop_sequences"):
+    @staticmethod
+    def _translate_params(params):
+        translated = dict(params or {})
+        thinking_level = str(translated.pop("thinking_level", "") or "").strip()
+        if thinking_level in {"low", "medium", "high", "xhigh"} and "thinking" not in translated:
+            budgets = {"low": 1024, "medium": 4096, "high": 8192, "xhigh": 16384}
+            translated["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": budgets[thinking_level],
+            }
+            translated["max_tokens"] = max(
+                int(translated.get("max_tokens", 4096) or 4096),
+                budgets[thinking_level] + 1024,
+            )
+        return translated
+
+    @staticmethod
+    def _copy_chat_params(body, params):
+        for k in ("temperature", "top_p", "top_k", "stop_sequences", "thinking"):
             if k in params:
                 body[k] = params[k]
         if "metadata" in params:
             body["metadata"] = params["metadata"]
-        raw = self._request_json("/v1/messages", body)
-        return self.parse_response(raw)
 
-    def stream(self, model, messages, tools, params):
+    def complete(self, model, messages, tools, params):
+        params = self._translate_params(params)
         system_parts, converted = self.build_request(messages)
         body = {"model": model, "messages": converted, "max_tokens": params.get("max_tokens", 4096)}
         if system_parts:
             body["system"] = system_parts
         if tools:
             body["tools"] = tools
-        for k in ("temperature", "top_p", "top_k", "stop_sequences"):
-            if k in params:
-                body[k] = params[k]
+        self._copy_chat_params(body, params)
+        raw = self._request_json("/v1/messages", body)
+        return self.parse_response(raw)
+
+    def stream(self, model, messages, tools, params):
+        params = self._translate_params(params)
+        system_parts, converted = self.build_request(messages)
+        body = {"model": model, "messages": converted, "max_tokens": params.get("max_tokens", 4096)}
+        if system_parts:
+            body["system"] = system_parts
+        if tools:
+            body["tools"] = tools
+        self._copy_chat_params(body, params)
         resp = self._request_stream("/v1/messages", body)
         usage_accum = {"input_tokens": 0, "output_tokens": 0}
         try:

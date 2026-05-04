@@ -3,6 +3,7 @@ import { PanelLeftOpen } from "lucide-react";
 
 import type { ChatItem } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
+import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
 import { api, type ChatContentBlock, type ChatMessage, type ComposerWidgetAction, type Conversation, type ModelProfile, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
 import { deriveConversationTitle, formatRelativeTime, messageToText } from "./lib/chat";
 import { cn } from "./lib/cn";
@@ -65,7 +66,43 @@ function toChatItem(conversation: Conversation): ChatItem {
     title: conversation.title,
     date: formatBoardDate(conversation.updated_at),
     type: "chat",
+    parentId: conversation.parent_conversation_id ?? null,
+    conversationKind: conversation.conversation_kind ?? "chat",
   };
+}
+
+function buildChatItems(conversations: Conversation[]): ChatItem[] {
+  const byId = new Map(conversations.map((conversation) => [conversation.id, conversation]));
+  const childIds = new Set<string>();
+
+  for (const conversation of conversations) {
+    if (conversation.parent_conversation_id) {
+      childIds.add(conversation.id);
+    }
+    for (const childId of conversation.child_conversation_ids ?? []) {
+      if (byId.has(childId)) childIds.add(childId);
+    }
+  }
+
+  const build = (conversation: Conversation): ChatItem => {
+    const linkedChildren = [
+      ...new Set([
+        ...(conversation.child_conversation_ids ?? []),
+        ...conversations
+          .filter((candidate) => candidate.parent_conversation_id === conversation.id)
+          .map((candidate) => candidate.id),
+      ]),
+    ]
+      .map((childId) => byId.get(childId))
+      .filter((child): child is Conversation => Boolean(child))
+      .sort((a, b) => b.updated_at - a.updated_at)
+      .map(build);
+    return { ...toChatItem(conversation), children: linkedChildren };
+  };
+
+  return conversations
+    .filter((conversation) => !childIds.has(conversation.id))
+    .map(build);
 }
 
 function normalizeBlocks(message: ChatMessage): ChatContentBlock[] {
@@ -115,6 +152,27 @@ function optimisticUserMessage(conversationId: string, text: string): ChatMessag
   };
 }
 
+function optimisticAssistantMessage(conversationId: string, model: string): ChatMessage {
+  return {
+    id: `optimistic-assistant-${Date.now()}`,
+    role: "assistant",
+    content: [{ type: "text", text: "" }],
+    raw_text: "",
+    created_at: Date.now(),
+    conversation_id: conversationId,
+    parent_id: null,
+    children_ids: [],
+    sequence_number: 0,
+    finish_reason: null,
+    usage: null,
+    widget: null,
+    metadata: { model, thinking: { state: "streaming" }, attached_tool_count: 0 },
+    events: [],
+    tool_logs: [],
+    model,
+  };
+}
+
 function previewFromAction(action: SidebarAction, title: string, data: unknown): ToolPreviewItem {
   const content = typeof data === "string" ? data : JSON.stringify(data, null, 2);
   return {
@@ -128,6 +186,111 @@ function previewFromAction(action: SidebarAction, title: string, data: unknown):
       content,
     },
   };
+}
+
+function previewLabel(preview: ToolPreviewItem | undefined): string {
+  if (!preview) return "memo.md";
+  const data = preview.data;
+  if (data.type === "web") return data.title || data.url || "Web preview";
+  if (data.type === "code") return data.filename || "Code preview";
+  if (data.type === "file") return data.filename || "File preview";
+  return data.alt || "Image preview";
+}
+
+function compactPreviewValue(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    return value.map(compactPreviewValue).filter(Boolean).join(", ");
+  }
+  if (typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>)
+      .slice(0, 6)
+      .map(([key, entry]) => {
+        const text = compactPreviewValue(entry);
+        return text ? `${key}: ${text}` : key;
+      })
+      .join("\n");
+  }
+  return String(value);
+}
+
+function toolPreviewsFromMessages(messages: ChatMessage[]): ToolPreviewItem[] {
+  return messages.flatMap((message) => (message.tool_logs ?? []).map((log, index) => {
+    const toolName = String(log.tool_name ?? "tool");
+    const result = log.result as Record<string, unknown> | undefined;
+    const status = String(result?.status ?? "completed");
+    const args = compactPreviewValue(log.arguments);
+    const output = compactPreviewValue(result?.data ?? result ?? "");
+    const content = [
+      `tool: ${toolName}`,
+      `status: ${status}`,
+      args ? `input:\n${args}` : "",
+      output ? `result:\n${output}` : "",
+    ].filter(Boolean).join("\n\n");
+    return {
+      id: `message-tool-${message.id}-${index}`,
+      toolStepId: toolName,
+      timestamp: typeof log.timestamp === "number" ? log.timestamp : message.created_at,
+      data: {
+        type: "file" as const,
+        filename: `${toolName}.tool`,
+        size: status,
+        content,
+      },
+    };
+  })).sort((a, b) => b.timestamp - a.timestamp);
+}
+
+function CanvasPeek({
+  previews,
+  memo,
+  activePreviewId,
+  onOpen,
+}: {
+  previews: ToolPreviewItem[];
+  memo: string;
+  activePreviewId: string | null;
+  onOpen: () => void;
+}) {
+  const items = buildToolPreviewDisplayItems(previews, memo, activePreviewId);
+  if (items.length === 0) return null;
+
+  const latest = items[0];
+  const count = items.length;
+  const isMemo = latest.id === "__memo__";
+  const subLabel = isMemo ? "Canvas · memo" : "Canvas · tool activity";
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="mx-auto mb-2 flex w-[min(620px,calc(100%_-_40px))] items-center justify-between gap-3 rounded-xl border border-zinc-800/90 bg-zinc-950/85 px-3 py-2 text-left shadow-[0_14px_38px_rgba(0,0,0,0.24)] transition-colors hover:border-zinc-700 hover:bg-zinc-900/90"
+      title="Canvas を開く"
+    >
+      <span className="flex min-w-0 items-center gap-3">
+        <span className="h-8 w-8 flex-shrink-0 rounded-lg border border-zinc-800 bg-zinc-900/80" />
+        <span className="min-w-0">
+          <span className="block truncate text-[12px] font-medium text-zinc-300">
+            {previewLabel(latest)}
+          </span>
+          <span className="block truncate text-[10px] text-zinc-600">{subLabel}</span>
+        </span>
+      </span>
+      <span className="flex-shrink-0 rounded-full border border-zinc-800 bg-zinc-900 px-2 py-0.5 text-[10px] text-zinc-500">
+        {count}
+      </span>
+    </button>
+  );
+}
+
+function isAbortError(errorValue: unknown): boolean {
+  return Boolean(
+    errorValue
+    && typeof errorValue === "object"
+    && "name" in errorValue
+    && String((errorValue as { name?: unknown }).name) === "AbortError",
+  );
 }
 
 function profileKey(profile: ModelProfile | null | undefined, fallback: string): string {
@@ -152,6 +315,91 @@ function findProfile(profiles: ModelProfile[], modelId: string): ModelProfile | 
     || profile.qualified_model_id === modelId
     || `${profile.provider_id}/${profile.model_id}` === modelId
   )) ?? null;
+}
+
+const CORE_MODEL_PROVIDERS = new Set(["google", "openrouter", "stub"]);
+const API_KEY_PROVIDER_IDS = new Set(["google", "openrouter"]);
+
+function isConfiguredProfile(profile: ModelProfile): boolean {
+  const availability = profile.availability ?? {};
+  return Boolean(
+    availability.configured
+    || availability.active
+    || availability.status === "configured"
+    || availability.status === "active",
+  );
+}
+
+export function profileNeedsApiKey(profile: ModelProfile | null | undefined): boolean {
+  if (!profile) return false;
+  const providerId = String(profile.provider_id ?? "").trim();
+  if (!providerId || providerId === "stub" || providerId === "rumi") return false;
+  const availability = profile.availability ?? {};
+  if (profile.local || availability.local || isConfiguredProfile(profile)) return false;
+  return API_KEY_PROVIDER_IDS.has(providerId);
+}
+
+function isUserFacingModelProfile(profile: ModelProfile, preferredModel: string): boolean {
+  const providerId = String(profile.provider_id ?? "").trim();
+  const modelId = String(profile.model_id ?? "").trim();
+  const type = String(profile.type ?? "chat").toLowerCase();
+  const profileId = profile.profile_id || profile.qualified_model_id || `${providerId}/${modelId}`;
+
+  if (profileId === preferredModel) return true;
+  if (type && type !== "chat") return false;
+  if (providerId === "rumi") return false;
+  if (providerId === "stub") return modelId === "default";
+  if (providerId === "openrouter") return modelId === "tencent/hy3-preview:free";
+  if (providerId === "google") return modelId.startsWith("gemini-") || modelId.startsWith("gemma-");
+  return isConfiguredProfile(profile);
+}
+
+function modelProfileSortKey(profile: ModelProfile): [number, number, string] {
+  const providerId = String(profile.provider_id ?? "").trim();
+  const modelId = String(profile.model_id ?? "").trim();
+  const providerOrder: Record<string, number> = {
+    google: 0,
+    openrouter: 1,
+    openai: 2,
+    anthropic: 3,
+    genspark: 4,
+    ollama: 7,
+    lmstudio: 8,
+    stub: 99,
+  };
+  const modelOrder: Record<string, number> = {
+    "gemini-2.5-pro": 0,
+    "gemini-2.5-flash": 1,
+    "gemini-3-pro-preview": 2,
+    "gemini-3-flash-preview": 3,
+    "gemini-2.5-flash-lite": 4,
+    "gemini-2.0-flash-lite": 5,
+    "gemma-4-31b-it": 6,
+    "gemma-4-26b-a4b-it": 7,
+    "gemma-3-27b-it": 8,
+    "gemma-3n-e4b-it": 9,
+    "tencent/hy3-preview:free": 0,
+    default: 0,
+  };
+  return [
+    providerOrder[providerId] ?? 50,
+    modelOrder[modelId] ?? 20,
+    profile.display_name || profile.profile_id,
+  ];
+}
+
+export function userFacingModelProfiles(profiles: ModelProfile[], preferredModel: string): ModelProfile[] {
+  const deduped = new Map<string, ModelProfile>();
+  for (const profile of profiles) {
+    if (!isUserFacingModelProfile(profile, preferredModel)) continue;
+    const key = profile.profile_id || profile.qualified_model_id || `${profile.provider_id}/${profile.model_id}`;
+    if (key) deduped.set(key, profile);
+  }
+  return [...deduped.values()].sort((a, b) => {
+    const aKey = modelProfileSortKey(a);
+    const bKey = modelProfileSortKey(b);
+    return aKey[0] - bKey[0] || aKey[1] - bKey[1] || aKey[2].localeCompare(bKey[2]);
+  });
 }
 
 function favoriteModelProfiles(rawFavorites: unknown, profiles: ModelProfile[], preferredModel: string): ModelProfile[] {
@@ -271,6 +519,7 @@ export default function App() {
   const [isHistoryMinimized, setIsHistoryMinimized] = useLocalStorage("rumi-history-minimized", false);
   const [isNewChatLaunching, setIsNewChatLaunching] = useState(false);
   const [previewMode, setPreviewMode] = useLocalStorage<ToolPreviewMode>("rumi-preview-mode", "auto");
+  const [canvasMemo, setCanvasMemo] = useLocalStorage("rumi-canvas-memo", "");
   const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
   const [previews, setPreviews] = useState<ToolPreviewItem[]>([]);
   const [health, setHealth] = useState<{ status: string; pack: string; ts: string } | null>(null);
@@ -287,9 +536,10 @@ export default function App() {
   const [pendingRequests, setPendingRequests] = useLocalStorage<Record<string, PendingChatRequest>>(pendingStorageKey, {});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isUnloadingRef = useRef(false);
+  const currentAbortControllerRef = useRef<AbortController | null>(null);
 
   const sidebarItems: SidebarItem[] = catalog?.sidebar.items ?? [];
-  const chatItems = conversations.map(toChatItem);
+  const chatItems = buildChatItems(conversations);
   const activeModelId = activeConversation?.model ?? String(settingsValues.models?.preferred_model ?? "openrouter/tencent/hy3-preview:free").trim();
   const activeProfile = findProfile(modelProfiles, activeModelId);
   const messages = activeConversation ? activeConversation.messages.map((message) => toUiMessage(message, activeProfile)) : [];
@@ -297,9 +547,15 @@ export default function App() {
   const isNewConversation = activeConversation === null || activeConversation.messages.length === 0;
   const placeholder = String(settingsValues.general?.composer_placeholder ?? "メッセージを入力...");
   const preferredModel = activeModelId;
-  const favoriteProfiles = favoriteModelProfiles(settingsValues.models?.favorite_profiles, modelProfiles, preferredModel);
+  const selectableModelProfiles = userFacingModelProfiles(modelProfiles, preferredModel);
+  const favoriteProfiles = favoriteModelProfiles(settingsValues.models?.favorite_profiles, selectableModelProfiles, preferredModel);
   const thinkingLevels = (settingsValues.models?.thinking_level_by_profile ?? {}) as Record<string, unknown>;
-  const selectedThinkingLevel = String(thinkingLevels[profileKey(activeProfile, preferredModel)] ?? activeProfile?.default_thinking_level ?? "medium");
+  const selectedThinkingLevel = String(
+    settingsValues.models?.thinking_level
+    ?? thinkingLevels[profileKey(activeProfile, preferredModel)]
+    ?? activeProfile?.default_thinking_level
+    ?? "medium",
+  );
   const contextUsage = contextUsageFor(activeConversation, activeProfile);
   const composerExtensions = composerExtensionItems(sidebarItems);
   const selectedToolIds = useMemo(() => selectedTools.map((tool) => tool.id), [selectedTools]);
@@ -309,6 +565,19 @@ export default function App() {
     pendingRequest && Date.now() - pendingRequest.startedAt < 10 * 60_000,
   );
   const browserApproval = pendingBrowserApproval(messages);
+  const messageToolPreviews = useMemo(
+    () => toolPreviewsFromMessages(activeConversation?.messages ?? []),
+    [activeConversation?.messages],
+  );
+  const canvasPreviews = useMemo(() => {
+    const seen = new Set(previews.map((preview) => preview.id));
+    return [
+      ...previews,
+      ...messageToolPreviews.filter((preview) => !seen.has(preview.id)),
+    ];
+  }, [messageToolPreviews, previews]);
+  const canShowCanvas = hasCanvasItems(canvasPreviews, canvasMemo);
+  const effectiveShowPreview = showPreview && canShowCanvas;
   const composerCommands = [
     {
       id: "yolo",
@@ -323,7 +592,7 @@ export default function App() {
       enabled: mode === "coding",
     },
   ];
-  const unknownBlockStrategy = String(settingsValues.chat_rendering?.unknown_block_strategy ?? "json");
+  const unknownBlockStrategy = String(settingsValues.chat_rendering?.unknown_block_strategy ?? "hidden");
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
   const showActivityInMessages = settingsValues.general?.show_activity_in_messages !== false;
   const showRegion = (regionId: string) => !catalog?.shell || hasShellRegion(catalog, regionId);
@@ -571,6 +840,17 @@ export default function App() {
     replaceChatIdInUrl(null, false);
   };
 
+  const handleStopGenerating = () => {
+    currentAbortControllerRef.current?.abort();
+    currentAbortControllerRef.current = null;
+    if (activeConversationId) {
+      forgetPendingRequest(activeConversationId);
+      replaceChatIdInUrl(activeConversationId, false);
+    }
+    setIsGenerating(false);
+    setIsNewChatLaunching(false);
+  };
+
   const handleHistoryClick = (conversationId: string) => {
     setError(null);
     void loadConversation(conversationId);
@@ -621,9 +901,15 @@ export default function App() {
     }
   };
 
+  const handleProviderApiKeySave = async (providerId: string, value: string) => {
+    await api.saveProviderApiKey(providerId, value);
+    await refreshCatalog();
+  };
+
   const handleThinkingLevelChange = (level: string | null) => {
     const key = profileKey(activeProfile, preferredModel);
     updateModelSettings({
+      thinking_level: level ?? "medium",
       thinking_level_by_profile: {
         ...thinkingLevels,
         [key]: level,
@@ -830,6 +1116,16 @@ export default function App() {
         result = await api.redditSearch(String(input || activeChatTitle || "rumi"), false);
       } else if (action.id === "browser.session") {
         result = await api.browserComputer("browser.session", { dry_run: true });
+      } else if (action.id === "browser.profiles.list") {
+        result = await api.browserComputer("browser.profiles.list", action.payload ?? {});
+      } else if (action.id === "browser.profile.create") {
+        result = await api.browserComputer("browser.profile.create", action.payload ?? {});
+      } else if (action.id === "browser.cookies.list") {
+        result = await api.browserComputer("browser.cookies.list", action.payload ?? {});
+      } else if (action.id === "browser.profile.clear_cache.dry_run") {
+        result = await api.browserComputer("browser.profile.clear_cache", { ...(action.payload ?? {}), dry_run: true });
+      } else if (action.id === "browser.profile.clear_cookies.dry_run") {
+        result = await api.browserComputer("browser.profile.clear_cookies", { ...(action.payload ?? {}), dry_run: true });
       } else if (action.id === "browser.screenshot.dry_run") {
         result = await api.browserComputer("computer.screenshot", { dry_run: true });
       } else if (action.id === "schedules.list") {
@@ -904,7 +1200,54 @@ export default function App() {
         const withoutCurrent = current.filter((candidate) => candidate.id !== conversation.id);
         return [item, ...withoutCurrent];
       });
-      await api.sendMessage(conversation.id, userText, {
+      const assistantDraft = optimisticAssistantMessage(conversation.id, preferredModel || "stub/default");
+      const abortController = new AbortController();
+      currentAbortControllerRef.current = abortController;
+      const updateStreamingAssistant = (delta: string) => {
+        setActiveConversation((current) => {
+          if (!current || current.id !== conversation.id) return current;
+          const existing = current.messages.find((message) => message.id === assistantDraft.id);
+          if (!existing) {
+            return {
+              ...current,
+              messages: [
+                ...current.messages,
+                {
+                  ...assistantDraft,
+                  content: [{ type: "text", text: delta }],
+                  raw_text: delta,
+                },
+              ],
+            };
+          }
+          return {
+            ...current,
+            messages: current.messages.map((message) => {
+              if (message.id !== assistantDraft.id) return message;
+              const nextText = `${message.raw_text ?? ""}${delta}`;
+              return {
+                ...message,
+                content: [{ type: "text", text: nextText }],
+                raw_text: nextText,
+              };
+            }),
+          };
+        });
+      };
+      const replaceStreamingAssistant = (message: ChatMessage) => {
+        setActiveConversation((current) => {
+          if (!current || current.id !== conversation.id) return current;
+          const hasDraft = current.messages.some((candidate) => candidate.id === assistantDraft.id);
+          return {
+            ...current,
+            messages: hasDraft
+              ? current.messages.map((candidate) => candidate.id === assistantDraft.id ? message : candidate)
+              : [...current.messages, message],
+          };
+        });
+      };
+
+      await api.streamMessage(conversation.id, userText, {
         thinking_level: activeProfile?.supports_thinking ? selectedThinkingLevel : null,
         tool_policy: {
           ...(yoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
@@ -913,12 +1256,17 @@ export default function App() {
         attachments: submittedAttachments,
         tools: selectedToolIds,
         metadata: {
+          mode: "chat",
           attachments: submittedAttachments.map(({ name, size, type, truncated, source, sourcePath }) => ({ name, size, type, truncated, source, sourcePath })),
           selected_tools: selectedToolIds,
           dropped_widgets: droppedWidgets
             .filter((widget) => widget.widgetKind === "tool_toggle" || widget.type === "tool" ? selectedToolIdSet.has(widget.sourceItemId || widget.id) : widget.enabled !== false)
             .map(({ id, type, label, widgetKind, sourceItemId }) => ({ id, type, label, widgetKind, sourceItemId })),
         },
+      }, {
+        onDelta: updateStreamingAssistant,
+        onMessage: replaceStreamingAssistant,
+        signal: abortController.signal,
       });
       setAttachedFiles([]);
       setSelectedTools([]);
@@ -933,6 +1281,15 @@ export default function App() {
       await refreshConversations(conversation.id);
     } catch (submitError) {
       console.error("Chat error:", submitError);
+      if (isAbortError(submitError)) {
+        if (submittedConversationId) {
+          forgetPendingRequest(submittedConversationId);
+          replaceChatIdInUrl(submittedConversationId, false);
+          await refreshConversations(submittedConversationId).catch(console.error);
+        }
+        setError(null);
+        return;
+      }
       if (submittedConversationId && !isUnloadingRef.current && document.visibilityState !== "hidden") {
         forgetPendingRequest(submittedConversationId);
       }
@@ -945,6 +1302,7 @@ export default function App() {
       );
       setIsNewChatLaunching(false);
     } finally {
+      currentAbortControllerRef.current = null;
       setIsGenerating(false);
       setIsNewChatLaunching(false);
     }
@@ -959,7 +1317,7 @@ export default function App() {
       isGenerating={isGenerating || isConversationPending}
       selectedProfile={activeProfile}
       favoriteProfiles={favoriteProfiles}
-      modelProfiles={modelProfiles}
+      modelProfiles={selectableModelProfiles}
       thinkingLevel={activeProfile?.supports_thinking ? selectedThinkingLevel : null}
       contextUsage={contextUsage}
       inlineExtensions={composerExtensions}
@@ -974,9 +1332,11 @@ export default function App() {
       onExtensionSelect={handleComposerExtensionSelect}
       onCommandSelect={handleComposerCommand}
       onModelProfileSelect={handleModelProfileSelect}
+      onProviderApiKeySave={handleProviderApiKeySave}
       onThinkingLevelChange={handleThinkingLevelChange}
       onInputChange={setInput}
       onSubmit={handleSubmit}
+      onStopGenerating={handleStopGenerating}
       onModeChange={handleModeChange}
       onFileAttach={handleFileAttach}
       onAtFileAttach={handleAtFileAttach}
@@ -997,7 +1357,7 @@ export default function App() {
 
       <div className="flex flex-1 min-h-0">
         {showRegion("history") && !isHistoryMinimized && (
-          <div className="w-[360px] max-w-[36vw] min-w-[300px] flex-shrink-0 border-r border-zinc-800/60 max-[900px]:w-[300px]">
+          <div className="w-[360px] max-w-[36vw] min-w-[300px] flex-shrink-0 overflow-hidden border-r border-zinc-800/60 max-[900px]:w-[300px]">
             <Renderers.historyBoard
               activeChatId={activeConversationId}
               chatItems={chatItems}
@@ -1024,14 +1384,16 @@ export default function App() {
         )}
 
         <main className="flex-1 flex min-w-0 bg-[#09090b] relative">
-          <div className={cn("flex-1 flex flex-col min-w-0", showPreview && "border-r border-zinc-800/40")}>
+          <div className={cn("flex-1 flex flex-col min-w-0", effectiveShowPreview && "border-r border-zinc-800/40")}>
             {showRegion("chat_header") && (
               <Renderers.chatHeader
                 title={activeChatTitle}
-                showPreview={showPreview}
-                canShowPreview={showRegion("activity_preview")}
+                showPreview={effectiveShowPreview}
+                canShowPreview={showRegion("activity_preview") && canShowCanvas}
                 canOpenSettings={showRegion("settings_modal")}
-                onTogglePreview={() => setShowPreview((value) => !value)}
+                onTogglePreview={() => {
+                  if (canShowCanvas) setShowPreview((value) => !value);
+                }}
                 onOpenSettings={() => setIsSettingsOpen(true)}
               />
             )}
@@ -1065,12 +1427,25 @@ export default function App() {
 
             {showRegion("composer") && !isNewConversation && (
               <div className="relative">
+                {showRegion("activity_preview") && !effectiveShowPreview && canShowCanvas && (
+                  <CanvasPeek
+                    previews={canvasPreviews}
+                    memo={canvasMemo}
+                    activePreviewId={activePreviewId}
+                    onOpen={() => setShowPreview(true)}
+                  />
+                )}
                 {browserApproval && !yoloMode && (
                   <div className="pointer-events-auto absolute bottom-full left-1/2 z-30 mb-2 w-[min(520px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-orange-500/30 bg-zinc-950 p-3 shadow-2xl">
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium text-zinc-100">{browserApproval.action} の承認が必要です</p>
-                        <p className="truncate text-[11px] text-zinc-500">{JSON.stringify(browserApproval.payload)}</p>
+                        <details className="mt-1 text-[11px] text-zinc-500">
+                          <summary className="cursor-pointer select-none text-zinc-500 hover:text-zinc-300">payload を表示</summary>
+                          <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap rounded-md border border-zinc-800 bg-black/30 p-2 font-mono">
+                            {JSON.stringify(browserApproval.payload, null, 2)}
+                          </pre>
+                        </details>
                       </div>
                       <button
                         type="button"
@@ -1087,14 +1462,16 @@ export default function App() {
             )}
           </div>
 
-          {showRegion("activity_preview") && showPreview && (
+          {showRegion("activity_preview") && effectiveShowPreview && (
             <Renderers.toolPreviewPanel
-              previews={previews}
-              showPreview={showPreview}
+              previews={canvasPreviews}
+              showPreview={effectiveShowPreview}
               onClose={() => setShowPreview(false)}
               previewMode={previewMode}
               onModeChange={setPreviewMode}
               activePreviewId={activePreviewId}
+              memo={canvasMemo}
+              onMemoChange={setCanvasMemo}
             />
           )}
         </main>
@@ -1126,7 +1503,7 @@ export default function App() {
           isOpen={isSettingsOpen}
           catalog={catalog}
           health={health}
-          previewsCount={previews.length}
+          previewsCount={canvasPreviews.length}
           settingsSections={settingsSections}
           settingsValues={settingsValues}
           onClose={() => setIsSettingsOpen(false)}

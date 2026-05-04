@@ -6,6 +6,8 @@ import {
   COMPOSER_PANEL_DROP,
   COMPOSER_SELECTOR_DROP,
   COMPOSER_TOGGLE_DROP,
+  sortedToolGroups,
+  sortedToolUiItems,
   supportedComposerDropKind,
   supportsComposerDrop,
   supportsComposerToggleDrop,
@@ -58,6 +60,40 @@ test("legacy tools without declarations still fall back to heuristic grouping", 
 
   assert.equal(group.id, "build");
   assert.equal(group.isDeclared, false);
+});
+
+test("tool groups sort by fixed workspace order instead of active or registry order", () => {
+  const groups = sortedToolGroups([
+    { id: "research", label: "Research", description: "", isDeclared: true, path: ["research"], items: [] },
+    { id: "coding/files/write", label: "Write", description: "", isDeclared: true, path: ["coding", "files", "write"], items: [] },
+    { id: "browser", label: "Browser", description: "", isDeclared: true, path: ["browser"], items: [] },
+    { id: "coding/files/read", label: "Read", description: "", isDeclared: true, path: ["coding", "files", "read"], items: [] },
+    { id: "computer", label: "Computer", description: "", isDeclared: true, path: ["computer"], items: [] },
+  ]);
+
+  assert.deepEqual(groups.map((group) => group.id), [
+    "browser",
+    "computer",
+    "coding/files/read",
+    "coding/files/write",
+    "research",
+  ]);
+});
+
+test("tool items sort by group and label", () => {
+  const items = sortedToolUiItems([
+    { id: "web_search", label: "Web Search", tags: ["search"] },
+    { id: "coding_file_write", label: "Write File", ui: { group_id: "coding/files/write" } },
+    { id: "browser_use", label: "Browser Use", ui: { group_id: "browser" } },
+    { id: "coding_file_read", label: "Read File", ui: { group_id: "coding/files/read" } },
+  ]);
+
+  assert.deepEqual(items.map((item) => item.id), [
+    "browser_use",
+    "coding_file_read",
+    "coding_file_write",
+    "web_search",
+  ]);
 });
 
 test("composer widget drop is exposed only when explicitly declared", () => {

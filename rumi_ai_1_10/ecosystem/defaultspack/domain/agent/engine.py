@@ -109,6 +109,28 @@ class AgentEngine:
             return tool_args
         return {}
 
+    def _normalize_tool_call(self, raw_call):
+        if not isinstance(raw_call, dict):
+            return None
+        function_def = raw_call.get("function") if isinstance(raw_call.get("function"), dict) else {}
+        tool_name = (
+            raw_call.get("name")
+            or raw_call.get("tool_name")
+            or function_def.get("name")
+            or "unknown"
+        )
+        tool_args = (
+            raw_call.get("args")
+            if "args" in raw_call
+            else raw_call.get("input", function_def.get("arguments", {}))
+        )
+        return {
+            "type": "tool_call",
+            "tool_name": str(tool_name),
+            "tool_args": self._normalize_tool_args(tool_args),
+            "raw": raw_call,
+        }
+
     def _reject_unconnected_tool_call(self, execution, parsed):
         connected_tools = self._connected_tool_names(execution)
         enforced_tools = self._enforced_tool_names(execution)
@@ -141,6 +163,8 @@ class AgentEngine:
         return True
 
     def _set_pending_tool_call(self, execution, parsed):
+        queued = parsed.get("tool_calls", []) if isinstance(parsed.get("tool_calls"), list) else []
+        execution.queued_tool_calls = queued[1:] if queued and queued[0].get("raw") == parsed.get("raw") else queued
         execution.status = "waiting_approval"
         execution.pending_tool_call = {
             "tool_name": parsed["tool_name"],
@@ -161,25 +185,24 @@ class AgentEngine:
                 "content": ai_result.get("error", "AI call failed"),
             }
         data = ai_result.get("data", {})
+        parsed_calls = []
         if isinstance(data, dict) and data.get("tool_calls"):
             tool_calls = data["tool_calls"]
-            first_call = tool_calls[0] if isinstance(tool_calls, list) and len(tool_calls) > 0 else tool_calls
-            return {
-                "type": "tool_call",
-                "tool_name": first_call.get("name", first_call.get("function", {}).get("name", "unknown")),
-                "tool_args": first_call.get("args", first_call.get("function", {}).get("arguments", {})),
-                "raw": first_call,
-            }
+            raw_calls = tool_calls if isinstance(tool_calls, list) else [tool_calls]
+            parsed_calls.extend(
+                call for call in (self._normalize_tool_call(raw) for raw in raw_calls) if call
+            )
         if isinstance(data, dict) and isinstance(data.get("content"), list):
             for part in data["content"]:
                 if not isinstance(part, dict) or part.get("type") not in {"tool_use", "tool_call"}:
                     continue
-                return {
-                    "type": "tool_call",
-                    "tool_name": part.get("name", "unknown"),
-                    "tool_args": part.get("input", part.get("args", {})),
-                    "raw": part,
-                }
+                normalized = self._normalize_tool_call(part)
+                if normalized:
+                    parsed_calls.append(normalized)
+        if parsed_calls:
+            first = dict(parsed_calls[0])
+            first["tool_calls"] = parsed_calls
+            return first
         content = ""
         if isinstance(data, dict):
             content = data.get("content", data.get("text", str(data)))
@@ -188,6 +211,17 @@ class AgentEngine:
         else:
             content = str(data)
         return {"type": "text", "content": content}
+
+    def _promote_queued_tool_call(self, execution):
+        if not execution.queued_tool_calls:
+            return False
+        parsed = execution.queued_tool_calls.pop(0)
+        remaining = list(execution.queued_tool_calls)
+        if self._reject_unconnected_tool_call(execution, parsed) or self._reject_policy_violation(execution, parsed):
+            return True
+        self._set_pending_tool_call(execution, parsed)
+        execution.queued_tool_calls = remaining
+        return True
 
     def _build_initial_messages(self, execution):
         messages = []
@@ -295,6 +329,12 @@ class AgentEngine:
             "content": str(tool_content) if not isinstance(tool_content, str) else tool_content,
             "name": pending["tool_name"],
         })
+        if self._promote_queued_tool_call(execution):
+            return {
+                "execution_id": execution_id,
+                "status": execution.status,
+                "result": execution.to_dict(),
+            }
         depth = sum(1 for s in execution.steps if s.step_type == "tool_call")
         if depth >= MAX_FLOW_CALL_DEPTH:
             execution.status = "error"
