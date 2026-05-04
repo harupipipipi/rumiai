@@ -130,6 +130,54 @@ def test_chat_send_attaches_tools_and_persists_activity_events(tmp_path, monkeyp
     ChatStore._instance = None
 
 
+def test_chat_stream_uses_provider_stream_and_persists_message(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from blocks.chat.stream import run
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    result = run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "hello stream"},
+            "tools": [],
+        },
+        {},
+    )
+
+    assert result["_sse"] is True
+    events = list(result["events"])
+    deltas = [event["delta"] for event in events if event.get("type") == "delta"]
+    assert "".join(deltas) == "This is a stub stream response."
+    final = [event["message"] for event in events if event.get("type") == "message"][-1]
+    assert final["role"] == "assistant"
+    assert final["raw_text"] == "This is a stub stream response."
+
+    persisted = json.loads(storage_path.read_text(encoding="utf-8"))
+    messages = persisted["conversations"][conversation["id"]]["messages"]
+    assert [message["role"] for message in messages] == ["user", "assistant"]
+    ChatStore._instance = None
+
+
+def test_inline_thought_stream_filter_separates_thinking():
+    from blocks.chat.stream import _InlineThoughtFilter
+
+    filter_ = _InlineThoughtFilter()
+    visible = [
+        filter_.push("<tho"),
+        filter_.push("ught>private"),
+        filter_.push("</thought>public"),
+        filter_.finish(),
+    ]
+
+    assert "".join(visible) == "public"
+    assert filter_.transcript() == "private"
+
+
 def test_chat_send_persists_user_attachment_metadata(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from blocks.chat.send import run

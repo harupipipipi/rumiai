@@ -323,6 +323,26 @@ type ApiError = {
 
 type ApiEnvelope<T> = ApiOk<T> | ApiError;
 
+type SendMessageOptions = {
+  thinking_level?: string | null;
+  tool_policy?: Record<string, unknown>;
+  attachments?: ChatAttachment[];
+  tools?: string[];
+  metadata?: Record<string, unknown>;
+};
+
+export type ChatStreamEvent =
+  | { type: "delta"; delta: string }
+  | { type: "message" | "done" | "user_message"; message?: ChatMessage }
+  | { type: "error"; error?: string };
+
+type ChatStreamHandlers = {
+  onEvent?: (event: ChatStreamEvent) => void;
+  onDelta?: (delta: string) => void;
+  onMessage?: (message: ChatMessage) => void;
+  onUserMessage?: (message: ChatMessage) => void;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
@@ -348,6 +368,75 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return payload.data;
+}
+
+function messageRequestBody(
+  text: string,
+  options?: SendMessageOptions,
+): Record<string, unknown> {
+  return {
+    message: {
+      role: "user",
+      content: text,
+      attachments: options?.attachments?.length ? options.attachments : undefined,
+      metadata: options?.metadata,
+    },
+    tools: options?.tools?.length ? options.tools : undefined,
+    params: {
+      thinking_level: options?.thinking_level ?? undefined,
+      tool_policy: options?.tool_policy ?? undefined,
+    },
+  };
+}
+
+async function readStreamEvents(
+  response: Response,
+  handlers: ChatStreamHandlers = {},
+): Promise<ChatMessage | null> {
+  if (!response.body) {
+    throw new Error("defaultspack API returned an empty stream");
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalMessage: ChatMessage | null = null;
+
+  const consumePacket = (packet: string) => {
+    const dataLines = packet
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trimStart());
+    if (!dataLines.length) return;
+    const raw = dataLines.join("\n");
+    if (!raw || raw === "[DONE]") return;
+    const event = JSON.parse(raw) as ChatStreamEvent;
+    handlers.onEvent?.(event);
+    if (event.type === "delta") {
+      handlers.onDelta?.(event.delta);
+    } else if (event.type === "user_message" && event.message) {
+      handlers.onUserMessage?.(event.message);
+    } else if ((event.type === "message" || event.type === "done") && event.message) {
+      finalMessage = event.message;
+      handlers.onMessage?.(event.message);
+    } else if (event.type === "error") {
+      throw new Error(event.error || "defaultspack stream failed");
+    }
+  };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+    const packets = buffer.split(/\r?\n\r?\n/);
+    buffer = packets.pop() ?? "";
+    for (const packet of packets) {
+      consumePacket(packet);
+    }
+    if (done) break;
+  }
+  if (buffer.trim()) {
+    consumePacket(buffer);
+  }
+  return finalMessage;
 }
 
 export const api = {
@@ -384,33 +473,44 @@ export const api = {
   sendMessage(
     conversationId: string,
     text: string,
-    options?: {
-      thinking_level?: string | null;
-      tool_policy?: Record<string, unknown>;
-      attachments?: ChatAttachment[];
-      tools?: string[];
-      metadata?: Record<string, unknown>;
-    },
+    options?: SendMessageOptions,
   ) {
     return request<ChatMessage>(
       `/api/chat/conversations/${conversationId}/messages`,
       {
         method: "POST",
-        body: JSON.stringify({
-          message: {
-            role: "user",
-            content: text,
-            attachments: options?.attachments?.length ? options.attachments : undefined,
-            metadata: options?.metadata,
-          },
-          tools: options?.tools?.length ? options.tools : undefined,
-          params: {
-            thinking_level: options?.thinking_level ?? undefined,
-            tool_policy: options?.tool_policy ?? undefined,
-          },
-        }),
+        body: JSON.stringify(messageRequestBody(text, options)),
       },
     );
+  },
+
+  async streamMessage(
+    conversationId: string,
+    text: string,
+    options?: SendMessageOptions,
+    handlers?: ChatStreamHandlers,
+  ) {
+    const response = await fetch(`/api/chat/conversations/${conversationId}/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(messageRequestBody(text, options)),
+    });
+
+    const contentType = response.headers.get("Content-Type") ?? "";
+    if (!response.ok || !contentType.includes("text/event-stream")) {
+      let payload: ApiEnvelope<ChatMessage>;
+      try {
+        payload = (await response.json()) as ApiEnvelope<ChatMessage>;
+      } catch {
+        throw new Error(`Request failed with status ${response.status}`);
+      }
+      if (payload.status === "error") {
+        throw new Error(payload.error.message);
+      }
+      handlers?.onMessage?.(payload.data);
+      return payload.data;
+    }
+    return readStreamEvents(response, handlers);
   },
 
   listModelProfiles() {

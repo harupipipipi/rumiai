@@ -115,6 +115,27 @@ function optimisticUserMessage(conversationId: string, text: string): ChatMessag
   };
 }
 
+function optimisticAssistantMessage(conversationId: string, model: string): ChatMessage {
+  return {
+    id: `optimistic-assistant-${Date.now()}`,
+    role: "assistant",
+    content: [{ type: "text", text: "" }],
+    raw_text: "",
+    created_at: Date.now(),
+    conversation_id: conversationId,
+    parent_id: null,
+    children_ids: [],
+    sequence_number: 0,
+    finish_reason: null,
+    usage: null,
+    widget: null,
+    metadata: { model, thinking: { state: "streaming" }, attached_tool_count: 0 },
+    events: [],
+    tool_logs: [],
+    model,
+  };
+}
+
 function previewFromAction(action: SidebarAction, title: string, data: unknown): ToolPreviewItem {
   const content = typeof data === "string" ? data : JSON.stringify(data, null, 2);
   return {
@@ -1001,7 +1022,52 @@ export default function App() {
         const withoutCurrent = current.filter((candidate) => candidate.id !== conversation.id);
         return [item, ...withoutCurrent];
       });
-      await api.sendMessage(conversation.id, userText, {
+      const assistantDraft = optimisticAssistantMessage(conversation.id, preferredModel || "stub/default");
+      const updateStreamingAssistant = (delta: string) => {
+        setActiveConversation((current) => {
+          if (!current || current.id !== conversation.id) return current;
+          const existing = current.messages.find((message) => message.id === assistantDraft.id);
+          if (!existing) {
+            return {
+              ...current,
+              messages: [
+                ...current.messages,
+                {
+                  ...assistantDraft,
+                  content: [{ type: "text", text: delta }],
+                  raw_text: delta,
+                },
+              ],
+            };
+          }
+          return {
+            ...current,
+            messages: current.messages.map((message) => {
+              if (message.id !== assistantDraft.id) return message;
+              const nextText = `${message.raw_text ?? ""}${delta}`;
+              return {
+                ...message,
+                content: [{ type: "text", text: nextText }],
+                raw_text: nextText,
+              };
+            }),
+          };
+        });
+      };
+      const replaceStreamingAssistant = (message: ChatMessage) => {
+        setActiveConversation((current) => {
+          if (!current || current.id !== conversation.id) return current;
+          const hasDraft = current.messages.some((candidate) => candidate.id === assistantDraft.id);
+          return {
+            ...current,
+            messages: hasDraft
+              ? current.messages.map((candidate) => candidate.id === assistantDraft.id ? message : candidate)
+              : [...current.messages, message],
+          };
+        });
+      };
+
+      await api.streamMessage(conversation.id, userText, {
         thinking_level: activeProfile?.supports_thinking ? selectedThinkingLevel : null,
         tool_policy: {
           ...(yoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
@@ -1017,6 +1083,9 @@ export default function App() {
             .filter((widget) => widget.widgetKind === "tool_toggle" || widget.type === "tool" ? selectedToolIdSet.has(widget.sourceItemId || widget.id) : widget.enabled !== false)
             .map(({ id, type, label, widgetKind, sourceItemId }) => ({ id, type, label, widgetKind, sourceItemId })),
         },
+      }, {
+        onDelta: updateStreamingAssistant,
+        onMessage: replaceStreamingAssistant,
       });
       setAttachedFiles([]);
       setSelectedTools([]);

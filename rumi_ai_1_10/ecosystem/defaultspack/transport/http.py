@@ -538,6 +538,8 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
 
             if isinstance(result, dict) and result.get("_static"):
                 self._send_static(200, result.get("content_type", "text/html"), result.get("body", ""))
+            elif isinstance(result, dict) and result.get("_sse"):
+                self._send_sse(result.get("events", []))
             else:
                 status_code = 200
                 if isinstance(result, dict) and result.get("status") == "error":
@@ -557,6 +559,26 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(body)
         except BrokenPipeError:
             pass
+
+    def _send_sse(self, events):
+        self.send_response(200)
+        self._send_cors_headers()
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache, no-transform")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        try:
+            for event in events:
+                if isinstance(event, bytes):
+                    payload = event
+                else:
+                    payload = ("data: " + json.dumps(event, ensure_ascii=False) + "\n\n").encode("utf-8")
+                self.wfile.write(payload)
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        finally:
+            self.close_connection = True
 
     def _send_static(self, status_code, content_type, body):
         if isinstance(body, str):

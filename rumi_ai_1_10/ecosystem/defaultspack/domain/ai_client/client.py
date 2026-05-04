@@ -293,6 +293,15 @@ class AIClient:
         except NotImplementedError as e:
             raise RuntimeError(str(e)) from None
 
+    def supports_stream(self, model):
+        provider, _ = self.resolve_provider(model)
+        try:
+            from domain.ai_client.base_provider import BaseProvider
+
+            return provider.__class__.stream is not BaseProvider.stream
+        except Exception:
+            return callable(getattr(provider, "stream", None))
+
     def list_models(self, provider=None):
         """登録済みプロバイダーの既知モデル一覧を返す。"""
         active_provider_ids = self._active_provider_ids()

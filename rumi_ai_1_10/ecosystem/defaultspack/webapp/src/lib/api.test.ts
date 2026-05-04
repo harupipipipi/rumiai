@@ -50,6 +50,41 @@ test("sendMessage serializes attachments and selected tools", async () => {
   });
 });
 
+test("streamMessage parses SSE deltas and final message", async () => {
+  const originalFetch = globalThis.fetch;
+  const events: string[] = [];
+  let finalId = "";
+  globalThis.fetch = (async () => {
+    const body = [
+      'data: {"type":"delta","delta":"he"}\n\n',
+      'data: {"type":"delta","delta":"llo"}\n\n',
+      'data: {"type":"message","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"hello"}],"created_at":1,"conversation_id":"c1"}}\n\n',
+      'data: {"type":"done","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"hello"}],"created_at":1,"conversation_id":"c1"}}\n\n',
+    ].join("");
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream; charset=utf-8" },
+    });
+  }) as typeof fetch;
+
+  try {
+    const final = await api.streamMessage("c1", "hello", undefined, {
+      onDelta(delta) {
+        events.push(delta);
+      },
+      onMessage(message) {
+        finalId = message.id;
+      },
+    });
+    assert.equal(final?.id, "m2");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(events, ["he", "llo"]);
+  assert.equal(finalId, "m2");
+});
+
 test("coding context, branch, and workspace read helpers use existing API routes", async () => {
   const seen: Array<{ input: string; body?: unknown }> = [];
   const originalFetch = globalThis.fetch;
