@@ -38,7 +38,57 @@
       "composer_label": "Computer Use",
       "composer_icon": "monitor",
       "drop_capabilities": ["composer.toggle_chip"],
-      "widget_kind": "tool_toggle"
+      "widget_kind": "tool_toggle",
+      "settings_fields": [
+        {
+          "id": "target",
+          "label": "Default Target",
+          "type": "select",
+          "default": "primary_display",
+          "options": [
+            {"value": "primary_display", "label": "Primary Display"},
+            {"value": "active_window", "label": "Active Window"},
+            {"value": "all_displays", "label": "All Displays"}
+          ],
+          "help": "Default desktop target for new tasks; request-specific details are supplied at call time."
+        },
+        {
+          "id": "mode",
+          "label": "Default Mode",
+          "type": "select",
+          "default": "inspect_first",
+          "options": [
+            {"value": "inspect_first", "label": "Inspect First"},
+            {"value": "direct", "label": "Direct Action"},
+            {"value": "read_only", "label": "Read Only"}
+          ],
+          "help": "Preferred operating mode before issuing desktop actions."
+        },
+        {
+          "id": "safety",
+          "label": "Safety Default",
+          "type": "select",
+          "default": "approval_required",
+          "options": [
+            {"value": "approval_required", "label": "Require Approval"},
+            {"value": "dry_run_first", "label": "Dry Run First"},
+            {"value": "read_only", "label": "Read Only"}
+          ],
+          "help": "Durable safety preference for desktop operations."
+        },
+        {
+          "id": "quality",
+          "label": "Screenshot Quality",
+          "type": "select",
+          "default": "standard",
+          "options": [
+            {"value": "compact", "label": "Compact"},
+            {"value": "standard", "label": "Standard"},
+            {"value": "high_detail", "label": "High Detail"}
+          ],
+          "help": "Default screenshot/detail preference for visual inspection."
+        }
+      ]
     }
   }
 }

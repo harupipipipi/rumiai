@@ -23,6 +23,65 @@
       }
     },
     "execution": {"type": "local"},
-    "handler": "domain.tool.executor:ToolExecutor.execute"
+    "handler": "domain.tool.executor:ToolExecutor.execute",
+    "requires_approval": true,
+    "ui": {
+      "group_id": "browser_computer",
+      "group_label": "Browser / Computer",
+      "composer_label": "Browser / Computer",
+      "composer_icon": "mouse-pointer-click",
+      "drop_capabilities": ["composer.toggle_chip"],
+      "widget_kind": "tool_toggle",
+      "settings_fields": [
+        {
+          "id": "target",
+          "label": "Default Target",
+          "type": "select",
+          "default": "active_context",
+          "options": [
+            {"value": "active_context", "label": "Active Context"},
+            {"value": "browser_first", "label": "Browser First"},
+            {"value": "desktop_first", "label": "Desktop First"}
+          ],
+          "help": "Default target preference when a task can use either browser or desktop."
+        },
+        {
+          "id": "mode",
+          "label": "Default Mode",
+          "type": "select",
+          "default": "inspect_first",
+          "options": [
+            {"value": "inspect_first", "label": "Inspect First"},
+            {"value": "direct", "label": "Direct Action"},
+            {"value": "read_only", "label": "Read Only"}
+          ],
+          "help": "Preferred operating mode before issuing cross-surface actions."
+        },
+        {
+          "id": "safety",
+          "label": "Safety Default",
+          "type": "select",
+          "default": "approval_required",
+          "options": [
+            {"value": "approval_required", "label": "Require Approval"},
+            {"value": "dry_run_first", "label": "Dry Run First"},
+            {"value": "read_only", "label": "Read Only"}
+          ],
+          "help": "Durable safety preference for cross-surface operations."
+        },
+        {
+          "id": "quality",
+          "label": "Screenshot Quality",
+          "type": "select",
+          "default": "standard",
+          "options": [
+            {"value": "compact", "label": "Compact"},
+            {"value": "standard", "label": "Standard"},
+            {"value": "high_detail", "label": "High Detail"}
+          ],
+          "help": "Default visual detail preference for browser and desktop inspection."
+        }
+      ]
+    }
   }
 }
