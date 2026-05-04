@@ -154,6 +154,87 @@ function findProfile(profiles: ModelProfile[], modelId: string): ModelProfile | 
   )) ?? null;
 }
 
+const CORE_MODEL_PROVIDERS = new Set(["google", "openrouter", "stub"]);
+const API_KEY_PROVIDER_IDS = new Set(["google", "openrouter"]);
+
+function isConfiguredProfile(profile: ModelProfile): boolean {
+  const availability = profile.availability ?? {};
+  return Boolean(
+    availability.configured
+    || availability.active
+    || availability.status === "configured"
+    || availability.status === "active",
+  );
+}
+
+export function profileNeedsApiKey(profile: ModelProfile | null | undefined): boolean {
+  if (!profile) return false;
+  const providerId = String(profile.provider_id ?? "").trim();
+  if (!providerId || providerId === "stub" || providerId === "rumi") return false;
+  const availability = profile.availability ?? {};
+  if (profile.local || availability.local || isConfiguredProfile(profile)) return false;
+  return API_KEY_PROVIDER_IDS.has(providerId);
+}
+
+function isUserFacingModelProfile(profile: ModelProfile, preferredModel: string): boolean {
+  const providerId = String(profile.provider_id ?? "").trim();
+  const modelId = String(profile.model_id ?? "").trim();
+  const type = String(profile.type ?? "chat").toLowerCase();
+  const profileId = profile.profile_id || profile.qualified_model_id || `${providerId}/${modelId}`;
+
+  if (profileId === preferredModel) return true;
+  if (type && type !== "chat") return false;
+  if (providerId === "rumi") return false;
+  if (providerId === "stub") return modelId === "default";
+  if (providerId === "openrouter") return modelId === "tencent/hy3-preview:free";
+  if (providerId === "google") return modelId.startsWith("gemini-");
+  return isConfiguredProfile(profile);
+}
+
+function modelProfileSortKey(profile: ModelProfile): [number, number, string] {
+  const providerId = String(profile.provider_id ?? "").trim();
+  const modelId = String(profile.model_id ?? "").trim();
+  const providerOrder: Record<string, number> = {
+    google: 0,
+    openrouter: 1,
+    openai: 2,
+    anthropic: 3,
+    genspark: 4,
+    ollama: 7,
+    lmstudio: 8,
+    stub: 99,
+  };
+  const modelOrder: Record<string, number> = {
+    "gemini-2.5-pro": 0,
+    "gemini-2.5-flash": 1,
+    "gemini-3-pro-preview": 2,
+    "gemini-3-flash-preview": 3,
+    "gemini-2.5-flash-lite": 4,
+    "gemini-2.0-flash-lite": 5,
+    "tencent/hy3-preview:free": 0,
+    default: 0,
+  };
+  return [
+    providerOrder[providerId] ?? 50,
+    modelOrder[modelId] ?? 20,
+    profile.display_name || profile.profile_id,
+  ];
+}
+
+export function userFacingModelProfiles(profiles: ModelProfile[], preferredModel: string): ModelProfile[] {
+  const deduped = new Map<string, ModelProfile>();
+  for (const profile of profiles) {
+    if (!isUserFacingModelProfile(profile, preferredModel)) continue;
+    const key = profile.profile_id || profile.qualified_model_id || `${profile.provider_id}/${profile.model_id}`;
+    if (key) deduped.set(key, profile);
+  }
+  return [...deduped.values()].sort((a, b) => {
+    const aKey = modelProfileSortKey(a);
+    const bKey = modelProfileSortKey(b);
+    return aKey[0] - bKey[0] || aKey[1] - bKey[1] || aKey[2].localeCompare(bKey[2]);
+  });
+}
+
 function favoriteModelProfiles(rawFavorites: unknown, profiles: ModelProfile[], preferredModel: string): ModelProfile[] {
   const favoriteIds = Array.isArray(rawFavorites)
     ? rawFavorites.map((item) => String(item))
@@ -297,9 +378,15 @@ export default function App() {
   const isNewConversation = activeConversation === null || activeConversation.messages.length === 0;
   const placeholder = String(settingsValues.general?.composer_placeholder ?? "メッセージを入力...");
   const preferredModel = activeModelId;
-  const favoriteProfiles = favoriteModelProfiles(settingsValues.models?.favorite_profiles, modelProfiles, preferredModel);
+  const selectableModelProfiles = userFacingModelProfiles(modelProfiles, preferredModel);
+  const favoriteProfiles = favoriteModelProfiles(settingsValues.models?.favorite_profiles, selectableModelProfiles, preferredModel);
   const thinkingLevels = (settingsValues.models?.thinking_level_by_profile ?? {}) as Record<string, unknown>;
-  const selectedThinkingLevel = String(thinkingLevels[profileKey(activeProfile, preferredModel)] ?? activeProfile?.default_thinking_level ?? "medium");
+  const selectedThinkingLevel = String(
+    settingsValues.models?.thinking_level
+    ?? thinkingLevels[profileKey(activeProfile, preferredModel)]
+    ?? activeProfile?.default_thinking_level
+    ?? "medium",
+  );
   const contextUsage = contextUsageFor(activeConversation, activeProfile);
   const composerExtensions = composerExtensionItems(sidebarItems);
   const selectedToolIds = useMemo(() => selectedTools.map((tool) => tool.id), [selectedTools]);
@@ -621,9 +708,15 @@ export default function App() {
     }
   };
 
+  const handleProviderApiKeySave = async (providerId: string, value: string) => {
+    await api.saveProviderApiKey(providerId, value);
+    await refreshCatalog();
+  };
+
   const handleThinkingLevelChange = (level: string | null) => {
     const key = profileKey(activeProfile, preferredModel);
     updateModelSettings({
+      thinking_level: level ?? "medium",
       thinking_level_by_profile: {
         ...thinkingLevels,
         [key]: level,
@@ -959,7 +1052,7 @@ export default function App() {
       isGenerating={isGenerating || isConversationPending}
       selectedProfile={activeProfile}
       favoriteProfiles={favoriteProfiles}
-      modelProfiles={modelProfiles}
+      modelProfiles={selectableModelProfiles}
       thinkingLevel={activeProfile?.supports_thinking ? selectedThinkingLevel : null}
       contextUsage={contextUsage}
       inlineExtensions={composerExtensions}
@@ -974,6 +1067,7 @@ export default function App() {
       onExtensionSelect={handleComposerExtensionSelect}
       onCommandSelect={handleComposerCommand}
       onModelProfileSelect={handleModelProfileSelect}
+      onProviderApiKeySave={handleProviderApiKeySave}
       onThinkingLevelChange={handleThinkingLevelChange}
       onInputChange={setInput}
       onSubmit={handleSubmit}

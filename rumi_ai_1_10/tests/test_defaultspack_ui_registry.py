@@ -478,7 +478,19 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
             if section["id"] == "models"
             for field in section["fields"]
         }
-        self.assertEqual(model_fields["preferred_model"]["type"], "text")
+        self.assertEqual(model_fields["preferred_model"]["type"], "select")
+        self.assertGreaterEqual(len(model_fields["preferred_model"]["options"]), 1)
+        model_option_values = {option["value"] for option in model_fields["preferred_model"]["options"]}
+        self.assertIn("google/gemini-2.5-flash", model_option_values)
+        self.assertIn("openrouter/tencent/hy3-preview:free", model_option_values)
+        self.assertNotIn("openrouter/openai/gpt-4o", model_option_values)
+        self.assertNotIn("ollama/llama3.2", model_option_values)
+        self.assertEqual(model_fields["thinking_level"]["type"], "select")
+        self.assertIn(
+            "xhigh",
+            {option["value"] for option in model_fields["thinking_level"]["options"]},
+        )
+        self.assertTrue(model_fields["model_profile"]["advanced"])
         self.assertEqual(model_fields["model_profile"]["type"], "textarea")
         self.assertEqual(values["models"]["preferred_model"], "openrouter/tencent/hy3-preview:free")
         self.assertIn("strengths", values["models"]["model_profile"])

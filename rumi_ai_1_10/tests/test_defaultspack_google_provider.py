@@ -89,6 +89,65 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
         self.assertEqual(captured["body"]["reasoning_effort"], "low")
         self.assertEqual(response["content"][0]["text"], "hello from gemini")
 
+    def test_openai_provider_translates_generic_thinking_level(self):
+        from domain.ai_client.providers.openai_provider import OpenAIProvider
+
+        provider = OpenAIProvider()
+        captured = {}
+
+        def fake_request_json(path, body):
+            captured["path"] = path
+            captured["body"] = body
+            return {
+                "choices": [
+                    {
+                        "message": {"content": "ok"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {},
+            }
+
+        provider._request_json = fake_request_json
+        provider.complete(
+            "gpt-5.4",
+            [{"role": "user", "content": "think"}],
+            [],
+            {"thinking_level": "xhigh"},
+        )
+
+        self.assertEqual(captured["path"], "/chat/completions")
+        self.assertEqual(captured["body"]["reasoning_effort"], "high")
+        self.assertNotIn("thinking_level", captured["body"])
+
+    def test_anthropic_provider_translates_generic_thinking_level(self):
+        from domain.ai_client.providers.anthropic_provider import AnthropicProvider
+
+        provider = AnthropicProvider()
+        captured = {}
+
+        def fake_request_json(path, body):
+            captured["path"] = path
+            captured["body"] = body
+            return {
+                "content": [{"type": "text", "text": "ok"}],
+                "stop_reason": "end_turn",
+                "usage": {},
+            }
+
+        provider._request_json = fake_request_json
+        provider.complete(
+            "claude-sonnet-4-6",
+            [{"role": "user", "content": "think"}],
+            [],
+            {"thinking_level": "xhigh", "max_tokens": 4096},
+        )
+
+        self.assertEqual(captured["path"], "/v1/messages")
+        self.assertEqual(captured["body"]["thinking"]["budget_tokens"], 16384)
+        self.assertGreaterEqual(captured["body"]["max_tokens"], 17408)
+        self.assertNotIn("thinking_level", captured["body"])
+
     def test_google_provider_key_can_be_saved_as_defaultspack_secret(self):
         from core_runtime.secrets_store import SecretsStore
         from domain.ai_client.api_key_store import (

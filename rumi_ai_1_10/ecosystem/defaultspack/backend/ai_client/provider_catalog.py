@@ -7,6 +7,11 @@ from dataclasses import dataclass, field
 from importlib import import_module
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+try:
+    from domain.ai_client.api_key_store import provider_has_api_key
+except ModuleNotFoundError:  # pragma: no cover - package import path in root-level tests
+    from ecosystem.defaultspack.domain.ai_client.api_key_store import provider_has_api_key
+
 
 @dataclass(frozen=True)
 class ProviderCatalogEntry:
@@ -348,6 +353,8 @@ _CATALOG_MODELS: Dict[str, Tuple[Dict[str, Any], ...]] = {
 
 def _env_detected(entry: ProviderCatalogEntry) -> Tuple[bool, List[str]]:
     configured = [name for name in entry.env_vars if os.environ.get(name)]
+    if not configured and provider_has_api_key(entry.provider_id):
+        return True, ["defaultspack_secret"]
     if entry.local:
         if configured:
             return True, configured
@@ -428,7 +435,7 @@ def _normalize_model_payload(model: Dict[str, Any], entry: ProviderCatalogEntry,
         )
     thinking_levels = model.get("thinking_levels")
     if not isinstance(thinking_levels, list):
-        thinking_levels = ["low", "medium", "high"] if supports_thinking else []
+        thinking_levels = ["low", "medium", "high", "xhigh"] if supports_thinking else []
     return {
         **model,
         "id": raw_id or f"{provider_id}/{model_id}",
@@ -553,6 +560,7 @@ def list_profile_catalog() -> List[Dict[str, Any]]:
                 "display_name": model.get("name") or model.get("display_name") or model["model_id"],
                 "provider_id": model["provider_id"],
                 "model_id": model["model_id"],
+                "type": model.get("type", "chat"),
                 "canonical_model_id": model["canonical_model_id"],
                 "family_id": model["family_id"],
                 "qualified_model_id": model["qualified_model_id"],

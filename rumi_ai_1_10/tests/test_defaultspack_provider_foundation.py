@@ -61,6 +61,26 @@ class TestDefaultspackProviderCatalog(unittest.TestCase):
         self.assertTrue(google["configured"])
         self.assertTrue(google["availability"]["configured"])
 
+    def test_provider_catalog_marks_google_configured_from_secret_store(self):
+        from core_runtime.secrets_store import SecretsStore
+        from ecosystem.defaultspack.backend.ai_client.provider_catalog import (
+            list_profile_catalog,
+            list_provider_catalog,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            secrets_dir = Path(tmpdir) / "secrets"
+            store = SecretsStore(str(secrets_dir))
+            store.set_secret("GOOGLE_API_KEY", "secret-key", actor="test")
+            with patch.dict(os.environ, {"RUMI_DEFAULTSPACK_SECRETS_DIR": str(secrets_dir)}, clear=True):
+                providers = {item["provider_id"]: item for item in list_provider_catalog()}
+                profiles = {item["profile_id"]: item for item in list_profile_catalog()}
+
+        google = providers["google"]
+        self.assertEqual(google["configured_envs"], ["defaultspack_secret"])
+        self.assertTrue(google["configured"])
+        self.assertTrue(profiles["google/gemini-2.5-flash"]["availability"]["configured"])
+
 
 class TestDefaultspackToolPermissionPolicy(unittest.TestCase):
     def test_permission_policy_round_trip_and_checker_behavior(self):

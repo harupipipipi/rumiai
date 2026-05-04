@@ -109,6 +109,7 @@ export type ComposerRendererProps = {
   onExtensionSelect?: (item: ComposerExtensionItem) => void;
   onCommandSelect?: (commandId: string) => void;
   onModelProfileSelect: (profileId: string) => void;
+  onProviderApiKeySave?: (providerId: string, value: string) => Promise<void> | void;
   onThinkingLevelChange: (level: string | null) => void;
   onInputChange: (value: string) => void;
   onSubmit: (event: FormEvent) => void;

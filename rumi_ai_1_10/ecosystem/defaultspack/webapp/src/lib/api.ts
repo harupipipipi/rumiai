@@ -93,7 +93,9 @@ export type ModelProfile = {
   profile_id: string;
   display_name: string;
   provider_id?: string;
+  provider_display_name?: string;
   model_id?: string;
+  type?: string;
   qualified_model_id?: string;
   max_context?: number;
   max_context_tokens?: number;
@@ -102,6 +104,7 @@ export type ModelProfile = {
   default_thinking_level?: string | null;
   availability?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
+  local?: boolean;
 };
 
 export type Conversation = {
@@ -138,6 +141,7 @@ export type SidebarField = {
   options?: SidebarFieldOption[];
   provider_id?: string;
   configured_field?: string;
+  advanced?: boolean;
 };
 
 export type SidebarAction = {

@@ -7,6 +7,7 @@ import {
   FileText,
   Folder,
   GitBranch,
+  KeyRound,
   Loader2,
   MessageSquare,
   Mic,
@@ -40,9 +41,11 @@ import { toolGroupFor } from "../lib/toolUi";
 export { resolveComposerWidgetDrop } from "../lib/composerWidgets";
 
 const THINKING_LABELS: Record<string, string> = {
+  none: "なし",
   low: "低",
   medium: "中",
   high: "高",
+  xhigh: "最高",
 };
 
 const MODE_META: Record<AppMode, { label: string; icon: typeof MessageSquare; description: string }> = {
@@ -50,6 +53,39 @@ const MODE_META: Record<AppMode, { label: string; icon: typeof MessageSquare; de
   coding: { label: "Coding", icon: Code2, description: "コード編集・Git操作" },
   agent: { label: "Agent", icon: Bot, description: "自律エージェント" },
 };
+
+const API_KEY_PROVIDER_IDS = new Set(["google", "openrouter"]);
+
+function profileProviderId(profile: ModelProfile | null | undefined): string {
+  return String(profile?.provider_id ?? "").trim();
+}
+
+function profileProviderLabel(profile: ModelProfile | null | undefined): string {
+  return String(
+    profile?.provider_display_name
+    ?? profile?.metadata?.provider_display_name
+    ?? profile?.provider_id
+    ?? "provider",
+  );
+}
+
+function profileIsConfigured(profile: ModelProfile | null | undefined): boolean {
+  const availability = profile?.availability ?? {};
+  return Boolean(
+    availability.configured
+    || availability.active
+    || availability.status === "configured"
+    || availability.status === "active",
+  );
+}
+
+export function profileNeedsApiKey(profile: ModelProfile | null | undefined): boolean {
+  const providerId = profileProviderId(profile);
+  if (!providerId || providerId === "stub" || providerId === "rumi") return false;
+  const availability = profile?.availability ?? {};
+  if (profile?.local || availability.local || profileIsConfigured(profile)) return false;
+  return API_KEY_PROVIDER_IDS.has(providerId);
+}
 
 function compactProfileName(name: string): string {
   return name
@@ -188,6 +224,95 @@ function ToolItemList({
   );
 }
 
+function ProviderApiKeyPrompt({
+  profile,
+  onCancel,
+  onSave,
+}: {
+  profile: ModelProfile;
+  onCancel: () => void;
+  onSave: (providerId: string, value: string) => Promise<void> | void;
+}) {
+  const [draft, setDraft] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const providerId = profileProviderId(profile);
+  const providerLabel = profileProviderLabel(profile);
+
+  const save = async () => {
+    const value = draft.trim();
+    if (!value || isSaving) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      await onSave(providerId, value);
+      setDraft("");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "API key の保存に失敗しました。");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <button type="button" aria-label="close api key prompt" className="fixed inset-0 z-30 cursor-default" onClick={onCancel} />
+      <div className="absolute bottom-full right-3 z-40 mb-2 w-[min(430px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/80 bg-zinc-950 shadow-2xl">
+        <div className="border-b border-zinc-800 px-4 py-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-zinc-100">
+            <KeyRound size={15} className="text-zinc-400" />
+            {providerLabel} API key
+          </div>
+          <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+            {profile.display_name} を使うには API key が必要です。ここで保存すると、そのままモデルを選べます。
+          </p>
+        </div>
+        <div className="space-y-2 p-3">
+          <input
+            type="password"
+            autoComplete="off"
+            value={draft}
+            onChange={(event) => {
+              setDraft(event.target.value);
+              setError(null);
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter") return;
+              event.preventDefault();
+              void save();
+            }}
+            placeholder={providerId === "google" ? "Gemini API key" : `${providerLabel} API key`}
+            className="w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-zinc-600"
+            autoFocus
+          />
+          {error && <p className="text-[11px] text-red-300">{error}</p>}
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="h-8 rounded-lg px-3 text-xs text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-zinc-100"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={!draft.trim() || isSaving}
+              onClick={() => void save()}
+              className={`h-8 rounded-lg px-3 text-xs font-semibold transition-colors ${
+                draft.trim() && !isSaving
+                  ? "bg-zinc-100 text-zinc-950 hover:bg-white"
+                  : "bg-zinc-900 text-zinc-600 cursor-not-allowed"
+              }`}
+            >
+              {isSaving ? "Saving..." : "Save and use"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
 function ModelDropdown({
   profiles,
   selectedProfile,
@@ -245,38 +370,47 @@ function ModelDropdown({
           {groupedByProvider.map(([provider, profiles]) => (
             <div key={provider}>
               <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-600">{provider}</div>
-              {profiles.map((profile) => (
-                <button
-                  key={profile.profile_id}
-                  type="button"
-                  draggable
-                  disabled={isGenerating}
-                  onDragStart={(event) => {
-                    event.dataTransfer.setData(
-                      "application/rumi-widget",
-                      JSON.stringify({ id: profile.profile_id, type: "model", label: profile.display_name }),
-                    );
-                    event.dataTransfer.effectAllowed = "copy";
-                  }}
-                  onClick={() => {
-                    onSelect(profile.profile_id);
-                    onClose();
-                  }}
-                  className={`w-full flex items-center justify-between gap-2 px-3 py-1.5 text-left transition-colors hover:bg-zinc-800/80 disabled:opacity-50 ${
-                    selectedProfile?.profile_id === profile.profile_id ? "bg-zinc-800/60" : ""
-                  }`}
-                >
-                  <span className="min-w-0">
-                    <span className="block truncate text-[13px] text-zinc-200">{compactProfileName(profile.display_name)}</span>
-                    <span className="block truncate text-[10px] text-zinc-500">
-                      {profile.provider_id}/{profile.model_id}
+              {profiles.map((profile) => {
+                const needsKey = profileNeedsApiKey(profile);
+                return (
+                  <button
+                    key={profile.profile_id}
+                    type="button"
+                    draggable
+                    disabled={isGenerating}
+                    onDragStart={(event) => {
+                      event.dataTransfer.setData(
+                        "application/rumi-widget",
+                        JSON.stringify({ id: profile.profile_id, type: "model", label: profile.display_name }),
+                      );
+                      event.dataTransfer.effectAllowed = "copy";
+                    }}
+                    onClick={() => {
+                      onSelect(profile.profile_id);
+                      onClose();
+                    }}
+                    className={`w-full flex items-center justify-between gap-2 px-3 py-1.5 text-left transition-colors hover:bg-zinc-800/80 disabled:opacity-50 ${
+                      selectedProfile?.profile_id === profile.profile_id ? "bg-zinc-800/60" : ""
+                    }`}
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate text-[13px] text-zinc-200">{compactProfileName(profile.display_name)}</span>
+                      <span className="block truncate text-[10px] text-zinc-500">
+                        {profile.provider_id}/{profile.model_id}
+                      </span>
                     </span>
-                  </span>
-                  <span className="flex-shrink-0 text-[10px] text-zinc-500">
-                    {profile.max_context_tokens ?? profile.max_context ?? "?"}
-                  </span>
-                </button>
-              ))}
+                    {needsKey ? (
+                      <span className="flex-shrink-0 rounded-full border border-amber-500/30 px-2 py-0.5 text-[10px] text-amber-300">
+                        API key
+                      </span>
+                    ) : (
+                      <span className="flex-shrink-0 text-[10px] text-zinc-500">
+                        {profile.max_context_tokens ?? profile.max_context ?? "?"}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           ))}
           {groupedByProvider.length === 0 && (
@@ -412,6 +546,7 @@ export function ComposerRenderer({
   onExtensionSelect,
   onCommandSelect,
   onModelProfileSelect,
+  onProviderApiKeySave,
   onThinkingLevelChange,
   onInputChange,
   onSubmit,
@@ -430,6 +565,8 @@ export function ComposerRenderer({
   const [openFolder, setOpenFolder] = useState<"tools" | "models" | "commands">("tools");
   const [openToolGroup, setOpenToolGroup] = useState<string | null>(null);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
+  const [apiKeyPromptProfile, setApiKeyPromptProfile] = useState<ModelProfile | null>(null);
+  const [locallyConfiguredProviders, setLocallyConfiguredProviders] = useState<Set<string>>(() => new Set());
   const [modeSelectorOpen, setModeSelectorOpen] = useState(false);
   const [atMentionOpen, setAtMentionOpen] = useState(false);
   const [atMentionQuery, setAtMentionQuery] = useState("");
@@ -443,7 +580,7 @@ export function ComposerRenderer({
   const levels = selectedProfile?.supports_thinking
     ? selectedProfile.thinking_levels?.length
       ? selectedProfile.thinking_levels
-      : ["low", "medium", "high"]
+      : ["low", "medium", "high", "xhigh"]
     : [];
   const contextDegrees = Math.round(contextUsage.ratio * 360);
   const contextTitle =
@@ -468,6 +605,46 @@ export function ComposerRenderer({
   const directoryEntries = (codingContext?.entries ?? []).filter((entry) => entry.is_dir);
   const branchOptions = codingContext?.branches?.length ? codingContext.branches : codingContext?.branch ? [codingContext.branch] : [];
   const currentDirectory = codingContext?.directory || ".";
+
+  const needsApiKey = useCallback(
+    (profile: ModelProfile | null | undefined) => (
+      profileNeedsApiKey(profile) && !locallyConfiguredProviders.has(profileProviderId(profile))
+    ),
+    [locallyConfiguredProviders],
+  );
+
+  const requestModelProfileSelect = useCallback(
+    (profileId: string) => {
+      const profile = selectableProfiles.find((item) => (
+        item.profile_id === profileId
+        || item.qualified_model_id === profileId
+        || `${item.provider_id}/${item.model_id}` === profileId
+      ));
+      if (profile && needsApiKey(profile)) {
+        setApiKeyPromptProfile(profile);
+        setModelDropdownOpen(false);
+        setMenuOpen(false);
+        return;
+      }
+      onModelProfileSelect(profileId);
+    },
+    [needsApiKey, onModelProfileSelect, selectableProfiles],
+  );
+
+  const saveProviderApiKey = useCallback(
+    async (providerId: string, value: string) => {
+      if (!apiKeyPromptProfile) return;
+      if (!onProviderApiKeySave) {
+        throw new Error("この provider の API key 保存に対応していません。");
+      }
+      await onProviderApiKeySave(providerId, value);
+      setLocallyConfiguredProviders((current) => new Set(current).add(providerId));
+      const selectedId = apiKeyPromptProfile.profile_id || apiKeyPromptProfile.qualified_model_id || `${apiKeyPromptProfile.provider_id}/${apiKeyPromptProfile.model_id}`;
+      setApiKeyPromptProfile(null);
+      onModelProfileSelect(selectedId);
+    },
+    [apiKeyPromptProfile, onModelProfileSelect, onProviderApiKeySave],
+  );
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -575,7 +752,7 @@ export function ComposerRenderer({
           if (action.type === "drop_widget") {
             onDropWidget?.(action.widget);
           } else if (action.type === "select_model") {
-            onModelProfileSelect(action.profileId);
+            requestModelProfileSelect(action.profileId);
             setModelDropdownOpen(false);
             setMenuOpen(false);
           }
@@ -584,13 +761,25 @@ export function ComposerRenderer({
         }
       }
     },
-    [attachFiles, onDropWidget, onModelProfileSelect, toolItems],
+    [attachFiles, onDropWidget, requestModelProfileSelect, toolItems],
   );
 
   const handleDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
   }, []);
+
+  const handleSubmitWithApiKeyGuard = useCallback(
+    (event: React.FormEvent) => {
+      if (needsApiKey(selectedProfile)) {
+        event.preventDefault();
+        if (selectedProfile) setApiKeyPromptProfile(selectedProfile);
+        return;
+      }
+      onSubmit(event);
+    },
+    [needsApiKey, onSubmit, selectedProfile],
+  );
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
@@ -614,10 +803,10 @@ export function ComposerRenderer({
 
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
-        onSubmit(event);
+        handleSubmitWithApiKeyGuard(event);
       }
     },
-    [matchedCommands, selectedCommandIndex, onSubmit],
+    [handleSubmitWithApiKeyGuard, matchedCommands, selectedCommandIndex],
   );
 
   return (
@@ -628,13 +817,20 @@ export function ComposerRenderer({
     >
       <div className={`rumi-composer-shell ${isNewConversation ? "rumi-composer-shell-new mx-auto" : "mx-auto"}`}>
         <form
-          onSubmit={onSubmit}
+          onSubmit={handleSubmitWithApiKeyGuard}
           className={`rumi-composer-frame ${
             isNewConversation
               ? "rumi-composer-new min-h-[176px] rounded-3xl border-zinc-700/70 bg-[#242423]"
               : "rounded-xl border-zinc-700/30 bg-[#2b2b2d] max-[640px]:rounded-xl"
           } relative flex flex-col border overflow-visible shadow-2xl shadow-black/20 focus-within:border-zinc-500/60`}
         >
+          {apiKeyPromptProfile && (
+            <ProviderApiKeyPrompt
+              profile={apiKeyPromptProfile}
+              onCancel={() => setApiKeyPromptProfile(null)}
+              onSave={saveProviderApiKey}
+            />
+          )}
           {matchedCommands.length > 0 && (
             <div className="absolute bottom-full left-4 z-30 mb-2 w-[min(420px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl">
               <div className="border-b border-zinc-800 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
@@ -760,32 +956,42 @@ export function ComposerRenderer({
                   )}
                   {openFolder === "models" && (
                     <div className="grid gap-0.5">
-                      {selectableProfiles.map((profile) => (
-                        <button
-                          key={profile.profile_id}
-                          type="button"
-                          draggable
-                          onDragStart={(event) => {
-                            event.dataTransfer.setData(
-                              "application/rumi-widget",
-                              JSON.stringify({ id: profile.profile_id, type: "model", label: profile.display_name }),
-                            );
-                            event.dataTransfer.effectAllowed = "copy";
-                          }}
-                          onClick={() => {
-                            onModelProfileSelect(profile.profile_id);
-                            setMenuOpen(false);
-                          }}
-                          className="rounded-lg px-3 py-1.5 text-left hover:bg-zinc-800/80 transition-colors"
-                        >
-                          <span className="block truncate text-[13px] text-zinc-200">
-                            {compactProfileName(profile.display_name)}
-                          </span>
-                          <span className="block truncate text-[10px] text-zinc-500">
-                            {profile.provider_id} · {profile.max_context_tokens ?? profile.max_context ?? "?"} ctx
-                          </span>
-                        </button>
-                      ))}
+                      {selectableProfiles.map((profile) => {
+                        const needsKey = needsApiKey(profile);
+                        return (
+                          <button
+                            key={profile.profile_id}
+                            type="button"
+                            draggable
+                            onDragStart={(event) => {
+                              event.dataTransfer.setData(
+                                "application/rumi-widget",
+                                JSON.stringify({ id: profile.profile_id, type: "model", label: profile.display_name }),
+                              );
+                              event.dataTransfer.effectAllowed = "copy";
+                            }}
+                            onClick={() => {
+                              requestModelProfileSelect(profile.profile_id);
+                              setMenuOpen(false);
+                            }}
+                            className="flex items-center justify-between gap-2 rounded-lg px-3 py-1.5 text-left hover:bg-zinc-800/80 transition-colors"
+                          >
+                            <span className="min-w-0">
+                              <span className="block truncate text-[13px] text-zinc-200">
+                                {compactProfileName(profile.display_name)}
+                              </span>
+                              <span className="block truncate text-[10px] text-zinc-500">
+                                {profile.provider_id} · {profile.max_context_tokens ?? profile.max_context ?? "?"} ctx
+                              </span>
+                            </span>
+                            {needsKey && (
+                              <span className="flex-shrink-0 rounded-full border border-amber-500/30 px-2 py-0.5 text-[10px] text-amber-300">
+                                API key
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                   {openFolder === "commands" && (
@@ -984,7 +1190,7 @@ export function ComposerRenderer({
                       profiles={selectableProfiles}
                       selectedProfile={selectedProfile}
                       isGenerating={isGenerating}
-                      onSelect={onModelProfileSelect}
+                      onSelect={requestModelProfileSelect}
                       onClose={() => setModelDropdownOpen(false)}
                     />
                   )}

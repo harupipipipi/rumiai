@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { filterAtMentionFiles, insertAtMentionText, resolveComposerWidgetDrop } from "./ComposerRenderer";
+import { filterAtMentionFiles, insertAtMentionText, profileNeedsApiKey, resolveComposerWidgetDrop } from "./ComposerRenderer";
 import { COMPOSER_BUTTON_DROP, COMPOSER_PANEL_DROP, COMPOSER_SELECTOR_DROP, COMPOSER_TOGGLE_DROP } from "../lib/toolUi";
 
 test("composer file mention filters string context files", () => {
@@ -27,6 +27,31 @@ test("composer model drop selects the model instead of creating a widget chip", 
   );
 
   assert.deepEqual(action, { type: "select_model", profileId: "openai/gpt-4.1" });
+});
+
+test("composer asks for an API key when an unconfigured Gemini model is selected", () => {
+  assert.equal(profileNeedsApiKey({
+    profile_id: "google/gemini-2.5-flash",
+    display_name: "Gemini 2.5 Flash",
+    provider_id: "google",
+    model_id: "gemini-2.5-flash",
+    availability: { configured: false, status: "catalog" },
+  }), true);
+
+  assert.equal(profileNeedsApiKey({
+    profile_id: "google/gemini-2.5-flash",
+    display_name: "Gemini 2.5 Flash",
+    provider_id: "google",
+    model_id: "gemini-2.5-flash",
+    availability: { configured: true, status: "configured" },
+  }), false);
+
+  assert.equal(profileNeedsApiKey({
+    profile_id: "stub/default",
+    display_name: "Stub Default",
+    provider_id: "stub",
+    model_id: "default",
+  }), false);
 });
 
 test("composer widget drop requires explicit kind capability contract", () => {

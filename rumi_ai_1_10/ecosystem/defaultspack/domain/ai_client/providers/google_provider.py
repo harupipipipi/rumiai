@@ -25,7 +25,7 @@ class GoogleProvider(OpenAICompatibleProvider):
             "provider_id": "google",
             "type": "chat",
             "supports_thinking": True,
-            "thinking_levels": ["none", "low", "medium", "high"],
+            "thinking_levels": ["none", "low", "medium", "high", "xhigh"],
             "default_thinking_level": "medium",
             "defaults": {"chat": True, "large": True},
         },
@@ -38,7 +38,7 @@ class GoogleProvider(OpenAICompatibleProvider):
             "provider_id": "google",
             "type": "chat",
             "supports_thinking": True,
-            "thinking_levels": ["none", "low", "medium", "high"],
+            "thinking_levels": ["none", "low", "medium", "high", "xhigh"],
             "default_thinking_level": "medium",
             "defaults": {"fast": True},
         },
@@ -51,7 +51,7 @@ class GoogleProvider(OpenAICompatibleProvider):
             "provider_id": "google",
             "type": "chat",
             "supports_thinking": True,
-            "thinking_levels": ["low", "medium", "high"],
+            "thinking_levels": ["low", "medium", "high", "xhigh"],
             "default_thinking_level": "medium",
         },
         {
@@ -63,7 +63,7 @@ class GoogleProvider(OpenAICompatibleProvider):
             "provider_id": "google",
             "type": "chat",
             "supports_thinking": True,
-            "thinking_levels": ["low", "medium", "high"],
+            "thinking_levels": ["low", "medium", "high", "xhigh"],
             "default_thinking_level": "medium",
         },
         {
@@ -75,7 +75,7 @@ class GoogleProvider(OpenAICompatibleProvider):
             "provider_id": "google",
             "type": "chat",
             "supports_thinking": True,
-            "thinking_levels": ["none", "low", "medium", "high"],
+            "thinking_levels": ["none", "low", "medium", "high", "xhigh"],
             "default_thinking_level": "medium",
         },
         {
@@ -158,8 +158,8 @@ class GoogleProvider(OpenAICompatibleProvider):
     def _translate_params(params):
         translated = dict(params or {})
         thinking_level = str(translated.pop("thinking_level", "") or "").strip()
-        if thinking_level in {"none", "low", "medium", "high"} and "reasoning_effort" not in translated:
-            translated["reasoning_effort"] = thinking_level
+        if thinking_level in {"none", "low", "medium", "high", "xhigh"} and "reasoning_effort" not in translated:
+            translated["reasoning_effort"] = "high" if thinking_level == "xhigh" else thinking_level
         return translated
 
     @staticmethod

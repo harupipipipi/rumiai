@@ -139,7 +139,7 @@ class AIClient:
             )
             thinking_levels = list(raw.get("thinking_levels") or metadata.get("thinking_levels") or [])
             if supports_thinking and not thinking_levels:
-                thinking_levels = ["low", "medium", "high"]
+                thinking_levels = ["low", "medium", "high", "xhigh"]
         else:
             return None
 

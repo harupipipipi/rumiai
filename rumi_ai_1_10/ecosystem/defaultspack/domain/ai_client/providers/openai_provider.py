@@ -203,23 +203,44 @@ class OpenAIProvider(BaseProvider):
 
     # ── 9 required methods ──────────────────────────────────────────────
 
+    @staticmethod
+    def _translate_params(params):
+        translated = dict(params or {})
+        thinking_level = str(translated.pop("thinking_level", "") or "").strip()
+        if thinking_level in {"low", "medium", "high", "xhigh"} and "reasoning_effort" not in translated:
+            translated["reasoning_effort"] = "high" if thinking_level == "xhigh" else thinking_level
+        return translated
+
+    @staticmethod
+    def _copy_chat_params(body, params):
+        for k in (
+            "temperature",
+            "max_tokens",
+            "top_p",
+            "frequency_penalty",
+            "presence_penalty",
+            "stop",
+            "response_format",
+            "reasoning_effort",
+        ):
+            if k in params:
+                body[k] = params[k]
+
     def complete(self, model, messages, tools, params):
+        params = self._translate_params(params)
         body = {"model": model, "messages": self.build_request(messages)}
         if tools:
             body["tools"] = tools
-        for k in ("temperature", "max_tokens", "top_p", "frequency_penalty", "presence_penalty", "stop", "response_format"):
-            if k in params:
-                body[k] = params[k]
+        self._copy_chat_params(body, params)
         raw = self._request_json("/chat/completions", body)
         return self.parse_response(raw)
 
     def stream(self, model, messages, tools, params):
+        params = self._translate_params(params)
         body = {"model": model, "messages": self.build_request(messages)}
         if tools:
             body["tools"] = tools
-        for k in ("temperature", "max_tokens", "top_p", "frequency_penalty", "presence_penalty", "stop", "response_format"):
-            if k in params:
-                body[k] = params[k]
+        self._copy_chat_params(body, params)
         body["stream_options"] = {"include_usage": True}
         resp = self._request_stream("/chat/completions", body)
         try:
