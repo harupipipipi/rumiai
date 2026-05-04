@@ -1010,6 +1010,7 @@ export default function App() {
         attachments: submittedAttachments,
         tools: selectedToolIds,
         metadata: {
+          mode: "chat",
           attachments: submittedAttachments.map(({ name, size, type, truncated, source, sourcePath }) => ({ name, size, type, truncated, source, sourcePath })),
           selected_tools: selectedToolIds,
           dropped_widgets: droppedWidgets

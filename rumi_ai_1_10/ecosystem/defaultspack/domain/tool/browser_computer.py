@@ -6,6 +6,7 @@ import secrets
 import subprocess
 import time
 import webbrowser
+import base64
 from pathlib import Path
 from typing import Any
 
@@ -57,7 +58,34 @@ class BrowserComputerController:
         self._artifact_root.mkdir(parents=True, exist_ok=True)
         path = self._artifact_root / f"screenshot-{int(time.time() * 1000)}.png"
         subprocess.run(["screencapture", "-x", str(path)], check=True)
-        return {"action": "computer.screenshot", "path": str(path), "mime_type": "image/png"}
+        model_path = self._model_screenshot_copy(path)
+        data_url = ""
+        try:
+            mime_type = "image/jpeg" if model_path.suffix.lower() in {".jpg", ".jpeg"} else "image/png"
+            data_url = "data:{};base64,".format(mime_type) + base64.b64encode(model_path.read_bytes()).decode("ascii")
+        except Exception:
+            data_url = ""
+        result = {"action": "computer.screenshot", "path": str(path), "mime_type": "image/png"}
+        if data_url:
+            result["data_url"] = data_url
+            result["model_image_path"] = str(model_path)
+        return result
+
+    def _model_screenshot_copy(self, path: Path) -> Path:
+        preview_path = path.with_name(path.stem + "-model.jpg")
+        if platform.system() == "Darwin":
+            try:
+                subprocess.run(
+                    ["sips", "-Z", "640", "-s", "format", "jpeg", str(path), "--out", str(preview_path)],
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                if preview_path.exists() and preview_path.stat().st_size > 0:
+                    return preview_path
+            except Exception:
+                pass
+        return path
 
     def _desktop_action(self, action: str, payload: dict[str, Any], *, yolo_mode: bool) -> dict[str, Any]:
         dry_run = bool(payload.get("dry_run"))

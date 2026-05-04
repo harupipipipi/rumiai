@@ -530,8 +530,7 @@ function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSetti
     <div
       ref={setDropRef}
       className={cn(
-        "flex-shrink-0 border-r border-zinc-800/60 bg-[#09090b] flex flex-col h-full transition-all duration-300",
-        "w-[280px]",
+        "w-full flex-shrink-0 border-b border-zinc-800/60 bg-[#09090b] flex flex-col transition-all duration-300",
         isDraggedOver && !isDragging && "ring-2 ring-inset ring-emerald-500/50 bg-emerald-500/[0.08]",
       )}
     >
@@ -965,7 +964,7 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
 
         {/* Columns */}
         <SortableContext items={allSortableIds} strategy={verticalListSortingStrategy}>
-          <div className="flex flex-1 overflow-x-auto overflow-y-hidden pb-12">
+          <div className="flex flex-1 flex-col overflow-x-hidden overflow-y-auto pb-12">
             {groups.map((group) => (
               <DraggableColumnHandle key={group.id} group={group}>
                 {(dragHandleProps) => (

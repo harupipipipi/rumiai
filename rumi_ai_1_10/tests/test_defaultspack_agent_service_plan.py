@@ -164,6 +164,11 @@ def test_chat_send_persists_user_attachment_metadata(tmp_path, monkeypatch):
     assert stored_user["metadata"]["attachments"][0]["name"] == "notes.md"
     assert stored_user["metadata"]["attachments"][1]["name"] == "photo.png"
     assert stored_user["metadata"]["selected_tools"] == ["local_file"]
+    history_path = storage_path.parent / "conversations" / conversation["id"] / "history.json"
+    workspace_path = storage_path.parent / "conversations" / conversation["id"] / "workspace"
+    assert history_path.exists()
+    assert (workspace_path / "attachments" / "notes.md").read_text(encoding="utf-8") == "hello from attachment"
+    assert stored_user["metadata"]["workspace_attachments"][0]["workspace_path"] == "workspace/attachments/notes.md"
     user_text = "\n".join(block.get("text", "") for block in stored_user["content"])
     assert "添付ファイル: notes.md" in user_text
     assert "hello from attachment" in user_text
@@ -503,6 +508,91 @@ def test_chat_tool_loop_replays_openai_tool_call_messages():
     assert seen_messages[1][-2]["tool_calls"][0]["function"]["name"] == "calculator"
     assert seen_messages[1][-1]["role"] == "tool"
     assert seen_messages[1][-1]["tool_call_id"] == "call_1"
+
+
+def test_browser_screenshot_tool_result_adds_image_for_vision_models():
+    import blocks.chat.send as send
+
+    messages = []
+    send._append_tool_result_message(
+        messages,
+        "browser_computer",
+        {
+            "status": "ok",
+            "data": {
+                "result": "screenshot",
+                "action": "computer.screenshot",
+                "data_url": "data:image/png;base64,abc123",
+            },
+        },
+        "call_1",
+        model="google/gemma-4-31b-it",
+    )
+
+    assert messages[0]["role"] == "tool"
+    assert messages[1]["role"] == "user"
+    assert messages[1]["content"][1]["image_url"]["url"] == "data:image/png;base64,abc123"
+
+
+def test_browser_screenshot_tool_log_compacts_inline_image_data():
+    import blocks.chat.send as send
+
+    compact = send._compact_tool_log_value(
+        {
+            "status": "ok",
+            "data": {
+                "widget": {
+                    "data_url": "data:image/jpeg;base64,abc123",
+                    "model_image_path": "/tmp/screenshot-model.jpg",
+                }
+            },
+        }
+    )
+
+    assert compact["data"]["widget"]["data_url"] == "[image data saved as artifact]"
+    assert compact["data"]["widget"]["model_image_path"] == "/tmp/screenshot-model.jpg"
+    assert send._compact_tool_log_value("see data:image/png;base64,abc123 now") == "see [image data saved as artifact] now"
+
+
+def test_chat_store_splits_loaded_inline_thoughts(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    conversation_id = "conv-1"
+    storage_path.parent.mkdir(parents=True)
+    storage_path.write_text(
+        json.dumps(
+            {
+                "conversations": {
+                    conversation_id: {
+                        "id": conversation_id,
+                        "title": "New Conversation",
+                        "created_at": 1,
+                        "updated_at": 1,
+                        "messages": [
+                            {
+                                "id": "msg-1",
+                                "role": "assistant",
+                                "content": [{"type": "text", "text": "<thought>hidden</thought>shown"}],
+                                "raw_text": "<thought>hidden</thought>shown",
+                            }
+                        ],
+                    }
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.get_conversation(conversation_id)
+    message = conversation["messages"][0]
+    assert message["content"][0]["text"] == "shown"
+    assert message["metadata"]["thinking"]["transcript"] == "hidden"
+    ChatStore._instance = None
 
 
 def test_builtin_calculator_returns_real_arithmetic_result():

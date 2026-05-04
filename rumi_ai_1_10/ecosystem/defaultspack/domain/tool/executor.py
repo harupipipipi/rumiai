@@ -307,8 +307,11 @@ class ToolExecutor:
                 dict(arguments.get("payload") or {}),
                 yolo_mode=bool(policy.get("yolo_mode")),
             )
+            summary = "browser_computer {} completed".format(result.get("action", "action"))
+            if result.get("path"):
+                summary += "; artifact: {}".format(result.get("path"))
             return {
-                "result": str(result),
+                "result": summary,
                 "is_error": False,
                 "widget": {"type": "browser_computer", **result}
             }

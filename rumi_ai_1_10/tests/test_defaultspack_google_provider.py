@@ -133,6 +133,26 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
         self.assertNotIn("action_type", tool)
         self.assertNotIn("write_action", tool)
 
+    def test_google_provider_moves_inline_thoughts_to_metadata(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        provider = GoogleProvider()
+        response = provider.parse_response(
+            {
+                "choices": [
+                    {
+                        "message": {"content": "<thought>private plan</thought> visible answer"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {},
+            }
+        )
+
+        self.assertEqual(response["content"][0]["text"], "visible answer")
+        self.assertEqual(response["metadata"]["thinking"]["transcript"], "private plan")
+        self.assertNotIn("<thought>", response["content"][0]["text"])
+
     def test_google_provider_preserves_multimodal_content_blocks(self):
         from domain.ai_client.providers.google_provider import GoogleProvider
 

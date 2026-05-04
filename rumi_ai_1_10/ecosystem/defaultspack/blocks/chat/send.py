@@ -1,6 +1,7 @@
 import sys
 import os
 import json
+from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from blocks._common import ok, error, gen_id, timestamp
 
@@ -165,7 +166,48 @@ def _append_assistant_tool_use_message(messages, tool_uses):
     )
 
 
-def _append_tool_result_message(messages, tool_name, result, tool_call_id=""):
+def _model_supports_vision(model):
+    try:
+        client = AIClient()
+        matches = client._runtime_model_matches(str(model or ""))
+    except Exception:
+        matches = []
+    for match in matches or []:
+        capabilities = match.get("capabilities", [])
+        if isinstance(capabilities, dict):
+            if capabilities.get("vision") or capabilities.get("image_input") or capabilities.get("multimodal"):
+                return True
+        elif any(str(item) in {"vision", "image_input", "multimodal"} for item in capabilities or []):
+            return True
+    return any(token in str(model or "").lower() for token in ("gemini", "gemma", "gpt-4o", "gpt-5"))
+
+
+def _browser_screenshot_data_url(result):
+    if not isinstance(result, dict):
+        return ""
+    data = result.get("data", result)
+    if not isinstance(data, dict):
+        return ""
+    widget = data.get("widget") if isinstance(data.get("widget"), dict) else {}
+    candidates = [data, widget]
+    for candidate in candidates:
+        data_url = candidate.get("data_url") or candidate.get("dataUrl")
+        if isinstance(data_url, str) and data_url.startswith("data:image/"):
+            return data_url
+    path = data.get("path") or widget.get("path")
+    mime = data.get("mime_type") or widget.get("mime_type") or "image/png"
+    if isinstance(path, str) and path:
+        try:
+            import base64
+
+            encoded = base64.b64encode(Path(path).read_bytes()).decode("ascii")
+            return "data:{};base64,{}".format(mime, encoded)
+        except Exception:
+            return ""
+    return ""
+
+
+def _append_tool_result_message(messages, tool_name, result, tool_call_id="", *, model=""):
     result_text = ""
     if isinstance(result, dict):
         data = result.get("data", result)
@@ -183,6 +225,39 @@ def _append_tool_result_message(messages, tool_name, result, tool_call_id=""):
             "content": result_text,
         }
     )
+    if tool_name == "browser_computer" and _model_supports_vision(model):
+        screenshot = _browser_screenshot_data_url(result)
+        if screenshot:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Browser screenshot captured by browser_computer. Use this image to continue the task.",
+                        },
+                        {"type": "image_url", "image_url": {"url": screenshot}},
+                    ],
+                }
+            )
+
+
+def _compact_tool_log_value(value):
+    if isinstance(value, dict):
+        compact = {}
+        for key, item in value.items():
+            if key in {"data_url", "dataUrl"} and isinstance(item, str) and item.startswith("data:image/"):
+                compact[key] = "[image data saved as artifact]"
+            else:
+                compact[key] = _compact_tool_log_value(item)
+        return compact
+    if isinstance(value, list):
+        return [_compact_tool_log_value(item) for item in value]
+    if isinstance(value, str) and "data:image/" in value:
+        import re
+
+        return re.sub(r"data:image/[A-Za-z0-9.+-]+;base64,[A-Za-z0-9+/=]+", "[image data saved as artifact]", value)
+    return value
 
 
 def _tool_visibility_message(tools):
@@ -289,7 +364,7 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
             log = {
                 "tool_name": tool_name,
                 "arguments": arguments,
-                "result": result,
+                "result": _compact_tool_log_value(result),
                 "timestamp": timestamp(),
             }
             tool_logs.append(log)
@@ -307,6 +382,7 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
                 tool_name,
                 result,
                 str(block.get("id") or block.get("tool_call_id") or ""),
+                model=model,
             )
 
     response = response or _stub_response()
@@ -437,7 +513,10 @@ def run(input_data, context):
     metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
     if isinstance(attachments, list):
         metadata = dict(metadata)
+        persisted_attachments = store.persist_attachments(conversation_id, attachments)
         metadata["attachments"] = _sanitize_attachment_metadata(attachments)
+        if persisted_attachments:
+            metadata["workspace_attachments"] = persisted_attachments
         if isinstance(content, list):
             content.extend(_attachment_text_blocks(attachments))
             content.extend(_attachment_image_blocks(attachments))

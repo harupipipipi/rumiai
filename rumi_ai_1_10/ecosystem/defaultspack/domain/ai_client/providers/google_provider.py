@@ -244,14 +244,36 @@ class GoogleProvider(OpenAICompatibleProvider):
                 body[key] = params[key]
 
     @staticmethod
-    def _strip_inline_thoughts(text: str) -> str:
-        return re.sub(r"<thought>.*?</thought>", "", str(text or ""), flags=re.DOTALL).strip()
+    def _split_inline_thoughts(text: str) -> tuple[list[str], str]:
+        thoughts: list[str] = []
+
+        def collect(match: re.Match[str]) -> str:
+            thought = str(match.group(1) or "").strip()
+            if thought:
+                thoughts.append(thought)
+            return ""
+
+        visible = re.sub(r"<thought>(.*?)</thought>", collect, str(text or ""), flags=re.DOTALL).strip()
+        return thoughts, visible
 
     def parse_response(self, raw):
         parsed = super().parse_response(raw)
+        thinking_parts: list[str] = []
         for block in parsed.get("content", []):
             if isinstance(block, dict) and block.get("type") == "text":
-                block["text"] = self._strip_inline_thoughts(str(block.get("text") or ""))
+                thoughts, visible = self._split_inline_thoughts(str(block.get("text") or ""))
+                thinking_parts.extend(thoughts)
+                block["text"] = visible
+        if thinking_parts:
+            metadata = dict(parsed.get("metadata") or {})
+            existing = metadata.get("thinking") if isinstance(metadata.get("thinking"), dict) else {}
+            metadata["thinking"] = {
+                **existing,
+                "state": "completed",
+                "transcript": "\n\n".join(thinking_parts),
+                "source": "google_inline_thought",
+            }
+            parsed["metadata"] = metadata
         return parsed
 
     @staticmethod
