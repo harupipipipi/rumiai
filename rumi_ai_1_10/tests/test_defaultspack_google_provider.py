@@ -89,6 +89,94 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
         self.assertEqual(captured["body"]["reasoning_effort"], "low")
         self.assertEqual(response["content"][0]["text"], "hello from gemini")
 
+    def test_google_provider_strips_rumi_tool_metadata_before_request(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        captured = {}
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-key"}, clear=True):
+            provider = GoogleProvider()
+
+        def fake_request_json(path, body):
+            captured["body"] = body
+            return {
+                "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                "usage": {},
+            }
+
+        provider._request_json = fake_request_json
+        provider.complete(
+            "gemma-4-26b-a4b-it",
+            [{"role": "user", "content": "calculate"}],
+            [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "calculator",
+                        "description": "Calculate an expression",
+                        "parameters": {"type": "object", "properties": {"expression": {"type": "string"}}},
+                    },
+                    "metadata": {"source": "extension"},
+                    "category": "math",
+                    "action_type": "read",
+                    "write_action": False,
+                }
+            ],
+            {},
+        )
+
+        tool = captured["body"]["tools"][0]
+        self.assertEqual(set(tool.keys()), {"type", "function"})
+        self.assertEqual(tool["function"]["name"], "calculator")
+        self.assertNotIn("metadata", tool)
+        self.assertNotIn("category", tool)
+        self.assertNotIn("action_type", tool)
+        self.assertNotIn("write_action", tool)
+
+    def test_google_provider_preserves_multimodal_content_blocks(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        provider = GoogleProvider()
+        messages = provider.build_request(
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "what is in this image?"},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": "data:image/png;base64,iVBORw0KGgo="},
+                        },
+                    ],
+                }
+            ]
+        )
+
+        self.assertEqual(messages[0]["content"][0]["text"], "what is in this image?")
+        self.assertEqual(
+            messages[0]["content"][1]["image_url"]["url"],
+            "data:image/png;base64,iVBORw0KGgo=",
+        )
+
+    def test_google_provider_hides_inline_thought_tags(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        response = GoogleProvider().parse_response(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "<thought>private reasoning</thought>赤",
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {},
+            }
+        )
+
+        self.assertEqual(response["content"][0]["text"], "赤")
+
     def test_google_provider_caps_gemini_thinking_levels(self):
         from domain.ai_client.providers.google_provider import GoogleProvider
 
@@ -242,6 +330,16 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
         self.assertNotIn("xhigh", profiles["google/gemini-2.5-pro"]["thinking_levels"])
         self.assertEqual(profiles["google/gemini-3-pro-preview"]["thinking_levels"], ["low", "high"])
         self.assertEqual(profiles["google/gemma-4-26b-a4b-it"]["thinking_levels"], ["low", "high"])
+
+    def test_google_catalog_marks_gemma_4_as_tool_and_vision_capable(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        profiles = {item["id"]: item for item in GoogleProvider().list_models()}
+
+        self.assertIn("tool_calls", profiles["google/gemma-4-31b-it"]["capabilities"])
+        self.assertIn("vision", profiles["google/gemma-4-31b-it"]["capabilities"])
+        self.assertIn("tool_calls", profiles["google/gemma-4-26b-a4b-it"]["capabilities"])
+        self.assertIn("vision", profiles["google/gemma-4-26b-a4b-it"]["capabilities"])
 
 
 if __name__ == "__main__":

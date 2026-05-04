@@ -17,6 +17,8 @@ def _default_conversation_model(settings_path=None):
             return preferred_model.strip()
     except Exception:
         pass
+    if settings_path is not None:
+        return DEFAULT_CHAT_MODEL
     try:
         from domain.ai_client.profile_loader import ProfileLoader
 

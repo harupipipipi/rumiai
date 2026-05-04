@@ -124,6 +124,34 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(catalog["app"]["icon"], "/static/assets/icons/defaultspack-icon.png")
         self.assertEqual(catalog["diagnostics"], [])
 
+    def test_chat_send_builds_multimodal_attachment_blocks(self):
+        from blocks.chat.send import (
+            _attachment_image_blocks,
+            _sanitize_attachment_metadata,
+        )
+        from domain.chat.message_converter import convert_to_standard
+
+        attachments = [
+            {
+                "id": "image-1",
+                "name": "sample.png",
+                "size": 128,
+                "type": "image/png",
+                "dataUrl": "data:image/png;base64,iVBORw0KGgo=",
+            }
+        ]
+
+        content = [{"type": "text", "text": "画像を見て"}]
+        content.extend(_attachment_image_blocks(attachments))
+        standard = convert_to_standard([{"role": "user", "content": content}])
+
+        self.assertEqual(standard[0]["content"][0]["text"], "画像を見て")
+        self.assertEqual(
+            standard[0]["content"][1]["image_url"]["url"],
+            "data:image/png;base64,iVBORw0KGgo=",
+        )
+        self.assertNotIn("dataUrl", _sanitize_attachment_metadata(attachments)[0])
+
     def test_fallback_http_routes_do_not_repeat_method_pattern_pairs(self):
         from transport.registry import _FALLBACK_HTTP_ROUTE_SPECS
 

@@ -183,6 +183,7 @@ export type AttachedFile = {
   name: string;
   size: number;
   content?: string;
+  dataUrl?: string;
   type?: string;
   truncated?: boolean;
   source?: "local_file" | "workspace";

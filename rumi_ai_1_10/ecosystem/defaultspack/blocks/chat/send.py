@@ -25,6 +25,7 @@ from domain.tool.schema_adapter import (
 
 MAX_ATTACHMENT_TEXT_CHARS = 240_000
 MAX_ATTACHMENT_TEXT_CHARS_PER_FILE = 120_000
+MAX_ATTACHMENT_IMAGE_BYTES = 8 * 1024 * 1024
 
 
 def _stub_response():
@@ -361,6 +362,49 @@ def _attachment_text_blocks(attachments):
     return blocks
 
 
+def _attachment_image_blocks(attachments):
+    if not isinstance(attachments, list):
+        return []
+
+    blocks = []
+    for attachment in attachments:
+        if not isinstance(attachment, dict):
+            continue
+        mime = str(attachment.get("type") or "").lower()
+        data_url = attachment.get("dataUrl") or attachment.get("data_url")
+        if not mime.startswith("image/") or not isinstance(data_url, str) or not data_url.startswith("data:image/"):
+            continue
+        size = attachment.get("size")
+        if isinstance(size, int) and size > MAX_ATTACHMENT_IMAGE_BYTES:
+            continue
+        blocks.append(
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": data_url,
+                },
+            }
+        )
+    return blocks
+
+
+def _sanitize_attachment_metadata(attachments):
+    if not isinstance(attachments, list):
+        return attachments
+    sanitized = []
+    for attachment in attachments:
+        if not isinstance(attachment, dict):
+            continue
+        sanitized.append(
+            {
+                key: attachment.get(key)
+                for key in ("id", "name", "size", "type", "truncated", "source", "sourcePath")
+                if key in attachment
+            }
+        )
+    return sanitized
+
+
 def run(input_data, context):
     store = ChatStore()
     conversation_id = input_data.get("conversation_id")
@@ -393,9 +437,10 @@ def run(input_data, context):
     metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
     if isinstance(attachments, list):
         metadata = dict(metadata)
-        metadata["attachments"] = attachments
+        metadata["attachments"] = _sanitize_attachment_metadata(attachments)
         if isinstance(content, list):
             content.extend(_attachment_text_blocks(attachments))
+            content.extend(_attachment_image_blocks(attachments))
     user_msg_dict = {
         "role": role,
         "content": content,

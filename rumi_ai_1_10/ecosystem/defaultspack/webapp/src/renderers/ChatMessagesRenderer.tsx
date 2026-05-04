@@ -21,8 +21,13 @@ function MessageBlock({ block, unknownStrategy }: { block: ChatContentBlock; unk
     );
   }
 
-  if (blockType === "image") {
-    const url = String(block.url ?? "");
+  if (blockType === "image" || blockType === "image_url") {
+    const imageUrl = block.image_url;
+    const url = String(
+      block.url
+      ?? (typeof imageUrl === "object" && imageUrl !== null && "url" in imageUrl ? imageUrl.url : "")
+      ?? "",
+    );
     return (
       <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 space-y-2">
         <div className="flex items-center gap-2 text-xs text-zinc-400">

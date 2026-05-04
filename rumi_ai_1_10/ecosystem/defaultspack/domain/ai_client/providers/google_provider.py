@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Dict, List
 
 from .openai_compatible_provider import OpenAICompatibleProvider
@@ -24,6 +25,7 @@ class GoogleProvider(OpenAICompatibleProvider):
             "provider": "google",
             "provider_id": "google",
             "type": "chat",
+            "capabilities": ["chat", "tool_calls", "vision"],
             "supports_thinking": True,
             "thinking_levels": ["none", "low", "medium", "high"],
             "default_thinking_level": "medium",
@@ -37,6 +39,7 @@ class GoogleProvider(OpenAICompatibleProvider):
             "provider": "google",
             "provider_id": "google",
             "type": "chat",
+            "capabilities": ["chat", "tool_calls", "vision"],
             "supports_thinking": True,
             "thinking_levels": ["none", "low", "medium", "high"],
             "default_thinking_level": "medium",
@@ -50,6 +53,7 @@ class GoogleProvider(OpenAICompatibleProvider):
             "provider": "google",
             "provider_id": "google",
             "type": "chat",
+            "capabilities": ["chat", "tool_calls", "vision"],
             "supports_thinking": True,
             "thinking_levels": ["low", "high"],
             "default_thinking_level": "high",
@@ -62,6 +66,7 @@ class GoogleProvider(OpenAICompatibleProvider):
             "provider": "google",
             "provider_id": "google",
             "type": "chat",
+            "capabilities": ["chat", "tool_calls", "vision"],
             "supports_thinking": True,
             "thinking_levels": ["none", "low", "medium", "high"],
             "default_thinking_level": "medium",
@@ -74,6 +79,7 @@ class GoogleProvider(OpenAICompatibleProvider):
             "provider": "google",
             "provider_id": "google",
             "type": "chat",
+            "capabilities": ["chat", "tool_calls", "vision"],
             "supports_thinking": True,
             "thinking_levels": ["none", "low", "medium", "high"],
             "default_thinking_level": "medium",
@@ -86,6 +92,7 @@ class GoogleProvider(OpenAICompatibleProvider):
             "provider": "google",
             "provider_id": "google",
             "type": "chat",
+            "capabilities": ["chat", "tool_calls", "vision"],
         },
         {
             "id": "google/gemma-4-31b-it",
@@ -95,6 +102,7 @@ class GoogleProvider(OpenAICompatibleProvider):
             "provider": "google",
             "provider_id": "google",
             "type": "chat",
+            "capabilities": ["chat", "tool_calls", "vision"],
             "supports_thinking": True,
             "thinking_levels": ["low", "high"],
             "default_thinking_level": "high",
@@ -107,6 +115,7 @@ class GoogleProvider(OpenAICompatibleProvider):
             "provider": "google",
             "provider_id": "google",
             "type": "chat",
+            "capabilities": ["chat", "tool_calls", "vision"],
             "supports_thinking": True,
             "thinking_levels": ["low", "high"],
             "default_thinking_level": "high",
@@ -119,6 +128,7 @@ class GoogleProvider(OpenAICompatibleProvider):
             "provider": "google",
             "provider_id": "google",
             "type": "chat",
+            "capabilities": ["chat", "vision"],
         },
         {
             "id": "google/gemma-3n-e4b-it",
@@ -128,6 +138,7 @@ class GoogleProvider(OpenAICompatibleProvider):
             "provider": "google",
             "provider_id": "google",
             "type": "chat",
+            "capabilities": ["chat", "vision"],
         },
         {
             "id": "google/gemini-embedding-001",
@@ -232,11 +243,56 @@ class GoogleProvider(OpenAICompatibleProvider):
             if key in params:
                 body[key] = params[key]
 
+    @staticmethod
+    def _strip_inline_thoughts(text: str) -> str:
+        return re.sub(r"<thought>.*?</thought>", "", str(text or ""), flags=re.DOTALL).strip()
+
+    def parse_response(self, raw):
+        parsed = super().parse_response(raw)
+        for block in parsed.get("content", []):
+            if isinstance(block, dict) and block.get("type") == "text":
+                block["text"] = self._strip_inline_thoughts(str(block.get("text") or ""))
+        return parsed
+
+    @staticmethod
+    def _sanitize_tool(tool: Any) -> Dict[str, Any] | None:
+        """Return the OpenAI-compatible function-tool shape Google accepts."""
+        if not isinstance(tool, dict):
+            return None
+        function_def = tool.get("function")
+        if not isinstance(function_def, dict):
+            return None
+        name = str(function_def.get("name") or "").strip()
+        if not name:
+            return None
+        sanitized_function: Dict[str, Any] = {"name": name}
+        description = function_def.get("description")
+        if isinstance(description, str) and description:
+            sanitized_function["description"] = description
+        parameters = function_def.get("parameters")
+        if isinstance(parameters, dict):
+            sanitized_function["parameters"] = parameters
+        else:
+            sanitized_function["parameters"] = {"type": "object", "properties": {}, "required": []}
+        return {"type": "function", "function": sanitized_function}
+
+    @classmethod
+    def _sanitize_tools(cls, tools: Any) -> List[Dict[str, Any]]:
+        if not isinstance(tools, list):
+            return []
+        sanitized: List[Dict[str, Any]] = []
+        for tool in tools:
+            item = cls._sanitize_tool(tool)
+            if item is not None:
+                sanitized.append(item)
+        return sanitized
+
     def complete(self, model, messages, tools, params):
         translated = self._translate_params(params, model)
         body = {"model": model, "messages": self.build_request(messages)}
-        if tools:
-            body["tools"] = tools
+        sanitized_tools = self._sanitize_tools(tools)
+        if sanitized_tools:
+            body["tools"] = sanitized_tools
         self._copy_chat_params(body, translated)
         raw = self._request_json("/chat/completions", body)
         return self.parse_response(raw)
@@ -244,8 +300,9 @@ class GoogleProvider(OpenAICompatibleProvider):
     def stream(self, model, messages, tools, params):
         translated = self._translate_params(params, model)
         body = {"model": model, "messages": self.build_request(messages)}
-        if tools:
-            body["tools"] = tools
+        sanitized_tools = self._sanitize_tools(tools)
+        if sanitized_tools:
+            body["tools"] = sanitized_tools
         self._copy_chat_params(body, translated)
         resp = self._request_stream("/chat/completions", body)
         try:
