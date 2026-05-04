@@ -379,12 +379,21 @@ function CategorySwitcher({
   onChange: (id: "all" | SidebarCategory) => void;
 }) {
   const [isOpen, setIsOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
   const current = CATEGORY_META[active];
   const hasActiveFilter = active !== "all";
+  const rect = buttonRef.current?.getBoundingClientRect();
+  const menuPosition = rect
+    ? {
+        top: `${Math.max(8, rect.top)}px`,
+        right: `${Math.max(8, window.innerWidth - rect.left + 8)}px`,
+      }
+    : undefined;
 
   return (
     <div className="relative">
       <button
+        ref={buttonRef}
         type="button"
         onClick={() => setIsOpen((value) => !value)}
         aria-expanded={isOpen}
@@ -407,7 +416,10 @@ function CategorySwitcher({
       {isOpen && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
-          <div className="absolute right-full mr-2 top-0 z-50 bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl overflow-hidden min-w-[150px]">
+          <div
+            className="fixed z-50 bg-zinc-900 border border-zinc-800 rounded-lg shadow-xl overflow-hidden min-w-[150px]"
+            style={menuPosition}
+          >
             <div className="px-2 py-1.5 border-b border-zinc-800/60">
               <p className="text-[9px] font-semibold text-zinc-500 uppercase tracking-wider">表示フィルター</p>
             </div>
@@ -462,6 +474,7 @@ export function RightSidebar({
   const [activePanel, setActivePanel] = useState<string | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<"all" | SidebarCategory>("all");
   const [openToolGroupMenu, setOpenToolGroupMenu] = useState<string | null>(null);
+  const [toolGroupMenuPosition, setToolGroupMenuPosition] = useState<{ top: number; right: number } | null>(null);
   const [shortcutItemIds, setShortcutItemIds] = useState<string[]>([]);
   const toolGroupMenuRef = useRef<HTMLDivElement | null>(null);
   const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
@@ -583,6 +596,15 @@ export function RightSidebar({
     setOpenToolGroupMenu(null);
   };
 
+  const openToolGroup = (groupId: string, button: HTMLButtonElement) => {
+    const rect = button.getBoundingClientRect();
+    setToolGroupMenuPosition({
+      top: Math.max(8, Math.min(rect.top, window.innerHeight - 300)),
+      right: Math.max(8, window.innerWidth - rect.left + 8),
+    });
+    setOpenToolGroupMenu(groupId);
+  };
+
   return (
     <aside className="flex-shrink-0 border-l border-zinc-800/60 bg-[#09090b] hidden md:flex h-full transition-[width,opacity] duration-200 ease-out">
       {activeItem && (
@@ -647,13 +669,17 @@ export function RightSidebar({
                 <div key={group.id} className="relative">
                   <button
                     type="button"
-                    onClick={() => {
+                    onClick={(event) => {
                       if (group.items.length === 1) {
                         setActivePanel(group.items[0].id);
                         setOpenToolGroupMenu(null);
                         return;
                       }
-                      setOpenToolGroupMenu((current) => (current === group.id ? null : group.id));
+                      if (openToolGroupMenu === group.id) {
+                        setOpenToolGroupMenu(null);
+                        return;
+                      }
+                      openToolGroup(group.id, event.currentTarget);
                     }}
                     className={cn(
                       "group/group w-9 h-9 rounded-lg flex items-center justify-center relative transition-all flex-shrink-0",
@@ -675,7 +701,10 @@ export function RightSidebar({
                     )}
                   </button>
                   {openToolGroupMenu === group.id && (
-                    <div className="absolute right-full top-0 z-50 mr-2 w-56 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 text-left shadow-2xl">
+                    <div
+                      className="fixed z-50 w-56 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 text-left shadow-2xl"
+                      style={toolGroupMenuPosition ? { top: `${toolGroupMenuPosition.top}px`, right: `${toolGroupMenuPosition.right}px` } : undefined}
+                    >
                       <div className="border-b border-zinc-800 px-3 py-2">
                         <p className="truncate text-[11px] font-semibold text-zinc-200">{group.label || TOOL_GROUP_LABELS[group.id] || group.id}</p>
                         {group.path?.length && group.path.length > 1 && (
