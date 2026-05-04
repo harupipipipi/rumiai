@@ -25,10 +25,7 @@ def run(input_data, context):
     for event in events:
         if not isinstance(event, dict):
             continue
-        result = _handle_event(
-            event,
-            context,
-        )
+        result = _handle_event(event, context, model=str(input_data.get("model") or "") or None)
         results.append(result)
     return ok({"verified": verification["verified"], "events": results})
 
@@ -36,6 +33,8 @@ def run(input_data, context):
 def _handle_event(
     event: Dict[str, Any],
     context,
+    *,
+    model: str | None = None,
 ) -> Dict[str, Any]:
     if event.get("type") != "message":
         return {"ignored": True, "reason": "unsupported LINE event", "event_type": event.get("type")}
@@ -54,6 +53,7 @@ def _handle_event(
         external_key=external_key,
         title="LINE " + source_id,
         event_id=str(event.get("webhookEventId") or message.get("id") or ""),
+        model=model,
         metadata={
             "source": source,
             "reply_token": event.get("replyToken"),

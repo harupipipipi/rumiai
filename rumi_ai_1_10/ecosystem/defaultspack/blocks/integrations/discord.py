@@ -57,6 +57,7 @@ def _handle_interaction(input_data: Dict[str, Any], context) -> Dict[str, Any]:
         external_key=external_key,
         title="Discord " + (channel_id or user_id or "interaction"),
         event_id=str(input_data.get("id") or ""),
+        model=str(input_data.get("model") or "") or None,
         metadata={
             "interaction_id": input_data.get("id"),
             "application_id": input_data.get("application_id"),
@@ -84,6 +85,7 @@ def _handle_message_create(input_data: Dict[str, Any], context) -> Dict[str, Any
         external_key=external_key,
         title="Discord " + (channel_id or user_id or "message"),
         event_id=str(data.get("id") or input_data.get("id") or ""),
+        model=str(input_data.get("model") or data.get("model") or "") or None,
         metadata={
             "guild_id": data.get("guild_id"),
             "channel_id": channel_id,

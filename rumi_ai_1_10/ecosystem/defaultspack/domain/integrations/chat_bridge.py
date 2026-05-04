@@ -13,6 +13,7 @@ def dispatch_external_message(
     external_key: str,
     title: str,
     event_id: str | None = None,
+    model: str | None = None,
     metadata: Dict[str, Any] | None = None,
     context: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
@@ -40,7 +41,7 @@ def dispatch_external_message(
         title=title,
         metadata=external_metadata,
         chat_store=chat_store,
-        model=None,
+        model=model,
     )
 
     from blocks.chat.send import run as send_run

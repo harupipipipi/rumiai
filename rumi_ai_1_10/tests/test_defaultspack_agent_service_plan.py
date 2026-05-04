@@ -276,6 +276,7 @@ def test_slack_event_creates_external_conversation(tmp_path, monkeypatch):
     stored = json.loads(storage_path.read_text(encoding="utf-8"))
     conversation = stored["conversations"][data["conversation_id"]]
     assert conversation["conversation_kind"] == "external"
+    assert conversation["model"] == "stub/default"
     assert "integration:slack" in conversation["tags"]
     assert conversation["messages"][0]["metadata"]["external"]["provider"] == "slack"
     ChatStore._instance = None

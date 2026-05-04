@@ -47,6 +47,7 @@ def run(input_data, context):
         external_key=external_key,
         title="Slack " + (channel or user or "chat"),
         event_id=str(input_data.get("event_id") or event.get("client_msg_id") or event.get("ts") or ""),
+        model=str(input_data.get("model") or "") or None,
         metadata={
             "team_id": team_id,
             "channel": channel,
