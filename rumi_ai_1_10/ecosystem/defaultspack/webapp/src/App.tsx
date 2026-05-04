@@ -187,7 +187,7 @@ function isUserFacingModelProfile(profile: ModelProfile, preferredModel: string)
   if (providerId === "rumi") return false;
   if (providerId === "stub") return modelId === "default";
   if (providerId === "openrouter") return modelId === "tencent/hy3-preview:free";
-  if (providerId === "google") return modelId.startsWith("gemini-");
+  if (providerId === "google") return modelId.startsWith("gemini-") || modelId.startsWith("gemma-");
   return isConfiguredProfile(profile);
 }
 
@@ -211,6 +211,10 @@ function modelProfileSortKey(profile: ModelProfile): [number, number, string] {
     "gemini-3-flash-preview": 3,
     "gemini-2.5-flash-lite": 4,
     "gemini-2.0-flash-lite": 5,
+    "gemma-4-31b-it": 6,
+    "gemma-4-26b-a4b-it": 7,
+    "gemma-3-27b-it": 8,
+    "gemma-3n-e4b-it": 9,
     "tencent/hy3-preview:free": 0,
     default: 0,
   };

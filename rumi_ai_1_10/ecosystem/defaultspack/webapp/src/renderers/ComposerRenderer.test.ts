@@ -39,6 +39,14 @@ test("composer asks for an API key when an unconfigured Gemini model is selected
   }), true);
 
   assert.equal(profileNeedsApiKey({
+    profile_id: "google/gemma-4-26b-a4b-it",
+    display_name: "Gemma 4 26B A4B IT",
+    provider_id: "google",
+    model_id: "gemma-4-26b-a4b-it",
+    availability: { configured: false, status: "catalog" },
+  }), true);
+
+  assert.equal(profileNeedsApiKey({
     profile_id: "google/gemini-2.5-flash",
     display_name: "Gemini 2.5 Flash",
     provider_id: "google",

@@ -25,7 +25,7 @@ class GoogleProvider(OpenAICompatibleProvider):
             "provider_id": "google",
             "type": "chat",
             "supports_thinking": True,
-            "thinking_levels": ["none", "low", "medium", "high", "xhigh"],
+            "thinking_levels": ["none", "low", "medium", "high"],
             "default_thinking_level": "medium",
             "defaults": {"chat": True, "large": True},
         },
@@ -38,7 +38,7 @@ class GoogleProvider(OpenAICompatibleProvider):
             "provider_id": "google",
             "type": "chat",
             "supports_thinking": True,
-            "thinking_levels": ["none", "low", "medium", "high", "xhigh"],
+            "thinking_levels": ["none", "low", "medium", "high"],
             "default_thinking_level": "medium",
             "defaults": {"fast": True},
         },
@@ -51,8 +51,8 @@ class GoogleProvider(OpenAICompatibleProvider):
             "provider_id": "google",
             "type": "chat",
             "supports_thinking": True,
-            "thinking_levels": ["low", "medium", "high", "xhigh"],
-            "default_thinking_level": "medium",
+            "thinking_levels": ["low", "high"],
+            "default_thinking_level": "high",
         },
         {
             "id": "google/gemini-3-flash-preview",
@@ -63,7 +63,7 @@ class GoogleProvider(OpenAICompatibleProvider):
             "provider_id": "google",
             "type": "chat",
             "supports_thinking": True,
-            "thinking_levels": ["low", "medium", "high", "xhigh"],
+            "thinking_levels": ["none", "low", "medium", "high"],
             "default_thinking_level": "medium",
         },
         {
@@ -75,7 +75,7 @@ class GoogleProvider(OpenAICompatibleProvider):
             "provider_id": "google",
             "type": "chat",
             "supports_thinking": True,
-            "thinking_levels": ["none", "low", "medium", "high", "xhigh"],
+            "thinking_levels": ["none", "low", "medium", "high"],
             "default_thinking_level": "medium",
         },
         {
@@ -95,6 +95,21 @@ class GoogleProvider(OpenAICompatibleProvider):
             "provider": "google",
             "provider_id": "google",
             "type": "chat",
+            "supports_thinking": True,
+            "thinking_levels": ["low", "high"],
+            "default_thinking_level": "high",
+        },
+        {
+            "id": "google/gemma-4-26b-a4b-it",
+            "model_id": "gemma-4-26b-a4b-it",
+            "name": "Gemma 4 26B A4B IT",
+            "display_name": "Gemma 4 26B A4B IT",
+            "provider": "google",
+            "provider_id": "google",
+            "type": "chat",
+            "supports_thinking": True,
+            "thinking_levels": ["low", "high"],
+            "default_thinking_level": "high",
         },
         {
             "id": "google/gemma-3-27b-it",
@@ -155,11 +170,51 @@ class GoogleProvider(OpenAICompatibleProvider):
         return self._normalize_known_models(self._load_profile_models())
 
     @staticmethod
-    def _translate_params(params):
+    def _translate_thinking_level(model: str, thinking_level: str) -> str | None:
+        model_id = str(model or "").strip()
+        level = str(thinking_level or "").strip().lower()
+        if not level:
+            return None
+        if level == "xhigh":
+            level = "high"
+
+        if model_id.startswith("gemini-3-pro"):
+            if level == "low":
+                return "low"
+            if level in {"medium", "high"}:
+                return "high"
+            return None
+
+        if model_id.startswith("gemini-3-flash"):
+            if level == "none":
+                return "minimal"
+            if level in {"low", "medium", "high"}:
+                return level
+            return None
+
+        if model_id.startswith("gemini-2.5"):
+            if level == "none" and model_id.startswith("gemini-2.5-pro"):
+                return None
+            if level in {"none", "low", "medium", "high"}:
+                return level
+            return None
+
+        if model_id.startswith("gemma-4"):
+            if level == "low":
+                return "low"
+            if level in {"medium", "high"}:
+                return "high"
+            return None
+
+        return None
+
+    @classmethod
+    def _translate_params(cls, params, model: str = ""):
         translated = dict(params or {})
         thinking_level = str(translated.pop("thinking_level", "") or "").strip()
-        if thinking_level in {"none", "low", "medium", "high", "xhigh"} and "reasoning_effort" not in translated:
-            translated["reasoning_effort"] = "high" if thinking_level == "xhigh" else thinking_level
+        reasoning_effort = cls._translate_thinking_level(model, thinking_level)
+        if reasoning_effort and "reasoning_effort" not in translated:
+            translated["reasoning_effort"] = reasoning_effort
         return translated
 
     @staticmethod
@@ -178,7 +233,7 @@ class GoogleProvider(OpenAICompatibleProvider):
                 body[key] = params[key]
 
     def complete(self, model, messages, tools, params):
-        translated = self._translate_params(params)
+        translated = self._translate_params(params, model)
         body = {"model": model, "messages": self.build_request(messages)}
         if tools:
             body["tools"] = tools
@@ -187,7 +242,7 @@ class GoogleProvider(OpenAICompatibleProvider):
         return self.parse_response(raw)
 
     def stream(self, model, messages, tools, params):
-        translated = self._translate_params(params)
+        translated = self._translate_params(params, model)
         body = {"model": model, "messages": self.build_request(messages)}
         if tools:
             body["tools"] = tools

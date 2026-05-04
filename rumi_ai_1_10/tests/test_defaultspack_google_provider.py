@@ -89,6 +89,30 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
         self.assertEqual(captured["body"]["reasoning_effort"], "low")
         self.assertEqual(response["content"][0]["text"], "hello from gemini")
 
+    def test_google_provider_caps_gemini_thinking_levels(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        self.assertEqual(
+            GoogleProvider._translate_params({"thinking_level": "xhigh"}, "gemini-3-pro-preview"),
+            {"reasoning_effort": "high"},
+        )
+        self.assertEqual(
+            GoogleProvider._translate_params({"thinking_level": "medium"}, "gemini-3-pro-preview"),
+            {"reasoning_effort": "high"},
+        )
+        self.assertEqual(
+            GoogleProvider._translate_params({"thinking_level": "none"}, "gemini-3-flash-preview"),
+            {"reasoning_effort": "minimal"},
+        )
+        self.assertEqual(
+            GoogleProvider._translate_params({"thinking_level": "none"}, "gemini-2.5-pro"),
+            {},
+        )
+        self.assertEqual(
+            GoogleProvider._translate_params({"thinking_level": "xhigh"}, "gemma-4-31b-it"),
+            {"reasoning_effort": "high"},
+        )
+
     def test_openai_provider_translates_generic_thinking_level(self):
         from domain.ai_client.providers.openai_provider import OpenAIProvider
 
@@ -206,8 +230,18 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
         self.assertIn("google/gemini-3-pro-preview", model_ids)
         self.assertIn("google/gemini-3-flash-preview", model_ids)
         self.assertIn("google/gemma-4-31b-it", model_ids)
+        self.assertIn("google/gemma-4-26b-a4b-it", model_ids)
         self.assertIn("google/gemma-3-27b-it", model_ids)
         self.assertIn("google/gemma-3n-e4b-it", model_ids)
+
+    def test_google_catalog_does_not_expose_xhigh_for_gemini(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        profiles = {item["id"]: item for item in GoogleProvider().list_models()}
+
+        self.assertNotIn("xhigh", profiles["google/gemini-2.5-pro"]["thinking_levels"])
+        self.assertEqual(profiles["google/gemini-3-pro-preview"]["thinking_levels"], ["low", "high"])
+        self.assertEqual(profiles["google/gemma-4-26b-a4b-it"]["thinking_levels"], ["low", "high"])
 
 
 if __name__ == "__main__":

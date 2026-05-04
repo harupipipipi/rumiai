@@ -679,7 +679,7 @@ class FrontendRegistry:
                             {"value": "high", "label": "High"},
                             {"value": "xhigh", "label": "Extra High"},
                         ],
-                        "help": "Rumi は none/low/medium/high/xhigh を送り、各 provider が対応する API パラメータへ変換します。",
+                        "help": "Rumi は none/low/medium/high/xhigh を送り、各 provider が対応する API パラメータへ変換します。Gemini/Gemma では未対応の値を自動で近い値へ落とします。",
                     },
                     {
                         "id": "google_api_key",
@@ -1207,7 +1207,7 @@ class FrontendRegistry:
         if provider_id == "openrouter":
             return model_id == "tencent/hy3-preview:free"
         if provider_id == "google":
-            return model_id.startswith("gemini-")
+            return model_id.startswith(("gemini-", "gemma-"))
         return bool(
             availability.get("configured")
             or availability.get("active")
@@ -1234,6 +1234,10 @@ class FrontendRegistry:
             "gemini-3-flash-preview": 3,
             "gemini-2.5-flash-lite": 4,
             "gemini-2.0-flash-lite": 5,
+            "gemma-4-31b-it": 6,
+            "gemma-4-26b-a4b-it": 7,
+            "gemma-3-27b-it": 8,
+            "gemma-3n-e4b-it": 9,
             "tencent/hy3-preview:free": 0,
             "default": 0,
         }.get(model_id, 20)

@@ -482,6 +482,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertGreaterEqual(len(model_fields["preferred_model"]["options"]), 1)
         model_option_values = {option["value"] for option in model_fields["preferred_model"]["options"]}
         self.assertIn("google/gemini-2.5-flash", model_option_values)
+        self.assertIn("google/gemma-4-26b-a4b-it", model_option_values)
         self.assertIn("openrouter/tencent/hy3-preview:free", model_option_values)
         self.assertNotIn("openrouter/openai/gpt-4o", model_option_values)
         self.assertNotIn("ollama/llama3.2", model_option_values)

@@ -580,7 +580,7 @@ export function ComposerRenderer({
   const levels = selectedProfile?.supports_thinking
     ? selectedProfile.thinking_levels?.length
       ? selectedProfile.thinking_levels
-      : ["low", "medium", "high", "xhigh"]
+      : ["low", "medium", "high"]
     : [];
   const contextDegrees = Math.round(contextUsage.ratio * 360);
   const contextTitle =
