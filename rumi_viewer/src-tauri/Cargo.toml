@@ -23,6 +23,8 @@ anyhow = "1"
 semver = "1"
 open = "5"
 rand = "0.8"
+which = "7"
+dirs = "6"
 
 [profile.release]
 strip = true

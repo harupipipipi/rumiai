@@ -335,7 +335,7 @@ export function fetchStartupProfiles(): Promise<StartupProfilesResponseData> {
 }
 
 export function createStartupProfile(
-  data: { name?: string; standard_pack_id?: string; slots?: Record<string, string> },
+  data: { name?: string; base_pack: string; graph_id?: string; packs?: string[]; node_overrides?: Record<string, string> },
 ): Promise<StartupProfileMutationResponseData> {
   return apiFetch<StartupProfileMutationResponseData>('/api/panel/startup/profiles', {
     method: 'POST',
@@ -345,7 +345,7 @@ export function createStartupProfile(
 
 export function updateStartupProfile(
   id: string,
-  data: { name?: string; standard_pack_id?: string; slots?: Record<string, string> },
+  data: { name?: string; base_pack?: string; graph_id?: string; packs?: string[]; node_overrides?: Record<string, string> },
 ): Promise<StartupProfileMutationResponseData> {
   return apiFetch<StartupProfileMutationResponseData>(
     `/api/panel/startup/profiles/${encodeURIComponent(id)}`,
@@ -381,6 +381,44 @@ export function launchStartupProfile(id: string): Promise<StartupProfileMutation
   return apiFetch<StartupProfileMutationResponseData>(
     `/api/panel/startup/profiles/${encodeURIComponent(id)}/launch`,
     { method: 'POST' },
+  );
+}
+
+export function addPackToStartupProfile(id: string, packId: string): Promise<StartupProfileMutationResponseData> {
+  return apiFetch<StartupProfileMutationResponseData>(
+    `/api/panel/startup/profiles/${encodeURIComponent(id)}/packs`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ pack_id: packId }),
+    },
+  );
+}
+
+export function removePackFromStartupProfile(id: string, packId: string): Promise<StartupProfileMutationResponseData> {
+  return apiFetch<StartupProfileMutationResponseData>(
+    `/api/panel/startup/profiles/${encodeURIComponent(id)}/packs/${encodeURIComponent(packId)}`,
+    { method: 'DELETE' },
+  );
+}
+
+export function setStartupProfileNodeOverride(
+  id: string,
+  portKey: string,
+  nodeId: string,
+): Promise<StartupProfileMutationResponseData> {
+  return apiFetch<StartupProfileMutationResponseData>(
+    `/api/panel/startup/profiles/${encodeURIComponent(id)}/overrides`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ port_key: portKey, node_id: nodeId }),
+    },
+  );
+}
+
+export function clearStartupProfileNodeOverride(id: string, portKey: string): Promise<StartupProfileMutationResponseData> {
+  return apiFetch<StartupProfileMutationResponseData>(
+    `/api/panel/startup/profiles/${encodeURIComponent(id)}/overrides/${encodeURIComponent(portKey)}`,
+    { method: 'DELETE' },
   );
 }
 

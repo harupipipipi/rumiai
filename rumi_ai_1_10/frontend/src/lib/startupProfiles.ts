@@ -1,8 +1,10 @@
 import type {
   ApiStartupCatalog,
+  ApiStartupGraphPort,
+  ApiStartupNodeDefinition,
+  ApiStartupNodePort,
+  ApiStartupPack,
   ApiStartupProfile,
-  ApiStartupSlotCandidate,
-  ApiStartupStandardPack,
 } from './apiTypes';
 
 export type StartupSortMode = 'recommended' | 'recent' | 'name';
@@ -18,24 +20,25 @@ export interface StartupProfileBadge {
   tone: 'accent' | 'neutral' | 'success' | 'warning' | 'danger';
 }
 
-export interface StartupProfileSlotSummary {
+export interface StartupProfilePortSummary {
   healthy: boolean;
   label: string;
-  packId: string;
-  packName: string;
-  slotId: string;
+  portKey: string;
+  resolvedNode: string;
+  targetStandards: string[];
 }
 
 export interface StartupProfileView {
   badges: StartupProfileBadge[];
+  basePack: ApiStartupPack | null;
   headline: string;
   issueCount: number;
   issues: StartupProfileIssue[];
   lastLaunched: boolean;
+  packs: ApiStartupPack[];
+  ports: StartupProfilePortSummary[];
   profile: ApiStartupProfile;
   runtimeReady: boolean;
-  slots: StartupProfileSlotSummary[];
-  standardPack: ApiStartupStandardPack | null;
   subtitle: string;
 }
 
@@ -44,8 +47,45 @@ function sentenceCase(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-function packDisplayName(packId: string, candidate: ApiStartupSlotCandidate | null): string {
-  return candidate?.display_name || packId || 'Unavailable';
+function displayName(value?: Record<string, string>, fallback = ''): string {
+  return value?.en || value?.ja || Object.values(value ?? {})[0] || fallback;
+}
+
+export function packLabel(pack: ApiStartupPack | null | undefined, fallback = ''): string {
+  return pack?.name || fallback || 'Unavailable';
+}
+
+function portLabel(port: ApiStartupGraphPort): string {
+  const target = port.target_port;
+  return displayName(target?.display_name, port.port_key);
+}
+
+function portStandards(port: ApiStartupNodePort | undefined): string[] {
+  return [...(port?.standards ?? port?.contracts ?? [])];
+}
+
+function nodeOutputPorts(node: ApiStartupNodeDefinition): ApiStartupNodePort[] {
+  return (node.ports ?? []).filter((port) => port.direction === 'output');
+}
+
+export function isNodeCompatibleWithGraphPort(node: ApiStartupNodeDefinition, graphPort: ApiStartupGraphPort): boolean {
+  const required = new Set(portStandards(graphPort.target_port));
+  if (required.size === 0) return false;
+  return nodeOutputPorts(node).some((port) =>
+    portStandards(port).some((standard) => required.has(standard)),
+  );
+}
+
+export function compatibleNodesForPort(
+  catalog: ApiStartupCatalog,
+  profile: ApiStartupProfile,
+  graphPort: ApiStartupGraphPort,
+): ApiStartupNodeDefinition[] {
+  return catalog.packs
+    .filter((pack) => pack.available && profile.packs.includes(pack.pack_id))
+    .flatMap((pack) => pack.nodes)
+    .filter((node) => isNodeCompatibleWithGraphPort(node, graphPort))
+    .sort((left, right) => left.node_id.localeCompare(right.node_id));
 }
 
 function describeApprovalIssue(issue: string): string | null {
@@ -80,42 +120,6 @@ export function describeStartupIssue(issue: string, contextLabel?: string): Star
     };
   }
 
-  const loadOrder = issue.match(/load_order is missing '([^']+)'/i);
-  if (loadOrder) {
-    return {
-      title: `${contextLabel || 'Pack'} is misconfigured`,
-      description: `The runtime is missing ${loadOrder[1]} in its load order.`,
-      severity: 'danger',
-    };
-  }
-
-  const missingTypes = issue.match(/missing required component types: (.+)/i);
-  if (missingTypes) {
-    return {
-      title: `${contextLabel || 'Pack'} is missing required parts`,
-      description: `The pack still needs: ${missingTypes[1]}.`,
-      severity: 'danger',
-    };
-  }
-
-  const standardPackMissing = issue.match(/Standard pack '([^']+)' is not installed/i);
-  if (standardPackMissing) {
-    return {
-      title: 'Standard pack unavailable',
-      description: `${standardPackMissing[1]} is not installed in this workspace.`,
-      severity: 'danger',
-    };
-  }
-
-  const standardPackSlot = issue.match(/Standard pack '([^']+)' has no runtime-ready '([^']+)' slot implementation/i);
-  if (standardPackSlot) {
-    return {
-      title: `${sentenceCase(standardPackSlot[2])} slot is unavailable`,
-      description: `${standardPackSlot[1]} cannot provide a working ${standardPackSlot[2]} slot right now.`,
-      severity: 'warning',
-    };
-  }
-
   const packDisabled = issue.match(/Pack '([^']+)' is disabled/i);
   if (packDisabled) {
     return {
@@ -142,29 +146,20 @@ export function describeStartupActionError(error: string, fallbackAction: string
   if (/At least one startup profile must remain/i.test(error)) {
     return 'You need to keep at least one saved profile.';
   }
-  if (/Standard pack/i.test(error) && /changed since it was last approved|modified since approval|re-approve/i.test(error)) {
-    return 'The selected standard pack changed after approval. Re-approve it or switch packs before saving.';
+  if (/base_pack is required/i.test(error)) {
+    return 'Choose a base pack before creating this profile.';
   }
-  const slotRuntime = error.match(/not runtime-ready for slot '([^']+)'(?:: (.+))?/i);
-  if (slotRuntime) {
-    const issue = slotRuntime[2] ? describeStartupIssue(slotRuntime[2], sentenceCase(slotRuntime[1])) : null;
-    return issue?.description || `${sentenceCase(slotRuntime[1])} is not ready for launch yet.`;
+  if (/Base pack .* not available|Unknown base pack/i.test(error)) {
+    return 'The selected base pack is unavailable. Repair or switch the pack before saving.';
   }
-  const slotMismatch = error.match(/does not satisfy slot '([^']+)'/i);
-  if (slotMismatch) {
-    return `${sentenceCase(slotMismatch[1])} only accepts compatible packs. Pick another pack for that slot.`;
+  if (/does not satisfy port/i.test(error) || /Required standards/i.test(error)) {
+    return 'That node does not provide the standard required by this graph port.';
   }
-  if (/Contract mismatch/i.test(error)) {
-    return 'That pack does not match the selected slot contract.';
+  if (/Component binding conflict/i.test(error)) {
+    return 'This profile selects multiple components for the same runtime binding. Remove the conflicting override.';
   }
   if (/Runtime handoff is unavailable/i.test(error)) {
     return 'Launch could not hand off to the runtime. Restart the kernel and try again.';
-  }
-  if (/Unknown standard pack/i.test(error)) {
-    return 'The selected standard pack is no longer available in this workspace.';
-  }
-  if (/not available/i.test(error) && /Standard pack/i.test(error)) {
-    return 'The selected standard pack is unavailable. Repair or switch the pack before saving.';
   }
   return error || `We could not ${fallbackAction}.`;
 }
@@ -173,57 +168,66 @@ function resolveProfileIssues(
   profile: ApiStartupProfile,
   catalog: ApiStartupCatalog,
 ): {
+  basePack: ApiStartupPack | null;
   issues: StartupProfileIssue[];
-  selectedCandidates: Record<string, ApiStartupSlotCandidate | null>;
-  standardPack: ApiStartupStandardPack | null;
-  slots: StartupProfileSlotSummary[];
+  packs: ApiStartupPack[];
+  ports: StartupProfilePortSummary[];
 } {
-  const standardPack = catalog.standard_packs.find((pack) => pack.pack_id === profile.standard_pack_id) ?? null;
+  const byId = new Map(catalog.packs.map((pack) => [pack.pack_id, pack]));
+  const basePack = byId.get(profile.base_pack) ?? null;
+  const packs = profile.packs.map((packId) => byId.get(packId)).filter((pack): pack is ApiStartupPack => Boolean(pack));
   const issues: StartupProfileIssue[] = [];
-  const selectedCandidates: Record<string, ApiStartupSlotCandidate | null> = {};
-  const slots: StartupProfileSlotSummary[] = [];
 
-  if (standardPack && !standardPack.runtime_ready) {
-    standardPack.runtime_issues.forEach((issue) => {
-      issues.push(describeStartupIssue(issue, standardPack.display_name));
+  if (!basePack) {
+    issues.push({
+      title: 'Base pack unavailable',
+      description: `${profile.base_pack || 'The selected base pack'} is not installed in this workspace.`,
+      severity: 'danger',
+    });
+  } else if (!basePack.available) {
+    (basePack.approval_issues.length ? basePack.approval_issues : ['Base pack is not available']).forEach((issue) => {
+      issues.push(describeStartupIssue(issue, packLabel(basePack)));
     });
   }
 
-  catalog.slot_specs.forEach((slot) => {
-    const packId = profile.slots[slot.slot_id] ?? '';
-    const candidate = (catalog.slot_candidates[slot.slot_id] ?? []).find(
-      (item) => item.pack_id === packId,
-    ) ?? null;
-
-    selectedCandidates[slot.slot_id] = candidate;
-    slots.push({
-      slotId: slot.slot_id,
-      label: slot.label,
-      packId,
-      packName: packDisplayName(packId, candidate),
-      healthy: Boolean(candidate?.runtime_ready),
-    });
-
-    if (!candidate) {
+  profile.packs.forEach((packId) => {
+    const pack = byId.get(packId);
+    if (!pack) {
       issues.push({
-        title: `${slot.label} slot needs a pack`,
-        description: `Choose a compatible pack for ${slot.label.toLowerCase()}.`,
-        severity: 'warning',
+        title: 'Pack unavailable',
+        description: `${packId} is not installed in this workspace.`,
+        severity: 'danger',
       });
       return;
     }
-
-    if (!candidate.runtime_ready) {
-      const candidateIssues = candidate.runtime_issues.length
-        ? candidate.runtime_issues
-        : ['No runtime-ready component matched this slot.'];
-      candidateIssues.forEach((issue) => {
-        issues.push(describeStartupIssue(issue, slot.label));
+    if (!pack.available) {
+      (pack.approval_issues.length ? pack.approval_issues : [`Pack '${packId}' is disabled`]).forEach((issue) => {
+        issues.push(describeStartupIssue(issue, packLabel(pack)));
       });
     }
   });
 
-  return { standardPack, selectedCandidates, issues, slots };
+  const ports = profile.graph_ports.map((port) => {
+    const resolvedNode = profile.node_overrides[port.port_key] || port.source_node_ref || port.source_ref;
+    const compatible = compatibleNodesForPort(catalog, profile, port);
+    const healthy = compatible.some((node) => node.node_id === resolvedNode);
+    if (!healthy) {
+      issues.push({
+        title: `${portLabel(port)} needs a compatible node`,
+        description: `Choose a node that provides ${portStandards(port.target_port).join(', ') || 'the required standard'}.`,
+        severity: 'warning',
+      });
+    }
+    return {
+      portKey: port.port_key,
+      label: portLabel(port),
+      resolvedNode,
+      targetStandards: portStandards(port.target_port),
+      healthy,
+    };
+  });
+
+  return { basePack, issues, packs, ports };
 }
 
 export function buildStartupProfileView(
@@ -232,18 +236,14 @@ export function buildStartupProfileView(
   activeProfileId: string | null,
   lastLaunchedProfileId: string | null,
 ): StartupProfileView {
-  const { issues, slots, standardPack } = resolveProfileIssues(profile, catalog);
+  const { basePack, issues, packs, ports } = resolveProfileIssues(profile, catalog);
   const active = activeProfileId === profile.profile_id;
   const lastLaunched = lastLaunchedProfileId === profile.profile_id;
   const runtimeReady = issues.length === 0;
   const badges: StartupProfileBadge[] = [];
 
-  if (active) {
-    badges.push({ label: 'Active', tone: 'accent' });
-  }
-  if (lastLaunched) {
-    badges.push({ label: 'Last Played', tone: 'neutral' });
-  }
+  if (active) badges.push({ label: 'Active', tone: 'accent' });
+  if (lastLaunched) badges.push({ label: 'Last Played', tone: 'neutral' });
   badges.push({
     label: runtimeReady ? 'Ready to Play' : `${issues.length} issue${issues.length === 1 ? '' : 's'}`,
     tone: runtimeReady ? 'success' : issues.some((issue) => issue.severity === 'danger') ? 'danger' : 'warning',
@@ -254,21 +254,21 @@ export function buildStartupProfileView(
       ? 'Ready to play from your active setup.'
       : 'Ready for launch.'
     : issues[0]?.title || 'Needs attention before launch.';
-
   const subtitle = runtimeReady
-    ? `${standardPack?.display_name || profile.standard_pack_id} • ${slots.length} connected slots`
-    : issues[0]?.description || `${standardPack?.display_name || profile.standard_pack_id} needs attention.`;
+    ? `${packLabel(basePack, profile.base_pack)} • ${packs.length} pack${packs.length === 1 ? '' : 's'} • ${ports.length} graph ports`
+    : issues[0]?.description || `${packLabel(basePack, profile.base_pack)} needs attention.`;
 
   return {
     profile,
-    standardPack,
+    basePack,
+    packs,
     runtimeReady,
     issueCount: issues.length,
     issues,
     badges,
     headline,
     subtitle,
-    slots,
+    ports,
     lastLaunched,
   };
 }
@@ -284,8 +284,9 @@ export function filterAndSortStartupProfiles(
         const haystack = [
           profile.profile.name,
           profile.profile.profile_id,
-          profile.standardPack?.display_name || profile.profile.standard_pack_id,
-          ...profile.slots.map((slot) => `${slot.label} ${slot.packName} ${slot.packId}`),
+          packLabel(profile.basePack, profile.profile.base_pack),
+          ...profile.packs.map((pack) => `${pack.pack_id} ${packLabel(pack)}`),
+          ...profile.ports.map((port) => `${port.label} ${port.resolvedNode} ${port.portKey}`),
         ]
           .join(' ')
           .toLowerCase();
@@ -294,12 +295,8 @@ export function filterAndSortStartupProfiles(
     : profiles;
 
   return [...filtered].sort((left, right) => {
-    if (sortMode === 'name') {
-      return left.profile.name.localeCompare(right.profile.name);
-    }
-    if (sortMode === 'recent') {
-      return right.profile.updated_at - left.profile.updated_at;
-    }
+    if (sortMode === 'name') return left.profile.name.localeCompare(right.profile.name);
+    if (sortMode === 'recent') return right.profile.updated_at - left.profile.updated_at;
 
     const leftScore =
       (left.badges.some((badge) => badge.label === 'Active') ? 100 : 0) +
@@ -312,9 +309,15 @@ export function filterAndSortStartupProfiles(
       (right.runtimeReady ? 20 : 0) -
       right.issueCount * 10;
 
-    if (rightScore !== leftScore) {
-      return rightScore - leftScore;
-    }
+    if (rightScore !== leftScore) return rightScore - leftScore;
     return right.profile.updated_at - left.profile.updated_at;
   });
+}
+
+export function defaultBasePack(catalog: ApiStartupCatalog | null): ApiStartupPack | null {
+  return catalog?.packs.find((pack) => pack.available && pack.graphs.length > 0) ?? null;
+}
+
+export function titleCasePortKey(portKey: string): string {
+  return sentenceCase(portKey.replace(/[._-]+/g, ' '));
 }

@@ -273,6 +273,28 @@
       "handler": "_panel_delete_startup_profile"
     },
     {
+      "method": "POST",
+      "path_pattern": "/api/panel/startup/profiles/{id}/packs",
+      "handler": "_panel_add_pack_to_startup_profile",
+      "pass_body": true
+    },
+    {
+      "method": "DELETE",
+      "path_pattern": "/api/panel/startup/profiles/{id}/packs/{pack_id}",
+      "handler": "_panel_remove_pack_from_startup_profile"
+    },
+    {
+      "method": "PUT",
+      "path_pattern": "/api/panel/startup/profiles/{id}/overrides",
+      "handler": "_panel_set_startup_profile_node_override",
+      "pass_body": true
+    },
+    {
+      "method": "DELETE",
+      "path_pattern": "/api/panel/startup/profiles/{id}/overrides/{port_key}",
+      "handler": "_panel_clear_startup_profile_node_override"
+    },
+    {
       "method": "PUT",
       "path_pattern": "/api/panel/flows/{id}",
       "handler": "_panel_update_flow",

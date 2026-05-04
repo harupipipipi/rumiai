@@ -1,7 +1,16 @@
 import assert from 'node:assert/strict';
 import {beforeEach, test} from 'node:test';
 
-import {apiFetch, bootstrapPanelSession, hasPendingPanelBootstrapCode, openExternalUrl} from './api.ts';
+import {
+  addPackToStartupProfile,
+  apiFetch,
+  bootstrapPanelSession,
+  clearStartupProfileNodeOverride,
+  createStartupProfile,
+  hasPendingPanelBootstrapCode,
+  openExternalUrl,
+  setStartupProfileNodeOverride,
+} from './api.ts';
 
 class MemoryStorage {
   private readonly values = new Map<string, string>();
@@ -333,4 +342,25 @@ test('openExternalUrl uses the desktop shell when Tauri is available', async () 
 
   assert.equal(tauriOpenExternalCount, 1);
   assert.equal(window.location.href, 'http://127.0.0.1:8765/panel/');
+});
+
+test('startup profile wrappers use v3 payloads and endpoints', async () => {
+  await createStartupProfile({name: 'V3', base_pack: 'defaultspack'});
+  assert.equal(lastFetchUrl, '/api/panel/startup/profiles');
+  assert.equal(lastFetchInit?.method, 'POST');
+  assert.equal(lastFetchInit?.body, JSON.stringify({name: 'V3', base_pack: 'defaultspack'}));
+
+  await addPackToStartupProfile('profile-1', 'coolpack');
+  assert.equal(lastFetchUrl, '/api/panel/startup/profiles/profile-1/packs');
+  assert.equal(lastFetchInit?.method, 'POST');
+  assert.equal(lastFetchInit?.body, JSON.stringify({pack_id: 'coolpack'}));
+
+  await setStartupProfileNodeOverride('profile-1', 'agent.ai', 'coolpack.ai_client');
+  assert.equal(lastFetchUrl, '/api/panel/startup/profiles/profile-1/overrides');
+  assert.equal(lastFetchInit?.method, 'PUT');
+  assert.equal(lastFetchInit?.body, JSON.stringify({port_key: 'agent.ai', node_id: 'coolpack.ai_client'}));
+
+  await clearStartupProfileNodeOverride('profile-1', 'agent.ai');
+  assert.equal(lastFetchUrl, '/api/panel/startup/profiles/profile-1/overrides/agent.ai');
+  assert.equal(lastFetchInit?.method, 'DELETE');
 });

@@ -8,13 +8,17 @@ API 一覧:
   GET  /api/panel/packs              — Pack 一覧（有効/無効含む）
   POST /api/panel/packs/{id}/enable  — Pack 有効化
   POST /api/panel/packs/{id}/disable — Pack 無効化
-  GET  /api/panel/startup/profiles   — 起動プロファイル一覧と slot catalog
+  GET  /api/panel/startup/profiles   — 起動プロファイル一覧と catalog
   POST /api/panel/startup/profiles   — 起動プロファイル新規作成
   PUT  /api/panel/startup/profiles/{id} — 起動プロファイル更新
   DELETE /api/panel/startup/profiles/{id} — 起動プロファイル削除
   POST /api/panel/startup/profiles/{id}/duplicate — 起動プロファイル複製
   POST /api/panel/startup/profiles/{id}/activate  — 起動プロファイル切り替え
   POST /api/panel/startup/profiles/{id}/launch    — 起動プロファイル起動
+  POST /api/panel/startup/profiles/{id}/packs     — Pack 追加
+  DELETE /api/panel/startup/profiles/{id}/packs/{pack_id} — Pack 削除
+  PUT  /api/panel/startup/profiles/{id}/overrides — Node 差し替え設定
+  DELETE /api/panel/startup/profiles/{id}/overrides/{port_key} — Node 差し替え解除
   GET  /api/panel/flows              — Flow 一覧（本文なし）
   GET  /api/panel/flows/{id}         — Flow 詳細（YAML 本文付き）
   POST /api/panel/flows              — Flow 新規作成
@@ -31,7 +35,6 @@ import json
 import logging
 import os
 import re
-import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -312,6 +315,41 @@ class ControlPanelHandlersMixin:
             return self._panel_startup_profile_manager().launch_profile(profile_id)
         except Exception as e:
             _log_internal_error("panel_launch_startup_profile", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_add_pack_to_startup_profile(self, profile_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            pack_id = str(body.get("pack_id") or "").strip()
+            if not pack_id:
+                return {"error": "pack_id is required", "status_code": 400}
+            return self._panel_startup_profile_manager().add_pack_to_profile(profile_id, pack_id)
+        except Exception as e:
+            _log_internal_error("panel_add_pack_to_startup_profile", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_remove_pack_from_startup_profile(self, profile_id: str, pack_id: str) -> Dict[str, Any]:
+        try:
+            return self._panel_startup_profile_manager().remove_pack_from_profile(profile_id, pack_id)
+        except Exception as e:
+            _log_internal_error("panel_remove_pack_from_startup_profile", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_set_startup_profile_node_override(self, profile_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            port_key = str(body.get("port_key") or "").strip()
+            node_id = str(body.get("node_id") or "").strip()
+            if not port_key or not node_id:
+                return {"error": "port_key and node_id are required", "status_code": 400}
+            return self._panel_startup_profile_manager().set_node_override(profile_id, port_key, node_id)
+        except Exception as e:
+            _log_internal_error("panel_set_startup_profile_node_override", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_clear_startup_profile_node_override(self, profile_id: str, port_key: str) -> Dict[str, Any]:
+        try:
+            return self._panel_startup_profile_manager().clear_node_override(profile_id, port_key)
+        except Exception as e:
+            _log_internal_error("panel_clear_startup_profile_node_override", e)
             return {"error": _SAFE_ERROR_MSG, "status_code": 500}
 
     # ------------------------------------------------------------------
