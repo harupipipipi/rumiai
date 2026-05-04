@@ -195,8 +195,9 @@ def test_subagent_tool_creates_child_conversation(tmp_path, monkeypatch):
     ChatStore._instance = None
 
 
-def test_integration_secret_store_loads_chat_tokens_into_env(tmp_path, monkeypatch):
+def test_integration_secret_store_reads_chat_tokens_without_env_injection(tmp_path, monkeypatch):
     from domain.integrations.secrets import (
+        get_integration_secret,
         load_integration_secrets_into_env,
         set_integration_secret,
     )
@@ -211,16 +212,17 @@ def test_integration_secret_store_loads_chat_tokens_into_env(tmp_path, monkeypat
 
     loaded = load_integration_secrets_into_env()
     assert loaded["slack"] is True
-    assert os.environ["SLACK_BOT_TOKEN"] == "xoxb-test"
+    assert "SLACK_BOT_TOKEN" not in os.environ
+    assert get_integration_secret("slack", "SLACK_BOT_TOKEN") == "xoxb-test"
 
 
-def test_unit_executor_allows_integration_tokens_for_python_fallback(monkeypatch):
+def test_unit_executor_does_not_pass_integration_tokens_to_python_fallback(monkeypatch):
     from core_runtime.unit_executor import UnitExecutor
 
     monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "line-token")
     process_env = UnitExecutor._build_subprocess_env()
 
-    assert process_env["LINE_CHANNEL_ACCESS_TOKEN"] == "line-token"
+    assert "LINE_CHANNEL_ACCESS_TOKEN" not in process_env
 
 
 def test_external_integration_routes_are_registered():
@@ -241,6 +243,8 @@ def test_slack_event_creates_external_conversation(tmp_path, monkeypatch):
     integration_path = tmp_path / "user_data" / "shared" / "integrations" / "conversations.json"
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_INTEGRATIONS_STORE_PATH", str(integration_path))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_SECRETS_DIR", str(tmp_path / "secrets"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_INTEGRATIONS_ALLOW_UNSIGNED_DEV", "1")
     monkeypatch.delenv("SLACK_SIGNING_SECRET", raising=False)
     monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
     ChatStore._instance = None
@@ -276,11 +280,32 @@ def test_slack_event_creates_external_conversation(tmp_path, monkeypatch):
     ChatStore._instance = None
 
 
-def test_discord_ping_and_agent_engine_queue_multiple_tool_calls():
+def test_slack_event_fails_closed_without_signing_secret(tmp_path, monkeypatch):
+    from blocks.integrations.slack import run
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_SECRETS_DIR", str(tmp_path / "secrets"))
+    monkeypatch.delenv("RUMI_DEFAULTSPACK_INTEGRATIONS_ALLOW_UNSIGNED_DEV", raising=False)
+    monkeypatch.delenv("SLACK_SIGNING_SECRET", raising=False)
+
+    result = run(
+        {
+            "type": "event_callback",
+            "event": {"type": "message", "channel": "C1", "user": "U1", "ts": "1.0", "text": "hello"},
+        },
+        {},
+    )
+
+    assert result["status"] == "error"
+    assert result["_http_status"] == 401
+    assert result["error"]["code"] == "SIGNATURE_INVALID"
+
+
+def test_discord_ping_and_agent_engine_queue_multiple_tool_calls(monkeypatch):
     from blocks.integrations.discord import run
     from domain.agent.engine import AgentEngine
     from domain.agent.execution import AgentExecution
 
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_INTEGRATIONS_ALLOW_UNSIGNED_DEV", "1")
     assert run({"type": 1}, {})["type"] == 1
 
     engine = AgentEngine()
@@ -742,7 +767,7 @@ def test_browser_screenshot_tool_result_adds_image_for_vision_models():
             "data": {
                 "result": "screenshot",
                 "action": "computer.screenshot",
-                "data_url": "data:image/png;base64,abc123",
+                "data_url": "data:image/png;base64,aGVsbG8=",
             },
         },
         "call_1",
@@ -751,7 +776,26 @@ def test_browser_screenshot_tool_result_adds_image_for_vision_models():
 
     assert messages[0]["role"] == "tool"
     assert messages[1]["role"] == "user"
-    assert messages[1]["content"][1]["image_url"]["url"] == "data:image/png;base64,abc123"
+    assert messages[1]["content"][1]["image_url"]["url"] == "data:image/png;base64,aGVsbG8="
+
+
+def test_attachment_image_blocks_validate_actual_data_url_bytes():
+    import blocks.chat.send as send
+
+    tiny_png = "data:image/png;base64,aGVsbG8="
+    too_large_encoded = "A" * (((send.MAX_ATTACHMENT_IMAGE_BYTES + 1 + 2) // 3) * 4)
+    too_large = "data:image/png;base64," + too_large_encoded
+
+    blocks = send._attachment_image_blocks(
+        [
+            {"type": "image/png", "size": 1, "dataUrl": tiny_png},
+            {"type": "image/png", "size": 1, "dataUrl": "data:image/png;base64,not valid"},
+            {"type": "image/png", "size": 1, "dataUrl": too_large},
+        ]
+    )
+
+    assert len(blocks) == 1
+    assert blocks[0]["image_url"]["url"] == tiny_png
 
 
 def test_browser_screenshot_tool_log_compacts_inline_image_data():
@@ -925,12 +969,13 @@ def test_direct_coding_route_cannot_execute_with_forged_approved(tmp_path, monke
     assert not (tmp_path / "direct-pwned.txt").exists()
 
 
-def test_sensitive_coding_routes_do_not_use_wildcard_cors():
-    from ecosystem.defaultspack.transport.http import _is_sensitive_coding_path
+def test_sensitive_routes_do_not_use_wildcard_cors():
+    from ecosystem.defaultspack.transport.http import _is_sensitive_http_path
 
-    assert _is_sensitive_coding_path("/api/coding/terminal/exec") is True
-    assert _is_sensitive_coding_path("/api/coding/files/write") is True
-    assert _is_sensitive_coding_path("/api/coding/files/read") is False
+    assert _is_sensitive_http_path("/api/coding/terminal/exec") is True
+    assert _is_sensitive_http_path("/api/coding/files/write") is True
+    assert _is_sensitive_http_path("/api/integrations/secrets") is True
+    assert _is_sensitive_http_path("/api/coding/files/read") is False
 
 
 def test_fallback_routes_expose_agent_service_and_coding_surfaces():

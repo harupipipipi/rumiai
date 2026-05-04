@@ -27,6 +27,7 @@ from domain.tool.schema_adapter import (
 MAX_ATTACHMENT_TEXT_CHARS = 240_000
 MAX_ATTACHMENT_TEXT_CHARS_PER_FILE = 120_000
 MAX_ATTACHMENT_IMAGE_BYTES = 8 * 1024 * 1024
+_DATA_IMAGE_PREFIX = "data:image/"
 
 
 def _stub_response():
@@ -182,6 +183,20 @@ def _model_supports_vision(model):
     return any(token in str(model or "").lower() for token in ("gemini", "gemma", "gpt-4o", "gpt-5"))
 
 
+def _image_data_url_byte_length(data_url):
+    if not isinstance(data_url, str) or not data_url.startswith(_DATA_IMAGE_PREFIX):
+        return None
+    header, separator, encoded = data_url.partition(",")
+    if not separator or ";base64" not in header.lower():
+        return None
+    try:
+        import base64
+
+        return len(base64.b64decode(encoded, validate=True))
+    except Exception:
+        return None
+
+
 def _browser_screenshot_data_url(result):
     if not isinstance(result, dict):
         return ""
@@ -192,7 +207,8 @@ def _browser_screenshot_data_url(result):
     candidates = [data, widget]
     for candidate in candidates:
         data_url = candidate.get("data_url") or candidate.get("dataUrl")
-        if isinstance(data_url, str) and data_url.startswith("data:image/"):
+        byte_length = _image_data_url_byte_length(data_url)
+        if byte_length is not None and byte_length <= MAX_ATTACHMENT_IMAGE_BYTES:
             return data_url
     path = data.get("path") or widget.get("path")
     mime = data.get("mime_type") or widget.get("mime_type") or "image/png"
@@ -448,10 +464,13 @@ def _attachment_image_blocks(attachments):
             continue
         mime = str(attachment.get("type") or "").lower()
         data_url = attachment.get("dataUrl") or attachment.get("data_url")
-        if not mime.startswith("image/") or not isinstance(data_url, str) or not data_url.startswith("data:image/"):
+        byte_length = _image_data_url_byte_length(data_url)
+        if not mime.startswith("image/") or byte_length is None:
             continue
         size = attachment.get("size")
         if isinstance(size, int) and size > MAX_ATTACHMENT_IMAGE_BYTES:
+            continue
+        if byte_length > MAX_ATTACHMENT_IMAGE_BYTES:
             continue
         blocks.append(
             {

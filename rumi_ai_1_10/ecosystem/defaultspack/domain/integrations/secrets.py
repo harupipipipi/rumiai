@@ -59,35 +59,38 @@ def provider_for_secret_key(key: str) -> str:
     return ""
 
 
+def get_integration_secret(provider_id: str, key: str, *, pack_root: Path | None = None) -> str:
+    normalized_provider = str(provider_id or "").strip()
+    normalized_key = str(key or "").strip()
+    if normalized_key not in integration_secret_keys(normalized_provider):
+        return ""
+    env_value = os.environ.get(normalized_key, "").strip()
+    if env_value:
+        return env_value
+    if not (_secrets_dir(pack_root) / f"{normalized_key}.json").exists():
+        return ""
+    value = _get_store(pack_root)._internal_read_value(
+        normalized_key,
+        caller_id=f"defaultspack.integrations:{normalized_provider}",
+    )
+    return str(value or "").strip()
+
+
 def load_integration_secrets_into_env(*, pack_root: Path | None = None) -> Dict[str, bool]:
     loaded: Dict[str, bool] = {}
-    store = None
     for provider_id, keys in INTEGRATION_SECRET_KEYS.items():
         configured = False
         for key in keys:
-            if os.environ.get(key, "").strip():
-                configured = True
-                continue
-            if not (_secrets_dir(pack_root) / f"{key}.json").exists():
-                continue
-            if store is None:
-                store = _get_store(pack_root)
-            value = store._internal_read_value(
-                key,
-                caller_id=f"defaultspack.integrations:{provider_id}",
-            )
-            if value:
-                os.environ[key] = value
+            if get_integration_secret(provider_id, key, pack_root=pack_root):
                 configured = True
         loaded[provider_id] = configured
     return loaded
 
 
 def integration_secret_status(*, pack_root: Path | None = None) -> List[Dict[str, Any]]:
-    load_integration_secrets_into_env(pack_root=pack_root)
     result = []
     for provider_id, keys in sorted(INTEGRATION_SECRET_KEYS.items()):
-        configured_keys = [key for key in keys if os.environ.get(key, "").strip()]
+        configured_keys = [key for key in keys if get_integration_secret(provider_id, key, pack_root=pack_root)]
         result.append(
             {
                 "provider_id": provider_id,
@@ -124,7 +127,6 @@ def set_integration_secret(
             actor="defaultspack",
             reason=f"clear {normalized_provider} integration secret",
         )
-        os.environ.pop(normalized_key, None)
         return {
             "success": bool(result.success),
             "provider_id": normalized_provider,
@@ -140,8 +142,6 @@ def set_integration_secret(
         actor="defaultspack",
         reason=f"set {normalized_provider} integration secret",
     )
-    if result.success:
-        os.environ[normalized_key] = cleaned
     return {
         "success": bool(result.success),
         "provider_id": normalized_provider,

@@ -2,15 +2,14 @@ from __future__ import annotations
 
 import hmac
 import hashlib
-import os
 import time
 from typing import Any, Dict
 
 from blocks._common import ok, error
-from blocks.integrations.common import headers_from_request, raw_body_bytes, text_limit
+from blocks.integrations.common import allow_unsigned_webhook_dev, headers_from_request, raw_body_bytes, text_limit
 from domain.integrations.chat_bridge import dispatch_external_message
 from domain.integrations.http_client import post_json
-from domain.integrations.secrets import load_integration_secrets_into_env
+from domain.integrations.secrets import get_integration_secret, load_integration_secrets_into_env
 
 
 def run(input_data, context):
@@ -55,9 +54,6 @@ def run(input_data, context):
             "thread_ts": thread_ts,
             "event_ts": event.get("event_ts") or event.get("ts"),
         },
-        model=input_data.get("model") if isinstance(input_data.get("model"), str) else None,
-        tools=input_data.get("tools") if isinstance(input_data.get("tools"), list) else None,
-        params=input_data.get("params") if isinstance(input_data.get("params"), dict) else None,
         context=context,
     )
     reply = result.get("assistant_text", "")
@@ -66,9 +62,11 @@ def run(input_data, context):
 
 
 def _verify_slack(headers: Dict[str, str], raw_body: bytes) -> Dict[str, Any]:
-    secret = os.environ.get("SLACK_SIGNING_SECRET", "").strip()
+    secret = get_integration_secret("slack", "SLACK_SIGNING_SECRET")
     if not secret:
-        return {"ok": True, "verified": False, "reason": "no signing secret configured"}
+        if allow_unsigned_webhook_dev():
+            return {"ok": True, "verified": False, "reason": "unsigned dev mode enabled"}
+        return {"ok": False, "verified": False, "reason": "Slack signing secret not configured"}
     timestamp = headers.get("x-slack-request-timestamp", "")
     signature = headers.get("x-slack-signature", "")
     if not timestamp or not signature:
@@ -86,7 +84,7 @@ def _verify_slack(headers: Dict[str, str], raw_body: bytes) -> Dict[str, Any]:
 
 
 def _send_slack_reply(channel: str, text: str, thread_ts: str = "") -> Dict[str, Any]:
-    token = os.environ.get("SLACK_BOT_TOKEN", "").strip()
+    token = get_integration_secret("slack", "SLACK_BOT_TOKEN")
     if not token:
         return {"sent": False, "reason": "SLACK_BOT_TOKEN not configured"}
     if not channel or not text:

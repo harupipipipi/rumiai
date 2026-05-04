@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import os
 from typing import Dict
 
 
@@ -27,3 +28,12 @@ def text_limit(value: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 1)] + "…"
+
+
+def allow_unsigned_webhook_dev() -> bool:
+    return os.environ.get("RUMI_DEFAULTSPACK_INTEGRATIONS_ALLOW_UNSIGNED_DEV", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }

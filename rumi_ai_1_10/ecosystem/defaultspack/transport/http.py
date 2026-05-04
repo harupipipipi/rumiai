@@ -4,6 +4,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from blocks._common import ok, error, not_implemented, timestamp, gen_id
 
 import base64
+import hmac
 import json
 import re
 import signal
@@ -479,9 +480,46 @@ _SENSITIVE_CODING_PATHS = {
     "/api/coding/git/push",
 }
 
+_SENSITIVE_INTEGRATION_PATHS = {
+    "/api/integrations/secrets",
+}
+
+_LOCAL_ORIGIN_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
 
 def _is_sensitive_coding_path(path):
     return path in _SENSITIVE_CODING_PATHS
+
+
+def _is_sensitive_http_path(path):
+    return path in _SENSITIVE_CODING_PATHS or path in _SENSITIVE_INTEGRATION_PATHS
+
+
+def _is_allowed_sensitive_origin(origin):
+    if not origin:
+        return True
+    try:
+        parsed = urllib.parse.urlsplit(origin)
+    except Exception:
+        return False
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    return parsed.hostname in _LOCAL_ORIGIN_HOSTS
+
+
+def _configured_local_auth_token():
+    for key in ("RUMI_DEFAULTSPACK_LOCAL_TOKEN", "RUMI_API_TOKEN", "RUMI_TOKEN"):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _bearer_token(headers):
+    auth_header = headers.get("Authorization", "")
+    if not auth_header.lower().startswith("bearer "):
+        return ""
+    return auth_header[7:].strip()
 
 
 class _RequestHandler(http.server.BaseHTTPRequestHandler):
@@ -512,6 +550,10 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             handler, path_params, source, path_inject = self.server_ref._match_route(method, path)
             if handler is None:
                 self._send_json(404, error("not found: " + method + " " + path))
+                return
+            sensitive_error = self._sensitive_request_error(method, path)
+            if sensitive_error:
+                self._send_json(sensitive_error[0], error(sensitive_error[1], sensitive_error[2]))
                 return
             request_data = {
                 key: values[-1]
@@ -617,10 +659,32 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
         except BrokenPipeError:
             pass
 
+    def _sensitive_request_error(self, method, path):
+        if path not in _SENSITIVE_INTEGRATION_PATHS:
+            return None
+        origin = self.headers.get("Origin", "")
+        if not _is_allowed_sensitive_origin(origin):
+            return (403, "origin not allowed for sensitive integration route", "ORIGIN_DENIED")
+        expected = _configured_local_auth_token()
+        provided = _bearer_token(self.headers)
+        if not expected:
+            return (403, "local auth token is not configured", "AUTH_REQUIRED")
+        if not provided or not hmac.compare_digest(provided, expected):
+            return (401, "local auth token required", "AUTH_REQUIRED")
+        if method.upper() in {"POST", "PUT", "DELETE"} and origin and not self.headers.get("X-Rumi-CSRF", "").strip():
+            return (403, "CSRF header required for sensitive integration mutation", "CSRF_REQUIRED")
+        return None
+
     def _send_cors_headers(self):
-        if _is_sensitive_coding_path(self.path.split("?")[0]):
+        path = self.path.split("?")[0]
+        if _is_sensitive_http_path(path):
+            origin = self.headers.get("Origin", "")
+            if _is_allowed_sensitive_origin(origin):
+                if origin:
+                    self.send_header("Access-Control-Allow-Origin", origin)
+                    self.send_header("Vary", "Origin")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Rumi-CSRF")
             return
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")

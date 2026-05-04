@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from domain.chat.store import ChatStore
 from domain.integrations.store import IntegrationConversationStore
@@ -14,9 +14,6 @@ def dispatch_external_message(
     title: str,
     event_id: str | None = None,
     metadata: Dict[str, Any] | None = None,
-    model: str | None = None,
-    tools: List[Any] | None = None,
-    params: Dict[str, Any] | None = None,
     context: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     cleaned_text = str(text or "").strip()
@@ -43,7 +40,7 @@ def dispatch_external_message(
         title=title,
         metadata=external_metadata,
         chat_store=chat_store,
-        model=model,
+        model=None,
     )
 
     from blocks.chat.send import run as send_run
@@ -63,10 +60,8 @@ def dispatch_external_message(
                 },
             },
         },
-        "params": params if isinstance(params, dict) else {},
+        "params": {},
     }
-    if tools is not None:
-        request["tools"] = tools
 
     result = send_run(request, context or {})
     if not isinstance(result, dict) or result.get("status") != "ok":

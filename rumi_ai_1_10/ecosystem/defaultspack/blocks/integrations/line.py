@@ -3,14 +3,13 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
-import os
 from typing import Any, Dict
 
 from blocks._common import ok, error
-from blocks.integrations.common import headers_from_request, raw_body_bytes, text_limit
+from blocks.integrations.common import allow_unsigned_webhook_dev, headers_from_request, raw_body_bytes, text_limit
 from domain.integrations.chat_bridge import dispatch_external_message
 from domain.integrations.http_client import post_json
-from domain.integrations.secrets import load_integration_secrets_into_env
+from domain.integrations.secrets import get_integration_secret, load_integration_secrets_into_env
 
 
 def run(input_data, context):
@@ -29,9 +28,6 @@ def run(input_data, context):
         result = _handle_event(
             event,
             context,
-            model=input_data.get("model") if isinstance(input_data.get("model"), str) else None,
-            tools=input_data.get("tools") if isinstance(input_data.get("tools"), list) else None,
-            params=input_data.get("params") if isinstance(input_data.get("params"), dict) else None,
         )
         results.append(result)
     return ok({"verified": verification["verified"], "events": results})
@@ -40,10 +36,6 @@ def run(input_data, context):
 def _handle_event(
     event: Dict[str, Any],
     context,
-    *,
-    model: str | None = None,
-    tools=None,
-    params=None,
 ) -> Dict[str, Any]:
     if event.get("type") != "message":
         return {"ignored": True, "reason": "unsupported LINE event", "event_type": event.get("type")}
@@ -68,9 +60,6 @@ def _handle_event(
             "message_id": message.get("id"),
             "message_type": message_type,
         },
-        model=model,
-        tools=tools,
-        params=params,
         context=context,
     )
     reply = _send_line_reply(str(event.get("replyToken") or ""), result.get("assistant_text", ""))
@@ -78,9 +67,11 @@ def _handle_event(
 
 
 def _verify_line(headers: Dict[str, str], raw_body: bytes) -> Dict[str, Any]:
-    secret = os.environ.get("LINE_CHANNEL_SECRET", "").strip()
+    secret = get_integration_secret("line", "LINE_CHANNEL_SECRET")
     if not secret:
-        return {"ok": True, "verified": False, "reason": "no channel secret configured"}
+        if allow_unsigned_webhook_dev():
+            return {"ok": True, "verified": False, "reason": "unsigned dev mode enabled"}
+        return {"ok": False, "verified": False, "reason": "LINE channel secret not configured"}
     signature = headers.get("x-line-signature", "")
     if not signature:
         return {"ok": False, "verified": False, "reason": "missing LINE signature header"}
@@ -92,7 +83,7 @@ def _verify_line(headers: Dict[str, str], raw_body: bytes) -> Dict[str, Any]:
 
 
 def _send_line_reply(reply_token: str, text: str) -> Dict[str, Any]:
-    token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
+    token = get_integration_secret("line", "LINE_CHANNEL_ACCESS_TOKEN")
     if not token:
         return {"sent": False, "reason": "LINE_CHANNEL_ACCESS_TOKEN not configured"}
     if not reply_token or not text:

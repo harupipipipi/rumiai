@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import os
 from typing import Any, Dict
 
 from blocks._common import ok, error
-from blocks.integrations.common import headers_from_request, raw_body_bytes, text_limit
+from blocks.integrations.common import allow_unsigned_webhook_dev, headers_from_request, raw_body_bytes, text_limit
 from domain.integrations.chat_bridge import dispatch_external_message
 from domain.integrations.http_client import post_json
-from domain.integrations.secrets import load_integration_secrets_into_env
+from domain.integrations.secrets import get_integration_secret, load_integration_secrets_into_env
 
 
 DISCORD_PING = 1
@@ -66,9 +65,6 @@ def _handle_interaction(input_data: Dict[str, Any], context) -> Dict[str, Any]:
             "user_id": user_id,
             "interaction_name": data.get("name"),
         },
-        model=input_data.get("model") if isinstance(input_data.get("model"), str) else None,
-        tools=input_data.get("tools") if isinstance(input_data.get("tools"), list) else None,
-        params=input_data.get("params") if isinstance(input_data.get("params"), dict) else None,
         context=context,
     )
 
@@ -94,9 +90,6 @@ def _handle_message_create(input_data: Dict[str, Any], context) -> Dict[str, Any
             "user_id": user_id,
             "message_id": data.get("id"),
         },
-        model=input_data.get("model") if isinstance(input_data.get("model"), str) else None,
-        tools=input_data.get("tools") if isinstance(input_data.get("tools"), list) else None,
-        params=input_data.get("params") if isinstance(input_data.get("params"), dict) else None,
         context=context,
     )
     reply = _send_discord_channel_message(channel_id, result.get("assistant_text", ""))
@@ -124,9 +117,11 @@ def _interaction_user_id(input_data: Dict[str, Any]) -> str:
 
 
 def _verify_discord(headers: Dict[str, str], raw_body: bytes) -> Dict[str, Any]:
-    public_key = os.environ.get("DISCORD_PUBLIC_KEY", "").strip()
+    public_key = get_integration_secret("discord", "DISCORD_PUBLIC_KEY")
     if not public_key:
-        return {"ok": True, "verified": False, "reason": "no public key configured"}
+        if allow_unsigned_webhook_dev():
+            return {"ok": True, "verified": False, "reason": "unsigned dev mode enabled"}
+        return {"ok": False, "verified": False, "reason": "Discord public key not configured"}
     signature = headers.get("x-signature-ed25519", "")
     timestamp = headers.get("x-signature-timestamp", "")
     if not signature or not timestamp:
@@ -142,7 +137,7 @@ def _verify_discord(headers: Dict[str, str], raw_body: bytes) -> Dict[str, Any]:
 
 
 def _send_discord_channel_message(channel_id: str, text: str) -> Dict[str, Any]:
-    token = os.environ.get("DISCORD_BOT_TOKEN", "").strip()
+    token = get_integration_secret("discord", "DISCORD_BOT_TOKEN")
     if not token:
         return {"sent": False, "reason": "DISCORD_BOT_TOKEN not configured"}
     if not channel_id or not text:
