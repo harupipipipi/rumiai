@@ -4,6 +4,7 @@ import subprocess
 import sys
 import importlib
 import json
+import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -192,6 +193,113 @@ def test_subagent_tool_creates_child_conversation(tmp_path, monkeypatch):
     assert child["title"] == "Subagent check"
     assert [message["role"] for message in child["messages"]] == ["user", "assistant"]
     ChatStore._instance = None
+
+
+def test_integration_secret_store_loads_chat_tokens_into_env(tmp_path, monkeypatch):
+    from domain.integrations.secrets import (
+        load_integration_secrets_into_env,
+        set_integration_secret,
+    )
+
+    secrets_dir = tmp_path / "secrets"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_SECRETS_DIR", str(secrets_dir))
+    monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
+
+    result = set_integration_secret("slack", "SLACK_BOT_TOKEN", "xoxb-test")
+    assert result["success"] is True
+    os.environ.pop("SLACK_BOT_TOKEN", None)
+
+    loaded = load_integration_secrets_into_env()
+    assert loaded["slack"] is True
+    assert os.environ["SLACK_BOT_TOKEN"] == "xoxb-test"
+
+
+def test_unit_executor_allows_integration_tokens_for_python_fallback(monkeypatch):
+    from core_runtime.unit_executor import UnitExecutor
+
+    monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "line-token")
+    process_env = UnitExecutor._build_subprocess_env()
+
+    assert process_env["LINE_CHANNEL_ACCESS_TOKEN"] == "line-token"
+
+
+def test_external_integration_routes_are_registered():
+    registry = _collect_defaultspack_routes()
+    patterns = {route["pattern"] for route in registry.routes}
+
+    assert "/api/integrations/slack/events" in patterns
+    assert "/api/integrations/line/webhook" in patterns
+    assert "/api/integrations/discord/interactions" in patterns
+    assert "/api/integrations/secrets" in patterns
+
+
+def test_slack_event_creates_external_conversation(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from blocks.integrations.slack import run
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    integration_path = tmp_path / "user_data" / "shared" / "integrations" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_INTEGRATIONS_STORE_PATH", str(integration_path))
+    monkeypatch.delenv("SLACK_SIGNING_SECRET", raising=False)
+    monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
+    ChatStore._instance = None
+
+    result = run(
+        {
+            "type": "event_callback",
+            "team_id": "T1",
+            "event_id": "Ev1",
+            "event": {
+                "type": "message",
+                "channel": "C1",
+                "user": "U1",
+                "ts": "1.0",
+                "text": "hello from slack",
+            },
+            "model": "stub/default",
+            "tools": [],
+        },
+        {},
+    )
+
+    assert result["status"] == "ok"
+    data = result["data"]
+    assert data["status"] == "ok"
+    assert data["reply"]["sent"] is False
+
+    stored = json.loads(storage_path.read_text(encoding="utf-8"))
+    conversation = stored["conversations"][data["conversation_id"]]
+    assert conversation["conversation_kind"] == "external"
+    assert "integration:slack" in conversation["tags"]
+    assert conversation["messages"][0]["metadata"]["external"]["provider"] == "slack"
+    ChatStore._instance = None
+
+
+def test_discord_ping_and_agent_engine_queue_multiple_tool_calls():
+    from blocks.integrations.discord import run
+    from domain.agent.engine import AgentEngine
+    from domain.agent.execution import AgentExecution
+
+    assert run({"type": 1}, {})["type"] == 1
+
+    engine = AgentEngine()
+    parsed = engine._parse_ai_response(
+        {
+            "status": "ok",
+            "data": {
+                "tool_calls": [
+                    {"function": {"name": "calculator", "arguments": "{\"expression\":\"1+1\"}"}},
+                    {"function": {"name": "todo", "arguments": "{\"action\":\"list\"}"}},
+                ]
+            },
+        }
+    )
+    execution = AgentExecution("agent_test", "task", [], "stub/default", "")
+    engine._set_pending_tool_call(execution, parsed)
+
+    assert execution.pending_tool_call["tool_name"] == "calculator"
+    assert [call["tool_name"] for call in execution.queued_tool_calls] == ["todo"]
 
 
 def test_chat_stream_uses_provider_stream_and_persists_message(tmp_path, monkeypatch):

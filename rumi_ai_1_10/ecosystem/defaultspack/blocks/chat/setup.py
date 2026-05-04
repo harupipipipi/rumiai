@@ -51,6 +51,13 @@ def run(context):
         ("POST", "/api/chat/channels/{id}/messages", _lazy("blocks.chat.channel.send_message"), {"id": "id"}),
         ("GET", "/api/chat/channels/{id}/messages", _lazy("blocks.chat.channel.get_messages"), {"id": "id"}),
         ("POST", "/api/chat/channels/{id}/messages/{msg_id}/reply", _lazy("blocks.chat.channel.reply"), {"id": "id", "msg_id": "msg_id"}),
+        # --- External chat integrations ---
+        ("GET", "/api/integrations/secrets", _lazy("blocks.integrations.secrets"), {}),
+        ("POST", "/api/integrations/secrets", _lazy("blocks.integrations.secrets"), {}),
+        ("POST", "/api/integrations/slack/events", _lazy("blocks.integrations.slack"), {}),
+        ("POST", "/api/integrations/line/webhook", _lazy("blocks.integrations.line"), {}),
+        ("POST", "/api/integrations/discord/interactions", _lazy("blocks.integrations.discord"), {}),
+        ("POST", "/api/integrations/discord/events", _lazy("blocks.integrations.discord"), {}),
     ]
 
     for method, pattern, handler, path_inject in routes:

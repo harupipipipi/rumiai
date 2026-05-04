@@ -3,6 +3,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from blocks._common import ok, error, not_implemented, timestamp, gen_id
 
+import base64
 import json
 import re
 import signal
@@ -22,7 +23,16 @@ class DefaultsHttpServer:
         self._server = None
         self._thread = None
         self._routes = []
+        self._load_runtime_secrets()
         self._setup_routes()
+
+    def _load_runtime_secrets(self):
+        try:
+            from domain.integrations.secrets import load_integration_secrets_into_env
+
+            load_integration_secrets_into_env()
+        except Exception:
+            pass
 
     def _setup_routes(self):
         """Build the route table.
@@ -508,18 +518,30 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                 for key, values in urllib.parse.parse_qs(parsed_url.query, keep_blank_values=True).items()
                 if values
             }
+            request_data["_headers"] = {str(key): str(value) for key, value in self.headers.items()}
             if method in ("POST", "PUT"):
                 content_length = int(self.headers.get("Content-Length", 0))
                 if content_length > 0:
                     raw_body = self.rfile.read(content_length)
-                    try:
-                        body_data = json.loads(raw_body.decode("utf-8"))
-                    except (json.JSONDecodeError, UnicodeDecodeError):
-                        self._send_json(400, error("invalid JSON body"))
-                        return
-                    if not isinstance(body_data, dict):
-                        self._send_json(400, error("JSON body must be an object"))
-                        return
+                    raw_text = raw_body.decode("utf-8", errors="replace")
+                    request_data["_raw_body"] = raw_text
+                    request_data["_raw_body_base64"] = base64.b64encode(raw_body).decode("ascii")
+                    content_type = str(self.headers.get("Content-Type", "")).lower()
+                    if "application/x-www-form-urlencoded" in content_type:
+                        body_data = {
+                            key: values[-1]
+                            for key, values in urllib.parse.parse_qs(raw_text, keep_blank_values=True).items()
+                            if values
+                        }
+                    else:
+                        try:
+                            body_data = json.loads(raw_text)
+                        except (json.JSONDecodeError, UnicodeDecodeError):
+                            self._send_json(400, error("invalid JSON body"))
+                            return
+                        if not isinstance(body_data, dict):
+                            self._send_json(400, error("JSON body must be an object"))
+                            return
                     request_data.update(body_data)
 
             if source == "registry":

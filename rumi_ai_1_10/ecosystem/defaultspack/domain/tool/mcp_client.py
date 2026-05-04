@@ -4,6 +4,7 @@ JSON-RPC 2.0 準拠。stdio / SSE トランスポート対応。
 外部ライブラリ不使用（標準ライブラリのみ）。
 """
 import json
+import os
 import subprocess
 import threading
 import time
@@ -271,7 +272,11 @@ class _ServerConnection:
             command = self.config.get("command")
             if not command:
                 raise ValueError("stdio transport requires 'command' in config")
-            env = self.config.get("env")
+            env = os.environ.copy()
+            config_env = self.config.get("env")
+            if isinstance(config_env, dict):
+                for key, value in config_env.items():
+                    env[str(key)] = str(value)
             self._transport = _StdioTransport(command, env=env)
         elif transport_type == "sse":
             url = self.config.get("url")

@@ -65,6 +65,12 @@ class ToolExecutor:
     """ツール実行エンジン"""
 
     def __init__(self):
+        try:
+            from domain.integrations.secrets import load_integration_secrets_into_env
+
+            load_integration_secrets_into_env()
+        except Exception:
+            pass
         self._registry = ToolRegistry()
         self._mcp_client = McpClient()
 
