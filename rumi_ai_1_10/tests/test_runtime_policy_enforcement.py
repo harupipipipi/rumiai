@@ -47,6 +47,26 @@ def test_policy_filters_shell_and_file_write_tools_from_provider_tools() -> None
     assert names == ["search"]
 
 
+def test_policy_filters_tool_allowlist_and_denylist() -> None:
+    tools = [
+        {"name": "rumi_api", "metadata": {"action_type": "read"}, "schema": {}},
+        {"name": "web_search", "metadata": {"action_type": "read"}, "schema": {}},
+        {"name": "coding_terminal_exec", "metadata": {"category": "shell"}, "schema": {}},
+    ]
+    runtime_profile = {
+        "policy": {
+            "tool_allowlist": ["rumi_api", "web_search", "coding_terminal_exec"],
+            "tool_denylist": ["web_search"],
+            "allow_shell": False,
+        },
+        "defaultspack": {"agents": {"agent": {"tools": ["rumi_api", "web_search", "coding_terminal_exec"]}}},
+    }
+
+    filtered = filter_tool_definitions_for_runtime_profile(adapt_tool_definitions(tools), runtime_profile)
+
+    assert [tool["function"]["name"] for tool in filtered] == ["rumi_api"]
+
+
 def test_tool_executor_rejects_policy_blocked_tool() -> None:
     ToolRegistry._instance = None
     registry = ToolRegistry()

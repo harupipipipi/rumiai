@@ -271,17 +271,22 @@ class Scheduler:
         now = timestamp()
         sid = "sched_" + gen_id()
 
+        task = {
+            "message": task_config.get("message"),
+            "model": task_config.get("model", "default"),
+            "conversation_id": task_config.get("conversation_id"),
+            "timeout": task_config.get("timeout", 300),
+        }
+        for key in ("profile_id", "agent_id", "tools", "tool_policy", "metadata", "thinking_level"):
+            if key in task_config:
+                task[key] = task_config.get(key)
+
         schedule = {
             "id": sid,
             "name": name if name else "Schedule " + sid[:12],
             "description": description,
             "type": schedule_type,
-            "task": {
-                "message": task_config.get("message"),
-                "model": task_config.get("model", "default"),
-                "conversation_id": task_config.get("conversation_id"),
-                "timeout": task_config.get("timeout", 300),
-            },
+            "task": task,
             "config": schedule_config,
             "status": "active",
             "execution_count": 0,
@@ -589,24 +594,61 @@ class Scheduler:
         }
 
         try:
-            from blocks.ai.complete import run as ai_complete_run
+            if conversation_id:
+                from blocks.chat.send import run as chat_send_run
 
-            messages = []
-            system_content = (
-                "You are a scheduled agent. Execute the following task. "
-                "Be concise and precise in your response."
-            )
-            messages.append({"role": "system", "content": system_content})
-            messages.append({"role": "user", "content": message})
+                params = {}
+                if isinstance(task_cfg.get("tool_policy"), dict):
+                    params["tool_policy"] = task_cfg["tool_policy"]
+                if task_cfg.get("thinking_level"):
+                    params["thinking_level"] = task_cfg.get("thinking_level")
+                metadata = task_cfg.get("metadata") if isinstance(task_cfg.get("metadata"), dict) else {}
+                result = chat_send_run(
+                    {
+                        "conversation_id": conversation_id,
+                        "message": {
+                            "role": "user",
+                            "content": message,
+                            "metadata": {
+                                **metadata,
+                                "source": "scheduler",
+                                "schedule_id": schedule_id,
+                                "schedule_execution_id": exec_id,
+                                "trigger": "manual" if manual else "scheduled",
+                                "profile_id": task_cfg.get("profile_id"),
+                                "agent_id": task_cfg.get("agent_id"),
+                            },
+                        },
+                        "params": params,
+                        "tools": task_cfg.get("tools") if isinstance(task_cfg.get("tools"), list) else None,
+                    },
+                    {"profile_policy": task_cfg.get("tool_policy") if isinstance(task_cfg.get("tool_policy"), dict) else {}},
+                )
+            else:
+                from blocks.ai.complete import run as ai_complete_run
 
-            empty_context = {}
-            result = ai_complete_run({"messages": messages, "model": model}, empty_context)
+                messages = []
+                system_content = (
+                    "You are a scheduled agent. Execute the following task. "
+                    "Be concise and precise in your response."
+                )
+                messages.append({"role": "system", "content": system_content})
+                messages.append({"role": "user", "content": message})
+
+                empty_context = {}
+                result = ai_complete_run({"messages": messages, "model": model}, empty_context)
 
             if result.get("status") == "ok":
                 data = result.get("data", {})
                 content = ""
                 if isinstance(data, dict):
                     content = data.get("content", data.get("text", str(data)))
+                    if isinstance(content, list):
+                        content = "\n".join(
+                            str(item.get("text", ""))
+                            for item in content
+                            if isinstance(item, dict) and item.get("text")
+                        )
                 elif isinstance(data, str):
                     content = data
                 else:

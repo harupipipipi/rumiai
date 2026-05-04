@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { PanelLeftOpen } from "lucide-react";
+import { Activity, Building2, MessageSquare, PanelLeftOpen, Play, RefreshCw, ShieldCheck, Users, Zap } from "lucide-react";
 
 import type { ChatItem } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { api, type ChatContentBlock, type ChatMessage, type ComposerWidgetAction, type Conversation, type ModelProfile, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { api, type ChatContentBlock, type ChatMessage, type ComposerWidgetAction, type Conversation, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
 import { deriveConversationTitle, formatRelativeTime, messageToText } from "./lib/chat";
 import { cn } from "./lib/cn";
 import { canExecuteComposerEndpointAction } from "./lib/composerWidgets";
@@ -284,6 +284,142 @@ function CanvasPeek({
   );
 }
 
+function hasOperationsProfile(catalog: UICatalog | null): boolean {
+  const profiles = catalog?.agent_service?.profiles ?? [];
+  return profiles.some((profile) => String(profile.profile_id ?? profile.id ?? "") === "defaultspack.operations_company");
+}
+
+function isOperationsConversation(conversation: Conversation | null): boolean {
+  if (!conversation) return false;
+  return (
+    conversation.conversation_kind === "operations_company"
+    || conversation.metadata?.profile_id === "defaultspack.operations_company"
+    || conversation.tags?.includes("operations-company")
+  );
+}
+
+function settingList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter(Boolean);
+  }
+  if (typeof value === "string") {
+    return value.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+function settingNumber(value: unknown, fallback: number): number {
+  const numeric = Number(value ?? fallback);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function OperationsCompanyPanel({
+  status,
+  isBusy,
+  active,
+  onStart,
+  onOpenChat,
+  onRefresh,
+  onTriggerHeartbeat,
+}: {
+  status: OperationsCompanyStatus | null;
+  isBusy: boolean;
+  active: boolean;
+  onStart: () => void;
+  onOpenChat: () => void;
+  onRefresh: () => void;
+  onTriggerHeartbeat: () => void;
+}) {
+  const roleCount = status?.manifest.roles?.length ?? 7;
+  const activeSchedules = (status?.schedules ?? []).filter((schedule) => schedule.status === "active").length;
+  const modelCount = status?.manifest.model_self_selection?.allowlist?.length ?? 0;
+  const heartbeat = (status?.schedules ?? []).find((schedule) => String(schedule.name ?? "").toLowerCase().includes("heartbeat"));
+  const nextExecution = heartbeat?.next_execution_at ? Date.parse(String(heartbeat.next_execution_at)) : 0;
+  const heartbeatLabel = nextExecution ? `next ${formatRelativeTime(nextExecution)}` : "not scheduled";
+  const bootstrapped = status?.bootstrapped === true;
+
+  return (
+    <section className={cn(
+      "border-b border-zinc-800/60 bg-zinc-950/70 px-4 py-3",
+      active && "bg-emerald-950/10",
+    )}>
+      <div className="mx-auto flex max-w-[1180px] flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-[260px] flex-1 items-center gap-3">
+          <span className={cn(
+            "flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border",
+            bootstrapped ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-zinc-800 bg-zinc-900 text-zinc-400",
+          )}>
+            <Building2 size={19} />
+          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-sm font-semibold text-zinc-100">Rumi Operations Company</h2>
+              <span className={cn(
+                "rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                bootstrapped ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-300" : "border-zinc-800 bg-zinc-900 text-zinc-500",
+              )}>
+                {bootstrapped ? "24/7 active" : "not started"}
+              </span>
+              {active && <span className="rounded-full border border-sky-500/20 bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium text-sky-300">client chat</span>}
+            </div>
+            <p className="mt-1 line-clamp-1 text-[11px] text-zinc-500">
+              ops-company · Client Manager · PM · Coding · Research · Review · Monitor · Scheduler
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-400">
+          <span className="inline-flex h-7 items-center gap-1 rounded-md border border-zinc-800 bg-zinc-900/70 px-2">
+            <Users size={13} /> {roleCount} roles
+          </span>
+          <span className="inline-flex h-7 items-center gap-1 rounded-md border border-zinc-800 bg-zinc-900/70 px-2">
+            <Activity size={13} /> {activeSchedules} schedules
+          </span>
+          <span className="inline-flex h-7 items-center gap-1 rounded-md border border-zinc-800 bg-zinc-900/70 px-2">
+            <ShieldCheck size={13} /> {modelCount} models
+          </span>
+          <span className="hidden h-7 items-center gap-1 rounded-md border border-zinc-800 bg-zinc-900/70 px-2 lg:inline-flex">
+            <Zap size={13} /> {heartbeatLabel}
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={isBusy}
+            className="flex h-8 items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-900 px-2.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+            title="Refresh operations status"
+          >
+            <RefreshCw size={14} /> Refresh
+          </button>
+          <button
+            type="button"
+            onClick={bootstrapped ? onOpenChat : onStart}
+            disabled={isBusy}
+            className="flex h-8 items-center gap-1.5 rounded-md bg-zinc-100 px-2.5 text-xs font-semibold text-zinc-950 hover:bg-white disabled:opacity-50"
+            title={bootstrapped ? "Open Client Manager chat" : "Start 24/7 company agent"}
+          >
+            {bootstrapped ? <MessageSquare size={14} /> : <Play size={14} />}
+            {bootstrapped ? "Open Chat" : "Start 24/7"}
+          </button>
+          {bootstrapped && (
+            <button
+              type="button"
+              onClick={onTriggerHeartbeat}
+              disabled={isBusy || !heartbeat}
+              className="flex h-8 items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-900 px-2.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+              title="Trigger heartbeat schedule"
+            >
+              <Activity size={14} /> Tick
+            </button>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function isAbortError(errorValue: unknown): boolean {
   return Boolean(
     errorValue
@@ -523,6 +659,8 @@ export default function App() {
   const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
   const [previews, setPreviews] = useState<ToolPreviewItem[]>([]);
   const [health, setHealth] = useState<{ status: string; pack: string; ts: string } | null>(null);
+  const [operationsStatus, setOperationsStatus] = useState<OperationsCompanyStatus | null>(null);
+  const [operationsBusy, setOperationsBusy] = useState(false);
   const [activeSidebarItemId, setActiveSidebarItemId] = useState<string | null>(null);
   const [sidebarSelectionTick, setSidebarSelectionTick] = useState(0);
   const [yoloMode, setYoloMode] = useLocalStorage("rumi-yolo-mode", false);
@@ -596,6 +734,8 @@ export default function App() {
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
   const showActivityInMessages = settingsValues.general?.show_activity_in_messages !== false;
   const showRegion = (regionId: string) => !catalog?.shell || hasShellRegion(catalog, regionId);
+  const operationsProfileAvailable = hasOperationsProfile(catalog);
+  const operationsConversationActive = isOperationsConversation(activeConversation);
 
   const updatePendingRequests = (updater: (current: Record<string, PendingChatRequest>) => Record<string, PendingChatRequest>) => {
     setPendingRequests((current) => {
@@ -682,6 +822,14 @@ export default function App() {
     }
   }
 
+  async function refreshOperationsStatus() {
+    try {
+      setOperationsStatus(await api.getOperationsCompanyStatus());
+    } catch (statusError) {
+      console.error(statusError);
+    }
+  }
+
   async function refreshPreview(conversationId: string | null) {
     if (!conversationId) {
       setPreviews([]);
@@ -746,6 +894,7 @@ export default function App() {
       setIsLoading(true);
       try {
         await Promise.all([refreshHealth(), refreshCatalog()]);
+        await refreshOperationsStatus();
         const pendingConversationId = chatIdFromLocation();
         if (pendingConversationId && isPendingInLocation()) {
           rememberPendingRequest({
@@ -778,6 +927,11 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!operationsProfileAvailable) return;
+    void refreshOperationsStatus();
+  }, [operationsProfileAvailable]);
 
   useEffect(() => {
     const handlePopState = () => {
@@ -1091,6 +1245,69 @@ export default function App() {
     setShowPreview(true);
   };
 
+  const operationsHeartbeatSchedule = () => (
+    (operationsStatus?.schedules ?? []).find((schedule) => String(schedule.name ?? "").toLowerCase().includes("heartbeat"))
+  );
+
+  const preferredOperationsModel = () => {
+    const allowlist = settingList(settingsValues.operations_company?.model_allowlist);
+    const manifestAllowlist = operationsStatus?.manifest.model_self_selection?.allowlist ?? [];
+    const effectiveAllowlist = allowlist.length ? allowlist : manifestAllowlist;
+    if (effectiveAllowlist.includes(preferredModel)) return preferredModel;
+    if (effectiveAllowlist.includes("stub/default")) return "stub/default";
+    return effectiveAllowlist[0] ?? "stub/default";
+  };
+
+  const handleStartOperationsCompany = async () => {
+    setOperationsBusy(true);
+    setError(null);
+    try {
+      const status = await api.bootstrapOperationsCompany({
+        start_nonstop: true,
+        heartbeat_minutes: Math.max(1, Math.min(1440, settingNumber(settingsValues.operations_company?.heartbeat_minutes, 15))),
+        model: preferredOperationsModel(),
+      });
+      setOperationsStatus(status);
+      await refreshConversations(status.conversation_id ?? null);
+    } catch (startError) {
+      setError(startError instanceof Error ? startError.message : "Operations Company の起動に失敗しました。");
+    } finally {
+      setOperationsBusy(false);
+    }
+  };
+
+  const handleOpenOperationsChat = async () => {
+    if (!operationsStatus?.conversation_id) {
+      await handleStartOperationsCompany();
+      return;
+    }
+    setError(null);
+    await loadConversation(operationsStatus.conversation_id);
+  };
+
+  const handleTriggerOperationsHeartbeat = async () => {
+    const heartbeat = operationsHeartbeatSchedule();
+    if (!heartbeat?.id) return;
+    setOperationsBusy(true);
+    setError(null);
+    try {
+      const result = await api.triggerSchedule(String(heartbeat.id));
+      pushActionPreview(
+        { id: "operations.heartbeat", label: "Operations Heartbeat", icon: "activity" },
+        "operations-heartbeat",
+        result,
+      );
+      await refreshOperationsStatus();
+      if (operationsStatus?.conversation_id) {
+        await refreshConversations(operationsStatus.conversation_id);
+      }
+    } catch (heartbeatError) {
+      setError(heartbeatError instanceof Error ? heartbeatError.message : "Operations Company heartbeat に失敗しました。");
+    } finally {
+      setOperationsBusy(false);
+    }
+  };
+
   const handlePanelAction = async (item: SidebarItem, action: SidebarAction) => {
     setError(null);
     try {
@@ -1132,6 +1349,16 @@ export default function App() {
         result = await api.listSchedules();
       } else if (action.id === "channels.list") {
         result = await api.listChannels();
+      } else if (action.id === "operations.status") {
+        result = await api.getOperationsCompanyStatus();
+        setOperationsStatus(result as OperationsCompanyStatus);
+      } else if (action.id === "operations.bootstrap") {
+        result = await api.bootstrapOperationsCompany({
+          start_nonstop: true,
+          heartbeat_minutes: Math.max(1, Math.min(1440, settingNumber(settingsValues.operations_company?.heartbeat_minutes, 15))),
+          model: preferredOperationsModel(),
+        });
+        setOperationsStatus(result as OperationsCompanyStatus);
       } else if (action.endpoint) {
         result = await fetch(action.endpoint, { method: action.method ?? "GET" }).then((response) => response.json());
       } else {
@@ -1172,6 +1399,7 @@ export default function App() {
         });
         setActiveConversationId(conversation.id);
       }
+      const isOperationsMode = isOperationsConversation(conversation);
       submittedConversationId = conversation.id;
       rememberPendingRequest({
         conversationId: conversation.id,
@@ -1247,16 +1475,41 @@ export default function App() {
         });
       };
 
+      const operationsModelAllowlist = settingList(settingsValues.operations_company?.model_allowlist);
+      const operationsToolDenylist = settingList(settingsValues.operations_company?.tool_denylist);
+      const operationsToolAllowlist = operationsStatus?.manifest.tool_policy?.allowlist ?? [];
+      const operationsPolicy = isOperationsMode
+        ? {
+            profile_id: "defaultspack.operations_company",
+            non_stop: true,
+            allow_shell: false,
+            allow_file_write: true,
+            write_actions_require_approval: true,
+            normal_status_silent: settingsValues.operations_company?.normal_status_silent !== false,
+            max_concurrent_children: Math.max(1, Math.min(12, settingNumber(settingsValues.operations_company?.max_concurrent_children, 3))),
+            ...(operationsModelAllowlist.length ? { model_allowlist: operationsModelAllowlist } : {}),
+            ...(operationsToolAllowlist.length ? { tool_allowlist: operationsToolAllowlist } : {}),
+            ...(operationsToolDenylist.length ? { tool_denylist: operationsToolDenylist } : {}),
+          }
+        : {};
+
       await api.streamMessage(conversation.id, userText, {
         thinking_level: activeProfile?.supports_thinking ? selectedThinkingLevel : null,
         tool_policy: {
           ...(yoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
+          ...operationsPolicy,
           ...(selectedToolIds.length ? { selected_tools: selectedToolIds } : {}),
         },
         attachments: submittedAttachments,
         tools: selectedToolIds,
         metadata: {
-          mode: "chat",
+          mode: isOperationsMode ? "operations_company" : "chat",
+          ...(isOperationsMode ? {
+            profile_id: "defaultspack.operations_company",
+            agent_id: "client_manager",
+            conversation_strategy: "one_agent_one_conversation",
+            internal_channel: "ops-company",
+          } : {}),
           attachments: submittedAttachments.map(({ name, size, type, truncated, source, sourcePath }) => ({ name, size, type, truncated, source, sourcePath })),
           selected_tools: selectedToolIds,
           dropped_widgets: droppedWidgets
@@ -1395,6 +1648,18 @@ export default function App() {
                   if (canShowCanvas) setShowPreview((value) => !value);
                 }}
                 onOpenSettings={() => setIsSettingsOpen(true)}
+              />
+            )}
+
+            {operationsProfileAvailable && (
+              <OperationsCompanyPanel
+                status={operationsStatus}
+                isBusy={operationsBusy}
+                active={operationsConversationActive}
+                onStart={handleStartOperationsCompany}
+                onOpenChat={handleOpenOperationsChat}
+                onRefresh={() => void refreshOperationsStatus()}
+                onTriggerHeartbeat={handleTriggerOperationsHeartbeat}
               />
             )}
 

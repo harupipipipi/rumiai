@@ -487,6 +487,26 @@ class FrontendRegistry:
                     },
                 },
                 {
+                    "id": "operations-company",
+                    "label": "Operations Company",
+                    "category": "system",
+                    "description": "24/7常駐agent、会社型ロール、内部mention、定期監視を束ねるprofile。",
+                    "tags": ["agent", "company", "24-7", "schedule"],
+                    "origin": {"kind": "builtin", "path": "profiles/operations_company.profile.yaml"},
+                    "panel": {
+                        "kind": "actions",
+                        "title": "Operations Company",
+                        "actions": [
+                            {"id": "operations.status", "label": "Status", "icon": "activity"},
+                            {"id": "operations.bootstrap", "label": "Start 24/7", "icon": "play", "method": "POST", "endpoint": "/api/agent/company/bootstrap", "payload": {"start_nonstop": True}},
+                        ],
+                        "notes": [
+                            "Client Manager がユーザーと会話し、PM/Coding/Research/Reviewer/Monitor/Scheduler が内部channelで報告します。",
+                            "tool と settings は defaultspack と共有し、roleごとの allowlist と profile denylist で切り替えます。",
+                        ],
+                    },
+                },
+                {
                     "id": "collaboration",
                     "label": "Collaboration",
                     "category": "widget",
@@ -812,6 +832,30 @@ class FrontendRegistry:
                 "fields": [
                     {"id": "show_channel_events", "label": "Show Channel Events", "type": "toggle", "default": True},
                     {"id": "default_visibility", "label": "Default Visibility", "type": "select", "default": "local", "options": [{"value": "local", "label": "Local"}, {"value": "private", "label": "Private"}, {"value": "unlisted", "label": "Unlisted"}]},
+                ],
+            },
+            {
+                "id": "operations_company",
+                "label": "Operations Company",
+                "description": "24/7常駐agent profile の共有設定。defaultspack tool/settingsをそのまま使います。",
+                "fields": [
+                    {"id": "enabled", "label": "Enabled", "type": "toggle", "default": True},
+                    {"id": "heartbeat_minutes", "label": "Heartbeat Minutes", "type": "number", "default": 15, "min": 1, "max": 1440},
+                    {"id": "normal_status_silent", "label": "Silent Normal Checks", "type": "toggle", "default": True},
+                    {"id": "max_concurrent_children", "label": "Max Child Agents", "type": "number", "default": 3, "min": 1, "max": 12},
+                    {
+                        "id": "model_allowlist",
+                        "label": "Model Allowlist",
+                        "type": "textarea",
+                        "default": "openrouter/tencent/hy3-preview:free\ngoogle/gemini-2.5-flash\ngoogle/gemini-2.5-pro\nopenai/gpt-5.4\nopenai/gpt-5.4-mini\nanthropic/claude-sonnet-4-6\nstub/default",
+                    },
+                    {
+                        "id": "tool_denylist",
+                        "label": "Disabled Tools",
+                        "type": "textarea",
+                        "default": "",
+                        "help": "1行に1つのtool id。profile allowlistよりdenyが優先されます。",
+                    },
                 ],
             },
             {
@@ -1235,6 +1279,22 @@ class FrontendRegistry:
                 "google_api_key_configured": provider_has_api_key("google", pack_root=self._pack_root),
                 "openrouter_api_key": "",
                 "openrouter_api_key_configured": provider_has_api_key("openrouter", pack_root=self._pack_root),
+            },
+            "operations_company": {
+                "enabled": True,
+                "heartbeat_minutes": 15,
+                "normal_status_silent": True,
+                "max_concurrent_children": 3,
+                "model_allowlist": (
+                    "openrouter/tencent/hy3-preview:free\n"
+                    "google/gemini-2.5-flash\n"
+                    "google/gemini-2.5-pro\n"
+                    "openai/gpt-5.4\n"
+                    "openai/gpt-5.4-mini\n"
+                    "anthropic/claude-sonnet-4-6\n"
+                    "stub/default"
+                ),
+                "tool_denylist": "",
             },
         }
 

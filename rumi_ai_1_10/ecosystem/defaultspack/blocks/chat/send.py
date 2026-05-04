@@ -33,6 +33,7 @@ _SECRET_KEY_RE = re.compile(
     r"(api[_-]?key|authorization|bearer|credential|password|secret|token)",
     re.IGNORECASE,
 )
+_PROMPT_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def _stub_response():
@@ -41,6 +42,25 @@ def _stub_response():
         "finish_reason": "stop",
         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
     }
+
+
+def _conversation_system_prompt(conv, manager):
+    prompt_id = str((conv or {}).get("system_prompt_id") or "").strip()
+    if not prompt_id:
+        return manager.get_system_prompt()
+    prompt = manager.get_prompt(prompt_id) or manager.get_prompt_by_name(prompt_id)
+    if isinstance(prompt, dict):
+        body = prompt.get("body") or prompt.get("content")
+        if body:
+            return str(body)
+    if _PROMPT_ID_RE.match(prompt_id):
+        prompt_path = Path(__file__).resolve().parents[2] / "prompts" / (prompt_id + ".system.md")
+        try:
+            if prompt_path.is_file():
+                return prompt_path.read_text(encoding="utf-8")
+        except OSError:
+            pass
+    return manager.get_system_prompt()
 
 
 def _has_real_provider(client, model):
@@ -605,7 +625,7 @@ def run(input_data, context):
     # P1-4: Inspector 用のリクエストID を生成
     request_id = gen_id()
     manager = get_manager()
-    system_prompt = manager.get_system_prompt()
+    system_prompt = _conversation_system_prompt(conv, manager)
 
     # --- 9b: ナレッジ / メモリ自動検索 & コンテキスト変数実動化 ---
     user_text = extract_user_text(content)

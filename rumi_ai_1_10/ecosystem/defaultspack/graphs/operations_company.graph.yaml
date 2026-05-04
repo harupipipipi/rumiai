@@ -1,0 +1,60 @@
+graph_id: defaultspack.operations_company
+version: rumi.graph.v1
+
+display_name:
+  ja: 常駐AI会社
+  en: Operations Company
+
+description:
+  ja: 24/7常駐agent、共有tool bundle、memory、prompt、desktop surfaceを接続するCapability Graph。
+  en: Capability Graph for a 24/7 resident agent with shared tools, memory, prompt, and desktop surface.
+
+nodes:
+  - id: start
+    ref: rumi.start
+  - id: ai
+    ref: defaultspack.ai_client
+  - id: shared_tools
+    ref: defaultspack.tool
+  - id: memory
+    ref: defaultspack.memory
+  - id: prompt
+    ref: defaultspack.prompt
+  - id: operations_agent
+    ref: defaultspack.agent
+  - id: cli
+    ref: defaultspack.cli_surface
+  - id: frontend
+    ref: defaultspack.frontend
+
+edges:
+  - id: start_to_agent
+    from: start.out
+    to: operations_agent.start
+    kind: binding
+  - id: ai_to_agent
+    from: ai.client
+    to: operations_agent.ai
+    kind: binding
+  - id: tools_to_agent
+    from: shared_tools.tools
+    to: operations_agent.tools
+    kind: binding
+  - id: memory_to_agent
+    from: memory.memory
+    to: operations_agent.memory
+    kind: binding
+  - id: prompt_to_agent
+    from: prompt.prompt
+    to: operations_agent.prompt
+    kind: binding
+  - id: cli_to_frontend
+    from: cli.surface
+    to: frontend.surface
+    kind: binding
+
+metadata:
+  pack_id: defaultspack
+  category: operations
+  non_stop: true
+  shared_tool_node: defaultspack.tool

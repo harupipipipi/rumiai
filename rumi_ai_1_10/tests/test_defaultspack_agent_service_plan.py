@@ -1154,6 +1154,9 @@ def test_fallback_routes_expose_agent_service_and_coding_surfaces():
     assert ("POST", "/api/tools/browser-computer", "blocks.tool.browser_computer") in routes
     assert ("GET", "/api/ai/profiles", "blocks.ai.profiles") in routes
     assert ("GET", "/api/agent/schedules", "blocks.agent.scheduler.list") in routes
+    assert ("GET", "/api/agent/company/status", "blocks.agent.company.status") in routes
+    assert ("POST", "/api/agent/company/bootstrap", "blocks.agent.company.bootstrap") in routes
+    assert ("GET", "/api/agent/org/roles", "blocks.agent.org.list_roles") in routes
     assert ("GET", "/api/chat/channels", "blocks.chat.channel.list") in routes
     assert ("POST", "/api/share", "blocks.share.create") in routes
 
@@ -1192,6 +1195,8 @@ def test_frontend_sidebar_api_routes_match_in_registry_mode():
         ("GET", "/api/coding/git/branch"),
         ("GET", "/api/ai/profiles"),
         ("GET", "/api/agent/schedules"),
+        ("GET", "/api/agent/company/status"),
+        ("POST", "/api/agent/company/bootstrap"),
         ("GET", "/api/chat/channels"),
         ("GET", "/api/capabilities/local_file"),
     ]
