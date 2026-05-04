@@ -14,7 +14,12 @@
       "group_label": "Status",
       "group_icon": "git",
       "drop_capabilities": ["composer.toggle_chip"],
-      "widget_kind": "tool_toggle"
+      "widget_kind": "tool_toggle",
+      "settings_fields": [
+        {"id": "default_workspace_root", "label": "Default Workspace Root", "type": "text", "default": "", "help": "Durable root used when a workspace root is not provided by the runtime."},
+        {"id": "diff_context_lines", "label": "Diff Context Lines", "type": "number", "default": 3, "min": 0, "max": 20},
+        {"id": "max_output_chars", "label": "Max Output Chars", "type": "number", "default": 20000, "min": 1000, "max": 200000}
+      ]
     },
     "tool_category": "git",
     "action_type": "read",
