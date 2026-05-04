@@ -116,6 +116,11 @@ export type Conversation = {
   model: string;
   system_prompt_id?: string | null;
   agent_id?: string | null;
+  parent_conversation_id?: string | null;
+  child_conversation_ids?: string[];
+  conversation_kind?: string;
+  group_id?: string | null;
+  metadata?: Record<string, unknown> | null;
   tags: string[];
   is_starred: boolean;
   is_archived: boolean;
@@ -450,7 +455,16 @@ export const api = {
     return request<Conversation>(`/api/chat/conversations/${id}`);
   },
 
-  createConversation(options?: { model?: string; system_prompt_id?: string | null; agent_id?: string | null; tags?: string[] }) {
+  createConversation(options?: {
+    model?: string;
+    system_prompt_id?: string | null;
+    agent_id?: string | null;
+    tags?: string[];
+    parent_conversation_id?: string | null;
+    conversation_kind?: string | null;
+    group_id?: string | null;
+    metadata?: Record<string, unknown>;
+  }) {
     return request<Conversation>("/api/chat/conversations", {
       method: "POST",
       body: JSON.stringify(options ?? {}),

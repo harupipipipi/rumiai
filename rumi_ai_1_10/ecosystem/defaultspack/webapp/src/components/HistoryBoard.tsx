@@ -44,6 +44,9 @@ export type ChatItem = {
   title: string;
   date: string;
   type: 'research' | 'code' | 'chat';
+  parentId?: string | null;
+  conversationKind?: string;
+  children?: ChatItem[];
 };
 
 export type ChatGroup = {
@@ -52,6 +55,12 @@ export type ChatGroup = {
   chats: ChatItem[];
   subGroups: ChatGroup[];
   isCollapsed?: boolean;
+  custom?: boolean;
+};
+
+type CustomGroupInfo = {
+  id: string;
+  title: string;
 };
 
 export type AccountInfo = {
@@ -102,7 +111,29 @@ function groupDateLabel(dateText: string): 'today' | 'recent' | 'older' {
   return 'older';
 }
 
-function buildGroupsFromChats(chatItems: ChatItem[]): ChatGroup[] {
+const CUSTOM_GROUPS_STORAGE_KEY = 'rumi-history-custom-groups';
+
+function loadCustomGroups(): CustomGroupInfo[] {
+  try {
+    const raw = localStorage.getItem(CUSTOM_GROUPS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is CustomGroupInfo => Boolean(item?.id && item?.title))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveCustomGroups(groups: CustomGroupInfo[]) {
+  try {
+    localStorage.setItem(CUSTOM_GROUPS_STORAGE_KEY, JSON.stringify(groups));
+  } catch {
+    // localStorage can be unavailable in restricted contexts.
+  }
+}
+
+function buildGroupsFromChats(chatItems: ChatItem[], customGroups: CustomGroupInfo[] = []): ChatGroup[] {
   const buckets: Record<'today' | 'recent' | 'older', ChatItem[]> = {
     today: [],
     recent: [],
@@ -141,7 +172,16 @@ function buildGroupsFromChats(chatItems: ChatItem[]): ChatGroup[] {
     },
   ];
 
-  return groups.filter((group) => group.chats.length > 0);
+  const visibleGroups = groups.filter((group) => group.chats.length > 0);
+  const custom = customGroups.map((group) => ({
+    id: group.id,
+    title: group.title,
+    isCollapsed: false,
+    chats: [],
+    subGroups: [],
+    custom: true,
+  }));
+  return [...custom, ...visibleGroups];
 }
 
 // ============================================================
@@ -149,9 +189,13 @@ function buildGroupsFromChats(chatItems: ChatItem[]): ChatGroup[] {
 // ============================================================
 
 function countChats(group: ChatGroup): number {
-  let count = group.chats.length;
+  let count = group.chats.reduce((total, chat) => total + countChatWithChildren(chat), 0);
   for (const sub of group.subGroups) count += countChats(sub);
   return count;
+}
+
+function countChatWithChildren(chat: ChatItem): number {
+  return 1 + (chat.children ?? []).reduce((total, child) => total + countChatWithChildren(child), 0);
 }
 
 function findGroupContainingChat(groups: ChatGroup[], chatId: string): string | null {
@@ -231,10 +275,14 @@ function mapGroups(groups: ChatGroup[], fn: (g: ChatGroup) => ChatGroup): ChatGr
 function getAllChatIds(groups: ChatGroup[]): string[] {
   const ids: string[] = [];
   for (const g of groups) {
-    ids.push(...g.chats.map(c => c.id));
+    ids.push(...g.chats.flatMap(getChatIds));
     ids.push(...getAllChatIds(g.subGroups));
   }
   return ids;
+}
+
+function getChatIds(chat: ChatItem): string[] {
+  return [chat.id, ...(chat.children ?? []).flatMap(getChatIds)];
 }
 
 function getAllGroupDragIds(groups: ChatGroup[]): string[] {
@@ -269,15 +317,21 @@ function createCustomCollision(activeType: string | null): CollisionDetection {
 
 interface SortableChatItemProps {
   chat: ChatItem;
-  isActive: boolean;
-  onClick: () => void;
+  activeChatId: string | null;
+  onChatSelect: (chatId: string) => void;
   onRename: (id: string, newTitle: string) => void;
+  onToggleChildren: (chatId: string) => void;
+  isChildrenExpanded: (chatId: string) => boolean;
   depth?: number;
 }
 
-function SortableChatItem({ chat, isActive, onClick, onRename, depth = 0 }: SortableChatItemProps) {
+function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggleChildren, isChildrenExpanded, depth = 0 }: SortableChatItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [title, setTitle] = useState(chat.title);
+  const children = chat.children ?? [];
+  const hasChildren = children.length > 0;
+  const expanded = hasChildren && isChildrenExpanded(chat.id);
+  const isActive = activeChatId === chat.id;
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: chat.id,
@@ -303,42 +357,74 @@ function SortableChatItem({ chat, isActive, onClick, onRename, depth = 0 }: Sort
                <MessageSquare size={14} className="text-zinc-500 flex-shrink-0" />;
 
   return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      {...attributes}
-      {...listeners}
-      className={cn(
-        "w-full flex items-center gap-2 pr-2 py-1.5 rounded-md text-left group/chat transition-colors cursor-grab active:cursor-grabbing outline-none",
-        isActive ? "bg-zinc-800/80" : "hover:bg-zinc-800/50",
-        isDragging && "ring-1 ring-emerald-500/50 z-50"
+    <>
+      <div
+        ref={setNodeRef}
+        style={style}
+        {...attributes}
+        {...listeners}
+        className={cn(
+          "w-full flex items-center gap-2 pr-2 py-1.5 rounded-md text-left group/chat transition-colors cursor-grab active:cursor-grabbing outline-none",
+          isActive ? "bg-zinc-800/80" : "hover:bg-zinc-800/50",
+          chat.conversationKind === "subagent" && "text-zinc-400",
+          isDragging && "ring-1 ring-emerald-500/50 z-50"
+        )}
+        onClick={() => { if (!isEditing) onChatSelect(chat.id); }}
+        onDoubleClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
+        tabIndex={0}
+      >
+        <GripVertical size={12} className="text-zinc-700 group-hover/chat:text-zinc-500 flex-shrink-0" />
+        {icon}
+        {hasChildren && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleChildren(chat.id);
+            }}
+            className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+            title={expanded ? "Subagents を閉じる" : "Subagents を開く"}
+          >
+            <ChevronRight size={13} className={cn("transition-transform", expanded && "rotate-90")} />
+          </button>
+        )}
+        {isEditing ? (
+          <input
+            autoFocus
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onBlur={handleBlur}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); handleBlur(); }
+              if (e.key === 'Escape') { setIsEditing(false); setTitle(chat.title); }
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className="bg-zinc-900 text-zinc-100 text-sm px-1 py-0.5 rounded outline-none w-full border border-emerald-500/50"
+          />
+        ) : (
+          <span className={cn(
+            "text-sm truncate flex-1 select-none",
+            isActive ? "text-zinc-100" : "text-zinc-300 group-hover/chat:text-zinc-100"
+          )}>{chat.title}</span>
+        )}
+      </div>
+      {expanded && (
+        <div className="space-y-0.5">
+          {children.map((child) => (
+            <SortableChatItem
+              key={child.id}
+              chat={child}
+              activeChatId={activeChatId}
+              onChatSelect={onChatSelect}
+              onRename={onRename}
+              onToggleChildren={onToggleChildren}
+              isChildrenExpanded={isChildrenExpanded}
+              depth={depth + 1}
+            />
+          ))}
+        </div>
       )}
-      onClick={() => { if (!isEditing) onClick(); }}
-      onDoubleClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
-      tabIndex={0}
-    >
-      <GripVertical size={12} className="text-zinc-700 group-hover/chat:text-zinc-500 flex-shrink-0" />
-      {icon}
-      {isEditing ? (
-        <input
-          autoFocus
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          onBlur={handleBlur}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') { e.preventDefault(); handleBlur(); }
-            if (e.key === 'Escape') { setIsEditing(false); setTitle(chat.title); }
-          }}
-          onClick={(e) => e.stopPropagation()}
-          className="bg-zinc-900 text-zinc-100 text-sm px-1 py-0.5 rounded outline-none w-full border border-emerald-500/50"
-        />
-      ) : (
-        <span className={cn(
-          "text-sm truncate flex-1 select-none",
-          isActive ? "text-zinc-100" : "text-zinc-300 group-hover/chat:text-zinc-100"
-        )}>{chat.title}</span>
-      )}
-    </div>
+    </>
   );
 }
 
@@ -354,10 +440,12 @@ interface SubGroupProps {
   onToggleCollapse: (id: string) => void;
   onRenameGroup: (id: string, newTitle: string) => void;
   onUngroup: (groupId: string) => void;
+  onToggleChatChildren: (chatId: string) => void;
+  isChatChildrenExpanded: (chatId: string) => boolean;
   depth: number;
 }
 
-function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCollapse, onRenameGroup, onUngroup, depth }: SubGroupProps) {
+function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCollapse, onRenameGroup, onUngroup, onToggleChatChildren, isChatChildrenExpanded, depth }: SubGroupProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [title, setTitle] = useState(group.title);
 
@@ -464,9 +552,11 @@ function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCol
               <SortableChatItem
                 key={chat.id}
                 chat={chat}
-                isActive={activeChatId === chat.id}
-                onClick={() => onChatSelect(chat.id)}
+                activeChatId={activeChatId}
+                onChatSelect={onChatSelect}
                 onRename={onChatRename}
+                onToggleChildren={onToggleChatChildren}
+                isChildrenExpanded={isChatChildrenExpanded}
                 depth={depth + 1}
               />
             ))}
@@ -481,6 +571,8 @@ function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCol
               onToggleCollapse={onToggleCollapse}
               onRenameGroup={onRenameGroup}
               onUngroup={onUngroup}
+              onToggleChatChildren={onToggleChatChildren}
+              isChatChildrenExpanded={isChatChildrenExpanded}
               depth={depth + 1}
             />
           ))}
@@ -504,12 +596,14 @@ interface DroppableColumnProps {
   onToggleCollapse: (id: string) => void;
   onChatRename: (chatId: string, newTitle: string) => void;
   onUngroup: (groupId: string) => void;
+  onToggleChatChildren: (chatId: string) => void;
+  isChatChildrenExpanded: (chatId: string) => boolean;
   isDraggedOver: boolean;
   isDragging: boolean;
   dragHandleProps?: React.HTMLAttributes<HTMLDivElement>;
 }
 
-function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSettingsClick, onRename, onToggleCollapse, onChatRename, onUngroup, isDraggedOver, isDragging, dragHandleProps }: DroppableColumnProps) {
+function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSettingsClick, onRename, onToggleCollapse, onChatRename, onUngroup, onToggleChatChildren, isChatChildrenExpanded, isDraggedOver, isDragging, dragHandleProps }: DroppableColumnProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [title, setTitle] = useState(group.title);
 
@@ -591,19 +685,21 @@ function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSetti
       {/* Content */}
       <div
         className={cn(
-          "rumi-history-collapse flex-1 overflow-hidden",
+          "rumi-history-collapse overflow-hidden",
           group.isCollapsed && "is-collapsed"
         )}
       >
-        <div className="rumi-history-collapse-inner h-full overflow-y-auto px-1 py-2 space-y-0.5">
+        <div className="rumi-history-collapse-inner px-1 py-2 space-y-0.5">
           <SortableContext items={group.chats.map(c => c.id)} strategy={verticalListSortingStrategy}>
             {group.chats.map(chat => (
               <SortableChatItem
                 key={chat.id}
                 chat={chat}
-                isActive={activeChatId === chat.id}
-                onClick={() => onChatSelect(chat.id)}
+                activeChatId={activeChatId}
+                onChatSelect={onChatSelect}
                 onRename={onChatRename}
+                onToggleChildren={onToggleChatChildren}
+                isChildrenExpanded={isChatChildrenExpanded}
                 depth={0}
               />
             ))}
@@ -618,6 +714,8 @@ function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSetti
               onToggleCollapse={onToggleCollapse}
               onRenameGroup={onRename}
               onUngroup={onUngroup}
+              onToggleChatChildren={onToggleChatChildren}
+              isChatChildrenExpanded={isChatChildrenExpanded}
               depth={0}
             />
           ))}
@@ -693,17 +791,19 @@ interface HistoryBoardProps {
 }
 
 export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, onNewTask, onSettingsClick, onMinimize }: HistoryBoardProps) {
-  const [groups, setGroups] = useState<ChatGroup[]>(() => buildGroupsFromChats(chatItems));
+  const [customGroups, setCustomGroups] = useState<CustomGroupInfo[]>(() => loadCustomGroups());
+  const [groups, setGroups] = useState<ChatGroup[]>(() => buildGroupsFromChats(chatItems, customGroups));
+  const [expandedChatIds, setExpandedChatIds] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     setGroups((previousGroups) => {
       const collapsedById = new Map(previousGroups.map((group) => [group.id, group.isCollapsed]));
-      return buildGroupsFromChats(chatItems).map((group) => ({
+      return buildGroupsFromChats(chatItems, customGroups).map((group) => ({
         ...group,
         isCollapsed: collapsedById.get(group.id) ?? group.isCollapsed,
       }));
     });
-  }, [chatItems]);
+  }, [chatItems, customGroups]);
 
   const [activeColumnDrag, setActiveColumnDrag] = useState<ChatGroup | null>(null);
   const [activeChat, setActiveChat] = useState<ChatItem | null>(null);
@@ -863,6 +963,11 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
   // --- Actions ---
   const handleRenameGroup = (id: string, newTitle: string) => {
     setGroups(prev => mapGroups(prev, g => g.id === id ? { ...g, title: newTitle } : g));
+    setCustomGroups((prev) => {
+      const next = prev.map((group) => group.id === id ? { ...group, title: newTitle } : group);
+      saveCustomGroups(next);
+      return next;
+    });
   };
 
   const handleToggleCollapse = (id: string) => {
@@ -897,12 +1002,21 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
   };
 
   const handleCreateGroup = () => {
-    const newGroup: ChatGroup = {
+    const customGroup: CustomGroupInfo = {
       id: `group-${Date.now()}`,
       title: `Group ${groups.length + 1}`,
+    };
+    setCustomGroups((prev) => {
+      const next = [...prev, customGroup];
+      saveCustomGroups(next);
+      return next;
+    });
+    const newGroup: ChatGroup = {
+      ...customGroup,
       chats: [],
       subGroups: [],
       isCollapsed: false,
+      custom: true,
     };
     setGroups(prev => [...prev, newGroup]);
   };
@@ -910,6 +1024,17 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
   const handleCreateChat = () => {
     onNewTask();
   };
+
+  const handleToggleChatChildren = (chatId: string) => {
+    setExpandedChatIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(chatId)) next.delete(chatId);
+      else next.add(chatId);
+      return next;
+    });
+  };
+
+  const isChatChildrenExpanded = (chatId: string) => expandedChatIds.has(chatId);
 
   const allSortableIds = [
     ...getAllGroupDragIds(groups),
@@ -978,6 +1103,8 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
                     onToggleCollapse={handleToggleCollapse}
                     onChatRename={handleRenameChat}
                     onUngroup={handleUngroup}
+                    onToggleChatChildren={handleToggleChatChildren}
+                    isChatChildrenExpanded={isChatChildrenExpanded}
                     isDraggedOver={overColumnId === group.id}
                     isDragging={activeColumnDrag?.id === group.id}
                     dragHandleProps={dragHandleProps}

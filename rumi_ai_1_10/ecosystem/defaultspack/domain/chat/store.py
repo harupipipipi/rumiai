@@ -83,6 +83,7 @@ class ChatStore:
         for conversation_id, conversation in conversations.items():
             if not isinstance(conversation, dict):
                 continue
+            self._normalize_conversation(str(conversation_id), conversation)
             self._sanitize_inline_thought_messages(conversation)
             loaded[str(conversation_id)] = conversation
         return loaded
@@ -105,9 +106,20 @@ class ChatStore:
     # ----------------------------------------------------------
     # Conversation CRUD
     # ----------------------------------------------------------
-    def create_conversation(self, model=None, system_prompt_id=None, agent_id=None, tags=None):
+    def create_conversation(
+        self,
+        model=None,
+        system_prompt_id=None,
+        agent_id=None,
+        tags=None,
+        parent_conversation_id=None,
+        conversation_kind=None,
+        metadata=None,
+        group_id=None,
+    ):
         cid = _gen_id()
         now = _now_ms()
+        parent_id = str(parent_conversation_id) if parent_conversation_id else None
         conv = {
             "id": cid,
             "title": "New Conversation",
@@ -120,9 +132,20 @@ class ChatStore:
             "is_starred": False,
             "is_archived": False,
             "current_node_id": None,
+            "parent_conversation_id": parent_id,
+            "child_conversation_ids": [],
+            "conversation_kind": conversation_kind or ("subagent" if parent_id else "chat"),
+            "group_id": group_id,
+            "metadata": metadata if isinstance(metadata, dict) else {},
             "messages": [],
         }
         self._conversations[cid] = conv
+        if parent_id and parent_id in self._conversations:
+            parent = self._conversations[parent_id]
+            self._normalize_conversation(parent_id, parent)
+            if cid not in parent["child_conversation_ids"]:
+                parent["child_conversation_ids"].append(cid)
+            parent["updated_at"] = now
         self._save_conversations()
         return copy.deepcopy(conv)
 
@@ -161,6 +184,17 @@ class ChatStore:
 
     def delete_conversation(self, conversation_id):
         if conversation_id in self._conversations:
+            conv = self._conversations[conversation_id]
+            parent_id = conv.get("parent_conversation_id") if isinstance(conv, dict) else None
+            if parent_id in self._conversations:
+                parent = self._conversations[parent_id]
+                child_ids = parent.get("child_conversation_ids", [])
+                if isinstance(child_ids, list):
+                    parent["child_conversation_ids"] = [cid for cid in child_ids if cid != conversation_id]
+                    parent["updated_at"] = _now_ms()
+            for candidate in self._conversations.values():
+                if isinstance(candidate, dict) and candidate.get("parent_conversation_id") == conversation_id:
+                    candidate["parent_conversation_id"] = None
             del self._conversations[conversation_id]
             self._save_conversations()
             return True
@@ -497,6 +531,30 @@ class ChatStore:
             elif isinstance(block, str):
                 parts.append(block)
         return " ".join(parts)
+
+    @staticmethod
+    def _normalize_conversation(conversation_id, conversation):
+        conversation.setdefault("id", conversation_id)
+        conversation.setdefault("title", "New Conversation")
+        conversation.setdefault("created_at", _now_ms())
+        conversation.setdefault("updated_at", conversation.get("created_at", _now_ms()))
+        conversation.setdefault("model", _default_conversation_model())
+        conversation.setdefault("system_prompt_id", None)
+        conversation.setdefault("agent_id", None)
+        conversation.setdefault("tags", [])
+        conversation.setdefault("is_starred", False)
+        conversation.setdefault("is_archived", False)
+        conversation.setdefault("current_node_id", None)
+        conversation.setdefault("parent_conversation_id", None)
+        conversation.setdefault("child_conversation_ids", [])
+        conversation.setdefault("conversation_kind", "subagent" if conversation.get("parent_conversation_id") else "chat")
+        conversation.setdefault("group_id", None)
+        conversation.setdefault("metadata", {})
+        conversation.setdefault("messages", [])
+        if not isinstance(conversation.get("child_conversation_ids"), list):
+            conversation["child_conversation_ids"] = []
+        if not isinstance(conversation.get("metadata"), dict):
+            conversation["metadata"] = {}
 
     # ----------------------------------------------------------
     # Per-chat files / workspace artifacts

@@ -65,7 +65,43 @@ function toChatItem(conversation: Conversation): ChatItem {
     title: conversation.title,
     date: formatBoardDate(conversation.updated_at),
     type: "chat",
+    parentId: conversation.parent_conversation_id ?? null,
+    conversationKind: conversation.conversation_kind ?? "chat",
   };
+}
+
+function buildChatItems(conversations: Conversation[]): ChatItem[] {
+  const byId = new Map(conversations.map((conversation) => [conversation.id, conversation]));
+  const childIds = new Set<string>();
+
+  for (const conversation of conversations) {
+    if (conversation.parent_conversation_id) {
+      childIds.add(conversation.id);
+    }
+    for (const childId of conversation.child_conversation_ids ?? []) {
+      if (byId.has(childId)) childIds.add(childId);
+    }
+  }
+
+  const build = (conversation: Conversation): ChatItem => {
+    const linkedChildren = [
+      ...new Set([
+        ...(conversation.child_conversation_ids ?? []),
+        ...conversations
+          .filter((candidate) => candidate.parent_conversation_id === conversation.id)
+          .map((candidate) => candidate.id),
+      ]),
+    ]
+      .map((childId) => byId.get(childId))
+      .filter((child): child is Conversation => Boolean(child))
+      .sort((a, b) => b.updated_at - a.updated_at)
+      .map(build);
+    return { ...toChatItem(conversation), children: linkedChildren };
+  };
+
+  return conversations
+    .filter((conversation) => !childIds.has(conversation.id))
+    .map(build);
 }
 
 function normalizeBlocks(message: ChatMessage): ChatContentBlock[] {
@@ -395,7 +431,7 @@ export default function App() {
   const isUnloadingRef = useRef(false);
 
   const sidebarItems: SidebarItem[] = catalog?.sidebar.items ?? [];
-  const chatItems = conversations.map(toChatItem);
+  const chatItems = buildChatItems(conversations);
   const activeModelId = activeConversation?.model ?? String(settingsValues.models?.preferred_model ?? "openrouter/tencent/hy3-preview:free").trim();
   const activeProfile = findProfile(modelProfiles, activeModelId);
   const messages = activeConversation ? activeConversation.messages.map((message) => toUiMessage(message, activeProfile)) : [];

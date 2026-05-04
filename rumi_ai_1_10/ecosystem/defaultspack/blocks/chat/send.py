@@ -225,7 +225,7 @@ def _append_tool_result_message(messages, tool_name, result, tool_call_id="", *,
             "content": result_text,
         }
     )
-    if tool_name == "browser_computer" and _model_supports_vision(model):
+    if tool_name in {"browser_computer", "browser_use", "computer_use"} and _model_supports_vision(model):
         screenshot = _browser_screenshot_data_url(result)
         if screenshot:
             messages.append(
@@ -565,6 +565,10 @@ def run(input_data, context):
     call_handler = context.get("call_handler") if context else None
     params = dict(input_data.get("params") or {})
     request_context = dict(context or {})
+    request_context["conversation_id"] = conversation_id
+    request_context["conversation_workspace_dir"] = str(store.conversation_workspace_dir(conversation_id))
+    request_context["model"] = model
+    request_context["chat_params"] = params
     tool_policy = params.get("tool_policy")
     if isinstance(tool_policy, dict):
         request_context["profile_policy"] = {

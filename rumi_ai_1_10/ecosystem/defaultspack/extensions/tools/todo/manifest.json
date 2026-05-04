@@ -1,0 +1,39 @@
+{
+  "id": "todo",
+  "category": "tool",
+  "version": "1",
+  "display_name": "Todo",
+  "description": "Create and maintain per-chat todo lists in the conversation workspace.",
+  "enabled": true,
+  "config": {
+    "name": "todo",
+    "summary": "Todo",
+    "tags": ["todo", "planning", "workspace"],
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["list", "add", "update", "complete", "remove", "clear"],
+            "default": "list"
+          },
+          "title": {"type": "string"},
+          "task": {"type": "string"},
+          "todo_id": {"type": "string"},
+          "status": {"type": "string", "enum": ["todo", "doing", "done", "blocked"]},
+          "priority": {"type": "string", "enum": ["low", "normal", "high"]},
+          "notes": {"type": "string"}
+        }
+      }
+    },
+    "execution": {"type": "local"},
+    "ui": {
+      "group_id": "planning",
+      "group_label": "Planning",
+      "composer_label": "Todo",
+      "composer_icon": "check-square",
+      "widget_kind": "tool_toggle"
+    }
+  }
+}

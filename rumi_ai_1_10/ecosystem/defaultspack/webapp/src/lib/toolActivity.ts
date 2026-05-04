@@ -25,6 +25,8 @@ const FOLDER_RULES: Array<[RegExp, string, string]> = [
   [/web|search/i, "web/search", "Web検索"],
   [/reddit/i, "web/reddit", "Reddit検索"],
   [/browser|computer/i, "browser", "ブラウザ"],
+  [/todo|task/i, "planning/todo", "Todo"],
+  [/subagent|agent/i, "agent/subagent", "Subagent"],
   [/terminal|shell|exec/i, "coding/terminal", "ターミナル"],
   [/file|read|write|list/i, "coding/files", "ファイル"],
   [/git|branch|commit|diff/i, "coding/git", "Git"],
@@ -68,6 +70,18 @@ export function summarizeToolArguments(toolName: string, args?: Record<string, u
   }
   if (lowerName.includes("file")) {
     return pickString(args, ["path", "filename", "directory", "glob"]);
+  }
+  if (lowerName.includes("todo")) {
+    return pickString(args, ["title", "task", "action", "todo_id"]);
+  }
+  if (lowerName.includes("subagent") || lowerName.includes("agent")) {
+    return pickString(args, ["task", "title", "prompt"]);
+  }
+  if (lowerName.includes("browser")) {
+    return pickString(args, ["url", "action"]);
+  }
+  if (lowerName.includes("computer")) {
+    return pickString(args, ["action", "text", "key"]);
   }
   if (lowerName.includes("terminal") || lowerName.includes("exec") || lowerName.includes("shell")) {
     return pickString(args, ["command", "cmd"]);

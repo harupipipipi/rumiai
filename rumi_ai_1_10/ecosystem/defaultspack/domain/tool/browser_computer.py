@@ -25,7 +25,7 @@ class BrowserComputerController:
         if action == "browser.open_url":
             return self._open_url(str(payload.get("url", "")), payload=payload, dry_run=bool(payload.get("dry_run")), yolo_mode=yolo_mode)
         if action == "browser.session":
-            return {"action": action, "session": self._read_sessions()}
+            return {"action": action, "platform": platform.system(), "capabilities": self._capabilities(), "session": self._read_sessions()}
         if action == "computer.screenshot":
             return self._screenshot(payload=payload, dry_run=bool(payload.get("dry_run")), yolo_mode=yolo_mode)
         if action in {"computer.click", "computer.type", "computer.key", "computer.scroll"}:
@@ -53,11 +53,20 @@ class BrowserComputerController:
         approved = yolo_mode or self._consume_approval(payload, "computer.screenshot", {})
         if not approved:
             return self._approval_required("computer.screenshot", {})
-        if platform.system() != "Darwin":
-            return {"action": "computer.screenshot", "supported": False, "reason": "macOS screencapture is required."}
         self._artifact_root.mkdir(parents=True, exist_ok=True)
         path = self._artifact_root / f"screenshot-{int(time.time() * 1000)}.png"
-        subprocess.run(["screencapture", "-x", str(path)], check=True)
+        system = platform.system()
+        if system == "Darwin":
+            subprocess.run(["screencapture", "-x", str(path)], check=True)
+        elif system == "Windows":
+            self._windows_screenshot(path)
+        else:
+            return {
+                "action": "computer.screenshot",
+                "supported": False,
+                "platform": system,
+                "reason": "Screenshots are supported on macOS and Windows.",
+            }
         model_path = self._model_screenshot_copy(path)
         data_url = ""
         try:
@@ -65,7 +74,7 @@ class BrowserComputerController:
             data_url = "data:{};base64,".format(mime_type) + base64.b64encode(model_path.read_bytes()).decode("ascii")
         except Exception:
             data_url = ""
-        result = {"action": "computer.screenshot", "path": str(path), "mime_type": "image/png"}
+        result = {"action": "computer.screenshot", "path": str(path), "mime_type": "image/png", "platform": system}
         if data_url:
             result["data_url"] = data_url
             result["model_image_path"] = str(model_path)
@@ -94,11 +103,20 @@ class BrowserComputerController:
         approval_payload = self._safe_payload(payload)
         if not (yolo_mode or self._consume_approval(payload, action, approval_payload)):
             return self._approval_required(action, approval_payload)
-        if platform.system() != "Darwin":
-            return {"action": action, "supported": False, "reason": "AppleScript desktop control is only supported on macOS."}
-        script = self._apple_script(action, payload)
-        subprocess.run(["osascript", "-e", script], check=True)
-        return {"action": action, "executed": True}
+        system = platform.system()
+        if system == "Darwin":
+            script = self._apple_script(action, payload)
+            subprocess.run(["osascript", "-e", script], check=True)
+        elif system == "Windows":
+            self._windows_desktop_action(action, payload)
+        else:
+            return {
+                "action": action,
+                "supported": False,
+                "platform": system,
+                "reason": "Desktop actions are supported on macOS and Windows.",
+            }
+        return {"action": action, "executed": True, "platform": system}
 
     def _apple_script(self, action: str, payload: dict[str, Any]) -> str:
         if action == "computer.click":
@@ -117,6 +135,105 @@ class BrowserComputerController:
             amount = int(payload.get("amount", 1))
             return f'tell application "System Events" to scroll wheel {amount}'
         raise ValueError(action)
+
+    def _windows_screenshot(self, path: Path) -> None:
+        escaped = self._ps_single(str(path))
+        script = "\n".join(
+            [
+                "$ErrorActionPreference = 'Stop'",
+                "Add-Type -AssemblyName System.Windows.Forms",
+                "Add-Type -AssemblyName System.Drawing",
+                "$bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds",
+                "$bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height",
+                "$graphics = [System.Drawing.Graphics]::FromImage($bitmap)",
+                "$graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)",
+                f"$bitmap.Save('{escaped}', [System.Drawing.Imaging.ImageFormat]::Png)",
+                "$graphics.Dispose()",
+                "$bitmap.Dispose()",
+            ]
+        )
+        self._run_powershell(script)
+
+    def _windows_desktop_action(self, action: str, payload: dict[str, Any]) -> None:
+        prelude = [
+            "$ErrorActionPreference = 'Stop'",
+            "Add-Type -AssemblyName System.Windows.Forms",
+            "Add-Type -AssemblyName System.Drawing",
+        ]
+        if action == "computer.click":
+            x = int(payload.get("x", 0))
+            y = int(payload.get("y", 0))
+            script = "\n".join(
+                prelude
+                + [
+                    "Add-Type -TypeDefinition @'\nusing System;\nusing System.Runtime.InteropServices;\npublic class RumiMouse {\n  [DllImport(\"user32.dll\")]\n  public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);\n}\n'@",
+                    f"[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point({x}, {y})",
+                    "[RumiMouse]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)",
+                    "[RumiMouse]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)",
+                ]
+            )
+            self._run_powershell(script)
+            return
+        if action == "computer.type":
+            text = self._ps_single(str(payload.get("text", "")))
+            self._run_powershell("\n".join(prelude + [f"[System.Windows.Forms.SendKeys]::SendWait('{text}')"]))
+            return
+        if action == "computer.key":
+            key = self._windows_send_key(str(payload.get("key", "ENTER")))
+            self._run_powershell("\n".join(prelude + [f"[System.Windows.Forms.SendKeys]::SendWait('{key}')"]))
+            return
+        if action == "computer.scroll":
+            amount = int(payload.get("amount", 1))
+            wheel_delta = amount * 120
+            script = "\n".join(
+                prelude
+                + [
+                    "Add-Type -TypeDefinition @'\nusing System;\nusing System.Runtime.InteropServices;\npublic class RumiMouse {\n  [DllImport(\"user32.dll\")]\n  public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);\n}\n'@",
+                    f"[RumiMouse]::mouse_event(0x0800, 0, 0, [uint32]({wheel_delta}), [UIntPtr]::Zero)",
+                ]
+            )
+            self._run_powershell(script)
+            return
+        raise ValueError(action)
+
+    @staticmethod
+    def _windows_send_key(key: str) -> str:
+        normalized = key.strip().lower()
+        key_map = {
+            "enter": "{ENTER}",
+            "return": "{ENTER}",
+            "escape": "{ESC}",
+            "esc": "{ESC}",
+            "tab": "{TAB}",
+            "backspace": "{BACKSPACE}",
+            "delete": "{DELETE}",
+            "up": "{UP}",
+            "down": "{DOWN}",
+            "left": "{LEFT}",
+            "right": "{RIGHT}",
+        }
+        return key_map.get(normalized, key)
+
+    @staticmethod
+    def _ps_single(value: str) -> str:
+        return value.replace("'", "''")
+
+    @staticmethod
+    def _run_powershell(script: str) -> None:
+        executable = "powershell"
+        try:
+            subprocess.run([executable, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], check=True)
+        except FileNotFoundError:
+            subprocess.run(["pwsh", "-NoProfile", "-Command", script], check=True)
+
+    @staticmethod
+    def _capabilities() -> dict[str, bool]:
+        system = platform.system()
+        return {
+            "browser_open_url": True,
+            "screenshot": system in {"Darwin", "Windows"},
+            "desktop_actions": system in {"Darwin", "Windows"},
+        }
 
     def _read_sessions(self) -> dict[str, Any]:
         try:

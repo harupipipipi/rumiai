@@ -91,6 +91,10 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         binding_part_ids = {binding["part_id"] for binding in catalog["component_bindings"]}
 
         self.assertIn("web_search", sidebar_ids)
+        self.assertIn("todo", sidebar_ids)
+        self.assertIn("subagent", sidebar_ids)
+        self.assertIn("browser_use", sidebar_ids)
+        self.assertIn("computer_use", sidebar_ids)
         self.assertIn("artifacts", sidebar_ids)
         self.assertIn("research-providers", sidebar_ids)
         self.assertIn("browser-computer", sidebar_ids)

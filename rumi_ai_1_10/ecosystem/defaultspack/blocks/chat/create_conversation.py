@@ -12,10 +12,18 @@ def run(input_data, context):
     system_prompt_id = input_data.get("system_prompt_id")
     agent_id = input_data.get("agent_id")
     tags = input_data.get("tags")
+    parent_conversation_id = input_data.get("parent_conversation_id")
+    conversation_kind = input_data.get("conversation_kind")
+    metadata = input_data.get("metadata")
+    group_id = input_data.get("group_id")
     conv = store.create_conversation(
         model=model,
         system_prompt_id=system_prompt_id,
         agent_id=agent_id,
         tags=tags,
+        parent_conversation_id=parent_conversation_id,
+        conversation_kind=conversation_kind,
+        metadata=metadata,
+        group_id=group_id,
     )
     return ok(conv)

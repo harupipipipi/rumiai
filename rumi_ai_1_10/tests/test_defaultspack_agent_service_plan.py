@@ -130,6 +130,70 @@ def test_chat_send_attaches_tools_and_persists_activity_events(tmp_path, monkeyp
     ChatStore._instance = None
 
 
+def test_chat_store_links_subagent_conversations(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    parent = store.create_conversation(model="stub/default")
+    child = store.create_conversation(
+        model="stub/default",
+        parent_conversation_id=parent["id"],
+        conversation_kind="subagent",
+    )
+
+    parent_after = store.get_conversation(parent["id"])
+    child_after = store.get_conversation(child["id"])
+    assert child_after["parent_conversation_id"] == parent["id"]
+    assert child_after["conversation_kind"] == "subagent"
+    assert child["id"] in parent_after["child_conversation_ids"]
+
+    store.delete_conversation(child["id"])
+    assert child["id"] not in store.get_conversation(parent["id"])["child_conversation_ids"]
+    ChatStore._instance = None
+
+
+def test_todo_tool_persists_in_conversation_workspace(tmp_path):
+    from domain.tool.todo import TodoController
+
+    workspace = tmp_path / "conversation" / "workspace"
+    result = TodoController().run(
+        {"action": "add", "title": "ブラウザ確認", "priority": "high"},
+        {"conversation_workspace_dir": str(workspace)},
+    )
+
+    todo_path = workspace / "todos.json"
+    assert result["todos"][0]["title"] == "ブラウザ確認"
+    assert todo_path.exists()
+    assert json.loads(todo_path.read_text(encoding="utf-8"))["todos"][0]["priority"] == "high"
+
+
+def test_subagent_tool_creates_child_conversation(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from domain.tool.subagent import SubagentController
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    parent = store.create_conversation(model="stub/default")
+    result = SubagentController().run(
+        {"task": "hello from subagent", "title": "Subagent check"},
+        {"conversation_id": parent["id"], "model": "stub/default"},
+    )
+
+    parent_after = store.get_conversation(parent["id"])
+    child = store.get_conversation(result["child_conversation_id"])
+    assert result["child_conversation_id"] in parent_after["child_conversation_ids"]
+    assert child["title"] == "Subagent check"
+    assert [message["role"] for message in child["messages"]] == ["user", "assistant"]
+    ChatStore._instance = None
+
+
 def test_chat_stream_uses_provider_stream_and_persists_message(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from blocks.chat.stream import run
@@ -665,6 +729,10 @@ def test_coding_tools_are_exposed_through_tool_registry():
         "coding_file_patch",
         "coding_terminal_exec",
         "coding_git_status",
+        "todo",
+        "subagent",
+        "browser_use",
+        "computer_use",
     } <= names
 
 

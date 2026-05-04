@@ -1,0 +1,43 @@
+{
+  "id": "computer_use",
+  "category": "tool",
+  "version": "1",
+  "display_name": "Computer Use",
+  "description": "Capture the screen and run approved desktop actions on macOS or Windows.",
+  "enabled": true,
+  "config": {
+    "name": "computer_use",
+    "summary": "コンピューター操作",
+    "tags": ["computer", "desktop", "screenshot", "approval"],
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["screenshot", "click", "type", "key", "scroll"],
+            "default": "screenshot"
+          },
+          "x": {"type": "integer"},
+          "y": {"type": "integer"},
+          "text": {"type": "string"},
+          "key": {"type": "string"},
+          "amount": {"type": "integer"},
+          "dry_run": {"type": "boolean"},
+          "approval_token": {"type": "string"},
+          "payload": {"type": "object"}
+        }
+      }
+    },
+    "execution": {"type": "local"},
+    "requires_approval": true,
+    "action_type": "desktop",
+    "ui": {
+      "group_id": "computer",
+      "group_label": "Computer",
+      "composer_label": "Computer Use",
+      "composer_icon": "monitor",
+      "widget_kind": "tool_toggle"
+    }
+  }
+}
