@@ -9,6 +9,34 @@
     "name": "calculator",
     "summary": "計算",
     "tags": ["math"],
+    "ui": {
+      "group_id": "other",
+      "group_label": "Other",
+      "group_icon": "calculator",
+      "settings_fields": [
+        {
+          "id": "decimal_precision",
+          "label": "Decimal precision",
+          "type": "number",
+          "default": 4,
+          "min": 0,
+          "max": 12,
+          "help": "Saved preference for rounded numeric results."
+        },
+        {
+          "id": "output_format",
+          "label": "Output format",
+          "type": "select",
+          "default": "auto",
+          "options": [
+            {"value": "auto", "label": "Auto"},
+            {"value": "plain", "label": "Plain number"},
+            {"value": "scientific", "label": "Scientific notation"}
+          ],
+          "help": "Saved preference for displaying calculator results."
+        }
+      ]
+    },
     "schema": {
       "parameters": {
         "type": "object",

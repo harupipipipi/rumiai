@@ -34,7 +34,28 @@
       "composer_label": "Todo",
       "composer_icon": "check-square",
       "drop_capabilities": ["composer.toggle_chip"],
-      "widget_kind": "tool_toggle"
+      "widget_kind": "tool_toggle",
+      "settings_fields": [
+        {
+          "id": "show_completed",
+          "label": "Show completed",
+          "type": "toggle",
+          "default": true,
+          "help": "Saved visibility preference for completed todos."
+        },
+        {
+          "id": "grouping",
+          "label": "Grouping",
+          "type": "select",
+          "default": "status",
+          "options": [
+            {"value": "status", "label": "Status"},
+            {"value": "priority", "label": "Priority"},
+            {"value": "none", "label": "None"}
+          ],
+          "help": "Saved preference for organizing todo lists."
+        }
+      ]
     }
   }
 }

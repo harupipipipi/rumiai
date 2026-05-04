@@ -40,7 +40,28 @@
       "composer_label": "Rumi API",
       "composer_icon": "plug",
       "drop_capabilities": ["composer.toggle_chip"],
-      "widget_kind": "tool_toggle"
+      "widget_kind": "tool_toggle",
+      "settings_fields": [
+        {
+          "id": "api_base_url",
+          "label": "API base URL",
+          "type": "text",
+          "default": "http://127.0.0.1:8766",
+          "help": "Saved default local API origin for agent API calls."
+        },
+        {
+          "id": "api_profile",
+          "label": "API profile",
+          "type": "select",
+          "default": "local",
+          "options": [
+            {"value": "local", "label": "Local"},
+            {"value": "development", "label": "Development"},
+            {"value": "custom", "label": "Custom"}
+          ],
+          "help": "Saved profile preference for selecting an API environment."
+        }
+      ]
     }
   }
 }
