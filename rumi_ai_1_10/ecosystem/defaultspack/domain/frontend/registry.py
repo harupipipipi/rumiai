@@ -695,6 +695,21 @@ class FrontendRegistry:
                         "help": "モデルの特性メモ。routing/profile API とつなぐ前の editable contract として保存します。",
                     },
                     {
+                        "id": "google_api_key",
+                        "label": "Google / Gemini API Key",
+                        "type": "secret",
+                        "default": "",
+                        "provider_id": "google",
+                        "configured_field": "google_api_key_configured",
+                        "help": "Google AI Studio の Gemini API key を保存します。保存後も値は再表示されません。",
+                    },
+                    {
+                        "id": "google_api_key_configured",
+                        "label": "Google Key Saved",
+                        "type": "readonly",
+                        "default": provider_has_api_key("google", pack_root=self._pack_root),
+                    },
+                    {
                         "id": "openrouter_api_key",
                         "label": "OpenRouter API Key",
                         "type": "secret",
@@ -1111,6 +1126,8 @@ class FrontendRegistry:
                 "favorite_profiles": ["openrouter/tencent/hy3-preview:free", "stub/default"],
                 "thinking_level_by_profile": {"openrouter/tencent/hy3-preview:free": "medium"},
                 "model_profile": self._default_model_profile_text(),
+                "google_api_key": "",
+                "google_api_key_configured": provider_has_api_key("google", pack_root=self._pack_root),
                 "openrouter_api_key": "",
                 "openrouter_api_key_configured": provider_has_api_key("openrouter", pack_root=self._pack_root),
             },
@@ -1191,27 +1208,40 @@ class FrontendRegistry:
         sanitized = deepcopy(patch)
         models = sanitized.get("models")
         if isinstance(models, dict):
-            raw_key = models.pop("openrouter_api_key", None)
-            if isinstance(raw_key, str) and raw_key.strip():
-                result = set_provider_api_key(
-                    "openrouter",
-                    raw_key,
-                    pack_root=self._pack_root,
-                )
-                models["openrouter_api_key_configured"] = bool(result.get("success"))
-            else:
-                models["openrouter_api_key_configured"] = provider_has_api_key(
-                    "openrouter",
-                    pack_root=self._pack_root,
-                )
-            models["openrouter_api_key"] = ""
+            for provider_id, field_id, configured_field in (
+                ("google", "google_api_key", "google_api_key_configured"),
+                ("openrouter", "openrouter_api_key", "openrouter_api_key_configured"),
+            ):
+                raw_key = models.pop(field_id, None)
+                if isinstance(raw_key, str) and raw_key.strip():
+                    result = set_provider_api_key(
+                        provider_id,
+                        raw_key,
+                        pack_root=self._pack_root,
+                    )
+                    models[configured_field] = bool(result.get("success"))
+                else:
+                    models[configured_field] = provider_has_api_key(
+                        provider_id,
+                        pack_root=self._pack_root,
+                    )
+                models[field_id] = ""
         return sanitized
 
     def _refresh_derived_settings(self, values: dict[str, Any]) -> dict[str, Any]:
         refreshed = deepcopy(values)
         models = refreshed.setdefault("models", {})
         if isinstance(models, dict):
+            models["google_api_key"] = ""
+            models["google_api_key_configured"] = provider_has_api_key(
+                "google",
+                pack_root=self._pack_root,
+            )
             models["openrouter_api_key"] = ""
+            models["openrouter_api_key_configured"] = provider_has_api_key(
+                "openrouter",
+                pack_root=self._pack_root,
+            )
             favorite_profiles = models.get("favorite_profiles")
             if isinstance(favorite_profiles, str):
                 try:
@@ -1235,8 +1265,4 @@ class FrontendRegistry:
                 except json.JSONDecodeError:
                     levels = {}
             models["thinking_level_by_profile"] = levels if isinstance(levels, dict) else {}
-            models["openrouter_api_key_configured"] = provider_has_api_key(
-                "openrouter",
-                pack_root=self._pack_root,
-            )
         return refreshed

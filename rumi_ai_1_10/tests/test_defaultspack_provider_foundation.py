@@ -52,7 +52,7 @@ class TestDefaultspackProviderCatalog(unittest.TestCase):
             list_provider_catalog,
         )
 
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}, clear=False):
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}, clear=True):
             providers = {item["provider_id"]: item for item in list_provider_catalog()}
 
         google = providers["google"]

@@ -35,6 +35,83 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
             provider = GoogleProvider()
 
         self.assertEqual(provider._api_key, "google-key")
+        self.assertEqual(
+            provider.BASE_URL,
+            "https://generativelanguage.googleapis.com/v1beta/openai",
+        )
+
+    def test_google_provider_uses_openai_compatible_chat_endpoint(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        captured = {}
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-key"}, clear=True):
+            provider = GoogleProvider()
+
+        def fake_request_json(path, body):
+            captured["path"] = path
+            captured["body"] = body
+            return {
+                "choices": [
+                    {
+                        "message": {"content": "hello from gemini"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 3,
+                    "completion_tokens": 4,
+                    "total_tokens": 7,
+                },
+                "model": "gemini-2.5-flash",
+            }
+
+        provider._request_json = fake_request_json
+        response = provider.complete(
+            "gemini-2.5-flash",
+            [{"role": "user", "content": "hello"}],
+            [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "lookup",
+                        "parameters": {"type": "object", "properties": {}},
+                    },
+                }
+            ],
+            {"temperature": 0.2, "thinking_level": "low"},
+        )
+
+        self.assertEqual(captured["path"], "/chat/completions")
+        self.assertEqual(captured["body"]["model"], "gemini-2.5-flash")
+        self.assertEqual(captured["body"]["messages"], [{"role": "user", "content": "hello"}])
+        self.assertEqual(captured["body"]["tools"][0]["function"]["name"], "lookup")
+        self.assertEqual(captured["body"]["reasoning_effort"], "low")
+        self.assertEqual(response["content"][0]["text"], "hello from gemini")
+
+    def test_google_provider_key_can_be_saved_as_defaultspack_secret(self):
+        from core_runtime.secrets_store import SecretsStore
+        from domain.ai_client.api_key_store import (
+            load_provider_api_keys_into_env,
+            provider_has_api_key,
+            set_provider_api_key,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            secrets_dir = Path(tmpdir) / "secrets"
+            with patch.dict(os.environ, {"RUMI_DEFAULTSPACK_SECRETS_DIR": str(secrets_dir)}, clear=True):
+                result = set_provider_api_key("google", "google-secret")
+                store = SecretsStore(str(secrets_dir))
+
+                self.assertTrue(result["success"])
+                self.assertEqual(result["key"], "GOOGLE_API_KEY")
+                self.assertTrue(provider_has_api_key("google"))
+                self.assertTrue(store.has_secret("GOOGLE_API_KEY"))
+
+                os.environ.pop("GOOGLE_API_KEY", None)
+                loaded = load_provider_api_keys_into_env()
+
+        self.assertTrue(loaded["google"])
 
     def test_google_provider_loads_profile_models_from_user_data(self):
         from domain.ai_client.providers.google_provider import GoogleProvider

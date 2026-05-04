@@ -102,19 +102,20 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
         from domain.ai_client.client import AIClient
 
         AIClient._instance = None
-        with patch.dict(os.environ, {}, clear=True):
-            client = AIClient()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"RUMI_DEFAULTSPACK_SECRETS_DIR": tmpdir}, clear=True):
+                client = AIClient()
 
-        try:
-            with self.assertRaisesRegex(RuntimeError, "openrouter: provider is not configured"):
-                client.complete(
-                    "openrouter/tencent/hy3-preview:free",
-                    [{"role": "user", "content": "hello"}],
-                    [],
-                    {},
-                )
-        finally:
-            AIClient._instance = None
+            try:
+                with self.assertRaisesRegex(RuntimeError, "openrouter: provider is not configured"):
+                    client.complete(
+                        "openrouter/tencent/hy3-preview:free",
+                        [{"role": "user", "content": "hello"}],
+                        [],
+                        {},
+                    )
+            finally:
+                AIClient._instance = None
 
 
 if __name__ == "__main__":

@@ -315,6 +315,29 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertNotIn("or-secret", settings_text)
         self.assertTrue(has_secret)
 
+    def test_update_settings_stores_google_key_as_secret(self):
+        from core_runtime.secrets_store import SecretsStore
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            with patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "google/gemini-2.5-flash"}]
+                registry = FrontendRegistry(pack_root=pack_root)
+                values = registry.update_settings({"models": {"google_api_key": "google-secret"}})
+                reloaded = registry.get_settings()["values"]
+
+            settings_path = pack_root / "user_data" / "shared" / "frontend_settings.json"
+            settings_text = settings_path.read_text(encoding="utf-8")
+            store = SecretsStore(str(pack_root / "user_data" / "secrets"))
+            has_secret = store.has_secret("GOOGLE_API_KEY")
+
+        self.assertTrue(values["models"]["google_api_key_configured"])
+        self.assertEqual(values["models"]["google_api_key"], "")
+        self.assertEqual(reloaded["models"]["google_api_key"], "")
+        self.assertNotIn("google-secret", settings_text)
+        self.assertTrue(has_secret)
+
     def test_openrouter_key_status_is_derived_from_secret_store(self):
         from core_runtime.secrets_store import SecretsStore
         from domain.frontend.registry import FrontendRegistry
@@ -343,6 +366,35 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
 
         self.assertEqual(values["models"]["openrouter_api_key"], "")
         self.assertTrue(values["models"]["openrouter_api_key_configured"])
+
+    def test_google_key_status_is_derived_from_secret_store(self):
+        from core_runtime.secrets_store import SecretsStore
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            settings_path = pack_root / "user_data" / "shared" / "frontend_settings.json"
+            settings_path.parent.mkdir(parents=True, exist_ok=True)
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "models": {
+                            "google_api_key": "must-not-persist",
+                            "google_api_key_configured": False,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            store = SecretsStore(str(pack_root / "user_data" / "secrets"))
+            store.set_secret("GOOGLE_API_KEY", "google-secret", actor="test")
+
+            with patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "google/gemini-2.5-flash"}]
+                values = FrontendRegistry(pack_root=pack_root).get_settings()["values"]
+
+        self.assertEqual(values["models"]["google_api_key"], "")
+        self.assertTrue(values["models"]["google_api_key_configured"])
 
     def test_fallback_http_routes_inject_method_for_block_handlers(self):
         from transport.registry import HttpRouteSpec, build_http_routes_from_specs
