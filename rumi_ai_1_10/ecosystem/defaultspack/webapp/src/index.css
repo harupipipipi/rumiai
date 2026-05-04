@@ -164,6 +164,20 @@ body {
   animation: rumi-message-enter 280ms cubic-bezier(0.2, 0.82, 0.2, 1) both;
 }
 
+.rumi-tool-activity summary::-webkit-details-marker,
+.rumi-tool-group summary::-webkit-details-marker {
+  display: none;
+}
+
+.rumi-tool-caret {
+  transition: transform 160ms ease;
+}
+
+.rumi-tool-activity[open] > summary .rumi-tool-caret,
+.rumi-tool-group[open] > summary .rumi-tool-caret {
+  transform: rotate(180deg);
+}
+
 .rumi-history-rail {
   animation: none;
 }

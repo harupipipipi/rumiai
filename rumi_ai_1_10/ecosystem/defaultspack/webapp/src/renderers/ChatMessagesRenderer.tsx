@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, ChevronDown, Clock, Folder, Image as ImageIcon, Loader2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, Clock, Image as ImageIcon, Loader2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 
 import { cn } from "../lib/cn";
@@ -64,23 +64,25 @@ function ToolActivityTray({ message }: { message: ChatMessagesRendererProps["mes
   const total = groups.reduce((count, group) => count + group.items.length, 0);
 
   return (
-    <details className="group mb-4 w-full rounded-xl border border-zinc-800/90 bg-zinc-950/70 px-4 py-3 text-zinc-300 shadow-[0_16px_44px_rgba(0,0,0,0.22)]" open>
+    <details className="rumi-tool-activity mb-4 w-full rounded-xl border border-zinc-800/90 bg-zinc-950/70 px-4 py-3 text-zinc-300 shadow-[0_16px_44px_rgba(0,0,0,0.22)]" open>
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-[13px] text-zinc-300">
         <span className="flex min-w-0 items-center gap-2 font-medium">
-          <Folder size={16} className="shrink-0 text-zinc-500" />
           <span className="truncate">使用した tool</span>
           <span className="rounded-full border border-zinc-800 bg-zinc-900 px-1.5 py-0.5 text-[10px] text-zinc-500">{total}</span>
         </span>
-        <ChevronDown size={16} className="shrink-0 text-zinc-500 transition-transform group-open:rotate-180" />
+        <ChevronDown size={16} className="rumi-tool-caret shrink-0 text-zinc-500" />
       </summary>
       <div className="mt-3 space-y-3">
         {groups.map((group) => (
-          <div key={group.id} className="space-y-2">
-            <div className="flex items-center gap-2 text-[12px] font-medium text-zinc-500">
-              <Folder size={13} />
-              <span>{group.label}</span>
-            </div>
-            <div className="grid gap-2">
+          <details key={group.id} className="rumi-tool-group rounded-lg border border-zinc-800/70 bg-zinc-900/35 px-3 py-2" open>
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-[12px] font-medium text-zinc-400">
+              <span className="min-w-0 truncate">{group.label}</span>
+              <span className="flex shrink-0 items-center gap-2 text-zinc-500">
+                <span className="rounded-full border border-zinc-800 bg-zinc-950/70 px-1.5 py-0.5 text-[10px]">{group.items.length}</span>
+                <ChevronDown size={14} className="rumi-tool-caret" />
+              </span>
+            </summary>
+            <div className="mt-2 grid gap-2">
               {group.items.map((item) => (
                 <div key={item.id} className="rounded-lg border border-zinc-800/80 bg-zinc-900/70 px-3 py-2.5">
                   <div className="flex min-w-0 items-center gap-2">
@@ -91,7 +93,7 @@ function ToolActivityTray({ message }: { message: ChatMessagesRendererProps["mes
                 </div>
               ))}
             </div>
-          </div>
+          </details>
         ))}
       </div>
     </details>
@@ -121,7 +123,7 @@ function PendingToolTray({ toolNames }: { toolNames: string[] }) {
         {[...groups.entries()].map(([id, group]) => (
           <div key={id} className="space-y-1.5">
             <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">
-              <Folder size={11} />
+              <ChevronDown size={11} className="rotate-180" />
               <span>{group.label}</span>
             </div>
             <div className="flex flex-wrap gap-1.5">
