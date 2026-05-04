@@ -64,30 +64,30 @@ function ToolActivityTray({ message }: { message: ChatMessagesRendererProps["mes
   const total = groups.reduce((count, group) => count + group.items.length, 0);
 
   return (
-    <details className="group mb-3 w-full max-w-[min(720px,100%)] rounded-xl border border-zinc-800/90 bg-zinc-950/70 px-3 py-2 text-zinc-300 shadow-[0_12px_32px_rgba(0,0,0,0.18)]" open>
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-[12px] text-zinc-300">
+    <details className="group mb-4 w-full rounded-xl border border-zinc-800/90 bg-zinc-950/70 px-4 py-3 text-zinc-300 shadow-[0_16px_44px_rgba(0,0,0,0.22)]" open>
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-[13px] text-zinc-300">
         <span className="flex min-w-0 items-center gap-2 font-medium">
-          <Folder size={14} className="shrink-0 text-zinc-500" />
+          <Folder size={16} className="shrink-0 text-zinc-500" />
           <span className="truncate">使用した tool</span>
           <span className="rounded-full border border-zinc-800 bg-zinc-900 px-1.5 py-0.5 text-[10px] text-zinc-500">{total}</span>
         </span>
-        <ChevronDown size={14} className="shrink-0 text-zinc-500 transition-transform group-open:rotate-180" />
+        <ChevronDown size={16} className="shrink-0 text-zinc-500 transition-transform group-open:rotate-180" />
       </summary>
-      <div className="mt-2 space-y-2">
+      <div className="mt-3 space-y-3">
         {groups.map((group) => (
-          <div key={group.id} className="space-y-1.5">
-            <div className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-500">
-              <Folder size={11} />
+          <div key={group.id} className="space-y-2">
+            <div className="flex items-center gap-2 text-[12px] font-medium text-zinc-500">
+              <Folder size={13} />
               <span>{group.label}</span>
             </div>
-            <div className="space-y-1.5">
+            <div className="grid gap-2">
               {group.items.map((item) => (
-                <div key={item.id} className="rounded-lg border border-zinc-800/80 bg-zinc-900/70 px-2.5 py-2">
+                <div key={item.id} className="rounded-lg border border-zinc-800/80 bg-zinc-900/70 px-3 py-2.5">
                   <div className="flex min-w-0 items-center gap-2">
                     <ToolStatusIcon item={item} />
-                    <span className="min-w-0 flex-1 truncate text-[12px] text-zinc-200">{item.title}</span>
+                    <span className="min-w-0 flex-1 truncate text-[13px] text-zinc-200">{item.title}</span>
                   </div>
-                  {item.detail && <p className="mt-1 line-clamp-2 pl-5 text-[11px] leading-relaxed text-zinc-500">{item.detail}</p>}
+                  {item.detail && <p className="mt-1 pl-5 text-[12px] leading-relaxed text-zinc-500">{item.detail}</p>}
                 </div>
               ))}
             </div>
@@ -112,7 +112,7 @@ function PendingToolTray({ toolNames }: { toolNames: string[] }) {
   }
 
   return (
-    <div className="mt-2 ml-5 w-[min(560px,calc(100vw-64px))] rounded-xl border border-zinc-800 bg-zinc-950/70 px-3 py-2">
+    <div className="mt-2 ml-5 w-[min(820px,calc(100vw-64px))] rounded-xl border border-zinc-800 bg-zinc-950/70 px-4 py-3">
       <div className="mb-2 flex items-center gap-2 text-[11px] font-medium text-zinc-400">
         <Loader2 size={12} className="animate-spin text-blue-300" />
         <span>接続中の tool</span>
@@ -120,8 +120,8 @@ function PendingToolTray({ toolNames }: { toolNames: string[] }) {
       <div className="space-y-2">
         {[...groups.entries()].map(([id, group]) => (
           <div key={id} className="space-y-1.5">
-            <div className="flex items-center gap-1.5 text-[10px] text-zinc-500">
-              <Folder size={10} />
+            <div className="flex items-center gap-1.5 text-[11px] text-zinc-500">
+              <Folder size={11} />
               <span>{group.label}</span>
             </div>
             <div className="flex flex-wrap gap-1.5">
@@ -164,7 +164,7 @@ export function ChatMessagesRenderer({
         <div className="flex-1" />
       ) : (
         <div className="flex-1 overflow-y-auto px-4 py-3">
-          <div className="max-w-3xl mx-auto space-y-4">
+          <div className="w-full max-w-5xl mx-auto space-y-4">
             {messages.map((message) => (
               <div key={message.id} className={cn("rumi-message-row flex gap-3", message.role === "user" ? "flex-row-reverse" : "")}>
                 <div className={cn("flex flex-col min-w-0 pt-1", message.role === "user" ? "items-end max-w-[80%]" : "items-start flex-1")}>
@@ -183,7 +183,7 @@ export function ChatMessagesRenderer({
                     "rounded-2xl max-w-full sm:px-4 px-3 py-3 text-[14px]", 
                     message.role === "user" 
                       ? "bg-zinc-800/80 text-zinc-100 rounded-tr-sm shadow-sm border border-zinc-700/50" 
-                      : "text-zinc-200 bg-transparent"
+                      : "w-full text-zinc-200 bg-transparent"
                   )}>
                     {showActivityInMessages && message.role === "agent" && <ToolActivityTray message={message} />}
 
