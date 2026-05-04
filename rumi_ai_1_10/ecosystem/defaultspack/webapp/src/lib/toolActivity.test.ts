@@ -30,6 +30,18 @@ test("groups real tool logs into folder-like sections", () => {
   assert.equal(groups[1].items[0].title, "Web検索 / web_search: 今日の天気 東京");
 });
 
+test("polishes calculator result prose into the answer", () => {
+  const groups = buildToolActivityGroups([
+    {
+      tool_name: "calculator",
+      arguments: { expression: "13829+12312" },
+      result: { status: "ok", data: { output: "Calculated: 13829+12312 = 26141" } },
+    },
+  ]);
+
+  assert.equal(groups[0].items[0].detail, "26141");
+});
+
 test("does not create activity from text-only claims", () => {
   assert.deepEqual(buildToolActivityGroups([], []), []);
 });

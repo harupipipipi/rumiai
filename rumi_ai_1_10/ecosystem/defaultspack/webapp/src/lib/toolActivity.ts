@@ -7,6 +7,7 @@ export type ToolActivityItem = {
   toolName: string;
   folder: string;
   folderLabel: string;
+  input: string;
   title: string;
   detail: string;
   status: ToolActivityStatus;
@@ -74,12 +75,18 @@ export function summarizeToolArguments(toolName: string, args?: Record<string, u
   return compact(args);
 }
 
-function summarizeToolResult(result: unknown): string {
+function formatCalculatorResult(summary: string): string {
+  const calculatedMatch = summary.match(/=\s*([-+]?[\d.,]+(?:\.\d+)?)\s*$/);
+  if (calculatedMatch) return calculatedMatch[1];
+  return summary;
+}
+
+function summarizeToolResult(toolName: string, result: unknown): string {
   if (!result || typeof result !== "object") return compact(result, 120);
   const record = result as Record<string, unknown>;
   const data = record.data && typeof record.data === "object" ? record.data as Record<string, unknown> : record;
   const direct = pickString(data, ["summary", "result", "message", "output", "title"]);
-  if (direct) return direct;
+  if (direct) return toolName.toLowerCase().includes("calc") ? formatCalculatorResult(direct) : direct;
   if (Array.isArray(data.results)) return `${data.results.length} 件の結果`;
   if (Array.isArray(data.items)) return `${data.items.length} 件の項目`;
   if (Array.isArray(data.files)) return `${data.files.length} 件のファイル`;
@@ -110,12 +117,13 @@ export function buildToolActivityGroups(
       const args = log.arguments && typeof log.arguments === "object" ? log.arguments as Record<string, unknown> : {};
       const folder = toolFolderFor(toolName);
       const argumentSummary = summarizeToolArguments(toolName, args);
-      const resultSummary = summarizeToolResult(log.result);
+      const resultSummary = summarizeToolResult(toolName, log.result);
       return {
         id: `log-${index}-${toolName}`,
         toolName,
         folder: folder.id,
         folderLabel: folder.label,
+        input: argumentSummary,
         title: argumentSummary ? `${folder.label} / ${toolName}: ${argumentSummary}` : `${folder.label} / ${toolName}`,
         detail: resultSummary,
         status: statusForLog(log),
@@ -139,6 +147,7 @@ export function buildToolActivityGroups(
         toolName,
         folder: folder.id,
         folderLabel: folder.label,
+        input: argumentSummary,
         title: argumentSummary ? `${folder.label} / ${toolName}: ${argumentSummary}` : `${folder.label} / ${toolName}`,
         detail: String(event.message ?? "使用中"),
         status: "running",

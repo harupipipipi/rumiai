@@ -58,10 +58,17 @@ function ToolStatusIcon({ item }: { item: ToolActivityItem }) {
   return <CheckCircle2 size={12} className="shrink-0 text-zinc-400" />;
 }
 
+function toolStatusLabel(item: ToolActivityItem): string {
+  if (item.status === "running") return "実行中";
+  if (item.status === "failed") return "失敗";
+  return "完了";
+}
+
 function ToolActivityTray({ message }: { message: ChatMessagesRendererProps["messages"][number] }) {
   const groups = buildToolActivityGroups(message.toolLogs ?? [], message.events ?? []);
   if (groups.length === 0) return null;
-  const total = groups.reduce((count, group) => count + group.items.length, 0);
+  const items = groups.flatMap((group) => group.items);
+  const total = items.length;
 
   return (
     <details className="rumi-tool-activity mb-4 w-full rounded-xl border border-zinc-800/90 bg-zinc-950/70 px-4 py-3 text-zinc-300 shadow-[0_16px_44px_rgba(0,0,0,0.22)]" open>
@@ -72,28 +79,40 @@ function ToolActivityTray({ message }: { message: ChatMessagesRendererProps["mes
         </span>
         <ChevronDown size={16} className="rumi-tool-caret shrink-0 text-zinc-500" />
       </summary>
-      <div className="mt-3 space-y-3">
-        {groups.map((group) => (
-          <details key={group.id} className="rumi-tool-group rounded-lg border border-zinc-800/70 bg-zinc-900/35 px-3 py-2" open>
-            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-[12px] font-medium text-zinc-400">
-              <span className="min-w-0 truncate">{group.label}</span>
-              <span className="flex shrink-0 items-center gap-2 text-zinc-500">
-                <span className="rounded-full border border-zinc-800 bg-zinc-950/70 px-1.5 py-0.5 text-[10px]">{group.items.length}</span>
-                <ChevronDown size={14} className="rumi-tool-caret" />
-              </span>
-            </summary>
-            <div className="mt-2 grid gap-2">
-              {group.items.map((item) => (
-                <div key={item.id} className="rounded-lg border border-zinc-800/80 bg-zinc-900/70 px-3 py-2.5">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <ToolStatusIcon item={item} />
-                    <span className="min-w-0 flex-1 truncate text-[13px] text-zinc-200">{item.title}</span>
+      <div className="mt-3 grid gap-2">
+        {items.map((item) => (
+          <div key={item.id} className="rumi-tool-card rounded-lg border border-zinc-800/80 bg-zinc-900/55 px-3.5 py-3">
+            <div className="flex min-w-0 items-start justify-between gap-3">
+              <div className="flex min-w-0 items-start gap-2.5">
+                <span className="mt-0.5">
+                  <ToolStatusIcon item={item} />
+                </span>
+                <div className="min-w-0">
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="rounded-md border border-zinc-800 bg-zinc-950/70 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400">
+                      {item.folderLabel}
+                    </span>
+                    <span className="min-w-0 truncate font-mono text-[12px] text-zinc-200">{item.toolName}</span>
                   </div>
-                  {item.detail && <p className="mt-1 pl-5 text-[12px] leading-relaxed text-zinc-500">{item.detail}</p>}
+                  {item.input && (
+                    <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[10px] leading-4 text-zinc-600">
+                      <span className="shrink-0 text-zinc-700">入力</span>
+                      <span className="min-w-0 truncate font-mono">{item.input}</span>
+                    </div>
+                  )}
                 </div>
-              ))}
+              </div>
+              <span className="shrink-0 rounded-full border border-zinc-800 bg-zinc-950/70 px-2 py-0.5 text-[10px] text-zinc-500">
+                {toolStatusLabel(item)}
+              </span>
             </div>
-          </details>
+            {item.detail && (
+              <div className="mt-2 flex min-w-0 items-center gap-2 rounded-md border border-zinc-800/70 bg-black/20 px-3 py-2 text-zinc-300">
+                <span className="shrink-0 text-[10px] font-medium text-zinc-600">結果</span>
+                <span className="min-w-0 break-words text-[12px] leading-relaxed">{item.detail}</span>
+              </div>
+            )}
+          </div>
         ))}
       </div>
     </details>
