@@ -285,6 +285,49 @@ def _browser_screenshot_data_url(result):
     return ""
 
 
+def _browser_screenshot_guidance(result):
+    if not isinstance(result, dict):
+        return "Browser screenshot captured by browser_computer. Use this image to continue the task."
+    data = result.get("data", result)
+    if not isinstance(data, dict):
+        return "Browser screenshot captured by browser_computer. Use this image to continue the task."
+    widget = data.get("widget") if isinstance(data.get("widget"), dict) else {}
+    source = widget if widget.get("coordinate_system") else data
+    image_size = source.get("image_size") if isinstance(source.get("image_size"), dict) else {}
+    action_coordinate_system = source.get("action_coordinate_system") if isinstance(source.get("action_coordinate_system"), dict) else {}
+    model_image_size = source.get("model_image_size") if isinstance(source.get("model_image_size"), dict) else {}
+    scale = source.get("model_to_action_scale") if isinstance(source.get("model_to_action_scale"), dict) else {}
+    cursor = source.get("cursor") if isinstance(source.get("cursor"), dict) else {}
+    parts = ["Browser screenshot captured by browser_computer. Use this image to continue the task."]
+    if image_size.get("width") and image_size.get("height"):
+        parts.append(
+            "The attached screenshot image is top-left pixel space: width={} height={}.".format(
+                image_size.get("width"),
+                image_size.get("height"),
+            )
+        )
+    if action_coordinate_system.get("width") and action_coordinate_system.get("height"):
+        parts.append(
+            "Mouse actions use top-left action coordinates: width={} height={} x_range={} y_range={}.".format(
+                action_coordinate_system.get("width"),
+                action_coordinate_system.get("height"),
+                action_coordinate_system.get("x_range"),
+                action_coordinate_system.get("y_range"),
+            )
+        )
+    if model_image_size.get("width") and model_image_size.get("height") and scale.get("x") and scale.get("y"):
+        parts.append(
+            "If you estimate a point on the attached image, convert it to action coordinates with scale x={:.4f}, y={:.4f} before moving.".format(
+                float(scale.get("x")),
+                float(scale.get("y")),
+            )
+        )
+    if cursor.get("x") is not None and cursor.get("y") is not None:
+        parts.append("Current cursor is near x={} y={}.".format(cursor.get("x"), cursor.get("y")))
+    parts.append("To reposition without clicking, call browser_use with action=move and integer x/y action coordinates.")
+    return " ".join(parts)
+
+
 def _append_tool_result_message(messages, tool_name, result, tool_call_id="", *, model=""):
     result_text = ""
     if isinstance(result, dict):
@@ -316,7 +359,7 @@ def _append_tool_result_message(messages, tool_name, result, tool_call_id="", *,
                     "content": [
                         {
                             "type": "text",
-                            "text": "Browser screenshot captured by browser_computer. Use this image to continue the task.",
+                            "text": _browser_screenshot_guidance(result),
                         },
                         {"type": "image_url", "image_url": {"url": screenshot}},
                     ],

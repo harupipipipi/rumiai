@@ -6,6 +6,7 @@ import platform
 import re
 import secrets
 import shutil
+import struct
 import subprocess
 import time
 import webbrowser
@@ -51,7 +52,7 @@ class BrowserComputerController:
             return self._delete_cookies(payload, dry_run=bool(payload.get("dry_run")), yolo_mode=yolo_mode)
         if action == "computer.screenshot":
             return self._screenshot(payload=payload, dry_run=bool(payload.get("dry_run")), yolo_mode=yolo_mode)
-        if action in {"computer.click", "computer.type", "computer.key", "computer.scroll"}:
+        if action in {"computer.move", "computer.click", "computer.type", "computer.key", "computer.scroll"}:
             return self._desktop_action(action, payload, yolo_mode=yolo_mode)
         raise ValueError(f"Unsupported browser/computer action: {action}")
 
@@ -258,10 +259,63 @@ class BrowserComputerController:
             data_url = "data:{};base64,".format(mime_type) + base64.b64encode(model_path.read_bytes()).decode("ascii")
         except Exception:
             data_url = ""
-        result = {"action": "computer.screenshot", "path": str(path), "mime_type": "image/png", "platform": system}
+        result = self._screenshot_result(path, model_path, system)
         if data_url:
             result["data_url"] = data_url
             result["model_image_path"] = str(model_path)
+        return result
+
+    def _screenshot_result(self, path: Path, model_path: Path, system: str) -> dict[str, Any]:
+        result: dict[str, Any] = {"action": "computer.screenshot", "path": str(path), "mime_type": "image/png", "platform": system}
+        image_size = self._image_size(path)
+        model_image_size = self._image_size(model_path)
+        if image_size:
+            width, height = image_size
+            result["image_size"] = {"width": width, "height": height}
+            result["coordinate_system"] = {
+                "origin": "top_left",
+                "unit": "px",
+                "space": "screenshot_image",
+                "x_range": [0, max(width - 1, 0)],
+                "y_range": [0, max(height - 1, 0)],
+            }
+        action_coordinate_system = self._action_coordinate_system(system, image_size)
+        if action_coordinate_system:
+            result["action_coordinate_system"] = action_coordinate_system
+        if model_image_size:
+            model_width, model_height = model_image_size
+            result["model_image_size"] = {"width": model_width, "height": model_height}
+        if image_size and model_image_size and model_image_size[0] and model_image_size[1]:
+            result["model_to_screen_scale"] = {
+                "x": image_size[0] / model_image_size[0],
+                "y": image_size[1] / model_image_size[1],
+            }
+        if action_coordinate_system and model_image_size and model_image_size[0] and model_image_size[1]:
+            action_width = action_coordinate_system.get("width")
+            action_height = action_coordinate_system.get("height")
+            if action_width and action_height:
+                result["model_to_action_scale"] = {
+                    "x": action_width / model_image_size[0],
+                    "y": action_height / model_image_size[1],
+                }
+        if action_coordinate_system and image_size and image_size[0] and image_size[1]:
+            action_width = action_coordinate_system.get("width")
+            action_height = action_coordinate_system.get("height")
+            if action_width and action_height:
+                result["screenshot_to_action_scale"] = {
+                    "x": action_width / image_size[0],
+                    "y": action_height / image_size[1],
+                }
+        cursor = self._cursor_position()
+        if cursor:
+            result["cursor"] = cursor
+        result["cursor_move_contract"] = {
+            "tool": "browser_use",
+            "action": "move",
+            "screen_coordinates": True,
+            "coordinate_source": "screenshot",
+            "notes": "Call move with action_coordinate_system coordinates. If a point is estimated on model_image_size, multiply by model_to_action_scale before calling move.",
+        }
         return result
 
     def _model_screenshot_copy(self, path: Path) -> Path:
@@ -280,6 +334,127 @@ class BrowserComputerController:
                 pass
         return path
 
+    @staticmethod
+    def _image_size(path: Path) -> tuple[int, int] | None:
+        try:
+            data = path.read_bytes()
+        except Exception:
+            return None
+        if data.startswith(b"\x89PNG\r\n\x1a\n") and len(data) >= 24:
+            try:
+                width, height = struct.unpack(">II", data[16:24])
+                return int(width), int(height)
+            except Exception:
+                return None
+        if data.startswith(b"\xff\xd8"):
+            index = 2
+            while index + 9 < len(data):
+                if data[index] != 0xFF:
+                    index += 1
+                    continue
+                marker = data[index + 1]
+                index += 2
+                if marker in {0xD8, 0xD9}:
+                    continue
+                if index + 2 > len(data):
+                    return None
+                length = int.from_bytes(data[index : index + 2], "big")
+                if length < 2 or index + length > len(data):
+                    return None
+                if 0xC0 <= marker <= 0xCF and marker not in {0xC4, 0xC8, 0xCC} and length >= 7:
+                    height = int.from_bytes(data[index + 3 : index + 5], "big")
+                    width = int.from_bytes(data[index + 5 : index + 7], "big")
+                    return int(width), int(height)
+                index += length
+        return None
+
+    @staticmethod
+    def _cursor_position() -> dict[str, Any] | None:
+        system = platform.system()
+        try:
+            if system == "Darwin":
+                code = (
+                    "import json, Quartz\n"
+                    "event = Quartz.CGEventCreate(None)\n"
+                    "loc = Quartz.CGEventGetLocation(event)\n"
+                    "print(json.dumps({'x': int(round(loc.x)), 'y': int(round(loc.y)), 'origin': 'top_left'}))"
+                )
+                completed = subprocess.run(["python3", "-c", code], check=True, capture_output=True, text=True)
+                value = json.loads(completed.stdout or "{}")
+                if "x" in value and "y" in value:
+                    return value
+            if system == "Windows":
+                script = "\n".join(
+                    [
+                        "Add-Type -AssemblyName System.Windows.Forms",
+                        "$p = [System.Windows.Forms.Cursor]::Position",
+                        "ConvertTo-Json @{ x = [int]$p.X; y = [int]$p.Y; origin = 'top_left' } -Compress",
+                    ]
+                )
+                executable = "powershell" if shutil.which("powershell") else "pwsh"
+                completed = subprocess.run([executable, "-NoProfile", "-Command", script], check=True, capture_output=True, text=True)
+                value = json.loads(completed.stdout or "{}")
+                if "x" in value and "y" in value:
+                    return value
+        except Exception:
+            return None
+        return None
+
+    @staticmethod
+    def _action_coordinate_system(system: str, image_size: tuple[int, int] | None) -> dict[str, Any] | None:
+        if system == "Darwin":
+            try:
+                code = (
+                    "import json, Quartz\n"
+                    "display = Quartz.CGMainDisplayID()\n"
+                    "bounds = Quartz.CGDisplayBounds(display)\n"
+                    "payload = {\n"
+                    "  'origin': 'top_left',\n"
+                    "  'unit': 'display_coordinate',\n"
+                    "  'screen': 'primary',\n"
+                    "  'x': int(round(bounds.origin.x)),\n"
+                    "  'y': int(round(bounds.origin.y)),\n"
+                    "  'width': int(round(bounds.size.width)),\n"
+                    "  'height': int(round(bounds.size.height)),\n"
+                    "}\n"
+                    "payload['x_range'] = [payload['x'], payload['x'] + max(payload['width'] - 1, 0)]\n"
+                    "payload['y_range'] = [payload['y'], payload['y'] + max(payload['height'] - 1, 0)]\n"
+                    "print(json.dumps(payload))"
+                )
+                completed = subprocess.run(["python3", "-c", code], check=True, capture_output=True, text=True)
+                value = json.loads(completed.stdout or "{}")
+                if value.get("width") and value.get("height"):
+                    return value
+            except Exception:
+                pass
+        if system == "Windows" and image_size:
+            width, height = image_size
+            return {
+                "origin": "top_left",
+                "unit": "px",
+                "screen": "primary",
+                "x": 0,
+                "y": 0,
+                "width": width,
+                "height": height,
+                "x_range": [0, max(width - 1, 0)],
+                "y_range": [0, max(height - 1, 0)],
+            }
+        if image_size:
+            width, height = image_size
+            return {
+                "origin": "top_left",
+                "unit": "px",
+                "screen": "captured",
+                "x": 0,
+                "y": 0,
+                "width": width,
+                "height": height,
+                "x_range": [0, max(width - 1, 0)],
+                "y_range": [0, max(height - 1, 0)],
+            }
+        return None
+
     def _desktop_action(self, action: str, payload: dict[str, Any], *, yolo_mode: bool) -> dict[str, Any]:
         dry_run = bool(payload.get("dry_run"))
         if dry_run:
@@ -288,7 +463,9 @@ class BrowserComputerController:
         if not (yolo_mode or self._consume_approval(payload, action, approval_payload)):
             return self._approval_required(action, approval_payload)
         system = platform.system()
-        if system == "Darwin":
+        if system == "Darwin" and action == "computer.move":
+            self._darwin_move_cursor(payload)
+        elif system == "Darwin":
             script = self._apple_script(action, payload)
             subprocess.run(["osascript", "-e", script], check=True)
         elif system == "Windows":
@@ -300,7 +477,29 @@ class BrowserComputerController:
                 "platform": system,
                 "reason": "Desktop actions are supported on macOS and Windows.",
             }
-        return {"action": action, "executed": True, "platform": system}
+        result: dict[str, Any] = {"action": action, "executed": True, "platform": system}
+        if action in {"computer.move", "computer.click"}:
+            result["target"] = {"x": int(payload.get("x", 0)), "y": int(payload.get("y", 0))}
+        if action == "computer.scroll":
+            result["amount"] = int(payload.get("amount", 1))
+        return result
+
+    def _darwin_move_cursor(self, payload: dict[str, Any]) -> None:
+        x = int(payload.get("x", 0))
+        y = int(payload.get("y", 0))
+        cliclick = shutil.which("cliclick")
+        if cliclick:
+            subprocess.run([cliclick, f"m:{x},{y}"], check=True)
+            return
+        code = (
+            "import Quartz, sys\n"
+            f"Quartz.CGWarpMouseCursorPosition(({x}, {y}))\n"
+            "Quartz.CGAssociateMouseAndMouseCursorPosition(True)\n"
+        )
+        try:
+            subprocess.run(["python3", "-c", code], check=True)
+        except Exception as exc:
+            raise RuntimeError("computer.move requires cliclick or PyObjC Quartz on macOS") from exc
 
     def _apple_script(self, action: str, payload: dict[str, Any]) -> str:
         if action == "computer.click":
@@ -344,6 +543,11 @@ class BrowserComputerController:
             "Add-Type -AssemblyName System.Windows.Forms",
             "Add-Type -AssemblyName System.Drawing",
         ]
+        if action == "computer.move":
+            x = int(payload.get("x", 0))
+            y = int(payload.get("y", 0))
+            self._run_powershell("\n".join(prelude + [f"[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point({x}, {y})"]))
+            return
         if action == "computer.click":
             x = int(payload.get("x", 0))
             y = int(payload.get("y", 0))
@@ -420,6 +624,7 @@ class BrowserComputerController:
             "browser_cache_management": True,
             "screenshot": system in {"Darwin", "Windows"},
             "desktop_actions": system in {"Darwin", "Windows"},
+            "cursor_move": system in {"Darwin", "Windows"},
         }
 
     def _read_sessions(self) -> dict[str, Any]:

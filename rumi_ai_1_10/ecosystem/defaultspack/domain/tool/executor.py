@@ -423,14 +423,25 @@ def _browser_computer_action_payload(tool_name, arguments):
             "open_url": "browser.open_url",
             "open": "browser.open_url",
             "screenshot": "computer.screenshot",
+            "move": "computer.move",
+            "cursor_move": "computer.move",
+            "mouse_move": "computer.move",
+            "click": "computer.click",
+            "type": "computer.type",
+            "key": "computer.key",
+            "scroll": "computer.scroll",
         }
         action = action_map.get(raw_action, raw_action)
-        if "url" in arguments:
-            raw_payload["url"] = arguments.get("url")
+        for key in ("url", "x", "y", "text", "key", "amount"):
+            if key in arguments:
+                raw_payload[key] = arguments.get(key)
     else:
         action_map = {
             "": "computer.screenshot",
             "screenshot": "computer.screenshot",
+            "move": "computer.move",
+            "cursor_move": "computer.move",
+            "mouse_move": "computer.move",
             "click": "computer.click",
             "type": "computer.type",
             "key": "computer.key",
