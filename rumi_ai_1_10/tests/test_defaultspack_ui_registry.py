@@ -108,12 +108,25 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(provider_item["ui"]["composer_action"]["target_item_id"], "provider-catalog")
         browser_use_item = next(item for item in catalog["sidebar"]["items"] if item["id"] == "browser_use")
         browser_use_field_ids = {field["id"] for field in browser_use_item["panel"]["fields"]}
-        self.assertEqual(browser_use_item["panel"]["fields"], [])
+        self.assertEqual(browser_use_field_ids, {"target", "mode", "safety", "quality"})
         self.assertNotIn("url", browser_use_field_ids)
         self.assertNotIn("x", browser_use_field_ids)
         self.assertIn("Runtime arguments: action, url", " ".join(browser_use_item["panel"]["notes"]))
         web_search_item = next(item for item in catalog["sidebar"]["items"] if item["id"] == "web_search")
-        self.assertEqual(web_search_item["panel"]["fields"], [])
+        web_search_field_ids = {field["id"] for field in web_search_item["panel"]["fields"]}
+        self.assertEqual(web_search_field_ids, {"default_result_limit", "freshness_window", "safe_search"})
+        self.assertNotIn("query", web_search_field_ids)
+        for item in catalog["sidebar"]["items"]:
+            if item.get("category") != "tool":
+                continue
+            fields = item.get("panel", {}).get("fields", [])
+            field_ids = {field["id"] for field in fields if isinstance(field, dict)}
+            runtime_args = set()
+            for note in item.get("panel", {}).get("notes", []):
+                if isinstance(note, str) and note.startswith("Runtime arguments: "):
+                    raw_names = note.removeprefix("Runtime arguments: ").rstrip(".")
+                    runtime_args = {name.strip() for name in raw_names.split(",") if name.strip()}
+            self.assertFalse(field_ids & runtime_args)
         self.assertIn("custom-widget", sidebar_ids)
         self.assertIn("custom", section_ids)
         self.assertIn("operations_company", section_ids)
