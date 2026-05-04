@@ -106,13 +106,21 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(provider_item["ui"]["widget_kind"], "panel")
         self.assertEqual(provider_item["ui"]["composer_action"]["type"], "open_panel")
         self.assertEqual(provider_item["ui"]["composer_action"]["target_item_id"], "provider-catalog")
+        browser_use_item = next(item for item in catalog["sidebar"]["items"] if item["id"] == "browser_use")
+        browser_use_field_ids = {field["id"] for field in browser_use_item["panel"]["fields"]}
+        self.assertEqual(browser_use_item["panel"]["fields"], [])
+        self.assertNotIn("url", browser_use_field_ids)
+        self.assertNotIn("x", browser_use_field_ids)
+        self.assertIn("Runtime arguments: action, url", " ".join(browser_use_item["panel"]["notes"]))
+        web_search_item = next(item for item in catalog["sidebar"]["items"] if item["id"] == "web_search")
+        self.assertEqual(web_search_item["panel"]["fields"], [])
         self.assertIn("custom-widget", sidebar_ids)
         self.assertIn("custom", section_ids)
-        self.assertIn("research", section_ids)
-        self.assertIn("browser_computer", section_ids)
         self.assertIn("operations_company", section_ids)
-        self.assertIn("collaboration", section_ids)
-        self.assertIn("share", section_ids)
+        self.assertNotIn("research", section_ids)
+        self.assertNotIn("browser_computer", section_ids)
+        self.assertNotIn("collaboration", section_ids)
+        self.assertNotIn("share", section_ids)
         self.assertIn("custom-renderer", renderers)
         self.assertEqual(renderers["text"]["component"], "CustomText")
         self.assertEqual(shell_renderers["composer"]["component"], "CustomComposer")
@@ -501,7 +509,6 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                     {
                         "models": {
                             "preferred_model": "openrouter/tencent/hy3-preview:free",
-                            "model_profile": '{"name":"hy3","strengths":["general"]}',
                         }
                     }
                 )
@@ -525,10 +532,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
             "xhigh",
             {option["value"] for option in model_fields["thinking_level"]["options"]},
         )
-        self.assertTrue(model_fields["model_profile"]["advanced"])
-        self.assertEqual(model_fields["model_profile"]["type"], "textarea")
+        self.assertNotIn("model_profile", model_fields)
+        self.assertNotIn("detected_provider_count", model_fields)
         self.assertEqual(values["models"]["preferred_model"], "openrouter/tencent/hy3-preview:free")
-        self.assertIn("strengths", values["models"]["model_profile"])
 
     def test_conversation_preview_uses_inspector_and_message_widgets(self):
         from domain.chat.store import ChatStore
