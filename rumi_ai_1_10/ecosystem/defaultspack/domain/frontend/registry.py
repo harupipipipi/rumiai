@@ -969,7 +969,50 @@ class FrontendRegistry:
                         },
                     }
                 )
+        for index, log in enumerate(message.get("tool_logs") or []):
+            if isinstance(log, dict):
+                previews.append(self._preview_from_tool_log(message, log, index))
         return previews
+
+    def _preview_from_tool_log(self, message: dict[str, Any], log: dict[str, Any], index: int) -> dict[str, Any]:
+        timestamp = int(message.get("created_at", 0)) - 200 - index
+        tool_name = str(log.get("tool_name") or "tool")
+        arguments = log.get("arguments") if isinstance(log.get("arguments"), dict) else {}
+        result = log.get("result")
+        input_text = self._preview_text(arguments, 180)
+        result_text = self._preview_text(result, 480)
+        status = "failed" if isinstance(result, dict) and result.get("status") == "error" else "completed"
+        lines = [
+            f"tool: {tool_name}",
+            f"status: {status}",
+        ]
+        if input_text:
+            lines.append(f"input: {input_text}")
+        if result_text:
+            lines.append(f"result: {result_text}")
+        return {
+            "id": f"tool-log-{message.get('id')}-{index}",
+            "toolStepId": tool_name,
+            "timestamp": timestamp,
+            "data": {
+                "type": "file",
+                "filename": f"{tool_name}.tool",
+                "size": status,
+                "content": "\n".join(lines),
+            },
+        }
+
+    def _preview_text(self, value: Any, limit: int) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            text = value
+        elif isinstance(value, (int, float, bool)):
+            text = str(value)
+        else:
+            text = json.dumps(value, ensure_ascii=False, sort_keys=True)
+        text = " ".join(text.split())
+        return text if len(text) <= limit else f"{text[:limit - 1]}…"
 
     def _load_ui_surfaces(self) -> list[dict[str, Any]]:
         try:

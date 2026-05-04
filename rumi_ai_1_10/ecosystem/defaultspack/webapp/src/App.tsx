@@ -3,6 +3,7 @@ import { PanelLeftOpen } from "lucide-react";
 
 import type { ChatItem } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
+import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
 import { api, type ChatContentBlock, type ChatMessage, type ComposerWidgetAction, type Conversation, type ModelProfile, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
 import { deriveConversationTitle, formatRelativeTime, messageToText } from "./lib/chat";
 import { cn } from "./lib/cn";
@@ -196,18 +197,70 @@ function previewLabel(preview: ToolPreviewItem | undefined): string {
   return data.alt || "Image preview";
 }
 
+function compactPreviewValue(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    return value.map(compactPreviewValue).filter(Boolean).join(", ");
+  }
+  if (typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>)
+      .slice(0, 6)
+      .map(([key, entry]) => {
+        const text = compactPreviewValue(entry);
+        return text ? `${key}: ${text}` : key;
+      })
+      .join("\n");
+  }
+  return String(value);
+}
+
+function toolPreviewsFromMessages(messages: ChatMessage[]): ToolPreviewItem[] {
+  return messages.flatMap((message) => (message.tool_logs ?? []).map((log, index) => {
+    const toolName = String(log.tool_name ?? "tool");
+    const result = log.result as Record<string, unknown> | undefined;
+    const status = String(result?.status ?? "completed");
+    const args = compactPreviewValue(log.arguments);
+    const output = compactPreviewValue(result?.data ?? result ?? "");
+    const content = [
+      `tool: ${toolName}`,
+      `status: ${status}`,
+      args ? `input:\n${args}` : "",
+      output ? `result:\n${output}` : "",
+    ].filter(Boolean).join("\n\n");
+    return {
+      id: `message-tool-${message.id}-${index}`,
+      toolStepId: toolName,
+      timestamp: typeof log.timestamp === "number" ? log.timestamp : message.created_at,
+      data: {
+        type: "file" as const,
+        filename: `${toolName}.tool`,
+        size: status,
+        content,
+      },
+    };
+  })).sort((a, b) => b.timestamp - a.timestamp);
+}
+
 function CanvasPeek({
   previews,
   memo,
+  activePreviewId,
   onOpen,
 }: {
   previews: ToolPreviewItem[];
   memo: string;
+  activePreviewId: string | null;
   onOpen: () => void;
 }) {
-  const latest = previews[0];
-  const count = previews.length + 1;
-  const memoText = memo.trim() ? memo.trim().split(/\r?\n/)[0] : "memo";
+  const items = buildToolPreviewDisplayItems(previews, memo, activePreviewId);
+  if (items.length === 0) return null;
+
+  const latest = items[0];
+  const count = items.length;
+  const isMemo = latest.id === "__memo__";
+  const subLabel = isMemo ? "Canvas · memo" : "Canvas · tool activity";
   return (
     <button
       type="button"
@@ -219,9 +272,9 @@ function CanvasPeek({
         <span className="h-8 w-8 flex-shrink-0 rounded-lg border border-zinc-800 bg-zinc-900/80" />
         <span className="min-w-0">
           <span className="block truncate text-[12px] font-medium text-zinc-300">
-            {latest ? previewLabel(latest) : memoText}
+            {previewLabel(latest)}
           </span>
-          <span className="block truncate text-[10px] text-zinc-600">Canvas · memo / preview / browser screenshot</span>
+          <span className="block truncate text-[10px] text-zinc-600">{subLabel}</span>
         </span>
       </span>
       <span className="flex-shrink-0 rounded-full border border-zinc-800 bg-zinc-900 px-2 py-0.5 text-[10px] text-zinc-500">
@@ -512,6 +565,19 @@ export default function App() {
     pendingRequest && Date.now() - pendingRequest.startedAt < 10 * 60_000,
   );
   const browserApproval = pendingBrowserApproval(messages);
+  const messageToolPreviews = useMemo(
+    () => toolPreviewsFromMessages(activeConversation?.messages ?? []),
+    [activeConversation?.messages],
+  );
+  const canvasPreviews = useMemo(() => {
+    const seen = new Set(previews.map((preview) => preview.id));
+    return [
+      ...previews,
+      ...messageToolPreviews.filter((preview) => !seen.has(preview.id)),
+    ];
+  }, [messageToolPreviews, previews]);
+  const canShowCanvas = hasCanvasItems(canvasPreviews, canvasMemo);
+  const effectiveShowPreview = showPreview && canShowCanvas;
   const composerCommands = [
     {
       id: "yolo",
@@ -1318,14 +1384,16 @@ export default function App() {
         )}
 
         <main className="flex-1 flex min-w-0 bg-[#09090b] relative">
-          <div className={cn("flex-1 flex flex-col min-w-0", showPreview && "border-r border-zinc-800/40")}>
+          <div className={cn("flex-1 flex flex-col min-w-0", effectiveShowPreview && "border-r border-zinc-800/40")}>
             {showRegion("chat_header") && (
               <Renderers.chatHeader
                 title={activeChatTitle}
-                showPreview={showPreview}
-                canShowPreview={showRegion("activity_preview")}
+                showPreview={effectiveShowPreview}
+                canShowPreview={showRegion("activity_preview") && canShowCanvas}
                 canOpenSettings={showRegion("settings_modal")}
-                onTogglePreview={() => setShowPreview((value) => !value)}
+                onTogglePreview={() => {
+                  if (canShowCanvas) setShowPreview((value) => !value);
+                }}
                 onOpenSettings={() => setIsSettingsOpen(true)}
               />
             )}
@@ -1359,10 +1427,11 @@ export default function App() {
 
             {showRegion("composer") && !isNewConversation && (
               <div className="relative">
-                {showRegion("activity_preview") && !showPreview && (
+                {showRegion("activity_preview") && !effectiveShowPreview && canShowCanvas && (
                   <CanvasPeek
-                    previews={previews}
+                    previews={canvasPreviews}
                     memo={canvasMemo}
+                    activePreviewId={activePreviewId}
                     onOpen={() => setShowPreview(true)}
                   />
                 )}
@@ -1393,10 +1462,10 @@ export default function App() {
             )}
           </div>
 
-          {showRegion("activity_preview") && showPreview && (
+          {showRegion("activity_preview") && effectiveShowPreview && (
             <Renderers.toolPreviewPanel
-              previews={previews}
-              showPreview={showPreview}
+              previews={canvasPreviews}
+              showPreview={effectiveShowPreview}
               onClose={() => setShowPreview(false)}
               previewMode={previewMode}
               onModeChange={setPreviewMode}
@@ -1434,7 +1503,7 @@ export default function App() {
           isOpen={isSettingsOpen}
           catalog={catalog}
           health={health}
-          previewsCount={previews.length}
+          previewsCount={canvasPreviews.length}
           settingsSections={settingsSections}
           settingsValues={settingsValues}
           onClose={() => setIsSettingsOpen(false)}

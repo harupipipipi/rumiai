@@ -548,6 +548,13 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                         "role": "assistant",
                         "content": [{"type": "code", "filename": "demo.py", "language": "python", "text": "print('hi')"}],
                         "widget": {"type": "indicator", "label": "Running"},
+                        "tool_logs": [
+                            {
+                                "tool_name": "calculator",
+                                "arguments": {"expression": "13829+12312"},
+                                "result": {"summary": "26141"},
+                            }
+                        ],
                     },
                 )
                 inspector.log_request(
@@ -570,6 +577,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
 
         preview_ids = {item["id"] for item in preview["previews"]}
         self.assertTrue(any(item.startswith("tool-web_search") for item in preview_ids))
+        self.assertTrue(any(item.startswith("tool-log-") for item in preview_ids))
         self.assertTrue(any(item.startswith("widget-") for item in preview_ids))
         self.assertTrue(any(item.startswith("code-") for item in preview_ids))
 

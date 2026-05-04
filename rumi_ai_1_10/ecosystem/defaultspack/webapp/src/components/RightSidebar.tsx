@@ -357,15 +357,28 @@ function CategorySwitcher({
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const current = CATEGORY_META[active];
+  const hasActiveFilter = active !== "all";
 
   return (
     <div className="relative">
       <button
+        type="button"
         onClick={() => setIsOpen((value) => !value)}
-        className={cn("w-9 h-9 rounded-lg flex items-center justify-center transition-all", "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/50", isOpen && "bg-zinc-800 text-zinc-100")}
+        aria-expanded={isOpen}
+        aria-pressed={hasActiveFilter}
+        className={cn(
+          "w-9 h-9 rounded-lg flex items-center justify-center transition-all relative",
+          hasActiveFilter
+            ? "bg-zinc-800 text-zinc-100 ring-1 ring-zinc-600/70"
+            : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/50",
+          isOpen && "bg-zinc-800 text-zinc-100",
+        )}
         title={`Filter: ${current.label}`}
       >
         {current.icon}
+        {hasActiveFilter && (
+          <span className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r-full bg-sky-400" />
+        )}
       </button>
 
       {isOpen && (
@@ -487,18 +500,26 @@ export function RightSidebar({
       list.push(item);
       groups.set(gid, list);
     }
+    const activeToolGroup = activePanel
+      ? toolItems.find((item) => item.id === activePanel)
+      : null;
+    const activeToolGroupId = activeToolGroup ? toolGroupFor(activeToolGroup).id : null;
     return [...groups.entries()].map(([id, groupItems]) => {
       const meta = toolGroupFor(groupItems[0]);
       return { id, label: meta.label, icon: meta.icon, path: meta.path, items: groupItems, count: groupItems.length };
+    }).sort((a, b) => {
+      if (a.id === activeToolGroupId) return -1;
+      if (b.id === activeToolGroupId) return 1;
+      return 0;
     });
-  }, [toolItems]);
+  }, [activePanel, toolItems]);
 
   const visibleItems = useMemo(() => {
     const base = categoryFilter === "all" ? items : items.filter((item) => item.category === categoryFilter);
     const filtered = base.filter((item) => item.category !== "tool" || !groupedToolIds.has(item.id) || shortcutIdSet.has(item.id));
     const active = items.find((item) => item.id === activePanel);
-    if (active && active.category !== "tool" && !filtered.some((item) => item.id === active.id)) {
-      return [active, ...filtered];
+    if (active && active.category !== "tool") {
+      return [active, ...filtered.filter((item) => item.id !== active.id)];
     }
     return filtered;
   }, [items, categoryFilter, groupedToolIds, shortcutIdSet, activePanel]);
@@ -599,6 +620,7 @@ export function RightSidebar({
             <div ref={toolGroupMenuRef} className="flex flex-col items-center gap-px w-full">
               {toolGroups.map((group) => {
                 const isGroupActive = activeToolGroupId === group.id;
+                const isGroupOpen = openToolGroupMenu === group.id;
                 return (
                 <div key={group.id} className="relative">
                   <button
@@ -613,7 +635,7 @@ export function RightSidebar({
                     }}
                     className={cn(
                       "group/group w-9 h-9 rounded-lg flex items-center justify-center relative transition-all flex-shrink-0",
-                      openToolGroupMenu === group.id || isGroupActive
+                      isGroupOpen || isGroupActive
                         ? "bg-emerald-900/40 text-emerald-300 border border-emerald-500/30"
                         : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
                     )}
@@ -626,7 +648,7 @@ export function RightSidebar({
                     <span className="absolute right-full mr-2 px-2 py-1 bg-zinc-800 text-zinc-200 text-[10px] rounded-md opacity-0 group-hover/group:opacity-100 pointer-events-none transition-opacity whitespace-nowrap border border-zinc-700 shadow-lg z-40">
                       {group.path?.length && group.path.length > 1 ? group.path.join(" / ") : group.label || TOOL_GROUP_LABELS[group.id] || group.id}
                     </span>
-                    {isGroupActive && (
+                    {(isGroupActive || isGroupOpen) && (
                       <div className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r-full bg-emerald-500" />
                     )}
                   </button>

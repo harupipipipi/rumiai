@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   X, Globe, Terminal, FileText, Image, ExternalLink,
   ChevronLeft, ChevronRight,
@@ -60,6 +60,43 @@ export type ToolPreviewItem = {
 };
 
 export type ToolPreviewMode = 'auto' | 'manual';
+
+export const MEMO_PREVIEW_ID = '__memo__';
+
+function matchesPreviewId(item: ToolPreviewItem, previewId?: string | null) {
+  return Boolean(previewId && (item.id === previewId || item.toolStepId === previewId));
+}
+
+export function hasCanvasItems(previews: ToolPreviewItem[], memo?: string | null) {
+  return previews.length > 0 || Boolean(memo?.trim());
+}
+
+export function buildToolPreviewDisplayItems(
+  previews: ToolPreviewItem[],
+  memo?: string,
+  activePreviewId?: string | null,
+): ToolPreviewItem[] {
+  const shouldShowMemo = Boolean(memo?.trim()) || activePreviewId === MEMO_PREVIEW_ID || activePreviewId === 'memo';
+  const memoPreview: ToolPreviewItem | null = shouldShowMemo
+    ? {
+        id: MEMO_PREVIEW_ID,
+        toolStepId: 'memo',
+        timestamp: 0,
+        data: {
+          type: 'file',
+          filename: 'memo.md',
+          size: 'local memo',
+          content: memo ?? '',
+        },
+      }
+    : null;
+  const items = memoPreview ? [memoPreview, ...previews] : [...previews];
+  if (!activePreviewId) return items;
+
+  const active = items.find((item) => matchesPreviewId(item, activePreviewId));
+  if (!active) return items;
+  return [active, ...items.filter((item) => item.id !== active.id)];
+}
 
 // ============================================================
 // Mock preview data
@@ -647,24 +684,16 @@ export function ToolPreviewPanel({
   onMemoChange,
 }: ToolPreviewPanelProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
-  const memoPreview: ToolPreviewItem | null = memo === undefined ? null : {
-    id: '__memo__',
-    toolStepId: 'memo',
-    timestamp: Date.now(),
-    data: {
-      type: 'file',
-      filename: 'memo.md',
-      size: 'local memo',
-      content: memo,
-    },
-  };
-  const displayItems = memoPreview ? [memoPreview, ...previews] : previews;
+  const displayItems = useMemo(
+    () => buildToolPreviewDisplayItems(previews, memo, activePreviewId),
+    [activePreviewId, memo, previews],
+  );
 
   // Jump to active preview when it changes (auto mode)
   useEffect(() => {
     if (mode === 'auto' && activePreviewId) {
       const idx = displayItems.findIndex(
-        p => p.id === activePreviewId || p.toolStepId === activePreviewId
+        p => matchesPreviewId(p, activePreviewId)
       );
       if (idx !== -1) setCurrentIndex(idx);
     }
@@ -674,16 +703,22 @@ export function ToolPreviewPanel({
   useEffect(() => {
     if (mode === 'manual' && activePreviewId) {
       const idx = displayItems.findIndex(
-        p => p.id === activePreviewId || p.toolStepId === activePreviewId
+        p => matchesPreviewId(p, activePreviewId)
       );
       if (idx !== -1) setCurrentIndex(idx);
     }
   }, [activePreviewId, mode, displayItems]);
 
+  useEffect(() => {
+    if (currentIndex >= displayItems.length) {
+      setCurrentIndex(0);
+    }
+  }, [currentIndex, displayItems.length]);
+
   if (!isVisible || displayItems.length === 0) return null;
 
   const current = displayItems[Math.min(currentIndex, displayItems.length - 1)];
-  const isMemo = current.id === '__memo__';
+  const isMemo = current.id === MEMO_PREVIEW_ID;
 
   const renderContent = () => {
     if (isMemo) return <MemoPreviewContent value={memo ?? ''} onChange={onMemoChange} />;
