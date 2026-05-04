@@ -984,6 +984,16 @@ export default function App() {
         result = await api.redditSearch(String(input || activeChatTitle || "rumi"), false);
       } else if (action.id === "browser.session") {
         result = await api.browserComputer("browser.session", { dry_run: true });
+      } else if (action.id === "browser.profiles.list") {
+        result = await api.browserComputer("browser.profiles.list", action.payload ?? {});
+      } else if (action.id === "browser.profile.create") {
+        result = await api.browserComputer("browser.profile.create", action.payload ?? {});
+      } else if (action.id === "browser.cookies.list") {
+        result = await api.browserComputer("browser.cookies.list", action.payload ?? {});
+      } else if (action.id === "browser.profile.clear_cache.dry_run") {
+        result = await api.browserComputer("browser.profile.clear_cache", { ...(action.payload ?? {}), dry_run: true });
+      } else if (action.id === "browser.profile.clear_cookies.dry_run") {
+        result = await api.browserComputer("browser.profile.clear_cookies", { ...(action.payload ?? {}), dry_run: true });
       } else if (action.id === "browser.screenshot.dry_run") {
         result = await api.browserComputer("computer.screenshot", { dry_run: true });
       } else if (action.id === "schedules.list") {

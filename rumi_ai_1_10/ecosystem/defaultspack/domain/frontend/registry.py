@@ -455,11 +455,16 @@ class FrontendRegistry:
                         "title": "Browser / Computer",
                         "actions": [
                             {"id": "browser.session", "label": "Inspect Browser Session", "icon": "browser"},
+                            {"id": "browser.profiles.list", "label": "Browser Profiles", "icon": "browser"},
+                            {"id": "browser.profile.create", "label": "Create Managed Profile", "icon": "browser", "payload": {"profile_id": "default", "label": "Default", "set_active": True}},
+                            {"id": "browser.cookies.list", "label": "Managed Cookies", "icon": "browser"},
+                            {"id": "browser.profile.clear_cache.dry_run", "label": "Cache Clear Dry Run", "icon": "browser"},
+                            {"id": "browser.profile.clear_cookies.dry_run", "label": "Cookie Clear Dry Run", "icon": "browser"},
                             {"id": "browser.screenshot.dry_run", "label": "Screenshot Dry Run", "icon": "browser"},
                         ],
                         "notes": [
-                            "実操作は approved=true が必要です。UI の既定 action は dry-run です。",
-                            "同じ controller に open_url/click/type/key/scroll を追加できます。",
+                            "open_url は管理 profile の user-data-dir/cache-dir で起動でき、cookie/cache を保存します。",
+                            "cache/cookie 削除などの破壊的操作は approval token が必要です。UI の削除系 action は dry-run です。",
                         ],
                     },
                 },

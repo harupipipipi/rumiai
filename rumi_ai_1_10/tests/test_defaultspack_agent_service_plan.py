@@ -1045,6 +1045,118 @@ def test_browser_computer_controller_gates_desktop_actions():
     assert controller.run("computer.click", {"x": 1, "y": 2, "approved": True})["requires_approval"] is True
 
 
+def test_browser_computer_manages_persistent_profiles_and_cookie_jars(tmp_path):
+    from domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController()
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._approval_path = tmp_path / "shared" / "browser_computer_approvals.json"
+    controller._browser_root = tmp_path / "shared" / "browser"
+    controller._profile_root = controller._browser_root / "profiles"
+
+    created = controller.run("browser.profile.create", {"profile_id": "Work Login", "label": "Work Login"})
+    assert created["profile"]["id"] == "work-login"
+    assert created["active_profile_id"] == "work-login"
+    assert Path(created["profile"]["profile_dir"]).exists()
+    assert Path(created["profile"]["cache_dir"]).exists()
+
+    imported = controller.run(
+        "browser.cookies.import",
+        {
+            "profile_id": "work-login",
+            "cookies": [
+                {"name": "sid", "value": "secret-token", "domain": "example.test", "path": "/"},
+            ],
+        },
+    )
+    assert imported["count"] == 1
+
+    listed = controller.run("browser.cookies.list", {"profile_id": "work-login"})
+    assert listed["count"] == 1
+    assert listed["cookies"][0]["value"] == "***"
+    assert listed["cookies"][0]["value_redacted"] is True
+
+    revealed = controller.run("browser.cookies.list", {"profile_id": "work-login", "include_values": True})
+    assert revealed["cookies"][0]["value"] == "secret-token"
+
+    dry_delete = controller.run("browser.cookies.delete", {"profile_id": "work-login", "name": "sid", "dry_run": True})
+    assert dry_delete["matches"] == 1
+    approval = controller.run("browser.cookies.delete", {"profile_id": "work-login", "name": "sid"})
+    assert approval["requires_approval"] is True
+    deleted = controller.run(
+        "browser.cookies.delete",
+        {"profile_id": "work-login", "name": "sid", "approval_token": approval["approval_token"]},
+    )
+    assert deleted["deleted"] == 1
+
+
+def test_browser_open_url_uses_managed_profile_launch_plan(tmp_path):
+    from domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController()
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._approval_path = tmp_path / "shared" / "browser_computer_approvals.json"
+    controller._browser_root = tmp_path / "shared" / "browser"
+    controller._profile_root = controller._browser_root / "profiles"
+    fake_browser = tmp_path / "chrome"
+    fake_browser.write_text("#!/bin/sh\n", encoding="utf-8")
+    fake_browser.chmod(0o755)
+    controller._find_browser_executable = lambda: fake_browser
+
+    result = controller.run(
+        "browser.open_url",
+        {"url": "https://example.test", "profile_id": "research", "dry_run": True},
+    )
+
+    assert result["requires_approval"] is False
+    assert result["launch"]["mode"] == "managed_profile"
+    assert result["launch"]["command"][0] == str(fake_browser)
+    assert "--user-data-dir=" in result["launch"]["command"][1]
+    assert "--disk-cache-dir=" in result["launch"]["command"][2]
+    assert result["launch"]["command"][-1] == "https://example.test"
+
+
+def test_browser_profile_cache_and_cookie_clear_are_approval_gated(tmp_path):
+    from domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController()
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._approval_path = tmp_path / "shared" / "browser_computer_approvals.json"
+    controller._browser_root = tmp_path / "shared" / "browser"
+    controller._profile_root = controller._browser_root / "profiles"
+    controller.run("browser.profile.create", {"profile_id": "managed"})
+    cache_file = controller._profile_path("managed") / "cache" / "entry.bin"
+    cache_file.write_bytes(b"cached")
+    cookie_file = controller._profile_path("managed") / "managed_cookies.json"
+    cookie_file.write_text('{"version":1,"cookies":[]}', encoding="utf-8")
+
+    dry_cache = controller.run("browser.profile.clear_cache", {"profile_id": "managed", "dry_run": True})
+    assert dry_cache["size_bytes"] == 6
+    assert cache_file.exists()
+
+    approval = controller.run("browser.profile.clear_cache", {"profile_id": "managed"})
+    assert approval["requires_approval"] is True
+    cleared = controller.run(
+        "browser.profile.clear_cache",
+        {"profile_id": "managed", "approval_token": approval["approval_token"]},
+    )
+    assert cleared["removed"]
+    assert not cache_file.exists()
+
+    cookie_approval = controller.run("browser.profile.clear_cookies", {"profile_id": "managed"})
+    assert cookie_approval["requires_approval"] is True
+    cleared_cookies = controller.run(
+        "browser.profile.clear_cookies",
+        {
+            "profile_id": "managed",
+            "include_managed": True,
+            "approval_token": cookie_approval["approval_token"],
+        },
+    )
+    assert str(cookie_file) in cleared_cookies["removed"]
+    assert not cookie_file.exists()
+
+
 def test_capability_detail_endpoint_returns_one_manifest_and_404_for_unknown():
     from blocks.capability.manifest import run
 
