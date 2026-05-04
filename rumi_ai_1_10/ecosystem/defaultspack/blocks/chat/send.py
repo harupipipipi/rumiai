@@ -1,6 +1,7 @@
 import sys
 import os
 import json
+import re
 from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from blocks._common import ok, error, gen_id, timestamp
@@ -28,6 +29,10 @@ MAX_ATTACHMENT_TEXT_CHARS = 240_000
 MAX_ATTACHMENT_TEXT_CHARS_PER_FILE = 120_000
 MAX_ATTACHMENT_IMAGE_BYTES = 8 * 1024 * 1024
 _DATA_IMAGE_PREFIX = "data:image/"
+_SECRET_KEY_RE = re.compile(
+    r"(api[_-]?key|authorization|bearer|credential|password|secret|token)",
+    re.IGNORECASE,
+)
 
 
 def _stub_response():
@@ -73,8 +78,28 @@ def _event(event_type, message, **extra):
         "message": message,
         "timestamp": timestamp(),
     }
-    payload.update(extra)
+    payload.update(_redact_sensitive_value(extra))
     return payload
+
+
+def _redact_sensitive_value(value, *, parent_key=""):
+    if isinstance(value, dict):
+        redacted = {}
+        for key, item in value.items():
+            key_text = str(key)
+            if _SECRET_KEY_RE.search(key_text):
+                redacted[key] = "[redacted]"
+            else:
+                redacted[key] = _redact_sensitive_value(item, parent_key=key_text)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_sensitive_value(item, parent_key=parent_key) for item in value]
+    if isinstance(value, str):
+        if parent_key and _SECRET_KEY_RE.search(parent_key):
+            return "[redacted]"
+        if value.startswith("data:image/"):
+            return "[image data saved as artifact]"
+    return value
 
 
 def _resolve_selected_tools(raw_tools):
@@ -183,6 +208,23 @@ def _model_supports_vision(model):
     return any(token in str(model or "").lower() for token in ("gemini", "gemma", "gpt-4o", "gpt-5"))
 
 
+def _model_supports_attachments(model):
+    try:
+        client = AIClient()
+        matches = client._runtime_model_matches(str(model or ""))
+    except Exception:
+        matches = []
+    for match in matches or []:
+        for source in (
+            match,
+            match.get("metadata", {}) if isinstance(match, dict) else {},
+            match.get("availability", {}) if isinstance(match, dict) else {},
+        ):
+            if isinstance(source, dict) and source.get("supports_attachments") is False:
+                return False
+    return True
+
+
 def _image_data_url_byte_length(data_url):
     if not isinstance(data_url, str) or not data_url.startswith(_DATA_IMAGE_PREFIX):
         return None
@@ -241,7 +283,11 @@ def _append_tool_result_message(messages, tool_name, result, tool_call_id="", *,
             "content": result_text,
         }
     )
-    if tool_name in {"browser_computer", "browser_use", "computer_use"} and _model_supports_vision(model):
+    if (
+        tool_name in {"browser_computer", "browser_use", "computer_use"}
+        and _model_supports_vision(model)
+        and _model_supports_attachments(model)
+    ):
         screenshot = _browser_screenshot_data_url(result)
         if screenshot:
             messages.append(
@@ -259,6 +305,7 @@ def _append_tool_result_message(messages, tool_name, result, tool_call_id="", *,
 
 
 def _compact_tool_log_value(value):
+    value = _redact_sensitive_value(value)
     if isinstance(value, dict):
         compact = {}
         for key, item in value.items():
@@ -356,13 +403,15 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
             tool_name = str(block.get("name") or block.get("tool_name") or "")
             if not tool_name:
                 continue
+            tool_call_id = str(block.get("id") or block.get("tool_call_id") or gen_id())
             arguments = _tool_arguments(block)
             events.append(
                 _event(
-                    "tool_call",
+                    "tool_call_started",
                     "{} を使用中".format(tool_name),
-                    phase="tool_call",
+                    phase="tool_call_started",
                     tool_name=tool_name,
+                    tool_call_id=tool_call_id,
                     arguments=arguments,
                 )
             )
@@ -379,17 +428,19 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
                 result = {"status": "ok", "data": executed}
             log = {
                 "tool_name": tool_name,
-                "arguments": arguments,
+                "tool_call_id": tool_call_id,
+                "arguments": _redact_sensitive_value(arguments),
                 "result": _compact_tool_log_value(result),
                 "timestamp": timestamp(),
             }
             tool_logs.append(log)
             events.append(
                 _event(
-                    "tool_result",
+                    "tool_call_completed",
                     "{} の結果を受け取りました".format(tool_name),
-                    phase="tool_result",
+                    phase="tool_call_completed",
                     tool_name=tool_name,
+                    tool_call_id=tool_call_id,
                     is_error=isinstance(result, dict) and result.get("status") == "error",
                 )
             )
@@ -397,7 +448,7 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
                 working_messages,
                 tool_name,
                 result,
-                str(block.get("id") or block.get("tool_call_id") or ""),
+                tool_call_id,
                 model=model,
             )
 

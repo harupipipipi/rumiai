@@ -63,6 +63,33 @@ test("uses running tool_call events when a log has not arrived yet", () => {
   assert.equal(groups[0].items[0].title, "ファイル / coding_file_list: src");
 });
 
+test("dedupes started events when a matching completed log exists", () => {
+  const groups = buildToolActivityGroups(
+    [
+      {
+        tool_name: "coding_file_list",
+        tool_call_id: "call_1",
+        arguments: { path: "src" },
+        result: { status: "ok", data: { files: ["a.ts"] } },
+      },
+    ],
+    [
+      {
+        type: "tool_call_started",
+        phase: "tool_call_started",
+        tool_call_id: "call_1",
+        tool_name: "coding_file_list",
+        arguments: { path: "src" },
+        message: "coding_file_list を使用中",
+      },
+    ],
+  );
+
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].items.length, 1);
+  assert.equal(groups[0].items[0].status, "completed");
+});
+
 test("classifies common tool families", () => {
   assert.equal(toolFolderFor("browser_computer").id, "browser");
   assert.equal(toolFolderFor("todo").id, "planning/todo");

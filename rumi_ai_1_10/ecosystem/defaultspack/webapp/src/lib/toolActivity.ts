@@ -116,6 +116,9 @@ function statusForLog(log: ToolLogEntry): ToolActivityStatus {
 }
 
 function eventKey(event: ChatActivityEvent): string {
+  if (typeof event.tool_call_id === "string" && event.tool_call_id.trim()) {
+    return event.tool_call_id.trim();
+  }
   const args = event.arguments && typeof event.arguments === "object" ? event.arguments : {};
   return `${event.tool_name ?? "tool"}:${JSON.stringify(args)}`;
 }
@@ -146,10 +149,18 @@ export function buildToolActivityGroups(
     });
 
   const logKeys = new Set(
-    toolLogs.map((log) => `${log.tool_name ?? "tool"}:${JSON.stringify(log.arguments ?? {})}`),
+    toolLogs.map((log) => {
+      const id = typeof log.tool_call_id === "string" ? log.tool_call_id.trim() : "";
+      return id || `${log.tool_name ?? "tool"}:${JSON.stringify(log.arguments ?? {})}`;
+    }),
   );
   const runningEvents = events
-    .filter((event) => (event.type === "tool_call" || event.phase === "tool_call") && typeof event.tool_name === "string")
+    .filter((event) => (
+      event.type === "tool_call" ||
+      event.type === "tool_call_started" ||
+      event.phase === "tool_call" ||
+      event.phase === "tool_call_started"
+    ) && typeof event.tool_name === "string")
     .filter((event) => !logKeys.has(eventKey(event)))
     .map((event, index): ToolActivityItem => {
       const toolName = String(event.tool_name);

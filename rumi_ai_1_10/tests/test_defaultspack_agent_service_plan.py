@@ -233,6 +233,7 @@ def test_external_integration_routes_are_registered():
     assert "/api/integrations/line/webhook" in patterns
     assert "/api/integrations/discord/interactions" in patterns
     assert "/api/integrations/secrets" in patterns
+    assert "/v1/conversations/{id}/run-results/{run_id}/browser-screenshots" in patterns
 
 
 def test_slack_event_creates_external_conversation(tmp_path, monkeypatch):
@@ -779,6 +780,38 @@ def test_browser_screenshot_tool_result_adds_image_for_vision_models():
     assert messages[1]["content"][1]["image_url"]["url"] == "data:image/png;base64,aGVsbG8="
 
 
+def test_browser_screenshot_tool_result_respects_provider_attachment_opt_out(monkeypatch):
+    import blocks.chat.send as send
+
+    class FakeClient:
+        def _runtime_model_matches(self, model):
+            return [
+                {
+                    "capabilities": ["vision"],
+                    "metadata": {"supports_attachments": False},
+                }
+            ]
+
+    monkeypatch.setattr(send, "AIClient", FakeClient)
+    messages = []
+    send._append_tool_result_message(
+        messages,
+        "browser_computer",
+        {
+            "status": "ok",
+            "data": {
+                "result": "screenshot",
+                "data_url": "data:image/png;base64,aGVsbG8=",
+            },
+        },
+        "call_1",
+        model="provider/no-attachments",
+    )
+
+    assert len(messages) == 1
+    assert messages[0]["role"] == "tool"
+
+
 def test_attachment_image_blocks_validate_actual_data_url_bytes():
     import blocks.chat.send as send
 
@@ -816,6 +849,126 @@ def test_browser_screenshot_tool_log_compacts_inline_image_data():
     assert compact["data"]["widget"]["data_url"] == "[image data saved as artifact]"
     assert compact["data"]["widget"]["model_image_path"] == "/tmp/screenshot-model.jpg"
     assert send._compact_tool_log_value("see data:image/png;base64,abc123 now") == "see [image data saved as artifact] now"
+
+
+def test_tool_activity_events_and_logs_redact_secret_values():
+    import blocks.chat.send as send
+
+    calls = {"ai": 0}
+
+    def call_handler(name, payload):
+        if name == "defaults.ai.complete":
+            calls["ai"] += 1
+            if calls["ai"] == 1:
+                return {
+                    "status": "ok",
+                    "data": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "call_secret",
+                                "name": "secret_echo",
+                                "input": "{\"api_key\":\"sk-live\",\"query\":\"ok\"}",
+                            }
+                        ],
+                        "finish_reason": "tool_calls",
+                    },
+                }
+            return {
+                "status": "ok",
+                "data": {"content": [{"type": "text", "text": "done"}], "finish_reason": "stop"},
+            }
+        if name == "defaults.tool.invoke":
+            return {"status": "ok", "data": {"token": "secret-token", "result": "safe"}}
+        raise AssertionError(name)
+
+    response = send._complete_with_tools(
+        "stub/default",
+        [{"role": "user", "content": "use tool"}],
+        [{"type": "function", "function": {"name": "secret_echo", "parameters": {"type": "object"}}}],
+        {},
+        call_handler,
+        {"max_tool_calls": 2},
+    )
+    started = [event for event in response["events"] if event["type"] == "tool_call_started"][0]
+    completed = [event for event in response["events"] if event["type"] == "tool_call_completed"][0]
+    log = response["tool_logs"][0]
+
+    assert started["tool_call_id"] == "call_secret"
+    assert completed["tool_call_id"] == "call_secret"
+    assert started["arguments"]["api_key"] == "[redacted]"
+    assert log["arguments"]["api_key"] == "[redacted]"
+    assert log["result"]["data"]["token"] == "[redacted]"
+
+
+def test_browser_screenshots_endpoint_is_conversation_and_owner_scoped(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from blocks.chat.browser_screenshots import run
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    screenshot_path = store.conversation_workspace_dir("placeholder").parent / "placeholder.png"
+    screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+    screenshot_path.write_bytes(b"image-bytes")
+
+    conversation = store.create_conversation(
+        model="stub/default",
+        metadata={"owner_user_id": "user-1"},
+    )
+    other = store.create_conversation(model="stub/default", metadata={"owner_user_id": "user-1"})
+    screenshot_path = store.conversation_workspace_dir(conversation["id"]) / "tools" / "screen.png"
+    screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+    screenshot_path.write_bytes(b"image-bytes")
+    assistant = store.add_message(
+        conversation["id"],
+        {
+            "role": "assistant",
+            "content": [{"type": "text", "text": "done"}],
+            "tool_logs": [
+                {
+                    "tool_name": "browser_computer",
+                    "tool_call_id": "call_1",
+                    "result": {"data": {"path": str(screenshot_path)}},
+                }
+            ],
+        },
+    )
+
+    ok_result = run(
+        {
+            "conversation_id": conversation["id"],
+            "run_id": assistant["id"],
+            "_headers": {"X-Rumi-User-Id": "user-1"},
+        },
+        {},
+    )
+    wrong_conversation = run(
+        {
+            "conversation_id": other["id"],
+            "run_id": assistant["id"],
+            "_headers": {"X-Rumi-User-Id": "user-1"},
+        },
+        {},
+    )
+    wrong_owner = run(
+        {
+            "conversation_id": conversation["id"],
+            "run_id": assistant["id"],
+            "_headers": {"X-Rumi-User-Id": "user-2"},
+        },
+        {},
+    )
+
+    assert ok_result["status"] == "ok"
+    assert ok_result["data"]["screenshots"][0]["data_url"].startswith("data:image/png;base64,")
+    assert wrong_conversation["status"] == "error"
+    assert wrong_conversation["error"]["code"] == "NOT_FOUND"
+    assert wrong_owner["status"] == "error"
+    assert wrong_owner["error"]["code"] == "FORBIDDEN"
+    ChatStore._instance = None
 
 
 def test_chat_store_splits_loaded_inline_thoughts(tmp_path, monkeypatch):
@@ -975,6 +1128,7 @@ def test_sensitive_routes_do_not_use_wildcard_cors():
     assert _is_sensitive_http_path("/api/coding/terminal/exec") is True
     assert _is_sensitive_http_path("/api/coding/files/write") is True
     assert _is_sensitive_http_path("/api/integrations/secrets") is True
+    assert _is_sensitive_http_path("/v1/conversations/c1/run-results/r1/browser-screenshots") is True
     assert _is_sensitive_http_path("/api/coding/files/read") is False
 
 

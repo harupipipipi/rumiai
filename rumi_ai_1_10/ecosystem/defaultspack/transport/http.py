@@ -483,6 +483,9 @@ _SENSITIVE_CODING_PATHS = {
 _SENSITIVE_INTEGRATION_PATHS = {
     "/api/integrations/secrets",
 }
+_SENSITIVE_CHAT_PATH_RE = re.compile(
+    r"^/v1/conversations/[^/]+/run-results/[^/]+/browser-screenshots$"
+)
 
 _LOCAL_ORIGIN_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
@@ -492,7 +495,11 @@ def _is_sensitive_coding_path(path):
 
 
 def _is_sensitive_http_path(path):
-    return path in _SENSITIVE_CODING_PATHS or path in _SENSITIVE_INTEGRATION_PATHS
+    return (
+        path in _SENSITIVE_CODING_PATHS
+        or path in _SENSITIVE_INTEGRATION_PATHS
+        or _SENSITIVE_CHAT_PATH_RE.match(path) is not None
+    )
 
 
 def _is_allowed_sensitive_origin(origin):
@@ -660,7 +667,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             pass
 
     def _sensitive_request_error(self, method, path):
-        if path not in _SENSITIVE_INTEGRATION_PATHS:
+        if path not in _SENSITIVE_INTEGRATION_PATHS and _SENSITIVE_CHAT_PATH_RE.match(path) is None:
             return None
         origin = self.headers.get("Origin", "")
         if not _is_allowed_sensitive_origin(origin):

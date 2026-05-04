@@ -78,12 +78,14 @@ export type ChatActivityEvent = {
   phase?: string;
   timestamp?: number | string;
   tool_name?: string;
+  tool_call_id?: string;
   model?: string;
   [key: string]: unknown;
 };
 
 export type ToolLogEntry = {
   tool_name?: string;
+  tool_call_id?: string;
   arguments?: Record<string, unknown>;
   result?: unknown;
   timestamp?: number | string;
