@@ -50,10 +50,12 @@ function MessageBlock({ block, unknownStrategy }: { block: ChatContentBlock; unk
 
 function WidgetCard({ widget }: { widget: Record<string, unknown> }) {
   return (
-    <div className="rounded-lg border border-blue-500/20 bg-blue-500/10 p-3 mt-2">
-      <div className="text-[10px] uppercase tracking-wider text-blue-300 mb-2">Widget</div>
-      <pre className="text-[11px] text-zinc-200 overflow-x-auto font-mono">{JSON.stringify(widget, null, 2)}</pre>
-    </div>
+    <details className="mt-2 rounded-lg border border-blue-500/20 bg-blue-500/10 p-3">
+      <summary className="cursor-pointer select-none text-[10px] uppercase tracking-wider text-blue-300">
+        Widget details
+      </summary>
+      <pre className="mt-2 overflow-x-auto text-[11px] font-mono text-zinc-200">{JSON.stringify(widget, null, 2)}</pre>
+    </details>
   );
 }
 
@@ -67,6 +69,31 @@ function toolStatusLabel(item: ToolActivityItem): string {
   if (item.status === "running") return "実行中";
   if (item.status === "failed") return "失敗";
   return "完了";
+}
+
+function isJsonLikeDetail(value: string): boolean {
+  const trimmed = value.trim();
+  return (
+    (trimmed.startsWith("{") && trimmed.endsWith("}"))
+    || (trimmed.startsWith("[") && trimmed.endsWith("]"))
+  );
+}
+
+function ToolResultDetail({ detail }: { detail: string }) {
+  if (isJsonLikeDetail(detail)) {
+    return (
+      <details className="min-w-0 flex-1 text-[12px] leading-relaxed">
+        <summary className="cursor-pointer select-none text-zinc-500 hover:text-zinc-300">
+          詳細データ
+        </summary>
+        <pre className="mt-2 max-h-36 overflow-auto whitespace-pre-wrap rounded-md border border-zinc-800 bg-black/30 p-2 font-mono text-[11px] text-zinc-500">
+          {detail}
+        </pre>
+      </details>
+    );
+  }
+
+  return <span className="min-w-0 break-words text-[12px] leading-relaxed">{detail}</span>;
 }
 
 function ToolActivityTray({ message }: { message: ChatMessagesRendererProps["messages"][number] }) {
@@ -112,9 +139,9 @@ function ToolActivityTray({ message }: { message: ChatMessagesRendererProps["mes
               </span>
             </div>
             {item.detail && (
-              <div className="mt-2 flex min-w-0 items-center gap-2 rounded-md border border-zinc-800/70 bg-black/20 px-3 py-2 text-zinc-300">
+              <div className="mt-2 flex min-w-0 items-start gap-2 rounded-md border border-zinc-800/70 bg-black/20 px-3 py-2 text-zinc-300">
                 <span className="shrink-0 text-[10px] font-medium text-zinc-600">結果</span>
-                <span className="min-w-0 break-words text-[12px] leading-relaxed">{item.detail}</span>
+                <ToolResultDetail detail={item.detail} />
               </div>
             )}
           </div>

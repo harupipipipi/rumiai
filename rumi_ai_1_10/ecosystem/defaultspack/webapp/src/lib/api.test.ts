@@ -85,6 +85,33 @@ test("streamMessage parses SSE deltas and final message", async () => {
   assert.equal(finalId, "m2");
 });
 
+test("streamMessage forwards abort signal to fetch", async () => {
+  const originalFetch = globalThis.fetch;
+  const controller = new AbortController();
+  let seenSignal: AbortSignal | undefined;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    seenSignal = init?.signal ?? undefined;
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        id: "m3",
+        role: "assistant",
+        content: "ok",
+        created_at: 1,
+        conversation_id: "c1",
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.streamMessage("c1", "hello", undefined, { signal: controller.signal });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(seenSignal, controller.signal);
+});
+
 test("coding context, branch, and workspace read helpers use existing API routes", async () => {
   const seen: Array<{ input: string; body?: unknown }> = [];
   const originalFetch = globalThis.fetch;

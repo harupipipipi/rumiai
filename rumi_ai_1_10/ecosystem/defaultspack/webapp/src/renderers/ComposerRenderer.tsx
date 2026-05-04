@@ -19,6 +19,7 @@ import {
   Search,
   SlidersHorizontal,
   Sparkles,
+  Square,
   Wrench,
   X,
 } from "lucide-react";
@@ -550,6 +551,7 @@ export function ComposerRenderer({
   onThinkingLevelChange,
   onInputChange,
   onSubmit,
+  onStopGenerating,
   onModeChange,
   onFileAttach,
   onAtFileAttach,
@@ -771,6 +773,11 @@ export function ComposerRenderer({
 
   const handleSubmitWithApiKeyGuard = useCallback(
     (event: React.FormEvent) => {
+      if (isGenerating) {
+        event.preventDefault();
+        onStopGenerating?.();
+        return;
+      }
       if (needsApiKey(selectedProfile)) {
         event.preventDefault();
         if (selectedProfile) setApiKeyPromptProfile(selectedProfile);
@@ -778,7 +785,7 @@ export function ComposerRenderer({
       }
       onSubmit(event);
     },
-    [needsApiKey, onSubmit, selectedProfile],
+    [isGenerating, needsApiKey, onStopGenerating, onSubmit, selectedProfile],
   );
 
   const handleKeyDown = useCallback(
@@ -1212,15 +1219,16 @@ export function ComposerRenderer({
                 )}
               </div>
               <button
-                type="submit"
-                disabled={(!input.trim() && attachedFiles.length === 0) || isGenerating}
-                title="送信"
+                type={isGenerating ? "button" : "submit"}
+                disabled={!isGenerating && (!input.trim() && attachedFiles.length === 0)}
+                onClick={isGenerating ? onStopGenerating : undefined}
+                title={isGenerating ? "停止" : "送信"}
                 className={`rumi-send-button ${
                   isNewConversation ? "h-9 w-9" : "w-8 h-8 max-[640px]:h-7 max-[640px]:w-7"
                 } flex flex-shrink-0 items-center justify-center bg-zinc-200 text-black rounded-lg disabled:opacity-30 disabled:cursor-not-allowed hover:bg-white shadow-sm transition-colors`}
               >
                 {isGenerating ? (
-                  <Loader2 size={15} className="animate-spin" />
+                  <Square size={13} fill="currentColor" strokeWidth={2.2} />
                 ) : (
                   <ArrowUp size={16} strokeWidth={2.4} />
                 )}

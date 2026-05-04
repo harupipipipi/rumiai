@@ -650,11 +650,11 @@ class FrontendRegistry:
                         "id": "unknown_block_strategy",
                         "label": "Unknown Block Strategy",
                         "type": "select",
-                        "default": "json",
+                        "default": "hidden",
                         "options": [
-                            {"value": "json", "label": "JSON Fallback"},
                             {"value": "hidden", "label": "Hide"},
                             {"value": "text", "label": "Plain Text"},
+                            {"value": "json", "label": "JSON Fallback"},
                         ],
                     },
                 ],
@@ -1144,7 +1144,7 @@ class FrontendRegistry:
         return {
             "general": {"composer_placeholder": "メッセージを入力...", "show_activity_in_messages": True},
             "preview": {"auto_open": False, "default_mode": "auto", "max_items": 12},
-            "chat_rendering": {"render_markdown": True, "show_widgets": True, "unknown_block_strategy": "json"},
+            "chat_rendering": {"render_markdown": True, "show_widgets": True, "unknown_block_strategy": "hidden"},
             "models": {
                 "detected_provider_count": len(self._list_provider_models()),
                 "preferred_model": "openrouter/tencent/hy3-preview:free",

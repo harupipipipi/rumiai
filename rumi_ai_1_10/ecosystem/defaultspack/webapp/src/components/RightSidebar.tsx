@@ -239,7 +239,28 @@ function SidebarPanel({
 }) {
   const panel = item.panel;
   const fields = panel?.fields ?? [];
+  const primaryFields = fields.filter((field) => !field.advanced);
+  const advancedFields = fields.filter((field) => field.advanced);
   const actions = panel?.actions ?? [];
+  const renderField = (field: SidebarField) => {
+    const value =
+      settingsValues[item.id]?.[field.id] ??
+      settingsValues.tools?.[`${item.id}.${field.id}`] ??
+      field.default;
+    return (
+      <div key={field.id} className="space-y-1">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] text-zinc-400">{field.label}</span>
+          <FieldControl
+            field={field}
+            value={value}
+            onChange={(nextValue) => onSettingChange(item.id, field.id, nextValue)}
+          />
+        </div>
+        {field.help && <p className="text-[9px] text-zinc-600 leading-relaxed">{field.help}</p>}
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-3">
@@ -253,28 +274,19 @@ function SidebarPanel({
         </div>
       )}
 
-      {fields.length > 0 && (
+      {primaryFields.length > 0 && (
         <div className="space-y-2.5">
-          {fields.map((field) => {
-            const value =
-              settingsValues[item.id]?.[field.id] ??
-              settingsValues.tools?.[`${item.id}.${field.id}`] ??
-              field.default;
-            return (
-              <div key={field.id} className="space-y-1">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[11px] text-zinc-400">{field.label}</span>
-                  <FieldControl
-                    field={field}
-                    value={value}
-                    onChange={(nextValue) => onSettingChange(item.id, field.id, nextValue)}
-                  />
-                </div>
-                {field.help && <p className="text-[9px] text-zinc-600 leading-relaxed">{field.help}</p>}
-              </div>
-            );
-          })}
+          {primaryFields.map(renderField)}
         </div>
+      )}
+
+      {advancedFields.length > 0 && (
+        <details className="rounded-lg border border-zinc-800/70 bg-zinc-950/35 px-2.5 py-2">
+          <summary className="cursor-pointer select-none text-[10px] font-medium text-zinc-500 hover:text-zinc-300">
+            高度な設定
+          </summary>
+          <div className="mt-2 space-y-2.5">{advancedFields.map(renderField)}</div>
+        </details>
       )}
 
       {panel?.models && panel.models.length > 0 && (
@@ -591,7 +603,14 @@ export function RightSidebar({
                 <div key={group.id} className="relative">
                   <button
                     type="button"
-                    onClick={() => setOpenToolGroupMenu((current) => (current === group.id ? null : group.id))}
+                    onClick={() => {
+                      if (group.items.length === 1) {
+                        setActivePanel(group.items[0].id);
+                        setOpenToolGroupMenu(null);
+                        return;
+                      }
+                      setOpenToolGroupMenu((current) => (current === group.id ? null : group.id));
+                    }}
                     className={cn(
                       "group/group w-9 h-9 rounded-lg flex items-center justify-center relative transition-all flex-shrink-0",
                       openToolGroupMenu === group.id || isGroupActive

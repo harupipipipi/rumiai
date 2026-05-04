@@ -113,6 +113,7 @@ export type ComposerRendererProps = {
   onThinkingLevelChange: (level: string | null) => void;
   onInputChange: (value: string) => void;
   onSubmit: (event: FormEvent) => void;
+  onStopGenerating?: () => void;
   onModeChange?: (mode: AppMode) => void;
   onFileAttach?: (files: AttachedFile[]) => void;
   onAtFileAttach?: (path: string) => void;
@@ -130,8 +131,10 @@ export type ToolPreviewPanelRendererProps = {
   showPreview: boolean;
   previewMode: ToolPreviewMode;
   activePreviewId: string | null;
+  memo?: string;
   onClose: () => void;
   onModeChange: (mode: ToolPreviewMode) => void;
+  onMemoChange?: (value: string) => void;
 };
 
 export type RightSidebarRendererProps = {

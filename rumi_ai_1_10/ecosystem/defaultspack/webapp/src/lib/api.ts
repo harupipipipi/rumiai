@@ -346,6 +346,7 @@ type ChatStreamHandlers = {
   onDelta?: (delta: string) => void;
   onMessage?: (message: ChatMessage) => void;
   onUserMessage?: (message: ChatMessage) => void;
+  signal?: AbortSignal;
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -508,6 +509,7 @@ export const api = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(messageRequestBody(text, options)),
+      signal: handlers?.signal,
     });
 
     const contentType = response.headers.get("Content-Type") ?? "";

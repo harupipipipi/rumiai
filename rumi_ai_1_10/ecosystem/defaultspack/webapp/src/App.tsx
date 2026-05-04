@@ -187,6 +187,59 @@ function previewFromAction(action: SidebarAction, title: string, data: unknown):
   };
 }
 
+function previewLabel(preview: ToolPreviewItem | undefined): string {
+  if (!preview) return "memo.md";
+  const data = preview.data;
+  if (data.type === "web") return data.title || data.url || "Web preview";
+  if (data.type === "code") return data.filename || "Code preview";
+  if (data.type === "file") return data.filename || "File preview";
+  return data.alt || "Image preview";
+}
+
+function CanvasPeek({
+  previews,
+  memo,
+  onOpen,
+}: {
+  previews: ToolPreviewItem[];
+  memo: string;
+  onOpen: () => void;
+}) {
+  const latest = previews[0];
+  const count = previews.length + 1;
+  const memoText = memo.trim() ? memo.trim().split(/\r?\n/)[0] : "memo";
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="mx-auto mb-2 flex w-[min(620px,calc(100%_-_40px))] items-center justify-between gap-3 rounded-xl border border-zinc-800/90 bg-zinc-950/85 px-3 py-2 text-left shadow-[0_14px_38px_rgba(0,0,0,0.24)] transition-colors hover:border-zinc-700 hover:bg-zinc-900/90"
+      title="Canvas を開く"
+    >
+      <span className="flex min-w-0 items-center gap-3">
+        <span className="h-8 w-8 flex-shrink-0 rounded-lg border border-zinc-800 bg-zinc-900/80" />
+        <span className="min-w-0">
+          <span className="block truncate text-[12px] font-medium text-zinc-300">
+            {latest ? previewLabel(latest) : memoText}
+          </span>
+          <span className="block truncate text-[10px] text-zinc-600">Canvas · memo / preview / browser screenshot</span>
+        </span>
+      </span>
+      <span className="flex-shrink-0 rounded-full border border-zinc-800 bg-zinc-900 px-2 py-0.5 text-[10px] text-zinc-500">
+        {count}
+      </span>
+    </button>
+  );
+}
+
+function isAbortError(errorValue: unknown): boolean {
+  return Boolean(
+    errorValue
+    && typeof errorValue === "object"
+    && "name" in errorValue
+    && String((errorValue as { name?: unknown }).name) === "AbortError",
+  );
+}
+
 function profileKey(profile: ModelProfile | null | undefined, fallback: string): string {
   return profile?.profile_id || profile?.qualified_model_id || fallback;
 }
@@ -413,6 +466,7 @@ export default function App() {
   const [isHistoryMinimized, setIsHistoryMinimized] = useLocalStorage("rumi-history-minimized", false);
   const [isNewChatLaunching, setIsNewChatLaunching] = useState(false);
   const [previewMode, setPreviewMode] = useLocalStorage<ToolPreviewMode>("rumi-preview-mode", "auto");
+  const [canvasMemo, setCanvasMemo] = useLocalStorage("rumi-canvas-memo", "");
   const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
   const [previews, setPreviews] = useState<ToolPreviewItem[]>([]);
   const [health, setHealth] = useState<{ status: string; pack: string; ts: string } | null>(null);
@@ -429,6 +483,7 @@ export default function App() {
   const [pendingRequests, setPendingRequests] = useLocalStorage<Record<string, PendingChatRequest>>(pendingStorageKey, {});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isUnloadingRef = useRef(false);
+  const currentAbortControllerRef = useRef<AbortController | null>(null);
 
   const sidebarItems: SidebarItem[] = catalog?.sidebar.items ?? [];
   const chatItems = buildChatItems(conversations);
@@ -471,7 +526,7 @@ export default function App() {
       enabled: mode === "coding",
     },
   ];
-  const unknownBlockStrategy = String(settingsValues.chat_rendering?.unknown_block_strategy ?? "json");
+  const unknownBlockStrategy = String(settingsValues.chat_rendering?.unknown_block_strategy ?? "hidden");
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
   const showActivityInMessages = settingsValues.general?.show_activity_in_messages !== false;
   const showRegion = (regionId: string) => !catalog?.shell || hasShellRegion(catalog, regionId);
@@ -717,6 +772,17 @@ export default function App() {
     setAttachedFiles([]);
     setDroppedWidgets([]);
     replaceChatIdInUrl(null, false);
+  };
+
+  const handleStopGenerating = () => {
+    currentAbortControllerRef.current?.abort();
+    currentAbortControllerRef.current = null;
+    if (activeConversationId) {
+      forgetPendingRequest(activeConversationId);
+      replaceChatIdInUrl(activeConversationId, false);
+    }
+    setIsGenerating(false);
+    setIsNewChatLaunching(false);
   };
 
   const handleHistoryClick = (conversationId: string) => {
@@ -1069,6 +1135,8 @@ export default function App() {
         return [item, ...withoutCurrent];
       });
       const assistantDraft = optimisticAssistantMessage(conversation.id, preferredModel || "stub/default");
+      const abortController = new AbortController();
+      currentAbortControllerRef.current = abortController;
       const updateStreamingAssistant = (delta: string) => {
         setActiveConversation((current) => {
           if (!current || current.id !== conversation.id) return current;
@@ -1132,6 +1200,7 @@ export default function App() {
       }, {
         onDelta: updateStreamingAssistant,
         onMessage: replaceStreamingAssistant,
+        signal: abortController.signal,
       });
       setAttachedFiles([]);
       setSelectedTools([]);
@@ -1146,6 +1215,15 @@ export default function App() {
       await refreshConversations(conversation.id);
     } catch (submitError) {
       console.error("Chat error:", submitError);
+      if (isAbortError(submitError)) {
+        if (submittedConversationId) {
+          forgetPendingRequest(submittedConversationId);
+          replaceChatIdInUrl(submittedConversationId, false);
+          await refreshConversations(submittedConversationId).catch(console.error);
+        }
+        setError(null);
+        return;
+      }
       if (submittedConversationId && !isUnloadingRef.current && document.visibilityState !== "hidden") {
         forgetPendingRequest(submittedConversationId);
       }
@@ -1158,6 +1236,7 @@ export default function App() {
       );
       setIsNewChatLaunching(false);
     } finally {
+      currentAbortControllerRef.current = null;
       setIsGenerating(false);
       setIsNewChatLaunching(false);
     }
@@ -1191,6 +1270,7 @@ export default function App() {
       onThinkingLevelChange={handleThinkingLevelChange}
       onInputChange={setInput}
       onSubmit={handleSubmit}
+      onStopGenerating={handleStopGenerating}
       onModeChange={handleModeChange}
       onFileAttach={handleFileAttach}
       onAtFileAttach={handleAtFileAttach}
@@ -1279,12 +1359,24 @@ export default function App() {
 
             {showRegion("composer") && !isNewConversation && (
               <div className="relative">
+                {showRegion("activity_preview") && !showPreview && (
+                  <CanvasPeek
+                    previews={previews}
+                    memo={canvasMemo}
+                    onOpen={() => setShowPreview(true)}
+                  />
+                )}
                 {browserApproval && !yoloMode && (
                   <div className="pointer-events-auto absolute bottom-full left-1/2 z-30 mb-2 w-[min(520px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-orange-500/30 bg-zinc-950 p-3 shadow-2xl">
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium text-zinc-100">{browserApproval.action} の承認が必要です</p>
-                        <p className="truncate text-[11px] text-zinc-500">{JSON.stringify(browserApproval.payload)}</p>
+                        <details className="mt-1 text-[11px] text-zinc-500">
+                          <summary className="cursor-pointer select-none text-zinc-500 hover:text-zinc-300">payload を表示</summary>
+                          <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap rounded-md border border-zinc-800 bg-black/30 p-2 font-mono">
+                            {JSON.stringify(browserApproval.payload, null, 2)}
+                          </pre>
+                        </details>
                       </div>
                       <button
                         type="button"
@@ -1309,6 +1401,8 @@ export default function App() {
               previewMode={previewMode}
               onModeChange={setPreviewMode}
               activePreviewId={activePreviewId}
+              memo={canvasMemo}
+              onMemoChange={setCanvasMemo}
             />
           )}
         </main>
