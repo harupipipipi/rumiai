@@ -10,6 +10,8 @@ export function ToolPreviewPanelRenderer({
   onClose,
   onModeChange,
   onMemoChange,
+  onApproveApproval,
+  onRejectApproval,
 }: ToolPreviewPanelRendererProps) {
   return (
     <div className="w-[clamp(300px,28vw,380px)] flex-shrink-0 h-full max-[1050px]:w-[300px] max-[900px]:hidden">
@@ -22,6 +24,8 @@ export function ToolPreviewPanelRenderer({
         activePreviewId={activePreviewId}
         memo={memo}
         onMemoChange={onMemoChange}
+        onApproveApproval={onApproveApproval}
+        onRejectApproval={onRejectApproval}
       />
     </div>
   );

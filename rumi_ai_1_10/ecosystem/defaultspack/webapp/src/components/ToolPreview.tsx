@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   X, Globe, Terminal, FileText, Image, ExternalLink,
   ChevronLeft, ChevronRight,
-  Eye, EyeOff, Code, NotebookPen
+  Eye, EyeOff, Code, NotebookPen, ShieldAlert, Check, Ban
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -15,7 +15,7 @@ function cn(...inputs: ClassValue[]) {
 // Types
 // ============================================================
 
-export type PreviewType = 'web' | 'code' | 'file' | 'image';
+export type PreviewType = 'web' | 'code' | 'file' | 'image' | 'approval';
 
 export type WebPreview = {
   type: 'web';
@@ -50,7 +50,16 @@ export type ImagePreview = {
   prompt?: string;
 };
 
-export type ToolPreviewData = WebPreview | CodePreview | FilePreview | ImagePreview;
+export type ApprovalPreview = {
+  type: 'approval';
+  approvalId: string;
+  action: string;
+  riskLevel?: string;
+  reason?: string;
+  payload?: Record<string, unknown>;
+};
+
+export type ToolPreviewData = WebPreview | CodePreview | FilePreview | ImagePreview | ApprovalPreview;
 
 export type ToolPreviewItem = {
   id: string;
@@ -592,6 +601,49 @@ function ImagePreviewContent({ data }: { data: ImagePreview }) {
   );
 }
 
+function ApprovalPreviewContent({
+  data,
+  onApprove,
+  onReject,
+}: {
+  data: ApprovalPreview;
+  onApprove?: (approval: ApprovalPreview) => void;
+  onReject?: (approval: ApprovalPreview) => void;
+}) {
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex items-center gap-2 border-b border-zinc-800/60 bg-zinc-900 px-3 py-2">
+        <ShieldAlert size={13} className="text-amber-300" />
+        <span className="truncate text-[11px] font-medium text-zinc-200">承認待ち</span>
+        <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-amber-200">{data.riskLevel || 'risk'}</span>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto p-3">
+        <p className="truncate text-sm font-medium text-zinc-100">{data.action}</p>
+        <p className="mt-1 text-xs text-zinc-500">{data.reason || 'approval requested'}</p>
+        <pre className="mt-3 max-h-52 overflow-auto whitespace-pre-wrap rounded-lg border border-zinc-800 bg-zinc-950 p-2 text-[10px] text-zinc-500">
+          {JSON.stringify(data.payload ?? {}, null, 2)}
+        </pre>
+      </div>
+      <div className="flex justify-end gap-2 border-t border-zinc-800/60 px-3 py-2">
+        <button
+          type="button"
+          onClick={() => onReject?.(data)}
+          className="flex h-7 items-center gap-1 rounded-md border border-zinc-800 bg-zinc-900 px-2 text-[11px] text-zinc-300 hover:bg-zinc-800"
+        >
+          <Ban size={12} /> 拒否
+        </button>
+        <button
+          type="button"
+          onClick={() => onApprove?.(data)}
+          className="flex h-7 items-center gap-1 rounded-md bg-zinc-100 px-2 text-[11px] font-semibold text-zinc-950 hover:bg-white"
+        >
+          <Check size={12} /> 承認
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ============================================================
 // Bottom tab navigation
 // ============================================================
@@ -627,6 +679,7 @@ function PreviewNav({
           item.data.type === 'web' ? <Globe size={10} /> :
           item.data.type === 'code' ? <Code size={10} /> :
           item.data.type === 'file' ? <FileText size={10} /> :
+          item.data.type === 'approval' ? <ShieldAlert size={10} /> :
           <Image size={10} />;
 
         let label = '';
@@ -642,6 +695,9 @@ function PreviewNav({
             break;
           case 'image':
             label = (item.data as ImagePreview).alt;
+            break;
+          case 'approval':
+            label = (item.data as ApprovalPreview).action;
             break;
         }
 
@@ -678,6 +734,8 @@ interface ToolPreviewPanelProps {
   activePreviewId?: string | null;
   memo?: string;
   onMemoChange?: (value: string) => void;
+  onApproveApproval?: (approval: ApprovalPreview) => void;
+  onRejectApproval?: (approval: ApprovalPreview) => void;
 }
 
 export function ToolPreviewPanel({
@@ -689,6 +747,8 @@ export function ToolPreviewPanel({
   activePreviewId,
   memo,
   onMemoChange,
+  onApproveApproval,
+  onRejectApproval,
 }: ToolPreviewPanelProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const displayItems = useMemo(
@@ -738,6 +798,8 @@ export function ToolPreviewPanel({
         return <FilePreviewContent data={current.data} />;
       case 'image':
         return <ImagePreviewContent data={current.data} />;
+      case 'approval':
+        return <ApprovalPreviewContent data={current.data} onApprove={onApproveApproval} onReject={onRejectApproval} />;
     }
   };
 
@@ -745,13 +807,15 @@ export function ToolPreviewPanel({
     isMemo ? 'Memo' :
     current.data.type === 'web' ? 'Web' :
     current.data.type === 'code' ? 'Code' :
-    current.data.type === 'file' ? 'File' : 'Image';
+    current.data.type === 'file' ? 'File' :
+    current.data.type === 'approval' ? 'Approval' : 'Image';
 
   const typeIcon =
     isMemo ? <NotebookPen size={12} className="text-zinc-300" /> :
     current.data.type === 'web' ? <Globe size={12} className="text-emerald-400" /> :
     current.data.type === 'code' ? <Code size={12} className="text-amber-400" /> :
     current.data.type === 'file' ? <FileText size={12} className="text-violet-400" /> :
+    current.data.type === 'approval' ? <ShieldAlert size={12} className="text-amber-300" /> :
     <Image size={12} className="text-blue-400" />;
 
   return (

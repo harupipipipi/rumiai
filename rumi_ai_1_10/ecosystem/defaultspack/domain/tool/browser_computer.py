@@ -367,7 +367,11 @@ class BrowserComputerController:
         if dry_run:
             return {"action": "computer.screenshot", "dry_run": True, "requires_approval": False}
         risk = classify_approval_risk("computer.screenshot", {})
-        approved = yolo_mode or self._consume_approval(payload, "computer.screenshot", {}, risk=risk)
+        approved = (
+            not risk.get("approval_required")
+            or yolo_mode
+            or self._consume_approval(payload, "computer.screenshot", {}, risk=risk)
+        )
         if not approved:
             return self._approval_required("computer.screenshot", {}, risk=risk)
         self._artifact_root.mkdir(parents=True, exist_ok=True)

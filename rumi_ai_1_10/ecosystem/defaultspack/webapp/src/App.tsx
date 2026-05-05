@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { Activity, Building2, MessageSquare, PanelLeftOpen, Play, RefreshCw, ShieldCheck, Users, Zap } from "lucide-react";
 
 import type { ChatItem } from "./components/HistoryBoard";
-import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
+import type { ApprovalPreview, ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
 import { api, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ComposerWidgetAction, type Conversation, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
 import { deriveConversationTitle, formatRelativeTime, messageToText } from "./lib/chat";
@@ -16,9 +16,12 @@ import { RendererBoundary } from "./renderers/trustedRendererLoader";
 import type { AppMode, AttachedFile, ChatUiMessage, CodingContext, ComposerExtensionItem, ContextUsageInfo, DroppedWidget } from "./renderers/types";
 
 type BrowserApproval = {
+  approvalId: string;
   action: string;
   payload: Record<string, unknown>;
-  token: string;
+  token?: string;
+  riskLevel?: string;
+  reason?: string;
 };
 
 type PendingChatRequest = {
@@ -195,6 +198,7 @@ function previewLabel(preview: ToolPreviewItem | undefined): string {
   if (data.type === "web") return data.title || data.url || "Web preview";
   if (data.type === "code") return data.filename || "Code preview";
   if (data.type === "file") return data.filename || "File preview";
+  if (data.type === "approval") return data.action || "Approval";
   return data.alt || "Image preview";
 }
 
@@ -222,12 +226,50 @@ function compactPreviewValue(value: unknown): string {
   return String(value);
 }
 
+function approvalFromToolResult(result: unknown): ApprovalPreview | null {
+  if (!result || typeof result !== "object") return null;
+  const record = result as Record<string, unknown>;
+  const data = record.data && typeof record.data === "object" ? record.data as Record<string, unknown> : record;
+  const widget = data.widget && typeof data.widget === "object" ? data.widget as Record<string, unknown> : data;
+  if (widget.requires_approval !== true && widget.approval_required !== true) return null;
+  const approvalId = String(widget.approval_id ?? "");
+  if (!approvalId) return null;
+  const payload = widget.payload && typeof widget.payload === "object" ? widget.payload as Record<string, unknown> : {};
+  return {
+    type: "approval",
+    approvalId,
+    action: String(widget.action ?? "computer.action"),
+    riskLevel: String(widget.risk_level ?? ""),
+    reason: String(widget.risk_reason ?? widget.reason ?? ""),
+    payload,
+  };
+}
+
+function toolLogTimestamp(logTimestamp: unknown, fallback: number): number {
+  if (typeof logTimestamp === "number" && Number.isFinite(logTimestamp)) return logTimestamp;
+  if (typeof logTimestamp === "string") {
+    const parsed = Date.parse(logTimestamp);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+}
+
 function toolPreviewsFromMessages(messages: ChatMessage[]): ToolPreviewItem[] {
   return messages.flatMap((message) => (message.tool_logs ?? []).map((log, index) => {
     const toolName = String(log.tool_name ?? "tool");
     const args = log.arguments && typeof log.arguments === "object" ? log.arguments as Record<string, unknown> : {};
     const result = log.result as Record<string, unknown> | undefined;
     const status = String(result?.status ?? "completed");
+    const approval = approvalFromToolResult(result);
+    if (approval) {
+      return {
+        id: `message-approval-${approval.approvalId}`,
+        toolStepId: `${toolName}:${approval.approvalId}`,
+        timestamp: toolLogTimestamp(log.timestamp, message.created_at),
+        priority: 20,
+        data: approval,
+      };
+    }
     const visual = extractToolVisual(result);
     if (visual) {
       const action = String(args.action ?? result?.action ?? "").toLowerCase();
@@ -235,7 +277,7 @@ function toolPreviewsFromMessages(messages: ChatMessage[]): ToolPreviewItem[] {
       return {
         id: `message-tool-${message.id}-${index}`,
         toolStepId: toolName,
-        timestamp: typeof log.timestamp === "number" ? log.timestamp : message.created_at,
+        timestamp: toolLogTimestamp(log.timestamp, message.created_at),
         priority: isClickFeedback ? 10 : visual.kind === "zoom" ? 6 : 1,
         data: {
           type: "image" as const,
@@ -259,7 +301,7 @@ function toolPreviewsFromMessages(messages: ChatMessage[]): ToolPreviewItem[] {
     return {
       id: `message-tool-${message.id}-${index}`,
       toolStepId: toolName,
-      timestamp: typeof log.timestamp === "number" ? log.timestamp : message.created_at,
+      timestamp: toolLogTimestamp(log.timestamp, message.created_at),
       data: {
         type: "file" as const,
         filename: `${toolName}.tool`,
@@ -651,19 +693,26 @@ function replaceChatIdInUrl(conversationId: string | null, pending?: boolean) {
 }
 
 function pendingBrowserApproval(messages: ChatUiMessage[]): BrowserApproval | null {
+  const approvalTools = new Set(["browser_computer", "browser_use", "computer_use", "zoom"]);
   for (const message of [...messages].reverse()) {
     for (const log of [...(message.toolLogs ?? [])].reverse()) {
-      if (log.tool_name !== "browser_computer") continue;
+      if (!approvalTools.has(String(log.tool_name ?? ""))) continue;
       const result = log.result as Record<string, unknown> | undefined;
       const data = (result?.data ?? result) as Record<string, unknown> | undefined;
       const widget = data?.widget as Record<string, unknown> | undefined;
       const candidate = (widget?.requires_approval ? widget : data) as Record<string, unknown> | undefined;
-      if (!candidate?.requires_approval || !candidate.approval_token) continue;
+      if (!candidate?.requires_approval && !candidate?.approval_required) continue;
+      const approvalId = String(candidate.approval_id ?? "");
+      if (!approvalId) continue;
       const rawPayload = candidate.payload;
+      const rawToken = String(candidate.approval_token ?? "");
       return {
+        approvalId,
         action: String(candidate.action ?? "browser.session"),
         payload: rawPayload && typeof rawPayload === "object" ? rawPayload as Record<string, unknown> : {},
-        token: String(candidate.approval_token),
+        token: rawToken && rawToken !== "[redacted]" ? rawToken : undefined,
+        riskLevel: String(candidate.risk_level ?? ""),
+        reason: String(candidate.risk_reason ?? candidate.reason ?? ""),
       };
     }
   }
@@ -740,12 +789,22 @@ export default function App() {
     [activeConversation?.messages],
   );
   const canvasPreviews = useMemo(() => {
-    const seen = new Set(previews.map((preview) => preview.id));
+    const seen = new Set(messageToolPreviews.map((preview) => preview.id));
     return [
-      ...previews,
-      ...messageToolPreviews.filter((preview) => !seen.has(preview.id)),
+      ...messageToolPreviews,
+      ...previews.filter((preview) => !seen.has(preview.id)),
     ];
   }, [messageToolPreviews, previews]);
+
+  useEffect(() => {
+    const latestToolPreview = messageToolPreviews[0];
+    if (previewMode === "auto" && latestToolPreview) {
+      setActivePreviewId(latestToolPreview.id);
+      if (latestToolPreview.data.type === "approval" || latestToolPreview.data.type === "image") {
+        setShowPreview(true);
+      }
+    }
+  }, [messageToolPreviews, previewMode, setShowPreview]);
   const canShowCanvas = hasCanvasItems(canvasPreviews, canvasMemo);
   const effectiveShowPreview = showPreview && canShowCanvas;
   const composerCommands = [
@@ -873,7 +932,7 @@ export default function App() {
       const limit = Number(settingsValues.preview?.max_items ?? 12);
       const nextPreviews = result.previews.slice(0, limit);
       setPreviews(nextPreviews);
-      setActivePreviewId(nextPreviews[0]?.id ?? null);
+      setActivePreviewId(null);
       if (settingsValues.preview?.auto_open && nextPreviews.length > 0) {
         setShowPreview(true);
       }
@@ -1249,25 +1308,46 @@ export default function App() {
     }
   };
 
-  const approveBrowserAction = async () => {
-    if (!browserApproval) return;
+  const approveComputerApproval = async (approval: BrowserApproval | ApprovalPreview) => {
     setError(null);
     try {
-      const result = await api.browserComputer(browserApproval.action, {
-        ...browserApproval.payload,
-        approval_token: browserApproval.token,
+      const decision = await api.approveApproval(approval.approvalId) as unknown as Record<string, unknown>;
+      const approvalToken = String(decision.approval_token ?? "");
+      const result = await api.browserComputer(approval.action, {
+        ...(approval.payload ?? {}),
+        approval_id: approval.approvalId,
+        ...(approvalToken ? { approval_token: approvalToken } : {}),
       });
       pushActionPreview(
         { id: "browser.approval", label: "Approved Browser Action", icon: "browser" },
-        "browser-approval",
+        approval.action,
         result,
       );
       if (activeConversationId) {
         await refreshPreview(activeConversationId);
+        await loadConversation(activeConversationId, false);
       }
     } catch (approvalError) {
       setError(approvalError instanceof Error ? approvalError.message : "browser/computer の承認に失敗しました。");
     }
+  };
+
+  const rejectComputerApproval = async (approval: BrowserApproval | ApprovalPreview) => {
+    setError(null);
+    try {
+      await api.rejectApproval(approval.approvalId);
+      if (activeConversationId) {
+        await refreshPreview(activeConversationId);
+        await loadConversation(activeConversationId, false);
+      }
+    } catch (approvalError) {
+      setError(approvalError instanceof Error ? approvalError.message : "browser/computer の拒否に失敗しました。");
+    }
+  };
+
+  const approveBrowserAction = async () => {
+    if (!browserApproval) return;
+    await approveComputerApproval(browserApproval);
   };
 
   const pushActionPreview = (action: SidebarAction, title: string, data: unknown) => {
@@ -1803,6 +1883,9 @@ export default function App() {
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium text-zinc-100">{browserApproval.action} の承認が必要です</p>
+                        <p className="mt-0.5 truncate text-[11px] text-amber-200">
+                          {browserApproval.riskLevel || "risk"} · {browserApproval.reason || browserApproval.approvalId}
+                        </p>
                         <details className="mt-1 text-[11px] text-zinc-500">
                           <summary className="cursor-pointer select-none text-zinc-500 hover:text-zinc-300">payload を表示</summary>
                           <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap rounded-md border border-zinc-800 bg-black/30 p-2 font-mono">
@@ -1810,13 +1893,22 @@ export default function App() {
                           </pre>
                         </details>
                       </div>
-                      <button
-                        type="button"
-                        onClick={approveBrowserAction}
-                        className="h-8 flex-shrink-0 rounded-lg bg-zinc-100 px-3 text-xs font-semibold text-zinc-950 hover:bg-white"
-                      >
-                        許可
-                      </button>
+                      <div className="flex flex-shrink-0 items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void rejectComputerApproval(browserApproval)}
+                          className="h-8 rounded-lg border border-zinc-800 bg-zinc-900 px-3 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
+                        >
+                          拒否
+                        </button>
+                        <button
+                          type="button"
+                          onClick={approveBrowserAction}
+                          className="h-8 rounded-lg bg-zinc-100 px-3 text-xs font-semibold text-zinc-950 hover:bg-white"
+                        >
+                          許可
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1835,6 +1927,8 @@ export default function App() {
               activePreviewId={activePreviewId}
               memo={canvasMemo}
               onMemoChange={setCanvasMemo}
+              onApproveApproval={(approval) => void approveComputerApproval(approval)}
+              onRejectApproval={(approval) => void rejectComputerApproval(approval)}
             />
           )}
         </main>

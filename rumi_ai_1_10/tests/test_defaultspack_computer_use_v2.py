@@ -166,6 +166,30 @@ def test_screenshot_result_includes_display_and_dpi_metadata(tmp_path, monkeypat
     assert result["display_metadata"]["screenshot_to_display_scale"] == {"x": 2.0, "y": 2.0}
 
 
+def test_read_only_screenshot_does_not_block_on_approval(tmp_path, monkeypatch):
+    from domain.tool.browser_computer import BrowserComputerController
+    import domain.tool.browser_computer as browser_computer
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(BrowserComputerController, "_prepare_target_context", lambda self, payload, system, focus: {"scope": "desktop"})
+    monkeypatch.setattr(BrowserComputerController, "_target_capture_bounds", lambda self, target_context: None)
+    monkeypatch.setattr(
+        browser_computer.subprocess,
+        "run",
+        lambda command, check: (tmp_path / "screenshot-1.png").write_bytes(b"\x89PNG\r\n\x1a\n"),
+    )
+    monkeypatch.setattr(
+        BrowserComputerController,
+        "_screenshot_result",
+        lambda self, path, model_image_path, system, **kwargs: {"action": "computer.screenshot", "path": str(path), "requires_approval": False},
+    )
+
+    result = BrowserComputerController(artifact_root=tmp_path).run("computer.screenshot")
+
+    assert result["action"] == "computer.screenshot"
+    assert result["requires_approval"] is False
+
+
 def test_zoom_crops_latest_screenshot_and_returns_coordinate_metadata(tmp_path):
     from domain.tool.browser_computer import BrowserComputerController
 

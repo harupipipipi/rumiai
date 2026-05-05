@@ -2,7 +2,7 @@ import type { FormEvent, MutableRefObject } from "react";
 
 import type { ChatActivityEvent, ChatContentBlock, CodingContextEntry, CodingGitStatus, ComposerWidgetAction, ModelProfile, SettingsSection, SidebarAction, SidebarItem, ToolLogEntry, UICatalog } from "../lib/api";
 import type { ChatItem } from "../components/HistoryBoard";
-import type { ToolPreviewItem, ToolPreviewMode } from "../components/ToolPreview";
+import type { ApprovalPreview, ToolPreviewItem, ToolPreviewMode } from "../components/ToolPreview";
 
 export type ChatUiMessage = {
   id: string;
@@ -135,6 +135,8 @@ export type ToolPreviewPanelRendererProps = {
   onClose: () => void;
   onModeChange: (mode: ToolPreviewMode) => void;
   onMemoChange?: (value: string) => void;
+  onApproveApproval?: (approval: ApprovalPreview) => void;
+  onRejectApproval?: (approval: ApprovalPreview) => void;
 };
 
 export type RightSidebarRendererProps = {
