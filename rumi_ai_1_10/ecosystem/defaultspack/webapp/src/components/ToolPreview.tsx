@@ -56,6 +56,7 @@ export type ToolPreviewItem = {
   id: string;
   toolStepId: string;
   timestamp: number;
+  priority?: number;
   data: ToolPreviewData;
 };
 
@@ -90,7 +91,12 @@ export function buildToolPreviewDisplayItems(
         },
       }
     : null;
-  const items = memoPreview ? [memoPreview, ...previews] : [...previews];
+  const rankedPreviews = [...previews].sort((a, b) => {
+    const priorityDelta = (b.priority ?? 0) - (a.priority ?? 0);
+    if (priorityDelta !== 0) return priorityDelta;
+    return b.timestamp - a.timestamp;
+  });
+  const items = memoPreview ? [memoPreview, ...rankedPreviews] : rankedPreviews;
   if (!activePreviewId) return items;
 
   const active = items.find((item) => matchesPreviewId(item, activePreviewId));
@@ -561,12 +567,13 @@ function ImagePreviewContent({ data }: { data: ImagePreview }) {
         <Image size={12} className="text-zinc-500" />
         <span className="text-[11px] text-zinc-300">{data.alt}</span>
       </div>
-      <div className="flex-1 p-3 flex items-start justify-center overflow-y-auto">
+      <div className="flex-1 p-3 flex items-start justify-center overflow-auto">
         {data.url ? (
           <img
             src={data.url}
             alt={data.alt}
-            className="max-h-[360px] w-full max-w-full rounded-lg border border-zinc-800 object-contain"
+            className="w-auto max-w-full rounded-lg border border-zinc-800 object-contain"
+            style={{ maxHeight: "min(44vh, 360px)" }}
           />
         ) : (
           <div className="w-full aspect-square max-w-[200px] bg-zinc-800/30 rounded-lg border border-zinc-800 flex items-center justify-center">

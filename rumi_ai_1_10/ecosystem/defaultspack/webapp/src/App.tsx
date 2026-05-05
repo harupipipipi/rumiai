@@ -198,6 +198,11 @@ function previewLabel(preview: ToolPreviewItem | undefined): string {
   return data.alt || "Image preview";
 }
 
+function previewThumbnail(preview: ToolPreviewItem | undefined): string {
+  if (!preview || preview.data.type !== "image") return "";
+  return preview.data.url;
+}
+
 function compactPreviewValue(value: unknown): string {
   if (value === null || value === undefined) return "";
   if (typeof value === "string") return value;
@@ -220,18 +225,22 @@ function compactPreviewValue(value: unknown): string {
 function toolPreviewsFromMessages(messages: ChatMessage[]): ToolPreviewItem[] {
   return messages.flatMap((message) => (message.tool_logs ?? []).map((log, index) => {
     const toolName = String(log.tool_name ?? "tool");
+    const args = log.arguments && typeof log.arguments === "object" ? log.arguments as Record<string, unknown> : {};
     const result = log.result as Record<string, unknown> | undefined;
     const status = String(result?.status ?? "completed");
     const visual = extractToolVisual(result);
     if (visual) {
+      const action = String(args.action ?? result?.action ?? "").toLowerCase();
+      const isClickFeedback = action.includes("click") || visual.points.length > 0;
       return {
         id: `message-tool-${message.id}-${index}`,
         toolStepId: toolName,
         timestamp: typeof log.timestamp === "number" ? log.timestamp : message.created_at,
+        priority: isClickFeedback ? 10 : visual.kind === "zoom" ? 6 : 1,
         data: {
           type: "image" as const,
           url: visual.src,
-          alt: `${toolName} ${visual.kind}`,
+          alt: isClickFeedback ? `${toolName} click feedback` : `${toolName} ${visual.kind}`,
           prompt: [
             visual.sourceLabel,
             visual.points.length ? `${visual.points.length} point${visual.points.length === 1 ? "" : "s"}` : "",
@@ -239,12 +248,12 @@ function toolPreviewsFromMessages(messages: ChatMessage[]): ToolPreviewItem[] {
         },
       };
     }
-    const args = compactPreviewValue(log.arguments);
+    const argsPreview = compactPreviewValue(log.arguments);
     const output = compactPreviewValue(result?.data ?? result ?? "");
     const content = [
       `tool: ${toolName}`,
       `status: ${status}`,
-      args ? `input:\n${args}` : "",
+      argsPreview ? `input:\n${argsPreview}` : "",
       output ? `result:\n${output}` : "",
     ].filter(Boolean).join("\n\n");
     return {
@@ -278,6 +287,7 @@ function CanvasPeek({
   const latest = items[0];
   const count = items.length;
   const isMemo = latest.id === "__memo__";
+  const thumbnail = previewThumbnail(latest);
   const subLabel = isMemo ? "Canvas · memo" : "Canvas · tool activity";
   return (
     <button
@@ -287,7 +297,11 @@ function CanvasPeek({
       title="Canvas を開く"
     >
       <span className="flex min-w-0 items-center gap-3">
-        <span className="h-8 w-8 flex-shrink-0 rounded-lg border border-zinc-800 bg-zinc-900/80" />
+        <span className="flex h-9 w-12 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900/80">
+          {thumbnail ? (
+            <img src={thumbnail} alt="" className="h-full w-full object-cover" />
+          ) : null}
+        </span>
         <span className="min-w-0">
           <span className="block truncate text-[12px] font-medium text-zinc-300">
             {previewLabel(latest)}

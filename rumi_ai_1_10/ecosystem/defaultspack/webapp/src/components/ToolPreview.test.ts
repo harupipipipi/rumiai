@@ -36,3 +36,24 @@ test("memo is shown first only when it is active or has content", () => {
   assert.equal(buildToolPreviewDisplayItems(previews, "", "__memo__")[0]?.id, "__memo__");
   assert.equal(buildToolPreviewDisplayItems(previews, "draft note", null)[0]?.id, "__memo__");
 });
+
+test("click feedback previews outrank later plain screenshots", () => {
+  const displayItems = buildToolPreviewDisplayItems([
+    {
+      id: "later-screenshot",
+      toolStepId: "computer_use",
+      timestamp: 20,
+      priority: 1,
+      data: { type: "image", url: "file:///tmp/screenshot.png", alt: "screenshot" },
+    },
+    {
+      id: "click-feedback",
+      toolStepId: "computer_use",
+      timestamp: 10,
+      priority: 10,
+      data: { type: "image", url: "file:///tmp/click.png", alt: "click feedback" },
+    },
+  ]);
+
+  assert.equal(displayItems[0]?.id, "click-feedback");
+});

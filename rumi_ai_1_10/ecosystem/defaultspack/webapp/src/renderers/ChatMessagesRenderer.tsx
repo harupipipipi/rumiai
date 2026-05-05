@@ -50,21 +50,24 @@ function MessageBlock({ block, unknownStrategy }: { block: ChatContentBlock; unk
 }
 
 function ToolVisualPreview({ visual }: { visual: ToolVisualImage }) {
-  const aspectRatio = visual.imageSize ? `${visual.imageSize.width} / ${visual.imageSize.height}` : "16 / 10";
+  const hasPoints = visual.points.length > 0;
   const title = visual.kind === "zoom" ? "Zoom crop" : "Screenshot";
+  const imageClass = hasPoints
+    ? "block max-h-[240px] max-w-full rounded-md border border-zinc-800 object-contain"
+    : "block max-h-[150px] max-w-full rounded-md border border-zinc-800 object-contain opacity-90";
 
   return (
     <div className="min-w-0 overflow-hidden rounded-lg border border-zinc-800/80 bg-zinc-950/80">
       <div className="flex min-w-0 items-center justify-between gap-3 border-b border-zinc-800/70 px-3 py-2">
         <div className="flex min-w-0 items-center gap-2 text-[11px] font-medium text-zinc-300">
           <ImageIcon size={12} className="shrink-0 text-blue-300" />
-          <span>{title}</span>
+          <span>{hasPoints ? "Click feedback" : title}</span>
         </div>
         <span className="min-w-0 truncate font-mono text-[10px] text-zinc-600">{visual.sourceLabel}</span>
       </div>
-      <div className="p-2">
-        <div className="relative mx-auto w-full max-w-[680px] overflow-hidden rounded-md bg-black/40" style={{ aspectRatio }}>
-          <img src={visual.src} alt={title} className="absolute inset-0 h-full w-full object-contain" />
+      <div className="p-2 text-center">
+        <div className="relative inline-block max-w-full overflow-hidden rounded-md bg-black/40 align-top">
+          <img src={visual.src} alt={title} className={imageClass} />
           {visual.points.map((point) => (
             <span
               key={point.id}
@@ -168,8 +171,8 @@ function ToolResultPanel({ item }: { item: ToolActivityItem }) {
   if (!item.detail && !visual) return null;
 
   return (
-    <div className="mt-2 flex min-w-0 items-start gap-2 rounded-md border border-zinc-800/70 bg-black/20 px-3 py-2 text-zinc-300">
-      <span className="shrink-0 text-[10px] font-medium text-zinc-600">結果</span>
+    <div className="mt-2 min-w-0 rounded-md border border-zinc-800/70 bg-black/20 px-3 py-2 text-zinc-300">
+      <span className="mb-1 block text-[10px] font-medium text-zinc-600">結果</span>
       <ToolResultDetail detail={item.detail} result={item.result} />
     </div>
   );
