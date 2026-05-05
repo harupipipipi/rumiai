@@ -67,13 +67,17 @@
           "id": "target",
           "label": "Default Target",
           "type": "select",
-          "default": "active_context",
+          "default": "focused_app_window",
           "options": [
-            {"value": "active_context", "label": "Active Context"},
+            {"value": "focused_app_window", "label": "Focused App Window"},
+            {"value": "app", "label": "App"},
+            {"value": "window", "label": "Window"},
+            {"value": "active_window", "label": "Active Window"},
             {"value": "browser_first", "label": "Browser First"},
-            {"value": "desktop_first", "label": "Desktop First"}
+            {"value": "desktop_first", "label": "Desktop First"},
+            {"value": "full_desktop", "label": "Full Desktop"}
           ],
-          "help": "Default target preference when a task can use either browser or desktop."
+          "help": "Prefer focused app/window operation for desktop tools; full desktop remains available for whole-screen tasks."
         },
         {
           "id": "mode",

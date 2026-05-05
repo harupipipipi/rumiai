@@ -372,10 +372,16 @@ class BrowserComputerController:
         self._artifact_root.mkdir(parents=True, exist_ok=True)
         path = self._artifact_root / f"screenshot-{int(time.time() * 1000)}.png"
         system = platform.system()
+        target_context = self._prepare_target_context(payload, system=system, focus=payload.get("focus", True) is not False)
+        target_bounds = self._target_capture_bounds(target_context)
         if system == "Darwin":
-            subprocess.run(["screencapture", "-x", str(path)], check=True)
+            command = ["screencapture", "-x"]
+            if target_bounds:
+                command.extend(["-R", self._region_arg(target_bounds)])
+            command.append(str(path))
+            subprocess.run(command, check=True)
         elif system == "Windows":
-            self._windows_screenshot(path)
+            self._windows_screenshot(path, bounds=target_bounds)
         else:
             return {
                 "action": "computer.screenshot",
@@ -390,7 +396,7 @@ class BrowserComputerController:
             data_url = "data:{};base64,".format(mime_type) + base64.b64encode(model_path.read_bytes()).decode("ascii")
         except Exception:
             data_url = ""
-        result = self._screenshot_result(path, model_path, system)
+        result = self._screenshot_result(path, model_path, system, target_context=target_context)
         if data_url:
             result["data_url"] = data_url
             result["visual_data_url"] = data_url
@@ -514,10 +520,18 @@ class BrowserComputerController:
             return None
         return max(candidates, key=lambda path: path.stat().st_mtime)
 
-    def _screenshot_result(self, path: Path, model_path: Path, system: str) -> dict[str, Any]:
+    def _screenshot_result(
+        self,
+        path: Path,
+        model_path: Path,
+        system: str,
+        *,
+        target_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         result: dict[str, Any] = {"action": "computer.screenshot", "path": str(path), "mime_type": "image/png", "platform": system}
         image_size = self._image_size(path)
         model_image_size = self._image_size(model_path)
+        target_context = target_context or self._desktop_target_context()
         if image_size:
             width, height = image_size
             result["image_size"] = {"width": width, "height": height}
@@ -561,12 +575,16 @@ class BrowserComputerController:
         cursor = self._cursor_position()
         if cursor:
             result["cursor"] = cursor
+        result["target"] = target_context
+        if target_context.get("origin"):
+            result["screenshot_origin"] = target_context["origin"]
+            result["screenshot_to_action_offset"] = target_context["origin"]
         result["cursor_move_contract"] = {
             "tool": "browser_use",
             "action": "move",
             "screen_coordinates": True,
             "coordinate_source": "screenshot",
-            "notes": "Call move with action_coordinate_system coordinates. If a point is estimated on model_image_size, multiply by model_to_action_scale before calling move.",
+            "notes": "For target=desktop, call move/click with desktop action coordinates. For target=app, window, or active_window screenshots, pass the same target plus local x/y; the tool offsets them to desktop coordinates. If a point is estimated on model_image_size, multiply by model_to_action_scale first.",
         }
         return result
 
@@ -1178,24 +1196,185 @@ class BrowserComputerController:
         except Exception:
             return {}
 
+    def _prepare_target_context(self, payload: dict[str, Any], *, system: str, focus: bool) -> dict[str, Any]:
+        scope = self._target_scope(payload)
+        context = self._desktop_target_context(scope=scope)
+        if scope in {"desktop", "full_desktop", "all_displays"}:
+            return context
+
+        if focus:
+            try:
+                if scope == "window":
+                    if system == "Darwin":
+                        self._darwin_focus_window(payload)
+                    elif system == "Windows" and str(payload.get("window_id") or payload.get("id") or "").strip():
+                        self._windows_desktop_action("computer.window.focus", payload)
+                elif scope in {"app", "app_window"} and self._app_name(payload):
+                    if system == "Darwin":
+                        self._darwin_focus_app(payload)
+                    elif system == "Windows":
+                        self._windows_desktop_action("computer.app.focus", payload)
+                if scope in {"window", "app", "app_window"}:
+                    time.sleep(0.2)
+            except Exception as exc:
+                context["focus_error"] = str(exc)
+
+        window = self._window_for_target(system, payload, scope)
+        if window:
+            bounds = self._valid_bounds(window.get("bounds"))
+            if bounds:
+                context.update(
+                    {
+                        "scope": scope,
+                        "window": window,
+                        "bounds": bounds,
+                        "origin": {"x": bounds["x"], "y": bounds["y"]},
+                        "coordinate_space": "target_window",
+                    }
+                )
+        return context
+
+    @staticmethod
+    def _desktop_target_context(*, scope: str = "desktop") -> dict[str, Any]:
+        normalized = scope if scope in {"desktop", "full_desktop", "all_displays"} else "desktop"
+        return {"scope": normalized, "coordinate_space": "desktop", "origin": {"x": 0, "y": 0}}
+
+    def _target_scope(self, payload: dict[str, Any]) -> str:
+        raw = str(
+            payload.get("target")
+            or payload.get("target_scope")
+            or payload.get("screen_mode")
+            or payload.get("mode")
+            or ""
+        ).strip().lower()
+        aliases = {
+            "desktop": "desktop",
+            "full": "full_desktop",
+            "full_screen": "full_desktop",
+            "fullscreen": "full_desktop",
+            "full_desktop": "full_desktop",
+            "entire_desktop": "full_desktop",
+            "all": "all_displays",
+            "all_displays": "all_displays",
+            "primary_display": "desktop",
+            "active_window": "active_window",
+            "focused_window": "active_window",
+            "window": "window",
+            "app": "app",
+            "application": "app",
+            "app_window": "app_window",
+            "focused_app_window": "app_window",
+            "focus_app_window": "app_window",
+        }
+        if raw in aliases:
+            return aliases[raw]
+        if payload.get("window_id") or payload.get("id") or payload.get("window_index") or payload.get("index"):
+            return "window"
+        if self._app_name(payload):
+            return "app_window"
+        return "desktop"
+
+    def _window_for_target(self, system: str, payload: dict[str, Any], scope: str) -> dict[str, Any] | None:
+        if scope in {"desktop", "full_desktop", "all_displays"}:
+            return None
+        if system == "Darwin":
+            if scope == "window":
+                app = self._app_name(payload)
+                index = int(payload.get("window_index") or payload.get("index") or 1)
+                if app:
+                    windows = [window for window in self._darwin_windows(max(index, 1) + 10) if window.get("app") == app]
+                    if len(windows) >= index:
+                        return windows[index - 1]
+            return self._darwin_active_window()
+        if system == "Windows":
+            if scope == "window":
+                window_id = str(payload.get("window_id") or payload.get("id") or "").strip()
+                if window_id:
+                    for window in self._windows_windows(100):
+                        if str(window.get("id")) == window_id:
+                            return window
+            return self._windows_active_window()
+        return None
+
+    @staticmethod
+    def _target_capture_bounds(target_context: dict[str, Any]) -> dict[str, int] | None:
+        scope = target_context.get("scope")
+        if scope in {"desktop", "full_desktop", "all_displays"}:
+            return None
+        return BrowserComputerController._valid_bounds(target_context.get("bounds"))
+
+    @staticmethod
+    def _valid_bounds(raw: Any) -> dict[str, int] | None:
+        if not isinstance(raw, dict):
+            return None
+        try:
+            bounds = {
+                "x": int(raw.get("x", 0)),
+                "y": int(raw.get("y", 0)),
+                "width": int(raw.get("width", 0)),
+                "height": int(raw.get("height", 0)),
+            }
+        except Exception:
+            return None
+        if bounds["width"] <= 0 or bounds["height"] <= 0:
+            return None
+        return bounds
+
+    @staticmethod
+    def _region_arg(bounds: dict[str, int]) -> str:
+        return f"{bounds['x']},{bounds['y']},{bounds['width']},{bounds['height']}"
+
+    def _payload_with_target_coordinates(
+        self,
+        action: str,
+        payload: dict[str, Any],
+        *,
+        system: str,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        if action not in {"computer.move", "computer.click"}:
+            return dict(payload), self._prepare_target_context(payload, system=system, focus=True)
+        target_context = self._prepare_target_context(payload, system=system, focus=True)
+        adjusted = dict(payload)
+        scope = target_context.get("scope")
+        coordinate_space = str(payload.get("coordinate_space") or payload.get("coordinates") or "").strip().lower()
+        if scope not in {"desktop", "full_desktop", "all_displays"} and coordinate_space not in {"desktop", "action", "screen"}:
+            origin = target_context.get("origin") if isinstance(target_context.get("origin"), dict) else {}
+            adjusted["x"] = int(payload.get("x", 0)) + int(origin.get("x", 0))
+            adjusted["y"] = int(payload.get("y", 0)) + int(origin.get("y", 0))
+            adjusted["_target_local_point"] = {"x": int(payload.get("x", 0)), "y": int(payload.get("y", 0))}
+        return adjusted, target_context
+
     def _desktop_action(self, action: str, payload: dict[str, Any], *, yolo_mode: bool) -> dict[str, Any]:
         dry_run = bool(payload.get("dry_run"))
         approval_payload = self._safe_payload(payload)
         risk = classify_approval_risk(action, approval_payload)
+        system = platform.system()
+        action_payload = dict(payload)
+        target_context: dict[str, Any] | None = None
         if dry_run:
             result = {"action": action, "dry_run": True, "requires_approval": False, "risk": risk, "payload": approval_payload}
             if action in {"computer.move", "computer.click"}:
-                result.update(self._action_point_metadata(action, payload))
+                result.update(self._action_point_metadata(action, action_payload))
             return result
         if risk.get("approval_required") and not (yolo_mode or self._consume_approval(payload, action, approval_payload, risk=risk)):
             return self._approval_required(action, approval_payload, risk=risk)
-        system = platform.system()
+        if action in {
+            "computer.move",
+            "computer.click",
+            "computer.type",
+            "computer.key",
+            "computer.hotkey",
+            "computer.scroll",
+        }:
+            action_payload, target_context = self._payload_with_target_coordinates(action, payload, system=system)
         if system == "Darwin" and action == "computer.move":
-            self._darwin_move_cursor(payload)
+            self._darwin_move_cursor(action_payload)
+        elif system == "Darwin" and action == "computer.click":
+            self._darwin_click(action_payload)
         elif system == "Darwin" and action == "computer.scroll":
-            self._darwin_scroll(payload)
+            self._darwin_scroll(action_payload)
         elif system == "Darwin" and action == "computer.hotkey":
-            subprocess.run(["osascript", "-e", self._darwin_hotkey_script(payload)], check=True)
+            subprocess.run(["osascript", "-e", self._darwin_hotkey_script(action_payload)], check=True)
         elif system == "Darwin" and action == "computer.clipboard.read":
             return self._darwin_clipboard_read()
         elif system == "Darwin" and action == "computer.clipboard.write":
@@ -1209,12 +1388,12 @@ class BrowserComputerController:
         elif system == "Darwin" and action == "computer.app.focus":
             self._darwin_focus_app(payload)
         elif system == "Darwin":
-            script = self._apple_script(action, payload)
+            script = self._apple_script(action, action_payload)
             subprocess.run(["osascript", "-e", script], check=True)
         elif system == "Windows" and action == "computer.clipboard.read":
             return self._windows_clipboard_read()
         elif system == "Windows":
-            self._windows_desktop_action(action, payload)
+            self._windows_desktop_action(action, action_payload)
         else:
             return {
                 "action": action,
@@ -1224,12 +1403,16 @@ class BrowserComputerController:
             }
         result: dict[str, Any] = {"action": action, "executed": True, "platform": system, "risk": risk}
         if action in {"computer.move", "computer.click"}:
-            result["target"] = {"x": int(payload.get("x", 0)), "y": int(payload.get("y", 0))}
-            result.update(self._action_point_metadata(action, payload))
+            result["target"] = {"x": int(action_payload.get("x", 0)), "y": int(action_payload.get("y", 0))}
+            if "_target_local_point" in action_payload:
+                result["local_target"] = action_payload["_target_local_point"]
+            result.update(self._action_point_metadata(action, action_payload))
+        if target_context:
+            result["target_context"] = target_context
         if action == "computer.scroll":
-            result["amount"] = int(payload.get("amount", 1))
+            result["amount"] = int(action_payload.get("amount", 1))
         if action == "computer.hotkey":
-            result["hotkey"] = self._hotkey_parts(payload)
+            result["hotkey"] = self._hotkey_parts(action_payload)
         if action == "computer.clipboard.write":
             result["bytes_written"] = len(str(payload.get("text") or payload.get("content") or "").encode("utf-8"))
         if action in {"computer.app.open", "computer.app.focus"}:
@@ -1270,6 +1453,33 @@ class BrowserComputerController:
             subprocess.run(["python3", "-c", code], check=True)
         except Exception as exc:
             raise RuntimeError("computer.move requires cliclick or PyObjC Quartz on macOS") from exc
+
+    def _darwin_click(self, payload: dict[str, Any]) -> None:
+        x = int(payload.get("x", 0))
+        y = int(payload.get("y", 0))
+        cliclick = shutil.which("cliclick")
+        if cliclick:
+            subprocess.run([cliclick, f"c:{x},{y}"], check=True)
+            return
+        swift = shutil.which("swift")
+        if swift:
+            code = (
+                "import CoreGraphics\n"
+                "import Darwin\n"
+                "let x = Double(CommandLine.arguments[1])!\n"
+                "let y = Double(CommandLine.arguments[2])!\n"
+                "let point = CGPoint(x: x, y: y)\n"
+                "CGWarpMouseCursorPosition(point)\n"
+                "let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left)\n"
+                "down?.post(tap: .cghidEventTap)\n"
+                "usleep(80000)\n"
+                "let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)\n"
+                "up?.post(tap: .cghidEventTap)\n"
+            )
+            subprocess.run([swift, "-e", code, str(x), str(y)], check=True)
+            return
+        script = self._apple_script("computer.click", payload)
+        subprocess.run(["osascript", "-e", script], check=True)
 
     def _darwin_scroll(self, payload: dict[str, Any]) -> None:
         amount = int(payload.get("amount", 1))
@@ -1414,17 +1624,27 @@ class BrowserComputerController:
             return f'tell application "System Events" to keystroke {json.dumps(str(key))}'
         raise ValueError(action)
 
-    def _windows_screenshot(self, path: Path) -> None:
+    def _windows_screenshot(self, path: Path, *, bounds: dict[str, int] | None = None) -> None:
         escaped = self._ps_single(str(path))
+        if bounds:
+            bounds_script = [
+                f"$bounds = New-Object System.Drawing.Rectangle({bounds['x']}, {bounds['y']}, {bounds['width']}, {bounds['height']})",
+                "$source = New-Object System.Drawing.Point($bounds.X, $bounds.Y)",
+            ]
+        else:
+            bounds_script = [
+                "$bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds",
+                "$source = $bounds.Location",
+            ]
         script = "\n".join(
             [
                 "$ErrorActionPreference = 'Stop'",
                 "Add-Type -AssemblyName System.Windows.Forms",
                 "Add-Type -AssemblyName System.Drawing",
-                "$bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds",
+                *bounds_script,
                 "$bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height",
                 "$graphics = [System.Drawing.Graphics]::FromImage($bitmap)",
-                "$graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)",
+                "$graphics.CopyFromScreen($source, [System.Drawing.Point]::Empty, $bounds.Size)",
                 f"$bitmap.Save('{escaped}', [System.Drawing.Imaging.ImageFormat]::Png)",
                 "$graphics.Dispose()",
                 "$bitmap.Dispose()",

@@ -236,3 +236,98 @@ def test_computer_displays_list_uses_windows_probe(monkeypatch):
     assert result["count"] == 1
     assert result["displays"][0]["primary"] is True
     assert result["displays"][0]["dpi_scale"] == 1.5
+
+
+def test_screenshot_can_target_active_window_region(tmp_path, monkeypatch):
+    from domain.tool.browser_computer import BrowserComputerController
+    import domain.tool.browser_computer as browser_computer
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    commands = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        if command[0] == "screencapture":
+            controller._write_png_pixels(
+                Path(command[-1]),
+                {"width": 300, "height": 200, "channels": 4, "color_type": 6, "rows": [bytearray([0, 0, 0, 255] * 300) for _ in range(200)]},
+            )
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+    monkeypatch.setattr(BrowserComputerController, "_model_screenshot_copy", lambda self, path: path)
+    monkeypatch.setattr(BrowserComputerController, "_cursor_position", staticmethod(lambda: None))
+    monkeypatch.setattr(BrowserComputerController, "_darwin_displays", lambda self: [])
+    monkeypatch.setattr(
+        BrowserComputerController,
+        "_darwin_active_window",
+        lambda self: {
+            "id": "frontmost",
+            "app": "Vivaldi",
+            "title": "LINE",
+            "bounds": {"x": 10, "y": 20, "width": 300, "height": 200},
+        },
+    )
+
+    result = controller.run("computer.screenshot", {"target": "active_window"}, yolo_mode=True)
+
+    assert commands[0][:4] == ["screencapture", "-x", "-R", "10,20,300,200"]
+    assert result["target"]["scope"] == "active_window"
+    assert result["target"]["origin"] == {"x": 10, "y": 20}
+    assert result["screenshot_origin"] == {"x": 10, "y": 20}
+    assert result["coordinate_system"]["x_range"] == [0, 299]
+
+
+def test_app_window_click_offsets_local_coordinates(monkeypatch):
+    from domain.tool.browser_computer import BrowserComputerController
+    import domain.tool.browser_computer as browser_computer
+
+    clicked = {}
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(BrowserComputerController, "_darwin_focus_app", lambda self, payload: None)
+    monkeypatch.setattr(
+        BrowserComputerController,
+        "_darwin_active_window",
+        lambda self: {
+            "id": "frontmost",
+            "app": "Vivaldi",
+            "title": "LINE",
+            "bounds": {"x": 100, "y": 200, "width": 500, "height": 400},
+        },
+    )
+    monkeypatch.setattr(BrowserComputerController, "_darwin_click", lambda self, payload: clicked.update(payload))
+
+    result = BrowserComputerController().run(
+        "computer.click",
+        {"target": "app", "app": "Vivaldi", "x": 12, "y": 34},
+        yolo_mode=True,
+    )
+
+    assert clicked["x"] == 112
+    assert clicked["y"] == 234
+    assert result["target"] == {"x": 112, "y": 234}
+    assert result["local_target"] == {"x": 12, "y": 34}
+    assert result["target_context"]["scope"] == "app"
+
+
+def test_desktop_click_keeps_absolute_coordinates(monkeypatch):
+    from domain.tool.browser_computer import BrowserComputerController
+    import domain.tool.browser_computer as browser_computer
+
+    clicked = {}
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(BrowserComputerController, "_darwin_click", lambda self, payload: clicked.update(payload))
+
+    result = BrowserComputerController().run(
+        "computer.click",
+        {"target": "full_desktop", "x": 12, "y": 34},
+        yolo_mode=True,
+    )
+
+    assert clicked["x"] == 12
+    assert clicked["y"] == 34
+    assert "local_target" not in result
+    assert result["target_context"]["scope"] == "full_desktop"

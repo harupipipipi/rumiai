@@ -47,6 +47,19 @@
           "y": {"type": "integer"},
           "width": {"type": "integer"},
           "height": {"type": "integer"},
+          "target": {
+            "type": "string",
+            "enum": ["focused_app_window", "app", "window", "active_window", "desktop", "full_desktop", "all_displays"]
+          },
+          "target_scope": {
+            "type": "string",
+            "enum": ["focused_app_window", "app", "window", "active_window", "desktop", "full_desktop", "all_displays"]
+          },
+          "coordinate_space": {
+            "type": "string",
+            "enum": ["target_window", "screenshot_image", "desktop", "action", "screen"]
+          },
+          "focus": {"type": "boolean"},
           "window_id": {"type": "string"},
           "window_index": {"type": "integer"},
           "combo": {"type": "string"},
@@ -83,13 +96,17 @@
           "id": "target",
           "label": "Default Target",
           "type": "select",
-          "default": "primary_display",
+          "default": "focused_app_window",
           "options": [
-            {"value": "primary_display", "label": "Primary Display"},
+            {"value": "focused_app_window", "label": "Focused App Window"},
+            {"value": "app", "label": "App"},
+            {"value": "window", "label": "Window"},
             {"value": "active_window", "label": "Active Window"},
+            {"value": "desktop", "label": "Desktop"},
+            {"value": "full_desktop", "label": "Full Desktop"},
             {"value": "all_displays", "label": "All Displays"}
           ],
-          "help": "Default desktop target for new tasks; request-specific details are supplied at call time."
+          "help": "Prefer focusing an app/window for normal computer use; choose desktop/full desktop when a task intentionally needs the whole screen."
         },
         {
           "id": "mode",
