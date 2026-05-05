@@ -103,7 +103,28 @@ def test_app_defaults_still_scope_app_screenshots():
 
     assert adjusted["target"] == "app"
     assert adjusted["app"] == "Vivaldi"
-    assert adjusted["focus"] is False
+    assert adjusted["focus"] is True
+
+
+def test_empty_frontend_default_target_app_is_replaced_by_text_inference():
+    from blocks.chat.send import _with_inferred_tool_support
+
+    updated = _with_inferred_tool_support(
+        {
+            "message": {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Vivaldi で LINE Chat を開いているので computer_use で送信して",
+                    }
+                ],
+            },
+            "params": {"tool_support": {"default_target_app": ""}},
+        }
+    )
+
+    assert updated["params"]["tool_support"]["default_target_app"] == "Vivaldi"
 
 
 def test_browser_use_executor_reaches_browser_v2_profile_manager(tmp_path):

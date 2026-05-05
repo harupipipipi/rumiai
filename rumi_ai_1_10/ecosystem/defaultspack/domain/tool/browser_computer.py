@@ -1619,14 +1619,6 @@ class BrowserComputerController:
         title_query = str(payload.get("title") or payload.get("window_title") or "").strip().lower()
         if system == "Darwin":
             if app and scope in {"window", "app", "app_window"}:
-                active = self._darwin_active_window()
-                if (
-                    isinstance(active, dict)
-                    and str(active.get("app") or "").lower() == app.lower()
-                    and (not title_query or title_query in str(active.get("title") or "").lower())
-                ):
-                    return active
-                index = int(payload.get("window_index") or payload.get("index") or 1)
                 windows = [
                     window
                     for window in self._darwin_windows(100)
@@ -1636,8 +1628,19 @@ class BrowserComputerController:
                     titled = [window for window in windows if title_query in str(window.get("title") or "").lower()]
                     if titled:
                         windows = titled
-                if len(windows) >= index:
-                    return windows[index - 1]
+                if windows:
+                    if self._has_explicit_window_index(payload):
+                        index = int(payload.get("window_index") or payload.get("index") or 1)
+                        if len(windows) >= index:
+                            return windows[index - 1]
+                    return self._largest_window(windows)
+                active = self._darwin_active_window()
+                if (
+                    isinstance(active, dict)
+                    and str(active.get("app") or "").lower() == app.lower()
+                    and (not title_query or title_query in str(active.get("title") or "").lower())
+                ):
+                    return active
             return self._darwin_active_window()
         if system == "Windows":
             if scope == "window":
@@ -1660,6 +1663,18 @@ class BrowserComputerController:
                     return windows[0]
             return self._windows_active_window()
         return None
+
+    @staticmethod
+    def _has_explicit_window_index(payload: dict[str, Any]) -> bool:
+        return payload.get("window_index") is not None or payload.get("index") is not None
+
+    @staticmethod
+    def _largest_window(windows: list[dict[str, Any]]) -> dict[str, Any]:
+        def area(window: dict[str, Any]) -> int:
+            bounds = BrowserComputerController._valid_bounds(window.get("bounds")) or {}
+            return int(bounds.get("width", 0)) * int(bounds.get("height", 0))
+
+        return max(windows, key=area)
 
     @staticmethod
     def _target_capture_bounds(target_context: dict[str, Any]) -> dict[str, int] | None:

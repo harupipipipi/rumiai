@@ -53,6 +53,11 @@ _TARGET_APP_PATTERNS = [
     (re.compile(r"\bchrome\b|クローム", re.IGNORECASE), "Google Chrome"),
     (re.compile(r"\bsafari\b|サファリ", re.IGNORECASE), "Safari"),
     (re.compile(r"\bfirefox\b|ファイアフォックス", re.IGNORECASE), "Firefox"),
+    (re.compile(r"\bline\b|ライン", re.IGNORECASE), "LINE"),
+    (re.compile(r"\bslack\b|スラック", re.IGNORECASE), "Slack"),
+    (re.compile(r"\bfinder\b|ファインダー", re.IGNORECASE), "Finder"),
+    (re.compile(r"\bterminal\b|ターミナル", re.IGNORECASE), "Terminal"),
+    (re.compile(r"\bxcode\b", re.IGNORECASE), "Xcode"),
 ]
 
 
@@ -238,7 +243,7 @@ def _with_inferred_tool_support(input_data):
     support = dict(params.get("tool_support") if isinstance(params.get("tool_support"), dict) else {})
     if support.get("default_target_app"):
         return input_data
-    support.setdefault("default_target_app", inferred_app)
+    support["default_target_app"] = inferred_app
     support.setdefault("app_scoped_desktop_actions", True)
     params["tool_support"] = support
     updated = dict(input_data)
