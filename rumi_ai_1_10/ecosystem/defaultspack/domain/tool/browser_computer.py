@@ -389,7 +389,11 @@ class BrowserComputerController:
                 "platform": system,
                 "reason": "Screenshots are supported on macOS and Windows.",
             }
-        model_path = self._model_screenshot_copy(path)
+        quality = self._normalize_screenshot_quality(payload)
+        try:
+            model_path = self._model_screenshot_copy(path, quality=quality)
+        except TypeError:
+            model_path = self._model_screenshot_copy(path)
         data_url = ""
         try:
             mime_type = "image/jpeg" if model_path.suffix.lower() in {".jpg", ".jpeg"} else "image/png"
@@ -397,10 +401,12 @@ class BrowserComputerController:
         except Exception:
             data_url = ""
         result = self._screenshot_result(path, model_path, system, target_context=target_context)
+        result["quality"] = quality
         if data_url:
             result["data_url"] = data_url
             result["visual_data_url"] = data_url
             result["model_image_path"] = str(model_path)
+        self._write_screenshot_metadata(path, result)
         return result
 
     def _zoom(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -433,8 +439,9 @@ class BrowserComputerController:
         source_width = int(image["width"])
         source_height = int(image["height"])
         try:
-            center_x = int(payload.get("x", source_width // 2))
-            center_y = int(payload.get("y", source_height // 2))
+            center = self._zoom_center_in_source_image(payload, source_path, source_width, source_height)
+            center_x = int(center["x"])
+            center_y = int(center["y"])
             radius = int(payload.get("radius", 80))
             crop_width = int(payload.get("width") or max(radius * 2, 1))
             crop_height = int(payload.get("height") or max(radius * 2, 1))
@@ -484,6 +491,12 @@ class BrowserComputerController:
             "visual_data_url": data_url,
             "crop_bounds": crop_bounds,
             "center": center,
+            "source_point": self._point_annotation(
+                "zoom-source",
+                int(payload.get("x", center_x)),
+                int(payload.get("y", center_y)),
+                coordinate_space=str(payload.get("coordinate_space") or "source_image"),
+            ),
             "scale": scale,
             "image_size": {"width": cropped["width"], "height": cropped["height"]},
             "source_image_size": {"width": source_width, "height": source_height},
@@ -505,10 +518,44 @@ class BrowserComputerController:
             "overlay_points": [zoom_point],
         }
 
+    def _zoom_center_in_source_image(
+        self,
+        payload: dict[str, Any],
+        source_path: Path,
+        source_width: int,
+        source_height: int,
+    ) -> dict[str, int]:
+        x = int(payload.get("x", source_width // 2))
+        y = int(payload.get("y", source_height // 2))
+        coordinate_space = str(payload.get("coordinate_space") or "source_image").strip().lower()
+        if coordinate_space in {"source_image", "screenshot_image", "image", ""}:
+            return {"x": x, "y": y}
+        metadata = self._screenshot_metadata_for_path(source_path) or self._latest_screenshot_metadata()
+        if not metadata:
+            return {"x": x, "y": y}
+        if coordinate_space == "model_image":
+            converted = self._model_point_to_screenshot_point(x, y, metadata)
+            if converted:
+                return converted
+        if coordinate_space in {"target_window", "window", "local"}:
+            converted = self._target_point_to_screenshot_point(x, y, metadata)
+            if converted:
+                return converted
+        if coordinate_space in {"desktop", "action", "screen"}:
+            converted = self._action_point_to_screenshot_point(x, y, metadata)
+            if converted:
+                return converted
+        return {"x": x, "y": y}
+
     def _zoom_source_path(self, payload: dict[str, Any]) -> Path | None:
-        raw_source = str(payload.get("source_path") or payload.get("path") or "").strip()
+        raw_source = str(payload.get("source_path") or payload.get("screenshot_path") or payload.get("path") or "").strip()
         if raw_source:
             return Path(raw_source).expanduser()
+        raw_model = str(payload.get("model_image_path") or "").strip()
+        if raw_model:
+            metadata = self._screenshot_metadata_for_path(Path(raw_model).expanduser())
+            if metadata and metadata.get("path"):
+                return Path(str(metadata["path"])).expanduser()
         if not bool(payload.get("latest")):
             return None
         candidates = [
@@ -572,6 +619,19 @@ class BrowserComputerController:
                     "x": action_width / image_size[0],
                     "y": action_height / image_size[1],
                 }
+        target_bounds = self._valid_bounds(target_context.get("bounds"))
+        if target_bounds and image_size and image_size[0] and image_size[1]:
+            result["target_action_size"] = {"width": target_bounds["width"], "height": target_bounds["height"]}
+            result["screenshot_to_target_scale"] = {
+                "x": target_bounds["width"] / image_size[0],
+                "y": target_bounds["height"] / image_size[1],
+            }
+            if model_image_size and model_image_size[0] and model_image_size[1]:
+                result["model_to_target_scale"] = {
+                    "x": target_bounds["width"] / model_image_size[0],
+                    "y": target_bounds["height"] / model_image_size[1],
+                }
+            result["target_to_action_offset"] = {"x": target_bounds["x"], "y": target_bounds["y"]}
         cursor = self._cursor_position()
         if cursor:
             result["cursor"] = cursor
@@ -584,7 +644,7 @@ class BrowserComputerController:
             "action": "move",
             "screen_coordinates": True,
             "coordinate_source": "screenshot",
-            "notes": "For target=desktop, call move/click with desktop action coordinates. For target=app, window, or active_window screenshots, pass the same target plus local x/y; the tool offsets them to desktop coordinates. If a point is estimated on model_image_size, multiply by model_to_action_scale first.",
+            "notes": "Pass coordinate_space explicitly. Use coordinate_space=model_image for points selected on model_image_path, screenshot_image for path pixels, target_window for local window points, and desktop/action for absolute display points. The tool converts model/screenshot/window points to desktop action coordinates.",
         }
         return result
 
@@ -621,12 +681,36 @@ class BrowserComputerController:
                 }
         return metadata
 
-    def _model_screenshot_copy(self, path: Path) -> Path:
+    @staticmethod
+    def _normalize_screenshot_quality(payload: dict[str, Any]) -> str:
+        raw = str(
+            payload.get("quality")
+            or payload.get("image_detail")
+            or payload.get("vision_detail")
+            or ""
+        ).strip().lower()
+        aliases = {
+            "low": "compact",
+            "compact": "compact",
+            "standard": "standard",
+            "auto": "standard",
+            "high": "high_detail",
+            "hi": "high_detail",
+            "high_detail": "high_detail",
+            "original": "high_detail",
+            "full": "high_detail",
+        }
+        return aliases.get(raw, "standard")
+
+    def _model_screenshot_copy(self, path: Path, *, quality: str = "standard") -> Path:
+        if quality == "high_detail":
+            return path
         preview_path = path.with_name(path.stem + "-model.jpg")
         if platform.system() == "Darwin":
             try:
+                max_size = "640" if quality == "compact" else "1280"
                 subprocess.run(
-                    ["sips", "-Z", "640", "-s", "format", "jpeg", str(path), "--out", str(preview_path)],
+                    ["sips", "-Z", max_size, "-s", "format", "jpeg", str(path), "--out", str(preview_path)],
                     check=True,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
@@ -670,6 +754,125 @@ class BrowserComputerController:
                     return int(width), int(height)
                 index += length
         return None
+
+    @staticmethod
+    def _screenshot_metadata_path(path: Path) -> Path:
+        stem = path.stem
+        if stem.endswith("-model"):
+            stem = stem[:-6]
+        return path.with_name(stem + ".json")
+
+    def _write_screenshot_metadata(self, path: Path, result: dict[str, Any]) -> None:
+        try:
+            metadata = dict(result)
+            metadata.pop("data_url", None)
+            metadata.pop("visual_data_url", None)
+            metadata["metadata_path"] = str(self._screenshot_metadata_path(path))
+            self._screenshot_metadata_path(path).write_text(
+                json.dumps(metadata, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+
+    def _screenshot_metadata_for_path(self, path: Path | None) -> dict[str, Any] | None:
+        if path is None:
+            return None
+        candidates = [self._screenshot_metadata_path(path)]
+        if path.suffix.lower() == ".json":
+            candidates.insert(0, path)
+        for candidate in candidates:
+            try:
+                if candidate.is_file():
+                    value = json.loads(candidate.read_text(encoding="utf-8"))
+                    return value if isinstance(value, dict) else None
+            except Exception:
+                continue
+        return None
+
+    def _latest_screenshot_metadata(self) -> dict[str, Any] | None:
+        try:
+            candidates = [
+                path
+                for path in self._artifact_root.glob("screenshot-*.json")
+                if path.is_file() and "-model" not in path.stem
+            ]
+            if not candidates:
+                return None
+            return self._screenshot_metadata_for_path(max(candidates, key=lambda path: path.stat().st_mtime))
+        except Exception:
+            return None
+
+    def _coordinate_reference_metadata(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        for key in ("screenshot_metadata_path", "metadata_path", "screenshot_path", "source_path", "model_image_path"):
+            raw = str(payload.get(key) or "").strip()
+            if raw:
+                metadata = self._screenshot_metadata_for_path(Path(raw).expanduser())
+                if metadata:
+                    return metadata
+        if payload.get("latest") is not False:
+            return self._latest_screenshot_metadata()
+        return None
+
+    @staticmethod
+    def _size_from_metadata(metadata: dict[str, Any], key: str) -> tuple[float, float] | None:
+        value = metadata.get(key)
+        if not isinstance(value, dict):
+            return None
+        width = value.get("width")
+        height = value.get("height")
+        if isinstance(width, (int, float)) and isinstance(height, (int, float)) and width > 0 and height > 0:
+            return float(width), float(height)
+        return None
+
+    @staticmethod
+    def _metadata_target_bounds(metadata: dict[str, Any]) -> dict[str, int] | None:
+        target = metadata.get("target")
+        if isinstance(target, dict):
+            bounds = BrowserComputerController._valid_bounds(target.get("bounds"))
+            if bounds:
+                return bounds
+            window = target.get("window")
+            if isinstance(window, dict):
+                return BrowserComputerController._valid_bounds(window.get("bounds"))
+        return None
+
+    def _model_point_to_screenshot_point(self, x: int, y: int, metadata: dict[str, Any]) -> dict[str, int] | None:
+        screenshot_size = self._size_from_metadata(metadata, "image_size")
+        model_size = self._size_from_metadata(metadata, "model_image_size")
+        if not screenshot_size or not model_size:
+            return None
+        return {
+            "x": int(round(float(x) * screenshot_size[0] / model_size[0])),
+            "y": int(round(float(y) * screenshot_size[1] / model_size[1])),
+        }
+
+    def _target_point_to_screenshot_point(self, x: int, y: int, metadata: dict[str, Any]) -> dict[str, int] | None:
+        screenshot_size = self._size_from_metadata(metadata, "image_size")
+        bounds = self._metadata_target_bounds(metadata)
+        if not screenshot_size or not bounds:
+            return None
+        return {
+            "x": int(round(float(x) * screenshot_size[0] / bounds["width"])),
+            "y": int(round(float(y) * screenshot_size[1] / bounds["height"])),
+        }
+
+    def _action_point_to_screenshot_point(self, x: int, y: int, metadata: dict[str, Any]) -> dict[str, int] | None:
+        screenshot_size = self._size_from_metadata(metadata, "image_size")
+        if not screenshot_size:
+            return None
+        bounds = self._metadata_target_bounds(metadata)
+        if bounds:
+            local_x = float(x) - float(bounds["x"])
+            local_y = float(y) - float(bounds["y"])
+            return self._target_point_to_screenshot_point(int(round(local_x)), int(round(local_y)), metadata)
+        action_size = self._size_from_metadata(metadata, "action_coordinate_system")
+        if not action_size:
+            return None
+        return {
+            "x": int(round(float(x) * screenshot_size[0] / action_size[0])),
+            "y": int(round(float(y) * screenshot_size[1] / action_size[1])),
+        }
 
     @staticmethod
     def _image_data_url(path: Path) -> str:
@@ -1324,6 +1527,73 @@ class BrowserComputerController:
     def _region_arg(bounds: dict[str, int]) -> str:
         return f"{bounds['x']},{bounds['y']},{bounds['width']},{bounds['height']}"
 
+    def _image_point_to_action_coordinates(
+        self,
+        payload: dict[str, Any],
+        target_context: dict[str, Any],
+        coordinate_space: str,
+    ) -> dict[str, Any] | None:
+        metadata = self._coordinate_reference_metadata(payload)
+        if not metadata:
+            return None
+        try:
+            original_x = int(payload.get("x", 0))
+            original_y = int(payload.get("y", 0))
+        except Exception:
+            return None
+        image_point = {"x": original_x, "y": original_y}
+        if coordinate_space == "model_image":
+            converted = self._model_point_to_screenshot_point(original_x, original_y, metadata)
+            if not converted:
+                return None
+            image_point = converted
+        elif coordinate_space not in {"screenshot_image", "source_image", "image"}:
+            return None
+
+        screenshot_size = self._size_from_metadata(metadata, "image_size")
+        if not screenshot_size:
+            return None
+
+        scope = target_context.get("scope")
+        bounds = self._valid_bounds(target_context.get("bounds"))
+        if scope not in {"desktop", "full_desktop", "all_displays"} and bounds:
+            local_x = int(round(float(image_point["x"]) * bounds["width"] / screenshot_size[0]))
+            local_y = int(round(float(image_point["y"]) * bounds["height"] / screenshot_size[1]))
+            origin = target_context.get("origin") if isinstance(target_context.get("origin"), dict) else {}
+            action_x = int(origin.get("x", 0)) + local_x
+            action_y = int(origin.get("y", 0)) + local_y
+            target_window_point = self._point_annotation("target-window", local_x, local_y, coordinate_space="target_window")
+        else:
+            action_size = self._size_from_metadata(metadata, "action_coordinate_system")
+            if not action_size:
+                action_system = self._action_coordinate_system(platform.system(), (int(screenshot_size[0]), int(screenshot_size[1])))
+                action_size = (
+                    float(action_system.get("width", screenshot_size[0])),
+                    float(action_system.get("height", screenshot_size[1])),
+                ) if action_system else screenshot_size
+            action_x = int(round(float(image_point["x"]) * action_size[0] / screenshot_size[0]))
+            action_y = int(round(float(image_point["y"]) * action_size[1] / screenshot_size[1]))
+            target_window_point = None
+
+        source_space = "screenshot_image" if coordinate_space != "model_image" else "model_image"
+        source_point = self._point_annotation("source", original_x, original_y, coordinate_space=source_space)
+        screenshot_point = self._point_annotation("screenshot", image_point["x"], image_point["y"], coordinate_space="screenshot_image")
+        transform = {
+            "input": source_point,
+            "screenshot_point": screenshot_point,
+            "action_point": self._point_annotation("action", action_x, action_y, coordinate_space="action"),
+            "metadata_path": metadata.get("metadata_path"),
+            "source_path": metadata.get("path"),
+        }
+        if target_window_point:
+            transform["target_window_point"] = target_window_point
+        return {
+            "x": action_x,
+            "y": action_y,
+            "local_target": {"x": target_window_point["x"], "y": target_window_point["y"]} if target_window_point else None,
+            "transform": transform,
+        }
+
     def _payload_with_target_coordinates(
         self,
         action: str,
@@ -1337,6 +1607,15 @@ class BrowserComputerController:
         adjusted = dict(payload)
         scope = target_context.get("scope")
         coordinate_space = str(payload.get("coordinate_space") or payload.get("coordinates") or "").strip().lower()
+        if coordinate_space in {"model_image", "screenshot_image", "source_image", "image"}:
+            converted = self._image_point_to_action_coordinates(payload, target_context, coordinate_space)
+            if converted:
+                adjusted["x"] = converted["x"]
+                adjusted["y"] = converted["y"]
+                if converted.get("local_target"):
+                    adjusted["_target_local_point"] = converted["local_target"]
+                adjusted["_coordinate_transform"] = converted["transform"]
+                return adjusted, target_context
         if scope not in {"desktop", "full_desktop", "all_displays"} and coordinate_space not in {"desktop", "action", "screen"}:
             origin = target_context.get("origin") if isinstance(target_context.get("origin"), dict) else {}
             adjusted["x"] = int(payload.get("x", 0)) + int(origin.get("x", 0))
@@ -1371,10 +1650,14 @@ class BrowserComputerController:
             self._darwin_move_cursor(action_payload)
         elif system == "Darwin" and action == "computer.click":
             self._darwin_click(action_payload)
+        elif system == "Darwin" and action == "computer.type":
+            self._darwin_type(action_payload)
+        elif system == "Darwin" and action == "computer.key":
+            self._darwin_key(action_payload)
         elif system == "Darwin" and action == "computer.scroll":
             self._darwin_scroll(action_payload)
         elif system == "Darwin" and action == "computer.hotkey":
-            subprocess.run(["osascript", "-e", self._darwin_hotkey_script(action_payload)], check=True)
+            self._darwin_hotkey(action_payload)
         elif system == "Darwin" and action == "computer.clipboard.read":
             return self._darwin_clipboard_read()
         elif system == "Darwin" and action == "computer.clipboard.write":
@@ -1407,6 +1690,17 @@ class BrowserComputerController:
             if "_target_local_point" in action_payload:
                 result["local_target"] = action_payload["_target_local_point"]
             result.update(self._action_point_metadata(action, action_payload))
+            if "_coordinate_transform" in action_payload:
+                result["coordinate_transform"] = action_payload["_coordinate_transform"]
+                result["display_overlay_points"] = [
+                    point
+                    for point in (
+                        action_payload["_coordinate_transform"].get("input"),
+                        action_payload["_coordinate_transform"].get("screenshot_point"),
+                        action_payload["_coordinate_transform"].get("target_window_point"),
+                    )
+                    if isinstance(point, dict)
+                ]
         if target_context:
             result["target_context"] = target_context
         if action == "computer.scroll":
@@ -1428,12 +1722,12 @@ class BrowserComputerController:
         return {"annotation": point, "overlay_points": [point]}
 
     @staticmethod
-    def _point_annotation(label: str, x: int, y: int) -> dict[str, Any]:
+    def _point_annotation(label: str, x: int, y: int, *, coordinate_space: str = "action") -> dict[str, Any]:
         return {
             "type": "point",
             "x": int(x),
             "y": int(y),
-            "coordinate_space": "action",
+            "coordinate_space": coordinate_space,
             "label": label,
         }
 
@@ -1501,6 +1795,32 @@ class BrowserComputerController:
         except Exception as exc:
             raise RuntimeError("computer.scroll requires PyObjC Quartz on macOS") from exc
 
+    def _darwin_type(self, payload: dict[str, Any]) -> None:
+        script = self._apple_script("computer.type", payload)
+        try:
+            subprocess.run(["osascript", "-e", script], check=True)
+            return
+        except subprocess.CalledProcessError:
+            # System Events often rejects non-ASCII keystrokes or missing Automation
+            # permission. Clipboard paste keeps Japanese text intact and uses the
+            # same CoreGraphics fallback as click/move.
+            self._darwin_paste_text(str(payload.get("text", "")))
+
+    def _darwin_key(self, payload: dict[str, Any]) -> None:
+        script = self._apple_script("computer.key", payload)
+        try:
+            subprocess.run(["osascript", "-e", script], check=True)
+        except subprocess.CalledProcessError:
+            key = str(payload.get("key", "return")).strip().lower()
+            self._darwin_post_key(key)
+
+    def _darwin_hotkey(self, payload: dict[str, Any]) -> None:
+        try:
+            subprocess.run(["osascript", "-e", self._darwin_hotkey_script(payload)], check=True)
+        except subprocess.CalledProcessError:
+            parts = self._hotkey_parts(payload)
+            self._darwin_post_key(parts["key"], modifiers=parts["modifiers"])
+
     def _darwin_hotkey_script(self, payload: dict[str, Any]) -> str:
         parts = self._hotkey_parts(payload)
         key = parts["key"]
@@ -1553,6 +1873,122 @@ class BrowserComputerController:
     def _darwin_clipboard_write(self, payload: dict[str, Any]) -> None:
         content = str(payload.get("text") if "text" in payload else payload.get("content") or "")
         subprocess.run(["pbcopy"], input=content, check=True, text=True)
+
+    def _darwin_paste_text(self, text: str) -> None:
+        try:
+            old_clipboard = subprocess.run(["pbpaste"], check=True, capture_output=True, text=True).stdout
+        except Exception:
+            old_clipboard = None
+        subprocess.run(["pbcopy"], input=str(text), check=True, text=True)
+        self._darwin_post_key("v", modifiers=["cmd"])
+        time.sleep(0.2)
+        if old_clipboard is not None:
+            try:
+                subprocess.run(["pbcopy"], input=old_clipboard, check=True, text=True)
+            except Exception:
+                pass
+
+    def _darwin_post_key(self, key: str, modifiers: list[str] | tuple[str, ...] | None = None) -> None:
+        key_name = str(key or "").strip().lower()
+        key_codes = {
+            "a": 0,
+            "s": 1,
+            "d": 2,
+            "f": 3,
+            "h": 4,
+            "g": 5,
+            "z": 6,
+            "x": 7,
+            "c": 8,
+            "v": 9,
+            "b": 11,
+            "q": 12,
+            "w": 13,
+            "e": 14,
+            "r": 15,
+            "y": 16,
+            "t": 17,
+            "1": 18,
+            "2": 19,
+            "3": 20,
+            "4": 21,
+            "6": 22,
+            "5": 23,
+            "=": 24,
+            "9": 25,
+            "7": 26,
+            "-": 27,
+            "8": 28,
+            "0": 29,
+            "]": 30,
+            "o": 31,
+            "u": 32,
+            "[": 33,
+            "i": 34,
+            "p": 35,
+            "return": 36,
+            "enter": 36,
+            "l": 37,
+            "j": 38,
+            "'": 39,
+            "k": 40,
+            ";": 41,
+            "\\": 42,
+            ",": 43,
+            "/": 44,
+            "n": 45,
+            "m": 46,
+            ".": 47,
+            "tab": 48,
+            "space": 49,
+            "`": 50,
+            "delete": 51,
+            "backspace": 51,
+            "escape": 53,
+            "esc": 53,
+            "left": 123,
+            "right": 124,
+            "down": 125,
+            "up": 126,
+        }
+        if key_name not in key_codes:
+            raise RuntimeError(f"Unsupported macOS key fallback: {key_name}")
+        flag_names = {str(item).strip().lower() for item in (modifiers or [])}
+        flags: list[str] = []
+        flag_map = {
+            "cmd": "maskCommand",
+            "command": "maskCommand",
+            "meta": "maskCommand",
+            "ctrl": "maskControl",
+            "control": "maskControl",
+            "alt": "maskAlternate",
+            "option": "maskAlternate",
+            "shift": "maskShift",
+        }
+        for name in sorted(flag_names):
+            flag = flag_map.get(name)
+            if flag and flag not in flags:
+                flags.append(flag)
+        flags_expr = "[]"
+        if flags:
+            flags_expr = "CGEventFlags([" + ", ".join("." + flag for flag in flags) + "])"
+        swift = f"""
+import CoreGraphics
+import Foundation
+let source = CGEventSource(stateID: .hidSystemState)
+let flags: CGEventFlags = {flags_expr}
+let keyCode = CGKeyCode({key_codes[key_name]})
+if let down = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true) {{
+    down.flags = flags
+    down.post(tap: .cghidEventTap)
+}}
+Thread.sleep(forTimeInterval: 0.03)
+if let up = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) {{
+    up.flags = flags
+    up.post(tap: .cghidEventTap)
+}}
+"""
+        subprocess.run(["swift", "-e", swift], check=True)
 
     def _darwin_focus_window(self, payload: dict[str, Any]) -> None:
         app = self._app_name(payload)
@@ -1621,6 +2057,23 @@ class BrowserComputerController:
             key = payload.get("key", "return")
             if isinstance(key, int):
                 return f'tell application "System Events" to key code {key}'
+            normalized = str(key).strip().lower()
+            key_codes = {
+                "return": 36,
+                "enter": 36,
+                "tab": 48,
+                "space": 49,
+                "delete": 51,
+                "backspace": 51,
+                "escape": 53,
+                "esc": 53,
+                "left": 123,
+                "right": 124,
+                "down": 125,
+                "up": 126,
+            }
+            if normalized in key_codes:
+                return f'tell application "System Events" to key code {key_codes[normalized]}'
             return f'tell application "System Events" to keystroke {json.dumps(str(key))}'
         raise ValueError(action)
 

@@ -30,6 +30,7 @@
               "computer.window.focus",
               "computer.window.bounds",
               "computer.screenshot",
+              "computer.zoom",
               "computer.move",
               "computer.click",
               "computer.type",
@@ -57,7 +58,21 @@
           },
           "coordinate_space": {
             "type": "string",
-            "enum": ["target_window", "screenshot_image", "desktop", "action", "screen"]
+            "enum": ["model_image", "source_image", "target_window", "screenshot_image", "desktop", "action", "screen"]
+          },
+          "source_path": {"type": "string"},
+          "screenshot_path": {"type": "string"},
+          "model_image_path": {"type": "string"},
+          "latest": {"type": "boolean"},
+          "radius": {"type": "integer"},
+          "scale": {"type": "number"},
+          "quality": {
+            "type": "string",
+            "enum": ["compact", "standard", "high_detail"]
+          },
+          "image_detail": {
+            "type": "string",
+            "enum": ["low", "auto", "high"]
           },
           "focus": {"type": "boolean"},
           "window_id": {"type": "string"},

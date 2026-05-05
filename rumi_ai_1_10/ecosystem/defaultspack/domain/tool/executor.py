@@ -432,9 +432,33 @@ def _browser_computer_action_payload(tool_name, arguments):
             "type": "computer.type",
             "key": "computer.key",
             "scroll": "computer.scroll",
+            "zoom": "computer.zoom",
+            "computer.zoom": "computer.zoom",
         }
         action = action_map.get(raw_action, raw_action)
-        for key in ("url", "x", "y", "text", "key", "amount"):
+        for key in (
+            "url",
+            "x",
+            "y",
+            "width",
+            "height",
+            "radius",
+            "scale",
+            "source_path",
+            "latest",
+            "text",
+            "key",
+            "amount",
+            "target",
+            "target_scope",
+            "coordinate_space",
+            "focus",
+            "quality",
+            "image_detail",
+            "vision_detail",
+            "screenshot_path",
+            "model_image_path",
+        ):
             if key in arguments:
                 raw_payload[key] = arguments.get(key)
     else:
@@ -448,11 +472,19 @@ def _browser_computer_action_payload(tool_name, arguments):
             "type": "computer.type",
             "key": "computer.key",
             "scroll": "computer.scroll",
+            "zoom": "computer.zoom",
+            "computer.zoom": "computer.zoom",
         }
         action = action_map.get(raw_action, raw_action)
         for key in (
             "x",
             "y",
+            "width",
+            "height",
+            "radius",
+            "scale",
+            "source_path",
+            "latest",
             "text",
             "content",
             "key",
@@ -460,12 +492,21 @@ def _browser_computer_action_payload(tool_name, arguments):
             "combo",
             "amount",
             "limit",
+            "target",
+            "target_scope",
+            "coordinate_space",
+            "focus",
             "window_id",
             "window_index",
             "app",
             "name",
             "path",
             "bundle_id",
+            "quality",
+            "image_detail",
+            "vision_detail",
+            "screenshot_path",
+            "model_image_path",
         ):
             if key in arguments:
                 raw_payload[key] = arguments.get(key)

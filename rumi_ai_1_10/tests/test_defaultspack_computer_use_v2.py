@@ -46,6 +46,30 @@ def test_macos_permissions_include_v2_preflight_fields(monkeypatch):
     assert preflight["cliclick"]["available"] is True
 
 
+def test_computer_use_executor_forwards_target_coordinate_and_quality_fields():
+    from domain.tool.executor import _browser_computer_action_payload
+
+    action, payload = _browser_computer_action_payload(
+        "computer_use",
+        {
+            "action": "click",
+            "target": "app",
+            "app": "Vivaldi",
+            "coordinate_space": "model_image",
+            "x": 150,
+            "y": 100,
+            "quality": "high_detail",
+            "model_image_path": "/tmp/screen-model.jpg",
+        },
+    )
+
+    assert action == "computer.click"
+    assert payload["target"] == "app"
+    assert payload["coordinate_space"] == "model_image"
+    assert payload["quality"] == "high_detail"
+    assert payload["model_image_path"] == "/tmp/screen-model.jpg"
+
+
 def test_windows_permissions_include_v2_preflight_fields(monkeypatch):
     from domain.tool.browser_computer import BrowserComputerController
     import domain.tool.browser_computer as browser_computer
@@ -142,6 +166,42 @@ def test_zoom_crops_latest_screenshot_and_returns_coordinate_metadata(tmp_path):
     assert result["annotation"]["coordinate_space"] == "zoom_image"
     assert result["annotation"]["source"] == {"x": 4, "y": 3, "coordinate_space": "source_image"}
     assert Path(result["path"]).is_file()
+
+
+def test_zoom_converts_model_image_coordinates_to_source_screenshot(tmp_path):
+    from domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    screenshot = tmp_path / "screenshot-100.png"
+    rows = []
+    for y in range(8):
+        row = bytearray()
+        for x in range(8):
+            row.extend([x, y, 200, 255])
+        rows.append(row)
+    controller._write_png_pixels(
+        screenshot,
+        {"width": 8, "height": 8, "channels": 4, "color_type": 6, "rows": rows},
+    )
+    (tmp_path / "screenshot-100.json").write_text(
+        json.dumps(
+            {
+                "path": str(screenshot),
+                "metadata_path": str(tmp_path / "screenshot-100.json"),
+                "image_size": {"width": 8, "height": 8},
+                "model_image_size": {"width": 4, "height": 4},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = controller.run(
+        "computer.zoom",
+        {"latest": True, "coordinate_space": "model_image", "x": 2, "y": 2, "width": 4, "height": 4},
+    )
+
+    assert result["center"] == {"x": 4, "y": 4, "coordinate_space": "source_image"}
+    assert result["source_point"] == {"type": "point", "x": 2, "y": 2, "coordinate_space": "model_image", "label": "zoom-source"}
 
 
 def test_computer_click_and_move_results_include_point_annotations(monkeypatch):
@@ -277,6 +337,132 @@ def test_screenshot_can_target_active_window_region(tmp_path, monkeypatch):
     assert result["target"]["origin"] == {"x": 10, "y": 20}
     assert result["screenshot_origin"] == {"x": 10, "y": 20}
     assert result["coordinate_system"]["x_range"] == [0, 299]
+
+
+def test_retina_window_screenshot_exposes_target_local_scales(tmp_path, monkeypatch):
+    from domain.tool.browser_computer import BrowserComputerController
+
+    screenshot = tmp_path / "screen.png"
+    model_image = tmp_path / "screen-model.png"
+    png_header = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR"
+    screenshot.write_bytes(png_header + b"\x00\x00\x02\x58\x00\x00\x01\x90")
+    model_image.write_bytes(png_header + b"\x00\x00\x01,\x00\x00\x00\xc8")
+    monkeypatch.setattr(BrowserComputerController, "_cursor_position", staticmethod(lambda: None))
+    monkeypatch.setattr(BrowserComputerController, "_darwin_displays", lambda self: [])
+
+    result = BrowserComputerController()._screenshot_result(
+        screenshot,
+        model_image,
+        "Darwin",
+        target_context={
+            "scope": "app",
+            "bounds": {"x": 100, "y": 200, "width": 300, "height": 200},
+            "origin": {"x": 100, "y": 200},
+            "coordinate_space": "target_window",
+        },
+    )
+
+    assert result["target_action_size"] == {"width": 300, "height": 200}
+    assert result["screenshot_to_target_scale"] == {"x": 0.5, "y": 0.5}
+    assert result["model_to_target_scale"] == {"x": 1.0, "y": 1.0}
+    assert result["target_to_action_offset"] == {"x": 100, "y": 200}
+
+
+def test_app_window_click_converts_screenshot_coordinates_to_desktop(tmp_path, monkeypatch):
+    from domain.tool.browser_computer import BrowserComputerController
+    import domain.tool.browser_computer as browser_computer
+
+    clicked = {}
+    metadata = {
+        "path": str(tmp_path / "screenshot-1.png"),
+        "metadata_path": str(tmp_path / "screenshot-1.json"),
+        "image_size": {"width": 600, "height": 400},
+        "model_image_size": {"width": 300, "height": 200},
+        "target": {
+            "scope": "app",
+            "bounds": {"x": 100, "y": 200, "width": 300, "height": 200},
+            "origin": {"x": 100, "y": 200},
+        },
+    }
+    (tmp_path / "screenshot-1.json").write_text(json.dumps(metadata), encoding="utf-8")
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(BrowserComputerController, "_darwin_focus_app", lambda self, payload: None)
+    monkeypatch.setattr(
+        BrowserComputerController,
+        "_darwin_active_window",
+        lambda self: {
+            "id": "frontmost",
+            "app": "Vivaldi",
+            "title": "LINE",
+            "bounds": {"x": 100, "y": 200, "width": 300, "height": 200},
+        },
+    )
+    monkeypatch.setattr(BrowserComputerController, "_darwin_click", lambda self, payload: clicked.update(payload))
+
+    result = BrowserComputerController(artifact_root=tmp_path).run(
+        "computer.click",
+        {"target": "app", "app": "Vivaldi", "coordinate_space": "screenshot_image", "x": 300, "y": 200},
+        yolo_mode=True,
+    )
+
+    assert clicked["x"] == 250
+    assert clicked["y"] == 300
+    assert result["target"] == {"x": 250, "y": 300}
+    assert result["local_target"] == {"x": 150, "y": 100}
+    assert result["coordinate_transform"]["screenshot_point"]["x"] == 300
+    assert result["coordinate_transform"]["target_window_point"] == {
+        "type": "point",
+        "x": 150,
+        "y": 100,
+        "coordinate_space": "target_window",
+        "label": "target-window",
+    }
+
+
+def test_app_window_click_converts_model_image_coordinates_to_desktop(tmp_path, monkeypatch):
+    from domain.tool.browser_computer import BrowserComputerController
+    import domain.tool.browser_computer as browser_computer
+
+    clicked = {}
+    metadata = {
+        "path": str(tmp_path / "screenshot-1.png"),
+        "metadata_path": str(tmp_path / "screenshot-1.json"),
+        "image_size": {"width": 600, "height": 400},
+        "model_image_size": {"width": 300, "height": 200},
+        "target": {
+            "scope": "app",
+            "bounds": {"x": 100, "y": 200, "width": 300, "height": 200},
+            "origin": {"x": 100, "y": 200},
+        },
+    }
+    (tmp_path / "screenshot-1.json").write_text(json.dumps(metadata), encoding="utf-8")
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(BrowserComputerController, "_darwin_focus_app", lambda self, payload: None)
+    monkeypatch.setattr(
+        BrowserComputerController,
+        "_darwin_active_window",
+        lambda self: {
+            "id": "frontmost",
+            "app": "Vivaldi",
+            "title": "LINE",
+            "bounds": {"x": 100, "y": 200, "width": 300, "height": 200},
+        },
+    )
+    monkeypatch.setattr(BrowserComputerController, "_darwin_click", lambda self, payload: clicked.update(payload))
+
+    result = BrowserComputerController(artifact_root=tmp_path).run(
+        "computer.click",
+        {"target": "app", "app": "Vivaldi", "coordinate_space": "model_image", "x": 150, "y": 100},
+        yolo_mode=True,
+    )
+
+    assert clicked["x"] == 250
+    assert clicked["y"] == 300
+    assert result["coordinate_transform"]["input"]["coordinate_space"] == "model_image"
+    assert result["coordinate_transform"]["screenshot_point"]["x"] == 300
+    assert result["coordinate_transform"]["screenshot_point"]["y"] == 200
 
 
 def test_app_window_click_offsets_local_coordinates(monkeypatch):

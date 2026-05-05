@@ -1,5 +1,7 @@
 import sys
 import os
+import queue
+import threading
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -87,7 +89,38 @@ class _InlineThoughtFilter:
 def _fallback_send(input_data, context):
     from blocks.chat.send import run as send_run
 
-    result = send_run(input_data, context)
+    live_tool_events = bool((context or {}).get("stream_live_tool_events"))
+    if live_tool_events:
+        events_queue: queue.Queue = queue.Queue()
+        sentinel = object()
+        result_box = {}
+
+        def event_callback(event):
+            if isinstance(event, dict):
+                events_queue.put(event)
+
+        def worker():
+            try:
+                live_context = dict(context or {})
+                live_context["event_callback"] = event_callback
+                result_box["result"] = send_run(input_data, live_context)
+            except Exception as exc:
+                result_box["exception"] = exc
+            finally:
+                events_queue.put(sentinel)
+
+        threading.Thread(target=worker, daemon=True).start()
+        while True:
+            item = events_queue.get()
+            if item is sentinel:
+                break
+            yield item
+        if result_box.get("exception") is not None:
+            yield {"type": "error", "error": "AI request failed: " + str(result_box["exception"])}
+            return
+        result = result_box.get("result")
+    else:
+        result = send_run(input_data, context)
     if isinstance(result, dict) and result.get("status") == "ok":
         message = result.get("data")
         if isinstance(message, dict):
@@ -96,11 +129,12 @@ def _fallback_send(input_data, context):
                 message.get("conversation_id"),
                 message.get("parent_id"),
             )
-            if user_message is not None:
+            if user_message is not None and not live_tool_events:
                 yield {"type": "user_message", "message": user_message}
-            for event in message.get("events") or []:
-                if isinstance(event, dict):
-                    yield event
+            if not live_tool_events:
+                for event in message.get("events") or []:
+                    if isinstance(event, dict):
+                        yield event
         yield {"type": "message", "message": message}
         yield {"type": "done", "message": message}
         return
@@ -265,5 +299,7 @@ def run(input_data, context):
     client = AIClient()
     model = conv.get("model", "stub/default")
     if selected_tools or not client.supports_stream(model):
-        return {"_sse": True, "events": _fallback_send(input_data, context)}
+        live_context = dict(context or {})
+        live_context["stream_live_tool_events"] = True
+        return {"_sse": True, "events": _fallback_send(input_data, live_context)}
     return {"_sse": True, "events": _stream_response(input_data, context)}

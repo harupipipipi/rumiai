@@ -478,6 +478,72 @@ def test_chat_stream_fallback_emits_persisted_user_and_assistant(tmp_path, monke
     ChatStore._instance = None
 
 
+def test_chat_stream_fallback_emits_live_tool_events_before_final_message(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from blocks.chat.stream import run
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+    calls = {"ai": 0}
+
+    def call_handler(name, payload):
+        if name == "defaults.ai.complete":
+            calls["ai"] += 1
+            if calls["ai"] == 1:
+                return {
+                    "status": "ok",
+                    "data": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "call_live",
+                                "name": "live_probe",
+                                "input": {"query": "now"},
+                            }
+                        ],
+                        "finish_reason": "tool_calls",
+                    },
+                }
+            return {
+                "status": "ok",
+                "data": {"content": [{"type": "text", "text": "done"}], "finish_reason": "stop"},
+            }
+        if name == "defaults.tool.invoke":
+            return {"status": "ok", "data": {"result": "ok"}}
+        raise AssertionError(name)
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    result = run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "use live probe"},
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "live_probe",
+                        "parameters": {"type": "object", "properties": {"query": {"type": "string"}}},
+                    },
+                }
+            ],
+            "params": {"max_tool_calls": 2},
+        },
+        {"call_handler": call_handler},
+    )
+
+    events = list(result["events"])
+    event_types = [event.get("type") for event in events]
+
+    assert event_types.index("user_message") < event_types.index("tool_call_started")
+    assert event_types.index("tool_call_started") < event_types.index("message")
+    assert event_types.count("tool_call_started") == 1
+    assert event_types.count("tool_call_completed") == 1
+
+    ChatStore._instance = None
+
+
 def test_inline_thought_stream_filter_separates_thinking():
     from blocks.chat.stream import _InlineThoughtFilter
 

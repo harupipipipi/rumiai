@@ -35,6 +35,7 @@
               "computer.window.focus",
               "computer.window.bounds",
               "computer.screenshot",
+              "computer.zoom",
               "computer.move",
               "computer.click",
               "computer.type",

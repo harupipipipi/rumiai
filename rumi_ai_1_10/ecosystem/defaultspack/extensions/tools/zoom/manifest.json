@@ -20,7 +20,13 @@
           "radius": {"type": "integer"},
           "scale": {"type": "number"},
           "source_path": {"type": "string"},
-          "latest": {"type": "boolean"}
+          "latest": {"type": "boolean"},
+          "coordinate_space": {
+            "type": "string",
+            "enum": ["model_image", "source_image", "target_window", "screenshot_image", "desktop", "action", "screen"]
+          },
+          "screenshot_path": {"type": "string"},
+          "model_image_path": {"type": "string"}
         }
       }
     },

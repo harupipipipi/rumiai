@@ -435,17 +435,31 @@ def _tool_visibility_message(tools):
     }
 
 
+def _append_event(events, event, event_callback=None):
+    events.append(event)
+    if event_callback is not None:
+        try:
+            event_callback(event)
+        except Exception:
+            pass
+    return event
+
+
 def _complete_with_tools(model, messages, tools, context, call_handler, params):
-    events = [_event("status", "{} が考えています".format(model), phase="thinking", model=model)]
+    event_callback = (context or {}).get("event_callback") if isinstance(context, dict) else None
+    events = []
+    _append_event(events, _event("status", "{} が考えています".format(model), phase="thinking", model=model), event_callback)
     tool_logs = []
     if tools:
-        events.append(
+        _append_event(
+            events,
             _event(
                 "status",
                 "{} 個の tool を接続しました".format(len(tools)),
                 phase="tools_attached",
                 tool_count=len(tools),
-            )
+            ),
+            event_callback,
         )
 
     working_messages = list(messages)
@@ -491,7 +505,8 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
                 continue
             tool_call_id = str(block.get("id") or block.get("tool_call_id") or gen_id())
             arguments = _tool_arguments(block)
-            events.append(
+            _append_event(
+                events,
                 _event(
                     "tool_call_started",
                     "{} を使用中".format(tool_name),
@@ -499,7 +514,8 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
                     tool_name=tool_name,
                     tool_call_id=tool_call_id,
                     arguments=arguments,
-                )
+                ),
+                event_callback,
             )
             invoke_context = build_tool_execution_context(context or {}, tool_name, connected_names)
             if call_handler is not None:
@@ -520,7 +536,8 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
                 "timestamp": timestamp(),
             }
             tool_logs.append(log)
-            events.append(
+            _append_event(
+                events,
                 _event(
                     "tool_call_completed",
                     "{} の結果を受け取りました".format(tool_name),
@@ -528,7 +545,8 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
                     tool_name=tool_name,
                     tool_call_id=tool_call_id,
                     is_error=isinstance(result, dict) and result.get("status") == "error",
-                )
+                ),
+                event_callback,
             )
             _append_tool_result_message(
                 working_messages,
@@ -644,6 +662,7 @@ def _sanitize_attachment_metadata(attachments):
 
 def run(input_data, context):
     store = ChatStore()
+    event_callback = context.get("event_callback") if isinstance(context, dict) else None
     conversation_id = input_data.get("conversation_id")
     if not conversation_id:
         return error("conversation_id is required", "INVALID_INPUT")
@@ -695,6 +714,11 @@ def run(input_data, context):
     user_msg = store.add_message(conversation_id, user_msg_dict)
     if user_msg is None:
         return error("Failed to add user message", "INTERNAL_ERROR")
+    if callable(event_callback):
+        try:
+            event_callback({"type": "user_message", "message": user_msg})
+        except Exception:
+            pass
     chain = store.get_message_chain(conversation_id, user_msg["id"])
     standard_messages = convert_to_standard(chain)
     model = conv.get("model", "stub/default")
