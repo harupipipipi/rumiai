@@ -16,6 +16,7 @@ import threading
 import time
 import calendar
 import re
+from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -594,7 +595,43 @@ class Scheduler:
         }
 
         try:
-            if conversation_id:
+            metadata = task_cfg.get("metadata") if isinstance(task_cfg.get("metadata"), dict) else {}
+            if (
+                (task_cfg.get("agent_runtime_tick") or metadata.get("runtime_handler") == "agent_runtime.tick")
+                and task_cfg.get("agent_id")
+            ):
+                from domain.agent.agent_runtime import AgentRuntime
+
+                runtime_root = metadata.get("runtime_pack_root")
+                runtime = AgentRuntime(pack_root=Path(runtime_root)) if runtime_root else AgentRuntime()
+                runtime_result = runtime.tick(
+                    str(task_cfg.get("agent_id")),
+                    message=message,
+                    conversation_id=conversation_id or "",
+                    trigger="manual" if manual else "scheduled",
+                    schedule_id=schedule_id,
+                    schedule_execution_id=exec_id,
+                    model=model,
+                    tools=task_cfg.get("tools") if isinstance(task_cfg.get("tools"), list) else None,
+                    tool_policy=task_cfg.get("tool_policy") if isinstance(task_cfg.get("tool_policy"), dict) else {},
+                    metadata={
+                        **metadata,
+                        "source": "scheduler",
+                        "schedule_id": schedule_id,
+                        "schedule_execution_id": exec_id,
+                        "trigger": "manual" if manual else "scheduled",
+                        "profile_id": task_cfg.get("profile_id"),
+                        "agent_id": task_cfg.get("agent_id"),
+                    },
+                    context={
+                        "profile_policy": task_cfg.get("tool_policy") if isinstance(task_cfg.get("tool_policy"), dict) else {},
+                    },
+                )
+                if runtime_result.get("status") in {"failed", "error"}:
+                    result = runtime_result
+                else:
+                    result = {"status": "ok", "data": runtime_result}
+            elif conversation_id:
                 from blocks.chat.send import run as chat_send_run
 
                 params = {}
@@ -602,7 +639,6 @@ class Scheduler:
                     params["tool_policy"] = task_cfg["tool_policy"]
                 if task_cfg.get("thinking_level"):
                     params["thinking_level"] = task_cfg.get("thinking_level")
-                metadata = task_cfg.get("metadata") if isinstance(task_cfg.get("metadata"), dict) else {}
                 result = chat_send_run(
                     {
                         "conversation_id": conversation_id,

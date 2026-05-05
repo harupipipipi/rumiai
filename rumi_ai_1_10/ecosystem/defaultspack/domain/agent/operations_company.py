@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from blocks._common import timestamp
+from domain.agent.agent_store import AgentStore
+from domain.agent.agent_templates import AgentTemplates
 from domain.agent.org_manager import OrgManager
 from domain.agent.role_registry import RoleRegistry
 
@@ -233,12 +235,15 @@ class OperationsCompanyRuntime:
         org = OrgManager().get_org(org_id) if org_id else None
         schedules = self._schedules_for_state(state)
         conversation_id = state.get("conversation_id")
+        agents = AgentStore(root=self._runtime_store_root()).list()
+        company_agent_ids = {role["agent_id"] for role in ROLE_DEFINITIONS}
         return {
             "profile_id": PROFILE_ID,
             "bootstrapped": bool(org),
             "org_id": org_id,
             "conversation_id": conversation_id,
             "org": org,
+            "agents": [agent for agent in agents if agent.get("agent_id") in company_agent_ids],
             "schedules": schedules,
             "state": state,
             "manifest": self.manifest(),
@@ -256,6 +261,7 @@ class OperationsCompanyRuntime:
         state = self._load_state()
         org_id = self._ensure_org(state)
         conversation_id = self._ensure_conversation(state, model=model)
+        self._ensure_default_agents()
         if start_nonstop:
             self._ensure_heartbeat_schedule(
                 state,
@@ -289,6 +295,7 @@ class OperationsCompanyRuntime:
 
     def _define_roles(self) -> None:
         registry = RoleRegistry()
+        agent_store = AgentStore(root=self._runtime_store_root())
         for role in ROLE_DEFINITIONS:
             registry.define_role(
                 role_key=role["role_key"],
@@ -297,6 +304,7 @@ class OperationsCompanyRuntime:
                 allowed_tools=role["allowed_tools"],
                 context_limit=role["context_limit"],
             )
+            agent_store.upsert(AgentTemplates.from_role_definition(role))
 
     def _ensure_org(self, state: dict[str, Any]) -> str:
         manager = OrgManager()
@@ -318,6 +326,14 @@ class OperationsCompanyRuntime:
                 role.get("model") or DEFAULT_MODEL,
             )
         return str(org_id)
+
+    def _ensure_default_agents(self) -> None:
+        from domain.agent.agent_definition import AgentDefinition
+        from domain.agent.agent_store import AgentStore
+
+        store = AgentStore(root=self._runtime_store_root())
+        for role in ROLE_DEFINITIONS:
+            store.upsert(AgentDefinition.from_role(role, profile_id=PROFILE_ID))
 
     def _ensure_conversation(self, state: dict[str, Any], *, model: str | None = None) -> str:
         from domain.chat.store import ChatStore
@@ -373,6 +389,7 @@ class OperationsCompanyRuntime:
                 "timeout": 300,
                 "profile_id": PROFILE_ID,
                 "agent_id": "operations_monitor",
+                "agent_runtime_tick": True,
                 "tools": ["rumi_api", "todo", "browser_computer", "web_search", "subagent"],
                 "tool_policy": {
                     "profile_id": PROFILE_ID,
@@ -388,6 +405,9 @@ class OperationsCompanyRuntime:
                     "profile_id": PROFILE_ID,
                     "agent_id": "operations_monitor",
                     "internal_channel": "ops-company",
+                    "runtime_handler": "agent_runtime.tick",
+                    "client_manager_conversation_id": conversation_id,
+                    "runtime_pack_root": str(self._runtime_store_root()),
                 },
             },
             {"value": safe_minutes, "unit": "minutes"},
@@ -410,3 +430,15 @@ class OperationsCompanyRuntime:
             return schedules
         except Exception:
             return []
+
+    def _runtime_store_root(self) -> Path:
+        if os.environ.get("RUMI_DEFAULTSPACK_AGENT_STORE_PATH", "").strip():
+            return self.pack_root
+        if os.environ.get("RUMI_DEFAULTSPACK_AGENTS_PATH", "").strip():
+            return self.pack_root
+        if os.environ.get("RUMI_DEFAULTSPACK_OPERATIONS_STATE_PATH", "").strip():
+            try:
+                return self.state_path.parent.parent
+            except Exception:
+                pass
+        return self.pack_root

@@ -6,8 +6,24 @@ from typing import Any, Dict, List
 
 
 PROVIDER_SECRET_KEYS: Dict[str, List[str]] = {
+    "anthropic": ["ANTHROPIC_API_KEY"],
+    "deepseek": ["DEEPSEEK_API_KEY"],
+    "fireworks": ["FIREWORKS_API_KEY"],
+    "genspark": ["GENSPARK_API_KEY"],
     "google": ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
+    "groq": ["GROQ_API_KEY"],
+    "llama_cpp": ["LLAMACPP_API_KEY"],
+    "llamacpp": ["LLAMACPP_API_KEY"],
+    "longcat": ["LONGCAT_API_KEY"],
+    "mistral": ["MISTRAL_API_KEY"],
+    "ollama": ["OLLAMA_API_KEY"],
+    "openai": ["OPENAI_API_KEY"],
+    "openai_compatible": ["OPENAI_COMPATIBLE_API_KEY"],
     "openrouter": ["OPENROUTER_API_KEY"],
+    "perplexity": ["PERPLEXITY_API_KEY"],
+    "together": ["TOGETHER_API_KEY"],
+    "vllm": ["VLLM_API_KEY"],
+    "xai": ["XAI_API_KEY"],
 }
 
 
@@ -47,6 +63,17 @@ def provider_secret_keys(provider_id: str) -> List[str]:
 
 
 def provider_has_api_key(provider_id: str, *, pack_root: Path | None = None) -> bool:
+    try:
+        from domain.ai_client.key_resolver import KeyResolver
+
+        resolved = KeyResolver(pack_root=pack_root).resolve_api_key(
+            provider_id=provider_id,
+            record_usage=False,
+        )
+        if resolved.get("configured"):
+            return True
+    except Exception:
+        pass
     keys = provider_secret_keys(provider_id)
     if not keys:
         return False
@@ -77,6 +104,14 @@ def set_provider_api_key(
             reason=f"clear {provider_id} api key",
         )
         os.environ.pop(key, None)
+        try:
+            from domain.ai_client.key_manager import KeyManager
+
+            KeyManager(pack_root=pack_root).delete_key(
+                "legacy_{}_default".format(str(provider_id or "").strip())
+            )
+        except Exception:
+            pass
         if result.success:
             _reset_ai_client()
         return {
@@ -96,6 +131,20 @@ def set_provider_api_key(
     )
     if result.success:
         os.environ[key] = cleaned
+        try:
+            from domain.ai_client.key_manager import KeyManager
+
+            KeyManager(pack_root=pack_root).create_key(
+                key_id="legacy_{}_default".format(str(provider_id or "").strip()),
+                provider_id=str(provider_id or "").strip(),
+                value=cleaned,
+                name="{} default".format(str(provider_id or "").strip() or "provider"),
+                env_var=key,
+                default_for_provider=True,
+                metadata={"legacy_secret_key": key},
+            )
+        except Exception:
+            pass
         _reset_ai_client()
     return {
         "success": bool(result.success),
@@ -111,31 +160,68 @@ def load_provider_api_keys_into_env(*, pack_root: Path | None = None) -> dict[st
     loaded: dict[str, bool] = {}
     for provider_id, keys in PROVIDER_SECRET_KEYS.items():
         configured = False
+        primary_key = keys[0] if keys else ""
         for key in keys:
             if os.environ.get(key, "").strip():
                 configured = True
                 continue
-            if not (_secrets_dir(pack_root) / f"{key}.json").exists():
-                continue
-            store = _get_store(pack_root)
-            value = store._internal_read_value(
-                key,
-                caller_id=f"defaultspack.ai_client:{provider_id}",
+        if configured:
+            loaded[provider_id] = True
+            continue
+
+        value = ""
+        env_key = primary_key
+        try:
+            from domain.ai_client.key_resolver import KeyResolver
+
+            resolved = KeyResolver(pack_root=pack_root).resolve_api_key(
+                provider_id=provider_id,
+                record_usage=False,
             )
-            if value:
-                os.environ[key] = value
-                configured = True
+            if resolved.get("configured"):
+                value = str(resolved.get("value") or "")
+                env_key = str(resolved.get("env_key") or primary_key)
+        except Exception:
+            value = ""
+
+        if value and env_key:
+            os.environ[env_key] = value
+            configured = True
+        else:
+            for key in keys:
+                if not (_secrets_dir(pack_root) / f"{key}.json").exists():
+                    continue
+                store = _get_store(pack_root)
+                value = store._internal_read_value(
+                    key,
+                    caller_id=f"defaultspack.ai_client:{provider_id}",
+                )
+                if value:
+                    os.environ[key] = value
+                    configured = True
+                    break
         loaded[provider_id] = configured
     return loaded
 
 
 def provider_key_status(*, pack_root: Path | None = None) -> list[dict[str, Any]]:
+    try:
+        from domain.ai_client.key_manager import KeyManager
+
+        named_keys = KeyManager(pack_root=pack_root).list_keys()
+    except Exception:
+        named_keys = []
     return [
         {
             "provider_id": provider_id,
             "key": keys[0],
             "keys": list(keys),
             "configured": provider_has_api_key(provider_id, pack_root=pack_root),
+            "named_key_count": sum(
+                1
+                for item in named_keys
+                if str(item.get("provider_id") or "") == provider_id
+            ),
         }
         for provider_id, keys in sorted(PROVIDER_SECRET_KEYS.items())
         if keys
