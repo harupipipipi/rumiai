@@ -53,19 +53,19 @@ function ToolVisualPreview({ visual }: { visual: ToolVisualImage }) {
   const hasPoints = visual.points.length > 0;
   const title = visual.kind === "zoom" ? "Zoom crop" : "Screenshot";
   const imageClass = hasPoints
-    ? "block max-h-[240px] max-w-full rounded-md border border-zinc-800 object-contain"
-    : "block max-h-[150px] max-w-full rounded-md border border-zinc-800 object-contain opacity-90";
+    ? "block max-h-[220px] max-w-full rounded-md border border-zinc-800 object-contain"
+    : "block max-h-[128px] max-w-full rounded-md border border-zinc-800 object-contain opacity-90";
 
   return (
-    <div className="min-w-0 overflow-hidden rounded-lg border border-zinc-800/80 bg-zinc-950/80">
+    <div className="inline-block max-w-full overflow-hidden rounded-lg border border-zinc-800/80 bg-zinc-950/80 align-top">
       <div className="flex min-w-0 items-center justify-between gap-3 border-b border-zinc-800/70 px-3 py-2">
         <div className="flex min-w-0 items-center gap-2 text-[11px] font-medium text-zinc-300">
           <ImageIcon size={12} className="shrink-0 text-blue-300" />
           <span>{hasPoints ? "Click feedback" : title}</span>
         </div>
-        <span className="min-w-0 truncate font-mono text-[10px] text-zinc-600">{visual.sourceLabel}</span>
+        <span className="max-w-[180px] truncate font-mono text-[10px] text-zinc-600">{visual.sourceLabel}</span>
       </div>
-      <div className="p-2 text-center">
+      <div className="p-2">
         <div className="relative inline-block max-w-full overflow-hidden rounded-md bg-black/40 align-top">
           <img src={visual.src} alt={title} className={imageClass} />
           {visual.points.map((point) => (
@@ -140,7 +140,7 @@ function ToolResultDetail({ detail, result }: { detail: string; result?: unknown
 
   if (isJsonLikeDetail(detail)) {
     return (
-      <div className="min-w-0 flex-1 space-y-2">
+      <div className="min-w-0 space-y-2">
         {visual && <ToolVisualPreview visual={visual} />}
         <details className="text-[12px] leading-relaxed" open={!visual}>
           <summary className="cursor-pointer select-none text-zinc-500 hover:text-zinc-300">
@@ -155,7 +155,7 @@ function ToolResultDetail({ detail, result }: { detail: string; result?: unknown
   }
 
   return (
-    <div className="min-w-0 flex-1 break-words text-[12px] leading-relaxed">
+    <div className="min-w-0 break-words text-[12px] leading-relaxed">
       {visual && (
         <div className="mb-2">
           <ToolVisualPreview visual={visual} />
@@ -171,7 +171,10 @@ function ToolResultPanel({ item }: { item: ToolActivityItem }) {
   if (!item.detail && !visual) return null;
 
   return (
-    <div className="mt-2 min-w-0 rounded-md border border-zinc-800/70 bg-black/20 px-3 py-2 text-zinc-300">
+    <div className={cn(
+      "mt-2 min-w-0 max-w-full rounded-md border border-zinc-800/70 bg-black/20 px-3 py-2 text-zinc-300",
+      visual && "w-fit",
+    )}>
       <span className="mb-1 block text-[10px] font-medium text-zinc-600">結果</span>
       <ToolResultDetail detail={item.detail} result={item.result} />
     </div>
@@ -185,7 +188,7 @@ function ToolActivityTray({ message }: { message: ChatMessagesRendererProps["mes
   const total = items.length;
 
   return (
-    <details className="rumi-tool-activity mb-4 w-full rounded-xl border border-zinc-800/90 bg-zinc-950/70 px-4 py-3 text-zinc-300 shadow-[0_16px_44px_rgba(0,0,0,0.22)]" open>
+    <details className="rumi-tool-activity mb-4 w-full max-w-full overflow-hidden rounded-xl border border-zinc-800/90 bg-zinc-950/70 px-4 py-3 text-zinc-300 shadow-[0_16px_44px_rgba(0,0,0,0.22)]" open>
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-[13px] text-zinc-300">
         <span className="flex min-w-0 items-center gap-2 font-medium">
           <span className="truncate">使用した tool</span>
@@ -195,7 +198,7 @@ function ToolActivityTray({ message }: { message: ChatMessagesRendererProps["mes
       </summary>
       <div className="mt-3 grid gap-2">
         {items.map((item) => (
-          <div key={item.id} className="rumi-tool-card rounded-lg border border-zinc-800/80 bg-zinc-900/55 px-3.5 py-3">
+          <div key={item.id} className="rumi-tool-card min-w-0 rounded-lg border border-zinc-800/80 bg-zinc-900/55 px-3.5 py-3">
             <div className="flex min-w-0 items-start justify-between gap-3">
               <div className="flex min-w-0 items-start gap-2.5">
                 <span className="mt-0.5">

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { extractToolVisual } from "./toolVisuals";
+import { compactVisualSourceLabel, extractToolVisual } from "./toolVisuals";
 
 test("extracts screenshot data urls and pixel overlay points", () => {
   const visual = extractToolVisual({
@@ -28,6 +28,7 @@ test("turns local screenshot paths into file urls when data url is unavailable",
 
   assert.ok(visual);
   assert.equal(visual.src, "file:///Users/haru/screenshot.png");
+  assert.equal(visual.sourceLabel, "screenshot.png");
   assert.deepEqual(visual.imageSize, { width: 800, height: 600 });
 });
 
@@ -42,9 +43,18 @@ test("prefers click history visual images and red-dot overlay points", () => {
 
   assert.ok(visual);
   assert.equal(visual.src, "file:///Users/haru/screenshot-clicks.png");
+  assert.equal(visual.sourceLabel, "screenshot-clicks.png");
   assert.equal(visual.points[0].label, "click-1");
   assert.equal(visual.points[0].xPercent, 25);
   assert.equal(visual.points[0].yPercent, 25);
+});
+
+test("compacts visual labels instead of rendering long absolute paths", () => {
+  assert.equal(
+    compactVisualSourceLabel("/Users/haru/Desktop/project/user_data/shared/screenshot-177.png"),
+    "screenshot-177.png",
+  );
+  assert.equal(compactVisualSourceLabel("data:image/png;base64,abc"), "data url");
 });
 
 test("extracts zoom crop images with crop metadata", () => {

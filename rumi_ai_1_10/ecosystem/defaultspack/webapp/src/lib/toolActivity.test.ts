@@ -42,6 +42,24 @@ test("polishes calculator result prose into the answer", () => {
   assert.equal(groups[0].items[0].detail, "26141");
 });
 
+test("summarizes computer screenshots without leaking giant absolute paths into the card", () => {
+  const groups = buildToolActivityGroups([
+    {
+      tool_name: "computer_use",
+      arguments: { action: "computer.screenshot" },
+      result: {
+        status: "ok",
+        data: {
+          action: "computer.screenshot",
+          path: "/Users/haru/Desktop/puroguramukei/rumi_ai_mac/rumi_ai_1_10/ecosystem/defaultspack/user_data/shared/screenshot-177.png",
+        },
+      },
+    },
+  ]);
+
+  assert.equal(groups[0].items[0].detail, "screenshot captured · screenshot-177.png");
+});
+
 test("does not create activity from text-only claims", () => {
   assert.deepEqual(buildToolActivityGroups([], []), []);
 });

@@ -48,6 +48,11 @@ function pickString(record: Record<string, unknown>, keys: string[]): string {
   return "";
 }
 
+function compactPath(value: string): string {
+  const normalized = value.trim().replace(/\\/g, "/");
+  return normalized.split("/").filter(Boolean).pop() || normalized;
+}
+
 export function toolFolderFor(toolName: string): { id: string; label: string } {
   for (const [pattern, id, label] of FOLDER_RULES) {
     if (pattern.test(toolName)) return { id, label };
@@ -100,8 +105,21 @@ function summarizeToolResult(toolName: string, result: unknown): string {
   if (!result || typeof result !== "object") return compact(result, 120);
   const record = result as Record<string, unknown>;
   const data = record.data && typeof record.data === "object" ? record.data as Record<string, unknown> : record;
+  const lowerToolName = toolName.toLowerCase();
+  const action = pickString(data, ["action"]);
+  const visualPath = pickString(data, [
+    "click_history_visual_path",
+    "visual_path",
+    "path",
+    "image_path",
+    "model_image_path",
+  ]);
+  if (lowerToolName.includes("computer") && visualPath) {
+    const label = action ? action.replace(/^computer\./, "") : "screenshot";
+    return `${label} captured · ${compactPath(visualPath)}`;
+  }
   const direct = pickString(data, ["summary", "result", "message", "output", "title"]);
-  if (direct) return toolName.toLowerCase().includes("calc") ? formatCalculatorResult(direct) : direct;
+  if (direct) return lowerToolName.includes("calc") ? formatCalculatorResult(direct) : direct;
   if (Array.isArray(data.results)) return `${data.results.length} 件の結果`;
   if (Array.isArray(data.items)) return `${data.items.length} 件の項目`;
   if (Array.isArray(data.files)) return `${data.files.length} 件のファイル`;

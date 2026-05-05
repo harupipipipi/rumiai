@@ -22,6 +22,28 @@ function nonEmptyString(value: unknown): string {
   return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
+export function compactVisualSourceLabel(value: string): string {
+  const normalized = value.trim().replace(/\\/g, "/");
+  if (!normalized) return "";
+  if (/^data:/i.test(normalized)) return "data url";
+  if (/^blob:/i.test(normalized)) return "blob";
+  try {
+    if (/^https?:\/\//i.test(normalized)) {
+      const url = new URL(normalized);
+      const filename = url.pathname.split("/").filter(Boolean).pop();
+      return filename || url.hostname;
+    }
+    if (/^file:\/\//i.test(normalized)) {
+      const url = new URL(normalized);
+      const filename = decodeURIComponent(url.pathname).split("/").filter(Boolean).pop();
+      return filename || "file";
+    }
+  } catch {
+    // Fall through to path compaction.
+  }
+  return normalized.split("/").filter(Boolean).pop() || normalized;
+}
+
 function imageSrcFromRecord(record: Record<string, unknown>): string {
   for (const key of ["visual_data_url", "visualDataUrl", "click_history_visual_data_url", "thumbnail_data_url", "thumbnailDataUrl"]) {
     const visualUrl = nonEmptyString(record[key]);
@@ -176,7 +198,14 @@ export function extractToolVisual(value: unknown): ToolVisualImage | null {
   return {
     kind: hasCrop ? "zoom" : "screenshot",
     src: normalizeImageSrc(src),
-    sourceLabel: nonEmptyString(record.path) || nonEmptyString(record.image_path) || nonEmptyString(record.model_image_path) || "data_url",
+    sourceLabel: compactVisualSourceLabel(
+      nonEmptyString(record.click_history_visual_path)
+      || nonEmptyString(record.visual_path)
+      || nonEmptyString(record.path)
+      || nonEmptyString(record.image_path)
+      || nonEmptyString(record.model_image_path)
+      || src,
+    ),
     imageSize: sizeFrom(record.image_size) ?? sizeFrom(record.model_image_size),
     cropBounds: hasCrop ? record.crop_bounds as Record<string, unknown> : undefined,
     points: pointsFromRecord(record),

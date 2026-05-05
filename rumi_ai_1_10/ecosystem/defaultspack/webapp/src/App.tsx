@@ -1749,7 +1749,7 @@ export default function App() {
               />
             )}
 
-            {operationsProfileAvailable && (
+            {operationsProfileAvailable && operationsConversationActive && (
               <OperationsCompanyPanel
                 status={operationsStatus}
                 isBusy={operationsBusy}
