@@ -8,6 +8,7 @@ import { api, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, t
 import { deriveConversationTitle, formatRelativeTime, messageToText } from "./lib/chat";
 import { cn } from "./lib/cn";
 import { canExecuteComposerEndpointAction } from "./lib/composerWidgets";
+import { extractToolVisual } from "./lib/toolVisuals";
 import { hasShellRegion } from "./lib/uiShell";
 import { hasWorkspaceAttachment, workspaceFileToAttachment } from "./lib/workspaceAttachments";
 import { resolveDefaultspackRenderers } from "./renderers/defaultspackRenderers";
@@ -221,6 +222,23 @@ function toolPreviewsFromMessages(messages: ChatMessage[]): ToolPreviewItem[] {
     const toolName = String(log.tool_name ?? "tool");
     const result = log.result as Record<string, unknown> | undefined;
     const status = String(result?.status ?? "completed");
+    const visual = extractToolVisual(result);
+    if (visual) {
+      return {
+        id: `message-tool-${message.id}-${index}`,
+        toolStepId: toolName,
+        timestamp: typeof log.timestamp === "number" ? log.timestamp : message.created_at,
+        data: {
+          type: "image" as const,
+          url: visual.src,
+          alt: `${toolName} ${visual.kind}`,
+          prompt: [
+            visual.sourceLabel,
+            visual.points.length ? `${visual.points.length} point${visual.points.length === 1 ? "" : "s"}` : "",
+          ].filter(Boolean).join(" · "),
+        },
+      };
+    }
     const args = compactPreviewValue(log.arguments);
     const output = compactPreviewValue(result?.data ?? result ?? "");
     const content = [

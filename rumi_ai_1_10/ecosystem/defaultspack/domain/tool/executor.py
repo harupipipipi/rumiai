@@ -421,13 +421,16 @@ def _safe_calculate(expression):
 
 def _browser_computer_action_payload(tool_name, arguments):
     arguments = arguments if isinstance(arguments, dict) else {}
+    raw_action = ""
     if tool_name == "browser_computer":
-        return str(arguments.get("action", "browser.session")), dict(arguments.get("payload") or {})
-    if tool_name == "zoom":
-        return "computer.zoom", dict(arguments)
-
-    raw_payload = dict(arguments.get("payload") or {})
-    raw_action = str(arguments.get("action") or "").strip()
+        action = str(arguments.get("action", "browser.session"))
+        raw_payload = dict(arguments.get("payload") or {})
+    elif tool_name == "zoom":
+        action = "computer.zoom"
+        raw_payload = dict(arguments)
+    else:
+        raw_payload = dict(arguments.get("payload") or {})
+        raw_action = str(arguments.get("action") or "").strip()
     if tool_name == "browser_use":
         action_map = {
             "": "browser.session",
@@ -496,10 +499,13 @@ def _browser_computer_action_payload(tool_name, arguments):
             "vision_detail",
             "screenshot_path",
             "model_image_path",
+            "visual_feedback",
+            "show_click_feedback",
+            "post_click_delay",
         ):
             if key in arguments:
                 raw_payload[key] = arguments.get(key)
-    else:
+    elif tool_name not in {"browser_computer", "zoom"}:
         action_map = {
             "": "computer.screenshot",
             "screenshot": "computer.screenshot",
@@ -571,6 +577,9 @@ def _browser_computer_action_payload(tool_name, arguments):
             "vision_detail",
             "screenshot_path",
             "model_image_path",
+            "visual_feedback",
+            "show_click_feedback",
+            "post_click_delay",
         ):
             if key in arguments:
                 raw_payload[key] = arguments.get(key)
@@ -578,6 +587,8 @@ def _browser_computer_action_payload(tool_name, arguments):
         raw_payload["shortcut"] = raw_action
     if action == "computer.type" and "text" not in raw_payload and "input_text" in raw_payload:
         raw_payload["text"] = raw_payload.get("input_text")
+    if action == "computer.click" and "visual_feedback" not in raw_payload and "show_click_feedback" not in raw_payload:
+        raw_payload["visual_feedback"] = True
     if "dry_run" in arguments:
         raw_payload["dry_run"] = arguments.get("dry_run")
     if "approval_token" in arguments:

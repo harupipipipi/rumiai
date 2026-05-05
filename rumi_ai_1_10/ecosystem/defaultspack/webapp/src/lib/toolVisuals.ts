@@ -23,13 +23,19 @@ function nonEmptyString(value: unknown): string {
 }
 
 function imageSrcFromRecord(record: Record<string, unknown>): string {
-  for (const key of ["visual_data_url", "visualDataUrl", "thumbnail_data_url", "thumbnailDataUrl"]) {
+  for (const key of ["visual_data_url", "visualDataUrl", "click_history_visual_data_url", "thumbnail_data_url", "thumbnailDataUrl"]) {
     const visualUrl = nonEmptyString(record[key]);
     if (visualUrl && visualUrl !== "[image data saved as artifact]") return visualUrl;
   }
   const dataUrl = nonEmptyString(record.data_url);
   if (dataUrl && dataUrl !== "[image data saved as artifact]") return dataUrl;
-  return nonEmptyString(record.path) || nonEmptyString(record.image_path) || nonEmptyString(record.model_image_path);
+  return (
+    nonEmptyString(record.click_history_visual_path)
+    || nonEmptyString(record.visual_path)
+    || nonEmptyString(record.path)
+    || nonEmptyString(record.image_path)
+    || nonEmptyString(record.model_image_path)
+  );
 }
 
 function normalizeImageSrc(src: string): string {
@@ -115,6 +121,8 @@ function pointsFromRecord(record: Record<string, unknown>): ToolVisualPoint[] {
   const rawPoints = [
     ...collectRawPoints(record.annotation),
     ...collectRawPoints(record.overlay_points),
+    ...collectRawPoints(record.click_history_overlay_points),
+    ...collectRawPoints(record.display_overlay_points),
     ...collectRawPoints(record.cursor),
   ];
   const coordinateSystem = isRecord(record.action_coordinate_system) ? record.action_coordinate_system : {};
@@ -147,6 +155,8 @@ function findVisualRecord(value: unknown): Record<string, unknown> | null {
     || value.crop_bounds
     || value.annotation
     || value.overlay_points
+    || value.click_history_overlay_points
+    || value.display_overlay_points
   ) {
     return value;
   }

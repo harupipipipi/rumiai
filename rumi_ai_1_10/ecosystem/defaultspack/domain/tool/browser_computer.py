@@ -1832,6 +1832,8 @@ class BrowserComputerController:
                     if isinstance(point, dict)
                 ]
             self._record_click_history(action, action_payload, result)
+            if action == "computer.click":
+                self._attach_post_click_visual(result, payload)
         if target_context:
             result["target_context"] = target_context
         if action == "computer.wait":
@@ -1907,6 +1909,55 @@ class BrowserComputerController:
         history = self._read_click_history()
         history.append(record)
         self._write_click_history(history)
+
+    def _attach_post_click_visual(self, result: dict[str, Any], payload: dict[str, Any]) -> None:
+        if payload.get("visual_feedback") is not True and payload.get("show_click_feedback") is not True:
+            return
+        try:
+            delay = float(payload.get("post_click_delay", 0.15))
+        except Exception:
+            delay = 0.15
+        if delay > 0:
+            time.sleep(min(delay, 1.0))
+        screenshot_payload = {
+            "focus": False,
+            "quality": payload.get("quality") or payload.get("image_quality") or "standard",
+        }
+        for key in (
+            "scope",
+            "target_scope",
+            "target",
+            "app",
+            "application",
+            "window_id",
+            "id",
+            "title",
+            "window_title",
+        ):
+            if key in payload:
+                screenshot_payload[key] = payload[key]
+        try:
+            screenshot = self._screenshot(payload=screenshot_payload, dry_run=False, yolo_mode=True)
+        except Exception as exc:
+            result["visual_feedback_error"] = str(exc)
+            return
+        if not isinstance(screenshot, dict) or not screenshot.get("path"):
+            return
+        result["post_click_screenshot"] = screenshot
+        result["path"] = screenshot.get("click_history_visual_path") or screenshot.get("path")
+        result["screenshot_path"] = screenshot.get("path")
+        result["visual_data_url"] = screenshot.get("click_history_visual_data_url") or screenshot.get("visual_data_url") or screenshot.get("data_url")
+        result["image_size"] = screenshot.get("image_size")
+        result["model_image_size"] = screenshot.get("model_image_size")
+        result["model_image_path"] = screenshot.get("model_image_path")
+        result["action_coordinate_system"] = screenshot.get("action_coordinate_system")
+        result["click_history_overlay_points"] = screenshot.get("click_history_overlay_points", [])
+        result["overlay_points"] = screenshot.get("click_history_overlay_points", result.get("overlay_points", []))
+        result["visual_feedback"] = {
+            "type": "post_click_screenshot",
+            "path": result.get("path"),
+            "overlay_points": result.get("overlay_points", []),
+        }
 
     def _attach_click_history_visual(self, screenshot_result: dict[str, Any]) -> None:
         path = Path(str(screenshot_result.get("path") or ""))

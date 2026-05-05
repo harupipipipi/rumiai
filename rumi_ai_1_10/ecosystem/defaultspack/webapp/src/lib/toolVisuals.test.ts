@@ -31,6 +31,22 @@ test("turns local screenshot paths into file urls when data url is unavailable",
   assert.deepEqual(visual.imageSize, { width: 800, height: 600 });
 });
 
+test("prefers click history visual images and red-dot overlay points", () => {
+  const visual = extractToolVisual({
+    action: "computer.click",
+    click_history_visual_path: "/Users/haru/screenshot-clicks.png",
+    path: "/Users/haru/screenshot.png",
+    image_size: { width: 1200, height: 800 },
+    click_history_overlay_points: [{ x: 300, y: 200, label: "click-1", coordinate_space: "screenshot_image" }],
+  });
+
+  assert.ok(visual);
+  assert.equal(visual.src, "file:///Users/haru/screenshot-clicks.png");
+  assert.equal(visual.points[0].label, "click-1");
+  assert.equal(visual.points[0].xPercent, 25);
+  assert.equal(visual.points[0].yPercent, 25);
+});
+
 test("extracts zoom crop images with crop metadata", () => {
   const visual = extractToolVisual({
     data: {

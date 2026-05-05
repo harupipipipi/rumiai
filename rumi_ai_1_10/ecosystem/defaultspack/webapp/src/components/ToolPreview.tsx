@@ -561,12 +561,12 @@ function ImagePreviewContent({ data }: { data: ImagePreview }) {
         <Image size={12} className="text-zinc-500" />
         <span className="text-[11px] text-zinc-300">{data.alt}</span>
       </div>
-      <div className="flex-1 p-4 flex items-center justify-center overflow-y-auto">
+      <div className="flex-1 p-3 flex items-start justify-center overflow-y-auto">
         {data.url ? (
           <img
             src={data.url}
             alt={data.alt}
-            className="max-w-full max-h-full rounded-lg border border-zinc-800"
+            className="max-h-[360px] w-full max-w-full rounded-lg border border-zinc-800 object-contain"
           />
         ) : (
           <div className="w-full aspect-square max-w-[200px] bg-zinc-800/30 rounded-lg border border-zinc-800 flex items-center justify-center">

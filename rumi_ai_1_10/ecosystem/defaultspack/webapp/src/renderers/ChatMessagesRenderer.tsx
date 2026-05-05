@@ -63,13 +63,13 @@ function ToolVisualPreview({ visual }: { visual: ToolVisualImage }) {
         <span className="min-w-0 truncate font-mono text-[10px] text-zinc-600">{visual.sourceLabel}</span>
       </div>
       <div className="p-2">
-        <div className="relative w-full overflow-hidden rounded-md bg-black/40" style={{ aspectRatio }}>
+        <div className="relative mx-auto w-full max-w-[680px] overflow-hidden rounded-md bg-black/40" style={{ aspectRatio }}>
           <img src={visual.src} alt={title} className="absolute inset-0 h-full w-full object-contain" />
           {visual.points.map((point) => (
             <span
               key={point.id}
               title={point.label}
-              className="absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-blue-400 shadow-[0_0_0_3px_rgba(59,130,246,0.42)]"
+              className="absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-red-500 shadow-[0_0_0_3px_rgba(239,68,68,0.42)]"
               style={{ left: `${point.xPercent}%`, top: `${point.yPercent}%` }}
             />
           ))}
