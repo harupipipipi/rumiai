@@ -325,12 +325,22 @@ class ToolExecutor:
                 payload,
                 yolo_mode=bool(policy.get("yolo_mode")),
             )
-            summary = "{} {} completed".format(tool_name, result.get("action", "action"))
+            action_name = result.get("action", "action")
+            is_error = result.get("status") == "error"
+            requires_approval = bool(result.get("requires_approval"))
+            if is_error:
+                error = result.get("error")
+                message = error.get("message") if isinstance(error, dict) else error
+                summary = "{} {} failed: {}".format(tool_name, action_name, message or "error")
+            elif requires_approval:
+                summary = "{} {} requires approval".format(tool_name, action_name)
+            else:
+                summary = "{} {} completed".format(tool_name, action_name)
             if result.get("path"):
                 summary += "; artifact: {}".format(result.get("path"))
             return {
                 "result": summary,
-                "is_error": False,
+                "is_error": is_error,
                 "widget": {"type": tool_name, **result}
             }
         elif tool_name == "todo":

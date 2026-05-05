@@ -31,7 +31,11 @@ _LOW_RISK_ACTIONS = {
     "computer.displays.list",
     "computer.active_window",
     "computer.windows.list",
+    "computer.screenshot",
+    "computer.zoom",
+    "computer.clipboard.read",
     "computer.wait",
+    "zoom",
 }
 
 _HIGH_RISK_ACTIONS = {

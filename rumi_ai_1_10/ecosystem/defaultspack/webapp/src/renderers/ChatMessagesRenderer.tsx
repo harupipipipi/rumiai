@@ -131,12 +131,14 @@ function WidgetCard({ widget }: { widget: Record<string, unknown> }) {
 function ToolStatusIcon({ item }: { item: ToolActivityItem }) {
   if (item.status === "running") return <Loader2 size={12} className="shrink-0 animate-spin text-blue-300" />;
   if (item.status === "failed") return <AlertTriangle size={12} className="shrink-0 text-red-300" />;
+  if (item.status === "approval") return <Clock size={12} className="shrink-0 text-amber-300" />;
   return <CheckCircle2 size={12} className="shrink-0 text-zinc-400" />;
 }
 
 function toolStatusLabel(item: ToolActivityItem): string {
   if (item.status === "running") return "実行中";
   if (item.status === "failed") return "失敗";
+  if (item.status === "approval") return "承認待ち";
   return "完了";
 }
 

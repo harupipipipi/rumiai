@@ -1,6 +1,6 @@
 import type { ChatActivityEvent, ToolLogEntry } from "./api";
 
-export type ToolActivityStatus = "running" | "completed" | "failed";
+export type ToolActivityStatus = "running" | "completed" | "failed" | "approval";
 
 export type ToolActivityItem = {
   id: string;
@@ -67,6 +67,7 @@ function coordinateSummary(args: Record<string, unknown>): string {
 function summarizeComputerArguments(toolName: string, args: Record<string, unknown>): string {
   const action = normalizeComputerAction(pickString(args, ["action"]), toolName);
   if (action.includes("screenshot")) return "スクリーンショット";
+  if (action.includes("zoom") || toolName.toLowerCase().includes("zoom")) return "ズーム";
   if (action.includes("click")) return `クリック${coordinateSummary(args)}`;
   if (action.includes("double")) return `ダブルクリック${coordinateSummary(args)}`;
   if (action.includes("move")) return `移動${coordinateSummary(args)}`;
@@ -82,8 +83,18 @@ function summarizeComputerArguments(toolName: string, args: Record<string, unkno
 
 function summarizeComputerResult(toolName: string, data: Record<string, unknown>, visualPath: string, args?: Record<string, unknown>): string {
   const action = normalizeComputerAction(pickString(data, ["action"]) || pickString(args ?? {}, ["action"]), toolName);
+  const error = data.error;
+  if (data.status === "error") {
+    const message = error && typeof error === "object" ? pickString(error as Record<string, unknown>, ["message", "reason"]) : "";
+    return message ? `失敗 · ${message}` : "失敗";
+  }
+  if (data.requires_approval === true || data.approval_required === true) {
+    const reason = pickString(data, ["risk_reason", "reason"]);
+    return reason ? `承認待ち · ${reason}` : "承認待ち";
+  }
   const artifact = visualPath ? ` · ${compactPath(visualPath)}` : "";
   if (action.includes("screenshot")) return `画面を取得${artifact}`;
+  if (action.includes("zoom") || toolName.toLowerCase().includes("zoom")) return `ズーム表示${artifact}`;
   if (action.includes("click")) return `クリック位置を記録${artifact}`;
   if (action.includes("double")) return `ダブルクリック位置を記録${artifact}`;
   if (action.includes("move")) return "ポインタを移動";
@@ -130,7 +141,7 @@ export function summarizeToolArguments(toolName: string, args?: Record<string, u
   if (lowerName.includes("browser")) {
     return pickString(args, ["url", "action"]);
   }
-  if (lowerName.includes("computer")) {
+  if (lowerName.includes("computer") || lowerName.includes("zoom")) {
     return summarizeComputerArguments(toolName, args);
   }
   if (lowerName.includes("terminal") || lowerName.includes("exec") || lowerName.includes("shell")) {
@@ -149,17 +160,23 @@ function summarizeToolResult(toolName: string, result: unknown, args?: Record<st
   if (!result || typeof result !== "object") return compact(result, 120);
   const record = result as Record<string, unknown>;
   const data = record.data && typeof record.data === "object" ? record.data as Record<string, unknown> : record;
+  const widget = data.widget && typeof data.widget === "object" ? data.widget as Record<string, unknown> : data;
   const lowerToolName = toolName.toLowerCase();
-  const action = pickString(data, ["action"]);
-  const visualPath = pickString(data, [
+  const visualPath = pickString(widget, [
+    "click_history_visual_path",
+    "visual_path",
+    "path",
+    "image_path",
+    "model_image_path",
+  ]) || pickString(data, [
     "click_history_visual_path",
     "visual_path",
     "path",
     "image_path",
     "model_image_path",
   ]);
-  if (lowerToolName.includes("computer")) {
-    return summarizeComputerResult(toolName, data, visualPath, args);
+  if (lowerToolName.includes("computer") || lowerToolName.includes("zoom")) {
+    return summarizeComputerResult(toolName, widget, visualPath, args);
   }
   const direct = pickString(data, ["summary", "result", "message", "output", "title"]);
   if (direct) return lowerToolName.includes("calc") ? formatCalculatorResult(direct) : direct;
@@ -171,7 +188,13 @@ function summarizeToolResult(toolName: string, result: unknown, args?: Record<st
 
 function statusForLog(log: ToolLogEntry): ToolActivityStatus {
   const result = log.result;
-  if (result && typeof result === "object" && (result as Record<string, unknown>).status === "error") {
+  const record = result && typeof result === "object" ? result as Record<string, unknown> : {};
+  const data = record.data && typeof record.data === "object" ? record.data as Record<string, unknown> : record;
+  const widget = data.widget && typeof data.widget === "object" ? data.widget as Record<string, unknown> : data;
+  if (widget.requires_approval === true || widget.approval_required === true) {
+    return "approval";
+  }
+  if (record.status === "error" || data.status === "error" || widget.status === "error") {
     return "failed";
   }
   return "completed";

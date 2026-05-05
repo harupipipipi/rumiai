@@ -80,6 +80,54 @@ test("summarizes computer clicks as useful compact activity", () => {
   assert.equal(groups[0].items[0].detail, "クリック位置を記録 · screenshot-clicks.png");
 });
 
+test("shows zoom failures instead of pretending they completed", () => {
+  const groups = buildToolActivityGroups([
+    {
+      tool_name: "zoom",
+      arguments: { x: 0, y: 700, width: 1000, height: 300 },
+      result: {
+        status: "ok",
+        data: {
+          result: "zoom computer.zoom completed",
+          widget: {
+            type: "zoom",
+            action: "computer.zoom",
+            status: "error",
+            error: { message: "zoom requires source_path" },
+          },
+        },
+      },
+    },
+  ]);
+
+  assert.equal(groups[0].items[0].input, "ズーム");
+  assert.equal(groups[0].items[0].status, "failed");
+  assert.equal(groups[0].items[0].detail, "失敗 · zoom requires source_path");
+});
+
+test("marks approval requests as pending instead of completed", () => {
+  const groups = buildToolActivityGroups([
+    {
+      tool_name: "computer_use",
+      arguments: { action: "click", x: 20, y: 30 },
+      result: {
+        status: "ok",
+        data: {
+          widget: {
+            type: "computer_use",
+            action: "computer.click",
+            requires_approval: true,
+            risk_reason: "state_changing_action",
+          },
+        },
+      },
+    },
+  ]);
+
+  assert.equal(groups[0].items[0].status, "approval");
+  assert.equal(groups[0].items[0].detail, "承認待ち · state_changing_action");
+});
+
 test("does not create activity from text-only claims", () => {
   assert.deepEqual(buildToolActivityGroups([], []), []);
 });

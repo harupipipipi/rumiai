@@ -563,8 +563,6 @@ class BrowserComputerController:
             metadata = self._screenshot_metadata_for_path(Path(raw_model).expanduser())
             if metadata and metadata.get("path"):
                 return Path(str(metadata["path"])).expanduser()
-        if not bool(payload.get("latest")):
-            return None
         candidates = [
             path
             for path in self._artifact_root.glob("screenshot-*.png")
