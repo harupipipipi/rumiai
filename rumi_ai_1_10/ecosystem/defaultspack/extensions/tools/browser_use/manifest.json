@@ -21,9 +21,19 @@
               "screenshot",
               "move",
               "click",
+              "input",
               "type",
               "key",
               "scroll",
+              "wait",
+              "zoom",
+              "new_tab",
+              "close_tab",
+              "refresh",
+              "reload",
+              "select_all",
+              "copy",
+              "paste",
               "profile_list",
               "profile_get",
               "profile_create",
@@ -56,9 +66,40 @@
           "ref_id": {"type": "string"},
           "x": {"type": "integer"},
           "y": {"type": "integer"},
+          "point": {
+            "description": "Gemini/browser operator point in [y, x] order, normalized from 0 to 1000.",
+            "type": "array",
+            "items": {"type": "number"},
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "points": {
+            "description": "List of operator points such as [{\"point\":[y,x]}]. The first point is used for click/move.",
+            "type": "array"
+          },
+          "normalized_point": {
+            "description": "Normalized 0..1000 point object or [y,x] array.",
+            "type": ["object", "array"]
+          },
+          "point_order": {
+            "type": "string",
+            "enum": ["yx", "xy"],
+            "default": "yx"
+          },
           "text": {"type": "string"},
+          "input_text": {"type": "string"},
           "key": {"type": "string"},
           "amount": {"type": "integer"},
+          "direction": {"type": "string", "enum": ["up", "down", "left", "right"]},
+          "seconds": {"type": "number"},
+          "coordinate_space": {
+            "type": "string",
+            "enum": ["model_image", "source_image", "target_window", "screenshot_image", "normalized_1000", "desktop", "action", "screen"]
+          },
+          "quality": {
+            "type": "string",
+            "enum": ["compact", "standard", "high_detail"]
+          },
           "name": {"type": "string"},
           "schema": {"type": "string", "enum": ["managed_chromium"], "default": "managed_chromium"},
           "browser": {"type": "string"},

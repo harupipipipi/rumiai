@@ -19,9 +19,11 @@
               "screenshot",
               "move",
               "click",
+              "input",
               "type",
               "key",
               "scroll",
+              "wait",
               "computer.health",
               "computer.permissions",
               "computer.displays.list",
@@ -33,6 +35,7 @@
               "computer.zoom",
               "computer.move",
               "computer.click",
+              "computer.wait",
               "computer.type",
               "computer.key",
               "computer.hotkey",
@@ -46,6 +49,26 @@
           },
           "x": {"type": "integer"},
           "y": {"type": "integer"},
+          "point": {
+            "description": "Gemini/browser operator point in [y, x] order, normalized from 0 to 1000.",
+            "type": "array",
+            "items": {"type": "number"},
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "points": {
+            "description": "List of operator points such as [{\"point\":[y,x]}]. The first point is used for click/move.",
+            "type": "array"
+          },
+          "normalized_point": {
+            "description": "Normalized 0..1000 point object or [y,x] array.",
+            "type": ["object", "array"]
+          },
+          "point_order": {
+            "type": "string",
+            "enum": ["yx", "xy"],
+            "default": "yx"
+          },
           "width": {"type": "integer"},
           "height": {"type": "integer"},
           "target": {
@@ -58,7 +81,7 @@
           },
           "coordinate_space": {
             "type": "string",
-            "enum": ["model_image", "source_image", "target_window", "screenshot_image", "desktop", "action", "screen"]
+            "enum": ["model_image", "source_image", "target_window", "screenshot_image", "normalized_1000", "desktop", "action", "screen"]
           },
           "source_path": {"type": "string"},
           "screenshot_path": {"type": "string"},
@@ -85,8 +108,11 @@
           "bundle_id": {"type": "string"},
           "text": {"type": "string"},
           "content": {"type": "string"},
+          "input_text": {"type": "string"},
           "key": {"type": "string"},
           "amount": {"type": "integer"},
+          "direction": {"type": "string", "enum": ["up", "down", "left", "right"]},
+          "seconds": {"type": "number"},
           "limit": {"type": "integer"},
           "dry_run": {"type": "boolean"},
           "approval_id": {"type": "string"},

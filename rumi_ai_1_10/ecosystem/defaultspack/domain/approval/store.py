@@ -20,13 +20,18 @@ _SECRET_KEY_RE = re.compile(
 
 _LOW_RISK_ACTIONS = {
     "browser.session",
+    "browser.profile.list",
     "browser.profiles.list",
+    "browser.session.health",
+    "browser.session.list",
+    "browser.tab.list",
     "browser.cookies.list",
     "computer.health",
     "computer.permissions",
     "computer.displays.list",
     "computer.active_window",
     "computer.windows.list",
+    "computer.wait",
 }
 
 _HIGH_RISK_ACTIONS = {

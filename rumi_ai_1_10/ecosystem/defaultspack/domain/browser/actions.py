@@ -42,9 +42,19 @@ _DESKTOP_ACTIONS = {
     "cursor_move": "computer.move",
     "mouse_move": "computer.move",
     "click": "computer.click",
+    "input": "computer.type",
     "type": "computer.type",
     "key": "computer.key",
     "scroll": "computer.scroll",
+    "wait": "computer.wait",
+    "zoom": "computer.zoom",
+    "new_tab": "computer.hotkey",
+    "close_tab": "computer.hotkey",
+    "refresh": "computer.hotkey",
+    "reload": "computer.hotkey",
+    "select_all": "computer.hotkey",
+    "copy": "computer.hotkey",
+    "paste": "computer.hotkey",
 }
 
 _INLINE_KEYS = {
@@ -56,9 +66,21 @@ _INLINE_KEYS = {
     "ref_id",
     "x",
     "y",
+    "point",
+    "points",
+    "normalized_point",
+    "point_order",
     "text",
+    "input_text",
     "key",
+    "keys",
+    "combo",
     "amount",
+    "direction",
+    "seconds",
+    "coordinate_space",
+    "quality",
+    "launch",
     "dry_run",
     "approval_token",
 }
@@ -80,6 +102,10 @@ def map_browser_use_action(arguments: dict[str, Any] | None) -> dict[str, Any]:
         canonical = _DESKTOP_ACTIONS.get(action_key, raw_action)
     if canonical == "browser.tab.open" and "url" not in payload and arguments.get("url"):
         payload["url"] = arguments.get("url")
+    if canonical == "computer.type" and "text" not in payload and "input_text" in payload:
+        payload["text"] = payload.get("input_text")
+    if canonical == "computer.hotkey" and "combo" not in payload and "keys" not in payload:
+        payload["shortcut"] = action_key
     return {
         "tool": "browser_use",
         "legacy_action": raw_action,
@@ -93,7 +119,26 @@ def map_browser_use_action(arguments: dict[str, Any] | None) -> dict[str, Any]:
 def map_computer_use_action(arguments: dict[str, Any] | None) -> dict[str, Any]:
     arguments = arguments if isinstance(arguments, dict) else {}
     payload = dict(arguments.get("payload") or {})
-    for key in ("x", "y", "text", "key", "amount", "dry_run", "approval_token"):
+    for key in (
+        "x",
+        "y",
+        "point",
+        "points",
+        "normalized_point",
+        "point_order",
+        "text",
+        "input_text",
+        "key",
+        "keys",
+        "combo",
+        "amount",
+        "direction",
+        "seconds",
+        "coordinate_space",
+        "quality",
+        "dry_run",
+        "approval_token",
+    ):
         if key in arguments:
             payload[key] = arguments.get(key)
     raw_action = str(arguments.get("action") or "screenshot").strip()
@@ -102,6 +147,10 @@ def map_computer_use_action(arguments: dict[str, Any] | None) -> dict[str, Any]:
         "screenshot": "computer.screenshot",
         **_DESKTOP_ACTIONS,
     }.get(raw_action.lower(), raw_action)
+    if canonical == "computer.type" and "text" not in payload and "input_text" in payload:
+        payload["text"] = payload.get("input_text")
+    if canonical == "computer.hotkey" and "combo" not in payload and "keys" not in payload:
+        payload["shortcut"] = raw_action.lower()
     return {
         "tool": "computer_use",
         "legacy_action": raw_action,

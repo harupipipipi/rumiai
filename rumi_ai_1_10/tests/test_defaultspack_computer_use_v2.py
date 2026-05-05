@@ -85,6 +85,23 @@ def test_computer_use_executor_accepts_natural_app_focus_alias():
     assert payload["app"] == "Vivaldi"
 
 
+def test_browser_tool_operator_point_payload_is_forwarded():
+    from domain.tool.executor import _browser_computer_action_payload
+
+    action, payload = _browser_computer_action_payload(
+        "computer_use",
+        {
+            "action": "click",
+            "point": [250, 750],
+            "target": "app",
+            "app": "Vivaldi",
+        },
+    )
+
+    assert action == "computer.click"
+    assert payload["point"] == [250, 750]
+
+
 def test_windows_permissions_include_v2_preflight_fields(monkeypatch):
     from domain.tool.browser_computer import BrowserComputerController
     import domain.tool.browser_computer as browser_computer
@@ -512,6 +529,72 @@ def test_click_infers_screenshot_coordinates_when_point_exceeds_action_space(tmp
         "coordinate_space": "screenshot_image",
         "label": "source",
     }
+
+
+def test_click_accepts_browser_operator_normalized_yx_point(tmp_path, monkeypatch):
+    from domain.tool.browser_computer import BrowserComputerController
+    import domain.tool.browser_computer as browser_computer
+
+    clicked = {}
+    metadata = {
+        "path": str(tmp_path / "screenshot-1.png"),
+        "metadata_path": str(tmp_path / "screenshot-1.json"),
+        "image_size": {"width": 600, "height": 400},
+        "action_coordinate_system": {"width": 300, "height": 200},
+    }
+    (tmp_path / "screenshot-1.json").write_text(json.dumps(metadata), encoding="utf-8")
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(BrowserComputerController, "_darwin_click", lambda self, payload: clicked.update(payload))
+
+    result = BrowserComputerController(artifact_root=tmp_path).run(
+        "computer.click",
+        {"point": [250, 750]},
+        yolo_mode=True,
+    )
+
+    assert clicked["x"] == 225
+    assert clicked["y"] == 50
+    assert result["coordinate_transform"]["normalized_point"] == {
+        "type": "point",
+        "x": 750,
+        "y": 250,
+        "coordinate_space": "normalized_1000",
+        "label": "normalized",
+    }
+
+
+def test_screenshot_burns_recent_click_history_into_visual(tmp_path):
+    from domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    screenshot = tmp_path / "screenshot-200.png"
+    rows = [bytearray([255, 255, 255, 255] * 20) for _ in range(20)]
+    controller._write_png_pixels(
+        screenshot,
+        {"width": 20, "height": 20, "channels": 4, "color_type": 6, "rows": rows},
+    )
+    controller._write_click_history(
+        [
+            {
+                "action": "computer.click",
+                "points": [
+                    {"type": "point", "x": 10, "y": 11, "coordinate_space": "screenshot_image", "label": "click"}
+                ],
+            }
+        ]
+    )
+
+    result = {
+        "path": str(screenshot),
+        "image_size": {"width": 20, "height": 20},
+        "action_coordinate_system": {"width": 20, "height": 20},
+    }
+    controller._attach_click_history_visual(result)
+
+    assert Path(result["click_history_visual_path"]).is_file()
+    assert result["click_history_overlay_points"][0]["x"] == 10
+    assert result["click_history_visual_data_url"].startswith("data:image/png;base64,")
 
 
 def test_app_window_click_offsets_local_coordinates(monkeypatch):

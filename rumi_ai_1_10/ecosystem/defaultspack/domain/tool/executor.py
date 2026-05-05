@@ -1,6 +1,7 @@
 from .registry import ToolRegistry
 from .mcp_client import McpClient
 from .schema_adapter import is_tool_rejected_by_policy, policy_from_context
+import json
 from pathlib import Path
 
 
@@ -309,6 +310,15 @@ class ToolExecutor:
             from domain.tool.browser_computer import BrowserComputerController
 
             policy = policy_from_context(context if isinstance(context, dict) else {})
+            if tool_name == "browser_use":
+                browser_v2 = _try_execute_browser_v2(arguments, context)
+                if browser_v2 is not None:
+                    result_text = browser_v2 if isinstance(browser_v2, str) else json.dumps(browser_v2, ensure_ascii=False)
+                    return {
+                        "result": result_text,
+                        "is_error": bool(isinstance(browser_v2, dict) and browser_v2.get("status") == "error"),
+                        "widget": {"type": "browser_use", **browser_v2} if isinstance(browser_v2, dict) else None,
+                    }
             action, payload = _browser_computer_action_payload(tool_name, arguments)
             result = BrowserComputerController(artifact_root=_conversation_tool_artifact_root(context)).run(
                 action,
@@ -429,11 +439,20 @@ def _browser_computer_action_payload(tool_name, arguments):
             "cursor_move": "computer.move",
             "mouse_move": "computer.move",
             "click": "computer.click",
+            "input": "computer.type",
             "type": "computer.type",
             "key": "computer.key",
             "scroll": "computer.scroll",
+            "wait": "computer.wait",
             "zoom": "computer.zoom",
             "computer.zoom": "computer.zoom",
+            "new_tab": "computer.hotkey",
+            "close_tab": "computer.hotkey",
+            "refresh": "computer.hotkey",
+            "reload": "computer.hotkey",
+            "select_all": "computer.hotkey",
+            "copy": "computer.hotkey",
+            "paste": "computer.hotkey",
             "app.focus": "computer.app.focus",
             "app_focus": "computer.app.focus",
             "focus_app": "computer.app.focus",
@@ -450,6 +469,10 @@ def _browser_computer_action_payload(tool_name, arguments):
             "url",
             "x",
             "y",
+            "point",
+            "points",
+            "normalized_point",
+            "point_order",
             "width",
             "height",
             "radius",
@@ -457,8 +480,13 @@ def _browser_computer_action_payload(tool_name, arguments):
             "source_path",
             "latest",
             "text",
+            "input_text",
+            "seconds",
             "key",
+            "keys",
+            "combo",
             "amount",
+            "direction",
             "target",
             "target_scope",
             "coordinate_space",
@@ -479,11 +507,20 @@ def _browser_computer_action_payload(tool_name, arguments):
             "cursor_move": "computer.move",
             "mouse_move": "computer.move",
             "click": "computer.click",
+            "input": "computer.type",
             "type": "computer.type",
             "key": "computer.key",
             "scroll": "computer.scroll",
+            "wait": "computer.wait",
             "zoom": "computer.zoom",
             "computer.zoom": "computer.zoom",
+            "new_tab": "computer.hotkey",
+            "close_tab": "computer.hotkey",
+            "refresh": "computer.hotkey",
+            "reload": "computer.hotkey",
+            "select_all": "computer.hotkey",
+            "copy": "computer.hotkey",
+            "paste": "computer.hotkey",
             "app.focus": "computer.app.focus",
             "app_focus": "computer.app.focus",
             "focus_app": "computer.app.focus",
@@ -499,6 +536,10 @@ def _browser_computer_action_payload(tool_name, arguments):
         for key in (
             "x",
             "y",
+            "point",
+            "points",
+            "normalized_point",
+            "point_order",
             "width",
             "height",
             "radius",
@@ -507,10 +548,13 @@ def _browser_computer_action_payload(tool_name, arguments):
             "latest",
             "text",
             "content",
+            "input_text",
             "key",
             "keys",
             "combo",
             "amount",
+            "direction",
+            "seconds",
             "limit",
             "target",
             "target_scope",
@@ -530,11 +574,108 @@ def _browser_computer_action_payload(tool_name, arguments):
         ):
             if key in arguments:
                 raw_payload[key] = arguments.get(key)
+    if raw_action in {"new_tab", "close_tab", "refresh", "reload", "select_all", "copy", "paste"} and "combo" not in raw_payload and "keys" not in raw_payload:
+        raw_payload["shortcut"] = raw_action
+    if action == "computer.type" and "text" not in raw_payload and "input_text" in raw_payload:
+        raw_payload["text"] = raw_payload.get("input_text")
     if "dry_run" in arguments:
         raw_payload["dry_run"] = arguments.get("dry_run")
     if "approval_token" in arguments:
         raw_payload["approval_token"] = arguments.get("approval_token")
     return action, raw_payload
+
+
+def _try_execute_browser_v2(arguments, context):
+    try:
+        from domain.browser.actions import map_browser_use_action
+        from domain.browser.profiles import BrowserProfileManager
+        from domain.browser.sessions import BrowserSessionManager
+    except Exception:
+        return None
+    mapped = map_browser_use_action(arguments if isinstance(arguments, dict) else {})
+    action = str(mapped.get("action") or "")
+    if not action.startswith("browser."):
+        return None
+    payload = dict(mapped.get("payload") or {})
+    root = None
+    if isinstance(context, dict) and isinstance(context.get("browser_root"), str):
+        root = context.get("browser_root")
+    profile_manager = BrowserProfileManager(root)
+    manager = BrowserSessionManager(root, profile_manager=profile_manager)
+    profile_id = str(payload.get("profile_id") or profile_manager.get_active_profile_id() or "default")
+    session_id = str(payload.get("session_id") or f"session-{profile_id}")
+    tab_id = payload.get("tab_id")
+
+    if action == "browser.profile.list":
+        return {"action": action, "profiles": profile_manager.list_profiles(), "active_profile_id": profile_manager.get_active_profile_id()}
+    if action == "browser.profile.get":
+        return {"action": action, "profile": profile_manager.get_profile(profile_id)}
+    if action == "browser.profile.create":
+        return {"action": action, "profile": profile_manager.create_profile(**_profile_create_kwargs(payload))}
+    if action == "browser.profile.update":
+        return {"action": action, "profile": profile_manager.update_profile(profile_id, payload)}
+    if action == "browser.profile.delete":
+        return {"action": action, **profile_manager.delete_profile(profile_id, delete_files=bool(payload.get("delete_files")))}
+    if action == "browser.profile.set_active":
+        return {"action": action, **profile_manager.set_active_profile(profile_id)}
+    if action == "browser.session.start":
+        return {
+            "action": action,
+            **manager.start_session(
+                session_id=session_id,
+                profile_id=profile_id,
+                url=payload.get("url"),
+                launch=payload.get("launch", True) is not False,
+            ),
+        }
+    if action == "browser.session.stop":
+        return {"action": action, **manager.stop_session(session_id)}
+    if action == "browser.session.restart":
+        return {"action": action, **manager.restart_session(session_id)}
+    if action == "browser.session.health":
+        return {"action": action, **manager.health(session_id)}
+    if action == "browser.session.list":
+        return {"action": action, "sessions": manager.list_sessions()}
+    if action == "browser.tab.list":
+        return {"action": action, **manager.list_tabs(session_id)}
+    if action == "browser.tab.open":
+        return {"action": action, **manager.open_tab(session_id=session_id, url=str(payload.get("url") or "about:blank"))}
+    if action == "browser.tab.focus":
+        return {"action": action, **manager.focus_tab(session_id=session_id, tab_id=str(tab_id or payload.get("id") or ""))}
+    if action == "browser.tab.close":
+        return {"action": action, **manager.close_tab(session_id=session_id, tab_id=str(tab_id or payload.get("id") or ""))}
+    if action == "browser.tab.navigate":
+        return {"action": action, **manager.navigate_tab(session_id=session_id, tab_id=tab_id, url=str(payload.get("url") or ""))}
+    if action == "browser.tab.snapshot":
+        return {"action": action, **manager.snapshot_tab(session_id=session_id, tab_id=tab_id)}
+    if action == "browser.tab.screenshot":
+        return {
+            "action": action,
+            **manager.screenshot_tab(
+                session_id=session_id,
+                tab_id=tab_id,
+                format=str(payload.get("format") or "png"),
+                quality=payload.get("quality"),
+            ),
+        }
+    if action.startswith("browser.ref."):
+        return {
+            "action": action,
+            **manager.execute_ref_action(
+                action=action.rsplit(".", 1)[-1],
+                ref_id=str(payload.get("ref") or payload.get("ref_id") or ""),
+                session_id=session_id,
+                tab_id=tab_id,
+                payload=payload,
+                current_snapshot=payload.get("current_snapshot") if isinstance(payload.get("current_snapshot"), dict) else None,
+            ),
+        }
+    return {"status": "error", "action": action, "error": {"message": f"unsupported browser v2 action: {action}"}}
+
+
+def _profile_create_kwargs(payload):
+    allowed = {"profile_id", "name", "browser", "schema", "settings", "metadata", "set_active"}
+    return {key: payload.get(key) for key in allowed if key in payload}
 
 
 def _conversation_tool_artifact_root(context):

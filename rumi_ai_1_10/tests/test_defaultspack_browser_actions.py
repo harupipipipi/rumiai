@@ -71,6 +71,39 @@ def test_zoom_executor_payload_uses_dedicated_computer_zoom_action():
     assert payload == {"latest": True, "x": 10, "y": 20, "radius": 30, "scale": 2}
 
 
+def test_browser_use_executor_reaches_browser_v2_profile_manager(tmp_path):
+    from domain.tool.executor import _try_execute_browser_v2
+
+    created = _try_execute_browser_v2(
+        {"action": "profile_create", "profile_id": "Operator", "name": "Operator Browser"},
+        {"browser_root": str(tmp_path)},
+    )
+    listed = _try_execute_browser_v2({"action": "profile_list"}, {"browser_root": str(tmp_path)})
+
+    assert created["action"] == "browser.profile.create"
+    assert created["profile"]["id"] == "operator"
+    assert listed["active_profile_id"] == "operator"
+    assert [profile["id"] for profile in listed["profiles"]] == ["operator"]
+
+
+def test_browser_use_executor_reaches_browser_v2_session_actions(tmp_path):
+    from domain.tool.executor import _try_execute_browser_v2
+
+    started = _try_execute_browser_v2(
+        {"action": "start", "profile_id": "Operator", "session_id": "session-operator", "launch": False},
+        {"browser_root": str(tmp_path)},
+    )
+    health = _try_execute_browser_v2(
+        {"action": "health", "profile_id": "Operator", "session_id": "session-operator"},
+        {"browser_root": str(tmp_path)},
+    )
+
+    assert started["action"] == "browser.session.start"
+    assert started["id"] == "session-operator"
+    assert health["action"] == "browser.session.health"
+    assert health["session"]["id"] == "session-operator"
+
+
 def test_browser_use_manifest_preserves_legacy_actions_and_exposes_v2_actions():
     manifest = json.loads(
         (DEFAULTSPACK_ROOT / "extensions" / "tools" / "browser_use" / "manifest.json").read_text(encoding="utf-8")

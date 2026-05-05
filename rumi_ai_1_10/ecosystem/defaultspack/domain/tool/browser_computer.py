@@ -72,6 +72,7 @@ class BrowserComputerController:
             "computer.type",
             "computer.key",
             "computer.scroll",
+            "computer.wait",
             "computer.window.focus",
             "computer.window.bounds",
             "computer.hotkey",
@@ -402,9 +403,10 @@ class BrowserComputerController:
             data_url = ""
         result = self._screenshot_result(path, model_path, system, target_context=target_context)
         result["quality"] = quality
+        self._attach_click_history_visual(result)
         if data_url:
             result["data_url"] = data_url
-            result["visual_data_url"] = data_url
+            result["visual_data_url"] = result.get("click_history_visual_data_url") or data_url
             result["model_image_path"] = str(model_path)
         self._write_screenshot_metadata(path, result)
         return result
@@ -525,10 +527,15 @@ class BrowserComputerController:
         source_width: int,
         source_height: int,
     ) -> dict[str, int]:
-        x = int(payload.get("x", source_width // 2))
-        y = int(payload.get("y", source_height // 2))
+        normalized = self._normalized_point_from_payload(payload)
+        if normalized:
+            x = int(round(normalized["x"] * max(source_width - 1, 1) / 1000))
+            y = int(round(normalized["y"] * max(source_height - 1, 1) / 1000))
+        else:
+            x = int(payload.get("x", source_width // 2))
+            y = int(payload.get("y", source_height // 2))
         coordinate_space = str(payload.get("coordinate_space") or "source_image").strip().lower()
-        if coordinate_space in {"source_image", "screenshot_image", "image", ""}:
+        if coordinate_space in {"source_image", "screenshot_image", "image", "", "normalized_1000", "normalized"}:
             return {"x": x, "y": y}
         metadata = self._screenshot_metadata_for_path(source_path) or self._latest_screenshot_metadata()
         if not metadata:
@@ -644,7 +651,22 @@ class BrowserComputerController:
             "action": "move",
             "screen_coordinates": True,
             "coordinate_source": "screenshot",
-            "notes": "Pass coordinate_space explicitly. Use coordinate_space=model_image for points selected on model_image_path, screenshot_image for path pixels, target_window for local window points, and desktop/action for absolute display points. The tool converts model/screenshot/window points to desktop action coordinates.",
+            "notes": "Pass coordinate_space explicitly. Use coordinate_space=model_image for points selected on model_image_path, screenshot_image for path pixels, target_window for local window points, normalized_1000 for Gemini operator points shaped as [y, x] in 0..1000, and desktop/action for absolute display points. The tool converts model/screenshot/window/normalized points to desktop action coordinates.",
+        }
+        result["normalized_coordinate_system"] = {
+            "origin": "top_left",
+            "unit": "normalized",
+            "space": "normalized_1000",
+            "point_order": "yx",
+            "x_range": [0, 1000],
+            "y_range": [0, 1000],
+            "example": {"point": [500, 500], "meaning": "center of the screenshot/model image"},
+        }
+        result["operator_point_contract"] = {
+            "format": [{"point": [500, 500]}],
+            "point_order": "yx",
+            "coordinate_space": "normalized_1000",
+            "notes": "Compatible with browser_tool_test Operator output; pass the selected item as point=[y,x].",
         }
         return result
 
@@ -767,6 +789,7 @@ class BrowserComputerController:
             metadata = dict(result)
             metadata.pop("data_url", None)
             metadata.pop("visual_data_url", None)
+            metadata.pop("click_history_visual_data_url", None)
             metadata["metadata_path"] = str(self._screenshot_metadata_path(path))
             self._screenshot_metadata_path(path).write_text(
                 json.dumps(metadata, ensure_ascii=False, indent=2),
@@ -1594,6 +1617,80 @@ class BrowserComputerController:
             "transform": transform,
         }
 
+    @staticmethod
+    def _normalized_point_from_payload(payload: dict[str, Any]) -> dict[str, int] | None:
+        raw_point = payload.get("normalized_point")
+        if raw_point is None:
+            raw_point = payload.get("point")
+        if raw_point is None and isinstance(payload.get("points"), list) and payload.get("points"):
+            first = payload.get("points")[0]
+            raw_point = first.get("point") if isinstance(first, dict) and "point" in first else first
+
+        point_order = str(payload.get("point_order") or "yx").strip().lower()
+        try:
+            if isinstance(raw_point, dict):
+                if "point" in raw_point:
+                    nested_payload = dict(payload)
+                    nested_payload["point"] = raw_point.get("point")
+                    return BrowserComputerController._normalized_point_from_payload(nested_payload)
+                x = float(raw_point.get("x"))
+                y = float(raw_point.get("y"))
+            elif isinstance(raw_point, (list, tuple)) and len(raw_point) >= 2:
+                first = float(raw_point[0])
+                second = float(raw_point[1])
+                if point_order in {"xy", "x,y"}:
+                    x, y = first, second
+                else:
+                    y, x = first, second
+            elif payload.get("coordinate_space") in {"normalized", "normalized_1000"} and "x" in payload and "y" in payload:
+                x = float(payload.get("x"))
+                y = float(payload.get("y"))
+            else:
+                return None
+        except Exception:
+            return None
+        if x < 0 or y < 0 or x > 1000 or y > 1000:
+            return None
+        return {"x": int(round(x)), "y": int(round(y))}
+
+    def _payload_with_normalized_point(
+        self,
+        payload: dict[str, Any],
+        target_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        point = self._normalized_point_from_payload(payload)
+        if not point:
+            return dict(payload)
+        adjusted = dict(payload)
+        adjusted["_normalized_point"] = self._point_annotation(
+            "normalized",
+            point["x"],
+            point["y"],
+            coordinate_space="normalized_1000",
+        )
+
+        metadata = self._coordinate_reference_metadata(payload)
+        screenshot_size = self._size_from_metadata(metadata, "image_size") if metadata else None
+        if screenshot_size:
+            adjusted["x"] = int(round(point["x"] * screenshot_size[0] / 1000))
+            adjusted["y"] = int(round(point["y"] * screenshot_size[1] / 1000))
+            adjusted["coordinate_space"] = "screenshot_image"
+            return adjusted
+
+        bounds = self._valid_bounds(target_context.get("bounds"))
+        if bounds:
+            adjusted["x"] = int(round(point["x"] * bounds["width"] / 1000))
+            adjusted["y"] = int(round(point["y"] * bounds["height"] / 1000))
+            adjusted["coordinate_space"] = "target_window"
+            return adjusted
+
+        action_size = self._size_from_metadata(metadata, "action_coordinate_system") if metadata else None
+        if action_size:
+            adjusted["x"] = int(round(point["x"] * action_size[0] / 1000))
+            adjusted["y"] = int(round(point["y"] * action_size[1] / 1000))
+            adjusted["coordinate_space"] = "action"
+        return adjusted
+
     def _infer_image_coordinate_space(self, payload: dict[str, Any]) -> str:
         metadata = self._coordinate_reference_metadata(payload)
         if not metadata:
@@ -1628,19 +1725,21 @@ class BrowserComputerController:
         if action not in {"computer.move", "computer.click"}:
             return dict(payload), self._prepare_target_context(payload, system=system, focus=True)
         target_context = self._prepare_target_context(payload, system=system, focus=True)
-        adjusted = dict(payload)
+        adjusted = self._payload_with_normalized_point(payload, target_context)
         scope = target_context.get("scope")
-        coordinate_space = str(payload.get("coordinate_space") or payload.get("coordinates") or "").strip().lower()
+        coordinate_space = str(adjusted.get("coordinate_space") or adjusted.get("coordinates") or "").strip().lower()
         if not coordinate_space:
-            coordinate_space = self._infer_image_coordinate_space(payload)
+            coordinate_space = self._infer_image_coordinate_space(adjusted)
         if coordinate_space in {"model_image", "screenshot_image", "source_image", "image"}:
-            converted = self._image_point_to_action_coordinates(payload, target_context, coordinate_space)
+            converted = self._image_point_to_action_coordinates(adjusted, target_context, coordinate_space)
             if converted:
                 adjusted["x"] = converted["x"]
                 adjusted["y"] = converted["y"]
                 if converted.get("local_target"):
                     adjusted["_target_local_point"] = converted["local_target"]
                 adjusted["_coordinate_transform"] = converted["transform"]
+                if "_normalized_point" in adjusted:
+                    adjusted["_coordinate_transform"]["normalized_point"] = adjusted["_normalized_point"]
                 return adjusted, target_context
         if scope not in {"desktop", "full_desktop", "all_displays"} and coordinate_space not in {"desktop", "action", "screen"}:
             origin = target_context.get("origin") if isinstance(target_context.get("origin"), dict) else {}
@@ -1672,7 +1771,11 @@ class BrowserComputerController:
             "computer.scroll",
         }:
             action_payload, target_context = self._payload_with_target_coordinates(action, payload, system=system)
-        if system == "Darwin" and action == "computer.move":
+        if action == "computer.scroll":
+            action_payload = self._payload_with_scroll_direction(action_payload)
+        if action == "computer.wait":
+            time.sleep(max(float(payload.get("seconds") or payload.get("duration") or 1), 0.0))
+        elif system == "Darwin" and action == "computer.move":
             self._darwin_move_cursor(action_payload)
         elif system == "Darwin" and action == "computer.click":
             self._darwin_click(action_payload)
@@ -1721,14 +1824,18 @@ class BrowserComputerController:
                 result["display_overlay_points"] = [
                     point
                     for point in (
+                        action_payload["_coordinate_transform"].get("normalized_point"),
                         action_payload["_coordinate_transform"].get("input"),
                         action_payload["_coordinate_transform"].get("screenshot_point"),
                         action_payload["_coordinate_transform"].get("target_window_point"),
                     )
                     if isinstance(point, dict)
                 ]
+            self._record_click_history(action, action_payload, result)
         if target_context:
             result["target_context"] = target_context
+        if action == "computer.wait":
+            result["seconds"] = max(float(payload.get("seconds") or payload.get("duration") or 1), 0.0)
         if action == "computer.scroll":
             result["amount"] = int(action_payload.get("amount", 1))
         if action == "computer.hotkey":
@@ -1746,6 +1853,170 @@ class BrowserComputerController:
         label = "click" if action == "computer.click" else "move"
         point = BrowserComputerController._point_annotation(label, int(payload.get("x", 0)), int(payload.get("y", 0)))
         return {"annotation": point, "overlay_points": [point]}
+
+    @staticmethod
+    def _payload_with_scroll_direction(payload: dict[str, Any]) -> dict[str, Any]:
+        adjusted = dict(payload)
+        direction = str(adjusted.get("direction") or "").strip().lower()
+        if not direction:
+            return adjusted
+        amount = abs(int(adjusted.get("amount") or 3))
+        if direction in {"down", "right"}:
+            adjusted["amount"] = -amount
+        elif direction in {"up", "left"}:
+            adjusted["amount"] = amount
+        return adjusted
+
+    def _click_history_path(self) -> Path:
+        return self._artifact_root / "click_history.json"
+
+    def _read_click_history(self) -> list[dict[str, Any]]:
+        try:
+            value = json.loads(self._click_history_path().read_text(encoding="utf-8"))
+            return value if isinstance(value, list) else []
+        except Exception:
+            return []
+
+    def _write_click_history(self, history: list[dict[str, Any]]) -> None:
+        try:
+            self._artifact_root.mkdir(parents=True, exist_ok=True)
+            self._click_history_path().write_text(json.dumps(history[-5:], ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    def _record_click_history(self, action: str, payload: dict[str, Any], result: dict[str, Any]) -> None:
+        if action != "computer.click":
+            return
+        point = result.get("annotation") if isinstance(result.get("annotation"), dict) else None
+        points = [point] if point else []
+        for candidate in result.get("display_overlay_points") or []:
+            if isinstance(candidate, dict):
+                points.append(candidate)
+        record = {
+            "ts": self._now_iso(),
+            "action": action,
+            "target": result.get("target"),
+            "local_target": result.get("local_target"),
+            "points": points,
+            "metadata_path": (
+                result.get("coordinate_transform", {}).get("metadata_path")
+                if isinstance(result.get("coordinate_transform"), dict)
+                else None
+            ),
+        }
+        history = self._read_click_history()
+        history.append(record)
+        self._write_click_history(history)
+
+    def _attach_click_history_visual(self, screenshot_result: dict[str, Any]) -> None:
+        path = Path(str(screenshot_result.get("path") or ""))
+        if not path.is_file():
+            return
+        history = self._read_click_history()
+        if not history:
+            return
+        try:
+            image = self._read_png_pixels(path)
+        except Exception:
+            return
+        metadata = dict(screenshot_result)
+        overlay_points: list[dict[str, Any]] = []
+        for index, record in enumerate(history[-5:], start=1):
+            point = self._history_point_for_screenshot(record, metadata)
+            if not point:
+                continue
+            point["label"] = f"click-{index}"
+            overlay_points.append(point)
+            self._draw_point_on_png(image, point["x"], point["y"], radius=7, color=(220, 38, 38, 255), outline=(255, 255, 255, 255))
+        if not overlay_points:
+            return
+        visual_path = path.with_name(path.stem + "-clicks.png")
+        self._write_png_pixels(visual_path, image)
+        screenshot_result["click_history_path"] = str(self._click_history_path())
+        screenshot_result["click_history_visual_path"] = str(visual_path)
+        screenshot_result["click_history_overlay_points"] = overlay_points
+        screenshot_result["click_history_visual_data_url"] = self._image_data_url(visual_path)
+
+    def _history_point_for_screenshot(self, record: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any] | None:
+        candidates = record.get("points") if isinstance(record.get("points"), list) else []
+        preferred_spaces = ("screenshot_image", "source_image", "target_window", "action", "normalized_1000")
+        for space in preferred_spaces:
+            for point in candidates:
+                if not isinstance(point, dict) or str(point.get("coordinate_space")) != space:
+                    continue
+                converted = self._point_to_screenshot_space(point, metadata)
+                if converted:
+                    return converted
+        target = record.get("target") if isinstance(record.get("target"), dict) else None
+        if target:
+            return self._point_to_screenshot_space(self._point_annotation("click", target.get("x", 0), target.get("y", 0)), metadata)
+        return None
+
+    def _point_to_screenshot_space(self, point: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any] | None:
+        try:
+            x = int(point.get("x", 0))
+            y = int(point.get("y", 0))
+        except Exception:
+            return None
+        space = str(point.get("coordinate_space") or "action")
+        screenshot_size = self._size_from_metadata(metadata, "image_size")
+        if not screenshot_size:
+            return None
+        if space in {"screenshot_image", "source_image", "image"}:
+            sx, sy = x, y
+        elif space == "model_image":
+            converted = self._model_point_to_screenshot_point(x, y, metadata)
+            if not converted:
+                return None
+            sx, sy = converted["x"], converted["y"]
+        elif space == "target_window":
+            converted = self._target_point_to_screenshot_point(x, y, metadata)
+            if not converted:
+                return None
+            sx, sy = converted["x"], converted["y"]
+        elif space in {"action", "desktop", "screen"}:
+            converted = self._action_point_to_screenshot_point(x, y, metadata)
+            if not converted:
+                return None
+            sx, sy = converted["x"], converted["y"]
+        elif space in {"normalized_1000", "normalized"}:
+            sx = int(round(x * screenshot_size[0] / 1000))
+            sy = int(round(y * screenshot_size[1] / 1000))
+        else:
+            return None
+        width, height = int(screenshot_size[0]), int(screenshot_size[1])
+        if sx < 0 or sy < 0 or sx >= width or sy >= height:
+            return None
+        return self._point_annotation(str(point.get("label") or "click"), sx, sy, coordinate_space="screenshot_image")
+
+    @staticmethod
+    def _draw_point_on_png(
+        image: dict[str, Any],
+        x: int,
+        y: int,
+        *,
+        radius: int,
+        color: tuple[int, int, int, int],
+        outline: tuple[int, int, int, int],
+    ) -> None:
+        width = int(image["width"])
+        height = int(image["height"])
+        channels = int(image["channels"])
+        outer = radius + 2
+        for py in range(max(y - outer, 0), min(y + outer + 1, height)):
+            for px in range(max(x - outer, 0), min(x + outer + 1, width)):
+                distance_sq = (px - x) * (px - x) + (py - y) * (py - y)
+                if distance_sq > outer * outer:
+                    continue
+                rgba = outline if distance_sq > radius * radius else color
+                offset = px * channels
+                row = image["rows"][py]
+                if channels == 1:
+                    row[offset] = int((rgba[0] + rgba[1] + rgba[2]) / 3)
+                elif channels == 3:
+                    row[offset : offset + 3] = bytes(rgba[:3])
+                else:
+                    row[offset : offset + 4] = bytes(rgba)
 
     @staticmethod
     def _point_annotation(label: str, x: int, y: int, *, coordinate_space: str = "action") -> dict[str, Any]:
@@ -2247,7 +2518,19 @@ if let up = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: f
 
     @staticmethod
     def _hotkey_parts(payload: dict[str, Any]) -> dict[str, Any]:
-        if isinstance(payload.get("keys"), list):
+        shortcut = str(payload.get("shortcut") or "").strip().lower()
+        shortcuts = {
+            "new_tab": ["cmd", "t"],
+            "close_tab": ["cmd", "w"],
+            "refresh": ["cmd", "r"],
+            "reload": ["cmd", "r"],
+            "select_all": ["cmd", "a"],
+            "copy": ["cmd", "c"],
+            "paste": ["cmd", "v"],
+        }
+        if shortcut in shortcuts:
+            raw_parts = shortcuts[shortcut]
+        elif isinstance(payload.get("keys"), list):
             raw_parts = [str(part).strip().lower() for part in payload.get("keys") or []]
         else:
             raw = str(payload.get("combo") or payload.get("hotkey") or payload.get("key") or "")
