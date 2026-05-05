@@ -24,6 +24,8 @@ type BrowserApproval = {
   reason?: string;
 };
 
+type ApprovalIdSet = Set<string> | null;
+
 type PendingChatRequest = {
   conversationId: string;
   startedAt: number;
@@ -226,7 +228,11 @@ function compactPreviewValue(value: unknown): string {
   return String(value);
 }
 
-function approvalFromToolResult(result: unknown): ApprovalPreview | null {
+function approvalFromToolResult(
+  result: unknown,
+  pendingApprovalIds: ApprovalIdSet = null,
+  resolvedApprovalIds?: Set<string>,
+): ApprovalPreview | null {
   if (!result || typeof result !== "object") return null;
   const record = result as Record<string, unknown>;
   const data = record.data && typeof record.data === "object" ? record.data as Record<string, unknown> : record;
@@ -234,6 +240,10 @@ function approvalFromToolResult(result: unknown): ApprovalPreview | null {
   if (widget.requires_approval !== true && widget.approval_required !== true) return null;
   const approvalId = String(widget.approval_id ?? "");
   if (!approvalId) return null;
+  const approvalStatus = String(widget.status ?? "pending").toLowerCase();
+  if (approvalStatus && !["pending", "approved"].includes(approvalStatus)) return null;
+  if (resolvedApprovalIds?.has(approvalId)) return null;
+  if (pendingApprovalIds !== null && !pendingApprovalIds.has(approvalId)) return null;
   const payload = widget.payload && typeof widget.payload === "object" ? widget.payload as Record<string, unknown> : {};
   return {
     type: "approval",
@@ -245,6 +255,12 @@ function approvalFromToolResult(result: unknown): ApprovalPreview | null {
   };
 }
 
+function approvalIdsFromMessages(messages: ChatMessage[]): string[] {
+  return Array.from(new Set(messages.flatMap((message) => (message.tool_logs ?? [])
+    .map((log) => approvalFromToolResult(log.result)?.approvalId)
+    .filter((approvalId): approvalId is string => Boolean(approvalId)))));
+}
+
 function toolLogTimestamp(logTimestamp: unknown, fallback: number): number {
   if (typeof logTimestamp === "number" && Number.isFinite(logTimestamp)) return logTimestamp;
   if (typeof logTimestamp === "string") {
@@ -254,13 +270,17 @@ function toolLogTimestamp(logTimestamp: unknown, fallback: number): number {
   return fallback;
 }
 
-function toolPreviewsFromMessages(messages: ChatMessage[]): ToolPreviewItem[] {
+function toolPreviewsFromMessages(
+  messages: ChatMessage[],
+  pendingApprovalIds: ApprovalIdSet = null,
+  resolvedApprovalIds?: Set<string>,
+): ToolPreviewItem[] {
   return messages.flatMap((message) => (message.tool_logs ?? []).map((log, index) => {
     const toolName = String(log.tool_name ?? "tool");
     const args = log.arguments && typeof log.arguments === "object" ? log.arguments as Record<string, unknown> : {};
     const result = log.result as Record<string, unknown> | undefined;
     const status = String(result?.status ?? "completed");
-    const approval = approvalFromToolResult(result);
+    const approval = approvalFromToolResult(result, pendingApprovalIds, resolvedApprovalIds);
     if (approval) {
       return {
         id: `message-approval-${approval.approvalId}`,
@@ -692,7 +712,11 @@ function replaceChatIdInUrl(conversationId: string | null, pending?: boolean) {
   }
 }
 
-function pendingBrowserApproval(messages: ChatUiMessage[]): BrowserApproval | null {
+function pendingBrowserApproval(
+  messages: ChatUiMessage[],
+  pendingApprovalIds: ApprovalIdSet = null,
+  resolvedApprovalIds?: Set<string>,
+): BrowserApproval | null {
   const approvalTools = new Set(["browser_computer", "browser_use", "computer_use", "zoom"]);
   for (const message of [...messages].reverse()) {
     for (const log of [...(message.toolLogs ?? [])].reverse()) {
@@ -704,6 +728,10 @@ function pendingBrowserApproval(messages: ChatUiMessage[]): BrowserApproval | nu
       if (!candidate?.requires_approval && !candidate?.approval_required) continue;
       const approvalId = String(candidate.approval_id ?? "");
       if (!approvalId) continue;
+      const approvalStatus = String(candidate.status ?? "pending").toLowerCase();
+      if (approvalStatus && !["pending", "approved"].includes(approvalStatus)) continue;
+      if (resolvedApprovalIds?.has(approvalId)) continue;
+      if (pendingApprovalIds !== null && !pendingApprovalIds.has(approvalId)) continue;
       const rawPayload = candidate.payload;
       const rawToken = String(candidate.approval_token ?? "");
       return {
@@ -739,6 +767,8 @@ export default function App() {
   const [canvasMemo, setCanvasMemo] = useLocalStorage("rumi-canvas-memo", "");
   const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
   const [previews, setPreviews] = useState<ToolPreviewItem[]>([]);
+  const [pendingApprovalIds, setPendingApprovalIds] = useState<Set<string> | null>(null);
+  const [resolvedApprovalIds, setResolvedApprovalIds] = useState<Set<string>>(() => new Set());
   const [health, setHealth] = useState<{ status: string; pack: string; ts: string } | null>(null);
   const [operationsStatus, setOperationsStatus] = useState<OperationsCompanyStatus | null>(null);
   const [operationsBusy, setOperationsBusy] = useState(false);
@@ -756,6 +786,7 @@ export default function App() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isUnloadingRef = useRef(false);
   const currentAbortControllerRef = useRef<AbortController | null>(null);
+  const streamingConversationIdRef = useRef<string | null>(null);
 
   const sidebarItems: SidebarItem[] = catalog?.sidebar.items ?? [];
   const chatItems = buildChatItems(conversations);
@@ -783,10 +814,14 @@ export default function App() {
   const isConversationPending = Boolean(
     pendingRequest && Date.now() - pendingRequest.startedAt < 10 * 60_000,
   );
-  const browserApproval = pendingBrowserApproval(messages);
-  const messageToolPreviews = useMemo(
-    () => toolPreviewsFromMessages(activeConversation?.messages ?? []),
+  const approvalIdsKey = useMemo(
+    () => approvalIdsFromMessages(activeConversation?.messages ?? []).join("|"),
     [activeConversation?.messages],
+  );
+  const browserApproval = pendingBrowserApproval(messages, pendingApprovalIds, resolvedApprovalIds);
+  const messageToolPreviews = useMemo(
+    () => toolPreviewsFromMessages(activeConversation?.messages ?? [], pendingApprovalIds, resolvedApprovalIds),
+    [activeConversation?.messages, pendingApprovalIds, resolvedApprovalIds],
   );
   const canvasPreviews = useMemo(() => {
     const seen = new Set(messageToolPreviews.map((preview) => preview.id));
@@ -1041,7 +1076,29 @@ export default function App() {
   }, [settingsValues.preview?.max_items, settingsValues.preview?.auto_open, activeConversationId]);
 
   useEffect(() => {
+    const approvalIds = approvalIdsKey ? approvalIdsKey.split("|").filter(Boolean) : [];
+    if (approvalIds.length === 0) {
+      setPendingApprovalIds(null);
+      return;
+    }
+    let cancelled = false;
+    void api.listApprovals({ status: "pending" }).then((result) => {
+      if (cancelled) return;
+      const pendingIds = new Set((result.approvals ?? [])
+        .map((approval) => approval.id)
+        .filter((approvalId) => approvalIds.includes(approvalId)));
+      setPendingApprovalIds(pendingIds);
+    }).catch(() => {
+      if (!cancelled) setPendingApprovalIds(null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [approvalIdsKey]);
+
+  useEffect(() => {
     if (!activeConversationId || !isConversationPending) return;
+    if (streamingConversationIdRef.current === activeConversationId) return;
     setIsGenerating(true);
     const interval = window.setInterval(() => {
       void api.getConversation(activeConversationId).then((conversation) => {
@@ -1310,6 +1367,16 @@ export default function App() {
 
   const approveComputerApproval = async (approval: BrowserApproval | ApprovalPreview) => {
     setError(null);
+    setResolvedApprovalIds((current) => new Set(current).add(approval.approvalId));
+    setPendingApprovalIds((current) => {
+      if (!current) return current;
+      const next = new Set(current);
+      next.delete(approval.approvalId);
+      return next;
+    });
+    setPreviews((current) => current.filter((preview) => (
+      preview.data.type !== "approval" || preview.data.approvalId !== approval.approvalId
+    )));
     try {
       const decision = await api.approveApproval(approval.approvalId) as unknown as Record<string, unknown>;
       const approvalToken = String(decision.approval_token ?? "");
@@ -1328,12 +1395,33 @@ export default function App() {
         await loadConversation(activeConversationId, false);
       }
     } catch (approvalError) {
+      setResolvedApprovalIds((current) => {
+        const next = new Set(current);
+        next.delete(approval.approvalId);
+        return next;
+      });
+      setPendingApprovalIds((current) => {
+        if (current?.has(approval.approvalId)) return current;
+        const next = new Set(current ?? []);
+        next.add(approval.approvalId);
+        return next;
+      });
       setError(approvalError instanceof Error ? approvalError.message : "browser/computer の承認に失敗しました。");
     }
   };
 
   const rejectComputerApproval = async (approval: BrowserApproval | ApprovalPreview) => {
     setError(null);
+    setResolvedApprovalIds((current) => new Set(current).add(approval.approvalId));
+    setPendingApprovalIds((current) => {
+      if (!current) return current;
+      const next = new Set(current);
+      next.delete(approval.approvalId);
+      return next;
+    });
+    setPreviews((current) => current.filter((preview) => (
+      preview.data.type !== "approval" || preview.data.approvalId !== approval.approvalId
+    )));
     try {
       await api.rejectApproval(approval.approvalId);
       if (activeConversationId) {
@@ -1341,6 +1429,17 @@ export default function App() {
         await loadConversation(activeConversationId, false);
       }
     } catch (approvalError) {
+      setResolvedApprovalIds((current) => {
+        const next = new Set(current);
+        next.delete(approval.approvalId);
+        return next;
+      });
+      setPendingApprovalIds((current) => {
+        if (current?.has(approval.approvalId)) return current;
+        const next = new Set(current ?? []);
+        next.add(approval.approvalId);
+        return next;
+      });
       setError(approvalError instanceof Error ? approvalError.message : "browser/computer の拒否に失敗しました。");
     }
   };
@@ -1513,6 +1612,7 @@ export default function App() {
       }
       const isOperationsMode = isOperationsConversation(conversation);
       submittedConversationId = conversation.id;
+      streamingConversationIdRef.current = conversation.id;
       rememberPendingRequest({
         conversationId: conversation.id,
         startedAt: Date.now(),
@@ -1734,6 +1834,9 @@ export default function App() {
       setIsNewChatLaunching(false);
     } finally {
       currentAbortControllerRef.current = null;
+      if (submittedConversationId && streamingConversationIdRef.current === submittedConversationId) {
+        streamingConversationIdRef.current = null;
+      }
       setIsGenerating(false);
       setIsNewChatLaunching(false);
     }
