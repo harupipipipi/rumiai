@@ -1594,6 +1594,30 @@ class BrowserComputerController:
             "transform": transform,
         }
 
+    def _infer_image_coordinate_space(self, payload: dict[str, Any]) -> str:
+        metadata = self._coordinate_reference_metadata(payload)
+        if not metadata:
+            return ""
+        try:
+            x = int(payload.get("x", 0))
+            y = int(payload.get("y", 0))
+        except Exception:
+            return ""
+        image_size = self._size_from_metadata(metadata, "image_size")
+        action_size = self._size_from_metadata(metadata, "action_coordinate_system")
+        if not image_size or not action_size:
+            return ""
+        image_width, image_height = image_size
+        action_width, action_height = action_size
+        if x < 0 or y < 0 or x > image_width or y > image_height:
+            return ""
+        # Models often emit coordinates in the screenshot they just saw. On
+        # Retina displays those values can be outside the desktop action space,
+        # which is a strong signal that conversion is needed.
+        if x > action_width or y > action_height:
+            return "screenshot_image"
+        return ""
+
     def _payload_with_target_coordinates(
         self,
         action: str,
@@ -1607,6 +1631,8 @@ class BrowserComputerController:
         adjusted = dict(payload)
         scope = target_context.get("scope")
         coordinate_space = str(payload.get("coordinate_space") or payload.get("coordinates") or "").strip().lower()
+        if not coordinate_space:
+            coordinate_space = self._infer_image_coordinate_space(payload)
         if coordinate_space in {"model_image", "screenshot_image", "source_image", "image"}:
             converted = self._image_point_to_action_coordinates(payload, target_context, coordinate_space)
             if converted:
@@ -1796,15 +1822,19 @@ class BrowserComputerController:
             raise RuntimeError("computer.scroll requires PyObjC Quartz on macOS") from exc
 
     def _darwin_type(self, payload: dict[str, Any]) -> None:
+        text = str(payload.get("text", ""))
+        if text:
+            self._darwin_paste_text(text)
+            return
         script = self._apple_script("computer.type", payload)
         try:
-            subprocess.run(["osascript", "-e", script], check=True)
+            subprocess.run(["osascript", "-e", script], check=True, capture_output=True, text=True)
             return
         except subprocess.CalledProcessError:
             # System Events often rejects non-ASCII keystrokes or missing Automation
             # permission. Clipboard paste keeps Japanese text intact and uses the
             # same CoreGraphics fallback as click/move.
-            self._darwin_paste_text(str(payload.get("text", "")))
+            self._darwin_paste_text(text)
 
     def _darwin_key(self, payload: dict[str, Any]) -> None:
         script = self._apple_script("computer.key", payload)

@@ -434,6 +434,16 @@ def _browser_computer_action_payload(tool_name, arguments):
             "scroll": "computer.scroll",
             "zoom": "computer.zoom",
             "computer.zoom": "computer.zoom",
+            "app.focus": "computer.app.focus",
+            "app_focus": "computer.app.focus",
+            "focus_app": "computer.app.focus",
+            "application.focus": "computer.app.focus",
+            "app.open": "computer.app.open",
+            "app_open": "computer.app.open",
+            "open_app": "computer.app.open",
+            "active_window": "computer.active_window",
+            "windows.list": "computer.windows.list",
+            "windows_list": "computer.windows.list",
         }
         action = action_map.get(raw_action, raw_action)
         for key in (
@@ -474,6 +484,16 @@ def _browser_computer_action_payload(tool_name, arguments):
             "scroll": "computer.scroll",
             "zoom": "computer.zoom",
             "computer.zoom": "computer.zoom",
+            "app.focus": "computer.app.focus",
+            "app_focus": "computer.app.focus",
+            "focus_app": "computer.app.focus",
+            "application.focus": "computer.app.focus",
+            "app.open": "computer.app.open",
+            "app_open": "computer.app.open",
+            "open_app": "computer.app.open",
+            "active_window": "computer.active_window",
+            "windows.list": "computer.windows.list",
+            "windows_list": "computer.windows.list",
         }
         action = action_map.get(raw_action, raw_action)
         for key in (

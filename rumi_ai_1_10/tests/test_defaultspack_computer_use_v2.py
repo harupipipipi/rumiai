@@ -70,6 +70,21 @@ def test_computer_use_executor_forwards_target_coordinate_and_quality_fields():
     assert payload["model_image_path"] == "/tmp/screen-model.jpg"
 
 
+def test_computer_use_executor_accepts_natural_app_focus_alias():
+    from domain.tool.executor import _browser_computer_action_payload
+
+    action, payload = _browser_computer_action_payload(
+        "computer_use",
+        {
+            "action": "app.focus",
+            "app": "Vivaldi",
+        },
+    )
+
+    assert action == "computer.app.focus"
+    assert payload["app"] == "Vivaldi"
+
+
 def test_windows_permissions_include_v2_preflight_fields(monkeypatch):
     from domain.tool.browser_computer import BrowserComputerController
     import domain.tool.browser_computer as browser_computer
@@ -465,6 +480,40 @@ def test_app_window_click_converts_model_image_coordinates_to_desktop(tmp_path, 
     assert result["coordinate_transform"]["screenshot_point"]["y"] == 200
 
 
+def test_click_infers_screenshot_coordinates_when_point_exceeds_action_space(tmp_path, monkeypatch):
+    from domain.tool.browser_computer import BrowserComputerController
+    import domain.tool.browser_computer as browser_computer
+
+    clicked = {}
+    metadata = {
+        "path": str(tmp_path / "screenshot-1.png"),
+        "metadata_path": str(tmp_path / "screenshot-1.json"),
+        "image_size": {"width": 600, "height": 400},
+        "action_coordinate_system": {"width": 300, "height": 200},
+    }
+    (tmp_path / "screenshot-1.json").write_text(json.dumps(metadata), encoding="utf-8")
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(BrowserComputerController, "_darwin_click", lambda self, payload: clicked.update(payload))
+
+    result = BrowserComputerController(artifact_root=tmp_path).run(
+        "computer.click",
+        {"x": 300, "y": 300},
+        yolo_mode=True,
+    )
+
+    assert clicked["x"] == 150
+    assert clicked["y"] == 150
+    assert result["target"] == {"x": 150, "y": 150}
+    assert result["coordinate_transform"]["input"] == {
+        "type": "point",
+        "x": 300,
+        "y": 300,
+        "coordinate_space": "screenshot_image",
+        "label": "source",
+    }
+
+
 def test_app_window_click_offsets_local_coordinates(monkeypatch):
     from domain.tool.browser_computer import BrowserComputerController
     import domain.tool.browser_computer as browser_computer
@@ -517,3 +566,29 @@ def test_desktop_click_keeps_absolute_coordinates(monkeypatch):
     assert clicked["y"] == 34
     assert "local_target" not in result
     assert result["target_context"]["scope"] == "full_desktop"
+
+
+def test_darwin_type_uses_clipboard_paste_for_text(monkeypatch):
+    from domain.tool.browser_computer import BrowserComputerController
+    import domain.tool.browser_computer as browser_computer
+
+    commands = []
+
+    def fake_run(command, **kwargs):
+        commands.append((command, kwargs))
+        if command == ["pbpaste"]:
+            return subprocess.CompletedProcess(command, 0, stdout="old")
+        return subprocess.CompletedProcess(command, 0, stdout="")
+
+    posted = []
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+    monkeypatch.setattr(BrowserComputerController, "_darwin_post_key", lambda self, key, modifiers=None: posted.append((key, modifiers)))
+
+    result = BrowserComputerController().run("computer.type", {"text": "Gemma 4 testです"}, yolo_mode=True)
+
+    assert result["executed"] is True
+    assert [command for command, _ in commands] == [["pbpaste"], ["pbcopy"], ["pbcopy"]]
+    assert commands[1][1]["input"] == "Gemma 4 testです"
+    assert commands[2][1]["input"] == "old"
+    assert posted == [("v", ["cmd"])]
