@@ -44,6 +44,13 @@ def run(context):
         ("GET", "/api/ai/profiles", _lazy("blocks.ai.profiles"), {}),
         ("GET", "/api/ai/provider-key", _lazy("blocks.ai.provider_key"), {}),
         ("POST", "/api/ai/provider-key", _lazy("blocks.ai.provider_key"), {}),
+        ("GET", "/api/ai/keys", _lazy("blocks.ai_keys.list"), {}),
+        ("POST", "/api/ai/keys", _lazy("blocks.ai_keys.create"), {}),
+        ("GET", "/api/ai/keys/{id}", _lazy("blocks.ai_keys.get"), {"id": "key_id"}),
+        ("PUT", "/api/ai/keys/{id}", _lazy("blocks.ai_keys.update"), {"id": "key_id"}),
+        ("DELETE", "/api/ai/keys/{id}", _lazy("blocks.ai_keys.delete"), {"id": "key_id"}),
+        ("POST", "/api/ai/keys/{id}/test", _lazy("blocks.ai_keys.test"), {"id": "key_id"}),
+        ("GET", "/api/ai/keys/{id}/usage", _lazy("blocks.ai_keys.usage"), {"id": "key_id"}),
         # --- Routing: analyze ---
         ("POST", "/api/ai/routing/analyze", _lazy("blocks.ai.routing.analyze"), {}),
         # --- Routing: route ---

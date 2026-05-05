@@ -7,7 +7,8 @@ from ._runtime import profile_manager
 
 def run(input_data, context=None):
     input_data = input_data if isinstance(input_data, dict) else {}
-    action = str(input_data.get("action") or "list")
+    method = str(input_data.get("_method") or "GET").upper()
+    action = str(input_data.get("action") or ("create" if method == "POST" else "list"))
     manager = profile_manager(input_data, context)
     try:
         if action == "list":

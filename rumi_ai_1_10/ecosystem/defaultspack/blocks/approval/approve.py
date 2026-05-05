@@ -12,13 +12,17 @@ def run(input_data, context=None):
         scope = "session"
     ttl = data.get("ttl_seconds")
     try:
-        return ok(
-            ApprovalStore().approve(
-                str(data.get("approval_id") or data.get("id") or ""),
-                scope=scope,
-                session_id=str(data.get("session_id") or ""),
-                ttl_seconds=int(ttl) if ttl is not None else None,
+        approval_id = str(data.get("approval_id") or data.get("id") or "")
+        store = ApprovalStore()
+        ttl_seconds = int(ttl) if ttl is not None else None
+        if scope == "session":
+            return ok(
+                store.approve_session(
+                    approval_id,
+                    session_id=str(data.get("session_id") or ""),
+                    **({"ttl_seconds": ttl_seconds} if ttl_seconds is not None else {}),
+                )
             )
-        )
+        return ok(store.approve_once(approval_id, **({"ttl_seconds": ttl_seconds} if ttl_seconds is not None else {})))
     except Exception as exc:
         return approval_error(exc)

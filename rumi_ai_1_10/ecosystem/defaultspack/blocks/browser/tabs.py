@@ -7,9 +7,11 @@ from ._runtime import session_manager
 
 def run(input_data, context=None):
     input_data = input_data if isinstance(input_data, dict) else {}
-    action = str(input_data.get("action") or "list")
+    method = str(input_data.get("_method") or "GET").upper()
+    action = str(input_data.get("action") or ("open" if method == "POST" else "list"))
     manager = session_manager(input_data, context)
-    session_id = input_data.get("session_id")
+    profile_id = str(input_data.get("profile_id") or input_data.get("id") or "default")
+    session_id = input_data.get("session_id") or f"session-{profile_id}"
     tab_id = input_data.get("tab_id")
     try:
         if action == "list":

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from blocks._common import error, ok
-from domain.approval.approval_store import ApprovalStore
+from domain.approval.store import ApprovalStore
 
 
 def approval_error(exc: Exception):

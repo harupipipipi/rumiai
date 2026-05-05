@@ -1335,6 +1335,28 @@ def test_computer_move_uses_cliclick_on_macos(monkeypatch):
     assert calls[0][0] == ["/opt/homebrew/bin/cliclick", "m:120,240"]
 
 
+def test_computer_scroll_uses_quartz_on_macos(monkeypatch):
+    from domain.tool.browser_computer import BrowserComputerController
+    import domain.tool.browser_computer as browser_computer
+
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+
+    result = BrowserComputerController().run("computer.scroll", {"amount": -3}, yolo_mode=True)
+
+    assert result["executed"] is True
+    assert result["amount"] == -3
+    assert calls[0][0][:2] == ["python3", "-c"]
+    assert "CGEventCreateScrollWheelEvent" in calls[0][0][2]
+    assert calls[0][0][3] == "-3"
+
+
 def test_browser_computer_manages_persistent_profiles_and_cookie_jars(tmp_path):
     from domain.tool.browser_computer import BrowserComputerController
 
