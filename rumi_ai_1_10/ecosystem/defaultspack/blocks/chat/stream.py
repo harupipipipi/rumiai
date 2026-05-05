@@ -18,6 +18,7 @@ from blocks.chat.send import (
     _conversation_system_prompt,
     _normalize_vision_detail,
     _sanitize_attachment_metadata,
+    _with_inferred_requested_tools,
 )
 
 
@@ -275,6 +276,7 @@ def _stream_response(input_data, context):
 
 
 def run(input_data, context):
+    input_data = _with_inferred_requested_tools(input_data)
     conversation_id = input_data.get("conversation_id")
     if not conversation_id:
         return error("conversation_id is required", "INVALID_INPUT")

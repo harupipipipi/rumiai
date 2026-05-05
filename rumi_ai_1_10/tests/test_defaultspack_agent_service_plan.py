@@ -478,6 +478,38 @@ def test_chat_stream_fallback_emits_persisted_user_and_assistant(tmp_path, monke
     ChatStore._instance = None
 
 
+def test_chat_stream_infers_computer_use_tools_from_explicit_request(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from blocks.chat.stream import run
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    result = run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "computer useでVivaldiを操作してLINEに送信して"},
+            "tools": [],
+            "params": {"tool_policy": {"selected_tools": []}},
+        },
+        {},
+    )
+
+    events = list(result["events"])
+    final = [event["message"] for event in events if event.get("type") == "message"][-1]
+    assert "computer_use" in final["metadata"]["attached_tools"]
+    assert "zoom" in final["metadata"]["attached_tools"]
+
+    persisted = json.loads(storage_path.read_text(encoding="utf-8"))
+    stored_user = persisted["conversations"][conversation["id"]]["messages"][0]
+    assert stored_user["metadata"]["selected_tools"] == ["computer_use", "zoom"]
+    assert stored_user["metadata"]["auto_selected_tools"] == ["computer_use", "zoom"]
+    ChatStore._instance = None
+
+
 def test_chat_stream_fallback_emits_live_tool_events_before_final_message(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from blocks.chat.stream import run

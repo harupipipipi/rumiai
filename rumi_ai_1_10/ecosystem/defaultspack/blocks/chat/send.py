@@ -35,6 +35,11 @@ _SECRET_KEY_RE = re.compile(
     re.IGNORECASE,
 )
 _PROMPT_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_COMPUTER_USE_REQUEST_RE = re.compile(
+    r"computer[\s_-]*use|computer\s+ツール|コンピューター操作|pc操作|"
+    r"(vivaldi|line|ブラウザ|browser).{0,24}(操作|送信|入力|クリック|開いて|開く)",
+    re.IGNORECASE,
+)
 
 
 def _stub_response():
@@ -148,6 +153,53 @@ def _resolve_selected_tools(raw_tools):
             continue
         resolved.append(tool_def)
     return resolved, unknown
+
+
+def _infer_requested_tools_from_message(message):
+    if not isinstance(message, dict):
+        return []
+    text = extract_user_text(message.get("content"))
+    if not _COMPUTER_USE_REQUEST_RE.search(text or ""):
+        return []
+    return ["computer_use", "zoom"]
+
+
+def _with_inferred_requested_tools(input_data):
+    if not isinstance(input_data, dict):
+        return input_data
+    raw_tools = input_data.get("tools")
+    if isinstance(raw_tools, list) and any(raw_tools):
+        return input_data
+
+    params = input_data.get("params") if isinstance(input_data.get("params"), dict) else {}
+    tool_policy = params.get("tool_policy") if isinstance(params.get("tool_policy"), dict) else {}
+    selected_policy_tools = tool_policy.get("selected_tools")
+    if isinstance(selected_policy_tools, list) and any(selected_policy_tools):
+        return input_data
+
+    inferred = _infer_requested_tools_from_message(input_data.get("message"))
+    if not inferred:
+        return input_data
+
+    updated = dict(input_data)
+    updated["tools"] = inferred
+
+    updated_params = dict(params)
+    updated_tool_policy = dict(tool_policy)
+    updated_tool_policy["selected_tools"] = inferred
+    updated_params["tool_policy"] = updated_tool_policy
+    updated["params"] = updated_params
+
+    message = input_data.get("message")
+    if isinstance(message, dict):
+        updated_message = dict(message)
+        metadata = dict(updated_message.get("metadata") if isinstance(updated_message.get("metadata"), dict) else {})
+        metadata["selected_tools"] = inferred
+        metadata["auto_selected_tools"] = inferred
+        updated_message["metadata"] = metadata
+        updated["message"] = updated_message
+
+    return updated
 
 
 def _available_tools(context, input_data):
@@ -661,6 +713,7 @@ def _sanitize_attachment_metadata(attachments):
 
 
 def run(input_data, context):
+    input_data = _with_inferred_requested_tools(input_data)
     store = ChatStore()
     event_callback = context.get("event_callback") if isinstance(context, dict) else None
     conversation_id = input_data.get("conversation_id")
