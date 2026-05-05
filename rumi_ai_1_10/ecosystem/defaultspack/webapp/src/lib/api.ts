@@ -107,6 +107,229 @@ export type OperationsCompanyStatus = {
   };
 };
 
+export type AgentLifecycleStatus =
+  | "idle"
+  | "scheduled"
+  | "running"
+  | "paused"
+  | "waiting_approval"
+  | "blocked"
+  | "completed"
+  | "failed"
+  | string;
+
+export type AgentRunMode = "manual" | "scheduled" | "non_stop" | string;
+
+export type AgentTemplate = {
+  id: string;
+  name: string;
+  description?: string;
+  profile_id?: string;
+  role?: string;
+  model?: string;
+  tools?: string[];
+  lifecycle?: AgentRunMode;
+};
+
+export type AgentScheduleConfig = {
+  enabled?: boolean;
+  mode?: AgentRunMode;
+  interval_minutes?: number;
+  cron?: string;
+  timezone?: string;
+  start_now?: boolean;
+  quiet_hours?: string;
+};
+
+export type AgentLifecycleConfig = {
+  run_mode?: AgentRunMode;
+  start_now?: boolean;
+  max_ticks?: number;
+  max_cost_usd?: number;
+  stop_on_failure?: boolean;
+  approval_mode?: "prompt" | "auto_low_risk" | "manual_only" | string;
+};
+
+export type AgentToolPolicy = {
+  allowed_tools?: string[];
+  denied_tools?: string[];
+  browser_enabled?: boolean;
+  computer_enabled?: boolean;
+  require_approval_for?: string[];
+  risk_budget?: ApprovalRiskLevel | string;
+};
+
+export type AgentMetrics = {
+  ticks?: number;
+  tokens?: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  tool_calls?: number;
+  failures?: number;
+  cost_usd?: number;
+  approvals_pending?: number;
+  last_tick_at?: number | string | null;
+};
+
+export type AgentRecord = {
+  id: string;
+  name: string;
+  status: AgentLifecycleStatus;
+  template_id?: string;
+  profile_id?: string;
+  role?: string;
+  model?: string;
+  api_key_id?: string | null;
+  provider_id?: string | null;
+  browser_profile_id?: string | null;
+  browser_enabled?: boolean;
+  computer_enabled?: boolean;
+  schedule?: AgentScheduleConfig | null;
+  lifecycle?: AgentLifecycleConfig | null;
+  tool_policy?: AgentToolPolicy | null;
+  tools?: string[];
+  blockers?: string[];
+  metrics?: AgentMetrics | null;
+  created_at?: number | string;
+  updated_at?: number | string;
+  last_tick_at?: number | string | null;
+  next_tick_at?: number | string | null;
+};
+
+export type CreateAgentRequest = {
+  template_id?: string;
+  name: string;
+  profile_id?: string;
+  role?: string;
+  model?: string;
+  api_key_id?: string | null;
+  provider_id?: string | null;
+  browser_profile_id?: string | null;
+  browser_enabled?: boolean;
+  computer_enabled?: boolean;
+  tools?: string[];
+  schedule?: AgentScheduleConfig;
+  lifecycle?: AgentLifecycleConfig;
+  tool_policy?: AgentToolPolicy;
+  metadata?: Record<string, unknown>;
+};
+
+export type AgentLifecycleAction =
+  | "start"
+  | "pause"
+  | "resume"
+  | "stop"
+  | "tick"
+  | "archive"
+  | string;
+
+export type ApiKeySummary = {
+  id: string;
+  provider_id: string;
+  label?: string;
+  configured: boolean;
+  key_name?: string;
+  redacted?: string;
+  created_at?: number | string | null;
+  updated_at?: number | string | null;
+  last_used_at?: number | string | null;
+  scopes?: string[];
+  models?: string[];
+};
+
+export type SaveApiKeyRequest = {
+  provider_id: string;
+  value: string;
+  label?: string;
+  scopes?: string[];
+  make_default?: boolean;
+};
+
+export type BrowserProfile = {
+  id: string;
+  profile_id?: string;
+  label?: string;
+  active?: boolean;
+  managed?: boolean;
+  persistent?: boolean;
+  created_at?: number | string | null;
+  updated_at?: number | string | null;
+  last_used_at?: number | string | null;
+  last_url?: string | null;
+  cookie_count?: number;
+  cache_bytes?: number;
+  storage_bytes?: number;
+  tags?: string[];
+};
+
+export type BrowserTab = {
+  id: string;
+  title?: string;
+  url?: string;
+  active?: boolean;
+  status?: string;
+  snapshot_ref?: string | null;
+  screenshot_url?: string | null;
+  updated_at?: number | string | null;
+};
+
+export type BrowserActionLogEntry = {
+  id: string;
+  action: string;
+  status?: string;
+  agent_id?: string | null;
+  tool_name?: string | null;
+  message?: string;
+  timestamp?: number | string | null;
+  payload?: Record<string, unknown>;
+};
+
+export type BrowserViewerState = {
+  profile_id?: string | null;
+  tabs: BrowserTab[];
+  active_tab_id?: string | null;
+  screenshot_url?: string | null;
+  snapshot_ref?: string | null;
+  action_log?: BrowserActionLogEntry[];
+  manual_takeover?: boolean;
+  takeover_owner?: string | null;
+};
+
+export type ApprovalRiskLevel = "low" | "medium" | "high" | "critical" | string;
+
+export type ApprovalStatus = "pending" | "approved" | "rejected" | "expired" | string;
+
+export type ApprovalRequest = {
+  id: string;
+  agent_id?: string | null;
+  agent_name?: string | null;
+  tool_name?: string | null;
+  action?: string;
+  risk_level?: ApprovalRiskLevel;
+  status: ApprovalStatus;
+  reason?: string;
+  payload?: Record<string, unknown>;
+  screenshot_url?: string | null;
+  snapshot_ref?: string | null;
+  created_at?: number | string | null;
+  expires_at?: number | string | null;
+};
+
+export type ApprovalDecision = {
+  decision: "approve" | "reject";
+  reason?: string;
+  payload?: Record<string, unknown>;
+};
+
+export type ApprovalPolicy = {
+  tool_policy?: Record<string, boolean>;
+  model_policy?: Record<string, boolean>;
+  risk_policy?: Record<string, boolean>;
+  require_human_for?: string[];
+  auto_approve_low_risk?: boolean;
+  updated_at?: number | string | null;
+};
+
 export type ChatActivityEvent = {
   type: string;
   message?: string;
@@ -570,6 +793,78 @@ export const api = {
     return request<{ profiles: ModelProfile[]; count: number }>("/api/ai/profiles");
   },
 
+  listAgents(options?: { status?: string; profile_id?: string }) {
+    const params = new URLSearchParams();
+    if (options?.status) params.set("status", options.status);
+    if (options?.profile_id) params.set("profile_id", options.profile_id);
+    return request<{
+      agents: AgentRecord[];
+      total?: number;
+      templates?: AgentTemplate[];
+    }>(`/api/agents${params.size ? `?${params.toString()}` : ""}`);
+  },
+
+  getAgent(agentId: string) {
+    return request<AgentRecord>(`/api/agents/${encodeURIComponent(agentId)}`);
+  },
+
+  createAgent(payload: CreateAgentRequest) {
+    return request<AgentRecord>("/api/agents", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  updateAgent(agentId: string, updates: Partial<CreateAgentRequest & AgentRecord>) {
+    return request<AgentRecord>(`/api/agents/${encodeURIComponent(agentId)}`, {
+      method: "PUT",
+      body: JSON.stringify({ updates }),
+    });
+  },
+
+  setAgentLifecycle(
+    agentId: string,
+    action: AgentLifecycleAction,
+    payload?: Record<string, unknown>,
+  ) {
+    return request<AgentRecord>(`/api/agents/${encodeURIComponent(agentId)}/lifecycle`, {
+      method: "POST",
+      body: JSON.stringify({ action, payload: payload ?? {} }),
+    });
+  },
+
+  deleteAgent(agentId: string) {
+    return request<{ deleted: boolean }>(`/api/agents/${encodeURIComponent(agentId)}`, {
+      method: "DELETE",
+    });
+  },
+
+  listApiKeys() {
+    return request<{ keys: ApiKeySummary[]; providers?: string[]; total?: number }>(
+      "/api/ai/keys",
+    );
+  },
+
+  saveApiKey(payload: SaveApiKeyRequest) {
+    return request<ApiKeySummary>("/api/ai/keys", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  deleteApiKey(keyId: string) {
+    return request<{ deleted: boolean }>(`/api/ai/keys/${encodeURIComponent(keyId)}`, {
+      method: "DELETE",
+    });
+  },
+
+  testApiKey(keyId: string) {
+    return request<{ ok: boolean; message?: string }>(
+      `/api/ai/keys/${encodeURIComponent(keyId)}/test`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+  },
+
   health() {
     return request<{ status: string; pack: string; ts: string }>("/api/health");
   },
@@ -595,6 +890,103 @@ export const api = {
     return request<{ provider_id: string; configured: boolean }>("/api/ai/provider-key", {
       method: "POST",
       body: JSON.stringify({ provider_id: providerId, value }),
+    });
+  },
+
+  listBrowserProfiles() {
+    return request<{
+      profiles: BrowserProfile[];
+      active_profile_id?: string | null;
+      viewer?: BrowserViewerState;
+    }>("/api/browser/profiles");
+  },
+
+  createBrowserProfile(payload: Partial<BrowserProfile> & { label?: string; set_active?: boolean }) {
+    return request<BrowserProfile>("/api/browser/profiles", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  updateBrowserProfile(profileId: string, updates: Partial<BrowserProfile>) {
+    return request<BrowserProfile>(`/api/browser/profiles/${encodeURIComponent(profileId)}`, {
+      method: "PUT",
+      body: JSON.stringify({ updates }),
+    });
+  },
+
+  deleteBrowserProfile(profileId: string) {
+    return request<{ deleted: boolean }>(
+      `/api/browser/profiles/${encodeURIComponent(profileId)}`,
+      { method: "DELETE" },
+    );
+  },
+
+  setActiveBrowserProfile(profileId: string) {
+    return request<{ active_profile_id: string }>(
+      `/api/browser/profiles/${encodeURIComponent(profileId)}/active`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+  },
+
+  browserProfileAction(profileId: string, action: string, payload?: Record<string, unknown>) {
+    return request<Record<string, unknown>>(
+      `/api/browser/profiles/${encodeURIComponent(profileId)}/actions`,
+      {
+        method: "POST",
+        body: JSON.stringify({ action, payload: payload ?? {} }),
+      },
+    );
+  },
+
+  listApprovals(options?: { status?: ApprovalStatus; agent_id?: string; risk_level?: string }) {
+    const params = new URLSearchParams();
+    if (options?.status) params.set("status", options.status);
+    if (options?.agent_id) params.set("agent_id", options.agent_id);
+    if (options?.risk_level) params.set("risk_level", options.risk_level);
+    return request<{ approvals: ApprovalRequest[]; total?: number }>(
+      `/api/approvals${params.size ? `?${params.toString()}` : ""}`,
+    );
+  },
+
+  decideApproval(approvalId: string, decision: ApprovalDecision) {
+    return request<ApprovalRequest>(
+      `/api/approvals/${encodeURIComponent(approvalId)}/decision`,
+      {
+        method: "POST",
+        body: JSON.stringify(decision),
+      },
+    );
+  },
+
+  approveApproval(approvalId: string, reason?: string) {
+    return request<ApprovalRequest>(
+      `/api/approvals/${encodeURIComponent(approvalId)}/decision`,
+      {
+        method: "POST",
+        body: JSON.stringify({ decision: "approve", reason }),
+      },
+    );
+  },
+
+  rejectApproval(approvalId: string, reason?: string) {
+    return request<ApprovalRequest>(
+      `/api/approvals/${encodeURIComponent(approvalId)}/decision`,
+      {
+        method: "POST",
+        body: JSON.stringify({ decision: "reject", reason }),
+      },
+    );
+  },
+
+  getApprovalPolicy() {
+    return request<ApprovalPolicy>("/api/approvals/policy");
+  },
+
+  updateApprovalPolicy(policy: ApprovalPolicy) {
+    return request<ApprovalPolicy>("/api/approvals/policy", {
+      method: "PUT",
+      body: JSON.stringify({ policy }),
     });
   },
 

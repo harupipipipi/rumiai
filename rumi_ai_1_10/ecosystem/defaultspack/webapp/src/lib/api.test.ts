@@ -177,3 +177,59 @@ test("coding context, branch, and workspace read helpers use existing API routes
     body: { path: "README.md" },
   });
 });
+
+test("agent operations helpers use typed PR56 routes", async () => {
+  const seen: Array<{ input: string; method?: string; body?: unknown }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    seen.push({
+      input: String(input),
+      method: init?.method,
+      body: init?.body ? JSON.parse(String(init.body)) : undefined,
+    });
+    return new Response(JSON.stringify({ status: "ok", data: {} }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }) as typeof fetch;
+
+  try {
+    await api.listAgents({ status: "running" });
+    await api.createAgent({ name: "Worker", profile_id: "local_agent", role: "Build UI" });
+    await api.setAgentLifecycle("agent 1", "tick", { force: true });
+    await api.saveApiKey({ provider_id: "openrouter", value: "secret", label: "Ops" });
+    await api.listBrowserProfiles();
+    await api.approveApproval("approval 1", "looks ok");
+    await api.updateApprovalPolicy({ risk_policy: { low: true, high: false } });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(seen[0].input, "/api/agents?status=running");
+  assert.deepEqual(seen[1], {
+    input: "/api/agents",
+    method: "POST",
+    body: { name: "Worker", profile_id: "local_agent", role: "Build UI" },
+  });
+  assert.deepEqual(seen[2], {
+    input: "/api/agents/agent%201/lifecycle",
+    method: "POST",
+    body: { action: "tick", payload: { force: true } },
+  });
+  assert.deepEqual(seen[3], {
+    input: "/api/ai/keys",
+    method: "POST",
+    body: { provider_id: "openrouter", value: "secret", label: "Ops" },
+  });
+  assert.equal(seen[4].input, "/api/browser/profiles");
+  assert.deepEqual(seen[5], {
+    input: "/api/approvals/approval%201/decision",
+    method: "POST",
+    body: { decision: "approve", reason: "looks ok" },
+  });
+  assert.deepEqual(seen[6], {
+    input: "/api/approvals/policy",
+    method: "PUT",
+    body: { policy: { risk_policy: { low: true, high: false } } },
+  });
+});
