@@ -57,7 +57,27 @@ test("summarizes computer screenshots without leaking giant absolute paths into 
     },
   ]);
 
-  assert.equal(groups[0].items[0].detail, "screenshot captured · screenshot-177.png");
+  assert.equal(groups[0].items[0].input, "スクリーンショット");
+  assert.equal(groups[0].items[0].detail, "画面を取得 · screenshot-177.png");
+});
+
+test("summarizes computer clicks as useful compact activity", () => {
+  const groups = buildToolActivityGroups([
+    {
+      tool_name: "computer_use",
+      arguments: { action: "computer.click", x: 840, y: 620 },
+      result: {
+        status: "ok",
+        data: {
+          action: "computer.click",
+          click_history_visual_path: "/Users/haru/Desktop/project/screenshot-clicks.png",
+        },
+      },
+    },
+  ]);
+
+  assert.equal(groups[0].items[0].input, "クリック (840, 620)");
+  assert.equal(groups[0].items[0].detail, "クリック位置を記録 · screenshot-clicks.png");
 });
 
 test("does not create activity from text-only claims", () => {

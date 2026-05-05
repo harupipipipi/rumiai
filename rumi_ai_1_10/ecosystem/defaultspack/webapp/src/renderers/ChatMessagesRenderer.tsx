@@ -7,11 +7,34 @@ import { extractToolVisual, type ToolVisualImage } from "../lib/toolVisuals";
 import type { ChatContentBlock } from "../lib/api";
 import type { ChatMessagesRendererProps } from "./types";
 
+function compactDisplayPath(value: string): string {
+  const normalized = value.trim().replace(/\\/g, "/");
+  return normalized.split("/").filter(Boolean).pop() || normalized;
+}
+
+function friendlyComputerAction(action: string, artifact?: string): string {
+  const normalized = action.trim().toLowerCase().replace(/^computer\./, "");
+  const suffix = artifact ? ` · ${compactDisplayPath(artifact)}` : "";
+  if (normalized.includes("screenshot")) return `computer_use: 画面を取得${suffix}`;
+  if (normalized.includes("click")) return `computer_use: クリック${suffix}`;
+  if (normalized.includes("type")) return "computer_use: テキスト入力";
+  if (normalized.includes("key") || normalized.includes("press")) return "computer_use: キー送信";
+  if (normalized.includes("scroll")) return "computer_use: スクロール";
+  return `computer_use: 操作完了${suffix}`;
+}
+
+function compactToolStatusText(text: string): string {
+  return text.replace(
+    /^computer_use\s+(computer\.[\w.-]+)\s+completed(?:;\s*artifact:\s*(\S+))?$/gm,
+    (_match, action: string, artifact?: string) => friendlyComputerAction(action, artifact),
+  );
+}
+
 function MessageBlock({ block, unknownStrategy }: { block: ChatContentBlock; unknownStrategy: string }) {
   const blockType = String(block.type ?? "text");
 
   if (blockType === "text" || blockType === "markdown") {
-    return <ReactMarkdown>{String(block.text ?? "")}</ReactMarkdown>;
+    return <ReactMarkdown>{compactToolStatusText(String(block.text ?? ""))}</ReactMarkdown>;
   }
 
   if (blockType === "code") {
@@ -166,16 +189,27 @@ function ToolResultDetail({ detail, result }: { detail: string; result?: unknown
   );
 }
 
+function isLowInformationDetail(item: ToolActivityItem, visual: ToolVisualImage | null): boolean {
+  if (visual) return false;
+  const detail = item.detail.trim().toLowerCase();
+  if (!detail) return true;
+  return (
+    detail === "completed"
+    || detail === `${item.toolName.toLowerCase()} completed`
+    || detail === `${item.toolName.toLowerCase()} ${item.input.toLowerCase()} completed`
+    || /^computer_use computer\.[a-z_.-]+ completed$/.test(detail)
+  );
+}
+
 function ToolResultPanel({ item }: { item: ToolActivityItem }) {
   const visual = extractToolVisual(item.result);
-  if (!item.detail && !visual) return null;
+  if (isLowInformationDetail(item, visual)) return null;
 
   return (
     <div className={cn(
-      "mt-2 min-w-0 max-w-full rounded-md border border-zinc-800/70 bg-black/20 px-3 py-2 text-zinc-300",
+      "mt-1.5 min-w-0 max-w-full text-zinc-300",
       visual && "w-fit",
     )}>
-      <span className="mb-1 block text-[10px] font-medium text-zinc-600">結果</span>
       <ToolResultDetail detail={item.detail} result={item.result} />
     </div>
   );
@@ -188,38 +222,28 @@ function ToolActivityTray({ message }: { message: ChatMessagesRendererProps["mes
   const total = items.length;
 
   return (
-    <details className="rumi-tool-activity mb-4 w-full max-w-full overflow-hidden rounded-xl border border-zinc-800/90 bg-zinc-950/70 px-4 py-3 text-zinc-300 shadow-[0_16px_44px_rgba(0,0,0,0.22)]" open>
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-[13px] text-zinc-300">
-        <span className="flex min-w-0 items-center gap-2 font-medium">
-          <span className="truncate">使用した tool</span>
-          <span className="rounded-full border border-zinc-800 bg-zinc-900 px-1.5 py-0.5 text-[10px] text-zinc-500">{total}</span>
+    <details className="rumi-tool-activity mb-2 w-fit max-w-full overflow-hidden rounded-lg border border-zinc-800/60 bg-zinc-950/35 px-2.5 py-1.5 text-zinc-300" open>
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-[11px] text-zinc-400">
+        <span className="flex min-w-0 items-center gap-1.5 font-medium">
+          <span className="truncate">tool</span>
+          <span className="rounded-full border border-zinc-800/70 bg-zinc-900/60 px-1.5 py-px font-mono text-[10px] text-zinc-500">{total}</span>
         </span>
-        <ChevronDown size={16} className="rumi-tool-caret shrink-0 text-zinc-500" />
+        <ChevronDown size={13} className="rumi-tool-caret shrink-0 text-zinc-600" />
       </summary>
-      <div className="mt-3 grid gap-2">
+      <div className="mt-1.5 grid gap-1">
         {items.map((item) => (
-          <div key={item.id} className="rumi-tool-card min-w-0 rounded-lg border border-zinc-800/80 bg-zinc-900/55 px-3.5 py-3">
-            <div className="flex min-w-0 items-start justify-between gap-3">
-              <div className="flex min-w-0 items-start gap-2.5">
-                <span className="mt-0.5">
+          <div key={item.id} className="rumi-tool-card min-w-0 rounded-md border border-zinc-800/45 bg-zinc-900/25 px-2 py-1.5">
+            <div className="flex min-w-0 items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-1.5">
+                <span className="shrink-0">
                   <ToolStatusIcon item={item} />
                 </span>
-                <div className="min-w-0">
-                  <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="rounded-md border border-zinc-800 bg-zinc-950/70 px-1.5 py-0.5 text-[10px] font-medium text-zinc-400">
-                      {item.folderLabel}
-                    </span>
-                    <span className="min-w-0 truncate font-mono text-[12px] text-zinc-200">{item.toolName}</span>
-                  </div>
-                  {item.input && (
-                    <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[10px] leading-4 text-zinc-600">
-                      <span className="shrink-0 text-zinc-700">入力</span>
-                      <span className="min-w-0 truncate font-mono">{item.input}</span>
-                    </div>
-                  )}
-                </div>
+                <span className="shrink-0 rounded border border-zinc-800/70 bg-zinc-950/50 px-1.5 py-px text-[10px] text-zinc-500">
+                  {item.folderLabel}
+                </span>
+                <span className="min-w-0 truncate text-[12px] text-zinc-200">{item.input || item.toolName}</span>
               </div>
-              <span className="shrink-0 rounded-full border border-zinc-800 bg-zinc-950/70 px-2 py-0.5 text-[10px] text-zinc-500">
+              <span className="shrink-0 rounded-full border border-zinc-800/70 bg-zinc-950/50 px-1.5 py-px text-[10px] text-zinc-500">
                 {toolStatusLabel(item)}
               </span>
             </div>
@@ -325,7 +349,7 @@ export function ChatMessagesRenderer({
                         ? message.content.map((block, index) => (
                             <MessageBlock key={`${message.id}-${index}`} block={block} unknownStrategy={unknownBlockStrategy} />
                           ))
-                        : <ReactMarkdown>{message.rawText}</ReactMarkdown>}
+                        : <ReactMarkdown>{compactToolStatusText(message.rawText)}</ReactMarkdown>}
                     </div>
 
                     {showWidgets && message.widget && <WidgetCard widget={message.widget} />}

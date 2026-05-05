@@ -53,6 +53,50 @@ function compactPath(value: string): string {
   return normalized.split("/").filter(Boolean).pop() || normalized;
 }
 
+function normalizeComputerAction(action: string, toolName = ""): string {
+  const raw = action.trim().toLowerCase() || toolName.trim().toLowerCase();
+  return raw.replace(/^computer[._-]/, "").replace(/^computer_use[._-]/, "");
+}
+
+function coordinateSummary(args: Record<string, unknown>): string {
+  const x = pickString(args, ["x", "left"]);
+  const y = pickString(args, ["y", "top"]);
+  return x && y ? ` (${x}, ${y})` : "";
+}
+
+function summarizeComputerArguments(toolName: string, args: Record<string, unknown>): string {
+  const action = normalizeComputerAction(pickString(args, ["action"]), toolName);
+  if (action.includes("screenshot")) return "スクリーンショット";
+  if (action.includes("click")) return `クリック${coordinateSummary(args)}`;
+  if (action.includes("double")) return `ダブルクリック${coordinateSummary(args)}`;
+  if (action.includes("move")) return `移動${coordinateSummary(args)}`;
+  if (action.includes("type")) return "テキスト入力";
+  if (action.includes("hotkey")) return `ホットキー ${pickString(args, ["keys", "key"])}`.trim();
+  if (action.includes("key") || action.includes("press")) return `キー ${pickString(args, ["key", "keys"])}`.trim();
+  if (action.includes("scroll")) return "スクロール";
+  if (action.includes("clipboard")) return "クリップボード";
+  if (action.includes("window")) return "ウィンドウ操作";
+  if (action.includes("app")) return "アプリ操作";
+  return pickString(args, ["action"]) || "操作";
+}
+
+function summarizeComputerResult(toolName: string, data: Record<string, unknown>, visualPath: string, args?: Record<string, unknown>): string {
+  const action = normalizeComputerAction(pickString(data, ["action"]) || pickString(args ?? {}, ["action"]), toolName);
+  const artifact = visualPath ? ` · ${compactPath(visualPath)}` : "";
+  if (action.includes("screenshot")) return `画面を取得${artifact}`;
+  if (action.includes("click")) return `クリック位置を記録${artifact}`;
+  if (action.includes("double")) return `ダブルクリック位置を記録${artifact}`;
+  if (action.includes("move")) return "ポインタを移動";
+  if (action.includes("type")) return "テキストを入力";
+  if (action.includes("hotkey")) return "ホットキーを送信";
+  if (action.includes("key") || action.includes("press")) return "キーを送信";
+  if (action.includes("scroll")) return "スクロール";
+  if (action.includes("clipboard")) return "クリップボードを更新";
+  if (action.includes("window")) return "ウィンドウ操作を実行";
+  if (action.includes("app")) return "アプリ操作を実行";
+  return "操作を実行";
+}
+
 export function toolFolderFor(toolName: string): { id: string; label: string } {
   for (const [pattern, id, label] of FOLDER_RULES) {
     if (pattern.test(toolName)) return { id, label };
@@ -87,7 +131,7 @@ export function summarizeToolArguments(toolName: string, args?: Record<string, u
     return pickString(args, ["url", "action"]);
   }
   if (lowerName.includes("computer")) {
-    return pickString(args, ["action", "text", "key"]);
+    return summarizeComputerArguments(toolName, args);
   }
   if (lowerName.includes("terminal") || lowerName.includes("exec") || lowerName.includes("shell")) {
     return pickString(args, ["command", "cmd"]);
@@ -101,7 +145,7 @@ function formatCalculatorResult(summary: string): string {
   return summary;
 }
 
-function summarizeToolResult(toolName: string, result: unknown): string {
+function summarizeToolResult(toolName: string, result: unknown, args?: Record<string, unknown>): string {
   if (!result || typeof result !== "object") return compact(result, 120);
   const record = result as Record<string, unknown>;
   const data = record.data && typeof record.data === "object" ? record.data as Record<string, unknown> : record;
@@ -114,9 +158,8 @@ function summarizeToolResult(toolName: string, result: unknown): string {
     "image_path",
     "model_image_path",
   ]);
-  if (lowerToolName.includes("computer") && visualPath) {
-    const label = action ? action.replace(/^computer\./, "") : "screenshot";
-    return `${label} captured · ${compactPath(visualPath)}`;
+  if (lowerToolName.includes("computer")) {
+    return summarizeComputerResult(toolName, data, visualPath, args);
   }
   const direct = pickString(data, ["summary", "result", "message", "output", "title"]);
   if (direct) return lowerToolName.includes("calc") ? formatCalculatorResult(direct) : direct;
@@ -153,7 +196,7 @@ export function buildToolActivityGroups(
       const args = log.arguments && typeof log.arguments === "object" ? log.arguments as Record<string, unknown> : {};
       const folder = toolFolderFor(toolName);
       const argumentSummary = summarizeToolArguments(toolName, args);
-      const resultSummary = summarizeToolResult(toolName, log.result);
+      const resultSummary = summarizeToolResult(toolName, log.result, args);
       return {
         id: `log-${index}-${toolName}`,
         toolName,
