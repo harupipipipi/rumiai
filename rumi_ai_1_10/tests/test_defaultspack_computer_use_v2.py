@@ -1,0 +1,187 @@
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+
+DEFAULTSPACK = Path(__file__).resolve().parents[1] / "ecosystem" / "defaultspack"
+if str(DEFAULTSPACK) not in sys.path:
+    sys.path.insert(0, str(DEFAULTSPACK))
+
+
+def test_macos_permissions_include_v2_preflight_fields(monkeypatch):
+    from domain.tool.browser_computer import BrowserComputerController
+    import domain.tool.browser_computer as browser_computer
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(
+        browser_computer.shutil,
+        "which",
+        lambda name: {
+            "osascript": "/usr/bin/osascript",
+            "screencapture": "/usr/sbin/screencapture",
+            "cliclick": "/opt/homebrew/bin/cliclick",
+        }.get(name),
+    )
+    monkeypatch.setattr(BrowserComputerController, "_python_module_preflight", staticmethod(lambda name: {"available": True, "status": "ok"}))
+    monkeypatch.setattr(BrowserComputerController, "_darwin_screen_recording_preflight", lambda self, quartz: {"available": True, "allowed": True, "status": "ok"})
+    monkeypatch.setattr(BrowserComputerController, "_darwin_accessibility_preflight", lambda self, quartz: {"available": True, "allowed": False, "status": "not_granted"})
+
+    result = BrowserComputerController().run("computer.permissions")
+    preflight = result["preflight"]
+
+    assert set(preflight) == {
+        "screen_recording",
+        "accessibility",
+        "automation_system_events",
+        "screencapture",
+        "osascript",
+        "quartz",
+        "cliclick",
+    }
+    assert preflight["screen_recording"]["allowed"] is True
+    assert preflight["accessibility"]["status"] == "not_granted"
+    assert preflight["cliclick"]["available"] is True
+
+
+def test_windows_permissions_include_v2_preflight_fields(monkeypatch):
+    from domain.tool.browser_computer import BrowserComputerController
+    import domain.tool.browser_computer as browser_computer
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(browser_computer.shutil, "which", lambda name: f"C:/Windows/{name}.exe" if name == "powershell" else None)
+    monkeypatch.setattr(
+        BrowserComputerController,
+        "_windows_preflight_probe",
+        lambda self: {
+            "forms": True,
+            "drawing": True,
+            "desktop_session_active": True,
+            "screen_locked": False,
+            "dpi_scale": 1.25,
+        },
+    )
+
+    preflight = BrowserComputerController().run("computer.permissions")["preflight"]
+
+    assert set(preflight) == {
+        "powershell",
+        "pwsh",
+        "forms",
+        "drawing",
+        "desktop_session_active",
+        "screen_locked",
+        "dpi_scale",
+    }
+    assert preflight["forms"]["allowed"] is True
+    assert preflight["screen_locked"]["status"] == "unlocked"
+    assert preflight["dpi_scale"] == 1.25
+
+
+def test_screenshot_result_includes_display_and_dpi_metadata(tmp_path, monkeypatch):
+    from domain.tool.browser_computer import BrowserComputerController
+
+    screenshot = tmp_path / "screen.png"
+    model_image = tmp_path / "screen-model.png"
+    png_header = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR"
+    screenshot.write_bytes(png_header + b"\x00\x00\x05\xa0\x00\x00\x03\x84")
+    model_image.write_bytes(png_header + b"\x00\x00\x02\x80\x00\x00\x01\x90")
+    monkeypatch.setattr(BrowserComputerController, "_cursor_position", staticmethod(lambda: None))
+    monkeypatch.setattr(
+        BrowserComputerController,
+        "_darwin_displays",
+        lambda self: [
+            {
+                "id": "1",
+                "primary": True,
+                "bounds": {"x": 0, "y": 0, "width": 720, "height": 450},
+                "pixel_size": {"width": 1440, "height": 900},
+                "dpi_scale": 2.0,
+            }
+        ],
+    )
+
+    result = BrowserComputerController()._screenshot_result(screenshot, model_image, "Darwin")
+
+    assert result["display_metadata"]["primary"]["dpi_scale"] == 2.0
+    assert result["display_metadata"]["captured_pixel_size"] == {"width": 1440, "height": 900}
+    assert result["display_metadata"]["screenshot_to_display_scale"] == {"x": 2.0, "y": 2.0}
+
+
+def test_windows_hotkey_translation_executes_sendkeys(monkeypatch):
+    from domain.tool.browser_computer import BrowserComputerController
+    import domain.tool.browser_computer as browser_computer
+
+    scripts = []
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(BrowserComputerController, "_run_powershell", staticmethod(lambda script: scripts.append(script)))
+
+    result = BrowserComputerController().run("computer.hotkey", {"combo": "ctrl+shift+escape"}, yolo_mode=True)
+
+    assert result["executed"] is True
+    assert result["hotkey"] == {"modifiers": ["ctrl", "shift"], "key": "esc", "combo": "ctrl+shift+esc"}
+    assert "[System.Windows.Forms.SendKeys]::SendWait('^+{ESC}')" in scripts[0]
+
+
+def test_high_risk_clipboard_write_requires_server_approved_token(tmp_path, monkeypatch):
+    from domain.approval.store import ApprovalStore
+    from domain.tool.browser_computer import BrowserComputerController
+    import domain.tool.browser_computer as browser_computer
+
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="")
+
+    controller = BrowserComputerController()
+    controller._approval_path = tmp_path / "approvals.json"
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+
+    required = controller.run("computer.clipboard.write", {"text": "hello"})
+    still_required = controller.run(
+        "computer.clipboard.write",
+        {"text": "hello", "approval_id": required["approval_id"], "approval_token": "client-token"},
+    )
+    approved = ApprovalStore(controller._approval_path).approve_once(required["approval_id"])
+    executed = controller.run(
+        "computer.clipboard.write",
+        {
+            "text": "hello",
+            "approval_id": required["approval_id"],
+            "approval_token": approved["approval_token"],
+        },
+    )
+
+    assert required["requires_approval"] is True
+    assert required["risk_level"] == "high"
+    assert "approval_token" not in required
+    assert still_required["requires_approval"] is True
+    assert executed["executed"] is True
+    assert calls[-1][0] == ["pbcopy"]
+    assert calls[-1][1]["input"] == "hello"
+
+
+def test_computer_displays_list_uses_windows_probe(monkeypatch):
+    from domain.tool.browser_computer import BrowserComputerController
+    import domain.tool.browser_computer as browser_computer
+
+    payload = [
+        {
+            "id": "\\\\.\\DISPLAY1",
+            "primary": True,
+            "bounds": {"x": 0, "y": 0, "width": 1920, "height": 1080},
+            "dpi_scale": 1.5,
+        }
+    ]
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(BrowserComputerController, "_run_powershell_json", lambda self, script: json.loads(json.dumps(payload)))
+
+    result = BrowserComputerController().run("computer.displays.list")
+
+    assert result["count"] == 1
+    assert result["displays"][0]["primary"] is True
+    assert result["displays"][0]["dpi_scale"] == 1.5

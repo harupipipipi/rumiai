@@ -4,7 +4,6 @@ import json
 import os
 import platform
 import re
-import secrets
 import shutil
 import struct
 import subprocess
@@ -14,6 +13,8 @@ import base64
 from pathlib import Path
 from typing import Any
 
+from domain.approval.store import ApprovalStore, approval_store_path, classify_approval_risk
+
 
 class BrowserComputerController:
     """Generic browser/computer action controller with approval gates."""
@@ -22,7 +23,7 @@ class BrowserComputerController:
         pack_root = Path(__file__).resolve().parents[2]
         self._artifact_root = artifact_root or pack_root / "user_data" / "artifacts" / "computer"
         self._session_path = pack_root / "user_data" / "shared" / "browser_sessions.json"
-        self._approval_path = pack_root / "user_data" / "shared" / "browser_computer_approvals.json"
+        self._approval_path = approval_store_path()
         self._browser_root = pack_root / "user_data" / "shared" / "browser"
         self._profile_root = self._browser_root / "profiles"
 
@@ -50,9 +51,32 @@ class BrowserComputerController:
             return self._import_cookies(payload)
         if action == "browser.cookies.delete":
             return self._delete_cookies(payload, dry_run=bool(payload.get("dry_run")), yolo_mode=yolo_mode)
+        if action == "computer.health":
+            return self._computer_health()
+        if action == "computer.permissions":
+            return {"action": action, "platform": platform.system(), "preflight": self._preflight()}
+        if action == "computer.displays.list":
+            return self._list_displays()
+        if action == "computer.active_window":
+            return self._active_window()
+        if action == "computer.windows.list":
+            return self._list_windows(payload)
         if action == "computer.screenshot":
             return self._screenshot(payload=payload, dry_run=bool(payload.get("dry_run")), yolo_mode=yolo_mode)
-        if action in {"computer.move", "computer.click", "computer.type", "computer.key", "computer.scroll"}:
+        if action in {
+            "computer.move",
+            "computer.click",
+            "computer.type",
+            "computer.key",
+            "computer.scroll",
+            "computer.window.focus",
+            "computer.window.bounds",
+            "computer.hotkey",
+            "computer.clipboard.read",
+            "computer.clipboard.write",
+            "computer.app.open",
+            "computer.app.focus",
+        }:
             return self._desktop_action(action, payload, yolo_mode=yolo_mode)
         raise ValueError(f"Unsupported browser/computer action: {action}")
 
@@ -232,12 +256,116 @@ class BrowserComputerController:
         self._write_cookie_jar(profile_id, {"version": 1, "cookies": remaining, "updated_at": self._now_iso()})
         return {"action": "browser.cookies.delete", "profile_id": profile_id, "deleted": len(cookies) - len(remaining), "count": len(remaining)}
 
+    def _computer_health(self) -> dict[str, Any]:
+        system = platform.system()
+        return {
+            "action": "computer.health",
+            "platform": system,
+            "supported": system in {"Darwin", "Windows"},
+            "capabilities": self._capabilities(),
+            "preflight": self._preflight(),
+            "risk": {
+                "read_only": classify_approval_risk("computer.permissions"),
+                "desktop_action": classify_approval_risk("computer.click", {"x": 0, "y": 0}),
+                "high_risk": classify_approval_risk("computer.clipboard.write", {"text": ""}),
+            },
+        }
+
+    def _preflight(self) -> dict[str, Any]:
+        system = platform.system()
+        if system == "Darwin":
+            return self._darwin_preflight()
+        if system == "Windows":
+            return self._windows_preflight()
+        return {"platform_supported": {"available": False, "status": "unsupported"}}
+
+    def _darwin_preflight(self) -> dict[str, Any]:
+        quartz = self._python_module_preflight("Quartz")
+        osascript = self._command_preflight("osascript", "/usr/bin/osascript")
+        screencapture = self._command_preflight("screencapture", "/usr/sbin/screencapture")
+        return {
+            "screen_recording": self._darwin_screen_recording_preflight(quartz),
+            "accessibility": self._darwin_accessibility_preflight(quartz),
+            "automation_system_events": {
+                "available": bool(osascript.get("available")),
+                "status": "unknown" if osascript.get("available") else "missing_dependency",
+                "reason": "macOS Automation permission is checked by System Events at execution time.",
+            },
+            "screencapture": screencapture,
+            "osascript": osascript,
+            "quartz": quartz,
+            "cliclick": self._command_preflight("cliclick"),
+        }
+
+    def _windows_preflight(self) -> dict[str, Any]:
+        powershell = self._command_preflight("powershell")
+        pwsh = self._command_preflight("pwsh")
+        probe = self._windows_preflight_probe() if powershell.get("available") or pwsh.get("available") else {}
+        return {
+            "powershell": powershell,
+            "pwsh": pwsh,
+            "forms": self._probe_status(probe, "forms"),
+            "drawing": self._probe_status(probe, "drawing"),
+            "desktop_session_active": self._probe_status(probe, "desktop_session_active"),
+            "screen_locked": self._probe_status(probe, "screen_locked"),
+            "dpi_scale": probe.get("dpi_scale") if isinstance(probe.get("dpi_scale"), (int, float)) else None,
+        }
+
+    def _list_displays(self) -> dict[str, Any]:
+        system = platform.system()
+        if system == "Darwin":
+            displays = self._darwin_displays()
+        elif system == "Windows":
+            displays = self._windows_displays()
+        else:
+            displays = []
+        return {
+            "action": "computer.displays.list",
+            "platform": system,
+            "supported": system in {"Darwin", "Windows"},
+            "displays": displays,
+            "count": len(displays),
+        }
+
+    def _active_window(self) -> dict[str, Any]:
+        system = platform.system()
+        if system == "Darwin":
+            window = self._darwin_active_window()
+        elif system == "Windows":
+            window = self._windows_active_window()
+        else:
+            window = None
+        return {
+            "action": "computer.active_window",
+            "platform": system,
+            "supported": system in {"Darwin", "Windows"},
+            "window": window,
+        }
+
+    def _list_windows(self, payload: dict[str, Any]) -> dict[str, Any]:
+        system = platform.system()
+        limit = int(payload.get("limit") or 50)
+        if system == "Darwin":
+            windows = self._darwin_windows(limit)
+        elif system == "Windows":
+            windows = self._windows_windows(limit)
+        else:
+            windows = []
+        return {
+            "action": "computer.windows.list",
+            "platform": system,
+            "supported": system in {"Darwin", "Windows"},
+            "windows": windows,
+            "count": len(windows),
+        }
+
     def _screenshot(self, *, payload: dict[str, Any], dry_run: bool, yolo_mode: bool) -> dict[str, Any]:
         if dry_run:
             return {"action": "computer.screenshot", "dry_run": True, "requires_approval": False}
-        approved = yolo_mode or self._consume_approval(payload, "computer.screenshot", {})
+        risk = classify_approval_risk("computer.screenshot", {})
+        approved = yolo_mode or self._consume_approval(payload, "computer.screenshot", {}, risk=risk)
         if not approved:
-            return self._approval_required("computer.screenshot", {})
+            return self._approval_required("computer.screenshot", {}, risk=risk)
         self._artifact_root.mkdir(parents=True, exist_ok=True)
         path = self._artifact_root / f"screenshot-{int(time.time() * 1000)}.png"
         system = platform.system()
@@ -282,6 +410,9 @@ class BrowserComputerController:
         action_coordinate_system = self._action_coordinate_system(system, image_size)
         if action_coordinate_system:
             result["action_coordinate_system"] = action_coordinate_system
+        display_metadata = self._screenshot_display_metadata(system, image_size)
+        if display_metadata:
+            result["display_metadata"] = display_metadata
         if model_image_size:
             model_width, model_height = model_image_size
             result["model_image_size"] = {"width": model_width, "height": model_height}
@@ -317,6 +448,39 @@ class BrowserComputerController:
             "notes": "Call move with action_coordinate_system coordinates. If a point is estimated on model_image_size, multiply by model_to_action_scale before calling move.",
         }
         return result
+
+    def _screenshot_display_metadata(self, system: str, image_size: tuple[int, int] | None) -> dict[str, Any] | None:
+        displays: list[dict[str, Any]] = []
+        if system == "Darwin":
+            displays = self._darwin_displays()
+        elif system == "Windows":
+            displays = self._windows_displays()
+        primary = next((display for display in displays if display.get("primary")), displays[0] if displays else None)
+        if not primary and image_size:
+            width, height = image_size
+            primary = {
+                "id": "captured",
+                "primary": True,
+                "bounds": {"x": 0, "y": 0, "width": width, "height": height},
+                "pixel_size": {"width": width, "height": height},
+                "dpi_scale": 1.0,
+            }
+        if not primary:
+            return None
+        metadata = {"primary": primary}
+        if displays:
+            metadata["displays"] = displays
+        if image_size:
+            metadata["captured_pixel_size"] = {"width": image_size[0], "height": image_size[1]}
+            bounds = primary.get("bounds") if isinstance(primary.get("bounds"), dict) else {}
+            width = bounds.get("width")
+            height = bounds.get("height")
+            if width and height:
+                metadata["screenshot_to_display_scale"] = {
+                    "x": image_size[0] / width,
+                    "y": image_size[1] / height,
+                }
+        return metadata
 
     def _model_screenshot_copy(self, path: Path) -> Path:
         preview_path = path.with_name(path.stem + "-model.jpg")
@@ -455,19 +619,336 @@ class BrowserComputerController:
             }
         return None
 
+    @staticmethod
+    def _command_preflight(name: str, fallback: str | None = None) -> dict[str, Any]:
+        path = shutil.which(name)
+        if not path and fallback and Path(fallback).exists():
+            path = fallback
+        return {"available": bool(path), "path": path, "status": "ok" if path else "missing"}
+
+    @staticmethod
+    def _python_module_preflight(module_name: str) -> dict[str, Any]:
+        try:
+            completed = subprocess.run(
+                ["python3", "-c", f"import {module_name}"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            available = completed.returncode == 0
+            return {"available": available, "status": "ok" if available else "missing"}
+        except Exception:
+            return {"available": False, "status": "missing"}
+
+    def _darwin_screen_recording_preflight(self, quartz: dict[str, Any]) -> dict[str, Any]:
+        if not quartz.get("available"):
+            return {"available": False, "status": "unknown", "reason": "Quartz is unavailable."}
+        code = (
+            "import json, Quartz\n"
+            "fn = getattr(Quartz, 'CGPreflightScreenCaptureAccess', None)\n"
+            "value = None if fn is None else bool(fn())\n"
+            "print(json.dumps({'available': value is not None, 'allowed': value, 'status': 'ok' if value else 'not_granted' if value is False else 'unknown'}))\n"
+        )
+        return self._python_json_probe(code, fallback={"available": True, "status": "unknown"})
+
+    def _darwin_accessibility_preflight(self, quartz: dict[str, Any]) -> dict[str, Any]:
+        if not quartz.get("available"):
+            return {"available": False, "status": "unknown", "reason": "Quartz is unavailable."}
+        code = (
+            "import json, Quartz\n"
+            "fn = getattr(Quartz, 'AXIsProcessTrusted', None)\n"
+            "value = None if fn is None else bool(fn())\n"
+            "print(json.dumps({'available': value is not None, 'allowed': value, 'status': 'ok' if value else 'not_granted' if value is False else 'unknown'}))\n"
+        )
+        return self._python_json_probe(code, fallback={"available": True, "status": "unknown"})
+
+    @staticmethod
+    def _python_json_probe(code: str, *, fallback: dict[str, Any]) -> dict[str, Any]:
+        try:
+            completed = subprocess.run(["python3", "-c", code], check=False, capture_output=True, text=True)
+            value = json.loads(completed.stdout or "{}")
+            return value if isinstance(value, dict) else dict(fallback)
+        except Exception:
+            return dict(fallback)
+
+    @staticmethod
+    def _probe_status(probe: dict[str, Any], key: str) -> dict[str, Any]:
+        if key not in probe:
+            return {"available": False, "status": "unknown"}
+        value = probe.get(key)
+        if key == "screen_locked":
+            return {"available": True, "locked": bool(value), "status": "locked" if value else "unlocked"}
+        if isinstance(value, bool):
+            return {"available": True, "allowed": value, "status": "ok" if value else "not_granted"}
+        return {"available": bool(value), "value": value, "status": "ok" if value else "unknown"}
+
+    def _windows_preflight_probe(self) -> dict[str, Any]:
+        script = "\n".join(
+            [
+                "$ErrorActionPreference = 'Stop'",
+                "Add-Type -AssemblyName System.Windows.Forms",
+                "Add-Type -AssemblyName System.Drawing",
+                "$graphics = [System.Drawing.Graphics]::FromHwnd([IntPtr]::Zero)",
+                "$locked = [bool](Get-Process logonui -ErrorAction SilentlyContinue)",
+                "$scale = [double]($graphics.DpiX / 96.0)",
+                "$graphics.Dispose()",
+                "ConvertTo-Json @{ forms = $true; drawing = $true; desktop_session_active = [Environment]::UserInteractive; screen_locked = $locked; dpi_scale = $scale } -Compress",
+            ]
+        )
+        return self._run_powershell_json(script)
+
+    def _darwin_displays(self) -> list[dict[str, Any]]:
+        code = (
+            "import json, Quartz\n"
+            "ids = []\n"
+            "try:\n"
+            "    result = Quartz.CGGetActiveDisplayList(16, None, None)\n"
+            "    if isinstance(result, tuple) and len(result) >= 2 and result[1]:\n"
+            "        count = int(result[2]) if len(result) > 2 else len(result[1])\n"
+            "        ids = [int(x) for x in list(result[1])[:count]]\n"
+            "except Exception:\n"
+            "    ids = []\n"
+            "main = int(Quartz.CGMainDisplayID())\n"
+            "if not ids:\n"
+            "    ids = [main]\n"
+            "items = []\n"
+            "for display_id in ids:\n"
+            "    bounds = Quartz.CGDisplayBounds(display_id)\n"
+            "    width = int(round(bounds.size.width))\n"
+            "    height = int(round(bounds.size.height))\n"
+            "    pixels_w = int(Quartz.CGDisplayPixelsWide(display_id))\n"
+            "    pixels_h = int(Quartz.CGDisplayPixelsHigh(display_id))\n"
+            "    scale = (pixels_w / width) if width else None\n"
+            "    items.append({'id': str(display_id), 'primary': display_id == main, 'bounds': {'x': int(round(bounds.origin.x)), 'y': int(round(bounds.origin.y)), 'width': width, 'height': height}, 'pixel_size': {'width': pixels_w, 'height': pixels_h}, 'dpi_scale': scale})\n"
+            "print(json.dumps(items))\n"
+        )
+        try:
+            completed = subprocess.run(["python3", "-c", code], check=True, capture_output=True, text=True)
+            value = json.loads(completed.stdout or "[]")
+            return value if isinstance(value, list) else []
+        except Exception:
+            return []
+
+    def _windows_displays(self) -> list[dict[str, Any]]:
+        script = "\n".join(
+            [
+                "$ErrorActionPreference = 'Stop'",
+                "Add-Type -AssemblyName System.Windows.Forms",
+                "Add-Type -AssemblyName System.Drawing",
+                "$graphics = [System.Drawing.Graphics]::FromHwnd([IntPtr]::Zero)",
+                "$scale = [double]($graphics.DpiX / 96.0)",
+                "$graphics.Dispose()",
+                "$items = foreach ($screen in [System.Windows.Forms.Screen]::AllScreens) { @{ id = $screen.DeviceName; primary = [bool]$screen.Primary; bounds = @{ x = [int]$screen.Bounds.X; y = [int]$screen.Bounds.Y; width = [int]$screen.Bounds.Width; height = [int]$screen.Bounds.Height }; working_area = @{ x = [int]$screen.WorkingArea.X; y = [int]$screen.WorkingArea.Y; width = [int]$screen.WorkingArea.Width; height = [int]$screen.WorkingArea.Height }; pixel_size = @{ width = [int]$screen.Bounds.Width; height = [int]$screen.Bounds.Height }; dpi_scale = $scale } }",
+                "ConvertTo-Json @($items) -Compress",
+            ]
+        )
+        value = self._run_powershell_json(script)
+        if isinstance(value, list):
+            return value
+        if isinstance(value, dict) and value:
+            return [value]
+        return []
+
+    def _darwin_active_window(self) -> dict[str, Any] | None:
+        script = [
+            'tell application "System Events"',
+            "set frontApp to first application process whose frontmost is true",
+            "set appName to name of frontApp as text",
+            "set pidValue to unix id of frontApp as text",
+            'set titleValue to ""',
+            "set xValue to 0 as text",
+            "set yValue to 0 as text",
+            "set wValue to 0 as text",
+            "set hValue to 0 as text",
+            "if exists window 1 of frontApp then",
+            "set titleValue to name of window 1 of frontApp as text",
+            "set posValue to position of window 1 of frontApp",
+            "set sizeValue to size of window 1 of frontApp",
+            "set xValue to item 1 of posValue as text",
+            "set yValue to item 2 of posValue as text",
+            "set wValue to item 1 of sizeValue as text",
+            "set hValue to item 2 of sizeValue as text",
+            "end if",
+            "return appName & tab & pidValue & tab & titleValue & tab & xValue & tab & yValue & tab & wValue & tab & hValue",
+            "end tell",
+        ]
+        try:
+            completed = self._run_osascript(script)
+            return self._parse_window_line(completed.stdout.strip(), window_id="frontmost")
+        except Exception:
+            return None
+
+    def _darwin_windows(self, limit: int) -> list[dict[str, Any]]:
+        script = [
+            'tell application "System Events"',
+            'set output to ""',
+            "repeat with proc in (application processes whose background only is false)",
+            "set appName to name of proc as text",
+            "set pidValue to unix id of proc as text",
+            "repeat with win in windows of proc",
+            "set titleValue to name of win as text",
+            "set posValue to position of win",
+            "set sizeValue to size of win",
+            "set output to output & appName & tab & pidValue & tab & titleValue & tab & (item 1 of posValue as text) & tab & (item 2 of posValue as text) & tab & (item 1 of sizeValue as text) & tab & (item 2 of sizeValue as text) & linefeed",
+            "end repeat",
+            "end repeat",
+            "return output",
+            "end tell",
+        ]
+        try:
+            completed = self._run_osascript(script)
+        except Exception:
+            return []
+        windows = []
+        for index, line in enumerate(completed.stdout.splitlines()):
+            parsed = self._parse_window_line(line, window_id=str(index + 1))
+            if parsed:
+                windows.append(parsed)
+            if len(windows) >= limit:
+                break
+        return windows
+
+    def _windows_active_window(self) -> dict[str, Any] | None:
+        script = self._windows_user32_prelude() + "\n".join(
+            [
+                "$hwnd = [RumiWindow]::GetForegroundWindow()",
+                "if ($hwnd -eq [IntPtr]::Zero) { ConvertTo-Json $null -Compress; exit }",
+                "$title = New-Object System.Text.StringBuilder 1024",
+                "[void][RumiWindow]::GetWindowText($hwnd, $title, $title.Capacity)",
+                "$rect = New-Object RumiRect",
+                "[void][RumiWindow]::GetWindowRect($hwnd, [ref]$rect)",
+                "$proc = Get-Process | Where-Object { $_.MainWindowHandle -eq $hwnd } | Select-Object -First 1",
+                "ConvertTo-Json @{ id = $hwnd.ToInt64().ToString(); title = $title.ToString(); app = if ($proc) { $proc.ProcessName } else { '' }; pid = if ($proc) { [int]$proc.Id } else { 0 }; bounds = @{ x = [int]$rect.Left; y = [int]$rect.Top; width = [int]($rect.Right - $rect.Left); height = [int]($rect.Bottom - $rect.Top) } } -Compress",
+            ]
+        )
+        value = self._run_powershell_json(script)
+        return value if isinstance(value, dict) and value else None
+
+    def _windows_windows(self, limit: int) -> list[dict[str, Any]]:
+        script = self._windows_user32_prelude() + "\n".join(
+            [
+                "$items = New-Object System.Collections.Generic.List[object]",
+                "$callback = [RumiWindow+EnumWindowsProc]{ param([IntPtr]$hwnd, [IntPtr]$lparam)",
+                "  if (-not [RumiWindow]::IsWindowVisible($hwnd)) { return $true }",
+                "  $title = New-Object System.Text.StringBuilder 1024",
+                "  [void][RumiWindow]::GetWindowText($hwnd, $title, $title.Capacity)",
+                "  if ([string]::IsNullOrWhiteSpace($title.ToString())) { return $true }",
+                "  $rect = New-Object RumiRect",
+                "  [void][RumiWindow]::GetWindowRect($hwnd, [ref]$rect)",
+                "  $items.Add(@{ id = $hwnd.ToInt64().ToString(); title = $title.ToString(); bounds = @{ x = [int]$rect.Left; y = [int]$rect.Top; width = [int]($rect.Right - $rect.Left); height = [int]($rect.Bottom - $rect.Top) } })",
+                f"  return $items.Count -lt {max(limit, 1)}",
+                "}",
+                "[void][RumiWindow]::EnumWindows($callback, [IntPtr]::Zero)",
+                "ConvertTo-Json @($items) -Compress",
+            ]
+        )
+        value = self._run_powershell_json(script)
+        if isinstance(value, list):
+            return value
+        if isinstance(value, dict) and value:
+            return [value]
+        return []
+
+    @staticmethod
+    def _parse_window_line(line: str, *, window_id: str) -> dict[str, Any] | None:
+        parts = line.split("\t")
+        if len(parts) < 7:
+            return None
+        app, pid, title, x, y, width, height = parts[:7]
+        return {
+            "id": window_id,
+            "app": app,
+            "pid": int(pid) if str(pid).isdigit() else 0,
+            "title": title,
+            "bounds": {
+                "x": int(float(x or 0)),
+                "y": int(float(y or 0)),
+                "width": int(float(width or 0)),
+                "height": int(float(height or 0)),
+            },
+        }
+
+    @staticmethod
+    def _run_osascript(lines: list[str]) -> subprocess.CompletedProcess:
+        command = ["osascript"]
+        for line in lines:
+            command.extend(["-e", line])
+        return subprocess.run(command, check=True, capture_output=True, text=True)
+
+    @staticmethod
+    def _windows_user32_prelude() -> str:
+        return (
+            "$ErrorActionPreference = 'Stop'\n"
+            "Add-Type -TypeDefinition @'\n"
+            "using System;\n"
+            "using System.Text;\n"
+            "using System.Runtime.InteropServices;\n"
+            "public struct RumiRect { public int Left; public int Top; public int Right; public int Bottom; }\n"
+            "public class RumiWindow {\n"
+            "  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);\n"
+            "  [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow();\n"
+            "  [DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr hWnd);\n"
+            "  [DllImport(\"user32.dll\")] public static extern bool MoveWindow(IntPtr hWnd, int X, int Y, int nWidth, int nHeight, bool repaint);\n"
+            "  [DllImport(\"user32.dll\")] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);\n"
+            "  [DllImport(\"user32.dll\")] public static extern bool GetWindowRect(IntPtr hWnd, ref RumiRect rect);\n"
+            "  [DllImport(\"user32.dll\")] public static extern bool IsWindowVisible(IntPtr hWnd);\n"
+            "  [DllImport(\"user32.dll\")] public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);\n"
+            "}\n"
+            "'@\n"
+        )
+
+    def _run_powershell_json(self, script: str) -> Any:
+        executable = "powershell" if shutil.which("powershell") else "pwsh"
+        command = [executable, "-NoProfile"]
+        if executable == "powershell":
+            command.extend(["-ExecutionPolicy", "Bypass"])
+        command.extend(["-Command", script])
+        try:
+            completed = subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except Exception:
+            return {}
+        try:
+            return json.loads(completed.stdout or "{}")
+        except Exception:
+            return {}
+
     def _desktop_action(self, action: str, payload: dict[str, Any], *, yolo_mode: bool) -> dict[str, Any]:
         dry_run = bool(payload.get("dry_run"))
-        if dry_run:
-            return {"action": action, "dry_run": True, "requires_approval": False, "payload": payload}
         approval_payload = self._safe_payload(payload)
-        if not (yolo_mode or self._consume_approval(payload, action, approval_payload)):
-            return self._approval_required(action, approval_payload)
+        risk = classify_approval_risk(action, approval_payload)
+        if dry_run:
+            return {"action": action, "dry_run": True, "requires_approval": False, "risk": risk, "payload": approval_payload}
+        if risk.get("approval_required") and not (yolo_mode or self._consume_approval(payload, action, approval_payload, risk=risk)):
+            return self._approval_required(action, approval_payload, risk=risk)
         system = platform.system()
         if system == "Darwin" and action == "computer.move":
             self._darwin_move_cursor(payload)
+        elif system == "Darwin" and action == "computer.scroll":
+            self._darwin_scroll(payload)
+        elif system == "Darwin" and action == "computer.hotkey":
+            subprocess.run(["osascript", "-e", self._darwin_hotkey_script(payload)], check=True)
+        elif system == "Darwin" and action == "computer.clipboard.read":
+            return self._darwin_clipboard_read()
+        elif system == "Darwin" and action == "computer.clipboard.write":
+            self._darwin_clipboard_write(payload)
+        elif system == "Darwin" and action == "computer.window.focus":
+            self._darwin_focus_window(payload)
+        elif system == "Darwin" and action == "computer.window.bounds":
+            self._darwin_set_window_bounds(payload)
+        elif system == "Darwin" and action == "computer.app.open":
+            self._darwin_open_app(payload)
+        elif system == "Darwin" and action == "computer.app.focus":
+            self._darwin_focus_app(payload)
         elif system == "Darwin":
             script = self._apple_script(action, payload)
             subprocess.run(["osascript", "-e", script], check=True)
+        elif system == "Windows" and action == "computer.clipboard.read":
+            return self._windows_clipboard_read()
         elif system == "Windows":
             self._windows_desktop_action(action, payload)
         else:
@@ -477,11 +958,19 @@ class BrowserComputerController:
                 "platform": system,
                 "reason": "Desktop actions are supported on macOS and Windows.",
             }
-        result: dict[str, Any] = {"action": action, "executed": True, "platform": system}
+        result: dict[str, Any] = {"action": action, "executed": True, "platform": system, "risk": risk}
         if action in {"computer.move", "computer.click"}:
             result["target"] = {"x": int(payload.get("x", 0)), "y": int(payload.get("y", 0))}
         if action == "computer.scroll":
             result["amount"] = int(payload.get("amount", 1))
+        if action == "computer.hotkey":
+            result["hotkey"] = self._hotkey_parts(payload)
+        if action == "computer.clipboard.write":
+            result["bytes_written"] = len(str(payload.get("text") or payload.get("content") or "").encode("utf-8"))
+        if action in {"computer.app.open", "computer.app.focus"}:
+            result["app"] = self._app_name(payload)
+        if action in {"computer.window.focus", "computer.window.bounds"}:
+            result["window_id"] = str(payload.get("window_id") or payload.get("id") or "")
         return result
 
     def _darwin_move_cursor(self, payload: dict[str, Any]) -> None:
@@ -501,6 +990,134 @@ class BrowserComputerController:
         except Exception as exc:
             raise RuntimeError("computer.move requires cliclick or PyObjC Quartz on macOS") from exc
 
+    def _darwin_scroll(self, payload: dict[str, Any]) -> None:
+        amount = int(payload.get("amount", 1))
+        if amount == 0:
+            return
+        code = (
+            "import Quartz, sys\n"
+            "amount = int(sys.argv[1])\n"
+            "event = Quartz.CGEventCreateScrollWheelEvent(\n"
+            "    None,\n"
+            "    Quartz.kCGScrollEventUnitLine,\n"
+            "    1,\n"
+            "    amount,\n"
+            ")\n"
+            "Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)\n"
+        )
+        try:
+            subprocess.run(["python3", "-c", code, str(amount)], check=True)
+        except Exception as exc:
+            raise RuntimeError("computer.scroll requires PyObjC Quartz on macOS") from exc
+
+    def _darwin_hotkey_script(self, payload: dict[str, Any]) -> str:
+        parts = self._hotkey_parts(payload)
+        key = parts["key"]
+        modifiers = []
+        modifier_map = {
+            "cmd": "command down",
+            "command": "command down",
+            "meta": "command down",
+            "ctrl": "control down",
+            "control": "control down",
+            "alt": "option down",
+            "option": "option down",
+            "shift": "shift down",
+        }
+        for modifier in parts["modifiers"]:
+            script_modifier = modifier_map.get(modifier)
+            if script_modifier and script_modifier not in modifiers:
+                modifiers.append(script_modifier)
+        using = " using {" + ", ".join(modifiers) + "}" if modifiers else ""
+        key_codes = {
+            "return": 36,
+            "enter": 36,
+            "tab": 48,
+            "space": 49,
+            "delete": 51,
+            "backspace": 51,
+            "escape": 53,
+            "esc": 53,
+            "left": 123,
+            "right": 124,
+            "down": 125,
+            "up": 126,
+        }
+        if re.fullmatch(r"f([1-9]|1[0-9]|2[0-4])", key):
+            key_codes[key] = 121 + int(key[1:])
+        if key in key_codes:
+            return f'tell application "System Events" to key code {key_codes[key]}{using}'
+        return f'tell application "System Events" to keystroke {json.dumps(key)}{using}'
+
+    def _darwin_clipboard_read(self) -> dict[str, Any]:
+        completed = subprocess.run(["pbpaste"], check=True, capture_output=True, text=True)
+        content = completed.stdout
+        return {
+            "action": "computer.clipboard.read",
+            "platform": "Darwin",
+            "content": content,
+            "bytes": len(content.encode("utf-8")),
+        }
+
+    def _darwin_clipboard_write(self, payload: dict[str, Any]) -> None:
+        content = str(payload.get("text") if "text" in payload else payload.get("content") or "")
+        subprocess.run(["pbcopy"], input=content, check=True, text=True)
+
+    def _darwin_focus_window(self, payload: dict[str, Any]) -> None:
+        app = self._app_name(payload)
+        if not app:
+            raise ValueError("computer.window.focus requires app or name on macOS")
+        window_index = int(payload.get("window_index") or payload.get("index") or 1)
+        script = [
+            'tell application "System Events"',
+            f"tell application process {json.dumps(app)}",
+            "set frontmost to true",
+            f"if exists window {window_index} then perform action \"AXRaise\" of window {window_index}",
+            "end tell",
+            "end tell",
+        ]
+        self._run_osascript(script)
+
+    def _darwin_set_window_bounds(self, payload: dict[str, Any]) -> None:
+        app = self._app_name(payload)
+        if not app:
+            raise ValueError("computer.window.bounds requires app or name on macOS")
+        window_index = int(payload.get("window_index") or payload.get("index") or 1)
+        x = int(payload.get("x", 0))
+        y = int(payload.get("y", 0))
+        width = int(payload.get("width", 800))
+        height = int(payload.get("height", 600))
+        script = [
+            'tell application "System Events"',
+            f"tell application process {json.dumps(app)}",
+            "set frontmost to true",
+            f"set position of window {window_index} to {{{x}, {y}}}",
+            f"set size of window {window_index} to {{{width}, {height}}}",
+            "end tell",
+            "end tell",
+        ]
+        self._run_osascript(script)
+
+    def _darwin_open_app(self, payload: dict[str, Any]) -> None:
+        bundle_id = str(payload.get("bundle_id") or "").strip()
+        app_path = str(payload.get("path") or "").strip()
+        app = self._app_name(payload)
+        if bundle_id:
+            subprocess.run(["open", "-b", bundle_id], check=True)
+            return
+        if app_path:
+            subprocess.run(["open", app_path], check=True)
+            return
+        if not app:
+            raise ValueError("computer.app.open requires app, name, bundle_id, or path")
+        subprocess.run(["open", "-a", app], check=True)
+
+    def _darwin_focus_app(self, payload: dict[str, Any]) -> None:
+        app = self._app_name(payload)
+        if not app:
+            raise ValueError("computer.app.focus requires app or name")
+        subprocess.run(["osascript", "-e", f'tell application {json.dumps(app)} to activate'], check=True)
+
     def _apple_script(self, action: str, payload: dict[str, Any]) -> str:
         if action == "computer.click":
             x = int(payload.get("x", 0))
@@ -514,9 +1131,6 @@ class BrowserComputerController:
             if isinstance(key, int):
                 return f'tell application "System Events" to key code {key}'
             return f'tell application "System Events" to keystroke {json.dumps(str(key))}'
-        if action == "computer.scroll":
-            amount = int(payload.get("amount", 1))
-            return f'tell application "System Events" to scroll wheel {amount}'
         raise ValueError(action)
 
     def _windows_screenshot(self, path: Path) -> None:
@@ -570,6 +1184,10 @@ class BrowserComputerController:
             key = self._windows_send_key(str(payload.get("key", "ENTER")))
             self._run_powershell("\n".join(prelude + [f"[System.Windows.Forms.SendKeys]::SendWait('{key}')"]))
             return
+        if action == "computer.hotkey":
+            sequence = self._windows_hotkey_sequence(payload)
+            self._run_powershell("\n".join(prelude + [f"[System.Windows.Forms.SendKeys]::SendWait('{sequence}')"]))
+            return
         if action == "computer.scroll":
             amount = int(payload.get("amount", 1))
             wheel_delta = amount * 120
@@ -582,7 +1200,107 @@ class BrowserComputerController:
             )
             self._run_powershell(script)
             return
+        if action == "computer.clipboard.write":
+            content = str(payload.get("text") if "text" in payload else payload.get("content") or "")
+            self._run_powershell("\n".join(prelude + [f"Set-Clipboard -Value {self._ps_here_string(content)}"]))
+            return
+        if action == "computer.window.focus":
+            window_id = str(payload.get("window_id") or payload.get("id") or "").strip()
+            if not window_id:
+                raise ValueError("computer.window.focus requires window_id on Windows")
+            script = self._windows_user32_prelude() + f"[void][RumiWindow]::SetForegroundWindow([IntPtr]{int(window_id)})"
+            self._run_powershell(script)
+            return
+        if action == "computer.window.bounds":
+            window_id = str(payload.get("window_id") or payload.get("id") or "").strip()
+            if not window_id:
+                raise ValueError("computer.window.bounds requires window_id on Windows")
+            x = int(payload.get("x", 0))
+            y = int(payload.get("y", 0))
+            width = int(payload.get("width", 800))
+            height = int(payload.get("height", 600))
+            script = self._windows_user32_prelude() + f"[void][RumiWindow]::MoveWindow([IntPtr]{int(window_id)}, {x}, {y}, {width}, {height}, $true)"
+            self._run_powershell(script)
+            return
+        if action == "computer.app.open":
+            target = str(payload.get("path") or payload.get("app") or payload.get("name") or "").strip()
+            if not target:
+                raise ValueError("computer.app.open requires app, name, or path")
+            self._run_powershell("\n".join(prelude + [f"Start-Process -FilePath {self._ps_here_string(target)}"]))
+            return
+        if action == "computer.app.focus":
+            app = self._app_name(payload)
+            if not app:
+                raise ValueError("computer.app.focus requires app or name")
+            self._run_powershell("\n".join(prelude + ["$shell = New-Object -ComObject WScript.Shell", f"[void]$shell.AppActivate({self._ps_here_string(app)})"]))
+            return
         raise ValueError(action)
+
+    def _windows_clipboard_read(self) -> dict[str, Any]:
+        script = "Get-Clipboard -Raw"
+        executable = "powershell" if shutil.which("powershell") else "pwsh"
+        command = [executable, "-NoProfile"]
+        if executable == "powershell":
+            command.extend(["-ExecutionPolicy", "Bypass"])
+        command.extend(["-Command", script])
+        completed = subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        content = completed.stdout
+        return {
+            "action": "computer.clipboard.read",
+            "platform": "Windows",
+            "content": content,
+            "bytes": len(content.encode("utf-8")),
+        }
+
+    @staticmethod
+    def _app_name(payload: dict[str, Any]) -> str:
+        return str(payload.get("app") or payload.get("name") or payload.get("application") or "").strip()
+
+    @staticmethod
+    def _hotkey_parts(payload: dict[str, Any]) -> dict[str, Any]:
+        if isinstance(payload.get("keys"), list):
+            raw_parts = [str(part).strip().lower() for part in payload.get("keys") or []]
+        else:
+            raw = str(payload.get("combo") or payload.get("hotkey") or payload.get("key") or "")
+            raw_parts = [part.strip().lower() for part in re.split(r"[+\s]+", raw) if part.strip()]
+        aliases = {
+            "control": "ctrl",
+            "ctl": "ctrl",
+            "cmd": "cmd",
+            "command": "cmd",
+            "meta": "cmd",
+            "win": "win",
+            "windows": "win",
+            "option": "alt",
+            "return": "enter",
+            "escape": "esc",
+        }
+        parts = [aliases.get(part, part) for part in raw_parts]
+        modifiers = [part for part in ("ctrl", "alt", "shift", "cmd", "win") if part in parts]
+        keys = [part for part in parts if part not in {"ctrl", "alt", "shift", "cmd", "win"}]
+        key = keys[-1] if keys else ""
+        if not key:
+            raise ValueError("computer.hotkey requires combo, hotkey, key, or keys with a non-modifier key")
+        return {"modifiers": modifiers, "key": key, "combo": "+".join(modifiers + [key])}
+
+    def _windows_hotkey_sequence(self, payload: dict[str, Any]) -> str:
+        parts = self._hotkey_parts(payload)
+        prefix = ""
+        for modifier in parts["modifiers"]:
+            if modifier == "ctrl":
+                prefix += "^"
+            elif modifier == "alt":
+                prefix += "%"
+            elif modifier == "shift":
+                prefix += "+"
+            elif modifier == "win":
+                raise ValueError("Windows-key hotkeys are not supported by SendKeys")
+        return prefix + self._windows_send_key(parts["key"])
 
     @staticmethod
     def _windows_send_key(key: str) -> str:
@@ -599,12 +1317,21 @@ class BrowserComputerController:
             "down": "{DOWN}",
             "left": "{LEFT}",
             "right": "{RIGHT}",
+            "space": " ",
         }
+        if re.fullmatch(r"f([1-9]|1[0-9]|2[0-4])", normalized):
+            return "{" + normalized.upper() + "}"
         return key_map.get(normalized, key)
 
     @staticmethod
     def _ps_single(value: str) -> str:
         return value.replace("'", "''")
+
+    @staticmethod
+    def _ps_here_string(value: str) -> str:
+        if "'@" in value:
+            return "'" + value.replace("'", "''") + "'"
+        return "@'\n" + value + "\n'@"
 
     @staticmethod
     def _run_powershell(script: str) -> None:
@@ -622,9 +1349,16 @@ class BrowserComputerController:
             "browser_persistent_profiles": True,
             "browser_cookie_management": True,
             "browser_cache_management": True,
+            "health": True,
+            "permissions": True,
             "screenshot": system in {"Darwin", "Windows"},
+            "display_metadata": system in {"Darwin", "Windows"},
+            "windows": system in {"Darwin", "Windows"},
             "desktop_actions": system in {"Darwin", "Windows"},
             "cursor_move": system in {"Darwin", "Windows"},
+            "hotkey": system in {"Darwin", "Windows"},
+            "clipboard": system in {"Darwin", "Windows"},
+            "app_control": system in {"Darwin", "Windows"},
         }
 
     def _read_sessions(self) -> dict[str, Any]:
@@ -874,44 +1608,51 @@ class BrowserComputerController:
         except Exception:
             return False
 
-    def _approval_required(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
-        token = self._issue_approval(action, payload)
-        return {
+    def _approval_required(self, action: str, payload: dict[str, Any], *, risk: dict[str, Any] | None = None) -> dict[str, Any]:
+        risk = risk or classify_approval_risk(action, payload)
+        approval = self._approval_store().request(
+            action,
+            payload,
+            risk_level=str(risk.get("risk_level") or "medium"),
+            reason=str(risk.get("reason") or ""),
+            issue_legacy_once_token=str(risk.get("risk_level") or "") != "high",
+        )
+        response = {
             "action": action,
             "requires_approval": True,
-            "approval_token": token,
-            "approval_expires_in_seconds": 300,
-            "approval_hint": "Repeat the same action with payload.approval_token after an explicit user confirmation.",
-            "payload": payload,
+            "approval_id": approval.get("approval_id"),
+            "approval_expires_in_seconds": approval.get("approval_expires_in_seconds", 300),
+            "approval_hint": "Approve this request server-side, then repeat the same action with payload.approval_id and payload.approval_token.",
+            "risk_level": risk.get("risk_level"),
+            "risk_reason": risk.get("reason"),
+            "payload": approval.get("payload", payload),
         }
+        if approval.get("approval_token"):
+            response["approval_token"] = approval["approval_token"]
+            response["approval_hint"] = "Repeat the same action with payload.approval_token after an explicit user confirmation."
+        return response
 
     def _issue_approval(self, action: str, payload: dict[str, Any]) -> str:
-        approvals = self._read_approvals()
-        token = secrets.token_urlsafe(24)
-        approvals[token] = {
-            "action": action,
-            "payload": payload,
-            "expires_at": time.time() + 300,
-        }
-        self._write_approvals(approvals)
-        return token
+        approval = self._approval_store().request(action, payload, issue_legacy_once_token=True)
+        return str(approval.get("approval_token") or "")
 
-    def _consume_approval(self, payload: dict[str, Any], action: str, expected_payload: dict[str, Any]) -> bool:
-        token = str(payload.get("approval_token") or "")
-        if not token:
-            return False
-        approvals = self._read_approvals()
-        record = approvals.pop(token, None)
-        self._write_approvals(approvals)
-        if not isinstance(record, dict):
-            return False
-        if record.get("action") != action:
-            return False
-        if record.get("payload") != expected_payload:
-            return False
-        if float(record.get("expires_at") or 0) < time.time():
-            return False
-        return True
+    def _consume_approval(
+        self,
+        payload: dict[str, Any],
+        action: str,
+        expected_payload: dict[str, Any],
+        *,
+        risk: dict[str, Any] | None = None,
+    ) -> bool:
+        risk = risk or classify_approval_risk(action, expected_payload)
+        return self._approval_store().consume(
+            approval_id=str(payload.get("approval_id") or ""),
+            approval_token=str(payload.get("approval_token") or ""),
+            action=action,
+            payload=expected_payload,
+            allow_legacy_token=str(risk.get("risk_level") or "") != "high",
+            session_id=str(payload.get("approval_session_id") or payload.get("session_id") or ""),
+        )
 
     def _read_approvals(self) -> dict[str, Any]:
         try:
@@ -931,5 +1672,18 @@ class BrowserComputerController:
         self._approval_path.parent.mkdir(parents=True, exist_ok=True)
         self._approval_path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    def _approval_store(self) -> ApprovalStore:
+        return ApprovalStore(Path(self._approval_path))
+
     def _safe_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return {key: value for key, value in payload.items() if key not in {"approved", "approval_token"}}
+        return {
+            key: value
+            for key, value in payload.items()
+            if key
+            not in {
+                "approved",
+                "approval_id",
+                "approval_token",
+                "approval_session_id",
+            }
+        }

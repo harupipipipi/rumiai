@@ -1,9 +1,9 @@
 {
   "id": "browser_computer",
   "category": "tool",
-  "version": "1",
+  "version": "2",
   "display_name": "Browser / Computer",
-  "description": "Open browser URLs, inspect sessions, and run approved desktop actions.",
+  "description": "Open browser URLs, inspect sessions, and run approved Computer Use v2 desktop actions.",
   "enabled": true,
   "config": {
     "name": "browser_computer",
@@ -15,7 +15,37 @@
         "properties": {
           "action": {
             "type": "string",
-            "enum": ["browser.open_url", "browser.session", "computer.screenshot", "computer.move", "computer.click", "computer.type", "computer.key", "computer.scroll"]
+            "enum": [
+              "browser.open_url",
+              "browser.session",
+              "browser.profiles.list",
+              "browser.profile.create",
+              "browser.profile.set_active",
+              "browser.profile.delete",
+              "browser.profile.clear_cache",
+              "browser.profile.clear_cookies",
+              "browser.cookies.list",
+              "browser.cookies.import",
+              "browser.cookies.delete",
+              "computer.health",
+              "computer.permissions",
+              "computer.displays.list",
+              "computer.active_window",
+              "computer.windows.list",
+              "computer.window.focus",
+              "computer.window.bounds",
+              "computer.screenshot",
+              "computer.move",
+              "computer.click",
+              "computer.type",
+              "computer.key",
+              "computer.hotkey",
+              "computer.scroll",
+              "computer.clipboard.read",
+              "computer.clipboard.write",
+              "computer.app.open",
+              "computer.app.focus"
+            ]
           },
           "payload": {"type": "object"}
         },
