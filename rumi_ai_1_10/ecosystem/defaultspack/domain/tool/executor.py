@@ -476,6 +476,13 @@ def _browser_computer_action_payload(tool_name, arguments):
             "active_window": "computer.active_window",
             "windows.list": "computer.windows.list",
             "windows_list": "computer.windows.list",
+            "apps.list": "computer.apps.list",
+            "apps_list": "computer.apps.list",
+            "app.list": "computer.apps.list",
+            "app_list": "computer.apps.list",
+            "app.find": "computer.app.find",
+            "app_find": "computer.app.find",
+            "find_app": "computer.app.find",
         }
         action = action_map.get(raw_action, raw_action)
         for key in (
@@ -512,6 +519,9 @@ def _browser_computer_action_payload(tool_name, arguments):
             "visual_feedback",
             "show_click_feedback",
             "post_click_delay",
+            "app",
+            "name",
+            "query",
         ):
             if key in arguments:
                 raw_payload[key] = arguments.get(key)
@@ -547,6 +557,13 @@ def _browser_computer_action_payload(tool_name, arguments):
             "active_window": "computer.active_window",
             "windows.list": "computer.windows.list",
             "windows_list": "computer.windows.list",
+            "apps.list": "computer.apps.list",
+            "apps_list": "computer.apps.list",
+            "app.list": "computer.apps.list",
+            "app_list": "computer.apps.list",
+            "app.find": "computer.app.find",
+            "app_find": "computer.app.find",
+            "find_app": "computer.app.find",
         }
         action = action_map.get(raw_action, raw_action)
         for key in (
@@ -580,6 +597,7 @@ def _browser_computer_action_payload(tool_name, arguments):
             "window_index",
             "app",
             "name",
+            "query",
             "path",
             "bundle_id",
             "quality",

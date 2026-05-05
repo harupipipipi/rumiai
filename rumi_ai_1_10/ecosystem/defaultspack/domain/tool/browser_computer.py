@@ -62,6 +62,10 @@ class BrowserComputerController:
             return self._active_window()
         if action == "computer.windows.list":
             return self._list_windows(payload)
+        if action == "computer.apps.list":
+            return self._list_apps(payload)
+        if action == "computer.app.find":
+            return self._find_apps(payload)
         if action == "computer.screenshot":
             return self._screenshot(payload=payload, dry_run=bool(payload.get("dry_run")), yolo_mode=yolo_mode)
         if action in {"computer.zoom", "zoom"}:
@@ -80,6 +84,8 @@ class BrowserComputerController:
             "computer.clipboard.write",
             "computer.app.open",
             "computer.app.focus",
+            "computer.apps.list",
+            "computer.app.find",
         }:
             return self._desktop_action(action, payload, yolo_mode=yolo_mode)
         raise ValueError(f"Unsupported browser/computer action: {action}")
@@ -362,6 +368,39 @@ class BrowserComputerController:
             "windows": windows,
             "count": len(windows),
         }
+
+    def _list_apps(self, payload: dict[str, Any]) -> dict[str, Any]:
+        system = platform.system()
+        limit = int(payload.get("limit") or 100)
+        query = str(payload.get("query") or payload.get("app") or payload.get("name") or "").strip().lower()
+        if system == "Darwin":
+            apps = self._darwin_apps(limit)
+        elif system == "Windows":
+            apps = self._windows_apps(limit)
+        else:
+            apps = []
+        if query:
+            apps = [app for app in apps if self._app_matches_query(app, query)]
+        limited = apps[: max(limit, 1)]
+        return {
+            "action": "computer.apps.list",
+            "platform": system,
+            "supported": system in {"Darwin", "Windows"},
+            "apps": limited,
+            "count": len(limited),
+            "query": query or None,
+        }
+
+    def _find_apps(self, payload: dict[str, Any]) -> dict[str, Any]:
+        query = str(payload.get("query") or payload.get("app") or payload.get("name") or "").strip()
+        if not query:
+            raise ValueError("computer.app.find requires query, app, or name")
+        result = self._list_apps({**payload, "query": query})
+        apps = result.get("apps") if isinstance(result.get("apps"), list) else []
+        result["action"] = "computer.app.find"
+        result["match"] = apps[0] if apps else None
+        result["found"] = bool(apps)
+        return result
 
     def _screenshot(self, *, payload: dict[str, Any], dry_run: bool, yolo_mode: bool) -> dict[str, Any]:
         if dry_run:
@@ -1315,6 +1354,53 @@ class BrowserComputerController:
                 break
         return windows
 
+    def _darwin_apps(self, limit: int) -> list[dict[str, Any]]:
+        script = [
+            'tell application "System Events"',
+            'set output to ""',
+            "set frontProc to first application process whose frontmost is true",
+            "set frontPid to unix id of frontProc as integer",
+            "repeat with proc in (application processes whose background only is false)",
+            "set appName to name of proc as text",
+            "set pidValue to unix id of proc as text",
+            'set bundleValue to ""',
+            "try",
+            "set bundleValue to bundle identifier of proc as text",
+            "end try",
+            "set windowCount to count of windows of proc",
+            "set frontValue to ((unix id of proc as integer) is frontPid) as text",
+            "set output to output & appName & tab & pidValue & tab & bundleValue & tab & (windowCount as text) & tab & frontValue & linefeed",
+            "end repeat",
+            "return output",
+            "end tell",
+        ]
+        try:
+            completed = self._run_osascript(script)
+        except Exception:
+            return []
+        apps = []
+        for line in completed.stdout.splitlines():
+            parts = line.split("\t")
+            if len(parts) < 5:
+                continue
+            name, pid, bundle_id, window_count, frontmost = parts[:5]
+            if not name:
+                continue
+            apps.append(
+                {
+                    "name": name,
+                    "app": name,
+                    "pid": int(pid) if str(pid).isdigit() else 0,
+                    "bundle_id": bundle_id,
+                    "window_count": int(window_count) if str(window_count).isdigit() else 0,
+                    "frontmost": frontmost.lower() == "true",
+                    "focus_payload": {"app": name, **({"bundle_id": bundle_id} if bundle_id else {})},
+                }
+            )
+            if len(apps) >= limit:
+                break
+        return apps
+
     def _windows_active_window(self) -> dict[str, Any] | None:
         script = self._windows_user32_prelude() + "\n".join(
             [
@@ -1355,6 +1441,30 @@ class BrowserComputerController:
         if isinstance(value, dict) and value:
             return [value]
         return []
+
+    def _windows_apps(self, limit: int) -> list[dict[str, Any]]:
+        script = "\n".join(
+            [
+                "$items = Get-Process | Where-Object { $_.MainWindowTitle -or $_.MainWindowHandle -ne 0 } | Sort-Object ProcessName | Select-Object -First "
+                + str(max(limit, 1))
+                + " | ForEach-Object { @{ name = $_.ProcessName; app = $_.ProcessName; pid = [int]$_.Id; title = $_.MainWindowTitle; window_id = $_.MainWindowHandle.ToInt64().ToString(); window_count = if ($_.MainWindowHandle -ne 0) { 1 } else { 0 }; focus_payload = @{ app = $_.ProcessName; window_id = $_.MainWindowHandle.ToInt64().ToString() } } }",
+                "ConvertTo-Json @($items) -Compress",
+            ]
+        )
+        value = self._run_powershell_json(script)
+        if isinstance(value, list):
+            return value
+        if isinstance(value, dict) and value:
+            return [value]
+        return []
+
+    @staticmethod
+    def _app_matches_query(app: dict[str, Any], query: str) -> bool:
+        haystack = " ".join(
+            str(app.get(key) or "")
+            for key in ("name", "app", "bundle_id", "title", "pid")
+        ).lower()
+        return query in haystack
 
     @staticmethod
     def _parse_window_line(line: str, *, window_id: str) -> dict[str, Any] | None:
@@ -2674,6 +2784,7 @@ if let up = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: f
             "screenshot": system in {"Darwin", "Windows"},
             "display_metadata": system in {"Darwin", "Windows"},
             "windows": system in {"Darwin", "Windows"},
+            "apps": system in {"Darwin", "Windows"},
             "desktop_actions": system in {"Darwin", "Windows"},
             "cursor_move": system in {"Darwin", "Windows"},
             "hotkey": system in {"Darwin", "Windows"},

@@ -77,6 +77,8 @@ function summarizeComputerArguments(toolName: string, args: Record<string, unkno
   if (action.includes("key") || action.includes("press")) return `キー ${pickString(args, ["key", "keys"])}`.trim();
   if (action.includes("scroll")) return "スクロール";
   if (action.includes("clipboard")) return "クリップボード";
+  if (action.includes("apps.list")) return `起動中アプリ一覧${pickString(args, ["query", "app", "name"]) ? ` · ${pickString(args, ["query", "app", "name"])}` : ""}`;
+  if (action.includes("app.find")) return `アプリ検索${pickString(args, ["query", "app", "name"]) ? ` · ${pickString(args, ["query", "app", "name"])}` : ""}`;
   if (action.includes("window")) return "ウィンドウ操作";
   if (action.includes("app")) return "アプリ操作";
   return pickString(args, ["action"]) || "操作";
@@ -126,6 +128,16 @@ function summarizeComputerResult(
   if (action.includes("key") || action.includes("press")) return "キーを送信";
   if (action.includes("scroll")) return "スクロール";
   if (action.includes("clipboard")) return "クリップボードを更新";
+  if (action.includes("apps.list")) {
+    const count = Number(data.count ?? 0);
+    return Number.isFinite(count) ? `起動中アプリ ${count} 件` : "起動中アプリを取得";
+  }
+  if (action.includes("app.find")) {
+    if (data.found === false) return "アプリが見つかりません";
+    const match = data.match && typeof data.match === "object" ? data.match as Record<string, unknown> : {};
+    const name = pickString(match, ["name", "app", "bundle_id"]);
+    return name ? `アプリ候補 · ${name}` : "アプリ候補を取得";
+  }
   if (action.includes("window")) return "ウィンドウ操作を実行";
   if (action.includes("app")) return "アプリ操作を実行";
   return "操作を実行";

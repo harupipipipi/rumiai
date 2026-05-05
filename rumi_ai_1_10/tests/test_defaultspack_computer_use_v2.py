@@ -85,6 +85,21 @@ def test_computer_use_executor_accepts_natural_app_focus_alias():
     assert payload["app"] == "Vivaldi"
 
 
+def test_computer_use_executor_accepts_app_search_alias():
+    from domain.tool.executor import _browser_computer_action_payload
+
+    action, payload = _browser_computer_action_payload(
+        "computer_use",
+        {
+            "action": "app.find",
+            "query": "Vivaldi",
+        },
+    )
+
+    assert action == "computer.app.find"
+    assert payload["query"] == "Vivaldi"
+
+
 def test_browser_tool_operator_point_payload_is_forwarded():
     from domain.tool.executor import _browser_computer_action_payload
 
@@ -134,6 +149,27 @@ def test_windows_permissions_include_v2_preflight_fields(monkeypatch):
     assert preflight["forms"]["allowed"] is True
     assert preflight["screen_locked"]["status"] == "unlocked"
     assert preflight["dpi_scale"] == 1.25
+
+
+def test_computer_apps_list_filters_running_apps(monkeypatch):
+    from domain.tool.browser_computer import BrowserComputerController
+    import domain.tool.browser_computer as browser_computer
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(
+        BrowserComputerController,
+        "_darwin_apps",
+        lambda self, limit: [
+            {"name": "Codex", "app": "Codex", "pid": 1},
+            {"name": "Vivaldi", "app": "Vivaldi", "pid": 2, "bundle_id": "com.vivaldi.Vivaldi"},
+        ],
+    )
+
+    result = BrowserComputerController().run("computer.app.find", {"query": "vivaldi"})
+
+    assert result.get("requires_approval") is not True
+    assert result["found"] is True
+    assert result["match"]["name"] == "Vivaldi"
 
 
 def test_screenshot_result_includes_display_and_dpi_metadata(tmp_path, monkeypatch):

@@ -463,10 +463,12 @@ def _compact_tool_log_value(value):
 
 def _tool_visibility_message(tools):
     names = []
+    connected_tool_names_lower = set()
     for tool in tools or []:
         name = tool_name_from_definition(tool)
         if not name:
             continue
+        connected_tool_names_lower.add(str(name).lower())
         description = ""
         if isinstance(tool, dict):
             function_def = tool.get("function")
@@ -477,12 +479,19 @@ def _tool_visibility_message(tools):
         names.append(label)
     if not names:
         return None
+    computer_guidance = ""
+    if connected_tool_names_lower & {"computer_use", "browser_computer", "browser_use"}:
+        computer_guidance = (
+            " For desktop tasks, first inspect the running apps with computer.apps.list or computer.app.find, "
+            "focus the intended app before screenshots/actions (for example app='Vivaldi'), "
+            "and target app/window instead of the whole desktop unless the user asks for full desktop."
+        )
     return {
         "role": "system",
         "content": (
             "Available tools are connected for this turn. "
             "Use them when they are relevant, and do not claim that no tools are available. "
-            "Connected tools: " + "; ".join(names)
+            "Connected tools: " + "; ".join(names) + computer_guidance
         ),
     }
 
@@ -596,6 +605,7 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
                     phase="tool_call_completed",
                     tool_name=tool_name,
                     tool_call_id=tool_call_id,
+                    tool_log=log,
                     is_error=isinstance(result, dict) and result.get("status") == "error",
                 ),
                 event_callback,

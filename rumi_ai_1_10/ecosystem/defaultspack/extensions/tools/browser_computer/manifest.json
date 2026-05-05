@@ -32,6 +32,8 @@
               "computer.displays.list",
               "computer.active_window",
               "computer.windows.list",
+              "computer.apps.list",
+              "computer.app.find",
               "computer.window.focus",
               "computer.window.bounds",
               "computer.screenshot",

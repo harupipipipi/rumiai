@@ -572,6 +572,9 @@ def test_chat_stream_fallback_emits_live_tool_events_before_final_message(tmp_pa
     assert event_types.index("tool_call_started") < event_types.index("message")
     assert event_types.count("tool_call_started") == 1
     assert event_types.count("tool_call_completed") == 1
+    completed = next(event for event in events if event.get("type") == "tool_call_completed")
+    assert completed["tool_log"]["tool_name"] == "live_probe"
+    assert completed["tool_log"]["result"]["data"]["result"] == "ok"
 
     ChatStore._instance = None
 

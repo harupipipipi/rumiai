@@ -4,7 +4,7 @@ import { Activity, Building2, MessageSquare, PanelLeftOpen, Play, RefreshCw, Shi
 import type { ChatItem } from "./components/HistoryBoard";
 import type { ApprovalPreview, ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { api, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ComposerWidgetAction, type Conversation, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { api, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ComposerWidgetAction, type Conversation, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type ToolLogEntry, type UICatalog } from "./lib/api";
 import { deriveConversationTitle, formatRelativeTime, messageToText } from "./lib/chat";
 import { cn } from "./lib/cn";
 import { canExecuteComposerEndpointAction } from "./lib/composerWidgets";
@@ -1726,6 +1726,20 @@ export default function App() {
         const eventType = String(streamEvent.type ?? "");
         if (!eventType || ["delta", "message", "done", "user_message", "error"].includes(eventType)) return;
         const activityEvent = streamEvent as ChatActivityEvent;
+        const liveToolLog = (
+          activityEvent.tool_log
+          && typeof activityEvent.tool_log === "object"
+          && !Array.isArray(activityEvent.tool_log)
+        ) ? activityEvent.tool_log as ToolLogEntry : null;
+        const appendLiveToolLog = (logs: ToolLogEntry[] | null | undefined): ToolLogEntry[] => {
+          if (!liveToolLog) return logs ?? [];
+          const key = String(liveToolLog.tool_call_id ?? "");
+          const existing = logs ?? [];
+          if (key && existing.some((log) => String(log.tool_call_id ?? "") === key)) {
+            return existing.map((log) => String(log.tool_call_id ?? "") === key ? liveToolLog : log);
+          }
+          return [...existing, liveToolLog];
+        };
         setActiveConversation((current) => {
           if (!current || current.id !== conversation.id) return current;
           const existing = current.messages.find((message) => message.id === assistantDraft.id);
@@ -1738,6 +1752,7 @@ export default function App() {
                 {
                   ...assistantDraft,
                   events: [nextEvent],
+                  tool_logs: appendLiveToolLog(assistantDraft.tool_logs),
                 },
               ],
             };
@@ -1746,7 +1761,7 @@ export default function App() {
             ...current,
             messages: current.messages.map((message) => (
               message.id === assistantDraft.id
-                ? { ...message, events: [...(message.events ?? []), nextEvent] }
+                ? { ...message, events: [...(message.events ?? []), nextEvent], tool_logs: appendLiveToolLog(message.tool_logs) }
                 : message
             )),
           };

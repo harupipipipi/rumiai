@@ -80,6 +80,26 @@ test("summarizes computer clicks as useful compact activity", () => {
   assert.equal(groups[0].items[0].detail, "クリック位置を記録 · screenshot-clicks.png");
 });
 
+test("summarizes running app search results", () => {
+  const groups = buildToolActivityGroups([
+    {
+      tool_name: "computer_use",
+      arguments: { action: "app.find", query: "Vivaldi" },
+      result: {
+        status: "ok",
+        data: {
+          action: "computer.app.find",
+          found: true,
+          match: { name: "Vivaldi", bundle_id: "com.vivaldi.Vivaldi" },
+        },
+      },
+    },
+  ]);
+
+  assert.equal(groups[0].items[0].input, "アプリ検索 · Vivaldi");
+  assert.equal(groups[0].items[0].detail, "アプリ候補 · Vivaldi");
+});
+
 test("shows zoom failures instead of pretending they completed", () => {
   const groups = buildToolActivityGroups([
     {
