@@ -71,6 +71,41 @@ def test_zoom_executor_payload_uses_dedicated_computer_zoom_action():
     assert payload == {"latest": True, "x": 10, "y": 20, "radius": 30, "scale": 2}
 
 
+def test_app_defaults_do_not_retarget_screenshot_based_clicks():
+    from domain.tool.executor import _apply_tool_support_desktop_defaults, _browser_computer_action_payload
+
+    action, payload = _browser_computer_action_payload(
+        "computer_use",
+        {"action": "click", "point": [825, 530]},
+    )
+
+    adjusted = _apply_tool_support_desktop_defaults(
+        action,
+        payload,
+        {"chat_params": {"tool_support": {"default_target_app": "Vivaldi"}}},
+    )
+
+    assert adjusted["point"] == [825, 530]
+    assert "target" not in adjusted
+    assert "app" not in adjusted
+
+
+def test_app_defaults_still_scope_app_screenshots():
+    from domain.tool.executor import _apply_tool_support_desktop_defaults, _browser_computer_action_payload
+
+    action, payload = _browser_computer_action_payload("computer_use", {"action": "screenshot"})
+
+    adjusted = _apply_tool_support_desktop_defaults(
+        action,
+        payload,
+        {"chat_params": {"tool_support": {"default_target_app": "Vivaldi"}}},
+    )
+
+    assert adjusted["target"] == "app"
+    assert adjusted["app"] == "Vivaldi"
+    assert adjusted["focus"] is False
+
+
 def test_browser_use_executor_reaches_browser_v2_profile_manager(tmp_path):
     from domain.tool.executor import _try_execute_browser_v2
 

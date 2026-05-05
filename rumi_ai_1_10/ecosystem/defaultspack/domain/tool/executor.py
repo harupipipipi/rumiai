@@ -739,6 +739,8 @@ def _apply_tool_support_desktop_defaults(action, payload, context):
     default_app = str(support.get("default_target_app") or "").strip()
     if not default_app:
         return payload
+    if action in {"computer.move", "computer.click"} and _payload_has_explicit_point_reference(payload):
+        return payload
     scoped_actions = {
         "computer.screenshot",
         "computer.move",
@@ -758,6 +760,32 @@ def _apply_tool_support_desktop_defaults(action, payload, context):
     else:
         next_payload.setdefault("focus", True)
     return next_payload
+
+
+def _payload_has_explicit_point_reference(payload):
+    coordinate_keys = {
+        "x",
+        "y",
+        "point",
+        "points",
+        "normalized_point",
+        "screenshot_path",
+        "screenshot_metadata_path",
+        "metadata_path",
+        "model_image_path",
+        "source_path",
+    }
+    if any(key in payload for key in coordinate_keys):
+        return True
+    coordinate_space = str(payload.get("coordinate_space") or payload.get("coordinates") or "").strip().lower()
+    return coordinate_space in {
+        "model_image",
+        "screenshot_image",
+        "source_image",
+        "image",
+        "normalized",
+        "normalized_1000",
+    }
 
 
 def _tool_value(tool_def, key):
