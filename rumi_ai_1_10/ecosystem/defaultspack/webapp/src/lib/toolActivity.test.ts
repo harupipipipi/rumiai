@@ -128,6 +128,30 @@ test("marks approval requests as pending instead of completed", () => {
   assert.equal(groups[0].items[0].detail, "承認待ち · state_changing_action");
 });
 
+test("uses central approval status for stale computer approval cards", () => {
+  const groups = buildToolActivityGroups([
+    {
+      tool_name: "computer_use",
+      arguments: { action: "click", x: 20, y: 30 },
+      result: {
+        status: "ok",
+        data: {
+          widget: {
+            type: "computer_use",
+            action: "computer.click",
+            requires_approval: true,
+            approval_id: "appr_1",
+            risk_reason: "state_changing_action",
+          },
+        },
+      },
+    },
+  ], [], { appr_1: "approved" });
+
+  assert.equal(groups[0].items[0].status, "completed");
+  assert.equal(groups[0].items[0].detail, "承認済み · 実行待ち");
+});
+
 test("does not create activity from text-only claims", () => {
   assert.deepEqual(buildToolActivityGroups([], []), []);
 });

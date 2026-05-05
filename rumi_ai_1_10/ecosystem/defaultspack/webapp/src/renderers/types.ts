@@ -84,6 +84,7 @@ export type ChatMessagesRendererProps = {
   unknownBlockStrategy: string;
   showActivityInMessages: boolean;
   showWidgets: boolean;
+  approvalStatuses?: Record<string, string>;
   onSuggestionClick: (text: string) => void;
 };
 

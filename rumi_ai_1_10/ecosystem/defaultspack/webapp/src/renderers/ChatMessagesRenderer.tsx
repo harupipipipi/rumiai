@@ -217,8 +217,14 @@ function ToolResultPanel({ item }: { item: ToolActivityItem }) {
   );
 }
 
-function ToolActivityTray({ message }: { message: ChatMessagesRendererProps["messages"][number] }) {
-  const groups = buildToolActivityGroups(message.toolLogs ?? [], message.events ?? []);
+function ToolActivityTray({
+  message,
+  approvalStatuses,
+}: {
+  message: ChatMessagesRendererProps["messages"][number];
+  approvalStatuses?: ChatMessagesRendererProps["approvalStatuses"];
+}) {
+  const groups = buildToolActivityGroups(message.toolLogs ?? [], message.events ?? [], approvalStatuses);
   if (groups.length === 0) return null;
   const items = groups.flatMap((group) => group.items);
   const total = items.length;
@@ -310,6 +316,7 @@ export function ChatMessagesRenderer({
   unknownBlockStrategy,
   showActivityInMessages,
   showWidgets,
+  approvalStatuses,
 }: ChatMessagesRendererProps) {
   return (
     <>
@@ -344,7 +351,9 @@ export function ChatMessagesRenderer({
                       ? "bg-zinc-800/80 text-zinc-100 rounded-tr-sm shadow-sm border border-zinc-700/50" 
                       : "w-full text-zinc-200 bg-transparent"
                   )}>
-                    {showActivityInMessages && message.role === "agent" && <ToolActivityTray message={message} />}
+                    {showActivityInMessages && message.role === "agent" && (
+                      <ToolActivityTray message={message} approvalStatuses={approvalStatuses} />
+                    )}
 
                     <div className="markdown-body leading-relaxed break-words space-y-4">
                       {message.content.length > 0

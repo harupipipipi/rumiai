@@ -1,6 +1,7 @@
 import type { ChatActivityEvent, ToolLogEntry } from "./api";
 
 export type ToolActivityStatus = "running" | "completed" | "failed" | "approval";
+export type ApprovalStatusById = Record<string, string>;
 
 export type ToolActivityItem = {
   id: string;
@@ -81,7 +82,24 @@ function summarizeComputerArguments(toolName: string, args: Record<string, unkno
   return pickString(args, ["action"]) || "操作";
 }
 
-function summarizeComputerResult(toolName: string, data: Record<string, unknown>, visualPath: string, args?: Record<string, unknown>): string {
+function approvalStatusForRecord(data: Record<string, unknown>, approvalStatuses?: ApprovalStatusById): string {
+  const approvalId = pickString(data, ["approval_id", "id"]);
+  const centralStatus = approvalId ? approvalStatuses?.[approvalId] : "";
+  if (centralStatus) return centralStatus.toLowerCase();
+  const explicit = pickString(data, ["approval_status", "approval_state"]);
+  if (explicit) return explicit.toLowerCase();
+  const generic = pickString(data, ["status"]).toLowerCase();
+  if (["pending", "approved", "consumed", "denied", "rejected", "expired"].includes(generic)) return generic;
+  return "";
+}
+
+function summarizeComputerResult(
+  toolName: string,
+  data: Record<string, unknown>,
+  visualPath: string,
+  args?: Record<string, unknown>,
+  approvalStatuses?: ApprovalStatusById,
+): string {
   const action = normalizeComputerAction(pickString(data, ["action"]) || pickString(args ?? {}, ["action"]), toolName);
   const error = data.error;
   if (data.status === "error") {
@@ -89,6 +107,11 @@ function summarizeComputerResult(toolName: string, data: Record<string, unknown>
     return message ? `失敗 · ${message}` : "失敗";
   }
   if (data.requires_approval === true || data.approval_required === true) {
+    const approvalStatus = approvalStatusForRecord(data, approvalStatuses);
+    if (approvalStatus === "approved") return "承認済み · 実行待ち";
+    if (approvalStatus === "consumed") return "承認済み · 実行済み";
+    if (approvalStatus === "denied" || approvalStatus === "rejected") return "拒否済み";
+    if (approvalStatus === "expired") return "承認期限切れ";
     const reason = pickString(data, ["risk_reason", "reason"]);
     return reason ? `承認待ち · ${reason}` : "承認待ち";
   }
@@ -156,7 +179,7 @@ function formatCalculatorResult(summary: string): string {
   return summary;
 }
 
-function summarizeToolResult(toolName: string, result: unknown, args?: Record<string, unknown>): string {
+function summarizeToolResult(toolName: string, result: unknown, args?: Record<string, unknown>, approvalStatuses?: ApprovalStatusById): string {
   if (!result || typeof result !== "object") return compact(result, 120);
   const record = result as Record<string, unknown>;
   const data = record.data && typeof record.data === "object" ? record.data as Record<string, unknown> : record;
@@ -176,7 +199,7 @@ function summarizeToolResult(toolName: string, result: unknown, args?: Record<st
     "model_image_path",
   ]);
   if (lowerToolName.includes("computer") || lowerToolName.includes("zoom")) {
-    return summarizeComputerResult(toolName, widget, visualPath, args);
+    return summarizeComputerResult(toolName, widget, visualPath, args, approvalStatuses);
   }
   const direct = pickString(data, ["summary", "result", "message", "output", "title"]);
   if (direct) return lowerToolName.includes("calc") ? formatCalculatorResult(direct) : direct;
@@ -186,12 +209,15 @@ function summarizeToolResult(toolName: string, result: unknown, args?: Record<st
   return compact(data, 120);
 }
 
-function statusForLog(log: ToolLogEntry): ToolActivityStatus {
+function statusForLog(log: ToolLogEntry, approvalStatuses?: ApprovalStatusById): ToolActivityStatus {
   const result = log.result;
   const record = result && typeof result === "object" ? result as Record<string, unknown> : {};
   const data = record.data && typeof record.data === "object" ? record.data as Record<string, unknown> : record;
   const widget = data.widget && typeof data.widget === "object" ? data.widget as Record<string, unknown> : data;
   if (widget.requires_approval === true || widget.approval_required === true) {
+    const approvalStatus = approvalStatusForRecord(widget, approvalStatuses);
+    if (approvalStatus === "approved" || approvalStatus === "consumed") return "completed";
+    if (approvalStatus === "denied" || approvalStatus === "rejected" || approvalStatus === "expired") return "failed";
     return "approval";
   }
   if (record.status === "error" || data.status === "error" || widget.status === "error") {
@@ -211,6 +237,7 @@ function eventKey(event: ChatActivityEvent): string {
 export function buildToolActivityGroups(
   toolLogs: ToolLogEntry[] = [],
   events: ChatActivityEvent[] = [],
+  approvalStatuses?: ApprovalStatusById,
 ): ToolActivityGroup[] {
   const fromLogs = toolLogs
     .filter((log) => typeof log.tool_name === "string" && log.tool_name.trim())
@@ -219,7 +246,7 @@ export function buildToolActivityGroups(
       const args = log.arguments && typeof log.arguments === "object" ? log.arguments as Record<string, unknown> : {};
       const folder = toolFolderFor(toolName);
       const argumentSummary = summarizeToolArguments(toolName, args);
-      const resultSummary = summarizeToolResult(toolName, log.result, args);
+      const resultSummary = summarizeToolResult(toolName, log.result, args, approvalStatuses);
       return {
         id: `log-${index}-${toolName}`,
         toolName,
@@ -229,7 +256,7 @@ export function buildToolActivityGroups(
         title: argumentSummary ? `${folder.label} / ${toolName}: ${argumentSummary}` : `${folder.label} / ${toolName}`,
         detail: resultSummary,
         result: log.result,
-        status: statusForLog(log),
+        status: statusForLog(log, approvalStatuses),
         timestamp: log.timestamp,
       };
     });

@@ -25,6 +25,7 @@ type BrowserApproval = {
 };
 
 type ApprovalIdSet = Set<string> | null;
+type ApprovalStatusById = Record<string, string>;
 
 type PendingChatRequest = {
   conversationId: string;
@@ -232,6 +233,7 @@ function approvalFromToolResult(
   result: unknown,
   pendingApprovalIds: ApprovalIdSet = null,
   resolvedApprovalIds?: Set<string>,
+  approvalStatuses?: ApprovalStatusById,
 ): ApprovalPreview | null {
   if (!result || typeof result !== "object") return null;
   const record = result as Record<string, unknown>;
@@ -240,8 +242,8 @@ function approvalFromToolResult(
   if (widget.requires_approval !== true && widget.approval_required !== true) return null;
   const approvalId = String(widget.approval_id ?? "");
   if (!approvalId) return null;
-  const approvalStatus = String(widget.status ?? "pending").toLowerCase();
-  if (approvalStatus && !["pending", "approved"].includes(approvalStatus)) return null;
+  const approvalStatus = approvalStatusForWidget(widget, approvalId, approvalStatuses);
+  if (approvalStatus && approvalStatus !== "pending") return null;
   if (resolvedApprovalIds?.has(approvalId)) return null;
   if (pendingApprovalIds !== null && !pendingApprovalIds.has(approvalId)) return null;
   const payload = widget.payload && typeof widget.payload === "object" ? widget.payload as Record<string, unknown> : {};
@@ -253,6 +255,20 @@ function approvalFromToolResult(
     reason: String(widget.risk_reason ?? widget.reason ?? ""),
     payload,
   };
+}
+
+function approvalStatusForWidget(
+  widget: Record<string, unknown>,
+  approvalId: string,
+  approvalStatuses?: ApprovalStatusById,
+): string {
+  const centralStatus = approvalStatuses?.[approvalId];
+  if (centralStatus) return centralStatus.toLowerCase();
+  const explicit = String(widget.approval_status ?? widget.approval_state ?? "").toLowerCase();
+  if (explicit) return explicit;
+  const generic = String(widget.status ?? "").toLowerCase();
+  if (["pending", "approved", "consumed", "denied", "rejected", "expired"].includes(generic)) return generic;
+  return "pending";
 }
 
 function approvalIdsFromMessages(messages: ChatMessage[]): string[] {
@@ -274,13 +290,14 @@ function toolPreviewsFromMessages(
   messages: ChatMessage[],
   pendingApprovalIds: ApprovalIdSet = null,
   resolvedApprovalIds?: Set<string>,
+  approvalStatuses?: ApprovalStatusById,
 ): ToolPreviewItem[] {
   return messages.flatMap((message) => (message.tool_logs ?? []).map((log, index) => {
     const toolName = String(log.tool_name ?? "tool");
     const args = log.arguments && typeof log.arguments === "object" ? log.arguments as Record<string, unknown> : {};
     const result = log.result as Record<string, unknown> | undefined;
     const status = String(result?.status ?? "completed");
-    const approval = approvalFromToolResult(result, pendingApprovalIds, resolvedApprovalIds);
+    const approval = approvalFromToolResult(result, pendingApprovalIds, resolvedApprovalIds, approvalStatuses);
     if (approval) {
       return {
         id: `message-approval-${approval.approvalId}`,
@@ -716,6 +733,7 @@ function pendingBrowserApproval(
   messages: ChatUiMessage[],
   pendingApprovalIds: ApprovalIdSet = null,
   resolvedApprovalIds?: Set<string>,
+  approvalStatuses?: ApprovalStatusById,
 ): BrowserApproval | null {
   const approvalTools = new Set(["browser_computer", "browser_use", "computer_use", "zoom"]);
   for (const message of [...messages].reverse()) {
@@ -728,8 +746,8 @@ function pendingBrowserApproval(
       if (!candidate?.requires_approval && !candidate?.approval_required) continue;
       const approvalId = String(candidate.approval_id ?? "");
       if (!approvalId) continue;
-      const approvalStatus = String(candidate.status ?? "pending").toLowerCase();
-      if (approvalStatus && !["pending", "approved"].includes(approvalStatus)) continue;
+      const approvalStatus = approvalStatusForWidget(candidate, approvalId, approvalStatuses);
+      if (approvalStatus && approvalStatus !== "pending") continue;
       if (resolvedApprovalIds?.has(approvalId)) continue;
       if (pendingApprovalIds !== null && !pendingApprovalIds.has(approvalId)) continue;
       const rawPayload = candidate.payload;
@@ -768,6 +786,7 @@ export default function App() {
   const [activePreviewId, setActivePreviewId] = useState<string | null>(null);
   const [previews, setPreviews] = useState<ToolPreviewItem[]>([]);
   const [pendingApprovalIds, setPendingApprovalIds] = useState<Set<string> | null>(null);
+  const [approvalStatuses, setApprovalStatuses] = useState<ApprovalStatusById>({});
   const [resolvedApprovalIds, setResolvedApprovalIds] = useState<Set<string>>(() => new Set());
   const [health, setHealth] = useState<{ status: string; pack: string; ts: string } | null>(null);
   const [operationsStatus, setOperationsStatus] = useState<OperationsCompanyStatus | null>(null);
@@ -818,10 +837,10 @@ export default function App() {
     () => approvalIdsFromMessages(activeConversation?.messages ?? []).join("|"),
     [activeConversation?.messages],
   );
-  const browserApproval = pendingBrowserApproval(messages, pendingApprovalIds, resolvedApprovalIds);
+  const browserApproval = pendingBrowserApproval(messages, pendingApprovalIds, resolvedApprovalIds, approvalStatuses);
   const messageToolPreviews = useMemo(
-    () => toolPreviewsFromMessages(activeConversation?.messages ?? [], pendingApprovalIds, resolvedApprovalIds),
-    [activeConversation?.messages, pendingApprovalIds, resolvedApprovalIds],
+    () => toolPreviewsFromMessages(activeConversation?.messages ?? [], pendingApprovalIds, resolvedApprovalIds, approvalStatuses),
+    [activeConversation?.messages, pendingApprovalIds, resolvedApprovalIds, approvalStatuses],
   );
   const canvasPreviews = useMemo(() => {
     const seen = new Set(messageToolPreviews.map((preview) => preview.id));
@@ -1079,17 +1098,30 @@ export default function App() {
     const approvalIds = approvalIdsKey ? approvalIdsKey.split("|").filter(Boolean) : [];
     if (approvalIds.length === 0) {
       setPendingApprovalIds(null);
+      setApprovalStatuses({});
       return;
     }
     let cancelled = false;
-    void api.listApprovals({ status: "pending" }).then((result) => {
+    void api.listApprovals().then((result) => {
       if (cancelled) return;
-      const pendingIds = new Set((result.approvals ?? [])
-        .map((approval) => approval.id)
-        .filter((approvalId) => approvalIds.includes(approvalId)));
+      const statusById: ApprovalStatusById = {};
+      const pendingIds = new Set<string>();
+      for (const approval of result.approvals ?? []) {
+        if (!approvalIds.includes(approval.id)) continue;
+        const status = String(approval.status ?? "").toLowerCase();
+        statusById[approval.id] = status;
+        if (status === "pending") pendingIds.add(approval.id);
+      }
+      for (const approvalId of approvalIds) {
+        if (!statusById[approvalId]) pendingIds.add(approvalId);
+      }
+      setApprovalStatuses(statusById);
       setPendingApprovalIds(pendingIds);
     }).catch(() => {
-      if (!cancelled) setPendingApprovalIds(null);
+      if (!cancelled) {
+        setApprovalStatuses({});
+        setPendingApprovalIds(null);
+      }
     });
     return () => {
       cancelled = true;
@@ -1368,6 +1400,7 @@ export default function App() {
   const approveComputerApproval = async (approval: BrowserApproval | ApprovalPreview) => {
     setError(null);
     setResolvedApprovalIds((current) => new Set(current).add(approval.approvalId));
+    setApprovalStatuses((current) => ({ ...current, [approval.approvalId]: "approved" }));
     setPendingApprovalIds((current) => {
       if (!current) return current;
       const next = new Set(current);
@@ -1400,6 +1433,7 @@ export default function App() {
         next.delete(approval.approvalId);
         return next;
       });
+      setApprovalStatuses((current) => ({ ...current, [approval.approvalId]: "pending" }));
       setPendingApprovalIds((current) => {
         if (current?.has(approval.approvalId)) return current;
         const next = new Set(current ?? []);
@@ -1413,6 +1447,7 @@ export default function App() {
   const rejectComputerApproval = async (approval: BrowserApproval | ApprovalPreview) => {
     setError(null);
     setResolvedApprovalIds((current) => new Set(current).add(approval.approvalId));
+    setApprovalStatuses((current) => ({ ...current, [approval.approvalId]: "denied" }));
     setPendingApprovalIds((current) => {
       if (!current) return current;
       const next = new Set(current);
@@ -1434,6 +1469,7 @@ export default function App() {
         next.delete(approval.approvalId);
         return next;
       });
+      setApprovalStatuses((current) => ({ ...current, [approval.approvalId]: "pending" }));
       setPendingApprovalIds((current) => {
         if (current?.has(approval.approvalId)) return current;
         const next = new Set(current ?? []);
@@ -1967,6 +2003,7 @@ export default function App() {
                 unknownBlockStrategy={unknownBlockStrategy}
                 showActivityInMessages={showActivityInMessages}
                 showWidgets={showWidgets}
+                approvalStatuses={approvalStatuses}
                 onSuggestionClick={(text) => setInput(text)}
               />
             )}

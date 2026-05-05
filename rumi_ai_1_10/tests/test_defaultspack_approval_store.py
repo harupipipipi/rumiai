@@ -121,3 +121,50 @@ def test_approval_blocks_issue_server_side_token(tmp_path, monkeypatch):
     assert fetched["status"] == "ok"
     assert fetched["data"]["has_token"] is True
     assert "token_hash" not in fetched["data"]
+
+
+def test_chat_get_conversation_syncs_tool_approval_status(tmp_path, monkeypatch):
+    from blocks.chat.get_conversation import run as get_conversation_run
+    from domain.approval.store import ApprovalStore
+    from domain.chat.store import ChatStore
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_APPROVAL_STORE_PATH", str(tmp_path / "approvals.json"))
+    monkeypatch.delenv("RUMI_DEFAULTSPACK_APPROVALS_PATH", raising=False)
+
+    approval = ApprovalStore().request("computer.click", {"point": [48, 55]}, risk_level="medium")
+    ApprovalStore().approve_once(approval["approval_id"])
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    store.add_message(
+        conversation["id"],
+        {
+            "role": "assistant",
+            "content": [{"type": "text", "text": "approval requested"}],
+            "tool_logs": [
+                {
+                    "tool_name": "computer_use",
+                    "arguments": {"action": "click", "point": [48, 55]},
+                    "result": {
+                        "status": "ok",
+                        "data": {
+                            "widget": {
+                                "type": "computer_use",
+                                "action": "computer.click",
+                                "requires_approval": True,
+                                "approval_id": approval["approval_id"],
+                            }
+                        },
+                    },
+                }
+            ],
+        },
+    )
+
+    response = get_conversation_run({"conversation_id": conversation["id"]}, {})
+    widget = response["data"]["messages"][0]["tool_logs"][0]["result"]["data"]["widget"]
+
+    assert response["status"] == "ok"
+    assert widget["approval_status"] == "approved"
+    assert widget["approval_token"] == "[redacted]"
