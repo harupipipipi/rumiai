@@ -599,6 +599,12 @@ type SendMessageOptions = {
 export type ChatStreamEvent =
   | { type: "delta"; delta: string }
   | { type: "message" | "done" | "user_message"; message?: ChatMessage }
+  | (
+    ChatActivityEvent & {
+      type: "status" | "tool_call" | "tool_call_started" | "tool_call_completed";
+      message?: string;
+    }
+  )
   | { type: "error"; error?: string };
 
 type ChatStreamHandlers = {

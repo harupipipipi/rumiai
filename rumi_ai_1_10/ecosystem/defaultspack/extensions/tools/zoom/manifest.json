@@ -1,0 +1,50 @@
+{
+  "id": "zoom",
+  "category": "tool",
+  "version": "1",
+  "display_name": "Zoom",
+  "description": "Crop and enlarge a region from a desktop screenshot for visual inspection.",
+  "enabled": true,
+  "config": {
+    "name": "zoom",
+    "summary": "Zoom into a desktop screenshot region",
+    "tags": ["computer", "desktop", "screenshot", "vision", "zoom"],
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "x": {"type": "integer"},
+          "y": {"type": "integer"},
+          "width": {"type": "integer"},
+          "height": {"type": "integer"},
+          "radius": {"type": "integer"},
+          "scale": {"type": "number"},
+          "source_path": {"type": "string"},
+          "latest": {"type": "boolean"}
+        }
+      }
+    },
+    "execution": {"type": "local"},
+    "requires_approval": false,
+    "action_type": "inspect",
+    "ui": {
+      "group_id": "computer",
+      "group_label": "Computer",
+      "composer_label": "Zoom",
+      "composer_icon": "zoom-in",
+      "drop_capabilities": ["composer.toggle_chip"],
+      "widget_kind": "tool_toggle",
+      "settings_fields": [
+        {
+          "id": "scale",
+          "label": "Default Scale",
+          "type": "number",
+          "default": 2,
+          "min": 1,
+          "max": 6,
+          "help": "Default enlargement factor for cropped screenshot regions."
+        }
+      ]
+    }
+  }
+}

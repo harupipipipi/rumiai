@@ -29,6 +29,7 @@ MAX_ATTACHMENT_TEXT_CHARS = 240_000
 MAX_ATTACHMENT_TEXT_CHARS_PER_FILE = 120_000
 MAX_ATTACHMENT_IMAGE_BYTES = 8 * 1024 * 1024
 _DATA_IMAGE_PREFIX = "data:image/"
+_VISION_DETAIL_VALUES = {"auto", "low", "high"}
 _SECRET_KEY_RE = re.compile(
     r"(api[_-]?key|authorization|bearer|credential|password|secret|token)",
     re.IGNORECASE,
@@ -117,7 +118,10 @@ def _redact_sensitive_value(value, *, parent_key=""):
     if isinstance(value, str):
         if parent_key and _SECRET_KEY_RE.search(parent_key):
             return "[redacted]"
-        if value.startswith("data:image/"):
+        if (
+            value.startswith("data:image/")
+            and parent_key not in {"visual_data_url", "visualDataUrl", "thumbnail_data_url", "thumbnailDataUrl"}
+        ):
             return "[image data saved as artifact]"
     return value
 
@@ -259,6 +263,22 @@ def _image_data_url_byte_length(data_url):
         return None
 
 
+def _normalize_vision_detail(*values):
+    for value in values:
+        detail = str(value or "").strip().lower()
+        if detail in _VISION_DETAIL_VALUES:
+            return detail
+    return None
+
+
+def _image_url_payload(url, *, detail=None):
+    payload = {"url": url}
+    normalized_detail = _normalize_vision_detail(detail)
+    if normalized_detail:
+        payload["detail"] = normalized_detail
+    return payload
+
+
 def _browser_screenshot_data_url(result):
     if not isinstance(result, dict):
         return ""
@@ -328,7 +348,7 @@ def _browser_screenshot_guidance(result):
     return " ".join(parts)
 
 
-def _append_tool_result_message(messages, tool_name, result, tool_call_id="", *, model=""):
+def _append_tool_result_message(messages, tool_name, result, tool_call_id="", *, model="", vision_detail=None):
     result_text = ""
     if isinstance(result, dict):
         data = result.get("data", result)
@@ -361,7 +381,7 @@ def _append_tool_result_message(messages, tool_name, result, tool_call_id="", *,
                             "type": "text",
                             "text": _browser_screenshot_guidance(result),
                         },
-                        {"type": "image_url", "image_url": {"url": screenshot}},
+                        {"type": "image_url", "image_url": _image_url_payload(screenshot, detail=vision_detail)},
                     ],
                 }
             )
@@ -372,7 +392,10 @@ def _compact_tool_log_value(value):
     if isinstance(value, dict):
         compact = {}
         for key, item in value.items():
-            if key in {"data_url", "dataUrl"} and isinstance(item, str) and item.startswith("data:image/"):
+            if key in {"visual_data_url", "visualDataUrl", "thumbnail_data_url", "thumbnailDataUrl"} and isinstance(item, str) and item.startswith("data:image/"):
+                byte_length = _image_data_url_byte_length(item)
+                compact[key] = item if byte_length is not None and byte_length <= MAX_ATTACHMENT_IMAGE_BYTES else "[image data saved as artifact]"
+            elif key in {"data_url", "dataUrl"} and isinstance(item, str) and item.startswith("data:image/"):
                 compact[key] = "[image data saved as artifact]"
             else:
                 compact[key] = _compact_tool_log_value(item)
@@ -513,6 +536,7 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
                 result,
                 tool_call_id,
                 model=model,
+                vision_detail=_normalize_vision_detail(params.get("image_detail"), params.get("vision_detail")),
             )
 
     response = response or _stub_response()
@@ -568,7 +592,7 @@ def _attachment_text_blocks(attachments):
     return blocks
 
 
-def _attachment_image_blocks(attachments):
+def _attachment_image_blocks(attachments, vision_detail=None):
     if not isinstance(attachments, list):
         return []
 
@@ -586,12 +610,16 @@ def _attachment_image_blocks(attachments):
             continue
         if byte_length > MAX_ATTACHMENT_IMAGE_BYTES:
             continue
+        detail = _normalize_vision_detail(
+            attachment.get("image_detail"),
+            attachment.get("vision_detail"),
+            attachment.get("detail"),
+            vision_detail,
+        )
         blocks.append(
             {
                 "type": "image_url",
-                "image_url": {
-                    "url": data_url,
-                },
+                "image_url": _image_url_payload(data_url, detail=detail),
             }
         )
     return blocks
@@ -625,6 +653,7 @@ def run(input_data, context):
     message = input_data.get("message")
     if not message or not isinstance(message, dict):
         return error("message dict is required", "INVALID_INPUT")
+    params = dict(input_data.get("params") or {})
 
     # --- 空メッセージ検証 ---
     raw_content = message.get("content")
@@ -652,7 +681,12 @@ def run(input_data, context):
             metadata["workspace_attachments"] = persisted_attachments
         if isinstance(content, list):
             content.extend(_attachment_text_blocks(attachments))
-            content.extend(_attachment_image_blocks(attachments))
+            content.extend(
+                _attachment_image_blocks(
+                    attachments,
+                    _normalize_vision_detail(params.get("image_detail"), params.get("vision_detail")),
+                )
+            )
     user_msg_dict = {
         "role": role,
         "content": content,
@@ -696,7 +730,6 @@ def run(input_data, context):
         standard_messages.insert(0, {"role": "system", "content": system_prompt})
 
     call_handler = context.get("call_handler") if context else None
-    params = dict(input_data.get("params") or {})
     request_context = dict(context or {})
     request_context["conversation_id"] = conversation_id
     request_context["conversation_workspace_dir"] = str(store.conversation_workspace_dir(conversation_id))

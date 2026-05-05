@@ -178,6 +178,84 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
             "data:image/png;base64,iVBORw0KGgo=",
         )
 
+    def test_google_provider_preserves_supported_image_detail(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        provider = GoogleProvider()
+        messages = provider.build_request(
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": "data:image/png;base64,iVBORw0KGgo=",
+                                "vision_detail": "HIGH",
+                            },
+                        },
+                    ],
+                }
+            ]
+        )
+
+        image_url = messages[0]["content"][0]["image_url"]
+        self.assertEqual(image_url["detail"], "high")
+        self.assertNotIn("vision_detail", image_url)
+
+    def test_chat_send_adds_image_detail_to_attachment_blocks(self):
+        from blocks.chat.send import _attachment_image_blocks
+
+        blocks = _attachment_image_blocks(
+            [
+                {
+                    "name": "screen.png",
+                    "type": "image/png",
+                    "dataUrl": "data:image/png;base64,iVBORw0KGgo=",
+                    "size": 12,
+                }
+            ],
+            "high",
+        )
+
+        self.assertEqual(blocks[0]["image_url"]["detail"], "high")
+
+    def test_chat_send_adds_image_detail_to_tool_screenshots(self):
+        from blocks.chat.send import _append_tool_result_message
+
+        messages = []
+        _append_tool_result_message(
+            messages,
+            "browser_computer",
+            {
+                "status": "ok",
+                "data": {
+                    "result": "captured",
+                    "data_url": "data:image/png;base64,iVBORw0KGgo=",
+                    "image_size": {"width": 20, "height": 10},
+                },
+            },
+            "call_screen",
+            model="google/gemini-2.5-flash",
+            vision_detail="low",
+        )
+
+        screenshot_message = messages[-1]
+        self.assertEqual(screenshot_message["content"][1]["image_url"]["detail"], "low")
+
+    def test_chat_send_preserves_visual_data_url_in_compact_tool_logs(self):
+        from blocks.chat.send import _compact_tool_log_value
+
+        compact = _compact_tool_log_value(
+            {
+                "data_url": "data:image/png;base64,iVBORw0KGgo=",
+                "visual_data_url": "data:image/png;base64,iVBORw0KGgo=",
+            }
+        )
+
+        self.assertEqual(compact["data_url"], "[image data saved as artifact]")
+        self.assertEqual(compact["visual_data_url"], "data:image/png;base64,iVBORw0KGgo=")
+
     def test_google_provider_hides_inline_thought_tags(self):
         from domain.ai_client.providers.google_provider import GoogleProvider
 

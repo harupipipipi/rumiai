@@ -14,6 +14,7 @@ from blocks.chat.send import (
     _attachment_image_blocks,
     _attachment_text_blocks,
     _conversation_system_prompt,
+    _normalize_vision_detail,
     _sanitize_attachment_metadata,
 )
 
@@ -89,6 +90,17 @@ def _fallback_send(input_data, context):
     result = send_run(input_data, context)
     if isinstance(result, dict) and result.get("status") == "ok":
         message = result.get("data")
+        if isinstance(message, dict):
+            store = ChatStore()
+            user_message = store.get_message(
+                message.get("conversation_id"),
+                message.get("parent_id"),
+            )
+            if user_message is not None:
+                yield {"type": "user_message", "message": user_message}
+            for event in message.get("events") or []:
+                if isinstance(event, dict):
+                    yield event
         yield {"type": "message", "message": message}
         yield {"type": "done", "message": message}
         return
@@ -101,6 +113,7 @@ def _stream_response(input_data, context):
     conversation_id = input_data.get("conversation_id")
     conv = store.get_conversation(conversation_id)
     message = input_data.get("message") if isinstance(input_data.get("message"), dict) else {}
+    params = dict(input_data.get("params") or {})
 
     role = message.get("role", "user")
     raw_content = message.get("content", [])
@@ -123,7 +136,12 @@ def _stream_response(input_data, context):
             metadata["workspace_attachments"] = persisted_attachments
         if isinstance(content, list):
             content.extend(_attachment_text_blocks(attachments))
-            content.extend(_attachment_image_blocks(attachments))
+            content.extend(
+                _attachment_image_blocks(
+                    attachments,
+                    _normalize_vision_detail(params.get("image_detail"), params.get("vision_detail")),
+                )
+            )
 
     user_msg = store.add_message(
         conversation_id,
@@ -155,7 +173,6 @@ def _stream_response(input_data, context):
     ):
         standard_messages.insert(0, {"role": "system", "content": system_prompt})
 
-    params = dict(input_data.get("params") or {})
     client = AIClient()
     thought_filter = _InlineThoughtFilter()
     text_parts = []

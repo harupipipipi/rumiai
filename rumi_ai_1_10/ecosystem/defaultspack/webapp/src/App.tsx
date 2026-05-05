@@ -4,7 +4,7 @@ import { Activity, Building2, MessageSquare, PanelLeftOpen, Play, RefreshCw, Shi
 import type { ChatItem } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { api, type ChatContentBlock, type ChatMessage, type ComposerWidgetAction, type Conversation, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { api, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ComposerWidgetAction, type Conversation, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
 import { deriveConversationTitle, formatRelativeTime, messageToText } from "./lib/chat";
 import { cn } from "./lib/cn";
 import { canExecuteComposerEndpointAction } from "./lib/composerWidgets";
@@ -1474,6 +1474,60 @@ export default function App() {
           };
         });
       };
+      const appendAssistantEvent = (streamEvent: ChatStreamEvent) => {
+        const eventType = String(streamEvent.type ?? "");
+        if (!eventType || ["delta", "message", "done", "user_message", "error"].includes(eventType)) return;
+        const activityEvent = streamEvent as ChatActivityEvent;
+        setActiveConversation((current) => {
+          if (!current || current.id !== conversation.id) return current;
+          const existing = current.messages.find((message) => message.id === assistantDraft.id);
+          const nextEvent = activityEvent;
+          if (!existing) {
+            return {
+              ...current,
+              messages: [
+                ...current.messages,
+                {
+                  ...assistantDraft,
+                  events: [nextEvent],
+                },
+              ],
+            };
+          }
+          return {
+            ...current,
+            messages: current.messages.map((message) => (
+              message.id === assistantDraft.id
+                ? { ...message, events: [...(message.events ?? []), nextEvent] }
+                : message
+            )),
+          };
+        });
+        if (activityEvent.type === "status" && activityEvent.message) {
+          rememberPendingRequest({
+            conversationId: conversation.id,
+            startedAt: Date.now(),
+            status: String(activityEvent.message),
+            toolNames: selectedToolLabels,
+          });
+        } else if (activityEvent.type === "tool_call_started" && activityEvent.tool_name) {
+          const toolName = String(activityEvent.tool_name);
+          rememberPendingRequest({
+            conversationId: conversation.id,
+            startedAt: Date.now(),
+            status: `${toolName} を使用中`,
+            toolNames: Array.from(new Set([...selectedToolLabels, toolName])),
+          });
+        } else if (activityEvent.type === "tool_call_completed" && activityEvent.tool_name) {
+          const toolName = String(activityEvent.tool_name);
+          rememberPendingRequest({
+            conversationId: conversation.id,
+            startedAt: Date.now(),
+            status: `${toolName} の結果を反映中`,
+            toolNames: Array.from(new Set([...selectedToolLabels, toolName])),
+          });
+        }
+      };
 
       const operationsModelAllowlist = settingList(settingsValues.operations_company?.model_allowlist);
       const operationsToolDenylist = settingList(settingsValues.operations_company?.tool_denylist);
@@ -1518,7 +1572,19 @@ export default function App() {
         },
       }, {
         onDelta: updateStreamingAssistant,
+        onEvent: appendAssistantEvent,
         onMessage: replaceStreamingAssistant,
+        onUserMessage: (message) => {
+          setActiveConversation((current) => {
+            if (!current || current.id !== conversation.id) return current;
+            return {
+              ...current,
+              messages: current.messages.map((candidate) => (
+                candidate.id.startsWith("optimistic-") && candidate.role === "user" ? message : candidate
+              )),
+            };
+          });
+        },
         signal: abortController.signal,
       });
       setAttachedFiles([]);

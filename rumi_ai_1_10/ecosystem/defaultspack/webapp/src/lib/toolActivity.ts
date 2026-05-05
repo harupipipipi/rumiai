@@ -10,6 +10,7 @@ export type ToolActivityItem = {
   input: string;
   title: string;
   detail: string;
+  result?: unknown;
   status: ToolActivityStatus;
   timestamp?: number | string;
 };
@@ -143,6 +144,7 @@ export function buildToolActivityGroups(
         input: argumentSummary,
         title: argumentSummary ? `${folder.label} / ${toolName}: ${argumentSummary}` : `${folder.label} / ${toolName}`,
         detail: resultSummary,
+        result: log.result,
         status: statusForLog(log),
         timestamp: log.timestamp,
       };

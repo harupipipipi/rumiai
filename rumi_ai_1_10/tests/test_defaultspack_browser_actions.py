@@ -40,6 +40,37 @@ def test_computer_use_action_mapper_keeps_desktop_actions():
     assert mapped["requires_computer_use"] is True
 
 
+def test_computer_use_executor_payload_preserves_v2_fields():
+    from domain.tool.executor import _browser_computer_action_payload
+
+    action, payload = _browser_computer_action_payload(
+        "computer_use",
+        {
+            "action": "computer.app.focus",
+            "app": "Vivaldi",
+            "keys": ["cmd", "v"],
+            "content": "hello",
+        },
+    )
+
+    assert action == "computer.app.focus"
+    assert payload["app"] == "Vivaldi"
+    assert payload["keys"] == ["cmd", "v"]
+    assert payload["content"] == "hello"
+
+
+def test_zoom_executor_payload_uses_dedicated_computer_zoom_action():
+    from domain.tool.executor import _browser_computer_action_payload
+
+    action, payload = _browser_computer_action_payload(
+        "zoom",
+        {"latest": True, "x": 10, "y": 20, "radius": 30, "scale": 2},
+    )
+
+    assert action == "computer.zoom"
+    assert payload == {"latest": True, "x": 10, "y": 20, "radius": 30, "scale": 2}
+
+
 def test_browser_use_manifest_preserves_legacy_actions_and_exposes_v2_actions():
     manifest = json.loads(
         (DEFAULTSPACK_ROOT / "extensions" / "tools" / "browser_use" / "manifest.json").read_text(encoding="utf-8")
@@ -64,3 +95,15 @@ def test_browser_use_manifest_preserves_legacy_actions_and_exposes_v2_actions():
     assert "session_id" in properties
     assert "tab_id" in properties
     assert "ref_id" in properties
+
+
+def test_zoom_manifest_exposes_gemma_friendly_inspection_tool():
+    manifest = json.loads(
+        (DEFAULTSPACK_ROOT / "extensions" / "tools" / "zoom" / "manifest.json").read_text(encoding="utf-8")
+    )
+    properties = manifest["config"]["schema"]["parameters"]["properties"]
+
+    assert manifest["id"] == "zoom"
+    assert manifest["config"]["name"] == "zoom"
+    assert manifest["config"]["requires_approval"] is False
+    assert {"x", "y", "width", "height", "radius", "scale", "source_path", "latest"} <= set(properties)

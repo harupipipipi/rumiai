@@ -305,7 +305,7 @@ class ToolExecutor:
                 "is_error": False,
                 "widget": {"type": "research_sources", **result.as_dict()}
             }
-        elif tool_name in {"browser_computer", "browser_use", "computer_use"}:
+        elif tool_name in {"browser_computer", "browser_use", "computer_use", "zoom"}:
             from domain.tool.browser_computer import BrowserComputerController
 
             policy = policy_from_context(context if isinstance(context, dict) else {})
@@ -413,6 +413,8 @@ def _browser_computer_action_payload(tool_name, arguments):
     arguments = arguments if isinstance(arguments, dict) else {}
     if tool_name == "browser_computer":
         return str(arguments.get("action", "browser.session")), dict(arguments.get("payload") or {})
+    if tool_name == "zoom":
+        return "computer.zoom", dict(arguments)
 
     raw_payload = dict(arguments.get("payload") or {})
     raw_action = str(arguments.get("action") or "").strip()
@@ -448,7 +450,23 @@ def _browser_computer_action_payload(tool_name, arguments):
             "scroll": "computer.scroll",
         }
         action = action_map.get(raw_action, raw_action)
-        for key in ("x", "y", "text", "key", "amount"):
+        for key in (
+            "x",
+            "y",
+            "text",
+            "content",
+            "key",
+            "keys",
+            "combo",
+            "amount",
+            "limit",
+            "window_id",
+            "window_index",
+            "app",
+            "name",
+            "path",
+            "bundle_id",
+        ):
             if key in arguments:
                 raw_payload[key] = arguments.get(key)
     if "dry_run" in arguments:

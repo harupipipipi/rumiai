@@ -110,6 +110,57 @@ def test_screenshot_result_includes_display_and_dpi_metadata(tmp_path, monkeypat
     assert result["display_metadata"]["screenshot_to_display_scale"] == {"x": 2.0, "y": 2.0}
 
 
+def test_zoom_crops_latest_screenshot_and_returns_coordinate_metadata(tmp_path):
+    from domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    screenshot = tmp_path / "screenshot-100.png"
+    rows = []
+    for y in range(6):
+        row = bytearray()
+        for x in range(8):
+            row.extend([x, y, 200, 255])
+        rows.append(row)
+    controller._write_png_pixels(
+        screenshot,
+        {"width": 8, "height": 6, "channels": 4, "color_type": 6, "rows": rows},
+    )
+
+    result = controller.run("computer.zoom", {"latest": True, "x": 4, "y": 3, "width": 4, "height": 2, "scale": 2})
+
+    assert result["action"] == "computer.zoom"
+    assert result["source_path"] == str(screenshot)
+    assert result["crop_bounds"] == {"x": 2, "y": 2, "width": 4, "height": 2, "right": 6, "bottom": 4}
+    assert result["center"] == {"x": 4, "y": 3, "coordinate_space": "source_image"}
+    assert result["scale"] == 2.0
+    assert result["image_size"] == {"width": 8, "height": 4}
+    assert result["source_image_size"] == {"width": 8, "height": 6}
+    assert result["data_url"].startswith("data:image/png;base64,")
+    assert result["visual_data_url"].startswith("data:image/png;base64,")
+    assert result["annotation"]["x"] == 4
+    assert result["annotation"]["y"] == 2
+    assert result["annotation"]["coordinate_space"] == "zoom_image"
+    assert result["annotation"]["source"] == {"x": 4, "y": 3, "coordinate_space": "source_image"}
+    assert Path(result["path"]).is_file()
+
+
+def test_computer_click_and_move_results_include_point_annotations(monkeypatch):
+    from domain.tool.browser_computer import BrowserComputerController
+    import domain.tool.browser_computer as browser_computer
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.subprocess, "run", lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0))
+    monkeypatch.setattr(browser_computer.shutil, "which", lambda name: "/opt/homebrew/bin/cliclick" if name == "cliclick" else None)
+
+    click = BrowserComputerController().run("computer.click", {"x": 11, "y": 22}, yolo_mode=True)
+    move = BrowserComputerController().run("computer.move", {"x": 33, "y": 44, "dry_run": True})
+
+    assert click["annotation"] == {"type": "point", "x": 11, "y": 22, "coordinate_space": "action", "label": "click"}
+    assert click["overlay_points"] == [click["annotation"]]
+    assert move["annotation"] == {"type": "point", "x": 33, "y": 44, "coordinate_space": "action", "label": "move"}
+    assert move["overlay_points"] == [move["annotation"]]
+
+
 def test_windows_hotkey_translation_executes_sendkeys(monkeypatch):
     from domain.tool.browser_computer import BrowserComputerController
     import domain.tool.browser_computer as browser_computer

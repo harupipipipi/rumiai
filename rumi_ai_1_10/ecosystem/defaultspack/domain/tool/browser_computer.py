@@ -10,6 +10,7 @@ import subprocess
 import time
 import webbrowser
 import base64
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -63,6 +64,8 @@ class BrowserComputerController:
             return self._list_windows(payload)
         if action == "computer.screenshot":
             return self._screenshot(payload=payload, dry_run=bool(payload.get("dry_run")), yolo_mode=yolo_mode)
+        if action in {"computer.zoom", "zoom"}:
+            return self._zoom(payload)
         if action in {
             "computer.move",
             "computer.click",
@@ -390,8 +393,126 @@ class BrowserComputerController:
         result = self._screenshot_result(path, model_path, system)
         if data_url:
             result["data_url"] = data_url
+            result["visual_data_url"] = data_url
             result["model_image_path"] = str(model_path)
         return result
+
+    def _zoom(self, payload: dict[str, Any]) -> dict[str, Any]:
+        source_path = self._zoom_source_path(payload)
+        if not source_path:
+            return {
+                "action": "computer.zoom",
+                "status": "error",
+                "error": {
+                    "message": "zoom requires source_path or latest: true with an existing computer screenshot",
+                },
+            }
+        if not source_path.is_file():
+            return {
+                "action": "computer.zoom",
+                "status": "error",
+                "error": {"message": f"zoom source does not exist: {source_path}"},
+                "source_path": str(source_path),
+            }
+
+        try:
+            image = self._read_png_pixels(source_path)
+        except Exception as exc:
+            return {
+                "action": "computer.zoom",
+                "status": "error",
+                "error": {"message": str(exc)},
+                "source_path": str(source_path),
+            }
+        source_width = int(image["width"])
+        source_height = int(image["height"])
+        try:
+            center_x = int(payload.get("x", source_width // 2))
+            center_y = int(payload.get("y", source_height // 2))
+            radius = int(payload.get("radius", 80))
+            crop_width = int(payload.get("width") or max(radius * 2, 1))
+            crop_height = int(payload.get("height") or max(radius * 2, 1))
+            scale = float(payload.get("scale", 2.0))
+            if crop_width <= 0 or crop_height <= 0:
+                raise ValueError("zoom width and height must be positive")
+            if scale <= 0:
+                raise ValueError("zoom scale must be positive")
+        except Exception as exc:
+            return {
+                "action": "computer.zoom",
+                "status": "error",
+                "error": {"message": str(exc)},
+                "source_path": str(source_path),
+            }
+
+        left = max(min(center_x - crop_width // 2, source_width - 1), 0)
+        top = max(min(center_y - crop_height // 2, source_height - 1), 0)
+        right = min(left + crop_width, source_width)
+        bottom = min(top + crop_height, source_height)
+        left = max(right - crop_width, 0)
+        top = max(bottom - crop_height, 0)
+        cropped = self._crop_png_pixels(image, left, top, right, bottom)
+        if scale != 1.0:
+            cropped = self._scale_png_pixels(cropped, scale)
+
+        self._artifact_root.mkdir(parents=True, exist_ok=True)
+        output_path = self._artifact_root / f"zoom-{int(time.time() * 1000)}.png"
+        self._write_png_pixels(output_path, cropped)
+        data_url = self._image_data_url(output_path)
+        crop_bounds = {"x": left, "y": top, "width": right - left, "height": bottom - top, "right": right, "bottom": bottom}
+        center = {"x": center_x, "y": center_y, "coordinate_space": "source_image"}
+        zoom_point = {
+            "type": "point",
+            "x": int(round((center_x - left) * scale)),
+            "y": int(round((center_y - top) * scale)),
+            "coordinate_space": "zoom_image",
+            "label": "zoom",
+            "source": center,
+        }
+        return {
+            "action": "computer.zoom",
+            "path": str(output_path),
+            "source_path": str(source_path),
+            "mime_type": "image/png",
+            "data_url": data_url,
+            "visual_data_url": data_url,
+            "crop_bounds": crop_bounds,
+            "center": center,
+            "scale": scale,
+            "image_size": {"width": cropped["width"], "height": cropped["height"]},
+            "source_image_size": {"width": source_width, "height": source_height},
+            "coordinate_system": {
+                "origin": "top_left",
+                "unit": "px",
+                "space": "source_image",
+                "x_range": [0, max(source_width - 1, 0)],
+                "y_range": [0, max(source_height - 1, 0)],
+            },
+            "zoom_coordinate_system": {
+                "origin": "top_left",
+                "unit": "px",
+                "space": "zoom_image",
+                "source_crop_bounds": crop_bounds,
+                "source_to_zoom_scale": {"x": scale, "y": scale},
+            },
+            "annotation": zoom_point,
+            "overlay_points": [zoom_point],
+        }
+
+    def _zoom_source_path(self, payload: dict[str, Any]) -> Path | None:
+        raw_source = str(payload.get("source_path") or payload.get("path") or "").strip()
+        if raw_source:
+            return Path(raw_source).expanduser()
+        if not bool(payload.get("latest")):
+            return None
+        candidates = [
+            path
+            for path in self._artifact_root.glob("screenshot-*.png")
+            if path.is_file() and "-model" not in path.stem
+        ]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda path: path.stat().st_mtime)
 
     def _screenshot_result(self, path: Path, model_path: Path, system: str) -> dict[str, Any]:
         result: dict[str, Any] = {"action": "computer.screenshot", "path": str(path), "mime_type": "image/png", "platform": system}
@@ -531,6 +652,146 @@ class BrowserComputerController:
                     return int(width), int(height)
                 index += length
         return None
+
+    @staticmethod
+    def _image_data_url(path: Path) -> str:
+        try:
+            mime_type = "image/jpeg" if path.suffix.lower() in {".jpg", ".jpeg"} else "image/png"
+            return "data:{};base64,".format(mime_type) + base64.b64encode(path.read_bytes()).decode("ascii")
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _read_png_pixels(path: Path) -> dict[str, Any]:
+        data = path.read_bytes()
+        if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise ValueError("zoom currently supports PNG screenshots")
+        offset = 8
+        width = height = bit_depth = color_type = None
+        idat = bytearray()
+        while offset + 8 <= len(data):
+            length = int.from_bytes(data[offset : offset + 4], "big")
+            chunk_type = data[offset + 4 : offset + 8]
+            chunk_data = data[offset + 8 : offset + 8 + length]
+            offset += 12 + length
+            if chunk_type == b"IHDR":
+                width, height = struct.unpack(">II", chunk_data[:8])
+                bit_depth = chunk_data[8]
+                color_type = chunk_data[9]
+                if chunk_data[12] != 0:
+                    raise ValueError("interlaced PNG screenshots are not supported")
+            elif chunk_type == b"IDAT":
+                idat.extend(chunk_data)
+            elif chunk_type == b"IEND":
+                break
+        if not width or not height or bit_depth != 8 or color_type not in {0, 2, 6}:
+            raise ValueError("zoom supports 8-bit grayscale, RGB, and RGBA PNG screenshots")
+        channels = {0: 1, 2: 3, 6: 4}[int(color_type)]
+        raw = zlib.decompress(bytes(idat))
+        stride = int(width) * channels
+        rows: list[bytearray] = []
+        previous = bytearray(stride)
+        cursor = 0
+        for _ in range(int(height)):
+            filter_type = raw[cursor]
+            cursor += 1
+            current = bytearray(raw[cursor : cursor + stride])
+            cursor += stride
+            for index in range(stride):
+                left = current[index - channels] if index >= channels else 0
+                up = previous[index]
+                upper_left = previous[index - channels] if index >= channels else 0
+                if filter_type == 1:
+                    current[index] = (current[index] + left) & 0xFF
+                elif filter_type == 2:
+                    current[index] = (current[index] + up) & 0xFF
+                elif filter_type == 3:
+                    current[index] = (current[index] + ((left + up) // 2)) & 0xFF
+                elif filter_type == 4:
+                    current[index] = (current[index] + BrowserComputerController._paeth(left, up, upper_left)) & 0xFF
+                elif filter_type != 0:
+                    raise ValueError(f"unsupported PNG filter type: {filter_type}")
+            rows.append(current)
+            previous = current
+        return {"width": int(width), "height": int(height), "channels": channels, "color_type": int(color_type), "rows": rows}
+
+    @staticmethod
+    def _crop_png_pixels(image: dict[str, Any], left: int, top: int, right: int, bottom: int) -> dict[str, Any]:
+        channels = int(image["channels"])
+        rows = [
+            bytearray(row[left * channels : right * channels])
+            for row in image["rows"][top:bottom]
+        ]
+        return {
+            "width": max(right - left, 1),
+            "height": max(bottom - top, 1),
+            "channels": channels,
+            "color_type": int(image["color_type"]),
+            "rows": rows,
+        }
+
+    @staticmethod
+    def _scale_png_pixels(image: dict[str, Any], scale: float) -> dict[str, Any]:
+        source_width = int(image["width"])
+        source_height = int(image["height"])
+        channels = int(image["channels"])
+        target_width = max(int(round(source_width * scale)), 1)
+        target_height = max(int(round(source_height * scale)), 1)
+        rows: list[bytearray] = []
+        for y in range(target_height):
+            source_y = min(int(y / scale), source_height - 1)
+            source_row = image["rows"][source_y]
+            row = bytearray(target_width * channels)
+            for x in range(target_width):
+                source_x = min(int(x / scale), source_width - 1)
+                start = source_x * channels
+                row[x * channels : (x + 1) * channels] = source_row[start : start + channels]
+            rows.append(row)
+        return {
+            "width": target_width,
+            "height": target_height,
+            "channels": channels,
+            "color_type": int(image["color_type"]),
+            "rows": rows,
+        }
+
+    @staticmethod
+    def _write_png_pixels(path: Path, image: dict[str, Any]) -> None:
+        width = int(image["width"])
+        height = int(image["height"])
+        color_type = int(image["color_type"])
+        raw = bytearray()
+        for row in image["rows"]:
+            raw.append(0)
+            raw.extend(row)
+        chunks = [
+            BrowserComputerController._png_chunk(
+                b"IHDR",
+                struct.pack(">IIBBBBB", width, height, 8, color_type, 0, 0, 0),
+            ),
+            BrowserComputerController._png_chunk(b"IDAT", zlib.compress(bytes(raw))),
+            BrowserComputerController._png_chunk(b"IEND", b""),
+        ]
+        path.write_bytes(b"\x89PNG\r\n\x1a\n" + b"".join(chunks))
+
+    @staticmethod
+    def _png_chunk(chunk_type: bytes, chunk_data: bytes) -> bytes:
+        import binascii
+
+        crc = binascii.crc32(chunk_type + chunk_data) & 0xFFFFFFFF
+        return len(chunk_data).to_bytes(4, "big") + chunk_type + chunk_data + crc.to_bytes(4, "big")
+
+    @staticmethod
+    def _paeth(left: int, up: int, upper_left: int) -> int:
+        estimate = left + up - upper_left
+        left_distance = abs(estimate - left)
+        up_distance = abs(estimate - up)
+        upper_left_distance = abs(estimate - upper_left)
+        if left_distance <= up_distance and left_distance <= upper_left_distance:
+            return left
+        if up_distance <= upper_left_distance:
+            return up
+        return upper_left
 
     @staticmethod
     def _cursor_position() -> dict[str, Any] | None:
@@ -922,7 +1183,10 @@ class BrowserComputerController:
         approval_payload = self._safe_payload(payload)
         risk = classify_approval_risk(action, approval_payload)
         if dry_run:
-            return {"action": action, "dry_run": True, "requires_approval": False, "risk": risk, "payload": approval_payload}
+            result = {"action": action, "dry_run": True, "requires_approval": False, "risk": risk, "payload": approval_payload}
+            if action in {"computer.move", "computer.click"}:
+                result.update(self._action_point_metadata(action, payload))
+            return result
         if risk.get("approval_required") and not (yolo_mode or self._consume_approval(payload, action, approval_payload, risk=risk)):
             return self._approval_required(action, approval_payload, risk=risk)
         system = platform.system()
@@ -961,6 +1225,7 @@ class BrowserComputerController:
         result: dict[str, Any] = {"action": action, "executed": True, "platform": system, "risk": risk}
         if action in {"computer.move", "computer.click"}:
             result["target"] = {"x": int(payload.get("x", 0)), "y": int(payload.get("y", 0))}
+            result.update(self._action_point_metadata(action, payload))
         if action == "computer.scroll":
             result["amount"] = int(payload.get("amount", 1))
         if action == "computer.hotkey":
@@ -972,6 +1237,22 @@ class BrowserComputerController:
         if action in {"computer.window.focus", "computer.window.bounds"}:
             result["window_id"] = str(payload.get("window_id") or payload.get("id") or "")
         return result
+
+    @staticmethod
+    def _action_point_metadata(action: str, payload: dict[str, Any]) -> dict[str, Any]:
+        label = "click" if action == "computer.click" else "move"
+        point = BrowserComputerController._point_annotation(label, int(payload.get("x", 0)), int(payload.get("y", 0)))
+        return {"annotation": point, "overlay_points": [point]}
+
+    @staticmethod
+    def _point_annotation(label: str, x: int, y: int) -> dict[str, Any]:
+        return {
+            "type": "point",
+            "x": int(x),
+            "y": int(y),
+            "coordinate_space": "action",
+            "label": label,
+        }
 
     def _darwin_move_cursor(self, payload: dict[str, Any]) -> None:
         x = int(payload.get("x", 0))

@@ -244,6 +244,44 @@ class GoogleProvider(OpenAICompatibleProvider):
                 body[key] = params[key]
 
     @staticmethod
+    def _normalize_image_detail(value: Any) -> str | None:
+        detail = str(value or "").strip().lower()
+        if detail in {"auto", "low", "high"}:
+            return detail
+        return None
+
+    @classmethod
+    def _normalize_image_url_details(cls, messages):
+        for message in messages:
+            content = message.get("content") if isinstance(message, dict) else None
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if not isinstance(block, dict) or block.get("type") != "image_url":
+                    continue
+                image_url = block.get("image_url")
+                if not isinstance(image_url, dict):
+                    continue
+                detail = cls._normalize_image_detail(
+                    image_url.get("detail")
+                    or image_url.get("image_detail")
+                    or image_url.get("vision_detail")
+                    or block.get("image_detail")
+                    or block.get("vision_detail")
+                )
+                for key in ("image_detail", "vision_detail"):
+                    image_url.pop(key, None)
+                    block.pop(key, None)
+                if detail:
+                    image_url["detail"] = detail
+                else:
+                    image_url.pop("detail", None)
+        return messages
+
+    def build_request(self, messages):
+        return self._normalize_image_url_details(super().build_request(messages))
+
+    @staticmethod
     def _split_inline_thoughts(text: str) -> tuple[list[str], str]:
         thoughts: list[str] = []
 

@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 
 import { cn } from "../lib/cn";
 import { buildToolActivityGroups, toolFolderFor, type ToolActivityItem } from "../lib/toolActivity";
+import { extractToolVisual, type ToolVisualImage } from "../lib/toolVisuals";
 import type { ChatContentBlock } from "../lib/api";
 import type { ChatMessagesRendererProps } from "./types";
 
@@ -48,12 +49,54 @@ function MessageBlock({ block, unknownStrategy }: { block: ChatContentBlock; unk
   );
 }
 
-function WidgetCard({ widget }: { widget: Record<string, unknown> }) {
+function ToolVisualPreview({ visual }: { visual: ToolVisualImage }) {
+  const aspectRatio = visual.imageSize ? `${visual.imageSize.width} / ${visual.imageSize.height}` : "16 / 10";
+  const title = visual.kind === "zoom" ? "Zoom crop" : "Screenshot";
+
   return (
-    <details className="mt-2 rounded-lg border border-blue-500/20 bg-blue-500/10 p-3">
+    <div className="min-w-0 overflow-hidden rounded-lg border border-zinc-800/80 bg-zinc-950/80">
+      <div className="flex min-w-0 items-center justify-between gap-3 border-b border-zinc-800/70 px-3 py-2">
+        <div className="flex min-w-0 items-center gap-2 text-[11px] font-medium text-zinc-300">
+          <ImageIcon size={12} className="shrink-0 text-blue-300" />
+          <span>{title}</span>
+        </div>
+        <span className="min-w-0 truncate font-mono text-[10px] text-zinc-600">{visual.sourceLabel}</span>
+      </div>
+      <div className="p-2">
+        <div className="relative w-full overflow-hidden rounded-md bg-black/40" style={{ aspectRatio }}>
+          <img src={visual.src} alt={title} className="absolute inset-0 h-full w-full object-contain" />
+          {visual.points.map((point) => (
+            <span
+              key={point.id}
+              title={point.label}
+              className="absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-blue-400 shadow-[0_0_0_3px_rgba(59,130,246,0.42)]"
+              style={{ left: `${point.xPercent}%`, top: `${point.yPercent}%` }}
+            />
+          ))}
+        </div>
+      </div>
+      {(visual.cropBounds || visual.imageSize) && (
+        <div className="flex flex-wrap gap-x-3 gap-y-1 border-t border-zinc-800/70 px-3 py-2 font-mono text-[10px] text-zinc-500">
+          {visual.imageSize && <span>{visual.imageSize.width}x{visual.imageSize.height}</span>}
+          {visual.cropBounds && <span>crop {JSON.stringify(visual.cropBounds)}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WidgetCard({ widget }: { widget: Record<string, unknown> }) {
+  const visual = extractToolVisual(widget);
+  return (
+    <details className="mt-2 rounded-lg border border-blue-500/20 bg-blue-500/10 p-3" open={Boolean(visual)}>
       <summary className="cursor-pointer select-none text-[10px] uppercase tracking-wider text-blue-300">
         Widget details
       </summary>
+      {visual && (
+        <div className="mt-2">
+          <ToolVisualPreview visual={visual} />
+        </div>
+      )}
       <pre className="mt-2 overflow-x-auto text-[11px] font-mono text-zinc-200">{JSON.stringify(widget, null, 2)}</pre>
     </details>
   );
@@ -79,21 +122,57 @@ function isJsonLikeDetail(value: string): boolean {
   );
 }
 
-function ToolResultDetail({ detail }: { detail: string }) {
+function parseJsonDetail(detail: string): unknown | null {
+  if (!isJsonLikeDetail(detail)) return null;
+  try {
+    return JSON.parse(detail);
+  } catch {
+    return null;
+  }
+}
+
+function ToolResultDetail({ detail, result }: { detail: string; result?: unknown }) {
+  const parsedDetail = typeof detail === "string" ? parseJsonDetail(detail) : null;
+  const visual = extractToolVisual(result) ?? extractToolVisual(parsedDetail);
+
   if (isJsonLikeDetail(detail)) {
     return (
-      <details className="min-w-0 flex-1 text-[12px] leading-relaxed">
-        <summary className="cursor-pointer select-none text-zinc-500 hover:text-zinc-300">
-          詳細データ
-        </summary>
-        <pre className="mt-2 max-h-36 overflow-auto whitespace-pre-wrap rounded-md border border-zinc-800 bg-black/30 p-2 font-mono text-[11px] text-zinc-500">
-          {detail}
-        </pre>
-      </details>
+      <div className="min-w-0 flex-1 space-y-2">
+        {visual && <ToolVisualPreview visual={visual} />}
+        <details className="text-[12px] leading-relaxed" open={!visual}>
+          <summary className="cursor-pointer select-none text-zinc-500 hover:text-zinc-300">
+            詳細データ
+          </summary>
+          <pre className="mt-2 max-h-36 overflow-auto whitespace-pre-wrap rounded-md border border-zinc-800 bg-black/30 p-2 font-mono text-[11px] text-zinc-500">
+            {detail}
+          </pre>
+        </details>
+      </div>
     );
   }
 
-  return <span className="min-w-0 break-words text-[12px] leading-relaxed">{detail}</span>;
+  return (
+    <div className="min-w-0 flex-1 break-words text-[12px] leading-relaxed">
+      {visual && (
+        <div className="mb-2">
+          <ToolVisualPreview visual={visual} />
+        </div>
+      )}
+      {detail}
+    </div>
+  );
+}
+
+function ToolResultPanel({ item }: { item: ToolActivityItem }) {
+  const visual = extractToolVisual(item.result);
+  if (!item.detail && !visual) return null;
+
+  return (
+    <div className="mt-2 flex min-w-0 items-start gap-2 rounded-md border border-zinc-800/70 bg-black/20 px-3 py-2 text-zinc-300">
+      <span className="shrink-0 text-[10px] font-medium text-zinc-600">結果</span>
+      <ToolResultDetail detail={item.detail} result={item.result} />
+    </div>
+  );
 }
 
 function ToolActivityTray({ message }: { message: ChatMessagesRendererProps["messages"][number] }) {
@@ -138,12 +217,7 @@ function ToolActivityTray({ message }: { message: ChatMessagesRendererProps["mes
                 {toolStatusLabel(item)}
               </span>
             </div>
-            {item.detail && (
-              <div className="mt-2 flex min-w-0 items-start gap-2 rounded-md border border-zinc-800/70 bg-black/20 px-3 py-2 text-zinc-300">
-                <span className="shrink-0 text-[10px] font-medium text-zinc-600">結果</span>
-                <ToolResultDetail detail={item.detail} />
-              </div>
-            )}
+            <ToolResultPanel item={item} />
           </div>
         ))}
       </div>

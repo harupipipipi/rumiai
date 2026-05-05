@@ -131,6 +131,79 @@ def test_chat_send_attaches_tools_and_persists_activity_events(tmp_path, monkeyp
     ChatStore._instance = None
 
 
+def test_chat_send_direct_persists_tool_logs_for_refresh(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from blocks.chat.send import run
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    calls = {"ai": 0, "tool": 0}
+
+    def call_handler(name, payload):
+        if name == "defaults.ai.complete":
+            calls["ai"] += 1
+            if calls["ai"] == 1:
+                return {
+                    "status": "ok",
+                    "data": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "call_sync",
+                                "name": "sync_probe",
+                                "input": {"query": "hello"},
+                            }
+                        ],
+                        "finish_reason": "tool_calls",
+                    },
+                }
+            return {
+                "status": "ok",
+                "data": {"content": [{"type": "text", "text": "synced"}], "finish_reason": "stop"},
+            }
+        if name == "defaults.tool.invoke":
+            calls["tool"] += 1
+            assert payload["tool_name"] == "sync_probe"
+            return {"status": "ok", "data": {"result": "tool result"}}
+        raise AssertionError(name)
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    result = run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "use sync probe"},
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "sync_probe",
+                        "description": "Probe chat sync",
+                        "parameters": {"type": "object", "properties": {"query": {"type": "string"}}},
+                    },
+                }
+            ],
+            "params": {"max_tool_calls": 2},
+        },
+        {"call_handler": call_handler},
+    )
+
+    assert result["status"] == "ok"
+    assistant = result["data"]
+    assert assistant["tool_logs"][0]["tool_name"] == "sync_probe"
+    assert any(event["type"] == "tool_call_started" for event in assistant["events"])
+
+    ChatStore._instance = None
+    refreshed = ChatStore().get_conversation(conversation["id"])
+    assert [message["role"] for message in refreshed["messages"]] == ["user", "assistant"]
+    refreshed_assistant = refreshed["messages"][-1]
+    assert refreshed_assistant["tool_logs"][0]["tool_call_id"] == "call_sync"
+    assert any(event["type"] == "tool_call_completed" for event in refreshed_assistant["events"])
+    ChatStore._instance = None
+
+
 def test_chat_store_links_subagent_conversations(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
 
@@ -359,6 +432,49 @@ def test_chat_stream_uses_provider_stream_and_persists_message(tmp_path, monkeyp
     persisted = json.loads(storage_path.read_text(encoding="utf-8"))
     messages = persisted["conversations"][conversation["id"]]["messages"]
     assert [message["role"] for message in messages] == ["user", "assistant"]
+    ChatStore._instance = None
+
+
+def test_chat_stream_fallback_emits_persisted_user_and_assistant(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from blocks.chat.stream import run
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    result = run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "hello fallback"},
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "noop_tool",
+                        "parameters": {"type": "object", "properties": {}},
+                    },
+                }
+            ],
+        },
+        {},
+    )
+
+    events = list(result["events"])
+    user_events = [event for event in events if event.get("type") == "user_message"]
+    message_events = [event for event in events if event.get("type") == "message"]
+    assert user_events and user_events[0]["message"]["role"] == "user"
+    assert message_events and message_events[-1]["message"]["role"] == "assistant"
+    assert message_events[-1]["message"]["parent_id"] == user_events[0]["message"]["id"]
+
+    persisted = json.loads(storage_path.read_text(encoding="utf-8"))
+    messages = persisted["conversations"][conversation["id"]]["messages"]
+    assert [message["id"] for message in messages] == [
+        user_events[0]["message"]["id"],
+        message_events[-1]["message"]["id"],
+    ]
     ChatStore._instance = None
 
 
