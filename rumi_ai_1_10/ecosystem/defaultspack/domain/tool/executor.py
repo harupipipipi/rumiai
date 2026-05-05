@@ -320,6 +320,7 @@ class ToolExecutor:
                         "widget": {"type": "browser_use", **browser_v2} if isinstance(browser_v2, dict) else None,
                     }
             action, payload = _browser_computer_action_payload(tool_name, arguments)
+            payload = _apply_tool_support_desktop_defaults(action, payload, context)
             result = BrowserComputerController(artifact_root=_conversation_tool_artifact_root(context)).run(
                 action,
                 payload,
@@ -724,6 +725,39 @@ def _conversation_tool_artifact_root(context):
     if not isinstance(workspace, str) or not workspace:
         return None
     return Path(workspace) / "tools" / "computer"
+
+
+def _apply_tool_support_desktop_defaults(action, payload, context):
+    if not isinstance(payload, dict):
+        return payload
+    if not str(action or "").startswith("computer."):
+        return payload
+    chat_params = context.get("chat_params") if isinstance(context, dict) else {}
+    support = chat_params.get("tool_support") if isinstance(chat_params, dict) else {}
+    if not isinstance(support, dict) or support.get("app_scoped_desktop_actions") is False:
+        return payload
+    default_app = str(support.get("default_target_app") or "").strip()
+    if not default_app:
+        return payload
+    scoped_actions = {
+        "computer.screenshot",
+        "computer.move",
+        "computer.click",
+        "computer.type",
+        "computer.key",
+        "computer.hotkey",
+        "computer.scroll",
+    }
+    if action not in scoped_actions:
+        return payload
+    next_payload = dict(payload)
+    next_payload.setdefault("target", "app")
+    next_payload.setdefault("app", default_app)
+    if action == "computer.screenshot":
+        next_payload.setdefault("focus", False)
+    else:
+        next_payload.setdefault("focus", True)
+    return next_payload
 
 
 def _tool_value(tool_def, key):

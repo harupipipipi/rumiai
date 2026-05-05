@@ -1615,14 +1615,29 @@ class BrowserComputerController:
     def _window_for_target(self, system: str, payload: dict[str, Any], scope: str) -> dict[str, Any] | None:
         if scope in {"desktop", "full_desktop", "all_displays"}:
             return None
+        app = self._app_name(payload)
+        title_query = str(payload.get("title") or payload.get("window_title") or "").strip().lower()
         if system == "Darwin":
-            if scope == "window":
-                app = self._app_name(payload)
+            if app and scope in {"window", "app", "app_window"}:
+                active = self._darwin_active_window()
+                if (
+                    isinstance(active, dict)
+                    and str(active.get("app") or "").lower() == app.lower()
+                    and (not title_query or title_query in str(active.get("title") or "").lower())
+                ):
+                    return active
                 index = int(payload.get("window_index") or payload.get("index") or 1)
-                if app:
-                    windows = [window for window in self._darwin_windows(max(index, 1) + 10) if window.get("app") == app]
-                    if len(windows) >= index:
-                        return windows[index - 1]
+                windows = [
+                    window
+                    for window in self._darwin_windows(100)
+                    if str(window.get("app") or "").lower() == app.lower()
+                ]
+                if title_query:
+                    titled = [window for window in windows if title_query in str(window.get("title") or "").lower()]
+                    if titled:
+                        windows = titled
+                if len(windows) >= index:
+                    return windows[index - 1]
             return self._darwin_active_window()
         if system == "Windows":
             if scope == "window":
@@ -1631,6 +1646,18 @@ class BrowserComputerController:
                     for window in self._windows_windows(100):
                         if str(window.get("id")) == window_id:
                             return window
+            if app and scope in {"app", "app_window"}:
+                windows = [
+                    window
+                    for window in self._windows_windows(100)
+                    if str(window.get("app") or window.get("name") or "").lower() == app.lower()
+                ]
+                if title_query:
+                    titled = [window for window in windows if title_query in str(window.get("title") or "").lower()]
+                    if titled:
+                        windows = titled
+                if windows:
+                    return windows[0]
             return self._windows_active_window()
         return None
 

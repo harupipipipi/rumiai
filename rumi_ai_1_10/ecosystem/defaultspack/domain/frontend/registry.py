@@ -793,6 +793,27 @@ class FrontendRegistry:
                 ],
             },
             {
+                "id": "tool_support",
+                "label": "Tool Support",
+                "description": "tool 失敗認識、ループ停止、アプリ対象操作の支援設定。",
+                "fields": [
+                    {"id": "enabled", "label": "Support Layer", "type": "toggle", "default": True},
+                    {"id": "max_tool_calls", "label": "Max Tool Calls", "type": "number", "default": 64, "min": 1, "max": 256, "help": "1ターン内の実行上限。反復検出で先に停止します。"},
+                    {"id": "loop_detection", "label": "Loop Detection", "type": "toggle", "default": True},
+                    {"id": "repeated_action_limit", "label": "Repeated Action Limit", "type": "number", "default": 4, "min": 2, "max": 20},
+                    {"id": "self_evaluation", "label": "Model Self Evaluation", "type": "toggle", "default": False, "help": "応答後に選択中モデル自身へ tool 利用の評価をさせます。"},
+                    {"id": "app_scoped_desktop_actions", "label": "Scope Desktop To App", "type": "toggle", "default": True},
+                    {"id": "default_target_app", "label": "Default Target App", "type": "text", "default": "", "help": "空の場合はユーザー文面から Vivaldi/Chrome/Safari 等を推定します。"},
+                    {
+                        "id": "by_profile",
+                        "label": "Per-profile Support Map",
+                        "type": "textarea",
+                        "default": "{\"google/gemma-4-31b-it\":{\"enabled\":true,\"max_tool_calls\":48,\"loop_detection\":true,\"repeated_action_limit\":5,\"self_evaluation\":false,\"image_detail\":\"high\",\"app_scoped_desktop_actions\":true}}",
+                        "advanced": True,
+                    },
+                ],
+            },
+            {
                 "id": "operations_company",
                 "label": "Operations Company",
                 "description": "24/7常駐agent profile の共有設定。defaultspack tool/settingsをそのまま使います。",
@@ -1225,6 +1246,26 @@ class FrontendRegistry:
                 "google_api_key_configured": provider_has_api_key("google", pack_root=self._pack_root),
                 "openrouter_api_key": "",
                 "openrouter_api_key_configured": provider_has_api_key("openrouter", pack_root=self._pack_root),
+            },
+            "tool_support": {
+                "enabled": True,
+                "max_tool_calls": 64,
+                "loop_detection": True,
+                "repeated_action_limit": 4,
+                "self_evaluation": False,
+                "app_scoped_desktop_actions": True,
+                "default_target_app": "",
+                "by_profile": {
+                    "google/gemma-4-31b-it": {
+                        "enabled": True,
+                        "max_tool_calls": 48,
+                        "loop_detection": True,
+                        "repeated_action_limit": 5,
+                        "self_evaluation": False,
+                        "image_detail": "high",
+                        "app_scoped_desktop_actions": True,
+                    }
+                },
             },
             "operations_company": {
                 "heartbeat_minutes": 15,

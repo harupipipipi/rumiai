@@ -204,6 +204,181 @@ def test_chat_send_direct_persists_tool_logs_for_refresh(tmp_path, monkeypatch):
     ChatStore._instance = None
 
 
+def test_chat_send_converts_text_tool_use_into_real_tool_call(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from blocks.chat.send import run
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    calls = {"ai": 0, "tool": 0}
+
+    def call_handler(name, payload):
+        if name == "defaults.ai.complete":
+            calls["ai"] += 1
+            if calls["ai"] == 1:
+                return {
+                    "status": "ok",
+                    "data": {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "{'type': 'tool_use', 'id': 'txt1', 'name': 'computer_use', 'input': '{\"action\":\"app.find\",\"query\":\"Vivaldi\"}'}",
+                            }
+                        ],
+                        "finish_reason": "stop",
+                    },
+                }
+            return {"status": "ok", "data": {"content": [{"type": "text", "text": "found"}], "finish_reason": "stop"}}
+        if name == "defaults.tool.invoke":
+            calls["tool"] += 1
+            assert payload["tool_name"] == "computer_use"
+            assert payload["arguments"] == {"action": "app.find", "query": "Vivaldi"}
+            return {"status": "ok", "data": {"result": "found Vivaldi"}}
+        raise AssertionError(name)
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    result = run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "vivaldiを探して"},
+            "tools": ["computer_use"],
+            "params": {"tool_support": {"enabled": True, "max_tool_calls": 8}},
+        },
+        {"call_handler": call_handler},
+    )
+
+    assert result["status"] == "ok"
+    assistant = result["data"]
+    assert calls == {"ai": 2, "tool": 1}
+    assert assistant["tool_logs"][0]["tool_call_id"] == "txt1"
+    assert any(event.get("phase") == "tool_support" for event in assistant["events"])
+    ChatStore._instance = None
+
+
+def test_chat_send_stops_repeated_tool_loop(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from blocks.chat.send import run
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    calls = {"ai": 0, "tool": 0}
+
+    def call_handler(name, payload):
+        if name == "defaults.ai.complete":
+            calls["ai"] += 1
+            return {
+                "status": "ok",
+                "data": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": f"loop{calls['ai']}",
+                            "name": "computer_use",
+                            "input": {"action": "screenshot", "target": "app", "app": "Vivaldi"},
+                        }
+                    ],
+                    "finish_reason": "tool_calls",
+                },
+            }
+        if name == "defaults.tool.invoke":
+            calls["tool"] += 1
+            return {"status": "ok", "data": {"result": "screen"}}
+        raise AssertionError(name)
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    result = run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "vivaldiを操作して"},
+            "tools": ["computer_use"],
+            "params": {
+                "tool_support": {
+                    "enabled": True,
+                    "max_tool_calls": 10,
+                    "loop_detection": True,
+                    "repeated_action_limit": 2,
+                }
+            },
+        },
+        {"call_handler": call_handler},
+    )
+
+    assert result["status"] == "ok"
+    assistant = result["data"]
+    assert calls["tool"] == 1
+    assert assistant["metadata"]["tool_support"]["max_tool_calls"] == 10
+    assert assistant["metadata"]["tool_support"]["loop_detection"] is True
+    assert any(event.get("phase") == "tool_loop_stopped" for event in assistant["events"])
+    assert assistant["finish_reason"] == "tool_loop_stopped"
+    ChatStore._instance = None
+
+
+def test_chat_send_stops_semantic_click_loop(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from blocks.chat.send import run
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    calls = {"ai": 0, "tool": 0}
+
+    def call_handler(name, payload):
+        if name == "defaults.ai.complete":
+            calls["ai"] += 1
+            return {
+                "status": "ok",
+                "data": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": f"near{calls['ai']}",
+                            "name": "computer_use",
+                            "input": {"action": "click", "target": "app", "app": "Vivaldi", "x": 820 + calls["ai"], "y": 700},
+                        }
+                    ],
+                    "finish_reason": "tool_calls",
+                },
+            }
+        if name == "defaults.tool.invoke":
+            calls["tool"] += 1
+            return {"status": "ok", "data": {"result": "clicked"}}
+        raise AssertionError(name)
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    result = run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "vivaldiを操作して"},
+            "tools": ["computer_use"],
+            "params": {
+                "tool_support": {
+                    "enabled": True,
+                    "max_tool_calls": 10,
+                    "loop_detection": True,
+                    "repeated_action_limit": 3,
+                }
+            },
+        },
+        {"call_handler": call_handler},
+    )
+
+    assert result["status"] == "ok"
+    assistant = result["data"]
+    assert calls["tool"] == 2
+    stopped = [event for event in assistant["events"] if event.get("phase") == "tool_loop_stopped"]
+    assert stopped
+    assert stopped[0]["details"]["reason"] == "repeated_semantic_tool_call"
+    ChatStore._instance = None
+
+
 def test_chat_store_links_subagent_conversations(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
 

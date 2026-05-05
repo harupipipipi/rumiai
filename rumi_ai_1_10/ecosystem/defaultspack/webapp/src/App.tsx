@@ -424,6 +424,38 @@ function settingNumber(value: unknown, fallback: number): number {
   return Number.isFinite(numeric) ? numeric : fallback;
 }
 
+function settingObject(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  if (typeof value === "string" && value.trim()) {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+function toolSupportForProfile(settings: Record<string, Record<string, unknown>>, profileId: string): Record<string, unknown> {
+  const raw = settings.tool_support ?? {};
+  const byProfile = settingObject(raw.by_profile);
+  const profileOverrides = settingObject(byProfile[profileId]);
+  const maxToolCalls = Math.max(1, Math.min(256, settingNumber(profileOverrides.max_tool_calls ?? raw.max_tool_calls, 64)));
+  const repeatedActionLimit = Math.max(2, Math.min(20, settingNumber(profileOverrides.repeated_action_limit ?? raw.repeated_action_limit, 4)));
+  const imageDetail = String(profileOverrides.image_detail ?? raw.image_detail ?? "high").trim();
+  return {
+    enabled: profileOverrides.enabled ?? raw.enabled ?? true,
+    max_tool_calls: maxToolCalls,
+    loop_detection: profileOverrides.loop_detection ?? raw.loop_detection ?? true,
+    repeated_action_limit: repeatedActionLimit,
+    self_evaluation: profileOverrides.self_evaluation ?? raw.self_evaluation ?? false,
+    app_scoped_desktop_actions: profileOverrides.app_scoped_desktop_actions ?? raw.app_scoped_desktop_actions ?? true,
+    default_target_app: String(profileOverrides.default_target_app ?? raw.default_target_app ?? "").trim(),
+    ...(imageDetail ? { image_detail: imageDetail } : {}),
+  };
+}
+
 function OperationsCompanyPanel({
   status,
   isBusy,
@@ -1812,6 +1844,9 @@ export default function App() {
 
       await api.streamMessage(conversation.id, userText, {
         thinking_level: activeProfile?.supports_thinking ? selectedThinkingLevel : null,
+        tool_support: toolSupportForProfile(settingsValues, activeModelId),
+        image_detail: String(toolSupportForProfile(settingsValues, activeModelId).image_detail ?? "high"),
+        max_tool_calls: Number(toolSupportForProfile(settingsValues, activeModelId).max_tool_calls ?? 64),
         tool_policy: {
           ...(yoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
           ...operationsPolicy,

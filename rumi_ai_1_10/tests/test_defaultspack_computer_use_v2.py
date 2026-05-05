@@ -172,6 +172,32 @@ def test_computer_apps_list_filters_running_apps(monkeypatch):
     assert result["match"]["name"] == "Vivaldi"
 
 
+def test_app_window_target_resolves_requested_app_window(monkeypatch):
+    from domain.tool.browser_computer import BrowserComputerController
+    import domain.tool.browser_computer as browser_computer
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(
+        BrowserComputerController,
+        "_darwin_windows",
+        lambda self, limit: [
+            {"app": "Codex", "title": "Rumi", "bounds": {"x": 0, "y": 0, "width": 500, "height": 400}},
+            {"app": "Vivaldi", "title": "LINE Chat", "bounds": {"x": 50, "y": 60, "width": 700, "height": 500}},
+        ],
+    )
+    monkeypatch.setattr(BrowserComputerController, "_darwin_active_window", lambda self: {"app": "Codex"})
+
+    context = BrowserComputerController()._prepare_target_context(
+        {"target": "app", "app": "Vivaldi", "focus": False},
+        system="Darwin",
+        focus=False,
+    )
+
+    assert context["scope"] == "app"
+    assert context["window"]["app"] == "Vivaldi"
+    assert context["bounds"] == {"x": 50, "y": 60, "width": 700, "height": 500}
+
+
 def test_screenshot_result_includes_display_and_dpi_metadata(tmp_path, monkeypatch):
     from domain.tool.browser_computer import BrowserComputerController
 

@@ -85,3 +85,30 @@ test("uses action coordinate system dimensions for point annotations", () => {
   assert.equal(visual.points[0].xPercent, 75);
   assert.equal(visual.points[0].yPercent, 50);
 });
+
+test("extracts nested browser artifact paths", () => {
+  const visual = extractToolVisual({
+    status: "ok",
+    data: {
+      action: "browser.tab.screenshot",
+      artifact: { path: "/Users/haru/browser-shot.png", mime_type: "image/png" },
+      image_size: { width: 1200, height: 900 },
+    },
+  });
+
+  assert.ok(visual);
+  assert.equal(visual.src, "file:///Users/haru/browser-shot.png");
+  assert.equal(visual.sourceLabel, "browser-shot.png");
+});
+
+test("places normalized_1000 points as percentages", () => {
+  const visual = extractToolVisual({
+    data_url: "data:image/png;base64,abc",
+    image_size: { width: 1000, height: 1000 },
+    overlay_points: [{ x: 820, y: 700, coordinate_space: "normalized_1000", label: "pick" }],
+  });
+
+  assert.ok(visual);
+  assert.equal(visual.points[0].xPercent, 82);
+  assert.equal(visual.points[0].yPercent, 70);
+});

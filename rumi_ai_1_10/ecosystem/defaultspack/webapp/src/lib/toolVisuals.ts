@@ -44,6 +44,10 @@ export function compactVisualSourceLabel(value: string): string {
   return normalized.split("/").filter(Boolean).pop() || normalized;
 }
 
+function nestedRecord(value: unknown): Record<string, unknown> {
+  return isRecord(value) ? value : {};
+}
+
 function imageSrcFromRecord(record: Record<string, unknown>): string {
   for (const key of ["visual_data_url", "visualDataUrl", "click_history_visual_data_url", "thumbnail_data_url", "thumbnailDataUrl"]) {
     const visualUrl = nonEmptyString(record[key]);
@@ -51,12 +55,14 @@ function imageSrcFromRecord(record: Record<string, unknown>): string {
   }
   const dataUrl = nonEmptyString(record.data_url);
   if (dataUrl && dataUrl !== "[image data saved as artifact]") return dataUrl;
+  const artifact = nestedRecord(record.artifact);
   return (
     nonEmptyString(record.click_history_visual_path)
     || nonEmptyString(record.visual_path)
     || nonEmptyString(record.path)
     || nonEmptyString(record.image_path)
     || nonEmptyString(record.model_image_path)
+    || nonEmptyString(artifact.path)
   );
 }
 
@@ -105,7 +111,7 @@ function usesNormalizedCoordinates(record: Record<string, unknown>): boolean {
   ].some((value) => nonEmptyString(value).toLowerCase().includes("normalized"));
 }
 
-function pointFromRecord(value: Record<string, unknown>): { x: number; y: number; label?: string } | null {
+function pointFromRecord(value: Record<string, unknown>): { x: number; y: number; label?: string; coordinateSpace?: string } | null {
   const x = numberFrom(value.x ?? value.left);
   const y = numberFrom(value.y ?? value.top);
   if (x === null || y === null) return null;
@@ -113,10 +119,11 @@ function pointFromRecord(value: Record<string, unknown>): { x: number; y: number
     x,
     y,
     label: nonEmptyString(value.label) || nonEmptyString(value.name) || nonEmptyString(value.action) || undefined,
+    coordinateSpace: nonEmptyString(value.coordinate_space) || nonEmptyString(value.space) || undefined,
   };
 }
 
-function collectRawPoints(value: unknown): Array<{ x: number; y: number; label?: string }> {
+function collectRawPoints(value: unknown): Array<{ x: number; y: number; label?: string; coordinateSpace?: string }> {
   if (Array.isArray(value)) {
     return value.flatMap((entry) => {
       if (Array.isArray(entry) && entry.length >= 2) {
@@ -153,13 +160,15 @@ function pointsFromRecord(record: Record<string, unknown>): ToolVisualPoint[] {
     y: numberFrom(coordinateSystem.y) ?? 0,
   };
   const size = coordinateSize(record);
-  const normalized = usesNormalizedCoordinates(record);
 
   return rawPoints.flatMap((point, index) => {
+    const pointSpace = String(point.coordinateSpace ?? "").toLowerCase();
+    const normalized = usesNormalizedCoordinates(record) || pointSpace.includes("normalized");
     const x = normalized ? point.x : point.x - coordinateOrigin.x;
     const y = normalized ? point.y : point.y - coordinateOrigin.y;
-    const xPercent = normalized || (!size && x >= 0 && x <= 1) ? x * 100 : size ? (x / size.width) * 100 : NaN;
-    const yPercent = normalized || (!size && y >= 0 && y <= 1) ? y * 100 : size ? (y / size.height) * 100 : NaN;
+    const normalizedIsUnit = x >= 0 && x <= 1 && y >= 0 && y <= 1;
+    const xPercent = normalized ? (normalizedIsUnit ? x * 100 : x / 10) : (!size && x >= 0 && x <= 1) ? x * 100 : size ? (x / size.width) * 100 : NaN;
+    const yPercent = normalized ? (normalizedIsUnit ? y * 100 : y / 10) : (!size && y >= 0 && y <= 1) ? y * 100 : size ? (y / size.height) * 100 : NaN;
     if (!Number.isFinite(xPercent) || !Number.isFinite(yPercent)) return [];
     return [{
       id: `point-${index}`,
@@ -204,6 +213,7 @@ export function extractToolVisual(value: unknown): ToolVisualImage | null {
       || nonEmptyString(record.path)
       || nonEmptyString(record.image_path)
       || nonEmptyString(record.model_image_path)
+      || nonEmptyString(nestedRecord(record.artifact).path)
       || src,
     ),
     imageSize: sizeFrom(record.image_size) ?? sizeFrom(record.model_image_size),

@@ -591,6 +591,9 @@ type ApiEnvelope<T> = ApiOk<T> | ApiError;
 type SendMessageOptions = {
   thinking_level?: string | null;
   tool_policy?: Record<string, unknown>;
+  tool_support?: Record<string, unknown>;
+  image_detail?: "auto" | "low" | "high" | string;
+  max_tool_calls?: number;
   attachments?: ChatAttachment[];
   tools?: string[];
   metadata?: Record<string, unknown>;
@@ -657,6 +660,9 @@ function messageRequestBody(
     params: {
       thinking_level: options?.thinking_level ?? undefined,
       tool_policy: options?.tool_policy ?? undefined,
+      tool_support: options?.tool_support ?? undefined,
+      image_detail: options?.image_detail ?? undefined,
+      max_tool_calls: options?.max_tool_calls ?? undefined,
     },
   };
 }

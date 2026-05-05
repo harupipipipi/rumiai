@@ -23,6 +23,14 @@ from domain.tool.schema_adapter import (
     resolve_runtime_profile_context,
     tool_name_from_definition,
 )
+from domain.tool.support import (
+    ToolLoopGuard,
+    effective_max_tool_calls,
+    extract_text_tool_uses,
+    strip_text_tool_use_blocks,
+    support_message_for_tool_result,
+    tool_support_settings,
+)
 
 
 MAX_ATTACHMENT_TEXT_CHARS = 240_000
@@ -40,6 +48,12 @@ _COMPUTER_USE_REQUEST_RE = re.compile(
     r"(vivaldi|line|ブラウザ|browser).{0,24}(操作|送信|入力|クリック|開いて|開く)",
     re.IGNORECASE,
 )
+_TARGET_APP_PATTERNS = [
+    (re.compile(r"\bv(i|ı)valdi\b|ヴィヴァルディ|ビバルディ", re.IGNORECASE), "Vivaldi"),
+    (re.compile(r"\bchrome\b|クローム", re.IGNORECASE), "Google Chrome"),
+    (re.compile(r"\bsafari\b|サファリ", re.IGNORECASE), "Safari"),
+    (re.compile(r"\bfirefox\b|ファイアフォックス", re.IGNORECASE), "Firefox"),
+]
 
 
 def _stub_response():
@@ -164,6 +178,14 @@ def _infer_requested_tools_from_message(message):
     return ["computer_use", "zoom"]
 
 
+def _infer_target_app_from_text(text):
+    text = str(text or "")
+    for pattern, app in _TARGET_APP_PATTERNS:
+        if pattern.search(text):
+            return app
+    return ""
+
+
 def _with_inferred_requested_tools(input_data):
     if not isinstance(input_data, dict):
         return input_data
@@ -202,6 +224,28 @@ def _with_inferred_requested_tools(input_data):
     return updated
 
 
+def _with_inferred_tool_support(input_data):
+    if not isinstance(input_data, dict):
+        return input_data
+    message = input_data.get("message")
+    if not isinstance(message, dict):
+        return input_data
+    text = extract_user_text(message.get("content"))
+    inferred_app = _infer_target_app_from_text(text)
+    if not inferred_app:
+        return input_data
+    params = dict(input_data.get("params") if isinstance(input_data.get("params"), dict) else {})
+    support = dict(params.get("tool_support") if isinstance(params.get("tool_support"), dict) else {})
+    if support.get("default_target_app"):
+        return input_data
+    support.setdefault("default_target_app", inferred_app)
+    support.setdefault("app_scoped_desktop_actions", True)
+    params["tool_support"] = support
+    updated = dict(input_data)
+    updated["params"] = params
+    return updated
+
+
 def _available_tools(context, input_data):
     raw_tools = input_data.get("tools")
     try:
@@ -226,6 +270,16 @@ def _tool_use_blocks(response):
         for block in blocks
         if isinstance(block, dict) and block.get("type") in {"tool_use", "tool_call"}
     ]
+
+
+def _response_tool_uses(response, connected_names, support):
+    tool_uses = _tool_use_blocks(response)
+    if tool_uses or not bool((support or {}).get("enabled", True)):
+        return tool_uses, response
+    extracted = extract_text_tool_uses(response if isinstance(response, dict) else {}, allowed_names=set(connected_names or []))
+    if not extracted:
+        return [], response
+    return extracted, strip_text_tool_use_blocks(response if isinstance(response, dict) else {})
 
 
 def _tool_arguments(block):
@@ -484,7 +538,12 @@ def _tool_visibility_message(tools):
         computer_guidance = (
             " For desktop tasks, first inspect the running apps with computer.apps.list or computer.app.find, "
             "focus the intended app before screenshots/actions (for example app='Vivaldi'), "
-            "and target app/window instead of the whole desktop unless the user asks for full desktop."
+            "and target app/window instead of the whole desktop unless the user asks for full desktop. "
+            "For browser pages, prefer browser_use browser/session/tab/ref actions when a managed browser session is available; "
+            "use computer_use only as the final OS interaction layer. "
+            "If your provider cannot emit a formal tool call, output only strict JSON like "
+            "{\"type\":\"tool_use\",\"name\":\"computer_use\",\"input\":{\"action\":\"screenshot\",\"target\":\"app\",\"app\":\"Vivaldi\"}} "
+            "and the harness will execute it."
         )
     return {
         "role": "system",
@@ -506,11 +565,74 @@ def _append_event(events, event, event_callback=None):
     return event
 
 
+def _response_text(response):
+    parts = []
+    for block in response.get("content", []) if isinstance(response, dict) else []:
+        if isinstance(block, dict) and block.get("type") == "text":
+            parts.append(str(block.get("text") or ""))
+    return "\n".join(parts).strip()
+
+
+def _maybe_self_evaluate_response(model, messages, response, tool_logs, params, call_handler):
+    support = tool_support_settings(params)
+    if not bool(support.get("self_evaluation", False)):
+        return None
+    text = _response_text(response)
+    prompt = (
+        "Evaluate the previous assistant turn for tool-use quality. "
+        "Return compact JSON only with keys: score (0-1), tool_success boolean, loop_risk boolean, notes string. "
+        "Focus on whether the selected tools were actually used, whether failures/approvals were handled, "
+        "and whether the next action should continue or stop."
+    )
+    eval_messages = [
+        {"role": "system", "content": "You are a strict evaluator for this same model's tool-use behavior."},
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "instruction": prompt,
+                    "assistant_text": text[-4000:],
+                    "tool_logs": _compact_tool_log_value(tool_logs)[-20:],
+                },
+                ensure_ascii=False,
+            ),
+        },
+    ]
+    try:
+        if call_handler is not None:
+            raw = call_handler(
+                "defaults.ai.complete",
+                {
+                    "model": model,
+                    "messages": eval_messages,
+                    "tools": [],
+                    "params": {"max_tokens": 240, "temperature": 0},
+                },
+            )
+            if isinstance(raw, dict) and raw.get("status") == "ok":
+                raw = raw.get("data", {})
+        else:
+            raw, err = _ai_direct_complete(model, eval_messages, [], {"max_tokens": 240, "temperature": 0})
+            if err is not None:
+                return {"status": "skipped", "reason": err}
+        eval_text = _response_text(raw if isinstance(raw, dict) else {})
+        try:
+            parsed = json.loads(eval_text)
+            if isinstance(parsed, dict):
+                return _redact_sensitive_value(parsed)
+        except Exception:
+            pass
+        return {"status": "ok", "text": eval_text[:1000]}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
 def _complete_with_tools(model, messages, tools, context, call_handler, params):
     event_callback = (context or {}).get("event_callback") if isinstance(context, dict) else None
     events = []
     _append_event(events, _event("status", "{} が考えています".format(model), phase="thinking", model=model), event_callback)
     tool_logs = []
+    support = tool_support_settings(params)
     if tools:
         _append_event(
             events,
@@ -529,10 +651,12 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
         insert_at = 1 if working_messages and working_messages[0].get("role") == "system" else 0
         working_messages.insert(insert_at, tool_context_message)
     response = None
-    limit = max_tool_calls(context or {})
-    if limit is None:
-        limit = int(params.get("max_tool_calls", 4) or 4)
+    limit = effective_max_tool_calls(max_tool_calls(context or {}), params, support)
     connected_names = connected_tool_names(tools, context.get("runtime_profile") if isinstance(context, dict) else None)
+    loop_guard = ToolLoopGuard(
+        enabled=bool(support.get("loop_detection", True)),
+        repeated_action_limit=int(support.get("repeated_action_limit", 4) or 4),
+    )
 
     for step_index in range(max(1, limit + 1)):
         ai_params = {
@@ -555,7 +679,18 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
 
         if not isinstance(response, dict):
             response = _stub_response()
-        tool_uses = _tool_use_blocks(response)
+        tool_uses, response = _response_tool_uses(response, connected_names, support)
+        if tool_uses and any(block.get("source") == "text_tool_use" for block in tool_uses):
+            _append_event(
+                events,
+                _event(
+                    "status",
+                    "本文内の tool_use を実行キューへ変換しました",
+                    phase="tool_support",
+                    converted_tool_calls=len(tool_uses),
+                ),
+                event_callback,
+            )
         if not tool_uses or step_index >= limit:
             break
 
@@ -566,6 +701,33 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
                 continue
             tool_call_id = str(block.get("id") or block.get("tool_call_id") or gen_id())
             arguments = _tool_arguments(block)
+            loop = loop_guard.record(tool_name, arguments)
+            if loop:
+                _append_event(
+                    events,
+                    _event(
+                        "tool_loop_stopped",
+                        "同じ tool 呼び出しの反復を検出して停止しました",
+                        phase="tool_loop_stopped",
+                        tool_name=tool_name,
+                        details=loop,
+                    ),
+                    event_callback,
+                )
+                response = {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                "同じ tool 呼び出しが繰り返されたため停止しました。"
+                                "アプリ/ウィンドウの対象、座標系、直前スクリーンショットを確認してから再開してください。"
+                            ),
+                        }
+                    ],
+                    "finish_reason": "tool_loop_stopped",
+                    "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                }
+                break
             _append_event(
                 events,
                 _event(
@@ -618,6 +780,12 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
                 model=model,
                 vision_detail=_normalize_vision_detail(params.get("image_detail"), params.get("vision_detail")),
             )
+            support_message = support_message_for_tool_result(tool_name, result)
+            if support_message is not None:
+                working_messages.append(support_message)
+        else:
+            continue
+        break
 
     response = response or _stub_response()
     existing_events = response.get("events", [])
@@ -631,8 +799,18 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
             "attached_tools": [tool_name_from_definition(tool) for tool in tools if tool_name_from_definition(tool)],
             "thinking": {"state": "completed"},
             "thinking_level": params.get("thinking_level"),
+            "tool_support": {
+                "enabled": bool(support.get("enabled", True)),
+                "max_tool_calls": limit,
+                "loop_detection": bool(support.get("loop_detection", True)),
+                "self_evaluation": bool(support.get("self_evaluation", False)),
+                "default_target_app": support.get("default_target_app") or "",
+            },
         }
     )
+    evaluation = _maybe_self_evaluate_response(model, working_messages, response, tool_logs, params, call_handler)
+    if evaluation:
+        metadata["tool_support"]["self_evaluation_result"] = evaluation
     response["metadata"] = metadata
     return response
 
@@ -724,6 +902,7 @@ def _sanitize_attachment_metadata(attachments):
 
 def run(input_data, context):
     input_data = _with_inferred_requested_tools(input_data)
+    input_data = _with_inferred_tool_support(input_data)
     store = ChatStore()
     event_callback = context.get("event_callback") if isinstance(context, dict) else None
     conversation_id = input_data.get("conversation_id")
