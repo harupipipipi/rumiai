@@ -173,7 +173,8 @@ def support_message_for_tool_result(tool_name: str, result: Any) -> dict[str, An
             "If it requires approval, stop and ask for approval or retry only after an approval token is available. "
             "If it failed, change strategy instead of repeating the same call. "
             "For desktop/browser work, prefer app-scoped screenshots/actions: computer.app.find, computer.app.focus, "
-            "then screenshot/click/type with target='app' and app set to the intended app."
+            "then screenshot/click/type with target='app' and app set to the intended app. "
+            "The visible cursor in screenshots is an AI virtual cursor, so do not rely on the user's real mouse position."
         ),
     }
 

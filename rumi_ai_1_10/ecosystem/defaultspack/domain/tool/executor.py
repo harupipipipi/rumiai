@@ -755,10 +755,7 @@ def _apply_tool_support_desktop_defaults(action, payload, context):
     next_payload = dict(payload)
     next_payload.setdefault("target", "app")
     next_payload.setdefault("app", default_app)
-    if action == "computer.screenshot":
-        next_payload.setdefault("focus", True)
-    else:
-        next_payload.setdefault("focus", True)
+    next_payload.setdefault("focus", False)
     return next_payload
 
 

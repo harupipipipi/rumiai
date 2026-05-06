@@ -103,7 +103,7 @@ def test_app_defaults_still_scope_app_screenshots():
 
     assert adjusted["target"] == "app"
     assert adjusted["app"] == "Vivaldi"
-    assert adjusted["focus"] is True
+    assert adjusted["focus"] is False
 
 
 def test_empty_frontend_default_target_app_is_replaced_by_text_inference():

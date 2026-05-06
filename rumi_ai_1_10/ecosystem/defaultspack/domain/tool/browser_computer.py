@@ -7,6 +7,7 @@ import re
 import shutil
 import struct
 import subprocess
+import sys
 import time
 import webbrowser
 import base64
@@ -416,14 +417,23 @@ class BrowserComputerController:
         self._artifact_root.mkdir(parents=True, exist_ok=True)
         path = self._artifact_root / f"screenshot-{int(time.time() * 1000)}.png"
         system = platform.system()
-        target_context = self._prepare_target_context(payload, system=system, focus=payload.get("focus", True) is not False)
+        target_context = self._prepare_target_context(payload, system=system, focus=payload.get("focus", False) is True)
         target_bounds = self._target_capture_bounds(target_context)
         if system == "Darwin":
-            command = ["screencapture", "-x"]
-            if target_bounds:
-                command.extend(["-R", self._region_arg(target_bounds)])
-            command.append(str(path))
-            subprocess.run(command, check=True)
+            captured = False
+            window_id = self._target_window_id(target_context)
+            if window_id:
+                try:
+                    self._darwin_capture_window(path, window_id)
+                    captured = True
+                except Exception as exc:
+                    target_context["window_capture_error"] = str(exc)
+            if not captured:
+                command = ["screencapture", "-x"]
+                if target_bounds:
+                    command.extend(["-R", self._region_arg(target_bounds)])
+                command.append(str(path))
+                subprocess.run(command, check=True)
         elif system == "Windows":
             self._windows_screenshot(path, bounds=target_bounds)
         else:
@@ -446,7 +456,7 @@ class BrowserComputerController:
             data_url = ""
         result = self._screenshot_result(path, model_path, system, target_context=target_context)
         result["quality"] = quality
-        self._attach_click_history_visual(result)
+        self._attach_screenshot_overlays(result)
         if data_url:
             result["data_url"] = data_url
             result["visual_data_url"] = result.get("click_history_visual_data_url") or data_url
@@ -680,9 +690,10 @@ class BrowserComputerController:
                     "y": target_bounds["height"] / model_image_size[1],
                 }
             result["target_to_action_offset"] = {"x": target_bounds["x"], "y": target_bounds["y"]}
-        cursor = self._cursor_position()
-        if cursor:
-            result["cursor"] = cursor
+        virtual_cursor = self._read_virtual_cursor()
+        if virtual_cursor:
+            result["cursor"] = virtual_cursor
+            result["virtual_cursor"] = virtual_cursor
         result["target"] = target_context
         if target_context.get("origin"):
             result["screenshot_origin"] = target_context["origin"]
@@ -1352,7 +1363,83 @@ class BrowserComputerController:
                 windows.append(parsed)
             if len(windows) >= limit:
                 break
-        return windows
+        return self._merge_cg_window_ids(windows, limit)
+
+    def _darwin_cg_windows(self, limit: int) -> list[dict[str, Any]]:
+        code = (
+            "import json, Quartz\n"
+            "opts = Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements\n"
+            "items = Quartz.CGWindowListCopyWindowInfo(opts, Quartz.kCGNullWindowID) or []\n"
+            "out = []\n"
+            "for item in items:\n"
+            "    bounds = item.get('kCGWindowBounds') or {}\n"
+            "    width = int(round(bounds.get('Width', 0)))\n"
+            "    height = int(round(bounds.get('Height', 0)))\n"
+            "    if width <= 0 or height <= 0:\n"
+            "        continue\n"
+            "    out.append({\n"
+            "        'id': str(item.get('kCGWindowNumber', '')),\n"
+            "        'window_id': str(item.get('kCGWindowNumber', '')),\n"
+            "        'cg_window_id': int(item.get('kCGWindowNumber', 0) or 0),\n"
+            "        'app': str(item.get('kCGWindowOwnerName') or ''),\n"
+            "        'pid': int(item.get('kCGWindowOwnerPID') or 0),\n"
+            "        'title': str(item.get('kCGWindowName') or ''),\n"
+            "        'bounds': {\n"
+            "            'x': int(round(bounds.get('X', 0))),\n"
+            "            'y': int(round(bounds.get('Y', 0))),\n"
+            "            'width': width,\n"
+            "            'height': height,\n"
+            "        },\n"
+            "    })\n"
+            "    if len(out) >= int(__import__('sys').argv[1]):\n"
+            "        break\n"
+            "print(json.dumps(out))\n"
+        )
+        try:
+            completed = subprocess.run([sys.executable, "-c", code, str(max(limit, 1))], check=True, capture_output=True, text=True)
+            value = json.loads(completed.stdout or "[]")
+            return value if isinstance(value, list) else []
+        except Exception:
+            return []
+
+    def _merge_cg_window_ids(self, windows: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+        cg_windows = self._darwin_cg_windows(limit)
+        if not cg_windows:
+            return windows
+        merged: list[dict[str, Any]] = []
+        used: set[int] = set()
+        for window in windows:
+            bounds = self._valid_bounds(window.get("bounds"))
+            app = str(window.get("app") or "").lower()
+            title = str(window.get("title") or "").lower()
+            match = None
+            for index, cg_window in enumerate(cg_windows):
+                if index in used:
+                    continue
+                cg_bounds = self._valid_bounds(cg_window.get("bounds"))
+                if not bounds or not cg_bounds:
+                    continue
+                if str(cg_window.get("app") or "").lower() != app:
+                    continue
+                if title and title not in str(cg_window.get("title") or "").lower():
+                    continue
+                close = (
+                    abs(bounds["x"] - cg_bounds["x"]) <= 3
+                    and abs(bounds["y"] - cg_bounds["y"]) <= 3
+                    and abs(bounds["width"] - cg_bounds["width"]) <= 6
+                    and abs(bounds["height"] - cg_bounds["height"]) <= 6
+                )
+                if close:
+                    match = cg_window
+                    used.add(index)
+                    break
+            merged.append({**window, **({"window_id": match.get("window_id"), "cg_window_id": match.get("cg_window_id")} if match else {})})
+        for index, cg_window in enumerate(cg_windows):
+            if index not in used:
+                merged.append(cg_window)
+            if len(merged) >= limit:
+                break
+        return merged[:limit]
 
     def _darwin_apps(self, limit: int) -> list[dict[str, Any]]:
         script = [
@@ -1684,6 +1771,43 @@ class BrowserComputerController:
         return BrowserComputerController._valid_bounds(target_context.get("bounds"))
 
     @staticmethod
+    def _target_window_id(target_context: dict[str, Any]) -> int | None:
+        window = target_context.get("window") if isinstance(target_context.get("window"), dict) else {}
+        for key in ("cg_window_id", "window_id"):
+            raw = window.get(key) or target_context.get(key)
+            try:
+                value = int(str(raw).strip())
+            except Exception:
+                continue
+            if value > 0:
+                return value
+        return None
+
+    @staticmethod
+    def _darwin_capture_window(path: Path, window_id: int) -> None:
+        code = (
+            "import sys, Quartz\n"
+            "from Foundation import NSURL\n"
+            "window_id = int(sys.argv[1])\n"
+            "path = sys.argv[2]\n"
+            "image = Quartz.CGWindowListCreateImage(\n"
+            "    Quartz.CGRectNull,\n"
+            "    Quartz.kCGWindowListOptionIncludingWindow,\n"
+            "    window_id,\n"
+            "    Quartz.kCGWindowImageBoundsIgnoreFraming,\n"
+            ")\n"
+            "if image is None:\n"
+            "    raise SystemExit('CGWindowListCreateImage returned no image')\n"
+            "dest = Quartz.CGImageDestinationCreateWithURL(NSURL.fileURLWithPath_(path), 'public.png', 1, None)\n"
+            "if dest is None:\n"
+            "    raise SystemExit('CGImageDestinationCreateWithURL failed')\n"
+            "Quartz.CGImageDestinationAddImage(dest, image, None)\n"
+            "if not Quartz.CGImageDestinationFinalize(dest):\n"
+            "    raise SystemExit('CGImageDestinationFinalize failed')\n"
+        )
+        subprocess.run([sys.executable, "-c", code, str(window_id), str(path)], check=True, capture_output=True, text=True)
+
+    @staticmethod
     def _valid_bounds(raw: Any) -> dict[str, int] | None:
         if not isinstance(raw, dict):
             return None
@@ -1877,9 +2001,13 @@ class BrowserComputerController:
         system: str,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         if action not in {"computer.move", "computer.click"}:
-            return dict(payload), self._prepare_target_context(payload, system=system, focus=True)
-        target_context = self._prepare_target_context(payload, system=system, focus=True)
+            target_context = self._prepare_target_context(payload, system=system, focus=payload.get("focus", False) is True)
+            adjusted = dict(payload)
+            self._attach_target_delivery_metadata(adjusted, target_context)
+            return adjusted, target_context
+        target_context = self._prepare_target_context(payload, system=system, focus=payload.get("focus", False) is True)
         adjusted = self._payload_with_normalized_point(payload, target_context)
+        self._attach_target_delivery_metadata(adjusted, target_context)
         scope = target_context.get("scope")
         coordinate_space = str(adjusted.get("coordinate_space") or adjusted.get("coordinates") or "").strip().lower()
         if not coordinate_space:
@@ -1901,6 +2029,18 @@ class BrowserComputerController:
             adjusted["y"] = int(payload.get("y", 0)) + int(origin.get("y", 0))
             adjusted["_target_local_point"] = {"x": int(payload.get("x", 0)), "y": int(payload.get("y", 0))}
         return adjusted, target_context
+
+    @staticmethod
+    def _attach_target_delivery_metadata(payload: dict[str, Any], target_context: dict[str, Any]) -> None:
+        window = target_context.get("window") if isinstance(target_context.get("window"), dict) else {}
+        pid = window.get("pid") or target_context.get("pid")
+        try:
+            pid_value = int(pid)
+        except Exception:
+            pid_value = 0
+        if pid_value > 0 and target_context.get("scope") not in {"desktop", "full_desktop", "all_displays"}:
+            payload["_target_pid"] = pid_value
+            payload["_target_app"] = window.get("app") or target_context.get("app")
 
     def _desktop_action(self, action: str, payload: dict[str, Any], *, yolo_mode: bool) -> dict[str, Any]:
         dry_run = bool(payload.get("dry_run"))
@@ -1985,6 +2125,7 @@ class BrowserComputerController:
                     )
                     if isinstance(point, dict)
                 ]
+            self._record_virtual_cursor(action, action_payload, result)
             self._record_click_history(action, action_payload, result)
             if action == "computer.click":
                 self._attach_post_click_visual(result, payload)
@@ -2026,6 +2167,23 @@ class BrowserComputerController:
     def _click_history_path(self) -> Path:
         return self._artifact_root / "click_history.json"
 
+    def _virtual_cursor_path(self) -> Path:
+        return self._artifact_root / "virtual_cursor.json"
+
+    def _read_virtual_cursor(self) -> dict[str, Any] | None:
+        try:
+            value = json.loads(self._virtual_cursor_path().read_text(encoding="utf-8"))
+            return value if isinstance(value, dict) else None
+        except Exception:
+            return None
+
+    def _write_virtual_cursor(self, state: dict[str, Any]) -> None:
+        try:
+            self._artifact_root.mkdir(parents=True, exist_ok=True)
+            self._virtual_cursor_path().write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
     def _read_click_history(self) -> list[dict[str, Any]]:
         try:
             value = json.loads(self._click_history_path().read_text(encoding="utf-8"))
@@ -2063,6 +2221,30 @@ class BrowserComputerController:
         history = self._read_click_history()
         history.append(record)
         self._write_click_history(history)
+
+    def _record_virtual_cursor(self, action: str, payload: dict[str, Any], result: dict[str, Any]) -> None:
+        if action not in {"computer.move", "computer.click"}:
+            return
+        point = result.get("annotation") if isinstance(result.get("annotation"), dict) else None
+        points = [point] if point else []
+        for candidate in result.get("display_overlay_points") or []:
+            if isinstance(candidate, dict):
+                points.append(candidate)
+        state = {
+            "type": "virtual_cursor",
+            "ts": self._now_iso(),
+            "action": action,
+            "target": result.get("target"),
+            "local_target": result.get("local_target"),
+            "points": points,
+            "metadata_path": (
+                result.get("coordinate_transform", {}).get("metadata_path")
+                if isinstance(result.get("coordinate_transform"), dict)
+                else None
+            ),
+            "source": "ai",
+        }
+        self._write_virtual_cursor(state)
 
     def _attach_post_click_visual(self, result: dict[str, Any], payload: dict[str, Any]) -> None:
         if payload.get("visual_feedback") is not True and payload.get("show_click_feedback") is not True:
@@ -2113,12 +2295,9 @@ class BrowserComputerController:
             "overlay_points": result.get("overlay_points", []),
         }
 
-    def _attach_click_history_visual(self, screenshot_result: dict[str, Any]) -> None:
+    def _attach_screenshot_overlays(self, screenshot_result: dict[str, Any]) -> None:
         path = Path(str(screenshot_result.get("path") or ""))
         if not path.is_file():
-            return
-        history = self._read_click_history()
-        if not history:
             return
         try:
             image = self._read_png_pixels(path)
@@ -2126,6 +2305,7 @@ class BrowserComputerController:
             return
         metadata = dict(screenshot_result)
         overlay_points: list[dict[str, Any]] = []
+        history = self._read_click_history()
         for index, record in enumerate(history[-5:], start=1):
             point = self._history_point_for_screenshot(record, metadata)
             if not point:
@@ -2133,6 +2313,10 @@ class BrowserComputerController:
             point["label"] = f"click-{index}"
             overlay_points.append(point)
             self._draw_point_on_png(image, point["x"], point["y"], radius=7, color=(220, 38, 38, 255), outline=(255, 255, 255, 255))
+        cursor_point = self._virtual_cursor_point_for_screenshot(metadata)
+        if cursor_point:
+            overlay_points.append(cursor_point)
+            self._draw_virtual_cursor_on_png(image, cursor_point["x"], cursor_point["y"])
         if not overlay_points:
             return
         visual_path = path.with_name(path.stem + "-clicks.png")
@@ -2140,7 +2324,20 @@ class BrowserComputerController:
         screenshot_result["click_history_path"] = str(self._click_history_path())
         screenshot_result["click_history_visual_path"] = str(visual_path)
         screenshot_result["click_history_overlay_points"] = overlay_points
+        screenshot_result["virtual_cursor_path"] = str(self._virtual_cursor_path())
+        if cursor_point:
+            screenshot_result["virtual_cursor_overlay_point"] = cursor_point
         screenshot_result["click_history_visual_data_url"] = self._image_data_url(visual_path)
+
+    def _virtual_cursor_point_for_screenshot(self, metadata: dict[str, Any]) -> dict[str, Any] | None:
+        state = self._read_virtual_cursor()
+        if not state:
+            return None
+        point = self._history_point_for_screenshot(state, metadata)
+        if point:
+            point["label"] = "ai-cursor"
+            return point
+        return None
 
     def _history_point_for_screenshot(self, record: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any] | None:
         candidates = record.get("points") if isinstance(record.get("points"), list) else []
@@ -2224,6 +2421,62 @@ class BrowserComputerController:
                     row[offset : offset + 4] = bytes(rgba)
 
     @staticmethod
+    def _draw_virtual_cursor_on_png(image: dict[str, Any], x: int, y: int) -> None:
+        width = int(image["width"])
+        height = int(image["height"])
+        channels = int(image["channels"])
+        fill = (20, 184, 166, 255)
+        outline = (255, 255, 255, 255)
+        shadow = (15, 23, 42, 160)
+        shape = [
+            (0, 0),
+            (0, 18),
+            (5, 14),
+            (8, 23),
+            (12, 21),
+            (9, 13),
+            (16, 13),
+        ]
+
+        def inside_polygon(px: int, py: int, points: list[tuple[int, int]]) -> bool:
+            inside = False
+            j = len(points) - 1
+            for i, (xi, yi) in enumerate(points):
+                xj, yj = points[j]
+                intersects = (yi > py) != (yj > py) and px < (xj - xi) * (py - yi) / ((yj - yi) or 1) + xi
+                if intersects:
+                    inside = not inside
+                j = i
+            return inside
+
+        def set_pixel(px: int, py: int, rgba: tuple[int, int, int, int]) -> None:
+            if px < 0 or py < 0 or px >= width or py >= height:
+                return
+            offset = px * channels
+            row = image["rows"][py]
+            if channels == 1:
+                row[offset] = int((rgba[0] + rgba[1] + rgba[2]) / 3)
+            elif channels == 3:
+                row[offset : offset + 3] = bytes(rgba[:3])
+            else:
+                row[offset : offset + 4] = bytes(rgba)
+
+        for dy in range(-2, 26):
+            for dx in range(-2, 20):
+                local_x = dx - 2
+                local_y = dy - 2
+                target_x = x + dx
+                target_y = y + dy
+                if inside_polygon(local_x, local_y, shape):
+                    set_pixel(target_x, target_y, shadow)
+                elif inside_polygon(dx, dy, shape):
+                    set_pixel(target_x, target_y, outline)
+        for dy in range(0, 24):
+            for dx in range(0, 18):
+                if inside_polygon(dx, dy, shape):
+                    set_pixel(x + dx, y + dy, fill)
+
+    @staticmethod
     def _point_annotation(label: str, x: int, y: int, *, coordinate_space: str = "action") -> dict[str, Any]:
         return {
             "type": "point",
@@ -2234,12 +2487,10 @@ class BrowserComputerController:
         }
 
     def _darwin_move_cursor(self, payload: dict[str, Any]) -> None:
+        if payload.get("real_cursor") is not True:
+            return
         x = int(payload.get("x", 0))
         y = int(payload.get("y", 0))
-        cliclick = shutil.which("cliclick")
-        if cliclick:
-            subprocess.run([cliclick, f"m:{x},{y}"], check=True)
-            return
         code = (
             "import Quartz, sys\n"
             f"Quartz.CGWarpMouseCursorPosition(({x}, {y}))\n"
@@ -2253,9 +2504,10 @@ class BrowserComputerController:
     def _darwin_click(self, payload: dict[str, Any]) -> None:
         x = int(payload.get("x", 0))
         y = int(payload.get("y", 0))
-        cliclick = shutil.which("cliclick")
-        if cliclick:
-            subprocess.run([cliclick, f"c:{x},{y}"], check=True)
+        pid = self._payload_pid(payload)
+        if pid:
+            self._darwin_ax_press_at_point(x, y, pid=pid)
+        if self._darwin_post_mouse_click(x, y, pid=pid):
             return
         swift = shutil.which("swift")
         if swift:
@@ -2264,43 +2516,92 @@ class BrowserComputerController:
                 "import Darwin\n"
                 "let x = Double(CommandLine.arguments[1])!\n"
                 "let y = Double(CommandLine.arguments[2])!\n"
+                "let pid = Int32(CommandLine.arguments.count > 3 ? CommandLine.arguments[3] : \"0\") ?? 0\n"
                 "let point = CGPoint(x: x, y: y)\n"
-                "CGWarpMouseCursorPosition(point)\n"
                 "let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left)\n"
-                "down?.post(tap: .cghidEventTap)\n"
+                "if pid > 0 { down?.postToPid(pid) } else { down?.post(tap: .cghidEventTap) }\n"
                 "usleep(80000)\n"
                 "let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)\n"
-                "up?.post(tap: .cghidEventTap)\n"
+                "if pid > 0 { up?.postToPid(pid) } else { up?.post(tap: .cghidEventTap) }\n"
             )
-            subprocess.run([swift, "-e", code, str(x), str(y)], check=True)
+            subprocess.run([swift, "-e", code, str(x), str(y), str(pid or 0)], check=True)
+            return
+        cliclick = shutil.which("cliclick")
+        if cliclick and not pid:
+            subprocess.run([cliclick, f"c:{x},{y}"], check=True)
             return
         script = self._apple_script("computer.click", payload)
         subprocess.run(["osascript", "-e", script], check=True)
+
+    @staticmethod
+    def _payload_pid(payload: dict[str, Any]) -> int | None:
+        try:
+            value = int(payload.get("_target_pid") or payload.get("pid") or 0)
+        except Exception:
+            return None
+        return value if value > 0 else None
+
+    @staticmethod
+    def _darwin_post_mouse_click(x: int, y: int, *, pid: int | None = None) -> bool:
+        code = (
+            "import sys, time, Quartz\n"
+            "x = int(sys.argv[1]); y = int(sys.argv[2]); pid = int(sys.argv[3])\n"
+            "point = Quartz.CGPoint(x, y)\n"
+            "down = Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventLeftMouseDown, point, Quartz.kCGMouseButtonLeft)\n"
+            "up = Quartz.CGEventCreateMouseEvent(None, Quartz.kCGEventLeftMouseUp, point, Quartz.kCGMouseButtonLeft)\n"
+            "if down is None or up is None:\n"
+            "    raise SystemExit(2)\n"
+            "if pid > 0 and hasattr(Quartz, 'CGEventPostToPid'):\n"
+            "    Quartz.CGEventPostToPid(pid, down)\n"
+            "    time.sleep(0.08)\n"
+            "    Quartz.CGEventPostToPid(pid, up)\n"
+            "else:\n"
+            "    Quartz.CGEventPost(Quartz.kCGHIDEventTap, down)\n"
+            "    time.sleep(0.08)\n"
+            "    Quartz.CGEventPost(Quartz.kCGHIDEventTap, up)\n"
+        )
+        try:
+            subprocess.run([sys.executable, "-c", code, str(x), str(y), str(pid or 0)], check=True, capture_output=True, text=True)
+            return True
+        except Exception:
+            return False
 
     def _darwin_scroll(self, payload: dict[str, Any]) -> None:
         amount = int(payload.get("amount", 1))
         if amount == 0:
             return
+        pid = self._payload_pid(payload)
         code = (
             "import Quartz, sys\n"
             "amount = int(sys.argv[1])\n"
+            "pid = int(sys.argv[2])\n"
             "event = Quartz.CGEventCreateScrollWheelEvent(\n"
             "    None,\n"
             "    Quartz.kCGScrollEventUnitLine,\n"
             "    1,\n"
             "    amount,\n"
             ")\n"
-            "Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)\n"
+            "if pid > 0 and hasattr(Quartz, 'CGEventPostToPid'):\n"
+            "    Quartz.CGEventPostToPid(pid, event)\n"
+            "else:\n"
+            "    Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)\n"
         )
         try:
-            subprocess.run(["python3", "-c", code, str(amount)], check=True)
+            subprocess.run([sys.executable, "-c", code, str(amount), str(pid or 0)], check=True)
         except Exception as exc:
             raise RuntimeError("computer.scroll requires PyObjC Quartz on macOS") from exc
 
     def _darwin_type(self, payload: dict[str, Any]) -> None:
         text = str(payload.get("text", ""))
         if text:
-            self._darwin_paste_text(text)
+            pid = self._payload_pid(payload)
+            point = self._virtual_cursor_action_point()
+            if pid and point and self._darwin_ax_set_text_at_point(point["x"], point["y"], pid=pid, text=text.rstrip("\r\n")):
+                if text.endswith(("\n", "\r")):
+                    time.sleep(0.1)
+                    self._darwin_post_key("return", pid=pid)
+                return
+            self._darwin_paste_text(text, pid=self._payload_pid(payload))
             return
         script = self._apple_script("computer.type", payload)
         try:
@@ -2313,6 +2614,10 @@ class BrowserComputerController:
             self._darwin_paste_text(text)
 
     def _darwin_key(self, payload: dict[str, Any]) -> None:
+        pid = self._payload_pid(payload)
+        if pid:
+            self._darwin_post_key(str(payload.get("key", "return")), pid=pid)
+            return
         script = self._apple_script("computer.key", payload)
         try:
             subprocess.run(["osascript", "-e", script], check=True)
@@ -2321,6 +2626,11 @@ class BrowserComputerController:
             self._darwin_post_key(key)
 
     def _darwin_hotkey(self, payload: dict[str, Any]) -> None:
+        pid = self._payload_pid(payload)
+        if pid:
+            parts = self._hotkey_parts(payload)
+            self._darwin_post_key(parts["key"], modifiers=parts["modifiers"], pid=pid)
+            return
         try:
             subprocess.run(["osascript", "-e", self._darwin_hotkey_script(payload)], check=True)
         except subprocess.CalledProcessError:
@@ -2380,13 +2690,13 @@ class BrowserComputerController:
         content = str(payload.get("text") if "text" in payload else payload.get("content") or "")
         subprocess.run(["pbcopy"], input=content, check=True, text=True)
 
-    def _darwin_paste_text(self, text: str) -> None:
+    def _darwin_paste_text(self, text: str, *, pid: int | None = None) -> None:
         try:
             old_clipboard = subprocess.run(["pbpaste"], check=True, capture_output=True, text=True).stdout
         except Exception:
             old_clipboard = None
         subprocess.run(["pbcopy"], input=str(text), check=True, text=True)
-        self._darwin_post_key("v", modifiers=["cmd"])
+        self._darwin_post_key("v", modifiers=["cmd"], pid=pid)
         time.sleep(0.2)
         if old_clipboard is not None:
             try:
@@ -2394,7 +2704,7 @@ class BrowserComputerController:
             except Exception:
                 pass
 
-    def _darwin_post_key(self, key: str, modifiers: list[str] | tuple[str, ...] | None = None) -> None:
+    def _darwin_post_key(self, key: str, modifiers: list[str] | tuple[str, ...] | None = None, *, pid: int | None = None) -> None:
         key_name = str(key or "").strip().lower()
         key_codes = {
             "a": 0,
@@ -2484,17 +2794,90 @@ import Foundation
 let source = CGEventSource(stateID: .hidSystemState)
 let flags: CGEventFlags = {flags_expr}
 let keyCode = CGKeyCode({key_codes[key_name]})
+let pid = Int32({int(pid or 0)})
 if let down = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true) {{
     down.flags = flags
-    down.post(tap: .cghidEventTap)
+    if pid > 0 {{ down.postToPid(pid) }} else {{ down.post(tap: .cghidEventTap) }}
 }}
 Thread.sleep(forTimeInterval: 0.03)
 if let up = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) {{
     up.flags = flags
-    up.post(tap: .cghidEventTap)
+    if pid > 0 {{ up.postToPid(pid) }} else {{ up.post(tap: .cghidEventTap) }}
 }}
 """
         subprocess.run(["swift", "-e", swift], check=True)
+
+    def _virtual_cursor_action_point(self) -> dict[str, int] | None:
+        state = self._read_virtual_cursor()
+        target = state.get("target") if isinstance(state, dict) and isinstance(state.get("target"), dict) else None
+        if not target:
+            return None
+        try:
+            return {"x": int(target.get("x", 0)), "y": int(target.get("y", 0))}
+        except Exception:
+            return None
+
+    @staticmethod
+    def _darwin_ax_press_at_point(x: int, y: int, *, pid: int) -> bool:
+        code = (
+            "import sys, ApplicationServices as AS\n"
+            "pid = int(sys.argv[1]); x = float(sys.argv[2]); y = float(sys.argv[3])\n"
+            "app = AS.AXUIElementCreateApplication(pid)\n"
+            "err, elem = AS.AXUIElementCopyElementAtPosition(app, x, y, None)\n"
+            "if err != 0 or elem is None:\n"
+            "    raise SystemExit(2)\n"
+            "try:\n"
+            "    AS.AXUIElementSetAttributeValue(elem, AS.kAXFocusedAttribute, True)\n"
+            "except Exception:\n"
+            "    pass\n"
+            "try:\n"
+            "    AS.AXUIElementPerformAction(elem, AS.kAXPressAction)\n"
+            "except Exception:\n"
+            "    pass\n"
+        )
+        try:
+            subprocess.run([sys.executable, "-c", code, str(pid), str(x), str(y)], check=True, capture_output=True, text=True)
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _darwin_ax_set_text_at_point(x: int, y: int, *, pid: int, text: str) -> bool:
+        code = (
+            "import sys, ApplicationServices as AS\n"
+            "pid = int(sys.argv[1]); x = float(sys.argv[2]); y = float(sys.argv[3]); text = sys.argv[4]\n"
+            "app = AS.AXUIElementCreateApplication(pid)\n"
+            "err, elem = AS.AXUIElementCopyElementAtPosition(app, x, y, None)\n"
+            "if err != 0 or elem is None:\n"
+            "    raise SystemExit(2)\n"
+            "role = ''\n"
+            "try:\n"
+            "    role_err, role = AS.AXUIElementCopyAttributeValue(elem, AS.kAXRoleAttribute, None)\n"
+            "    role = role if role_err == 0 else ''\n"
+            "except Exception:\n"
+            "    role = ''\n"
+            "if role not in ('AXTextArea', 'AXTextField', 'AXComboBox'):\n"
+            "    raise SystemExit(3)\n"
+            "try:\n"
+            "    AS.AXUIElementSetAttributeValue(elem, AS.kAXFocusedAttribute, True)\n"
+            "except Exception:\n"
+            "    pass\n"
+            "current = ''\n"
+            "try:\n"
+            "    value_err, value = AS.AXUIElementCopyAttributeValue(elem, AS.kAXValueAttribute, None)\n"
+            "    current = str(value or '') if value_err == 0 else ''\n"
+            "except Exception:\n"
+            "    current = ''\n"
+            "new_value = current + text\n"
+            "err = AS.AXUIElementSetAttributeValue(elem, AS.kAXValueAttribute, new_value)\n"
+            "if err != 0:\n"
+            "    raise SystemExit(err)\n"
+        )
+        try:
+            subprocess.run([sys.executable, "-c", code, str(pid), str(x), str(y), str(text)], check=True, capture_output=True, text=True)
+            return True
+        except Exception:
+            return False
 
     def _darwin_focus_window(self, payload: dict[str, Any]) -> None:
         app = self._app_name(payload)

@@ -373,6 +373,58 @@ def test_computer_click_and_move_results_include_point_annotations(monkeypatch):
     assert move["overlay_points"] == [move["annotation"]]
 
 
+def test_computer_move_updates_virtual_cursor_without_moving_real_mouse(tmp_path, monkeypatch):
+    from domain.tool.browser_computer import BrowserComputerController
+    import domain.tool.browser_computer as browser_computer
+
+    calls = []
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.subprocess, "run", lambda *args, **kwargs: calls.append((args, kwargs)))
+
+    result = BrowserComputerController(artifact_root=tmp_path).run(
+        "computer.move",
+        {"x": 41, "y": 52},
+        yolo_mode=True,
+    )
+    state = json.loads((tmp_path / "virtual_cursor.json").read_text(encoding="utf-8"))
+
+    assert result["executed"] is True
+    assert state["type"] == "virtual_cursor"
+    assert state["target"] == {"x": 41, "y": 52}
+    assert calls == []
+
+
+def test_screenshot_burns_virtual_cursor_into_visual(tmp_path):
+    from domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    screenshot = tmp_path / "screenshot-virtual.png"
+    rows = [bytearray([255, 255, 255, 255] * 30) for _ in range(30)]
+    controller._write_png_pixels(
+        screenshot,
+        {"width": 30, "height": 30, "channels": 4, "color_type": 6, "rows": rows},
+    )
+    controller._write_virtual_cursor(
+        {
+            "type": "virtual_cursor",
+            "points": [
+                {"type": "point", "x": 4, "y": 5, "coordinate_space": "screenshot_image", "label": "move"}
+            ],
+        }
+    )
+
+    result = {
+        "path": str(screenshot),
+        "image_size": {"width": 30, "height": 30},
+        "action_coordinate_system": {"width": 30, "height": 30},
+    }
+    controller._attach_screenshot_overlays(result)
+
+    assert Path(result["click_history_visual_path"]).is_file()
+    assert result["virtual_cursor_overlay_point"]["label"] == "ai-cursor"
+    assert result["virtual_cursor_overlay_point"]["x"] == 4
+
+
 def test_windows_hotkey_translation_executes_sendkeys(monkeypatch):
     from domain.tool.browser_computer import BrowserComputerController
     import domain.tool.browser_computer as browser_computer
@@ -712,7 +764,7 @@ def test_screenshot_burns_recent_click_history_into_visual(tmp_path):
         "image_size": {"width": 20, "height": 20},
         "action_coordinate_system": {"width": 20, "height": 20},
     }
-    controller._attach_click_history_visual(result)
+    controller._attach_screenshot_overlays(result)
 
     assert Path(result["click_history_visual_path"]).is_file()
     assert result["click_history_overlay_points"][0]["x"] == 10
@@ -789,7 +841,7 @@ def test_darwin_type_uses_clipboard_paste_for_text(monkeypatch):
     posted = []
     monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
-    monkeypatch.setattr(BrowserComputerController, "_darwin_post_key", lambda self, key, modifiers=None: posted.append((key, modifiers)))
+    monkeypatch.setattr(BrowserComputerController, "_darwin_post_key", lambda self, key, modifiers=None, pid=None: posted.append((key, modifiers, pid)))
 
     result = BrowserComputerController().run("computer.type", {"text": "Gemma 4 testです"}, yolo_mode=True)
 
@@ -797,4 +849,42 @@ def test_darwin_type_uses_clipboard_paste_for_text(monkeypatch):
     assert [command for command, _ in commands] == [["pbpaste"], ["pbcopy"], ["pbcopy"]]
     assert commands[1][1]["input"] == "Gemma 4 testです"
     assert commands[2][1]["input"] == "old"
-    assert posted == [("v", ["cmd"])]
+    assert posted == [("v", ["cmd"], None)]
+
+
+def test_darwin_type_prefers_ax_text_at_virtual_cursor_for_target_app(tmp_path, monkeypatch):
+    from domain.tool.browser_computer import BrowserComputerController
+    import domain.tool.browser_computer as browser_computer
+
+    ax_calls = []
+    posted = []
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(
+        BrowserComputerController,
+        "_prepare_target_context",
+        lambda self, payload, system, focus: {
+            "scope": "app",
+            "window": {"pid": 123, "app": "Vivaldi", "bounds": {"x": 0, "y": 0, "width": 500, "height": 400}},
+            "bounds": {"x": 0, "y": 0, "width": 500, "height": 400},
+            "origin": {"x": 0, "y": 0},
+        },
+    )
+    monkeypatch.setattr(
+        BrowserComputerController,
+        "_darwin_ax_set_text_at_point",
+        staticmethod(lambda x, y, pid, text: ax_calls.append((x, y, pid, text)) or True),
+    )
+    monkeypatch.setattr(BrowserComputerController, "_darwin_post_key", lambda self, key, modifiers=None, pid=None: posted.append((key, modifiers, pid)))
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._write_virtual_cursor({"target": {"x": 40, "y": 50}})
+
+    result = controller.run(
+        "computer.type",
+        {"target": "app", "app": "Vivaldi", "text": "hello\n"},
+        yolo_mode=True,
+    )
+
+    assert result["executed"] is True
+    assert ax_calls == [(40, 50, 123, "hello")]
+    assert posted == [("return", None, 123)]
