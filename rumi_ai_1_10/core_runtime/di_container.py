@@ -1,8 +1,8 @@
 """
-di_container.py - 軽量DIコンテナ
+di_container.py - lightweight DI container
 
-サービスのファクトリ登録・遅延初期化・キャッシュを提供する。
-スレッドセーフ（RLock使用）。
+Provides service factory registration, lazy initialization, and caching.
+Thread-safe via RLock.
 
 Usage:
     from core_runtime.di_container import get_container, reset_container
@@ -19,11 +19,10 @@ from typing import Any, Callable, Dict, List, Optional
 
 class DIContainer:
     """
-    軽量サービスレジストリ（遅延初期化・キャッシュ付き）。
+    Lightweight service registry with lazy initialization and caching.
 
-    register() でファクトリ（引数なし callable）を登録し、
-    get() 初回呼び出し時にファクトリを実行してインスタンスをキャッシュする。
-    ファクトリが例外を送出した場合はキャッシュせず、例外を透過する。
+    register() stores a zero-argument factory. get() runs the factory on
+    first access and caches the instance. Factory exceptions are not cached.
     """
 
     def __init__(self) -> None:
@@ -32,45 +31,43 @@ class DIContainer:
         self._instances: Dict[str, Any] = {}
 
     # ------------------------------------------------------------------
-    # 登録
+    # Registration
     # ------------------------------------------------------------------
 
     def register(self, name: str, factory: Callable[[], Any]) -> None:
         """
-        サービスファクトリを登録する。
+        Register a service factory.
 
-        既に同名のファクトリが登録されている場合は上書きし、
-        キャッシュ済みインスタンスを破棄する。
+        Re-registering a service replaces the factory and drops any cached instance.
 
         Args:
-            name:    サービス名
-            factory: 引数なしで呼び出し可能なファクトリ関数
+            name:    Service name.
+            factory: Zero-argument callable factory.
         """
         with self._lock:
             self._factories[name] = factory
             self._instances.pop(name, None)
 
     # ------------------------------------------------------------------
-    # 取得
+    # Lookup
     # ------------------------------------------------------------------
 
     def get(self, name: str) -> Any:
         """
-        サービスインスタンスを取得する。
+        Get a service instance.
 
-        キャッシュ済みならキャッシュを返す。
-        未キャッシュならファクトリを実行し、成功時のみキャッシュする。
-        ファクトリが例外を送出した場合はキャッシュせず re-raise する。
+        Cached instances are reused. Otherwise the factory is executed and
+        cached only when it succeeds. Factory exceptions are re-raised.
 
         Args:
-            name: サービス名
+            name: Service name.
 
         Returns:
-            サービスインスタンス
+            Service instance.
 
         Raises:
-            KeyError: 未登録のサービス名
-            Exception: ファクトリが送出した例外
+            KeyError: Unknown service name.
+            Exception: Exception raised by the factory.
         """
         with self._lock:
             if name in self._instances:
@@ -78,21 +75,20 @@ class DIContainer:
             if name not in self._factories:
                 raise KeyError(f"Service not registered: {name}")
             factory = self._factories[name]
-            # RLock なので同スレッドからの再入は安全。
-            # ロック内でファクトリを実行し、厳密に1回だけ生成を保証する。
-            instance = factory()  # 例外時はキャッシュしない
+            # RLock allows same-thread re-entry while preserving one-time creation.
+            instance = factory()  # Do not cache when the factory raises.
             self._instances[name] = instance
             return instance
 
     def get_or_none(self, name: str) -> Optional[Any]:
         """
-        サービスインスタンスを取得する。未登録・ファクトリ例外時は None を返す。
+        Get a service instance, returning None for missing services or factory errors.
 
         Args:
-            name: サービス名
+            name: Service name.
 
         Returns:
-            サービスインスタンス、または None
+            Service instance, or None.
         """
         try:
             return self.get(name)
@@ -100,72 +96,69 @@ class DIContainer:
             return None
 
     # ------------------------------------------------------------------
-    # 問い合わせ
+    # Introspection
     # ------------------------------------------------------------------
 
     def has(self, name: str) -> bool:
         """
-        サービスが登録済みかどうかを返す。
+        Return whether a service is registered.
 
         Args:
-            name: サービス名
+            name: Service name.
 
         Returns:
-            True: 登録済み / False: 未登録
+            True if registered, otherwise False.
         """
         with self._lock:
             return name in self._factories
 
     def registered_names(self) -> List[str]:
         """
-        登録済みサービス名の一覧を返す。
+        Return registered service names.
 
         Returns:
-            サービス名のリスト
+            List of service names.
         """
         with self._lock:
             return list(self._factories.keys())
 
     # ------------------------------------------------------------------
-    # リセット
+    # Reset
     # ------------------------------------------------------------------
 
     def reset(self, name: str) -> None:
         """
-        指定サービスのキャッシュ済みインスタンスを破棄する。
-        ファクトリ登録は維持される。次回 get() で再生成される。
+        Drop the cached instance for a service while keeping its factory.
 
         Args:
-            name: サービス名
+            name: Service name.
         """
         with self._lock:
             self._instances.pop(name, None)
 
     def reset_all(self) -> None:
         """
-        全サービスのキャッシュ済みインスタンスを破棄する。
-        ファクトリ登録は維持される。
+        Drop all cached instances while keeping factory registrations.
         """
         with self._lock:
             self._instances.clear()
 
     def set_instance(self, name: str, instance: Any) -> None:
         """
-        インスタンスを直接キャッシュに設定する。
+        Set a cached instance directly.
 
-        initialize_hmac_key_manager() のように特定引数で生成した
-        インスタンスを登録する場合に使用する。
+        Useful for services initialized with arguments elsewhere.
 
         Args:
-            name:     サービス名
-            instance: キャッシュするインスタンス
+            name:     Service name.
+            instance: Instance to cache.
         """
         with self._lock:
             self._instances[name] = instance
 
 
 # ======================================================================
-# グローバルコンテナ
+# Global container
 # ======================================================================
 
 _container: Optional[DIContainer] = None
@@ -174,13 +167,12 @@ _container_lock: threading.Lock = threading.Lock()
 
 def get_container() -> DIContainer:
     """
-    グローバル DIContainer を取得する（遅延初期化）。
+    Get the global DIContainer, lazily initialized.
 
-    初回呼び出し時に register_defaults() を実行し、
-    デフォルトファクトリを登録する。
+    The first call registers all default factories.
 
     Returns:
-        DIContainer インスタンス
+        DIContainer instance.
     """
     global _container
     if _container is None:
@@ -194,9 +186,9 @@ def get_container() -> DIContainer:
 
 def reset_container() -> None:
     """
-    グローバル DIContainer を破棄する（テスト用）。
+    Reset the global DIContainer for tests.
 
-    次回 get_container() で新しいコンテナが生成される。
+    The next get_container() call creates a new container.
     """
     global _container
     with _container_lock:
@@ -204,12 +196,12 @@ def reset_container() -> None:
 
 
 # ======================================================================
-# デフォルトファクトリ登録
+# Default factory registration
 # ======================================================================
 
 def _register_defaults(container: DIContainer) -> None:
     """
-    全サービスのデフォルトファクトリをコンテナに登録する。
+    Register all default service factories on a container.
 
     Wave 1-4: AuditLogger, HMACKeyManager, VocabRegistry,
               NetworkGrantManager, StoreRegistry,
@@ -226,7 +218,7 @@ def _register_defaults(container: DIContainer) -> None:
     Wave 24:  FunctionRegistry
 
     Args:
-        container: 登録先の DIContainer
+        container: Target DIContainer.
     """
     # --- Wave 1: core ---
     def _audit_logger_factory() -> "AuditLogger":  # noqa: F821

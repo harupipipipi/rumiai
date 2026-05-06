@@ -140,6 +140,30 @@ class DefaultsHttpServer:
         for source_key, dest_key in (inject or {}).items():
             payload[dest_key] = path_params.get(source_key, "")
         context = self._build_context()
+        try:
+            from domain.function_runtime.bridge import invoke_function
+            from domain.function_runtime.registry import function_id_for_block_module
+
+            function_id = function_id_for_block_module(module_name)
+            if function_id:
+                context["_defaultspack_http_route_adapter"] = True
+                result = invoke_function(
+                    f"defaultspack:{function_id}",
+                    payload,
+                    context,
+                    principal_id="defaultspack",
+                )
+                error_info = result.get("error", {}) if isinstance(result, dict) else {}
+                error_code = str(error_info.get("code") or "")
+                if error_code not in {
+                    "FUNCTION_REGISTRY_UNAVAILABLE",
+                    "FUNCTION_NOT_FOUND",
+                    "CAPABILITY_RUNTIME_UNAVAILABLE",
+                    "CAPABILITY_EXECUTION_FAILED",
+                }:
+                    return result
+        except Exception:
+            pass
         return invoke_block(module_name, payload, context)
 
     # ---- Chat Handlers (fallback) ----
