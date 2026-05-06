@@ -314,10 +314,32 @@ class AIClient:
             return f"{provider_id}/{model_id}"
         return f"{provider_id}/{model}"
 
+    def _api_route_attempts(self, model, route_refs):
+        attempts = []
+        for route_ref in route_refs:
+            provider_id, api_id = self._route_parts(route_ref)
+            if not provider_id:
+                continue
+            api_key = read_provider_api_key(provider_id, api_id)
+            if not api_key:
+                continue
+            route_model = self._model_for_route(model, provider_id)
+            provider, model_name = self.resolve_provider(route_model)
+            if provider.__class__.__name__ == "StubProvider":
+                continue
+            attempts.append((provider, model_name, api_key))
+        return attempts
+
     def _call_with_api_routes(self, method_name, model, messages, tools=None, params=None):
         route_refs = self._routes_for_model(model)
         if not route_refs:
             return None, False
+
+        if method_name == "stream":
+            route_attempts = self._api_route_attempts(model, route_refs)
+            if not route_attempts:
+                return None, False
+            return self._stream_with_api_routes(route_attempts, messages, tools, params), True
 
         last_error = None
         for route_ref in route_refs:
@@ -347,6 +369,28 @@ class AIClient:
         if last_error is not None:
             raise last_error
         return None, False
+
+    def _stream_with_api_routes(self, route_attempts, messages, tools=None, params=None):
+        last_error = None
+        for provider, model_name, api_key in route_attempts:
+            previous_key = getattr(provider, "_api_key", None)
+            yielded = False
+            try:
+                if previous_key is not None:
+                    provider._api_key = api_key
+                for chunk in provider.stream(model_name, messages, tools or [], params or {}):
+                    yielded = True
+                    yield chunk
+                return
+            except Exception as exc:
+                last_error = exc
+                if yielded or not self._is_rate_limit_error(exc):
+                    raise
+            finally:
+                if previous_key is not None:
+                    provider._api_key = previous_key
+        if last_error is not None:
+            raise last_error
 
     def complete(self, model, messages, tools=None, params=None):
         routed, handled = self._call_with_api_routes("complete", model, messages, tools, params)
