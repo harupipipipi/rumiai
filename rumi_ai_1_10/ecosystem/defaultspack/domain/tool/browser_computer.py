@@ -2155,7 +2155,7 @@ class BrowserComputerController:
                 ]
             self._record_virtual_cursor(action, action_payload, result)
             self._record_click_history(action, action_payload, result)
-            if action == "computer.click":
+            if action in {"computer.move", "computer.click"}:
                 self._attach_post_click_visual(result, payload)
         if target_context:
             result["target_context"] = target_context
@@ -2318,7 +2318,7 @@ class BrowserComputerController:
         result["click_history_overlay_points"] = screenshot.get("click_history_overlay_points", [])
         result["overlay_points"] = screenshot.get("click_history_overlay_points", result.get("overlay_points", []))
         result["visual_feedback"] = {
-            "type": "post_click_screenshot",
+            "type": "post_move_screenshot" if result.get("action") == "computer.move" else "post_click_screenshot",
             "path": result.get("path"),
             "overlay_points": result.get("overlay_points", []),
         }

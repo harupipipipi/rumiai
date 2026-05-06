@@ -26,6 +26,7 @@ type BrowserApproval = {
 };
 
 type ApprovalIdSet = Set<string> | null;
+const PENDING_CHAT_REQUEST_TTL_MS = 6 * 60 * 60_000;
 type ApprovalStatusById = Record<string, string>;
 
 type PendingChatRequest = {
@@ -179,6 +180,15 @@ function optimisticAssistantMessage(conversationId: string, model: string): Chat
     tool_logs: [],
     model,
   };
+}
+
+function isAssistantMessageStillRunning(message: ChatMessage | undefined): boolean {
+  if (!message || message.role === "user") return false;
+  const metadata = message.metadata && typeof message.metadata === "object" ? message.metadata : {};
+  const thinking = metadata.thinking && typeof metadata.thinking === "object" ? metadata.thinking as Record<string, unknown> : {};
+  const state = String(thinking.state ?? "").toLowerCase();
+  const finishReason = String(message.finish_reason ?? "").toLowerCase();
+  return state === "streaming" || state === "running" || finishReason === "streaming";
 }
 
 function previewFromAction(action: SidebarAction, title: string, data: unknown): ToolPreviewItem {
@@ -868,7 +878,7 @@ export default function App() {
   );
   const pendingRequest = activeConversationId ? pendingRequests[activeConversationId] : null;
   const isConversationPending = Boolean(
-    pendingRequest && Date.now() - pendingRequest.startedAt < 10 * 60_000,
+    pendingRequest && Date.now() - pendingRequest.startedAt < PENDING_CHAT_REQUEST_TTL_MS,
   );
   const approvalIdsKey = useMemo(
     () => approvalIdsFromMessages(activeConversation?.messages ?? []).join("|"),
@@ -1173,11 +1183,13 @@ export default function App() {
       void api.getConversation(activeConversationId).then((conversation) => {
         setActiveConversation(conversation);
         const latest = conversation.messages[conversation.messages.length - 1];
-        if (latest && latest.role !== "user") {
+        if (latest && latest.role !== "user" && !isAssistantMessageStillRunning(latest)) {
           forgetPendingRequest(activeConversationId);
           replaceChatIdInUrl(activeConversationId, false);
           setIsGenerating(false);
           void refreshConversations(conversation.id);
+        } else {
+          setIsGenerating(true);
         }
       }).catch(console.error);
     }, 1500);
@@ -1186,7 +1198,7 @@ export default function App() {
 
   useEffect(() => {
     const staleIds = Object.entries(pendingRequests)
-      .filter(([, request]) => Date.now() - request.startedAt >= 10 * 60_000)
+      .filter(([, request]) => Date.now() - request.startedAt >= PENDING_CHAT_REQUEST_TTL_MS)
       .map(([id]) => id);
     if (staleIds.length === 0) return;
     updatePendingRequests((current) => {

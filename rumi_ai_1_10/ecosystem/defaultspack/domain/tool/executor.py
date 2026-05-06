@@ -732,7 +732,9 @@ def _browser_computer_action_payload(tool_name, arguments):
         raw_payload["shortcut"] = raw_action
     if action == "computer.type" and "text" not in raw_payload and "input_text" in raw_payload:
         raw_payload["text"] = raw_payload.get("input_text")
-    if action == "computer.click" and "visual_feedback" not in raw_payload and "show_click_feedback" not in raw_payload:
+    if action == "computer.move" and not bool(arguments.get("dry_run")) and "visual_feedback" not in raw_payload and "show_click_feedback" not in raw_payload:
+        raw_payload["visual_feedback"] = True
+    if action == "computer.click" and not bool(arguments.get("dry_run")) and "visual_feedback" not in raw_payload and "show_click_feedback" not in raw_payload:
         raw_payload["visual_feedback"] = True
     if "dry_run" in arguments:
         raw_payload["dry_run"] = arguments.get("dry_run")

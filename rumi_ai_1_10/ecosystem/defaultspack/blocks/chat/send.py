@@ -2,6 +2,7 @@ import sys
 import os
 import json
 import re
+import time
 from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from blocks._common import ok, error, gen_id, timestamp
@@ -59,6 +60,44 @@ _TARGET_APP_PATTERNS = [
     (re.compile(r"\bterminal\b|ターミナル", re.IGNORECASE), "Terminal"),
     (re.compile(r"\bxcode\b", re.IGNORECASE), "Xcode"),
 ]
+_DEFAULT_AI_RETRY_DELAYS = (1.5, 4.0, 9.0)
+_NON_RETRYABLE_AI_ERROR_RE = re.compile(
+    r"(api key|not configured|unauthorized|forbidden|authentication|invalid api|invalid request|bad request|\b400\b|\b401\b|\b403\b)",
+    re.IGNORECASE,
+)
+
+
+def _ai_retry_attempts(params):
+    retry = params.get("retry") if isinstance(params, dict) else None
+    if isinstance(retry, dict):
+        if retry.get("enabled") is False:
+            return 1
+        raw = retry.get("max_attempts")
+    else:
+        raw = params.get("max_retry_attempts") if isinstance(params, dict) else None
+    try:
+        attempts = int(raw) if raw is not None else 3
+    except Exception:
+        attempts = 3
+    return max(1, min(attempts, 5))
+
+
+def _ai_retry_delay(params, retry_index):
+    retry = params.get("retry") if isinstance(params, dict) else None
+    if isinstance(retry, dict) and isinstance(retry.get("delays"), list):
+        try:
+            value = float(retry["delays"][min(retry_index, len(retry["delays"]) - 1)])
+            return max(0.0, min(value, 30.0))
+        except Exception:
+            pass
+    return _DEFAULT_AI_RETRY_DELAYS[min(retry_index, len(_DEFAULT_AI_RETRY_DELAYS) - 1)]
+
+
+def _is_retryable_ai_error(message):
+    text = str(message or "")
+    if not text:
+        return True
+    return _NON_RETRYABLE_AI_ERROR_RE.search(text) is None
 
 
 def _stub_response():
@@ -606,6 +645,77 @@ def _append_event(events, event, event_callback=None):
     return event
 
 
+def _call_ai_complete_with_retry(model, messages, tools, params, call_handler, events, event_callback):
+    attempts = _ai_retry_attempts(params)
+    last_error = "AI request failed"
+    for attempt_index in range(attempts):
+        try:
+            if call_handler is not None:
+                response = call_handler(
+                    "defaults.ai.complete",
+                    {
+                        "model": model,
+                        "messages": messages,
+                        "tools": tools,
+                        "params": params,
+                    },
+                )
+                if isinstance(response, dict) and response.get("status") == "error":
+                    err = response.get("error", {})
+                    raise RuntimeError(str(err.get("message") or "AI request failed"))
+                if isinstance(response, dict) and response.get("status") == "ok":
+                    return response.get("data", {})
+                return response
+            response, ai_error = _ai_direct_complete(model, messages, tools, params)
+            if ai_error is not None:
+                raise RuntimeError(ai_error)
+            return response
+        except Exception as exc:
+            last_error = str(exc)
+            if attempt_index >= attempts - 1 or not _is_retryable_ai_error(last_error):
+                break
+            delay = _ai_retry_delay(params, attempt_index)
+            _append_event(
+                events,
+                _event(
+                    "ai_retry_scheduled",
+                    "APIエラーのため少し待って再送信します",
+                    phase="ai_retry_scheduled",
+                    attempt=attempt_index + 1,
+                    max_attempts=attempts,
+                    delay_seconds=delay,
+                    error=last_error,
+                ),
+                event_callback,
+            )
+            if delay > 0:
+                time.sleep(delay)
+    raise RuntimeError(last_error)
+
+
+def _ai_error_response(model, message, params, events=None):
+    text = "APIエラーでこのタスクを終了しました。\n\n{}".format(str(message or "AI request failed"))
+    return {
+        "content": [{"type": "text", "text": text}],
+        "finish_reason": "error",
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        "events": list(events or []),
+        "tool_logs": [],
+        "metadata": {
+            "model": model,
+            "attached_tool_count": 0,
+            "attached_tools": [],
+            "thinking": {"state": "failed"},
+            "thinking_level": params.get("thinking_level") if isinstance(params, dict) else None,
+            "error": {
+                "type": "AI_ERROR",
+                "message": str(message or "AI request failed"),
+                "terminal": True,
+            },
+        },
+    }
+
+
 def _response_text(response):
     parts = []
     for block in response.get("content", []) if isinstance(response, dict) else []:
@@ -700,23 +810,15 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
     )
 
     for step_index in range(max(1, limit + 1)):
-        ai_params = {
-            "model": model,
-            "messages": working_messages,
-            "tools": tools,
-            "params": params,
-        }
-        if call_handler is not None:
-            response = call_handler("defaults.ai.complete", ai_params)
-            if isinstance(response, dict) and response.get("status") == "error":
-                err = response.get("error", {})
-                raise RuntimeError(str(err.get("message") or "AI request failed"))
-            if isinstance(response, dict) and response.get("status") == "ok":
-                response = response.get("data", {})
-        else:
-            response, ai_error = _ai_direct_complete(model, working_messages, tools, params)
-            if ai_error is not None:
-                raise RuntimeError(ai_error)
+        response = _call_ai_complete_with_retry(
+            model,
+            working_messages,
+            tools,
+            params,
+            call_handler,
+            events,
+            event_callback,
+        )
 
         if not isinstance(response, dict):
             response = _stub_response()
@@ -1053,6 +1155,7 @@ def run(input_data, context):
         }
     raw_tools, provider_tools, tool_context = _available_tools(request_context, input_data)
     tools_called = [tool_name_from_definition(tool) for tool in raw_tools if tool_name_from_definition(tool)]
+    ai_error_message = None
     try:
         response = _complete_with_tools(
             model,
@@ -1063,9 +1166,11 @@ def run(input_data, context):
             params,
         )
     except RuntimeError as exc:
-        return error(str(exc), "AI_ERROR")
+        ai_error_message = str(exc)
+        response = _ai_error_response(model, ai_error_message, params)
     except Exception as exc:
-        return error("AI request failed: " + str(exc), "AI_ERROR")
+        ai_error_message = "AI request failed: " + str(exc)
+        response = _ai_error_response(model, ai_error_message, params)
 
     # P1-4: Inspector にリクエストログを記録
     try:
@@ -1099,4 +1204,6 @@ def run(input_data, context):
     assistant_msg = store.add_message(conversation_id, assistant_msg_dict)
     if assistant_msg is None:
         return error("Failed to add assistant message", "INTERNAL_ERROR")
+    if ai_error_message:
+        assistant_msg["error"] = {"code": "AI_ERROR", "message": ai_error_message, "terminal": True}
     return ok(assistant_msg)

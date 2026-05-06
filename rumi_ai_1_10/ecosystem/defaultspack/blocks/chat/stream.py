@@ -2,6 +2,7 @@ import sys
 import os
 import queue
 import threading
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -13,9 +14,14 @@ from domain.chat.message_builder import build_assistant_message
 from domain.prompt.manager import get_manager
 from blocks.chat._context_helpers import extract_user_text, enrich_messages
 from blocks.chat.send import (
+    _ai_error_response,
+    _ai_retry_attempts,
+    _ai_retry_delay,
     _attachment_image_blocks,
     _attachment_text_blocks,
     _conversation_system_prompt,
+    _event,
+    _is_retryable_ai_error,
     _normalize_vision_detail,
     _sanitize_attachment_metadata,
     _with_inferred_requested_tools,
@@ -191,6 +197,32 @@ def _stream_response(input_data, context):
         return
     yield {"type": "user_message", "message": user_msg}
 
+    seq = user_msg.get("sequence_number", 1) + 1
+    assistant_msg = store.add_message(
+        conversation_id,
+        build_assistant_message(
+            conversation_id=conversation_id,
+            parent_id=user_msg["id"],
+            sequence_number=seq,
+            response={
+                "content": [{"type": "text", "text": ""}],
+                "finish_reason": "streaming",
+                "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+                "metadata": {
+                    "model": conv.get("model", "stub/default") if isinstance(conv, dict) else "stub/default",
+                    "attached_tool_count": 0,
+                    "attached_tools": [],
+                    "thinking": {"state": "streaming"},
+                    "thinking_level": params.get("thinking_level"),
+                },
+            },
+            model=conv.get("model", "stub/default"),
+        ),
+    )
+    if assistant_msg is None:
+        yield {"type": "error", "error": "Failed to create assistant message"}
+        return
+
     chain = store.get_message_chain(conversation_id, user_msg["id"])
     standard_messages = convert_to_standard(chain)
     model = conv.get("model", "stub/default")
@@ -213,24 +245,77 @@ def _stream_response(input_data, context):
     text_parts = []
     finish_reason = "stop"
     usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
-    try:
-        chunks = client.stream(model, standard_messages, tools=[], params=params)
-        for chunk in chunks:
-            chunk_type = chunk.get("type", "") if isinstance(chunk, dict) else ""
-            if chunk_type == "content_delta":
-                delta = chunk.get("delta", {})
-                text = delta.get("text", "")
-                if text:
-                    visible_text = thought_filter.push(text)
-                    if visible_text:
-                        text_parts.append(visible_text)
-                        yield {"type": "delta", "delta": visible_text}
-            elif chunk_type == "stream_end":
-                finish_reason = chunk.get("finish_reason", "stop")
-                usage = chunk.get("usage", usage)
-    except Exception as exc:
-        yield {"type": "error", "error": "AI request failed: " + str(exc)}
-        return
+    attempts = _ai_retry_attempts(params)
+    for attempt_index in range(attempts):
+        try:
+            chunks = client.stream(model, standard_messages, tools=[], params=params)
+            for chunk in chunks:
+                chunk_type = chunk.get("type", "") if isinstance(chunk, dict) else ""
+                if chunk_type == "content_delta":
+                    delta = chunk.get("delta", {})
+                    text = delta.get("text", "")
+                    if text:
+                        visible_text = thought_filter.push(text)
+                        if visible_text:
+                            text_parts.append(visible_text)
+                            current_text = "".join(text_parts)
+                            store.update_message(
+                                conversation_id,
+                                assistant_msg["id"],
+                                {
+                                    "content": [{"type": "text", "text": current_text}],
+                                    "raw_text": current_text,
+                                    "metadata": {
+                                        **(assistant_msg.get("metadata") or {}),
+                                        "thinking": {"state": "streaming"},
+                                    },
+                                },
+                            )
+                            yield {"type": "delta", "delta": visible_text}
+                elif chunk_type == "stream_end":
+                    finish_reason = chunk.get("finish_reason", "stop")
+                    usage = chunk.get("usage", usage)
+            break
+        except Exception as exc:
+            message = "AI request failed: " + str(exc)
+            if text_parts or attempt_index >= attempts - 1 or not _is_retryable_ai_error(message):
+                failed_response = _ai_error_response(
+                    model,
+                    message,
+                    params,
+                    events=[
+                        _event(
+                            "task_failed",
+                            "APIエラーでタスクを終了しました",
+                            phase="task_failed",
+                            error=message,
+                            terminal=True,
+                        )
+                    ],
+                )
+                failed_message = build_assistant_message(
+                    conversation_id=conversation_id,
+                    parent_id=user_msg["id"],
+                    sequence_number=seq,
+                    response=failed_response,
+                    model=model,
+                )
+                assistant_msg = store.update_message(conversation_id, assistant_msg["id"], failed_message) or failed_message
+                yield {"type": "task_failed", "message": "APIエラーでタスクを終了しました", "error": message, "terminal": True}
+                yield {"type": "message", "message": assistant_msg}
+                yield {"type": "done", "message": assistant_msg}
+                return
+            delay = _ai_retry_delay(params, attempt_index)
+            yield {
+                "type": "ai_retry_scheduled",
+                "message": "APIエラーのため少し待って再送信します",
+                "attempt": attempt_index + 1,
+                "max_attempts": attempts,
+                "delay_seconds": delay,
+                "error": message,
+            }
+            if delay > 0:
+                time.sleep(delay)
 
     trailing_text = thought_filter.finish()
     if trailing_text:
@@ -257,17 +342,14 @@ def _stream_response(input_data, context):
             "source": "inline_thought_stream",
         }
 
-    seq = user_msg.get("sequence_number", 1) + 1
-    assistant_msg = store.add_message(
-        conversation_id,
-        build_assistant_message(
-            conversation_id=conversation_id,
-            parent_id=user_msg["id"],
-            sequence_number=seq,
-            response=response,
-            model=model,
-        ),
+    final_message = build_assistant_message(
+        conversation_id=conversation_id,
+        parent_id=user_msg["id"],
+        sequence_number=seq,
+        response=response,
+        model=model,
     )
+    assistant_msg = store.update_message(conversation_id, assistant_msg["id"], final_message)
     if assistant_msg is None:
         yield {"type": "error", "error": "Failed to add assistant message"}
         return
