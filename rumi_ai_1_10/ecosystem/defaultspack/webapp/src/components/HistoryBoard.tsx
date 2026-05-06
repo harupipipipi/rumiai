@@ -26,7 +26,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import {
   Globe, Terminal, MessageSquare, Plus, ChevronRight, Settings,
-  GripVertical, FolderOpen, Folder, FolderPlus, MessageSquarePlus, PanelLeftClose, X,
+  GripVertical, FolderOpen, Folder, FolderPlus, MessageSquarePlus, PanelLeftClose, PanelLeftOpen, X,
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -292,6 +292,20 @@ function getAllGroupDragIds(groups: ChatGroup[]): string[] {
     ids.push(...getAllGroupDragIds(g.subGroups));
   }
   return ids;
+}
+
+function flattenChats(groups: ChatGroup[]): ChatItem[] {
+  const chats: ChatItem[] = [];
+  const visitChat = (chat: ChatItem) => {
+    chats.push(chat);
+    for (const child of chat.children ?? []) visitChat(child);
+  };
+  const visitGroup = (group: ChatGroup) => {
+    for (const chat of group.chats) visitChat(chat);
+    for (const subGroup of group.subGroups) visitGroup(subGroup);
+  };
+  for (const group of groups) visitGroup(group);
+  return chats;
 }
 
 // ============================================================
@@ -788,9 +802,11 @@ interface HistoryBoardProps {
   onNewTask: () => void;
   onSettingsClick: () => void;
   onMinimize?: () => void;
+  onRestore?: () => void;
+  isCompact?: boolean;
 }
 
-export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, onNewTask, onSettingsClick, onMinimize }: HistoryBoardProps) {
+export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, onNewTask, onSettingsClick, onMinimize, onRestore, isCompact = false }: HistoryBoardProps) {
   const [customGroups, setCustomGroups] = useState<CustomGroupInfo[]>(() => loadCustomGroups());
   const [groups, setGroups] = useState<ChatGroup[]>(() => buildGroupsFromChats(chatItems, customGroups));
   const [expandedChatIds, setExpandedChatIds] = useState<Set<string>>(() => new Set());
@@ -1047,6 +1063,77 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
   const accountInitial = account?.initial || accountName.charAt(0).toUpperCase();
   const accountIcon = account?.avatar_url || '';
   const accountIconIsImage = /^(https?:|data:image|\/)/.test(accountIcon);
+  const compactChats = flattenChats(groups);
+
+  if (isCompact) {
+    return (
+      <div className="flex h-full w-full flex-col items-center bg-[#09090b] text-zinc-400">
+        <div className="flex w-full flex-col items-center gap-1 border-b border-zinc-800/60 px-1.5 py-2">
+          <button
+            onClick={handleCreateChat}
+            className="flex h-9 w-9 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+            title="New Chat"
+            aria-label="New Chat"
+          >
+            <MessageSquarePlus size={16} />
+          </button>
+          <button
+            onClick={handleCreateGroup}
+            className="flex h-9 w-9 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+            title="New Group"
+            aria-label="New Group"
+          >
+            <FolderPlus size={16} />
+          </button>
+          {onRestore && (
+            <button
+              type="button"
+              onClick={onRestore}
+              className="flex h-9 w-9 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+              title="チャット欄を開く"
+              aria-label="チャット欄を開く"
+            >
+              <PanelLeftOpen size={16} />
+            </button>
+          )}
+        </div>
+
+        <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto px-1.5 py-2">
+          {compactChats.map((chat) => {
+            const isActive = activeChatId === chat.id;
+            return (
+              <button
+                key={chat.id}
+                type="button"
+                onClick={() => onChatSelect(chat.id)}
+                className={cn(
+                  "relative flex h-9 w-9 items-center justify-center rounded-md transition-colors",
+                  isActive ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:bg-zinc-800/70 hover:text-zinc-100"
+                )}
+                title={chat.title}
+                aria-label={chat.title}
+              >
+                <MessageSquare size={15} />
+                {isActive && <span className="absolute left-0 h-4 w-0.5 rounded-r bg-emerald-400" />}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex w-full flex-col items-center border-t border-zinc-800/60 px-1.5 py-2">
+          <button
+            type="button"
+            onClick={onSettingsClick}
+            className="flex h-9 w-9 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+            title="Settings"
+            aria-label="Settings"
+          >
+            <Settings size={15} />
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <DndContext
@@ -1058,10 +1145,10 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
     >
       <div className="relative flex flex-col h-full min-w-0">
         {/* Top action bar */}
-        <div className="flex items-center gap-1 px-3 py-2 border-b border-zinc-800/60 flex-shrink-0">
+        <div className="flex flex-col gap-1 px-3 py-2 border-b border-zinc-800/60 flex-shrink-0">
           <button
             onClick={handleCreateChat}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded-md transition-colors"
+            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs font-medium text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
             title="New Chat"
           >
             <MessageSquarePlus size={14} />
@@ -1069,7 +1156,7 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
           </button>
           <button
             onClick={handleCreateGroup}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded-md transition-colors"
+            className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs font-medium text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
             title="New Group"
           >
             <FolderPlus size={14} />
@@ -1079,10 +1166,11 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
             <button
               type="button"
               onClick={onMinimize}
-              className="ml-auto flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs font-medium text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
               title="チャット欄を閉じる"
             >
               <PanelLeftClose size={15} />
+              <span>閉じる</span>
             </button>
           )}
         </div>

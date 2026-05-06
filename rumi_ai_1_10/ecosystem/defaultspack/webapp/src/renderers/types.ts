@@ -60,6 +60,8 @@ export type HistoryBoardRendererProps = {
   onNewTask: () => void;
   onSettingsClick: () => void;
   onMinimize?: () => void;
+  onRestore?: () => void;
+  isCompact?: boolean;
 };
 
 export type ChatHeaderRendererProps = {

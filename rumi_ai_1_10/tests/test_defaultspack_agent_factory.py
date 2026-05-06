@@ -90,3 +90,33 @@ def test_wait_tool_invoke_is_allowed_by_safe_metadata(monkeypatch, tmp_path):
 
     assert result["status"] == "ok"
     assert result["data"]["permission"]["allowed"] is True
+
+
+def test_think_tool_records_visible_checkpoint():
+    from domain.tool.executor import ToolExecutor
+
+    result = ToolExecutor().execute(
+        "think",
+        {
+            "summary": "Investigated the current failure.",
+            "completed": ["Read logs"],
+            "next_steps": ["Patch UI"],
+            "blockers": [],
+            "confidence": 0.8,
+        },
+        {},
+    )
+
+    assert result["is_error"] is False
+    assert "Investigated the current failure" in result["result"]
+    assert result["widget"]["completed"] == ["Read logs"]
+
+
+def test_think_tool_invoke_is_allowed_by_safe_metadata(monkeypatch, tmp_path):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_TOOL_PERMISSION_POLICY_PATH", str(tmp_path / "permission.json"))
+    from blocks.tool.invoke import run
+
+    result = run({"tool_name": "think", "arguments": {"summary": "checkpoint"}}, {})
+
+    assert result["status"] == "ok"
+    assert result["data"]["permission"]["allowed"] is True

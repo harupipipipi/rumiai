@@ -25,7 +25,7 @@ class PermissionChecker:
             decision.get("action") == "ask"
             and isinstance(tool_def, dict)
             and tool_def.get("requires_approval") is False
-            and str(tool_def.get("action_type") or "") in {"wait"}
+            and str(tool_def.get("action_type") or "") in {"wait", "think"}
         ):
             return {
                 **decision,

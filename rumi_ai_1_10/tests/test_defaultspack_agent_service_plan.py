@@ -689,6 +689,21 @@ def test_chat_stream_infers_computer_use_tools_from_explicit_request(tmp_path, m
     ChatStore._instance = None
 
 
+def test_chat_tool_inference_accepts_common_computer_use_typos():
+    from blocks.chat.send import _with_inferred_requested_tools
+
+    result = _with_inferred_requested_tools(
+        {
+            "message": {"role": "user", "content": "vivladiで自分にメッセージを送って。compter use"},
+            "tools": [],
+            "params": {"tool_policy": {"selected_tools": []}},
+        }
+    )
+
+    assert result["tools"] == ["computer_use", "zoom"]
+    assert result["message"]["metadata"]["auto_selected_tools"] == ["computer_use", "zoom"]
+
+
 def test_chat_stream_fallback_emits_live_tool_events_before_final_message(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from blocks.chat.stream import run

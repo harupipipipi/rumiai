@@ -44,12 +44,12 @@ _SECRET_KEY_RE = re.compile(
 )
 _PROMPT_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _COMPUTER_USE_REQUEST_RE = re.compile(
-    r"computer[\s_-]*use|computer\s+ツール|コンピューター操作|pc操作|"
-    r"(vivaldi|line|ブラウザ|browser).{0,24}(操作|送信|入力|クリック|開いて|開く)",
+    r"compu?ter[\s_-]*use|compter[\s_-]*use|computer\s+ツール|コンピューター操作|pc操作|"
+    r"(vivaldi|vivladi|line|ブラウザ|browser).{0,24}(操作|送信|入力|クリック|開いて|開く)",
     re.IGNORECASE,
 )
 _TARGET_APP_PATTERNS = [
-    (re.compile(r"\bv(i|ı)valdi\b|ヴィヴァルディ|ビバルディ", re.IGNORECASE), "Vivaldi"),
+    (re.compile(r"\bv(i|ı)?valdi\b|\bvivladi\b|ヴィヴァルディ|ビバルディ", re.IGNORECASE), "Vivaldi"),
     (re.compile(r"\bchrome\b|クローム", re.IGNORECASE), "Google Chrome"),
     (re.compile(r"\bsafari\b|サファリ", re.IGNORECASE), "Safari"),
     (re.compile(r"\bfirefox\b|ファイアフォックス", re.IGNORECASE), "Firefox"),

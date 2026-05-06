@@ -363,6 +363,13 @@ class ToolExecutor:
                 "is_error": result.get("status") == "error",
                 "widget": {"type": "wait", **result},
             }
+        elif tool_name == "think":
+            result = _execute_think(arguments, context if isinstance(context, dict) else {})
+            return {
+                "result": result.get("summary", "checkpoint recorded"),
+                "is_error": False,
+                "widget": {"type": "think", **result},
+            }
         elif tool_name == "subagent":
             from domain.tool.subagent import SubagentController
 
@@ -488,6 +495,55 @@ def _wait_seconds(arguments):
     if unit.startswith("m"):
         return value * 60
     return value
+
+
+def _execute_think(arguments, context):
+    del context
+    arguments = arguments if isinstance(arguments, dict) else {}
+
+    def text(name, fallback=""):
+        value = arguments.get(name, fallback)
+        if value is None:
+            return ""
+        return str(value).strip()
+
+    def list_text(name):
+        value = arguments.get(name)
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [line.strip(" -\t") for line in value.splitlines() if line.strip(" -\t")]
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        return [str(value).strip()] if str(value).strip() else []
+
+    summary = text("summary") or text("checkpoint") or "Checkpoint recorded."
+    completed = list_text("completed")
+    next_steps = list_text("next_steps") or list_text("next")
+    blockers = list_text("blockers")
+    confidence = arguments.get("confidence")
+    try:
+        confidence = None if confidence is None else max(0.0, min(1.0, float(confidence)))
+    except Exception:
+        confidence = None
+
+    parts = [summary]
+    if completed:
+        parts.append("Done: " + "; ".join(completed[:5]))
+    if next_steps:
+        parts.append("Next: " + "; ".join(next_steps[:5]))
+    if blockers:
+        parts.append("Blocked: " + "; ".join(blockers[:5]))
+
+    return {
+        "status": "ok",
+        "summary": "\n".join(parts),
+        "checkpoint": summary,
+        "completed": completed,
+        "next_steps": next_steps,
+        "blockers": blockers,
+        "confidence": confidence,
+    }
 
 
 def _browser_computer_action_payload(tool_name, arguments):

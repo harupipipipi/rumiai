@@ -1,0 +1,56 @@
+{
+  "id": "think",
+  "category": "tool",
+  "version": "1",
+  "display_name": "Think",
+  "description": "Record a visible checkpoint that summarizes progress, next steps, blockers, and confidence.",
+  "enabled": true,
+  "config": {
+    "tool_id": "think",
+    "name": "think",
+    "summary": "ここまでの進捗と次の行動を一旦整理します。",
+    "tags": ["planning", "checkpoint", "reflection", "agent"],
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "summary": {
+            "type": "string",
+            "description": "Short visible checkpoint summary."
+          },
+          "completed": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Things already completed."
+          },
+          "next_steps": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Concrete next actions."
+          },
+          "blockers": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Open blockers or uncertainties."
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      }
+    },
+    "execution": {"type": "local"},
+    "requires_approval": false,
+    "action_type": "think",
+    "ui": {
+      "group_id": "planning",
+      "group_label": "Planning",
+      "composer_label": "Think",
+      "composer_icon": "brain",
+      "drop_capabilities": ["composer.toggle_chip"],
+      "widget_kind": "tool_toggle"
+    }
+  }
+}
