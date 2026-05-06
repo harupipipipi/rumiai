@@ -39,7 +39,7 @@ def test_operations_company_profile_coexists_with_default_profile():
 
 
 def test_operations_company_bootstrap_creates_org_conversation_and_heartbeat(tmp_path, monkeypatch):
-    from domain.agent.operations_company import OperationsCompanyRuntime
+    from ecosystem.rumi_operations_company_pack.domain.agent.operations_company import OperationsCompanyRuntime
     from domain.agent.scheduler import Scheduler
     from domain.chat.store import ChatStore
 
@@ -79,7 +79,7 @@ def test_operations_conversation_resolves_pack_system_prompt():
 
 
 def test_operations_heartbeat_trigger_persists_into_single_client_conversation(tmp_path, monkeypatch):
-    from domain.agent.operations_company import OperationsCompanyRuntime
+    from ecosystem.rumi_operations_company_pack.domain.agent.operations_company import OperationsCompanyRuntime
     from domain.agent.scheduler import Scheduler
     from domain.chat.store import ChatStore
 
@@ -109,7 +109,7 @@ def test_operations_heartbeat_trigger_persists_into_single_client_conversation(t
 
 
 def test_rumi_api_tool_lists_routes_and_requires_mutation_approval():
-    from domain.tool.rumi_api import run
+    from ecosystem.rumi_default_tools_pack.domain.tool.rumi_api import run
 
     listed = run({"action": "list_routes"}, {})
     mutation = run(

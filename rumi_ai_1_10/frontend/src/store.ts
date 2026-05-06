@@ -13,6 +13,10 @@ import {
   deleteFlow as apiDeleteFlow,
   updateProfile as apiUpdateProfile,
   restartKernel as apiRestartKernel,
+  fetchUpdates,
+  fetchUpdateSettings,
+  updateUpdateSettings,
+  applyUpdate as apiApplyUpdate,
   openExternalUrl,
   startOAuth,
 } from './lib/api';
@@ -104,6 +108,17 @@ export interface VersionInfo {
   };
 }
 
+export type UpdateTarget = 'rumiai' | 'defaultspack';
+
+export interface UpdateInfo {
+  target: UpdateTarget;
+  currentVersion: string;
+  latestVersion: string;
+  updateAvailable: boolean;
+  releaseUrl: string;
+  repo: string;
+}
+
 export type RuntimeStatus = 'starting' | 'panel_ready' | 'runtime_ready' | 'error';
 
 interface AppState {
@@ -158,6 +173,15 @@ interface AppState {
 
   version: VersionInfo;
   loadVersion: () => Promise<void>;
+  updates: UpdateInfo[];
+  autoUpdate: Record<UpdateTarget, boolean>;
+  updatesLoading: boolean;
+  updateSettingsLoading: boolean;
+  updateApplyingTarget: UpdateTarget | null;
+  loadUpdates: () => Promise<void>;
+  loadUpdateSettings: () => Promise<void>;
+  setAutoUpdate: (target: UpdateTarget, enabled: boolean) => Promise<void>;
+  applyUpdate: (target: UpdateTarget) => Promise<void>;
 }
 
 const defaultDashboard: DashboardData = {
@@ -187,6 +211,24 @@ const defaultVersion: VersionInfo = {
     type: '',
   },
 };
+
+function transformUpdateInfo(update: {
+  target: UpdateTarget;
+  current_version: string;
+  latest_version: string;
+  update_available: boolean;
+  release_url: string;
+  repo: string;
+}): UpdateInfo {
+  return {
+    target: update.target,
+    currentVersion: update.current_version,
+    latestVersion: update.latest_version,
+    updateAvailable: update.update_available,
+    releaseUrl: update.release_url,
+    repo: update.repo,
+  };
+}
 
 export const useAppStore = create<AppState>((set, get) => ({
   theme: (localStorage.getItem('rumi-theme') as Theme) || 'Rumi',
@@ -441,6 +483,69 @@ export const useAppStore = create<AppState>((set, get) => ({
       // Version fetch failure is non-critical
       const msg = e instanceof Error ? e.message : 'Failed to load version';
       console.warn('Version fetch failed:', msg);
+    }
+  },
+
+  updates: [],
+  autoUpdate: { rumiai: false, defaultspack: false },
+  updatesLoading: false,
+  updateSettingsLoading: false,
+  updateApplyingTarget: null,
+
+  loadUpdates: async () => {
+    set({ updatesLoading: true });
+    try {
+      const data = await fetchUpdates();
+      set({ updates: data.updates.map(transformUpdateInfo), updatesLoading: false });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to check updates';
+      set({ updatesLoading: false });
+      get().addToast(msg, 'error');
+    }
+  },
+
+  loadUpdateSettings: async () => {
+    set({ updateSettingsLoading: true });
+    try {
+      const data = await fetchUpdateSettings();
+      set({ autoUpdate: data.auto_update, updateSettingsLoading: false });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to load update settings';
+      set({ updateSettingsLoading: false });
+      get().addToast(msg, 'error');
+    }
+  },
+
+  setAutoUpdate: async (target, enabled) => {
+    const previous = get().autoUpdate;
+    set({ autoUpdate: { ...previous, [target]: enabled }, updateSettingsLoading: true });
+    try {
+      const data = await updateUpdateSettings({ [target]: enabled });
+      set({ autoUpdate: data.auto_update, updateSettingsLoading: false });
+      get().addToast(`Auto update ${enabled ? 'enabled' : 'disabled'}: ${target}`, 'success');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to save update settings';
+      set({ autoUpdate: previous, updateSettingsLoading: false });
+      get().addToast(msg, 'error');
+    }
+  },
+
+  applyUpdate: async (target) => {
+    set({ updateApplyingTarget: target });
+    try {
+      const result = await apiApplyUpdate(target);
+      await get().loadUpdates();
+      const suffix = result.restart_required
+        ? ' Restart Rumi AI to finish.'
+        : result.routes_reload_recommended
+          ? ' Restart the Kernel to reload routes.'
+          : '';
+      get().addToast(`Update applied: ${target}.${suffix}`, 'success');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to apply update';
+      get().addToast(msg, 'error');
+    } finally {
+      set({ updateApplyingTarget: null });
     }
   },
 }));

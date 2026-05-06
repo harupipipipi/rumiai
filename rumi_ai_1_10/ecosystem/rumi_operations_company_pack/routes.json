@@ -1,0 +1,22 @@
+{
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/api/agent/company/manifest",
+      "flow_id": "transport_direct",
+      "description": "Inspect the Operations Company long-running profile contract"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/company/status",
+      "flow_id": "transport_direct",
+      "description": "Read Operations Company org, schedule, and chat status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/company/bootstrap",
+      "flow_id": "transport_direct",
+      "description": "Start or reattach the Operations Company 24/7 agent"
+    }
+  ]
+}

@@ -27,6 +27,10 @@ API 一覧:
   GET  /api/panel/settings/profile   — プロフィール取得
   PUT  /api/panel/settings/profile   — プロフィール更新
   GET  /api/panel/version            — バージョン情報
+  GET  /api/panel/updates            — rumiai/defaultspack 更新確認
+  GET  /api/panel/updates/settings   — 自動アップデート設定取得
+  PUT  /api/panel/updates/settings   — 自動アップデート設定更新
+  POST /api/panel/updates/{target}/apply — GitHub Release から更新適用
   POST /api/panel/kernel/restart     — Kernel 再起動（exit code 42）
 """
 from __future__ import annotations
@@ -849,6 +853,74 @@ class ControlPanelHandlersMixin:
             "platform": platform.system(),
             "platform_release": platform.release(),
         }
+
+    # ------------------------------------------------------------------
+    # Updates
+    # ------------------------------------------------------------------
+
+    def _panel_check_updates(self) -> Dict[str, Any]:
+        """GET /api/panel/updates — rumiai/defaultspack の更新確認"""
+        try:
+            from ..github_update_manager import get_github_update_manager
+
+            manager = get_github_update_manager()
+            checks = manager.check_many(["rumiai", "defaultspack"])
+            return {"updates": [check.to_dict() for check in checks]}
+        except Exception as e:
+            _log_internal_error("panel_check_updates", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_get_update_settings(self) -> Dict[str, Any]:
+        """GET /api/panel/updates/settings — 自動アップデート設定取得"""
+        try:
+            from ..github_update_manager import get_github_update_manager
+
+            manager = get_github_update_manager()
+            return manager.read_auto_update_settings()
+        except Exception as e:
+            _log_internal_error("panel_get_update_settings", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_update_update_settings(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        """PUT /api/panel/updates/settings — 自動アップデート設定更新"""
+        auto_update = body.get("auto_update")
+        if not isinstance(auto_update, dict):
+            return {"error": "auto_update must be an object", "status_code": 400}
+        unknown = set(auto_update.keys()) - {"rumiai", "defaultspack"}
+        if unknown:
+            return {"error": f"Unknown update target: {sorted(unknown)[0]}", "status_code": 400}
+
+        try:
+            from ..github_update_manager import get_github_update_manager
+
+            manager = get_github_update_manager()
+            return manager.set_auto_update_settings(auto_update)
+        except Exception as e:
+            _log_internal_error("panel_update_update_settings", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
+
+    def _panel_apply_update(self, target: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        """POST /api/panel/updates/{target}/apply — GitHub Release 更新適用"""
+        if target not in {"rumiai", "defaultspack"}:
+            return {"error": "Unknown update target", "status_code": 400}
+
+        try:
+            from ..github_update_manager import GitHubUpdateError, get_github_update_manager
+
+            force = bool(body.get("force", False))
+            manager = get_github_update_manager()
+            result = manager.apply(target, force=force)  # type: ignore[arg-type]
+            payload = result.to_dict()
+            if target == "rumiai":
+                payload["restart_required"] = True
+            else:
+                payload["routes_reload_recommended"] = True
+            return payload
+        except GitHubUpdateError as e:
+            return {"error": str(e), "status_code": 400}
+        except Exception as e:
+            _log_internal_error("panel_apply_update", e)
+            return {"error": _SAFE_ERROR_MSG, "status_code": 500}
 
     # ------------------------------------------------------------------
     # Kernel Restart

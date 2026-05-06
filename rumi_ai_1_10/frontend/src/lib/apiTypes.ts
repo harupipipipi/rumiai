@@ -70,6 +70,25 @@ export interface ApiVersion {
   platform_release: string;
 }
 
+export type ApiUpdateTarget = 'rumiai' | 'defaultspack';
+
+export interface ApiUpdateInfo {
+  target: ApiUpdateTarget;
+  current_version: string;
+  latest_version: string;
+  update_available: boolean;
+  release_url: string;
+  repo: string;
+}
+
+export interface ApiUpdateSettings {
+  auto_update: Record<ApiUpdateTarget, boolean>;
+  check_interval_hours: number;
+  last_checked_at: string | null;
+  last_results: Array<Record<string, unknown>>;
+  updated_at: string | null;
+}
+
 // ============================================================
 // Endpoint-specific response data shapes (inside envelope)
 // ============================================================
@@ -82,6 +101,24 @@ export interface PacksResponseData {
 export interface PackToggleResponseData {
   pack_id: string;
   enabled: boolean;
+}
+
+export interface UpdatesResponseData {
+  updates: ApiUpdateInfo[];
+}
+
+export interface UpdateApplyResponseData {
+  target: ApiUpdateTarget;
+  current_version: string;
+  latest_version: string;
+  release_url: string;
+  backup_dir: string;
+  applied_files: string[];
+  skipped_files: string[];
+  applied_count: number;
+  skipped_count: number;
+  restart_required?: boolean;
+  routes_reload_recommended?: boolean;
 }
 
 export interface ApiStartupNodePort {
@@ -306,6 +343,8 @@ export interface ApiCapabilityGraph {
   display_name?: Record<string, string>;
   description?: Record<string, string>;
   description_label: string;
+  display_name?: Record<string, string>;
+  description?: Record<string, string>;
   nodes: Array<{id: string; ref: string; display_name?: Record<string, string>; metadata?: Record<string, unknown>}>;
   edges: Array<{id: string; from: string; to: string; kind: string; metadata?: Record<string, unknown>}>;
   metadata: Record<string, unknown>;

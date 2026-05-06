@@ -1,0 +1,13 @@
+{
+  "function_id": "calculator",
+  "description": "Evaluate a basic arithmetic expression for the calculator tool.",
+  "calling_convention": "subprocess",
+  "host_execution": false,
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "expression": {"type": "string"}
+    },
+    "required": ["expression"]
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "pack_id": "rumi_model_catalog_pack",
+  "display_name": "Rumi Model Catalog Pack",
+  "description": "Concrete provider and model catalog data separated from defaultspack core.",
+  "target_pack_id": "rumi_model_catalog_pack",
+  "recommended": true,
+  "risk_level": "low",
+  "supports_all_ok": true
+}

@@ -1,0 +1,13 @@
+{
+  "function_id": "file_reader",
+  "description": "Compatibility file reader tool function.",
+  "calling_convention": "subprocess",
+  "host_execution": false,
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "path": {"type": "string"}
+    },
+    "required": ["path"]
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "function_id": "todo",
+  "description": "Maintain per-conversation todo lists.",
+  "calling_convention": "subprocess",
+  "host_execution": false,
+  "input_schema": {"type": "object"}
+}

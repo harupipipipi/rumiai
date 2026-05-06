@@ -1,0 +1,7 @@
+{
+  "function_id": "computer_use",
+  "description": "Run computer_use tool actions through the shared browser/computer controller.",
+  "calling_convention": "subprocess",
+  "host_execution": false,
+  "input_schema": {"type": "object"}
+}

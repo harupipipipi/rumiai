@@ -2,6 +2,7 @@ from .registry import ToolRegistry
 from .mcp_client import McpClient
 from .schema_adapter import is_tool_rejected_by_policy, policy_from_context
 from pathlib import Path
+import json
 
 
 # P1-2: サンドボックス用の安全なビルトイン一覧
@@ -61,6 +62,10 @@ _SAFE_BUILTINS = {
 }
 
 
+def json_dumps(value):
+    return json.dumps(value, ensure_ascii=False)
+
+
 class ToolExecutor:
     """ツール実行エンジン"""
 
@@ -103,6 +108,12 @@ class ToolExecutor:
             mcp_tool_name = execution.get("mcp_tool_name", tool_name)
             return self._mcp_client.invoke(server_name, mcp_tool_name, arguments)
 
+        if exec_type == "rumi_function":
+            return self._execute_rumi_function(tool_def, arguments, context)
+
+        if exec_type == "capability":
+            return self._execute_capability(tool_def, arguments, context)
+
         if exec_type == "dynamic":
             return self._execute_dynamic(tool_def, arguments, context)
 
@@ -114,6 +125,145 @@ class ToolExecutor:
             return self._execute_handler(tool_def, arguments, context)
 
         return self._execute_local(tool_name, arguments, context)
+
+    def _execute_rumi_function(self, tool_def, arguments, context):
+        execution = tool_def.get("execution", {}) if isinstance(tool_def, dict) else {}
+        qualified_name = str(execution.get("qualified_name") or "").strip()
+        if not qualified_name:
+            return {
+                "result": "Tool '{}' has no rumi_function qualified_name".format(
+                    tool_def.get("name", tool_def.get("tool_id", "tool"))
+                ),
+                "is_error": True,
+                "widget": None,
+            }
+        request = {
+            "type": "function.call",
+            "qualified_name": qualified_name,
+            "args": arguments or {},
+        }
+        return self._execute_capability_request(tool_def, request, context)
+
+    def _execute_capability(self, tool_def, arguments, context):
+        execution = tool_def.get("execution", {}) if isinstance(tool_def, dict) else {}
+        permission_id = str(execution.get("permission_id") or "").strip()
+        if not permission_id:
+            return {
+                "result": "Tool '{}' has no capability permission_id".format(
+                    tool_def.get("name", tool_def.get("tool_id", "tool"))
+                ),
+                "is_error": True,
+                "widget": None,
+            }
+        request = {
+            "permission_id": permission_id,
+            "args": arguments or {},
+        }
+        qualified_name = str(execution.get("qualified_name") or "").strip()
+        if qualified_name:
+            request["qualified_name"] = qualified_name
+        return self._execute_capability_request(tool_def, request, context)
+
+    def _execute_capability_request(self, tool_def, request, context):
+        try:
+            from core_runtime.capability_executor import CapabilityExecutor
+        except Exception as exc:
+            return {
+                "result": "CapabilityExecutor is not available: {}".format(exc),
+                "is_error": True,
+                "widget": None,
+            }
+        principal_id = self._principal_id(tool_def, context)
+        try:
+            executor = CapabilityExecutor()
+            if request.get("type") == "function.call":
+                executor._function_registry = self._build_function_registry()
+                executor._initialized = True
+            response = executor.execute(principal_id, request)
+        except Exception as exc:
+            return {
+                "result": "Capability execution failed: {}".format(exc),
+                "is_error": True,
+                "widget": None,
+            }
+        return self._tool_response_from_capability(response)
+
+    @staticmethod
+    def _build_function_registry():
+        from core_runtime.function_registry import FunctionRegistry
+
+        registry = FunctionRegistry()
+        ecosystem_dir = Path(__file__).resolve().parents[3]
+        for pack_root in sorted(ecosystem_dir.iterdir()):
+            if not pack_root.is_dir() or not (pack_root / "ecosystem.json").exists():
+                continue
+            try:
+                pack_manifest = json.loads((pack_root / "ecosystem.json").read_text(encoding="utf-8"))
+            except Exception:
+                pack_manifest = {}
+            pack_id = str(pack_manifest.get("pack_id") or pack_root.name).strip() or pack_root.name
+            functions_root = pack_root / "functions"
+            if not functions_root.exists():
+                continue
+            for function_dir in sorted(path for path in functions_root.iterdir() if path.is_dir()):
+                manifest_path = function_dir / "manifest.json"
+                if not manifest_path.is_file():
+                    continue
+                try:
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                function_id = str(manifest.get("function_id") or function_dir.name).strip()
+                if not function_id:
+                    continue
+                registry.register(
+                    pack_id=pack_id,
+                    function_id=function_id,
+                    manifest=manifest,
+                    function_dir=function_dir,
+                )
+        return registry
+
+    @staticmethod
+    def _principal_id(tool_def, context):
+        if isinstance(context, dict):
+            for key in ("principal_id", "pack_id", "_source_pack_id"):
+                value = context.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+        source_pack_id = tool_def.get("source_pack_id") or tool_def.get("metadata", {}).get("source_pack_id")
+        if isinstance(source_pack_id, str) and source_pack_id.strip():
+            return source_pack_id.strip()
+        return "defaultspack"
+
+    @staticmethod
+    def _tool_response_from_capability(response):
+        success = bool(getattr(response, "success", False))
+        output = getattr(response, "output", None)
+        error = getattr(response, "error", None)
+        if not success:
+            return {
+                "result": str(error or "Capability execution failed"),
+                "is_error": True,
+                "widget": None,
+            }
+        if isinstance(output, dict):
+            if "result" in output or "is_error" in output or "widget" in output:
+                return {
+                    "result": output.get("result", output.get("summary", "")),
+                    "is_error": bool(output.get("is_error", False)),
+                    "widget": output.get("widget"),
+                }
+            return {
+                "result": json_dumps(output),
+                "is_error": False,
+                "widget": output,
+            }
+        return {
+            "result": "" if output is None else str(output),
+            "is_error": False,
+            "widget": None,
+        }
 
     def _execute_dynamic(self, tool_def, arguments, context):
         """
@@ -306,7 +456,7 @@ class ToolExecutor:
                 "widget": {"type": "research_sources", **result.as_dict()}
             }
         elif tool_name in {"browser_computer", "browser_use", "computer_use"}:
-            from domain.tool.browser_computer import BrowserComputerController
+            from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 
             policy = policy_from_context(context if isinstance(context, dict) else {})
             action, payload = _browser_computer_action_payload(tool_name, arguments)
@@ -324,7 +474,7 @@ class ToolExecutor:
                 "widget": {"type": tool_name, **result}
             }
         elif tool_name == "todo":
-            from domain.tool.todo import TodoController
+            from ecosystem.rumi_default_tools_pack.domain.tool.todo import TodoController
 
             result = TodoController().run(arguments, context if isinstance(context, dict) else {})
             return {
@@ -333,7 +483,7 @@ class ToolExecutor:
                 "widget": {"type": "todo", **result},
             }
         elif tool_name == "subagent":
-            from domain.tool.subagent import SubagentController
+            from ecosystem.rumi_default_tools_pack.domain.tool.subagent import SubagentController
 
             result = SubagentController().run(arguments, context if isinstance(context, dict) else {})
             return {

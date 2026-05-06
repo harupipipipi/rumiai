@@ -1,0 +1,9 @@
+{
+  "pack_id": "rumi_operations_company_pack",
+  "display_name": "Rumi Operations Company Pack",
+  "description": "Optional long-running operations company profile and UI entry.",
+  "target_pack_id": "rumi_operations_company_pack",
+  "recommended": true,
+  "risk_level": "medium",
+  "supports_all_ok": true
+}

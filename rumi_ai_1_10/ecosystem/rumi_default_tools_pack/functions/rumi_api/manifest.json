@@ -1,0 +1,7 @@
+{
+  "function_id": "rumi_api",
+  "description": "Inspect and call the local Rumi API from agents.",
+  "calling_convention": "subprocess",
+  "host_execution": false,
+  "input_schema": {"type": "object"}
+}

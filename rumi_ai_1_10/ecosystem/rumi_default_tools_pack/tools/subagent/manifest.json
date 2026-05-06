@@ -1,0 +1,55 @@
+{
+  "id": "subagent",
+  "category": "tool",
+  "version": "1",
+  "display_name": "Subagent",
+  "description": "Delegate a bounded task to a child conversation and link it under the parent chat.",
+  "enabled": true,
+  "config": {
+    "name": "subagent",
+    "summary": "サブエージェント",
+    "tags": ["agent", "subagent", "delegation"],
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task": {"type": "string"},
+          "title": {"type": "string"},
+          "model": {"type": "string"},
+          "agent_id": {"type": "string"}
+        },
+        "required": ["task"]
+      }
+    },
+    "execution": {
+      "type": "rumi_function",
+      "qualified_name": "rumi_default_tools_pack:subagent"
+    },
+    "ui": {
+      "group_id": "agent",
+      "group_label": "Agent",
+      "composer_label": "Subagent",
+      "composer_icon": "bot",
+      "drop_capabilities": ["composer.toggle_chip"],
+      "widget_kind": "tool_toggle",
+      "settings_fields": [
+        {
+          "id": "default_model",
+          "label": "Default model",
+          "type": "text",
+          "default": "",
+          "help": "Saved fallback model preference when a parent chat has no model."
+        },
+        {
+          "id": "max_concurrent_subagents",
+          "label": "Max concurrent subagents",
+          "type": "number",
+          "default": 2,
+          "min": 1,
+          "max": 8,
+          "help": "Saved preference for delegated work fan-out."
+        }
+      ]
+    }
+  }
+}

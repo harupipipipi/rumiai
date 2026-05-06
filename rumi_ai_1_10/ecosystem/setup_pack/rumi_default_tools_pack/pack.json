@@ -1,0 +1,9 @@
+{
+  "pack_id": "rumi_default_tools_pack",
+  "display_name": "Rumi Default Tools Pack",
+  "description": "Concrete starter tools separated from defaultspack core.",
+  "target_pack_id": "rumi_default_tools_pack",
+  "recommended": true,
+  "risk_level": "medium",
+  "supports_all_ok": true
+}

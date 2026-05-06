@@ -70,10 +70,6 @@ def run(context):
         ("POST", "/api/agent/schedules/{id}/pause", _lazy("blocks.agent.scheduler.pause"), {"id": "schedule_id"}),
         ("POST", "/api/agent/schedules/{id}/resume", _lazy("blocks.agent.scheduler.resume"), {"id": "schedule_id"}),
         ("GET", "/api/agent/schedules/{id}/history", _lazy("blocks.agent.scheduler.history"), {"id": "schedule_id"}),
-        # ---- Operations Company profile routes ----
-        ("GET", "/api/agent/company/manifest", _lazy("blocks.agent.company.manifest"), {}),
-        ("GET", "/api/agent/company/status", _lazy("blocks.agent.company.status"), {}),
-        ("POST", "/api/agent/company/bootstrap", _lazy("blocks.agent.company.bootstrap"), {}),
         # ---- Organization routes ----
         ("GET", "/api/agent/org", _lazy("blocks.agent.org.list"), {}),
         ("POST", "/api/agent/org", _lazy("blocks.agent.org.create"), {}),

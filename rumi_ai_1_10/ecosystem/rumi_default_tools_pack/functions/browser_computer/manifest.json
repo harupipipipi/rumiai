@@ -1,0 +1,7 @@
+{
+  "function_id": "browser_computer",
+  "description": "Run approved browser/computer actions.",
+  "calling_convention": "subprocess",
+  "host_execution": false,
+  "input_schema": {"type": "object"}
+}

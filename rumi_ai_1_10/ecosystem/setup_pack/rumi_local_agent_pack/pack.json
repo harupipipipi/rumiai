@@ -1,0 +1,9 @@
+{
+  "pack_id": "rumi_local_agent_pack",
+  "display_name": "Rumi Local Agent Pack",
+  "description": "Starter local agent profiles, prompts, presets, and examples.",
+  "target_pack_id": "rumi_local_agent_pack",
+  "recommended": true,
+  "risk_level": "low",
+  "supports_all_ok": true
+}

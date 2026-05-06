@@ -88,6 +88,16 @@
     },
     {
       "method": "GET",
+      "path": "/api/panel/updates",
+      "handler": "_panel_check_updates"
+    },
+    {
+      "method": "GET",
+      "path": "/api/panel/updates/settings",
+      "handler": "_panel_get_update_settings"
+    },
+    {
+      "method": "GET",
       "path": "/api/nodes",
       "handler": "_capability_get_nodes"
     },
@@ -221,6 +231,12 @@
     },
     {
       "method": "POST",
+      "path_pattern": "/api/panel/updates/{target}/apply",
+      "handler": "_panel_apply_update",
+      "pass_body": true
+    },
+    {
+      "method": "POST",
       "path": "/api/panel/graphs",
       "handler": "_capability_create_graph",
       "pass_body": true
@@ -310,6 +326,12 @@
       "method": "PUT",
       "path": "/api/panel/settings/profile",
       "handler": "_panel_update_profile",
+      "pass_body": true
+    },
+    {
+      "method": "PUT",
+      "path": "/api/panel/updates/settings",
+      "handler": "_panel_update_update_settings",
       "pass_body": true
     },
     {

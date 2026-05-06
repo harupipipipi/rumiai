@@ -14,7 +14,43 @@ class CapabilityCatalog:
         self.pack_root = Path(pack_root) if pack_root is not None else Path(__file__).resolve().parents[2]
 
     def _load_yaml_dir(self, directory_name: str, suffix: str) -> List[Dict[str, Any]]:
-        directory = self.pack_root / directory_name
+        return self._load_yaml_dir_from_roots(directory_name, suffix, self._catalog_roots())
+
+    def _catalog_roots(self) -> List[Path]:
+        ecosystem_dir = self.pack_root.parent
+        roots: List[Path] = []
+        if ecosystem_dir.is_dir():
+            for path in sorted(ecosystem_dir.iterdir()):
+                if path.is_dir() and (path / "ecosystem.json").is_file():
+                    roots.append(path)
+        if self.pack_root not in roots:
+            roots.insert(0, self.pack_root)
+        return roots
+
+    @staticmethod
+    def _pack_id(pack_root: Path) -> str:
+        try:
+            raw = json.loads((pack_root / "ecosystem.json").read_text(encoding="utf-8"))
+            pack_id = str(raw.get("pack_id") or "").strip()
+            if pack_id:
+                return pack_id
+        except Exception:
+            pass
+        return pack_root.name
+
+    def _load_yaml_dir_from_roots(
+        self,
+        directory_name: str,
+        suffix: str,
+        roots: List[Path],
+    ) -> List[Dict[str, Any]]:
+        items: List[Dict[str, Any]] = []
+        for root in roots:
+            items.extend(self._load_yaml_dir_from_root(root, directory_name, suffix))
+        return items
+
+    def _load_yaml_dir_from_root(self, pack_root: Path, directory_name: str, suffix: str) -> List[Dict[str, Any]]:
+        directory = pack_root / directory_name
         if not directory.is_dir():
             return []
         items: List[Dict[str, Any]] = []
@@ -25,7 +61,12 @@ class CapabilityCatalog:
                 data = {"id": path.stem, "error": str(exc)}
             if isinstance(data, dict):
                 data.setdefault("id", path.name.replace(suffix, ""))
-                data["_source_path"] = str(path.relative_to(self.pack_root))
+                data["source_pack_id"] = self._pack_id(pack_root)
+                data["_source_pack_id"] = data["source_pack_id"]
+                try:
+                    data["_source_path"] = str(path.relative_to(pack_root))
+                except ValueError:
+                    data["_source_path"] = str(path)
                 items.append(data)
         return items
 
@@ -59,20 +100,24 @@ class CapabilityCatalog:
         return self._load_yaml_dir("examples", ".example.yaml")
 
     def prompts(self) -> List[Dict[str, Any]]:
-        prompt_dir = self.pack_root / "prompts"
-        if not prompt_dir.is_dir():
-            return []
         prompts: List[Dict[str, Any]] = []
-        for path in sorted(prompt_dir.glob("*.system.md")):
-            text = path.read_text(encoding="utf-8")
-            prompts.append(
-                {
-                    "id": path.name.replace(".system.md", ""),
-                    "name": path.stem.replace(".system", ""),
-                    "content_ref": str(path.relative_to(self.pack_root)),
-                    "preview": text.strip().splitlines()[0] if text.strip() else "",
-                }
-            )
+        for pack_root in self._catalog_roots():
+            prompt_dir = pack_root / "prompts"
+            if not prompt_dir.is_dir():
+                continue
+            source_pack_id = self._pack_id(pack_root)
+            for path in sorted(prompt_dir.glob("*.system.md")):
+                text = path.read_text(encoding="utf-8")
+                prompts.append(
+                    {
+                        "id": path.name.replace(".system.md", ""),
+                        "name": path.stem.replace(".system", ""),
+                        "content_ref": str(path.relative_to(pack_root)),
+                        "preview": text.strip().splitlines()[0] if text.strip() else "",
+                        "source_pack_id": source_pack_id,
+                        "_source_pack_id": source_pack_id,
+                    }
+                )
         return prompts
 
     def feature_catalog(self) -> Dict[str, Any]:

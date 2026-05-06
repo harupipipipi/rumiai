@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
-import { useAppStore, Theme, ColorMode, AVATAR_OPTIONS } from '@/src/store';
+import { useAppStore, Theme, ColorMode, AVATAR_OPTIONS, UpdateTarget } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
 import { cn } from '@/src/lib/utils';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/src/components/ui/Card';
 import { Button } from '@/src/components/ui/Button';
 import { Input } from '@/src/components/ui/Input';
 import { Badge } from '@/src/components/ui/Badge';
-import { User, Settings as SettingsIcon, Globe, Briefcase, Palette, Moon, Sun, LogIn, Loader2, CheckCircle2, ChevronDown } from 'lucide-react';
+import { Switch } from '@/src/components/ui/Switch';
+import { User, Settings as SettingsIcon, Globe, Briefcase, Palette, Moon, Sun, LogIn, Loader2, CheckCircle2, ChevronDown, RefreshCw, DownloadCloud } from 'lucide-react';
 
 export function Settings() {
   const t = useT();
@@ -16,6 +17,15 @@ export function Settings() {
   const loadProfile = useAppStore(state => state.loadProfile);
   const loadVersion = useAppStore(state => state.loadVersion);
   const version = useAppStore(state => state.version);
+  const updates = useAppStore(state => state.updates);
+  const autoUpdate = useAppStore(state => state.autoUpdate);
+  const updatesLoading = useAppStore(state => state.updatesLoading);
+  const updateSettingsLoading = useAppStore(state => state.updateSettingsLoading);
+  const updateApplyingTarget = useAppStore(state => state.updateApplyingTarget);
+  const loadUpdates = useAppStore(state => state.loadUpdates);
+  const loadUpdateSettings = useAppStore(state => state.loadUpdateSettings);
+  const setAutoUpdate = useAppStore(state => state.setAutoUpdate);
+  const applyUpdate = useAppStore(state => state.applyUpdate);
   const theme = useAppStore(state => state.theme);
   const setTheme = useAppStore(state => state.setTheme);
   const colorMode = useAppStore(state => state.colorMode);
@@ -31,6 +41,13 @@ export function Settings() {
     loadProfile();
     loadVersion();
   }, [loadProfile, loadVersion]);
+
+  useEffect(() => {
+    if (activeTab === 'version') {
+      loadUpdates();
+      loadUpdateSettings();
+    }
+  }, [activeTab, loadUpdates, loadUpdateSettings]);
 
   useEffect(() => {
     const refreshProfile = () => {
@@ -75,6 +92,11 @@ export function Settings() {
   };
 
   const themes: Theme[] = ['Rumi', 'Minimal', 'Standard', 'Rounded'];
+  const updateName = (target: UpdateTarget) => target === 'rumiai' ? 'Rumi AI' : 'defaultspack';
+
+  const handleApplyUpdate = async (target: UpdateTarget) => {
+    await applyUpdate(target);
+  };
 
   return (
     <div className="flex-1 overflow-y-auto p-8 flex flex-col gap-8 animate-in fade-in slide-in-from-bottom-4">
@@ -294,36 +316,93 @@ export function Settings() {
           </div>
         </div>
       ) : (
-        <Card>
-          <CardHeader>
-            <CardTitle>{t('settings.version')}</CardTitle>
-            <CardDescription>{t('settings.version_desc')}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-4 md:grid-cols-2">
-              {[
-                ['App Version', version.app],
-                ['Kernel Version', version.kernel],
-                ['Python Version', version.python],
-                ['Launcher Version', version.launcher],
-              ].map(([label, val]) => (
-                <div key={label} className="flex items-center justify-between rounded-[var(--radius)] border border-border p-4">
-                  <span className="text-sm font-medium text-text-main">{label}</span>
-                  <Badge variant="secondary">{val}</Badge>
+        <div className="flex flex-col gap-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>{t('settings.version')}</CardTitle>
+              <CardDescription>{t('settings.version_desc')}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 md:grid-cols-2">
+                {[
+                  ['App Version', version.app],
+                  ['Kernel Version', version.kernel],
+                  ['Python Version', version.python],
+                  ['Launcher Version', version.launcher],
+                ].map(([label, val]) => (
+                  <div key={label} className="flex items-center justify-between rounded-[var(--radius)] border border-border p-4">
+                    <span className="text-sm font-medium text-text-main">{label}</span>
+                    <Badge variant="secondary">{val}</Badge>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between rounded-[var(--radius)] border border-border p-4">
+                  <div className="flex flex-col">
+                    <span className="text-sm font-medium text-text-main">Docker</span>
+                    <span className="text-xs text-text-muted">{version.docker.type}</span>
+                  </div>
+                  <Badge variant={version.docker.installed ? 'secondary' : 'destructive'}>
+                    {version.docker.installed ? version.docker.version : t('settings.not_installed')}
+                  </Badge>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex-row items-center justify-between space-y-0">
+              <div>
+                <CardTitle>{t('settings.updates')}</CardTitle>
+                <CardDescription>{t('settings.updates_desc')}</CardDescription>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => loadUpdates()} disabled={updatesLoading} className="gap-2">
+                {updatesLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                {t('settings.check_updates')}
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {updates.map((update) => (
+                <div key={update.target} className="flex flex-col gap-3 rounded-[var(--radius)] border border-border p-4 md:flex-row md:items-center md:justify-between">
+                  <div className="flex min-w-0 flex-col gap-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-semibold text-text-main">{updateName(update.target)}</span>
+                      <Badge variant={update.updateAvailable ? 'default' : 'secondary'}>
+                        {update.updateAvailable ? t('settings.update_available') : t('settings.up_to_date')}
+                      </Badge>
+                    </div>
+                    <span className="text-xs text-text-muted">
+                      {update.currentVersion} → {update.latestVersion}
+                    </span>
+                    <span className="text-xs text-text-muted">{update.repo}</span>
+                  </div>
+                  <div className="flex flex-col gap-3 md:items-end">
+                    <label className="flex items-center gap-2 text-xs font-medium text-text-muted">
+                      <Switch
+                        checked={autoUpdate[update.target]}
+                        disabled={updateSettingsLoading}
+                        onCheckedChange={(checked) => setAutoUpdate(update.target, checked)}
+                      />
+                      {t('settings.auto_update')}
+                    </label>
+                    <Button
+                      variant={update.updateAvailable ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => handleApplyUpdate(update.target)}
+                      disabled={!update.updateAvailable || updateApplyingTarget !== null || updatesLoading}
+                      className="gap-2 md:w-32"
+                    >
+                      {updateApplyingTarget === update.target ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <DownloadCloud className="h-4 w-4" />
+                      )}
+                      {t('settings.apply_update')}
+                    </Button>
+                  </div>
                 </div>
               ))}
-              <div className="flex items-center justify-between rounded-[var(--radius)] border border-border p-4">
-                <div className="flex flex-col">
-                  <span className="text-sm font-medium text-text-main">Docker</span>
-                  <span className="text-xs text-text-muted">{version.docker.type}</span>
-                </div>
-                <Badge variant={version.docker.installed ? 'secondary' : 'destructive'}>
-                  {version.docker.installed ? version.docker.version : t('settings.not_installed')}
-                </Badge>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </div>
       )}
     </div>
   );

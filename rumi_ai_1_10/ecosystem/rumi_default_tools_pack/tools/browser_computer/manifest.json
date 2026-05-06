@@ -1,0 +1,89 @@
+{
+  "id": "browser_computer",
+  "category": "tool",
+  "version": "1",
+  "display_name": "Browser / Computer",
+  "description": "Open browser URLs, inspect sessions, and run approved desktop actions.",
+  "enabled": true,
+  "config": {
+    "name": "browser_computer",
+    "summary": "Approved browser and computer actions",
+    "tags": ["browser", "computer", "approval"],
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["browser.open_url", "browser.session", "computer.screenshot", "computer.move", "computer.click", "computer.type", "computer.key", "computer.scroll"]
+          },
+          "payload": {"type": "object"}
+        },
+        "required": ["action"]
+      }
+    },
+    "execution": {
+      "type": "rumi_function",
+      "qualified_name": "rumi_default_tools_pack:browser_computer"
+    },
+    "requires_approval": true,
+    "ui": {
+      "group_id": "browser_computer",
+      "group_label": "Browser / Computer",
+      "composer_label": "Browser / Computer",
+      "composer_icon": "mouse-pointer-click",
+      "drop_capabilities": ["composer.toggle_chip"],
+      "widget_kind": "tool_toggle",
+      "settings_fields": [
+        {
+          "id": "target",
+          "label": "Default Target",
+          "type": "select",
+          "default": "active_context",
+          "options": [
+            {"value": "active_context", "label": "Active Context"},
+            {"value": "browser_first", "label": "Browser First"},
+            {"value": "desktop_first", "label": "Desktop First"}
+          ],
+          "help": "Default target preference when a task can use either browser or desktop."
+        },
+        {
+          "id": "mode",
+          "label": "Default Mode",
+          "type": "select",
+          "default": "inspect_first",
+          "options": [
+            {"value": "inspect_first", "label": "Inspect First"},
+            {"value": "direct", "label": "Direct Action"},
+            {"value": "read_only", "label": "Read Only"}
+          ],
+          "help": "Preferred operating mode before issuing cross-surface actions."
+        },
+        {
+          "id": "safety",
+          "label": "Safety Default",
+          "type": "select",
+          "default": "approval_required",
+          "options": [
+            {"value": "approval_required", "label": "Require Approval"},
+            {"value": "dry_run_first", "label": "Dry Run First"},
+            {"value": "read_only", "label": "Read Only"}
+          ],
+          "help": "Durable safety preference for cross-surface operations."
+        },
+        {
+          "id": "quality",
+          "label": "Screenshot Quality",
+          "type": "select",
+          "default": "standard",
+          "options": [
+            {"value": "compact", "label": "Compact"},
+            {"value": "standard", "label": "Standard"},
+            {"value": "high_detail", "label": "High Detail"}
+          ],
+          "help": "Default visual detail preference for browser and desktop inspection."
+        }
+      ]
+    }
+  }
+}

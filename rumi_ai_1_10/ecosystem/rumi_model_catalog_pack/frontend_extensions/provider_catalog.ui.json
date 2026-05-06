@@ -1,0 +1,26 @@
+{
+  "sidebar_items": [
+    {
+      "id": "provider-catalog",
+      "label": "Providers",
+      "category": "integration",
+      "description": "Available AI providers and model catalog.",
+      "tags": ["provider", "model"],
+      "ui": {
+        "widget_kind": "panel",
+        "drop_capabilities": ["composer.open_panel"],
+        "composer_label": "AI Library",
+        "composer_icon": "provider",
+        "composer_action": {
+          "type": "open_panel",
+          "target_item_id": "provider-catalog"
+        }
+      },
+      "origin": {"kind": "pack", "path": "rumi_model_catalog_pack/frontend_extensions/provider_catalog.ui.json"},
+      "panel": {
+        "kind": "models",
+        "title": "Providers"
+      }
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 import json
 import os
 import threading
+from pathlib import Path
 
 from ..extensions.runtime import get_extension_registry
 
@@ -23,8 +24,7 @@ class ToolRegistry:
         self._mcp_servers = {}
         self._lock = threading.Lock()
         self._tools_dir = self._resolve_tools_dir()
-        if not self._load_extension_tools():
-            self._register_defaults()
+        self._load_pack_tools()
         self._load_dynamic_tools()
 
     # ------------------------------------------------------------------
@@ -41,59 +41,79 @@ class ToolRegistry:
         return tools_dir
 
     # ------------------------------------------------------------------
-    # built-in tools
+    # pack-provided tools
     # ------------------------------------------------------------------
 
-    def _register_defaults(self):
-        """フォールバック用ビルトインツールを登録する。"""
-        self.register({
-            "tool_id": "web_search",
-            "name": "web_search",
-            "summary": "ウェブ検索",
-            "tags": ["search"],
-            "schema": {
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string"}
-                    },
-                    "required": ["query"]
-                }
-            },
-            "execution": {"type": "local"}
-        })
-        self.register({
-            "tool_id": "calculator",
-            "name": "calculator",
-            "summary": "計算",
-            "tags": ["math"],
-            "schema": {
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "expression": {"type": "string"}
-                    },
-                    "required": ["expression"]
-                }
-            },
-            "execution": {"type": "local"}
-        })
-        self.register({
-            "tool_id": "file_reader",
-            "name": "file_reader",
-            "summary": "ファイル読み取り",
-            "tags": ["io", "file"],
-            "schema": {
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "path": {"type": "string"}
-                    },
-                    "required": ["path"]
-                }
-            },
-            "execution": {"type": "local"}
-        })
+    def _pack_root(self) -> Path:
+        return Path(__file__).resolve().parents[2]
+
+    def _ecosystem_dir(self) -> Path:
+        return self._pack_root().parent
+
+    def _installed_pack_roots(self) -> list[Path]:
+        ecosystem_dir = self._ecosystem_dir()
+        if not ecosystem_dir.is_dir():
+            return [self._pack_root()]
+        roots: list[Path] = []
+        for path in sorted(ecosystem_dir.iterdir()):
+            if path.is_dir() and (path / "ecosystem.json").is_file():
+                roots.append(path)
+        return roots
+
+    def _load_pack_tools(self):
+        loaded = self._load_extension_tools()
+        for pack_root in self._installed_pack_roots():
+            loaded += self._load_tools_from_pack(pack_root)
+        return loaded
+
+    def _load_tools_from_pack(self, pack_root: Path) -> int:
+        loaded = 0
+        for manifest_path in sorted((pack_root / "tools").glob("*/manifest.json")):
+            tool_def = self._tool_from_path_manifest(manifest_path, pack_root)
+            if tool_def is not None:
+                self.register(tool_def)
+                loaded += 1
+        for manifest_path in sorted((pack_root / "tools").glob("*/tool.json")):
+            tool_def = self._tool_from_path_manifest(manifest_path, pack_root)
+            if tool_def is not None:
+                self.register(tool_def)
+                loaded += 1
+        for manifest_path in sorted((pack_root / "extensions" / "tools").glob("*/manifest.json")):
+            tool_def = self._tool_from_path_manifest(manifest_path, pack_root)
+            if tool_def is not None:
+                self.register(tool_def)
+                loaded += 1
+        return loaded
+
+    def _tool_from_path_manifest(self, manifest_path: Path, pack_root: Path):
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(manifest, dict):
+            return None
+        manifest["source_path"] = str(manifest_path)
+        tool_def = self._tool_from_manifest(manifest)
+        if tool_def is None:
+            return None
+        pack_id = self._pack_id_from_root(pack_root)
+        metadata = dict(tool_def.get("metadata", {}))
+        metadata["source_pack_id"] = pack_id
+        metadata["source"] = "pack"
+        tool_def["metadata"] = metadata
+        tool_def["source_pack_id"] = pack_id
+        return tool_def
+
+    @staticmethod
+    def _pack_id_from_root(pack_root: Path) -> str:
+        try:
+            raw = json.loads((pack_root / "ecosystem.json").read_text(encoding="utf-8"))
+            pack_id = str(raw.get("pack_id") or "").strip()
+            if pack_id:
+                return pack_id
+        except Exception:
+            pass
+        return pack_root.name
 
     def _load_extension_tools(self):
         """extension manifests から built-in tools を構築する。"""
@@ -156,6 +176,7 @@ class ToolRegistry:
             "metadata": {
                 "source": "extension",
                 "manifest_path": manifest.get("source_path", ""),
+                "source_pack_id": manifest.get("source_pack_id", ""),
                 "category": str(config.get("tool_category", config.get("category", ""))),
                 "action_type": str(config.get("action_type", "")),
                 "write_action": bool(config.get("write_action", False)),

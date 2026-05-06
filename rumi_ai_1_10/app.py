@@ -260,6 +260,23 @@ def main():
 
         atexit.register(lambda: _kernel.shutdown() if _kernel else None)
 
+        def _start_auto_update_thread():
+            def _run_auto_updates():
+                try:
+                    from core_runtime.github_update_manager import get_github_update_manager
+
+                    result = get_github_update_manager().run_auto_updates_once()
+                    if result.due:
+                        _logger.info("Auto update check finished: %s", result.to_dict())
+                except Exception:
+                    _logger.debug("Auto update check skipped", exc_info=True)
+
+            threading.Thread(
+                target=_run_auto_updates,
+                daemon=True,
+                name="rumi-auto-update",
+            ).start()
+
         def _finish_runtime_startup():
             try:
                 _kernel.run_startup_remaining()
@@ -270,6 +287,7 @@ def main():
                 except Exception:
                     _logger.debug("mark_ecosystem_initialized failed", exc_info=True)
                 print(f"[Rumi] {L('startup.success')}")
+                _start_auto_update_thread()
             except Exception as e:
                 mark_runtime_failed(str(e))
                 _logger.error("Deferred runtime startup failed", exc_info=True)
@@ -290,6 +308,7 @@ def main():
             except Exception:
                 _logger.debug("mark_ecosystem_initialized failed", exc_info=True)
             print(f"[Rumi] {L('startup.success')}")
+            _start_auto_update_thread()
 
         if args.headless:
             print(f"[Rumi] {L('startup.headless')}")
