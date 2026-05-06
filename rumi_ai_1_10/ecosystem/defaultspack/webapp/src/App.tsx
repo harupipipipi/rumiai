@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { Activity, Building2, MessageSquare, PanelLeftOpen, Play, RefreshCw, ShieldCheck, Users, Zap } from "lucide-react";
+import { Activity, Building2, MessageSquare, Play, RefreshCw, ShieldCheck, Users, Zap } from "lucide-react";
 
 import type { ChatItem } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
@@ -1624,15 +1624,17 @@ export default function App() {
         )}
 
         {showRegion("history") && isHistoryMinimized && (
-          <div className="rumi-history-rail flex w-12 flex-shrink-0 flex-col items-center border-r border-zinc-800/60 bg-[#09090b] py-2">
-            <button
-              type="button"
-              onClick={() => setIsHistoryMinimized(false)}
-              className="flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
-              title="チャット欄を開く"
-            >
-              <PanelLeftOpen size={17} />
-            </button>
+          <div className="rumi-history-rail w-14 flex-shrink-0 overflow-hidden border-r border-zinc-800/60">
+            <Renderers.historyBoard
+              activeChatId={activeConversationId}
+              chatItems={chatItems}
+              account={catalog?.app?.account}
+              onChatSelect={handleHistoryClick}
+              onNewTask={handleNewTask}
+              onSettingsClick={() => setIsSettingsOpen(true)}
+              onRestore={() => setIsHistoryMinimized(false)}
+              isCompact
+            />
           </div>
         )}
 
