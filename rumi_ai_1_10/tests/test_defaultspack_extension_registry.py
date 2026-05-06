@@ -189,7 +189,7 @@ def test_extension_registry_preserves_google_api_key_env_list():
     root = (
         Path(__file__).resolve().parent.parent
         / "ecosystem"
-        / "defaultspack"
+        / "rumi_model_catalog_pack"
         / "extensions"
     )
 
@@ -335,12 +335,12 @@ def test_tool_registry_loads_extension_tools(monkeypatch, tmp_path: Path):
     _write_json(
         extensions_root / "tools/calculator/manifest.json",
         {
-            "id": "calculator",
+                "id": "custom_calc",
             "category": "tool",
             "version": "1",
             "enabled": True,
             "config": {
-                "name": "calculator",
+                "name": "custom_calc",
                 "summary": "計算",
                 "tags": ["math"],
                 "schema": {
@@ -359,7 +359,7 @@ def test_tool_registry_loads_extension_tools(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(tool_registry_module, "get_extension_registry", lambda force_reload=True: registry)
     ToolRegistry._instance = None
     tool_registry = ToolRegistry()
-    tool = tool_registry.get("calculator")
+    tool = tool_registry.get("custom_calc")
     assert tool is not None
     assert tool["metadata"]["source"] == "extension"
     assert tool["summary"] == "計算"

@@ -729,7 +729,20 @@ class CapabilityExecutor:
                 self._audit(principal_id, "function.call", None, resp, args, request_id,
                             detail_reason=f"Principal '{principal_id}' does not meet caller_requires: {entry.caller_requires}")
                 return resp
-        if is_core:
+        calling_convention = getattr(entry, "calling_convention", None)
+        if calling_convention and calling_convention in _VALID_CALLING_CONVENTIONS:
+            resp = self._dispatch_by_calling_convention(
+                calling_convention=calling_convention,
+                entry=entry,
+                principal_id=principal_id,
+                effective_permission_id="function.call",
+                grant_config={},
+                args=args,
+                timeout_seconds=request.get("timeout_seconds", DEFAULT_FUNCTION_TIMEOUT),
+                request_id=request_id,
+                start_time=start_time,
+            )
+        elif is_core:
             resp = self._dispatch_core_function(principal_id=principal_id, entry=entry, args=args,
                                                  request_id=request_id, start_time=start_time)
         elif entry.host_execution:
@@ -739,7 +752,7 @@ class CapabilityExecutor:
             resp = self._execute_user_function(principal_id=principal_id, entry=entry, args=args,
                                                 request_id=request_id, start_time=start_time)
         self._audit(principal_id, "function.call", None, resp, args, request_id,
-                    extra_details={"qualified_name": qualified_name, "pack_id": pack_id, "is_core": is_core})
+                    extra_details={"qualified_name": qualified_name, "pack_id": pack_id, "is_core": is_core, "calling_convention": calling_convention})
         return resp
 
     # ------------------------------------------------------------------
@@ -1129,9 +1142,10 @@ class CapabilityExecutor:
             if detail_reason is not None: details["detail_reason"] = detail_reason
             if extra_details: details.update(extra_details)
             if response.error: details["error"] = response.error; details["error_type"] = response.error_type
+            rejection_reason = str(detail_reason or grant_reason or response.error or "")
             audit.log_permission_event(pack_id=principal_id, permission_type="capability", action="execute",
                                         success=response.success, details=details,
-                                        rejection_reason=(detail_reason or grant_reason or response.error) if not response.success else None)
+                                        rejection_reason=rejection_reason if not response.success else "")
         except Exception:
             logger.debug("Capability audit logging failed", exc_info=True)
 

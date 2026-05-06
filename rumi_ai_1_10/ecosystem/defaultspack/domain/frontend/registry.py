@@ -284,7 +284,7 @@ class FrontendRegistry:
                 "id": "activity_preview",
                 "kind": "preview",
                 "label": "Activity Preview",
-                "uses": ["chat", "dev", "tool", "knowledge", "memory", "media", "artifact", "research", "browser", "computer", "collaboration"],
+                "uses": ["chat", "dev", "tool", "context", "media", "artifact", "extension"],
                 "contracts": {
                     "preview": "/api/ui/conversations/{conversation_id}/preview",
                 },
@@ -303,7 +303,7 @@ class FrontendRegistry:
                 "id": "extension_sidebar",
                 "kind": "sidebar",
                 "label": "Extension Sidebar",
-                "uses": ["tool", "widget", "frontend", "artifact", "research", "browser", "computer", "scheduler", "collaboration", "share"],
+                "uses": ["tool", "widget", "frontend", "artifact", "extension"],
                 "contracts": {"catalog": "/api/ui/catalog", "settings": "/api/ui/settings"},
                 "schema": {"type": "object", "properties": {"items": {"type": "array"}, "filters": {"type": "array"}}},
             },
@@ -377,233 +377,23 @@ class FrontendRegistry:
                     "id": "agent-service-capabilities",
                     "label": "Capabilities",
                     "category": "system",
-                    "description": "defaultspack の local-first capability catalog。",
+                    "description": "defaultspack core capability catalog.",
                     "tags": ["agent", "capability", "local-first"],
                     "origin": {"kind": "builtin", "path": "capabilities/"},
                     "panel": {
                         "kind": "info",
                         "title": "Agent Service Capabilities",
                         "notes": [
-                            "/api/capabilities と /api/agent-service/manifest で同じ定義を取得できます。",
-                            "capability yaml は他 pack から置き換え可能な標準語彙です。",
+                            "The core registry exposes capability contracts.",
+                            "Concrete UI entries are supplied by frontend extension packs.",
                         ],
                     },
-                },
-                {
-                    "id": "knowledge-context",
-                    "label": "Knowledge",
-                    "category": "widget",
-                    "description": "会話時に注入される knowledge 検索結果。",
-                    "tags": ["knowledge", "preview"],
-                    "origin": {"kind": "builtin", "path": "blocks/chat/_context_helpers.py"},
-                    "panel": {
-                        "kind": "info",
-                        "title": "Knowledge Context",
-                        "notes": [
-                            "Conversation preview で knowledge_results を表示します。",
-                            "検索実装は blocks/chat/_context_helpers.py にあります。",
-                        ],
-                    },
-                },
-                {
-                    "id": "artifacts",
-                    "label": "Artifacts",
-                    "category": "widget",
-                    "description": "生成物と添付物を共通 artifact contract で扱います。",
-                    "tags": ["artifact", "preview", "export"],
-                    "origin": {"kind": "builtin", "path": "domain/artifact/store.py"},
-                    "panel": {
-                        "kind": "actions",
-                        "title": "Artifacts",
-                        "actions": [
-                            {"id": "artifacts.list", "label": "List Artifacts", "icon": "artifacts"},
-                        ],
-                        "notes": [
-                            "/api/artifacts は UI preview と share/export の共通ソースです。",
-                            "個別 renderer ではなく汎用 artifact item として扱えます。",
-                        ],
-                    },
-                },
-                {
-                    "id": "research-providers",
-                    "label": "Research",
-                    "category": "integration",
-                    "description": "local / external web / Reddit を同じ source schema で扱います。",
-                    "tags": ["research", "web", "reddit"],
-                    "origin": {"kind": "builtin", "path": "domain/research/providers.py"},
-                    "panel": {
-                        "kind": "actions",
-                        "title": "Research Providers",
-                        "actions": [
-                            {"id": "research.web", "label": "Web Provider Dry Run", "icon": "web"},
-                            {"id": "research.reddit", "label": "Reddit Provider Dry Run", "icon": "reddit"},
-                        ],
-                        "notes": [
-                            "右サイドバーからは安全のため network disabled の dry-run を起動します。",
-                            "API では allow_network=true を明示した場合に外部 provider を使います。",
-                        ],
-                    },
-                },
-                {
-                    "id": "browser-computer",
-                    "label": "Browser / Computer",
-                    "category": "capability",
-                    "description": "ブラウザ URL、session、承認済み desktop action を扱う controller。",
-                    "tags": ["browser", "computer", "approval"],
-                    "origin": {"kind": "builtin", "path": "domain/tool/browser_computer.py"},
-                    "panel": {
-                        "kind": "actions",
-                        "title": "Browser / Computer",
-                        "actions": [
-                            {"id": "browser.session", "label": "Inspect Browser Session", "icon": "browser"},
-                            {"id": "browser.profiles.list", "label": "Browser Profiles", "icon": "browser"},
-                            {"id": "browser.profile.create", "label": "Create Managed Profile", "icon": "browser", "payload": {"profile_id": "default", "label": "Default", "set_active": True}},
-                            {"id": "browser.cookies.list", "label": "Managed Cookies", "icon": "browser"},
-                            {"id": "browser.profile.clear_cache.dry_run", "label": "Cache Clear Dry Run", "icon": "browser"},
-                            {"id": "browser.profile.clear_cookies.dry_run", "label": "Cookie Clear Dry Run", "icon": "browser"},
-                            {"id": "browser.screenshot.dry_run", "label": "Screenshot Dry Run", "icon": "browser"},
-                        ],
-                        "notes": [
-                            "open_url は管理 profile の user-data-dir/cache-dir で起動でき、cookie/cache を保存します。",
-                            "cache/cookie 削除などの破壊的操作は approval token が必要です。UI の削除系 action は dry-run です。",
-                        ],
-                    },
-                },
-                {
-                    "id": "scheduled-tasks",
-                    "label": "Schedules",
-                    "category": "system",
-                    "description": "agent schedule store と scheduler route。",
-                    "tags": ["agent", "schedule"],
-                    "origin": {"kind": "builtin", "path": "domain/agent/scheduler.py"},
-                    "panel": {
-                        "kind": "actions",
-                        "title": "Scheduled Tasks",
-                        "actions": [
-                            {"id": "schedules.list", "label": "List Schedules", "icon": "schedules"},
-                        ],
-                        "notes": [
-                            "/api/agent/schedules で作成・更新・pause/resume・trigger が可能です。",
-                        ],
-                    },
-                },
-                {
-                    "id": "operations-company",
-                    "label": "Operations Company",
-                    "category": "system",
-                    "description": "24/7常駐agent、会社型ロール、内部mention、定期監視を束ねるprofile。",
-                    "tags": ["agent", "company", "24-7", "schedule"],
-                    "origin": {"kind": "builtin", "path": "profiles/operations_company.profile.yaml"},
-                    "panel": {
-                        "kind": "actions",
-                        "title": "Operations Company",
-                        "actions": [
-                            {"id": "operations.status", "label": "Status", "icon": "activity"},
-                            {"id": "operations.bootstrap", "label": "Start 24/7", "icon": "play", "method": "POST", "endpoint": "/api/agent/company/bootstrap", "payload": {"start_nonstop": True}},
-                        ],
-                        "notes": [
-                            "Client Manager がユーザーと会話し、PM/Coding/Research/Reviewer/Monitor/Scheduler が内部channelで報告します。",
-                            "tool と settings は defaultspack と共有し、roleごとの allowlist と profile denylist で切り替えます。",
-                        ],
-                    },
-                },
-                {
-                    "id": "collaboration",
-                    "label": "Collaboration",
-                    "category": "widget",
-                    "description": "channel と multi-agent collaboration の UI entry。",
-                    "tags": ["channel", "multi-agent", "collaboration"],
-                    "origin": {"kind": "builtin", "path": "domain/agent/inter_agent_comm.py"},
-                    "panel": {
-                        "kind": "actions",
-                        "title": "Collaboration",
-                        "actions": [
-                            {"id": "channels.list", "label": "List Channels", "icon": "channels"},
-                        ],
-                        "notes": [
-                            "channel API は chat block、multi-agent API は agent block から提供されます。",
-                        ],
-                    },
-                },
-                {
-                    "id": "share-export",
-                    "label": "Share / Export",
-                    "category": "integration",
-                    "description": "会話 export と local share link を作成します。",
-                    "tags": ["share", "export"],
-                    "origin": {"kind": "builtin", "path": "domain/share/store.py"},
-                    "panel": {
-                        "kind": "actions",
-                        "title": "Share / Export",
-                        "actions": [
-                            {"id": "conversation.export", "label": "Export Active Conversation", "icon": "export", "payload": {"format": "markdown"}},
-                            {"id": "conversation.share", "label": "Create Local Share Link", "icon": "share"},
-                        ],
-                        "notes": [
-                            "share はローカル token store に保存され、/api/share/{token} で取得できます。",
-                        ],
-                    },
-                },
-                {
-                    "id": "memory-context",
-                    "label": "Memory",
-                    "category": "system",
-                    "description": "会話時に注入される memory 検索結果。",
-                    "tags": ["memory", "preview"],
-                    "origin": {"kind": "builtin", "path": "blocks/chat/_context_helpers.py"},
-                    "panel": {
-                        "kind": "info",
-                        "title": "Memory Context",
-                        "notes": [
-                            "Conversation preview で memory_results を表示します。",
-                            "MemoryStore の recall 結果をそのまま扱います。",
-                        ],
-                    },
-                },
-                {
-                    "id": "request-inspector",
-                    "label": "Inspector",
-                    "category": "system",
-                    "description": "直近リクエストの prompt / context / tool usage を参照。",
-                    "tags": ["debug", "inspect"],
-                    "origin": {"kind": "builtin", "path": "domain/dev/inspector.py"},
-                    "panel": {
-                        "kind": "info",
-                        "title": "Inspector",
-                        "notes": [
-                            "blocks.dev.inspect からも同じログを取得できます。",
-                            "会話 preview と settings の両方で再利用できます。",
-                        ],
-                    },
-                },
-                {
-                    "id": "provider-catalog",
-                    "label": "Providers",
-                    "category": "integration",
-                    "description": "現在利用可能な AI provider / model catalog。",
-                    "tags": ["provider", "model"],
-                    "ui": {
-                        "widget_kind": "panel",
-                        "drop_capabilities": ["composer.open_panel"],
-                        "composer_label": "AI Library",
-                        "composer_icon": "provider",
-                        "composer_action": {
-                            "type": "open_panel",
-                            "target_item_id": "provider-catalog",
-                        },
-                    },
-                    "origin": {"kind": "builtin", "path": "domain/ai_client/client.py"},
-                    "panel": {
-                        "kind": "models",
-                        "title": "Providers",
-                        "models": self._list_provider_models(),
-                    },
-                },
+                }
             ]
         )
 
         items.extend(self._config_list(ui_surfaces, "sidebar_items"))
-        items.extend(self._config_list(extensions, "sidebar_items"))
+        items.extend(self._hydrate_sidebar_items(self._config_list(extensions, "sidebar_items")))
 
         return sorted(self._dedupe_by_key(items, "id"), key=self._sidebar_item_sort_key)
 
@@ -792,29 +582,6 @@ class FrontendRegistry:
                     },
                 ],
             },
-            {
-                "id": "operations_company",
-                "label": "Operations Company",
-                "description": "24/7常駐agent profile の共有設定。defaultspack tool/settingsをそのまま使います。",
-                "fields": [
-                    {"id": "heartbeat_minutes", "label": "Heartbeat Minutes", "type": "number", "default": 15, "min": 1, "max": 1440},
-                    {"id": "normal_status_silent", "label": "Silent Normal Checks", "type": "toggle", "default": True},
-                    {"id": "max_concurrent_children", "label": "Max Child Agents", "type": "number", "default": 3, "min": 1, "max": 12},
-                    {
-                        "id": "model_allowlist",
-                        "label": "Model Allowlist",
-                        "type": "textarea",
-                        "default": "openrouter/tencent/hy3-preview:free\ngoogle/gemini-2.5-flash\ngoogle/gemini-2.5-pro\nopenai/gpt-5.4\nopenai/gpt-5.4-mini\nanthropic/claude-sonnet-4-6\nstub/default",
-                    },
-                    {
-                        "id": "tool_denylist",
-                        "label": "Disabled Tools",
-                        "type": "textarea",
-                        "default": "",
-                        "help": "1行に1つのtool id。profile allowlistよりdenyが優先されます。",
-                    },
-                ],
-            },
         ]
 
         sections.extend(self._config_list(ui_surfaces, "settings_sections"))
@@ -853,27 +620,27 @@ class FrontendRegistry:
             },
             {
                 "id": "sidebar_items",
-                "path": "user_data/shared/frontend_extensions/*.ui.json",
+                "path": "packs/frontend_extensions/*.ui.json or user_data/shared/frontend_extensions/*.ui.json",
                 "description": "Right sidebar entries and their panel metadata.",
             },
             {
                 "id": "settings_sections",
-                "path": "user_data/shared/frontend_extensions/*.ui.json",
+                "path": "packs/frontend_extensions/*.ui.json or user_data/shared/frontend_extensions/*.ui.json",
                 "description": "Settings modal sections / fields. Saved into frontend_settings.json.",
             },
             {
                 "id": "chat_renderers",
-                "path": "user_data/shared/frontend_extensions/*.ui.json",
+                "path": "packs/frontend_extensions/*.ui.json or user_data/shared/frontend_extensions/*.ui.json",
                 "description": "Metadata describing custom block/widget renderers.",
             },
             {
                 "id": "composer.inline",
-                "path": "user_data/shared/frontend_extensions/*.ui.json config.composer.inline",
+                "path": "packs/frontend_extensions/*.ui.json or user_data/shared/frontend_extensions/*.ui.json config.composer.inline",
                 "description": "Small action buttons rendered inside the composer control row.",
             },
             {
                 "id": "composer.below",
-                "path": "user_data/shared/frontend_extensions/*.ui.json config.composer.below",
+                "path": "packs/frontend_extensions/*.ui.json or user_data/shared/frontend_extensions/*.ui.json config.composer.below",
                 "description": "Secondary action buttons rendered below the composer.",
             },
             {
@@ -888,7 +655,7 @@ class FrontendRegistry:
             },
             {
                 "id": "shell_renderers",
-                "path": "extensions/ui/*/manifest.json config.shell_renderers or user_data/shared/frontend_extensions/*.ui.json",
+                "path": "extensions/ui/*/manifest.json config.shell_renderers or packs/frontend_extensions/*.ui.json",
                 "description": "Renderer IDs and component names bound to shell regions.",
             },
         ]
@@ -1050,14 +817,13 @@ class FrontendRegistry:
         return [surface for surface in surfaces if isinstance(surface, dict)]
 
     def _load_extensions(self) -> list[dict[str, Any]]:
-        if not self._extensions_dir.exists():
-            return []
         extensions = []
-        for path in sorted(self._extensions_dir.glob("*.ui.json")):
+        for path in self._frontend_extension_paths():
             try:
                 extension = json.loads(path.read_text(encoding="utf-8"))
                 if isinstance(extension, dict):
                     extension["_source"] = str(path)
+                    extension["source_pack_id"] = self._source_pack_id(path)
                     extensions.append(extension)
                 else:
                     self._add_diagnostic("warning", "frontend_extension_not_object", f"{path} must contain a JSON object.", str(path))
@@ -1065,6 +831,42 @@ class FrontendRegistry:
                 self._add_diagnostic("warning", "frontend_extension_invalid_json", str(exc), str(path))
                 continue
         return extensions
+
+    def _frontend_extension_paths(self) -> list[Path]:
+        paths: list[Path] = []
+        seen: set[Path] = set()
+        for directory in self._frontend_extension_dirs():
+            if not directory.exists():
+                continue
+            for path in sorted(directory.glob("*.ui.json")):
+                resolved = path.resolve()
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                paths.append(path)
+        return paths
+
+    def _frontend_extension_dirs(self) -> list[Path]:
+        dirs: list[Path] = []
+        ecosystem_root = self._ecosystem_root()
+        if ecosystem_root.exists():
+            for pack_root in sorted(ecosystem_root.iterdir()):
+                if not pack_root.is_dir() or not (pack_root / "ecosystem.json").exists():
+                    continue
+                dirs.append(pack_root / "frontend_extensions")
+        dirs.append(self._extensions_dir)
+        return dirs
+
+    def _ecosystem_root(self) -> Path:
+        if (self._pack_root / "ecosystem.json").exists() and self._pack_root.parent.name == "ecosystem":
+            return self._pack_root.parent
+        return Path(__file__).resolve().parents[3]
+
+    def _source_pack_id(self, path: Path) -> str:
+        for parent in path.parents:
+            if (parent / "ecosystem.json").exists():
+                return parent.name
+        return "user_data"
 
     def _load_shell_config(self) -> dict[str, Any]:
         if not self._shell_path.exists():
@@ -1189,6 +991,16 @@ class FrontendRegistry:
             values.extend(item for item in items if isinstance(item, dict))
         return values
 
+    def _hydrate_sidebar_items(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        hydrated: list[dict[str, Any]] = []
+        for item in items:
+            item = deepcopy(item)
+            panel = item.get("panel")
+            if isinstance(panel, dict) and panel.get("kind") == "models" and "models" not in panel:
+                panel["models"] = self._list_provider_models()
+            hydrated.append(item)
+        return hydrated
+
     def _dedupe_by_key(self, items: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
         deduped: dict[str, dict[str, Any]] = {}
         order: list[str] = []
@@ -1225,21 +1037,6 @@ class FrontendRegistry:
                 "google_api_key_configured": provider_has_api_key("google", pack_root=self._pack_root),
                 "openrouter_api_key": "",
                 "openrouter_api_key_configured": provider_has_api_key("openrouter", pack_root=self._pack_root),
-            },
-            "operations_company": {
-                "heartbeat_minutes": 15,
-                "normal_status_silent": True,
-                "max_concurrent_children": 3,
-                "model_allowlist": (
-                    "openrouter/tencent/hy3-preview:free\n"
-                    "google/gemini-2.5-flash\n"
-                    "google/gemini-2.5-pro\n"
-                    "openai/gpt-5.4\n"
-                    "openai/gpt-5.4-mini\n"
-                    "anthropic/claude-sonnet-4-6\n"
-                    "stub/default"
-                ),
-                "tool_denylist": "",
             },
         }
 

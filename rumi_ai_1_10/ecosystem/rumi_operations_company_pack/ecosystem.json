@@ -1,0 +1,29 @@
+{
+  "pack_id": "rumi_operations_company_pack",
+  "pack_identity": "rumi:ecosystem/rumi_operations_company_pack",
+  "version": "1.0.0",
+  "metadata": {
+    "name": "Rumi Operations Company Pack",
+    "description": "Operations Company product profile, routes, graph, prompt, and UI extension.",
+    "author": "Rumi AI Team",
+    "license": "MIT"
+  },
+  "vocabulary": {
+    "types": ["agent"]
+  },
+  "components": {
+    "operations_company": {
+      "type": "agent",
+      "id": "operations_company",
+      "path": "blocks/agent",
+      "connectivity": {
+        "provides": [
+          "rumi.operations_company.manifest",
+          "rumi.operations_company.status",
+          "rumi.operations_company.bootstrap"
+        ]
+      }
+    }
+  },
+  "load_order": ["agent:operations_company"]
+}

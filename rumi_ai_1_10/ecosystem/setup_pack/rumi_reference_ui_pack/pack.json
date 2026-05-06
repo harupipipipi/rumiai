@@ -1,0 +1,9 @@
+{
+  "pack_id": "rumi_reference_ui_pack",
+  "display_name": "Rumi Reference UI Pack",
+  "description": "Reference sidebar and panel manifests loaded through frontend_extensions.",
+  "target_pack_id": "rumi_reference_ui_pack",
+  "recommended": true,
+  "risk_level": "low",
+  "supports_all_ok": true
+}

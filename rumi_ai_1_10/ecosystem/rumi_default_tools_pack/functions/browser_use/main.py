@@ -1,0 +1,31 @@
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from functions.browser_computer.main import run as _run_browser_computer
+
+
+def run(context, args):
+    raw = dict(args or {})
+    payload = dict(raw.get("payload") or {})
+    action_map = {
+        "": "browser.session",
+        "session": "browser.session",
+        "open_url": "browser.open_url",
+        "open": "browser.open_url",
+        "screenshot": "computer.screenshot",
+        "move": "computer.move",
+        "cursor_move": "computer.move",
+        "mouse_move": "computer.move",
+        "click": "computer.click",
+        "type": "computer.type",
+        "key": "computer.key",
+        "scroll": "computer.scroll",
+    }
+    action = action_map.get(str(raw.get("action") or "").strip(), str(raw.get("action") or "").strip())
+    for key in ("url", "x", "y", "text", "key", "amount", "dry_run", "approval_token"):
+        if key in raw:
+            payload[key] = raw.get(key)
+    return _run_browser_computer(context, {"action": action, "payload": payload})

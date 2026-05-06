@@ -1,0 +1,67 @@
+{
+  "id": "reddit_search",
+  "category": "tool",
+  "version": "1",
+  "display_name": "Reddit Search",
+  "description": "Search Reddit posts through the research provider interface.",
+  "enabled": true,
+  "config": {
+    "name": "reddit_search",
+    "summary": "Reddit provider search",
+    "tags": ["research", "reddit", "community"],
+    "ui": {
+      "group_id": "research",
+      "group_label": "Research",
+      "group_icon": "search",
+      "settings_fields": [
+        {
+          "id": "default_result_limit",
+          "label": "Result limit",
+          "type": "number",
+          "default": 10,
+          "min": 1,
+          "max": 50,
+          "help": "Saved default for the number of Reddit results to return."
+        },
+        {
+          "id": "freshness_window",
+          "label": "Freshness",
+          "type": "select",
+          "default": "any",
+          "options": [
+            {"value": "any", "label": "Any time"},
+            {"value": "day", "label": "Past day"},
+            {"value": "week", "label": "Past week"},
+            {"value": "month", "label": "Past month"},
+            {"value": "year", "label": "Past year"}
+          ],
+          "help": "Saved default recency preference for community results."
+        },
+        {
+          "id": "safe_filter",
+          "label": "Safe filter",
+          "type": "toggle",
+          "default": true,
+          "help": "Saved preference for hiding explicit community results."
+        }
+      ]
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {"type": "string"},
+          "subreddit": {"type": "string"},
+          "sort": {"type": "string", "enum": ["relevance", "hot", "top", "new", "comments"]},
+          "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+          "allow_network": {"type": "boolean"}
+        },
+        "required": ["query"]
+      }
+    },
+    "execution": {
+      "type": "rumi_function",
+      "qualified_name": "rumi_default_tools_pack:reddit_search"
+    }
+  }
+}

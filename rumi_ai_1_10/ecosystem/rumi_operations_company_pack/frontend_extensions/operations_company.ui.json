@@ -1,0 +1,49 @@
+{
+  "sidebar_items": [
+    {
+      "id": "operations-company",
+      "label": "Operations Company",
+      "category": "system",
+      "description": "24/7 long-running company-style agent profile.",
+      "tags": ["agent", "company", "24-7", "schedule"],
+      "origin": {"kind": "pack", "path": "rumi_operations_company_pack/profiles/operations_company.profile.yaml"},
+      "panel": {
+        "kind": "actions",
+        "title": "Operations Company",
+        "actions": [
+          {"id": "operations.status", "label": "Status", "icon": "activity"},
+          {"id": "operations.bootstrap", "label": "Start 24/7", "icon": "play", "method": "POST", "endpoint": "/api/agent/company/bootstrap", "payload": {"start_nonstop": true}}
+        ],
+        "notes": [
+          "Client Manager talks with the user while PM, coding, research, review, monitor, and scheduler roles coordinate internally.",
+          "Tools and settings are shared with the runtime, while role policies control allowlists and denylists."
+        ]
+      }
+    }
+  ],
+  "settings_sections": [
+    {
+      "id": "operations_company",
+      "label": "Operations Company",
+      "description": "Shared settings for the long-running operations profile.",
+      "fields": [
+        {"id": "heartbeat_minutes", "label": "Heartbeat Minutes", "type": "number", "default": 15, "min": 1, "max": 1440},
+        {"id": "normal_status_silent", "label": "Silent Normal Checks", "type": "toggle", "default": true},
+        {"id": "max_concurrent_children", "label": "Max Child Agents", "type": "number", "default": 3, "min": 1, "max": 12},
+        {
+          "id": "model_allowlist",
+          "label": "Model Allowlist",
+          "type": "textarea",
+          "default": "openrouter/tencent/hy3-preview:free\ngoogle/gemini-2.5-flash\ngoogle/gemini-2.5-pro\nopenai/gpt-5.4\nopenai/gpt-5.4-mini\nanthropic/claude-sonnet-4-6\nstub/default"
+        },
+        {
+          "id": "tool_denylist",
+          "label": "Disabled Tools",
+          "type": "textarea",
+          "default": "",
+          "help": "One tool id per line. Deny rules win over profile allowlists."
+        }
+      ]
+    }
+  ]
+}

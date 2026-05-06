@@ -9,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
+OPERATIONS_PACK_ROOT = ROOT / "ecosystem" / "rumi_operations_company_pack"
 
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
@@ -43,6 +44,14 @@ def _collect_defaultspack_routes():
         except ModuleNotFoundError:
             continue
         setup.run({"interface_registry": registry, "_source_component": entry})
+    from ecosystem.rumi_operations_company_pack.blocks.agent import setup as operations_setup
+
+    operations_setup.run(
+        {
+            "interface_registry": registry,
+            "_source_component": "rumi_operations_company_pack:agent:operations_company",
+        }
+    )
     return registry
 
 
@@ -158,7 +167,7 @@ def test_chat_store_links_subagent_conversations(tmp_path, monkeypatch):
 
 
 def test_todo_tool_persists_in_conversation_workspace(tmp_path):
-    from domain.tool.todo import TodoController
+    from ecosystem.rumi_default_tools_pack.domain.tool.todo import TodoController
 
     workspace = tmp_path / "conversation" / "workspace"
     result = TodoController().run(
@@ -174,7 +183,7 @@ def test_todo_tool_persists_in_conversation_workspace(tmp_path):
 
 def test_subagent_tool_creates_child_conversation(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
-    from domain.tool.subagent import SubagentController
+    from ecosystem.rumi_default_tools_pack.domain.tool.subagent import SubagentController
 
     storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
@@ -862,7 +871,7 @@ def test_browser_screenshot_tool_log_compacts_inline_image_data():
 
 
 def test_browser_computer_screenshot_result_includes_coordinate_metadata(tmp_path, monkeypatch):
-    from domain.tool.browser_computer import BrowserComputerController
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 
     screenshot = tmp_path / "screen.png"
     model_image = tmp_path / "screen-model.png"
@@ -1204,15 +1213,15 @@ def test_fallback_routes_expose_agent_service_and_coding_surfaces():
     assert ("POST", "/api/tools/browser-computer", "blocks.tool.browser_computer") in routes
     assert ("GET", "/api/ai/profiles", "blocks.ai.profiles") in routes
     assert ("GET", "/api/agent/schedules", "blocks.agent.scheduler.list") in routes
-    assert ("GET", "/api/agent/company/status", "blocks.agent.company.status") in routes
-    assert ("POST", "/api/agent/company/bootstrap", "blocks.agent.company.bootstrap") in routes
     assert ("GET", "/api/agent/org/roles", "blocks.agent.org.list_roles") in routes
     assert ("GET", "/api/chat/channels", "blocks.chat.channel.list") in routes
     assert ("POST", "/api/share", "blocks.share.create") in routes
 
 
 def test_transport_direct_routes_json_has_interface_registry_parity():
-    ecosystem_routes = json.loads((DEFAULTSPACK_ROOT / "routes.json").read_text(encoding="utf-8"))["routes"]
+    ecosystem_routes = []
+    for routes_path in (DEFAULTSPACK_ROOT / "routes.json", OPERATIONS_PACK_ROOT / "routes.json"):
+        ecosystem_routes.extend(json.loads(routes_path.read_text(encoding="utf-8"))["routes"])
     contract_routes = {
         (route["method"], route["path"])
         for route in ecosystem_routes
@@ -1287,7 +1296,7 @@ def test_external_web_provider_rejects_private_network_urls():
 
 
 def test_browser_computer_controller_gates_desktop_actions():
-    from domain.tool.browser_computer import BrowserComputerController
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 
     controller = BrowserComputerController()
 
@@ -1315,8 +1324,8 @@ def test_browser_use_maps_cursor_move_to_browser_computer_payload():
 
 
 def test_computer_move_uses_cliclick_on_macos(monkeypatch):
-    from domain.tool.browser_computer import BrowserComputerController
-    import domain.tool.browser_computer as browser_computer
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
 
     calls = []
 
@@ -1336,7 +1345,7 @@ def test_computer_move_uses_cliclick_on_macos(monkeypatch):
 
 
 def test_browser_computer_manages_persistent_profiles_and_cookie_jars(tmp_path):
-    from domain.tool.browser_computer import BrowserComputerController
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 
     controller = BrowserComputerController()
     controller._session_path = tmp_path / "shared" / "browser_sessions.json"
@@ -1381,7 +1390,7 @@ def test_browser_computer_manages_persistent_profiles_and_cookie_jars(tmp_path):
 
 
 def test_browser_open_url_uses_managed_profile_launch_plan(tmp_path):
-    from domain.tool.browser_computer import BrowserComputerController
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 
     controller = BrowserComputerController()
     controller._session_path = tmp_path / "shared" / "browser_sessions.json"
@@ -1407,7 +1416,7 @@ def test_browser_open_url_uses_managed_profile_launch_plan(tmp_path):
 
 
 def test_browser_profile_cache_and_cookie_clear_are_approval_gated(tmp_path):
-    from domain.tool.browser_computer import BrowserComputerController
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 
     controller = BrowserComputerController()
     controller._session_path = tmp_path / "shared" / "browser_sessions.json"

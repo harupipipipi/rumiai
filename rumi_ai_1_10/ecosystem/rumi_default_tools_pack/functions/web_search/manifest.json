@@ -1,0 +1,15 @@
+{
+  "function_id": "web_search",
+  "description": "Web search tool function backed by the defaultspack research provider.",
+  "calling_convention": "subprocess",
+  "host_execution": false,
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "query": {"type": "string"},
+      "limit": {"type": "integer"},
+      "allow_network": {"type": "boolean"}
+    },
+    "required": ["query"]
+  }
+}

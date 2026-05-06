@@ -28,6 +28,7 @@ import json
 import os
 import time
 import uuid
+from pathlib import Path
 from typing import Any
 
 from ..extensions.runtime import get_extension_registry, get_extensions_root
@@ -64,6 +65,17 @@ def _safe_filename(name: str) -> str:
     """name をファイル名に安全な形式に変換する。"""
     safe = "".join(c if (c.isalnum() or c in "-_") else "_" for c in name)
     return safe or "unnamed"
+
+
+def _read_pack_id(pack_root: Path) -> str:
+    try:
+        raw = json.loads((pack_root / "ecosystem.json").read_text(encoding="utf-8"))
+        pack_id = str(raw.get("pack_id") or "").strip()
+        if pack_id:
+            return pack_id
+    except Exception:
+        pass
+    return pack_root.name
 
 
 # ---------------------------------------------------------------------------
@@ -155,11 +167,49 @@ class PromptManager:
             return {}
         return prompts
 
+    def _pack_prompts(self) -> dict[str, dict]:
+        prompts: dict[str, dict] = {}
+        ecosystem_root = Path(__file__).resolve().parents[3]
+        if not ecosystem_root.exists():
+            return prompts
+        for pack_root in sorted(ecosystem_root.iterdir()):
+            if not pack_root.is_dir() or not (pack_root / "ecosystem.json").exists():
+                continue
+            prompt_dir = pack_root / "prompts"
+            if not prompt_dir.exists():
+                continue
+            source_pack_id = _read_pack_id(pack_root)
+            for prompt_path in sorted(prompt_dir.glob("*.system.md")):
+                try:
+                    body = prompt_path.read_text(encoding="utf-8")
+                except OSError:
+                    continue
+                prompt_id = prompt_path.name.removesuffix(".system.md")
+                prompts[prompt_id] = {
+                    "id": prompt_id,
+                    "name": prompt_id,
+                    "content": body,
+                    "body": body,
+                    "description": "",
+                    "variables": [],
+                    "metadata": {
+                        "source": "pack",
+                        "source_pack_id": source_pack_id,
+                        "path": str(prompt_path),
+                    },
+                    "created_at": "",
+                    "updated_at": "",
+                    "read_only": True,
+                    "source_pack_id": source_pack_id,
+                }
+        return prompts
+
     # -- 一覧 ---------------------------------------------------------------
     def list_prompts(self) -> list[dict]:
         """保存されたプロンプト一覧を返す。"""
         self._ensure_loaded()
-        combined = dict(self._extension_prompts())
+        combined = dict(self._pack_prompts())
+        combined.update(self._extension_prompts())
         combined.update(self._prompts)
         return list(combined.values())
 
@@ -170,7 +220,7 @@ class PromptManager:
         prompt = self._prompts.get(prompt_id)
         if prompt is not None:
             return prompt
-        return self._extension_prompts().get(prompt_id)
+        return self._extension_prompts().get(prompt_id) or self._pack_prompts().get(prompt_id)
 
     def get_prompt_by_name(self, name: str) -> dict | None:
         """name でプロンプトを取得する。存在しなければ None。"""
@@ -178,7 +228,7 @@ class PromptManager:
         pid = self._name_index.get(name)
         if pid is not None:
             return self._prompts.get(pid)
-        return self._extension_prompts().get(name)
+        return self._extension_prompts().get(name) or self._pack_prompts().get(name)
 
     # -- 作成 ---------------------------------------------------------------
     def create_prompt(self, data: dict) -> dict:

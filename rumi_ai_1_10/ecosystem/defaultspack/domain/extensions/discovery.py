@@ -45,6 +45,11 @@ def discover_extensions(
     root_path = Path(root)
     if not root_path.exists():
         return result
+    source_pack_id = ""
+    try:
+        source_pack_id = root_path.parent.name
+    except Exception:
+        source_pack_id = ""
 
     for category in selected:
         spec = specs.get(category)
@@ -90,6 +95,8 @@ def discover_extensions(
 
             seen.add(dedupe_key)
             manifest["source_path"] = str(manifest_path)
+            if source_pack_id:
+                manifest["source_pack_id"] = source_pack_id
             result.extensions.append(
                 DiscoveredExtension(
                     category=category,
@@ -100,4 +107,3 @@ def discover_extensions(
             )
 
     return result
-

@@ -1,0 +1,7 @@
+{
+  "function_id": "subagent",
+  "description": "Delegate bounded work to a child conversation.",
+  "calling_convention": "subprocess",
+  "host_execution": false,
+  "input_schema": {"type": "object"}
+}

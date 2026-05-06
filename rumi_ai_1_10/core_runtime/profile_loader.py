@@ -184,10 +184,21 @@ class CapabilityProfileLoader:
 
     def _iter_packs(self) -> Iterable[Tuple[str, Any]]:
         registry = self.registry or self._load_registry()
+        discovered: Dict[str, Any] = {}
         packs = getattr(registry, "packs", None)
         if isinstance(packs, dict):
-            return list(packs.items())
-        return []
+            discovered.update(packs)
+        for loc in self._discover_installed_packs():
+            discovered.setdefault(loc.pack_id, loc)
+        return list(discovered.items())
+
+    def _discover_installed_packs(self) -> List[Any]:
+        from .paths import discover_pack_locations
+
+        try:
+            return list(discover_pack_locations(self.ecosystem_dir))
+        except Exception:
+            return []
 
     def _load_registry(self) -> Any:
         from .paths import discover_pack_locations

@@ -1,0 +1,17 @@
+{
+  "function_id": "reddit_search",
+  "description": "Reddit search tool function backed by the defaultspack research provider.",
+  "calling_convention": "subprocess",
+  "host_execution": false,
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "query": {"type": "string"},
+      "subreddit": {"type": "string"},
+      "sort": {"type": "string"},
+      "limit": {"type": "integer"},
+      "allow_network": {"type": "boolean"}
+    },
+    "required": ["query"]
+  }
+}

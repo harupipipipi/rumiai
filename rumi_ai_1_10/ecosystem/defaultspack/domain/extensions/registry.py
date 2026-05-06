@@ -10,11 +10,15 @@ from .discovery import DiscoveryIssue, discover_extensions
 class ExtensionRegistry:
     def __init__(
         self,
-        extensions_root: Path | str,
+        extensions_root: Path | str | Iterable[Path | str],
         *,
         strict: bool = False,
     ) -> None:
-        self._root = Path(extensions_root)
+        if isinstance(extensions_root, (list, tuple, set)):
+            self._roots = [Path(root) for root in extensions_root]
+        else:
+            self._roots = [Path(extensions_root)]
+        self._root = self._roots[0] if self._roots else Path(".")
         self._strict = strict
         self._items: Dict[str, Dict[str, Dict[str, Any]]] = {
             category: {} for category in DEFAULT_CATEGORY_SPECS.keys()
@@ -31,15 +35,17 @@ class ExtensionRegistry:
         return list(self._issues)
 
     def reload(self) -> "ExtensionRegistry":
-        result = discover_extensions(
-            self._root,
-            categories=DEFAULT_CATEGORY_SPECS.keys(),
-            strict=self._strict,
-        )
         self._items = {category: {} for category in DEFAULT_CATEGORY_SPECS.keys()}
-        for item in result.extensions:
-            self._items[item.category][item.extension_id] = dict(item.manifest)
-        self._issues = list(result.issues)
+        self._issues = []
+        for root in self._roots:
+            result = discover_extensions(
+                root,
+                categories=DEFAULT_CATEGORY_SPECS.keys(),
+                strict=self._strict,
+            )
+            for item in result.extensions:
+                self._items[item.category][item.extension_id] = dict(item.manifest)
+            self._issues.extend(result.issues)
         return self
 
     def categories(self) -> List[str]:

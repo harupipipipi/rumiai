@@ -623,7 +623,7 @@ def test_defaultspack_minimal_bindings_compile_sample_graph() -> None:
         path=defaultspack_root,
     )
     registry = _registry(pack)
-    approval_manager = FakeApprovalManager({"defaultspack"})
+    approval_manager = FakeApprovalManager({"defaultspack", "rumi_local_agent_pack"})
     interface_registry = InterfaceRegistry()
     register_defaultspack_binding_handlers(interface_registry)
 
@@ -680,7 +680,7 @@ def test_defaultspack_startup_graph_compiles_with_memory_and_prompt_nodes() -> N
         path=defaultspack_root,
     )
     registry = _registry(pack)
-    approval_manager = FakeApprovalManager({"defaultspack"})
+    approval_manager = FakeApprovalManager({"defaultspack", "rumi_local_agent_pack"})
     interface_registry = InterfaceRegistry()
     register_defaultspack_binding_handlers(interface_registry)
 
@@ -740,7 +740,7 @@ def test_flow_step_can_explicitly_compile_defaultspack_graph() -> None:
         path=defaultspack_root,
     )
     registry = _registry(pack)
-    approval_manager = FakeApprovalManager({"defaultspack"})
+    approval_manager = FakeApprovalManager({"defaultspack", "rumi_local_agent_pack"})
     interface_registry = InterfaceRegistry()
     register_defaultspack_binding_handlers(interface_registry)
 

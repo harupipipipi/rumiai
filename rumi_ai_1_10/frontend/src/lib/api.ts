@@ -13,6 +13,10 @@ import type {
   ApiDashboard,
   ProfileResponseData,
   ApiVersion,
+  ApiUpdateTarget,
+  ApiUpdateSettings,
+  UpdatesResponseData,
+  UpdateApplyResponseData,
   KernelRestartResponseData,
   OAuthStartResponseData,
   SetupStatusResponseData,
@@ -488,6 +492,33 @@ export function updateProfile(
 
 export function fetchVersion(): Promise<ApiVersion> {
   return apiFetch<ApiVersion>('/api/panel/version');
+}
+
+export function fetchUpdates(): Promise<UpdatesResponseData> {
+  return apiFetch<UpdatesResponseData>('/api/panel/updates');
+}
+
+export function fetchUpdateSettings(): Promise<ApiUpdateSettings> {
+  return apiFetch<ApiUpdateSettings>('/api/panel/updates/settings');
+}
+
+export function updateUpdateSettings(
+  autoUpdate: Partial<Record<ApiUpdateTarget, boolean>>,
+): Promise<ApiUpdateSettings> {
+  return apiFetch<ApiUpdateSettings>('/api/panel/updates/settings', {
+    method: 'PUT',
+    body: JSON.stringify({auto_update: autoUpdate}),
+  });
+}
+
+export function applyUpdate(target: ApiUpdateTarget): Promise<UpdateApplyResponseData> {
+  return apiFetch<UpdateApplyResponseData>(
+    `/api/panel/updates/${encodeURIComponent(target)}/apply`,
+    {
+      method: 'POST',
+      body: JSON.stringify({}),
+    },
+  );
 }
 
 export function restartKernel(): Promise<KernelRestartResponseData> {

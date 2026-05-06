@@ -1,0 +1,16 @@
+{
+  "pack_id": "rumi_model_catalog_pack",
+  "pack_identity": "rumi:ecosystem/rumi_model_catalog_pack",
+  "version": "1.0.0",
+  "metadata": {
+    "name": "Rumi Model Catalog Pack",
+    "description": "Concrete provider and model catalog data for the AI client loader.",
+    "author": "Rumi AI Team",
+    "license": "MIT"
+  },
+  "vocabulary": {
+    "types": ["ai_client"]
+  },
+  "components": {},
+  "load_order": []
+}
