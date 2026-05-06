@@ -1,0 +1,171 @@
+profile_id: defaultspack.operations_company
+version: rumi.profile.v1
+kind: runtime_profile
+locale: ja
+
+display_name:
+  ja: 常駐AI会社
+  en: Operations Company
+
+description:
+  ja: 24/7監視、定期タスク、会社型マルチAI、内部チャンネル報告を前提にしたdefaultspack長時間運用プロファイル。
+  en: Long-running defaultspack profile for 24/7 monitoring, scheduled work, company-style multi-agent operation, and internal channel reports.
+
+default_graph: defaultspack.operations_company
+default_flow: agent_chat
+
+surfaces:
+  preferred: desktop
+  enabled: [desktop, cli]
+
+permissions:
+  can_create_profile: true
+  can_update_profile: true
+  can_delete_profile: false
+  can_enable_node: true
+  can_disable_node: true
+  can_enable_unapproved_nodes: false
+  can_install_packs: false
+  can_edit_bindings: false
+  require_audit: true
+
+enabled_nodes:
+  - rumi.start
+  - defaultspack.agent
+  - defaultspack.ai_client
+  - defaultspack.tool
+  - defaultspack.memory
+  - defaultspack.prompt
+  - defaultspack.frontend
+  - defaultspack.cli_surface
+
+disabled_nodes: []
+
+node_settings:
+  defaultspack.ai_client:
+    default_model: openrouter/tencent/hy3-preview:free
+    model_self_selection:
+      enabled: true
+      allowlist:
+        - openrouter/tencent/hy3-preview:free
+        - google/gemini-2.5-flash
+        - google/gemini-2.5-pro
+        - openai/gpt-5.4
+        - openai/gpt-5.4-mini
+        - anthropic/claude-sonnet-4-6
+        - stub/default
+      default_reasoning_effort: medium
+      max_switches_per_day: 12
+      require_audit_reason: true
+  defaultspack.tool:
+    shared_with_profiles:
+      - defaultspack.local_agent
+      - defaultspack.coding
+      - defaultspack.operations_company
+    browser_profile_id: defaultspack-shared
+    allowed_actions:
+      - rumi_api
+      - todo
+      - subagent
+      - web_search
+      - reddit_search
+      - file_reader
+      - browser_use
+      - browser_computer
+      - computer_use
+      - calculator
+      - coding_file_read
+      - coding_file_search
+      - coding_file_list
+      - coding_file_write
+      - coding_file_create
+      - coding_file_patch
+      - coding_file_restore
+      - coding_git_status
+      - coding_git_diff
+      - coding_terminal_exec
+  defaultspack.memory:
+    mode: long_running
+    conversation_strategy: single_agent_thread
+    compact_context: true
+    compact_after_messages: 32
+    protect_last_messages: 12
+    summary_target_ratio: 0.28
+    session_search: true
+    store:
+      decisions: true
+      incidents: true
+      handoffs: true
+  defaultspack.agent:
+    organization_profile: operations_company
+    non_stop: true
+    max_concurrent_children: 3
+    max_spawn_depth: 1
+    client_facing_role: client_manager
+
+policy:
+  non_stop: true
+  can_run_24_7: true
+  scheduled_tasks_enabled: true
+  monitor_tasks_enabled: true
+  normal_status_silent: true
+  exception_delivery_required: true
+  max_tool_calls: 12
+  allow_shell: false
+  allow_file_write: true
+  write_actions_require_approval: true
+  delete_actions_require_approval: true
+  terminal_actions_require_approval: true
+  external_send_requires_approval: true
+  settings_mutation_requires_approval: true
+  browser_cache_scope: shared_defaultspack
+  tool_allowlist:
+    - rumi_api
+    - todo
+    - subagent
+    - web_search
+    - reddit_search
+    - file_reader
+    - browser_use
+    - browser_computer
+    - computer_use
+    - calculator
+    - coding_file_read
+    - coding_file_search
+    - coding_file_list
+    - coding_file_write
+    - coding_file_create
+    - coding_file_patch
+    - coding_file_restore
+    - coding_git_status
+    - coding_git_diff
+    - coding_terminal_exec
+  tool_denylist: []
+  model_allowlist:
+    - openrouter/tencent/hy3-preview:free
+    - google/gemini-2.5-flash
+    - google/gemini-2.5-pro
+    - openai/gpt-5.4
+    - openai/gpt-5.4-mini
+    - anthropic/claude-sonnet-4-6
+    - stub/default
+
+metadata:
+  pack_id: defaultspack
+  category: operations
+  agent_service_profile: true
+  role_model: company
+  client_manager_agent_id: client_manager
+  channel_model: slack_like_mentions
+  chat_contract:
+    one_agent_one_conversation: true
+    default_conversation_kind: operations_company
+    compression: adaptive
+  organization_roles:
+    - client_manager
+    - project_manager
+    - coding_engineer
+    - research_specialist
+    - reviewer
+    - operations_monitor
+    - scheduler

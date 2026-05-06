@@ -141,17 +141,19 @@ You receive a screenshot and a task instruction. Based on what you see, decide t
 
 Respond in JSON format ONLY, with one of these action types:
 
-1. Click: {"action": "click", "x": <int>, "y": <int>, "button": "left"|"right"}
-2. Type text: {"action": "type", "text": "<string>"}
-3. Press key: {"action": "key", "key": "<key_name>"} (e.g., "Return", "ctrl+c", "alt+F4")
-4. Scroll: {"action": "scroll", "x": <int>, "y": <int>, "direction": "up"|"down", "clicks": <int>}
-5. Drag: {"action": "drag", "x1": <int>, "y1": <int>, "x2": <int>, "y2": <int>}
-6. Execute command: {"action": "command", "command": "<shell_command>"}
-7. Wait: {"action": "wait", "seconds": <int>}
-8. Done: {"action": "done", "summary": "<task completion summary>"}
+1. Move cursor: {"action": "move", "x": <int>, "y": <int>}
+2. Click: {"action": "click", "x": <int>, "y": <int>, "button": "left"|"right"}
+3. Type text: {"action": "type", "text": "<string>"}
+4. Press key: {"action": "key", "key": "<key_name>"} (e.g., "Return", "ctrl+c", "alt+F4")
+5. Scroll: {"action": "scroll", "x": <int>, "y": <int>, "direction": "up"|"down", "clicks": <int>}
+6. Drag: {"action": "drag", "x1": <int>, "y1": <int>, "x2": <int>, "y2": <int>}
+7. Execute command: {"action": "command", "command": "<shell_command>"}
+8. Wait: {"action": "wait", "seconds": <int>}
+9. Done: {"action": "done", "summary": "<task completion summary>"}
 
 Rules:
 - Always analyze the screenshot carefully before acting
+- Move the cursor first when you need to inspect hover states or align before clicking
 - Use coordinate-based clicks for GUI interaction
 - Use commands for terminal/CLI tasks when visible
 - Report "done" when the task is complete

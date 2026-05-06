@@ -13,6 +13,7 @@ from blocks.chat._context_helpers import extract_user_text, enrich_messages
 from blocks.chat.send import (
     _attachment_image_blocks,
     _attachment_text_blocks,
+    _conversation_system_prompt,
     _sanitize_attachment_metadata,
 )
 
@@ -142,7 +143,7 @@ def _stream_response(input_data, context):
     model = conv.get("model", "stub/default")
 
     manager = get_manager()
-    system_prompt = manager.get_system_prompt()
+    system_prompt = _conversation_system_prompt(conv, manager)
     user_text = extract_user_text(content)
     try:
         enrich_messages(standard_messages, system_prompt, conversation_id, user_text, manager)

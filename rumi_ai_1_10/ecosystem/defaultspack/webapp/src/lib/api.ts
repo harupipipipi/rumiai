@@ -72,6 +72,41 @@ export type CodingBranchResponse = {
   output?: string;
 };
 
+export type OperationsCompanyRole = {
+  agent_id: string;
+  role_key: string;
+  agent_name: string;
+  display_name: string;
+  model?: string;
+  allowed_tools?: string[];
+  context_limit?: number;
+};
+
+export type OperationsCompanyStatus = {
+  profile_id: string;
+  bootstrapped: boolean;
+  org_id?: string | null;
+  conversation_id?: string | null;
+  org?: {
+    org_id: string;
+    name: string;
+    status: string;
+    members?: Record<string, unknown>;
+    member_count?: number;
+    recent_messages?: unknown[];
+  } | null;
+  schedules?: Array<Record<string, unknown>>;
+  manifest: {
+    name?: string;
+    non_stop?: boolean;
+    can_run_24_7?: boolean;
+    roles?: OperationsCompanyRole[];
+    scheduler?: Record<string, unknown>;
+    model_self_selection?: { allowlist?: string[] };
+    tool_policy?: { allowlist?: string[]; denylist?: string[]; role_overrides?: Record<string, string[]> };
+  };
+};
+
 export type ChatActivityEvent = {
   type: string;
   message?: string;
@@ -606,6 +641,28 @@ export const api = {
 
   listSchedules() {
     return request<Record<string, unknown>>("/api/agent/schedules");
+  },
+
+  getOperationsCompanyStatus() {
+    return request<OperationsCompanyStatus>("/api/agent/company/status");
+  },
+
+  bootstrapOperationsCompany(options?: {
+    start_nonstop?: boolean;
+    heartbeat_minutes?: number;
+    model?: string;
+  }) {
+    return request<OperationsCompanyStatus>("/api/agent/company/bootstrap", {
+      method: "POST",
+      body: JSON.stringify(options ?? {}),
+    });
+  },
+
+  triggerSchedule(scheduleId: string) {
+    return request<Record<string, unknown>>(`/api/agent/schedules/${scheduleId}/trigger`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
   },
 
   listChannels() {

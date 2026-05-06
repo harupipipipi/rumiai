@@ -28,7 +28,25 @@
       "composer_label": "Subagent",
       "composer_icon": "bot",
       "drop_capabilities": ["composer.toggle_chip"],
-      "widget_kind": "tool_toggle"
+      "widget_kind": "tool_toggle",
+      "settings_fields": [
+        {
+          "id": "default_model",
+          "label": "Default model",
+          "type": "text",
+          "default": "",
+          "help": "Saved fallback model preference when a parent chat has no model."
+        },
+        {
+          "id": "max_concurrent_subagents",
+          "label": "Max concurrent subagents",
+          "type": "number",
+          "default": 2,
+          "min": 1,
+          "max": 8,
+          "help": "Saved preference for delegated work fan-out."
+        }
+      ]
     }
   }
 }

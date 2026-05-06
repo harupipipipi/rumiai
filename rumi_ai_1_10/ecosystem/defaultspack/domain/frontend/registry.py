@@ -348,6 +348,7 @@ class FrontendRegistry:
         for tool in registry.list_tools():
             schema = tool.get("schema", {}).get("parameters", {})
             execution_type = tool.get("execution", {}).get("type", "local")
+            ui = dict(tool.get("ui", {})) if isinstance(tool.get("ui"), dict) else {}
             items.append(
                 {
                     "id": tool.get("tool_id", tool.get("name", "tool")),
@@ -356,15 +357,15 @@ class FrontendRegistry:
                     "description": tool.get("summary", ""),
                     "badge": "Dynamic" if execution_type == "dynamic" else None,
                     "tags": tool.get("tags", []),
-                    "ui": dict(tool.get("ui", {})) if isinstance(tool.get("ui"), dict) else {},
+                    "ui": ui,
                     "origin": {"kind": "tool_registry", "path": "domain/tool/registry.py"},
                     "panel": {
-                        "kind": "schema",
+                        "kind": "tool_settings",
                         "title": tool.get("name", tool.get("tool_id", "tool")),
-                        "fields": self._schema_to_fields(schema),
+                        "fields": self._tool_settings_fields(ui),
                         "notes": [
-                            "Tool schema is read from ToolRegistry.",
-                            "Add or update tools under user_data/shared/tools/ via API.",
+                            "Tool call arguments stay in ToolRegistry schema and are not shown as settings.",
+                            self._tool_schema_summary(schema),
                         ],
                     },
                 }
@@ -483,6 +484,26 @@ class FrontendRegistry:
                         ],
                         "notes": [
                             "/api/agent/schedules で作成・更新・pause/resume・trigger が可能です。",
+                        ],
+                    },
+                },
+                {
+                    "id": "operations-company",
+                    "label": "Operations Company",
+                    "category": "system",
+                    "description": "24/7常駐agent、会社型ロール、内部mention、定期監視を束ねるprofile。",
+                    "tags": ["agent", "company", "24-7", "schedule"],
+                    "origin": {"kind": "builtin", "path": "profiles/operations_company.profile.yaml"},
+                    "panel": {
+                        "kind": "actions",
+                        "title": "Operations Company",
+                        "actions": [
+                            {"id": "operations.status", "label": "Status", "icon": "activity"},
+                            {"id": "operations.bootstrap", "label": "Start 24/7", "icon": "play", "method": "POST", "endpoint": "/api/agent/company/bootstrap", "payload": {"start_nonstop": True}},
+                        ],
+                        "notes": [
+                            "Client Manager がユーザーと会話し、PM/Coding/Research/Reviewer/Monitor/Scheduler が内部channelで報告します。",
+                            "tool と settings は defaultspack と共有し、roleごとの allowlist と profile denylist で切り替えます。",
                         ],
                     },
                 },
@@ -680,7 +701,6 @@ class FrontendRegistry:
                 "label": "Chat Rendering",
                 "description": "block / widget rendering rules for the conversation pane.",
                 "fields": [
-                    {"id": "render_markdown", "label": "Render Markdown", "type": "toggle", "default": True},
                     {"id": "show_widgets", "label": "Render Widgets", "type": "toggle", "default": True},
                     {
                         "id": "unknown_block_strategy",
@@ -770,57 +790,29 @@ class FrontendRegistry:
                         "help": "高度設定: profile_id ごとの上書き。通常は Thinking Level を使います。",
                         "advanced": True,
                     },
+                ],
+            },
+            {
+                "id": "operations_company",
+                "label": "Operations Company",
+                "description": "24/7常駐agent profile の共有設定。defaultspack tool/settingsをそのまま使います。",
+                "fields": [
+                    {"id": "heartbeat_minutes", "label": "Heartbeat Minutes", "type": "number", "default": 15, "min": 1, "max": 1440},
+                    {"id": "normal_status_silent", "label": "Silent Normal Checks", "type": "toggle", "default": True},
+                    {"id": "max_concurrent_children", "label": "Max Child Agents", "type": "number", "default": 3, "min": 1, "max": 12},
                     {
-                        "id": "model_profile",
-                        "label": "Model Profile JSON",
+                        "id": "model_allowlist",
+                        "label": "Model Allowlist",
                         "type": "textarea",
-                        "default": self._default_model_profile_text(),
-                        "help": "高度設定: routing/profile API 用の編集 contract。",
-                        "advanced": True,
+                        "default": "openrouter/tencent/hy3-preview:free\ngoogle/gemini-2.5-flash\ngoogle/gemini-2.5-pro\nopenai/gpt-5.4\nopenai/gpt-5.4-mini\nanthropic/claude-sonnet-4-6\nstub/default",
                     },
                     {
-                        "id": "detected_provider_count",
-                        "label": "Detected Providers",
-                        "type": "readonly",
-                        "default": len(self._list_provider_models()),
-                        "advanced": True,
+                        "id": "tool_denylist",
+                        "label": "Disabled Tools",
+                        "type": "textarea",
+                        "default": "",
+                        "help": "1行に1つのtool id。profile allowlistよりdenyが優先されます。",
                     },
-                ],
-            },
-            {
-                "id": "research",
-                "label": "Research",
-                "description": "External provider behavior shared by research tools.",
-                "fields": [
-                    {"id": "allow_external_network", "label": "External Network", "type": "toggle", "default": False, "help": "Web/Reddit provider を実ネットワークに接続する既定値。"},
-                    {"id": "default_limit", "label": "Default Limit", "type": "number", "default": 5, "min": 1, "max": 50},
-                ],
-            },
-            {
-                "id": "browser_computer",
-                "label": "Browser / Computer",
-                "description": "Approval defaults for browser and desktop control.",
-                "fields": [
-                    {"id": "dry_run_by_default", "label": "Dry Run By Default", "type": "toggle", "default": True},
-                    {"id": "require_approval", "label": "Require Approval", "type": "toggle", "default": True},
-                ],
-            },
-            {
-                "id": "collaboration",
-                "label": "Collaboration",
-                "description": "Channel and multi-agent UI defaults.",
-                "fields": [
-                    {"id": "show_channel_events", "label": "Show Channel Events", "type": "toggle", "default": True},
-                    {"id": "default_visibility", "label": "Default Visibility", "type": "select", "default": "local", "options": [{"value": "local", "label": "Local"}, {"value": "private", "label": "Private"}, {"value": "unlisted", "label": "Unlisted"}]},
-                ],
-            },
-            {
-                "id": "share",
-                "label": "Share & Export",
-                "description": "Local share link and export defaults.",
-                "fields": [
-                    {"id": "default_format", "label": "Default Format", "type": "select", "default": "markdown", "options": [{"value": "markdown", "label": "Markdown"}, {"value": "json", "label": "JSON"}]},
-                    {"id": "copy_result_to_clipboard", "label": "Copy Result", "type": "toggle", "default": True},
                 ],
             },
         ]
@@ -1223,18 +1215,31 @@ class FrontendRegistry:
         return {
             "general": {"composer_placeholder": "メッセージを入力...", "show_activity_in_messages": True},
             "preview": {"auto_open": False, "default_mode": "auto", "max_items": 12},
-            "chat_rendering": {"render_markdown": True, "show_widgets": True, "unknown_block_strategy": "hidden"},
+            "chat_rendering": {"show_widgets": True, "unknown_block_strategy": "hidden"},
             "models": {
-                "detected_provider_count": len(self._list_provider_models()),
                 "preferred_model": "openrouter/tencent/hy3-preview:free",
                 "thinking_level": "medium",
                 "favorite_profiles": ["openrouter/tencent/hy3-preview:free", "stub/default"],
                 "thinking_level_by_profile": {"openrouter/tencent/hy3-preview:free": "medium"},
-                "model_profile": self._default_model_profile_text(),
                 "google_api_key": "",
                 "google_api_key_configured": provider_has_api_key("google", pack_root=self._pack_root),
                 "openrouter_api_key": "",
                 "openrouter_api_key_configured": provider_has_api_key("openrouter", pack_root=self._pack_root),
+            },
+            "operations_company": {
+                "heartbeat_minutes": 15,
+                "normal_status_silent": True,
+                "max_concurrent_children": 3,
+                "model_allowlist": (
+                    "openrouter/tencent/hy3-preview:free\n"
+                    "google/gemini-2.5-flash\n"
+                    "google/gemini-2.5-pro\n"
+                    "openai/gpt-5.4\n"
+                    "openai/gpt-5.4-mini\n"
+                    "anthropic/claude-sonnet-4-6\n"
+                    "stub/default"
+                ),
+                "tool_denylist": "",
             },
         }
 
@@ -1348,44 +1353,18 @@ class FrontendRegistry:
         except Exception:
             return [{"id": "stub/default", "name": "stub/default"}]
 
-    def _default_model_profile_text(self) -> str:
-        return json.dumps(
-            {
-                "name": "Tencent HY3 Preview Free",
-                "provider": "openrouter",
-                "model_id": "tencent/hy3-preview:free",
-                "profile_id": "openrouter/tencent/hy3-preview:free",
-                "max_context": 32000,
-                "supports_thinking": False,
-                "thinking_level": None,
-                "traits": ["free", "preview"],
-                "strengths": ["general"],
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
+    def _tool_settings_fields(self, ui: dict[str, Any]) -> list[dict[str, Any]]:
+        fields = ui.get("settings_fields", [])
+        if not isinstance(fields, list):
+            return []
+        return [field for field in fields if isinstance(field, dict)]
 
-    def _schema_to_fields(self, schema: dict[str, Any]) -> list[dict[str, Any]]:
+    def _tool_schema_summary(self, schema: dict[str, Any]) -> str:
         properties = schema.get("properties", {}) if isinstance(schema, dict) else {}
-        required = set(schema.get("required", [])) if isinstance(schema, dict) else set()
-        fields = []
-        for key, value in properties.items():
-            field_type = value.get("type", "string")
-            ui_type = {"boolean": "toggle", "integer": "number", "number": "number"}.get(field_type, "text")
-            if value.get("enum"):
-                ui_type = "select"
-            fields.append(
-                {
-                    "id": key,
-                    "label": key,
-                    "type": ui_type,
-                    "required": key in required,
-                    "default": value.get("default"),
-                    "help": value.get("description", ""),
-                    "options": [{"value": option, "label": str(option)} for option in value.get("enum", [])],
-                }
-            )
-        return fields
+        if not isinstance(properties, dict) or not properties:
+            return "This tool does not declare runtime arguments."
+        names = ", ".join(str(name) for name in properties.keys())
+        return f"Runtime arguments: {names}."
 
     def _iso_to_ms(self, value: Any) -> int:
         if not value or not isinstance(value, str):

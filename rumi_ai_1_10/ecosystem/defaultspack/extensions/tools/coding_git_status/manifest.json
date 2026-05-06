@@ -23,7 +23,10 @@
         "method": "GET",
         "result_surface": "preview",
         "requires_approval": false
-      }
+      },
+      "settings_fields": [
+        {"id": "default_workspace_root", "label": "Default Workspace Root", "type": "text", "default": "", "help": "Durable root used when a workspace root is not provided by the runtime."}
+      ]
     },
     "tool_category": "git",
     "action_type": "read",

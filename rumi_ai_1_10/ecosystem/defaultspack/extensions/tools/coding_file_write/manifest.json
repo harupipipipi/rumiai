@@ -14,7 +14,13 @@
       "group_label": "Write",
       "group_icon": "file",
       "drop_capabilities": ["composer.toggle_chip"],
-      "widget_kind": "tool_toggle"
+      "widget_kind": "tool_toggle",
+      "settings_fields": [
+        {"id": "approval_policy", "label": "Approval Policy", "type": "select", "default": "prompt", "options": [{"value": "prompt", "label": "Prompt"}, {"value": "always_require", "label": "Always Require"}]},
+        {"id": "default_workspace_root", "label": "Default Workspace Root", "type": "text", "default": "", "help": "Durable root used when a workspace root is not provided by the runtime."},
+        {"id": "preflight_by_default", "label": "Preflight By Default", "type": "toggle", "default": true},
+        {"id": "diff_context_lines", "label": "Diff Context Lines", "type": "number", "default": 3, "min": 0, "max": 20}
+      ]
     },
     "tool_category": "filesystem_write",
     "action_type": "file_write",

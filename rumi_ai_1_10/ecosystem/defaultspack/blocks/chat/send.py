@@ -33,6 +33,7 @@ _SECRET_KEY_RE = re.compile(
     r"(api[_-]?key|authorization|bearer|credential|password|secret|token)",
     re.IGNORECASE,
 )
+_PROMPT_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def _stub_response():
@@ -41,6 +42,25 @@ def _stub_response():
         "finish_reason": "stop",
         "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
     }
+
+
+def _conversation_system_prompt(conv, manager):
+    prompt_id = str((conv or {}).get("system_prompt_id") or "").strip()
+    if not prompt_id:
+        return manager.get_system_prompt()
+    prompt = manager.get_prompt(prompt_id) or manager.get_prompt_by_name(prompt_id)
+    if isinstance(prompt, dict):
+        body = prompt.get("body") or prompt.get("content")
+        if body:
+            return str(body)
+    if _PROMPT_ID_RE.match(prompt_id):
+        prompt_path = Path(__file__).resolve().parents[2] / "prompts" / (prompt_id + ".system.md")
+        try:
+            if prompt_path.is_file():
+                return prompt_path.read_text(encoding="utf-8")
+        except OSError:
+            pass
+    return manager.get_system_prompt()
 
 
 def _has_real_provider(client, model):
@@ -265,6 +285,49 @@ def _browser_screenshot_data_url(result):
     return ""
 
 
+def _browser_screenshot_guidance(result):
+    if not isinstance(result, dict):
+        return "Browser screenshot captured by browser_computer. Use this image to continue the task."
+    data = result.get("data", result)
+    if not isinstance(data, dict):
+        return "Browser screenshot captured by browser_computer. Use this image to continue the task."
+    widget = data.get("widget") if isinstance(data.get("widget"), dict) else {}
+    source = widget if widget.get("coordinate_system") else data
+    image_size = source.get("image_size") if isinstance(source.get("image_size"), dict) else {}
+    action_coordinate_system = source.get("action_coordinate_system") if isinstance(source.get("action_coordinate_system"), dict) else {}
+    model_image_size = source.get("model_image_size") if isinstance(source.get("model_image_size"), dict) else {}
+    scale = source.get("model_to_action_scale") if isinstance(source.get("model_to_action_scale"), dict) else {}
+    cursor = source.get("cursor") if isinstance(source.get("cursor"), dict) else {}
+    parts = ["Browser screenshot captured by browser_computer. Use this image to continue the task."]
+    if image_size.get("width") and image_size.get("height"):
+        parts.append(
+            "The attached screenshot image is top-left pixel space: width={} height={}.".format(
+                image_size.get("width"),
+                image_size.get("height"),
+            )
+        )
+    if action_coordinate_system.get("width") and action_coordinate_system.get("height"):
+        parts.append(
+            "Mouse actions use top-left action coordinates: width={} height={} x_range={} y_range={}.".format(
+                action_coordinate_system.get("width"),
+                action_coordinate_system.get("height"),
+                action_coordinate_system.get("x_range"),
+                action_coordinate_system.get("y_range"),
+            )
+        )
+    if model_image_size.get("width") and model_image_size.get("height") and scale.get("x") and scale.get("y"):
+        parts.append(
+            "If you estimate a point on the attached image, convert it to action coordinates with scale x={:.4f}, y={:.4f} before moving.".format(
+                float(scale.get("x")),
+                float(scale.get("y")),
+            )
+        )
+    if cursor.get("x") is not None and cursor.get("y") is not None:
+        parts.append("Current cursor is near x={} y={}.".format(cursor.get("x"), cursor.get("y")))
+    parts.append("To reposition without clicking, call browser_use with action=move and integer x/y action coordinates.")
+    return " ".join(parts)
+
+
 def _append_tool_result_message(messages, tool_name, result, tool_call_id="", *, model=""):
     result_text = ""
     if isinstance(result, dict):
@@ -296,7 +359,7 @@ def _append_tool_result_message(messages, tool_name, result, tool_call_id="", *,
                     "content": [
                         {
                             "type": "text",
-                            "text": "Browser screenshot captured by browser_computer. Use this image to continue the task.",
+                            "text": _browser_screenshot_guidance(result),
                         },
                         {"type": "image_url", "image_url": {"url": screenshot}},
                     ],
@@ -605,7 +668,7 @@ def run(input_data, context):
     # P1-4: Inspector 用のリクエストID を生成
     request_id = gen_id()
     manager = get_manager()
-    system_prompt = manager.get_system_prompt()
+    system_prompt = _conversation_system_prompt(conv, manager)
 
     # --- 9b: ナレッジ / メモリ自動検索 & コンテキスト変数実動化 ---
     user_text = extract_user_text(content)

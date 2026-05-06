@@ -156,6 +156,21 @@ def max_tool_calls(context: Dict[str, Any]) -> Optional[int]:
 def is_tool_rejected_by_policy(tool: Any, policy: Optional[Dict[str, Any]]) -> bool:
     if not isinstance(policy, dict):
         return False
+    tool_name = tool_name_from_definition(tool)
+    denylist = _normalize_policy_tool_list(
+        policy.get("tool_denylist")
+        or policy.get("disabled_tools")
+        or policy.get("tool_blocklist")
+    )
+    if tool_name and tool_name in denylist:
+        return True
+    allowlist = _normalize_policy_tool_list(
+        policy.get("tool_allowlist")
+        or policy.get("enabled_tools")
+        or policy.get("allowed_tools")
+    )
+    if allowlist and tool_name not in allowlist:
+        return True
     category = _tool_metadata_value(tool, "category")
     action_type = _tool_metadata_value(tool, "action_type")
     if policy.get("allow_shell") is False and (category == "shell" or action_type == "shell"):
@@ -166,6 +181,14 @@ def is_tool_rejected_by_policy(tool: Any, policy: Optional[Dict[str, Any]]) -> b
     ):
         return True
     return False
+
+
+def _normalize_policy_tool_list(value: Any) -> Set[str]:
+    if isinstance(value, str):
+        value = [item.strip() for item in value.split(",")]
+    if not isinstance(value, list):
+        return set()
+    return {str(item).strip() for item in value if str(item).strip()}
 
 
 def tool_requires_approval_by_policy(tool: Any, policy: Optional[Dict[str, Any]]) -> bool:

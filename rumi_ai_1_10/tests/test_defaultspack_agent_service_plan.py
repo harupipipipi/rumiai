@@ -770,6 +770,11 @@ def test_browser_screenshot_tool_result_adds_image_for_vision_models():
                 "result": "screenshot",
                 "action": "computer.screenshot",
                 "data_url": "data:image/png;base64,aGVsbG8=",
+                "image_size": {"width": 1440, "height": 900},
+                "action_coordinate_system": {"width": 720, "height": 450, "x_range": [0, 719], "y_range": [0, 449]},
+                "model_image_size": {"width": 640, "height": 400},
+                "model_to_screen_scale": {"x": 2.25, "y": 2.25},
+                "model_to_action_scale": {"x": 1.125, "y": 1.125},
             },
         },
         "call_1",
@@ -778,6 +783,10 @@ def test_browser_screenshot_tool_result_adds_image_for_vision_models():
 
     assert messages[0]["role"] == "tool"
     assert messages[1]["role"] == "user"
+    assert "action=move" in messages[1]["content"][0]["text"]
+    assert "width=1440 height=900" in messages[1]["content"][0]["text"]
+    assert "width=720 height=450" in messages[1]["content"][0]["text"]
+    assert "scale x=1.1250, y=1.1250" in messages[1]["content"][0]["text"]
     assert messages[1]["content"][1]["image_url"]["url"] == "data:image/png;base64,aGVsbG8="
 
 
@@ -850,6 +859,47 @@ def test_browser_screenshot_tool_log_compacts_inline_image_data():
     assert compact["data"]["widget"]["data_url"] == "[image data saved as artifact]"
     assert compact["data"]["widget"]["model_image_path"] == "/tmp/screenshot-model.jpg"
     assert send._compact_tool_log_value("see data:image/png;base64,abc123 now") == "see [image data saved as artifact] now"
+
+
+def test_browser_computer_screenshot_result_includes_coordinate_metadata(tmp_path, monkeypatch):
+    from domain.tool.browser_computer import BrowserComputerController
+
+    screenshot = tmp_path / "screen.png"
+    model_image = tmp_path / "screen-model.png"
+    png_header = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR"
+    screenshot.write_bytes(png_header + b"\x00\x00\x05\xa0\x00\x00\x03\x84")
+    model_image.write_bytes(png_header + b"\x00\x00\x02\x80\x00\x00\x01\x90")
+    monkeypatch.setattr(BrowserComputerController, "_cursor_position", staticmethod(lambda: {"x": 12, "y": 34, "origin": "top_left"}))
+    monkeypatch.setattr(
+        BrowserComputerController,
+        "_action_coordinate_system",
+        staticmethod(
+            lambda system, image_size: {
+                "origin": "top_left",
+                "unit": "display_coordinate",
+                "screen": "primary",
+                "x": 0,
+                "y": 0,
+                "width": 720,
+                "height": 450,
+                "x_range": [0, 719],
+                "y_range": [0, 449],
+            }
+        ),
+    )
+
+    result = BrowserComputerController()._screenshot_result(screenshot, model_image, "Darwin")
+
+    assert result["image_size"] == {"width": 1440, "height": 900}
+    assert result["model_image_size"] == {"width": 640, "height": 400}
+    assert result["coordinate_system"]["origin"] == "top_left"
+    assert result["coordinate_system"]["x_range"] == [0, 1439]
+    assert result["action_coordinate_system"]["width"] == 720
+    assert result["model_to_screen_scale"] == {"x": 2.25, "y": 2.25}
+    assert result["model_to_action_scale"] == {"x": 1.125, "y": 1.125}
+    assert result["screenshot_to_action_scale"] == {"x": 0.5, "y": 0.5}
+    assert result["cursor"] == {"x": 12, "y": 34, "origin": "top_left"}
+    assert result["cursor_move_contract"]["action"] == "move"
 
 
 def test_tool_activity_events_and_logs_redact_secret_values():
@@ -1154,6 +1204,9 @@ def test_fallback_routes_expose_agent_service_and_coding_surfaces():
     assert ("POST", "/api/tools/browser-computer", "blocks.tool.browser_computer") in routes
     assert ("GET", "/api/ai/profiles", "blocks.ai.profiles") in routes
     assert ("GET", "/api/agent/schedules", "blocks.agent.scheduler.list") in routes
+    assert ("GET", "/api/agent/company/status", "blocks.agent.company.status") in routes
+    assert ("POST", "/api/agent/company/bootstrap", "blocks.agent.company.bootstrap") in routes
+    assert ("GET", "/api/agent/org/roles", "blocks.agent.org.list_roles") in routes
     assert ("GET", "/api/chat/channels", "blocks.chat.channel.list") in routes
     assert ("POST", "/api/share", "blocks.share.create") in routes
 
@@ -1192,6 +1245,8 @@ def test_frontend_sidebar_api_routes_match_in_registry_mode():
         ("GET", "/api/coding/git/branch"),
         ("GET", "/api/ai/profiles"),
         ("GET", "/api/agent/schedules"),
+        ("GET", "/api/agent/company/status"),
+        ("POST", "/api/agent/company/bootstrap"),
         ("GET", "/api/chat/channels"),
         ("GET", "/api/capabilities/local_file"),
     ]
@@ -1237,12 +1292,47 @@ def test_browser_computer_controller_gates_desktop_actions():
     controller = BrowserComputerController()
 
     assert controller.run("browser.session")["action"] == "browser.session"
+    assert controller.run("browser.session")["capabilities"]["cursor_move"] in {True, False}
     assert controller.run("browser.open_url", {"url": "https://example.test", "dry_run": True})["dry_run"] is True
     assert controller.run("computer.screenshot", {"dry_run": True})["requires_approval"] is False
+    assert controller.run("computer.move", {"x": 1, "y": 2, "dry_run": True})["requires_approval"] is False
     approval = controller.run("computer.click", {"x": 1, "y": 2})
     assert approval["requires_approval"] is True
     assert approval["approval_token"]
     assert controller.run("computer.click", {"x": 1, "y": 2, "approved": True})["requires_approval"] is True
+
+
+def test_browser_use_maps_cursor_move_to_browser_computer_payload():
+    from domain.tool.executor import _browser_computer_action_payload
+
+    action, payload = _browser_computer_action_payload(
+        "browser_use",
+        {"action": "move", "x": 120, "y": 240, "dry_run": True},
+    )
+
+    assert action == "computer.move"
+    assert payload == {"x": 120, "y": 240, "dry_run": True}
+
+
+def test_computer_move_uses_cliclick_on_macos(monkeypatch):
+    from domain.tool.browser_computer import BrowserComputerController
+    import domain.tool.browser_computer as browser_computer
+
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.shutil, "which", lambda name: "/opt/homebrew/bin/cliclick" if name == "cliclick" else None)
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+
+    result = BrowserComputerController().run("computer.move", {"x": 120, "y": 240}, yolo_mode=True)
+
+    assert result["executed"] is True
+    assert result["target"] == {"x": 120, "y": 240}
+    assert calls[0][0] == ["/opt/homebrew/bin/cliclick", "m:120,240"]
 
 
 def test_browser_computer_manages_persistent_profiles_and_cookie_jars(tmp_path):
