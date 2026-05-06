@@ -71,6 +71,7 @@ export function AgentDashboard({
   onLifecycleAction,
   onOpenBrowser,
   onOpenApprovals,
+  onEditAgent,
 }: {
   agents: AgentRecord[];
   loading?: boolean;
@@ -82,6 +83,7 @@ export function AgentDashboard({
   onLifecycleAction?: (agent: AgentRecord, action: AgentLifecycleAction) => void;
   onOpenBrowser?: (agent: AgentRecord) => void;
   onOpenApprovals?: (agent: AgentRecord) => void;
+  onEditAgent?: (agent: AgentRecord) => void;
 }) {
   const [statusFilter, setStatusFilter] = useState("all");
   const [query, setQuery] = useState("");
@@ -183,6 +185,7 @@ export function AgentDashboard({
                 onLifecycleAction={onLifecycleAction}
                 onOpenBrowser={onOpenBrowser}
                 onOpenApprovals={onOpenApprovals}
+                onEditAgent={onEditAgent}
               />
             ))}
           </div>

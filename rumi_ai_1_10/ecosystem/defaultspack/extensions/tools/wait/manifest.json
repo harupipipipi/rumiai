@@ -1,0 +1,52 @@
+{
+  "id": "wait",
+  "category": "tool",
+  "version": "1",
+  "display_name": "Wait",
+  "description": "Pause an agent run for seconds, minutes, or hours.",
+  "enabled": true,
+  "config": {
+    "tool_id": "wait",
+    "name": "wait",
+    "summary": "指定した時間だけ待機します。",
+    "tags": ["time", "wait", "delay", "agent"],
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "seconds": {"type": "number"},
+          "minutes": {"type": "number"},
+          "hours": {"type": "number"},
+          "duration": {
+            "type": "string",
+            "description": "Human duration such as 30s, 10m, 2h, or 1.5 hours."
+          },
+          "reason": {"type": "string"},
+          "dry_run": {"type": "boolean"}
+        }
+      }
+    },
+    "execution": {"type": "local"},
+    "requires_approval": false,
+    "action_type": "wait",
+    "ui": {
+      "group_id": "agent",
+      "group_label": "Agent",
+      "composer_label": "Wait",
+      "composer_icon": "clock",
+      "drop_capabilities": ["composer.toggle_chip"],
+      "widget_kind": "tool_toggle",
+      "settings_fields": [
+        {
+          "id": "max_hours",
+          "label": "Max Hours",
+          "type": "number",
+          "default": 6,
+          "min": 0.01,
+          "max": 24,
+          "help": "Upper bound for a single wait call."
+        }
+      ]
+    }
+  }
+}

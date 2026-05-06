@@ -86,6 +86,7 @@ def run(context):
         ("POST", "/api/agents/{id}/stop", _lazy("blocks.agent.agents.stop"), {"id": "agent_id"}),
         ("POST", "/api/agents/{id}/tick", _lazy("blocks.agent.agents.tick"), {"id": "agent_id"}),
         ("POST", "/api/agents/{id}/lifecycle", _lazy("blocks.agent.agents.lifecycle"), {"id": "agent_id"}),
+        ("POST", "/api/agents/{id}/webhook", _lazy("blocks.agent.agents.webhook"), {"id": "agent_id"}),
         ("GET", "/api/agents/{id}/status", _lazy("blocks.agent.agents.status"), {"id": "agent_id"}),
         ("GET", "/api/agents/{id}/runs", _lazy("blocks.agent.agents.runs"), {"id": "agent_id"}),
         ("GET", "/api/agents/{id}/logs", _lazy("blocks.agent.agents.logs"), {"id": "agent_id"}),

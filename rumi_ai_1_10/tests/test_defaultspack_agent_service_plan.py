@@ -57,6 +57,9 @@ def test_capability_catalog_loads_plan_manifest():
     assert manifest["default_profile"] == "defaultspack.local_agent"
     assert manifest["counts"]["capabilities"] >= 11
     assert manifest["counts"]["profiles"] >= 5
+    assert manifest["runtime"]["can_run_24_7"] is True
+    assert "Windows" in manifest["runtime"]["platforms"]
+    assert "webhook" in manifest["runtime"]["activation_modes"]
     capability_ids = {item["id"] for item in manifest["capabilities"]}
     assert {"local_file", "terminal", "git", "safety", "artifact", "compact", "research"} <= capability_ids
 
@@ -479,6 +482,7 @@ def test_external_integration_routes_are_registered():
 
     assert "/api/integrations/slack/events" in patterns
     assert "/api/integrations/line/webhook" in patterns
+    assert "/api/agents/{id}/webhook" in patterns
     assert "/api/integrations/discord/interactions" in patterns
     assert "/api/integrations/secrets" in patterns
     assert "/v1/conversations/{id}/run-results/{run_id}/browser-screenshots" in patterns
@@ -1261,7 +1265,8 @@ def test_browser_computer_screenshot_result_includes_coordinate_metadata(tmp_pat
     png_header = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR"
     screenshot.write_bytes(png_header + b"\x00\x00\x05\xa0\x00\x00\x03\x84")
     model_image.write_bytes(png_header + b"\x00\x00\x02\x80\x00\x00\x01\x90")
-    monkeypatch.setattr(BrowserComputerController, "_cursor_position", staticmethod(lambda: {"x": 12, "y": 34, "origin": "top_left"}))
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._write_virtual_cursor({"x": 12, "y": 34, "origin": "top_left", "type": "virtual_cursor"})
     monkeypatch.setattr(
         BrowserComputerController,
         "_action_coordinate_system",
@@ -1280,7 +1285,7 @@ def test_browser_computer_screenshot_result_includes_coordinate_metadata(tmp_pat
         ),
     )
 
-    result = BrowserComputerController()._screenshot_result(screenshot, model_image, "Darwin")
+    result = controller._screenshot_result(screenshot, model_image, "Darwin")
 
     assert result["image_size"] == {"width": 1440, "height": 900}
     assert result["model_image_size"] == {"width": 640, "height": 400}
@@ -1290,7 +1295,9 @@ def test_browser_computer_screenshot_result_includes_coordinate_metadata(tmp_pat
     assert result["model_to_screen_scale"] == {"x": 2.25, "y": 2.25}
     assert result["model_to_action_scale"] == {"x": 1.125, "y": 1.125}
     assert result["screenshot_to_action_scale"] == {"x": 0.5, "y": 0.5}
-    assert result["cursor"] == {"x": 12, "y": 34, "origin": "top_left"}
+    assert result["cursor"]["x"] == 12
+    assert result["cursor"]["y"] == 34
+    assert result["cursor"]["type"] == "virtual_cursor"
     assert result["cursor_move_contract"]["action"] == "move"
 
 
@@ -1598,6 +1605,7 @@ def test_fallback_routes_expose_agent_service_and_coding_surfaces():
     assert ("GET", "/api/agent/schedules", "blocks.agent.scheduler.list") in routes
     assert ("GET", "/api/agent/company/status", "blocks.agent.company.status") in routes
     assert ("POST", "/api/agent/company/bootstrap", "blocks.agent.company.bootstrap") in routes
+    assert ("POST", "/api/agents/{id}/webhook", "blocks.agent.agents.webhook") in routes
     assert ("GET", "/api/agent/org/roles", "blocks.agent.org.list_roles") in routes
     assert ("GET", "/api/chat/channels", "blocks.chat.channel.list") in routes
     assert ("POST", "/api/share", "blocks.share.create") in routes
@@ -1639,6 +1647,7 @@ def test_frontend_sidebar_api_routes_match_in_registry_mode():
         ("GET", "/api/agent/schedules"),
         ("GET", "/api/agent/company/status"),
         ("POST", "/api/agent/company/bootstrap"),
+        ("POST", "/api/agents/example/webhook"),
         ("GET", "/api/chat/channels"),
         ("GET", "/api/capabilities/local_file"),
     ]
@@ -1706,7 +1715,7 @@ def test_browser_use_maps_cursor_move_to_browser_computer_payload():
     assert payload == {"x": 120, "y": 240, "dry_run": True}
 
 
-def test_computer_move_uses_cliclick_on_macos(monkeypatch):
+def test_computer_move_records_virtual_cursor_without_warping_macos(monkeypatch, tmp_path):
     from domain.tool.browser_computer import BrowserComputerController
     import domain.tool.browser_computer as browser_computer
 
@@ -1720,11 +1729,14 @@ def test_computer_move_uses_cliclick_on_macos(monkeypatch):
     monkeypatch.setattr(browser_computer.shutil, "which", lambda name: "/opt/homebrew/bin/cliclick" if name == "cliclick" else None)
     monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
 
-    result = BrowserComputerController().run("computer.move", {"x": 120, "y": 240}, yolo_mode=True)
+    result = BrowserComputerController(artifact_root=tmp_path).run("computer.move", {"x": 120, "y": 240}, yolo_mode=True)
 
     assert result["executed"] is True
     assert result["target"] == {"x": 120, "y": 240}
-    assert calls[0][0] == ["/opt/homebrew/bin/cliclick", "m:120,240"]
+    assert calls == []
+    state = json.loads((tmp_path / "virtual_cursor.json").read_text(encoding="utf-8"))
+    assert state["type"] == "virtual_cursor"
+    assert state["target"] == {"x": 120, "y": 240}
 
 
 def test_computer_scroll_uses_quartz_on_macos(monkeypatch):
@@ -1744,7 +1756,7 @@ def test_computer_scroll_uses_quartz_on_macos(monkeypatch):
 
     assert result["executed"] is True
     assert result["amount"] == -3
-    assert calls[0][0][:2] == ["python3", "-c"]
+    assert calls[0][0][1] == "-c"
     assert "CGEventCreateScrollWheelEvent" in calls[0][0][2]
     assert calls[0][0][3] == "-3"
 

@@ -1,8 +1,11 @@
+import json
+import re
+import time
+from pathlib import Path
+
 from .registry import ToolRegistry
 from .mcp_client import McpClient
 from .schema_adapter import is_tool_rejected_by_policy, policy_from_context
-import json
-from pathlib import Path
 
 
 # P1-2: サンドボックス用の安全なビルトイン一覧
@@ -353,6 +356,13 @@ class ToolExecutor:
                 "is_error": False,
                 "widget": {"type": "todo", **result},
             }
+        elif tool_name == "wait":
+            result = _execute_wait(arguments, context if isinstance(context, dict) else {})
+            return {
+                "result": result.get("summary", "wait completed"),
+                "is_error": result.get("status") == "error",
+                "widget": {"type": "wait", **result},
+            }
         elif tool_name == "subagent":
             from domain.tool.subagent import SubagentController
 
@@ -428,6 +438,56 @@ def _safe_calculate(expression):
     except Exception as exc:
         return {"is_error": True, "error": "Calculator error: {}".format(exc)}
     return {"is_error": False, "result": result}
+
+
+def _execute_wait(arguments, context):
+    del context
+    try:
+        seconds = _wait_seconds(arguments if isinstance(arguments, dict) else {})
+    except Exception as exc:
+        return {"status": "error", "summary": str(exc)}
+    max_seconds = float((arguments or {}).get("max_seconds") or 6 * 60 * 60)
+    if seconds < 0:
+        return {"status": "error", "summary": "wait duration must be non-negative", "seconds": seconds}
+    if seconds > max_seconds:
+        return {
+            "status": "error",
+            "summary": "wait duration exceeds max_seconds",
+            "seconds": seconds,
+            "max_seconds": max_seconds,
+        }
+    if bool((arguments or {}).get("dry_run")):
+        return {"status": "ok", "dry_run": True, "summary": f"would wait {seconds:g} seconds", "seconds": seconds}
+    started = time.time()
+    time.sleep(seconds)
+    elapsed = time.time() - started
+    return {
+        "status": "ok",
+        "summary": f"waited {elapsed:.2f} seconds",
+        "seconds": seconds,
+        "elapsed_seconds": elapsed,
+        "reason": str((arguments or {}).get("reason") or ""),
+    }
+
+
+def _wait_seconds(arguments):
+    total = 0.0
+    for key, multiplier in (("seconds", 1.0), ("minutes", 60.0), ("hours", 3600.0)):
+        if arguments.get(key) is not None:
+            total += float(arguments.get(key) or 0) * multiplier
+    if total > 0 or not arguments.get("duration"):
+        return total
+    raw = str(arguments.get("duration") or "").strip().lower()
+    match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours)?", raw)
+    if not match:
+        raise ValueError("duration must look like 30s, 10m, or 2h")
+    value = float(match.group(1))
+    unit = match.group(2) or "seconds"
+    if unit.startswith("h"):
+        return value * 3600
+    if unit.startswith("m"):
+        return value * 60
+    return value
 
 
 def _browser_computer_action_payload(tool_name, arguments):

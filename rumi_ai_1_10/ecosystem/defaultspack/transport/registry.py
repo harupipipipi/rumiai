@@ -75,6 +75,7 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("POST", "/api/agents/{id}/stop", block_module="blocks.agent.agents.stop", path_inject={"id": "agent_id"}),
     HttpRouteSpec("POST", "/api/agents/{id}/tick", block_module="blocks.agent.agents.tick", path_inject={"id": "agent_id"}),
     HttpRouteSpec("POST", "/api/agents/{id}/lifecycle", block_module="blocks.agent.agents.lifecycle", path_inject={"id": "agent_id"}),
+    HttpRouteSpec("POST", "/api/agents/{id}/webhook", block_module="blocks.agent.agents.webhook", path_inject={"id": "agent_id"}),
     HttpRouteSpec("GET", "/api/agents/{id}/status", block_module="blocks.agent.agents.status", path_inject={"id": "agent_id"}),
     HttpRouteSpec("GET", "/api/agents/{id}/runs", block_module="blocks.agent.agents.runs", path_inject={"id": "agent_id"}),
     HttpRouteSpec("GET", "/api/agents/{id}/logs", block_module="blocks.agent.agents.logs", path_inject={"id": "agent_id"}),

@@ -17,7 +17,9 @@ import {
 import {
   api,
   type AgentRunMode,
+  type AgentRecord,
   type AgentTemplate,
+  type AgentWebhookConfig,
   type ApiKeySummary,
   type BrowserProfile,
   type CreateAgentRequest,
@@ -49,6 +51,11 @@ export type AgentWizardDraft = {
   stop_on_failure: boolean;
   max_cost_usd: number;
   approval_mode: "prompt" | "auto_low_risk" | "manual_only";
+  webhook_enabled: boolean;
+  webhook_url_mode: "cloudflare_pages" | "custom";
+  webhook_cloudflare_pages_url: string;
+  webhook_custom_url: string;
+  webhook_secret: string;
 };
 
 export const WIZARD_STEPS = [
@@ -106,6 +113,11 @@ const DEFAULT_DRAFT: AgentWizardDraft = {
   stop_on_failure: true,
   max_cost_usd: 5,
   approval_mode: "prompt",
+  webhook_enabled: false,
+  webhook_url_mode: "cloudflare_pages",
+  webhook_cloudflare_pages_url: "https://rumi-agent-webhook.pages.dev/api/agent-webhook",
+  webhook_custom_url: "",
+  webhook_secret: "",
 };
 
 export function buildCreateAgentPayload(draft: AgentWizardDraft): CreateAgentRequest {
@@ -128,6 +140,7 @@ export function buildCreateAgentPayload(draft: AgentWizardDraft): CreateAgentReq
       interval_minutes: Math.max(1, Number(draft.interval_minutes) || 1),
       start_now: draft.start_now,
     },
+    webhook: buildWebhookConfig(draft),
     lifecycle: {
       run_mode: draft.run_mode,
       start_now: draft.start_now,
@@ -141,6 +154,43 @@ export function buildCreateAgentPayload(draft: AgentWizardDraft): CreateAgentReq
       computer_enabled: draft.computer_enabled,
       require_approval_for: draft.approval_mode === "manual_only" ? ["low", "medium", "high"] : ["medium", "high"],
     },
+  };
+}
+
+function buildWebhookConfig(draft: AgentWizardDraft): AgentWebhookConfig {
+  return {
+    enabled: draft.run_mode === "webhook" || draft.webhook_enabled,
+    url_mode: draft.webhook_url_mode,
+    cloudflare_pages_url: draft.webhook_cloudflare_pages_url.trim() || "https://rumi-agent-webhook.pages.dev/api/agent-webhook",
+    custom_webhook_url: draft.webhook_custom_url.trim(),
+    secret: draft.webhook_secret,
+    accept_unsigned_local: true,
+  };
+}
+
+export function buildAgentWizardDraft(agent: AgentRecord): Partial<AgentWizardDraft> {
+  const webhook = agent.webhook ?? {};
+  return {
+    name: agent.name ?? "",
+    profile_id: agent.profile_id ?? "local_agent",
+    role: agent.role ?? "",
+    model: agent.model ?? "",
+    api_key_id: agent.api_key_id ?? "",
+    provider_id: agent.provider_id ?? "",
+    browser_profile_id: agent.browser_profile_id ?? "",
+    browser_enabled: agent.browser_enabled !== false,
+    computer_enabled: agent.computer_enabled === true,
+    tools: agent.tools ?? agent.tool_policy?.allowed_tools ?? [],
+    run_mode: agent.lifecycle?.run_mode ?? agent.schedule?.mode ?? "manual",
+    interval_minutes: Number(agent.schedule?.interval_minutes ?? 30),
+    start_now: agent.lifecycle?.start_now === true || agent.schedule?.start_now === true,
+    max_cost_usd: Number(agent.lifecycle?.max_cost_usd ?? 5),
+    approval_mode: (agent.lifecycle?.approval_mode as AgentWizardDraft["approval_mode"]) || "prompt",
+    webhook_enabled: webhook.enabled === true,
+    webhook_url_mode: webhook.url_mode === "custom" ? "custom" : "cloudflare_pages",
+    webhook_cloudflare_pages_url: webhook.cloudflare_pages_url || "https://rumi-agent-webhook.pages.dev/api/agent-webhook",
+    webhook_custom_url: webhook.custom_webhook_url || "",
+    webhook_secret: webhook.secret || "",
   };
 }
 
@@ -248,7 +298,9 @@ export function CreateAgentWizard({
   tools = [],
   initialDraft,
   isBusy = false,
+  mode = "create",
   onCreate,
+  onSave,
   onCancel,
 }: {
   templates?: AgentTemplate[];
@@ -258,7 +310,9 @@ export function CreateAgentWizard({
   tools?: AgentToolOption[];
   initialDraft?: Partial<AgentWizardDraft>;
   isBusy?: boolean;
+  mode?: "create" | "edit";
   onCreate?: (payload: CreateAgentRequest) => Promise<void> | void;
+  onSave?: (payload: CreateAgentRequest) => Promise<void> | void;
   onCancel?: () => void;
 }) {
   const [step, setStep] = useState(0);
@@ -294,7 +348,9 @@ export function CreateAgentWizard({
     setSubmitting(true);
     setSubmitError("");
     try {
-      if (onCreate) {
+      if (mode === "edit" && onSave) {
+        await onSave(payload);
+      } else if (onCreate) {
         await onCreate(payload);
       } else {
         await api.createAgent(payload);
@@ -310,7 +366,7 @@ export function CreateAgentWizard({
     <form onSubmit={submit} className="flex h-full min-h-0 flex-col border border-zinc-800 bg-[#09090b] text-zinc-100">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 px-4 py-3">
         <div className="min-w-0">
-          <h2 className="truncate text-sm font-semibold">Agent Factory</h2>
+          <h2 className="truncate text-sm font-semibold">{mode === "edit" ? "Edit Agent" : "Agent Factory"}</h2>
           <p className="mt-0.5 truncate text-[11px] text-zinc-500">{WIZARD_STEPS[step]}</p>
         </div>
         <div className="flex items-center gap-1">
@@ -503,9 +559,9 @@ export function CreateAgentWizard({
         {step === 5 && (
           <div className="space-y-4">
             <div className="flex flex-wrap gap-2">
-              {(["manual", "scheduled", "non_stop"] as const).map((mode) => (
-                <SegmentedButton key={mode} active={draft.run_mode === mode} onClick={() => update({ run_mode: mode })} title={mode}>
-                  {mode}
+              {(["manual", "scheduled", "non_stop", "webhook"] as const).map((runMode) => (
+                <SegmentedButton key={runMode} active={draft.run_mode === runMode} onClick={() => update({ run_mode: runMode, webhook_enabled: runMode === "webhook" || draft.webhook_enabled })} title={runMode}>
+                  {runMode}
                 </SegmentedButton>
               ))}
             </div>
@@ -552,6 +608,46 @@ export function CreateAgentWizard({
               <ToggleRow checked={draft.start_now} icon={<Play size={16} />} label="Start now" onChange={(value) => update({ start_now: value })} />
               <ToggleRow checked={draft.stop_on_failure} icon={<ShieldCheck size={16} />} label="Stop on failure" onChange={(value) => update({ stop_on_failure: value })} />
             </div>
+            <div className="grid gap-3 rounded-lg border border-zinc-800 bg-zinc-950/50 p-3 md:grid-cols-2">
+              <ToggleRow checked={draft.webhook_enabled || draft.run_mode === "webhook"} icon={<Globe2 size={16} />} label="Webhook trigger" onChange={(value) => update({ webhook_enabled: value, run_mode: value ? "webhook" : draft.run_mode === "webhook" ? "manual" : draft.run_mode })} />
+              <label className="space-y-1.5">
+                <span className="text-xs font-medium text-zinc-400">Webhook URL</span>
+                <select
+                  value={draft.webhook_url_mode}
+                  onChange={(event) => update({ webhook_url_mode: event.target.value as AgentWizardDraft["webhook_url_mode"] })}
+                  className="h-9 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100 outline-none focus:border-zinc-600"
+                >
+                  <option value="cloudflare_pages">Cloudflare Pages</option>
+                  <option value="custom">Custom URL</option>
+                </select>
+              </label>
+              <label className="space-y-1.5 md:col-span-2">
+                <span className="text-xs font-medium text-zinc-400">Cloudflare Pages URL</span>
+                <input
+                  value={draft.webhook_cloudflare_pages_url}
+                  onChange={(event) => update({ webhook_cloudflare_pages_url: event.target.value })}
+                  className="h-9 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100 outline-none focus:border-zinc-600"
+                />
+              </label>
+              <label className="space-y-1.5 md:col-span-2">
+                <span className="text-xs font-medium text-zinc-400">Custom Webhook URL</span>
+                <input
+                  value={draft.webhook_custom_url}
+                  onChange={(event) => update({ webhook_custom_url: event.target.value })}
+                  className="h-9 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100 outline-none focus:border-zinc-600"
+                  placeholder="https://example.com/webhook"
+                />
+              </label>
+              <label className="space-y-1.5 md:col-span-2">
+                <span className="text-xs font-medium text-zinc-400">Webhook Secret</span>
+                <input
+                  type="password"
+                  value={draft.webhook_secret}
+                  onChange={(event) => update({ webhook_secret: event.target.value })}
+                  className="h-9 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 text-sm text-zinc-100 outline-none focus:border-zinc-600"
+                />
+              </label>
+            </div>
           </div>
         )}
 
@@ -566,6 +662,7 @@ export function CreateAgentWizard({
               ["browser", payload.browser_enabled ? payload.browser_profile_id || "default" : "off"],
               ["computer", payload.computer_enabled ? "on" : "off"],
               ["lifecycle", payload.lifecycle?.run_mode],
+              ["webhook", payload.webhook?.enabled ? payload.webhook.url_mode : "off"],
               ["tools", `${payload.tools?.length ?? 0}`],
             ].map(([label, value]) => (
               <div key={label} className="min-w-0 rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
@@ -606,10 +703,10 @@ export function CreateAgentWizard({
           <button
             type="submit"
             disabled={busy}
-            title={step === WIZARD_STEPS.length - 1 ? "Create agent" : "Next step"}
+            title={step === WIZARD_STEPS.length - 1 ? (mode === "edit" ? "Save agent" : "Create agent") : "Next step"}
             className="flex h-8 items-center gap-1 rounded-md bg-zinc-100 px-3 text-xs font-semibold text-zinc-950 hover:bg-white disabled:opacity-50"
           >
-            {step === WIZARD_STEPS.length - 1 ? "Create" : "Next"}
+            {step === WIZARD_STEPS.length - 1 ? (mode === "edit" ? "Save" : "Create") : "Next"}
             {step === WIZARD_STEPS.length - 1 ? <Check size={14} /> : <ChevronRight size={14} />}
           </button>
         </div>

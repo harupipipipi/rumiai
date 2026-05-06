@@ -68,10 +68,7 @@ class AgentStore:
             tool_policy.setdefault("denylist", []).append("computer_use")
         if tool_policy:
             merged["tool_policy"] = tool_policy
-        if isinstance(payload.get("schedule"), dict) and not merged.get("schedule_policy"):
-            merged["schedule_policy"] = payload["schedule"]
-        if isinstance(payload.get("lifecycle"), dict):
-            merged["runtime_policy"] = {**dict(merged.get("runtime_policy") or {}), **payload["lifecycle"]}
+        merged.update(_frontend_agent_updates(payload, base=merged))
         definition = AgentDefinition.from_dict(merged).to_dict()
         return self.upsert(definition)
 
@@ -85,7 +82,10 @@ class AgentStore:
         current = self.get_agent(agent_id)
         if not current:
             raise ValueError("agent not found")
-        current.update({key: value for key, value in updates.items() if key not in {"agent_id", "id"}})
+        normalized = _frontend_agent_updates(updates, base=current)
+        if not normalized:
+            normalized = {key: value for key, value in updates.items() if key not in {"agent_id", "id"}}
+        current.update(normalized)
         current["updated_at"] = timestamp()
         return self.upsert(current)
 
@@ -131,3 +131,126 @@ class AgentStore:
     def _write(self, value: dict[str, Any]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps({"schema_version": 1, **value}, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _frontend_agent_updates(payload: dict[str, Any], *, base: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Map webapp AgentRecord/CreateAgentRequest fields into AgentDefinition fields."""
+    base = base if isinstance(base, dict) else {}
+    updates: dict[str, Any] = {}
+    if payload.get("name") is not None:
+        updates["display_name"] = str(payload.get("name") or "").strip()
+    if payload.get("role") is not None:
+        updates["role_key"] = str(payload.get("role") or "").strip() or "custom"
+        if not payload.get("system_prompt"):
+            updates["system_prompt"] = str(payload.get("role") or "")
+    if payload.get("profile_id") is not None:
+        updates["profile_id"] = str(payload.get("profile_id") or "defaultspack.local_agent")
+    if payload.get("model"):
+        model = str(payload.get("model"))
+        model_policy = dict(base.get("model_policy") or {})
+        model_policy["default_model"] = model
+        if not model_policy.get("allowed_models") or model not in set(model_policy.get("allowed_models") or []):
+            model_policy["allowed_models"] = [model]
+        updates["model_policy"] = model_policy
+    if payload.get("api_key_id") is not None or payload.get("provider_id") is not None:
+        api_key_policy = dict(base.get("api_key_policy") or {})
+        if payload.get("api_key_id") is not None:
+            api_key_policy["preferred_key_id"] = str(payload.get("api_key_id") or "")
+        if payload.get("provider_id") is not None:
+            api_key_policy["provider_id"] = str(payload.get("provider_id") or "")
+        updates["api_key_policy"] = api_key_policy
+
+    tool_policy = _tool_policy_from_frontend(payload, base=base)
+    if tool_policy is not None:
+        updates["tool_policy"] = tool_policy
+
+    lifecycle = payload.get("lifecycle") if isinstance(payload.get("lifecycle"), dict) else {}
+    schedule = payload.get("schedule") if isinstance(payload.get("schedule"), dict) else {}
+    webhook = payload.get("webhook") if isinstance(payload.get("webhook"), dict) else payload.get("webhook_policy")
+    webhook = webhook if isinstance(webhook, dict) else {}
+    if lifecycle or schedule or webhook:
+        runtime_policy = dict(base.get("runtime_policy") or {})
+        schedule_policy = dict(base.get("schedule_policy") or {"type": "manual"})
+        webhook_policy = dict(base.get("webhook_policy") or {})
+        run_mode = str(lifecycle.get("run_mode") or schedule.get("mode") or schedule_policy.get("run_mode") or schedule_policy.get("type") or "manual")
+        if webhook:
+            webhook_policy.update(_webhook_policy_from_frontend(webhook))
+            run_mode = "webhook" if webhook_policy.get("enabled") else run_mode
+        if schedule:
+            schedule_policy.update(_schedule_policy_from_frontend(schedule, run_mode=run_mode, webhook_policy=webhook_policy))
+        if lifecycle:
+            runtime_policy.update({key: value for key, value in lifecycle.items() if key not in {"max_cost_usd", "stop_on_failure"}})
+        runtime_policy["activation_mode"] = run_mode
+        runtime_policy["non_stop"] = run_mode == "non_stop"
+        runtime_policy["can_run_24_7"] = run_mode in {"scheduled", "non_stop", "webhook"} or bool(runtime_policy.get("can_run_24_7"))
+        updates["runtime_policy"] = runtime_policy
+        updates["schedule_policy"] = schedule_policy
+        updates["webhook_policy"] = webhook_policy
+        stop_conditions = dict(base.get("stop_conditions") or {})
+        if "max_cost_usd" in lifecycle:
+            stop_conditions["max_cost_usd"] = lifecycle.get("max_cost_usd")
+        if lifecycle.get("stop_on_failure") is False:
+            stop_conditions["max_failures"] = None
+        updates["stop_conditions"] = stop_conditions
+    return {key: value for key, value in updates.items() if key not in {"agent_id", "id"}}
+
+
+def _tool_policy_from_frontend(payload: dict[str, Any], *, base: dict[str, Any]) -> dict[str, Any] | None:
+    touched = any(key in payload for key in ("tools", "tool_policy", "browser_profile_id", "browser_enabled", "computer_enabled"))
+    if not touched:
+        return None
+    tool_policy = dict(base.get("tool_policy") or {})
+    incoming = payload.get("tool_policy") if isinstance(payload.get("tool_policy"), dict) else {}
+    if isinstance(payload.get("tools"), list):
+        tool_policy["allowlist"] = [str(item) for item in payload.get("tools") or []]
+    if isinstance(incoming.get("allowed_tools"), list):
+        tool_policy["allowlist"] = [str(item) for item in incoming.get("allowed_tools") or []]
+    if isinstance(incoming.get("denied_tools"), list):
+        tool_policy["denylist"] = [str(item) for item in incoming.get("denied_tools") or []]
+    if payload.get("browser_profile_id") is not None:
+        tool_policy["browser_profile_id"] = str(payload.get("browser_profile_id") or "")
+    denylist = list(tool_policy.get("denylist") or [])
+    if payload.get("browser_enabled") is False and "browser_use" not in denylist:
+        denylist.append("browser_use")
+    if payload.get("computer_enabled") is False and "computer_use" not in denylist:
+        denylist.append("computer_use")
+    if payload.get("browser_enabled") is True:
+        denylist = [item for item in denylist if item != "browser_use"]
+    if payload.get("computer_enabled") is True:
+        denylist = [item for item in denylist if item != "computer_use"]
+    tool_policy["denylist"] = denylist
+    if isinstance(incoming.get("require_approval_for"), list):
+        tool_policy["require_approval_for"] = [str(item) for item in incoming.get("require_approval_for") or []]
+    return tool_policy
+
+
+def _schedule_policy_from_frontend(schedule: dict[str, Any], *, run_mode: str, webhook_policy: dict[str, Any]) -> dict[str, Any]:
+    if schedule.get("enabled") is False or run_mode == "manual":
+        return {"type": "manual", "enabled": False, "run_mode": "manual"}
+    if run_mode == "webhook":
+        return {
+            "type": "webhook",
+            "enabled": bool(webhook_policy.get("enabled", True)),
+            "run_mode": "webhook",
+            "url_mode": webhook_policy.get("url_mode", "cloudflare_pages"),
+        }
+    interval = max(1, int(float(schedule.get("interval_minutes") or schedule.get("every_minutes") or 30)))
+    return {
+        "type": "interval",
+        "enabled": True,
+        "run_mode": run_mode,
+        "every_minutes": interval,
+        "timezone": str(schedule.get("timezone") or "Asia/Tokyo"),
+        "start_now": bool(schedule.get("start_now")),
+    }
+
+
+def _webhook_policy_from_frontend(webhook: dict[str, Any]) -> dict[str, Any]:
+    policy = dict(webhook)
+    if "enabled" in webhook:
+        policy["enabled"] = bool(webhook.get("enabled"))
+    policy.setdefault("url_mode", "cloudflare_pages")
+    policy.setdefault("cloudflare_pages_url", "https://rumi-agent-webhook.pages.dev/api/agent-webhook")
+    policy.setdefault("custom_webhook_url", "")
+    policy.setdefault("accept_unsigned_local", True)
+    return policy

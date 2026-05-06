@@ -118,7 +118,7 @@ export type AgentLifecycleStatus =
   | "failed"
   | string;
 
-export type AgentRunMode = "manual" | "scheduled" | "non_stop" | string;
+export type AgentRunMode = "manual" | "scheduled" | "non_stop" | "webhook" | string;
 
 export type AgentTemplate = {
   id: string;
@@ -139,6 +139,15 @@ export type AgentScheduleConfig = {
   timezone?: string;
   start_now?: boolean;
   quiet_hours?: string;
+};
+
+export type AgentWebhookConfig = {
+  enabled?: boolean;
+  url_mode?: "cloudflare_pages" | "custom" | string;
+  cloudflare_pages_url?: string;
+  custom_webhook_url?: string;
+  secret?: string;
+  accept_unsigned_local?: boolean;
 };
 
 export type AgentLifecycleConfig = {
@@ -185,6 +194,7 @@ export type AgentRecord = {
   browser_enabled?: boolean;
   computer_enabled?: boolean;
   schedule?: AgentScheduleConfig | null;
+  webhook?: AgentWebhookConfig | null;
   lifecycle?: AgentLifecycleConfig | null;
   tool_policy?: AgentToolPolicy | null;
   tools?: string[];
@@ -209,6 +219,7 @@ export type CreateAgentRequest = {
   computer_enabled?: boolean;
   tools?: string[];
   schedule?: AgentScheduleConfig;
+  webhook?: AgentWebhookConfig;
   lifecycle?: AgentLifecycleConfig;
   tool_policy?: AgentToolPolicy;
   metadata?: Record<string, unknown>;

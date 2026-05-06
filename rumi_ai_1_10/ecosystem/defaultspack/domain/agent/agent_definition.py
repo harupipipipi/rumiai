@@ -16,6 +16,8 @@ DEFAULT_MODEL_POLICY = {
 
 DEFAULT_RUNTIME_POLICY = {
     "non_stop": False,
+    "can_run_24_7": True,
+    "activation_mode": "manual",
     "max_tool_calls_per_tick": 12,
     "max_concurrent_children": 1,
     "max_spawn_depth": 1,
@@ -31,6 +33,15 @@ DEFAULT_STOP_CONDITIONS = {
     "max_no_change_ticks": 20,
     "stop_on_approval_required": False,
     "stop_on_login_required": False,
+}
+
+DEFAULT_WEBHOOK_POLICY = {
+    "enabled": False,
+    "url_mode": "cloudflare_pages",
+    "cloudflare_pages_url": "https://rumi-agent-webhook.pages.dev/api/agent-webhook",
+    "custom_webhook_url": "",
+    "secret": "",
+    "accept_unsigned_local": True,
 }
 
 
@@ -51,6 +62,7 @@ class AgentDefinition:
         tool_policy: dict[str, Any] | None = None,
         runtime_policy: dict[str, Any] | None = None,
         schedule_policy: dict[str, Any] | None = None,
+        webhook_policy: dict[str, Any] | None = None,
         stop_conditions: dict[str, Any] | None = None,
         memory_policy: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
@@ -68,6 +80,7 @@ class AgentDefinition:
         self.tool_policy = dict(tool_policy or {})
         self.runtime_policy = self._merge(DEFAULT_RUNTIME_POLICY, runtime_policy)
         self.schedule_policy = dict(schedule_policy or {"type": "manual"})
+        self.webhook_policy = self._merge(DEFAULT_WEBHOOK_POLICY, webhook_policy)
         self.stop_conditions = self._merge(DEFAULT_STOP_CONDITIONS, stop_conditions)
         self.memory_policy = dict(memory_policy or {"compact_context": True})
         self.metadata = dict(metadata or {})
@@ -87,6 +100,7 @@ class AgentDefinition:
             "tool_policy": deepcopy(self.tool_policy),
             "runtime_policy": deepcopy(self.runtime_policy),
             "schedule_policy": deepcopy(self.schedule_policy),
+            "webhook_policy": deepcopy(self.webhook_policy),
             "stop_conditions": deepcopy(self.stop_conditions),
             "memory_policy": deepcopy(self.memory_policy),
             "metadata": deepcopy(self.metadata),
@@ -108,6 +122,7 @@ class AgentDefinition:
             tool_policy=value.get("tool_policy") if isinstance(value.get("tool_policy"), dict) else None,
             runtime_policy=value.get("runtime_policy") if isinstance(value.get("runtime_policy"), dict) else None,
             schedule_policy=value.get("schedule_policy") if isinstance(value.get("schedule_policy"), dict) else None,
+            webhook_policy=value.get("webhook_policy") if isinstance(value.get("webhook_policy"), dict) else None,
             stop_conditions=value.get("stop_conditions") if isinstance(value.get("stop_conditions"), dict) else None,
             memory_policy=value.get("memory_policy") if isinstance(value.get("memory_policy"), dict) else None,
             metadata=value.get("metadata") if isinstance(value.get("metadata"), dict) else None,

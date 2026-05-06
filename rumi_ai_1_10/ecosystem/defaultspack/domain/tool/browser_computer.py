@@ -1657,6 +1657,18 @@ class BrowserComputerController:
                         "coordinate_space": "target_window",
                     }
                 )
+        elif self._app_name(payload) and scope in {"app", "app_window"}:
+            app_process = self._app_process_for_target(system, payload)
+            if app_process:
+                context.update(
+                    {
+                        "scope": scope,
+                        "app": app_process.get("app") or app_process.get("name") or self._app_name(payload),
+                        "pid": app_process.get("pid"),
+                        "bundle_id": app_process.get("bundle_id"),
+                        "coordinate_space": "app",
+                    }
+                )
         return context
 
     @staticmethod
@@ -1728,6 +1740,7 @@ class BrowserComputerController:
                     and (not title_query or title_query in str(active.get("title") or "").lower())
                 ):
                     return active
+                return None
             return self._darwin_active_window()
         if system == "Windows":
             if scope == "window":
@@ -1748,7 +1761,22 @@ class BrowserComputerController:
                         windows = titled
                 if windows:
                     return windows[0]
+                return None
             return self._windows_active_window()
+        return None
+
+    def _app_process_for_target(self, system: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+        app = self._app_name(payload)
+        if not app:
+            return None
+        try:
+            apps = self._darwin_apps(200) if system == "Darwin" else (self._windows_apps(200) if system == "Windows" else [])
+        except Exception:
+            apps = []
+        query = app.lower()
+        for candidate in apps:
+            if self._app_matches_query(candidate, query):
+                return candidate
         return None
 
     @staticmethod

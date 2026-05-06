@@ -888,3 +888,32 @@ def test_darwin_type_prefers_ax_text_at_virtual_cursor_for_target_app(tmp_path, 
     assert result["executed"] is True
     assert ax_calls == [(40, 50, 123, "hello")]
     assert posted == [("return", None, 123)]
+
+
+def test_target_app_without_window_uses_pid_instead_of_active_window(tmp_path, monkeypatch):
+    from domain.tool.browser_computer import BrowserComputerController
+    import domain.tool.browser_computer as browser_computer
+
+    typed = []
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    monkeypatch.setattr(controller, "_darwin_windows", lambda limit: [])
+    monkeypatch.setattr(
+        controller,
+        "_darwin_active_window",
+        lambda: {"app": "Codex", "pid": 1, "bounds": {"x": 1, "y": 2, "width": 3, "height": 4}},
+    )
+    monkeypatch.setattr(
+        controller,
+        "_darwin_apps",
+        lambda limit: [{"app": "Vivaldi", "name": "Vivaldi", "pid": 222, "bundle_id": "com.vivaldi.Vivaldi"}],
+    )
+    monkeypatch.setattr(controller, "_darwin_ax_set_text_at_point", lambda x, y, pid, text: typed.append((pid, text)) or True)
+    controller._write_virtual_cursor({"target": {"x": 40, "y": 50}})
+
+    result = controller.run("computer.type", {"app": "Vivaldi", "target": "app", "text": "hello"}, yolo_mode=True)
+
+    assert result["executed"] is True
+    assert result["target_context"]["app"] == "Vivaldi"
+    assert result["target_context"]["pid"] == 222
+    assert typed == [(222, "hello")]

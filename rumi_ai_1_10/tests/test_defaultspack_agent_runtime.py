@@ -69,3 +69,33 @@ def test_operations_heartbeat_routes_through_agent_runtime(monkeypatch, tmp_path
     conversation = ChatStore().get_conversation(status["conversation_id"])
     assert conversation["agent_id"] == "client_manager"
     assert conversation["messages"][0]["metadata"]["runtime_source"] == "agent_runtime"
+
+
+def test_agent_webhook_route_triggers_enabled_agent(monkeypatch, tmp_path):
+    from blocks.agent.agents.webhook import run as webhook_run
+    from domain.agent.agent_definition import AgentDefinition
+    from domain.agent.agent_store import AgentStore
+
+    _runtime_env(monkeypatch, tmp_path)
+    AgentStore().upsert(
+        AgentDefinition(
+            agent_id="hooked",
+            display_name="Hooked",
+            schedule_policy={"type": "webhook", "enabled": True, "run_mode": "webhook"},
+            webhook_policy={"enabled": True, "secret": "ok"},
+        )
+    )
+
+    result = webhook_run(
+        {
+            "agent_id": "hooked",
+            "action": "ping",
+            "secret": "ok",
+            "payload": {"message": "webhook hello"},
+        },
+        {},
+    )
+
+    assert result["status"] == "ok"
+    assert result["data"]["accepted"] is True
+    assert result["data"]["result"]["run"]["trigger"] == "webhook"

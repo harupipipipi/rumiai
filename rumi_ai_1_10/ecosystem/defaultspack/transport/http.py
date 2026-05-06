@@ -101,6 +101,7 @@ class DefaultsHttpServer:
         self._server = http.server.ThreadingHTTPServer(
             (self.host, self.port), _RequestHandler
         )
+        self._arm_agent_schedules()
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=False)
         self._thread.start()
         print("[defaults] HTTP server started on " + self.host + ":" + str(self.port))
@@ -146,6 +147,14 @@ class DefaultsHttpServer:
 
     def _handle_chat_send(self, request_data, path_params):
         return self._invoke_fallback_block("blocks.chat.send", request_data, path_params)
+
+    def _arm_agent_schedules(self):
+        try:
+            from domain.agent.scheduler import Scheduler
+
+            Scheduler().ensure_loaded()
+        except Exception as exc:
+            print("[defaults] WARNING: failed to arm agent schedules - " + str(exc))
 
     def _handle_chat_create(self, request_data, path_params):
         return self._invoke_fallback_block("blocks.chat.create_conversation", request_data, path_params)

@@ -4,6 +4,7 @@ import {
   CircleDollarSign,
   Clock3,
   Cpu,
+  Edit3,
   Globe2,
   KeyRound,
   Pause,
@@ -94,6 +95,7 @@ export function AgentCard({
   onLifecycleAction,
   onOpenBrowser,
   onOpenApprovals,
+  onEditAgent,
 }: {
   agent: AgentRecord;
   selected?: boolean;
@@ -101,6 +103,7 @@ export function AgentCard({
   onLifecycleAction?: (agent: AgentRecord, action: AgentLifecycleAction) => void;
   onOpenBrowser?: (agent: AgentRecord) => void;
   onOpenApprovals?: (agent: AgentRecord) => void;
+  onEditAgent?: (agent: AgentRecord) => void;
 }) {
   const stats = agentDisplayStats(agent);
   const running = agent.status === "running" || agent.status === "scheduled";
@@ -191,6 +194,16 @@ export function AgentCard({
             title="Open approvals"
           >
             <AlertTriangle size={13} /> Approvals
+          </button>
+        )}
+        {onEditAgent && (
+          <button
+            type="button"
+            onClick={() => onEditAgent(agent)}
+            className="flex h-7 items-center gap-1 rounded-md border border-zinc-800 bg-zinc-900 px-2 text-[11px] text-zinc-300 hover:bg-zinc-800"
+            title="Edit agent"
+          >
+            <Edit3 size={13} /> Edit
           </button>
         )}
         {onOpenBrowser && (

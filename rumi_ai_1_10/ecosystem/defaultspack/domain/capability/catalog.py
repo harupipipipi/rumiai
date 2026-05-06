@@ -110,6 +110,21 @@ class CapabilityCatalog:
             "profiles": profiles,
             "presets": presets,
             "feature_catalog": self.feature_catalog(),
+            "runtime": {
+                "platforms": ["Darwin", "Windows"],
+                "can_run_24_7": True,
+                "scheduler": {
+                    "mode": "in_process_threading_timer",
+                    "armed_on_http_server_start": True,
+                    "requires_process_alive": True,
+                },
+                "activation_modes": ["manual", "scheduled", "non_stop", "webhook"],
+                "webhook": {
+                    "local_route_template": "/api/agents/{agent_id}/webhook",
+                    "cloudflare_pages_url": "https://rumi-agent-webhook.pages.dev/api/agent-webhook",
+                    "custom_url_supported": True,
+                },
+            },
             "policy": {
                 "network_default": "deny",
                 "write_actions_require_approval": True,
