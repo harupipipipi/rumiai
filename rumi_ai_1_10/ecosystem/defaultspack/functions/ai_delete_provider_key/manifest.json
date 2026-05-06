@@ -1,0 +1,46 @@
+{
+  "function_id": "ai_delete_provider_key",
+  "description": "Delete a provider API key.",
+  "tags": [
+    "ai",
+    "provider_key"
+  ],
+  "risk": "high",
+  "requires": [
+    "ai.delete.provider.key"
+  ],
+  "caller_requires": [
+    "user.approved.high_risk"
+  ],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ai.delete_provider_key",
+    "defaultspack.ai.delete_provider_key",
+    "defaults.ai.delete.provider.key",
+    "defaultspack.ai.delete.provider.key"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

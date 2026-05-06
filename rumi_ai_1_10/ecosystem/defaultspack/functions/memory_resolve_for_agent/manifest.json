@@ -1,0 +1,41 @@
+{
+  "function_id": "memory_resolve_for_agent",
+  "description": "Resolve memory for an agent.",
+  "tags": [
+    "memory"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.memory.resolve_for_agent",
+    "defaultspack.memory.resolve_for_agent",
+    "defaults.memory.resolve.for.agent",
+    "defaultspack.memory.resolve.for.agent"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

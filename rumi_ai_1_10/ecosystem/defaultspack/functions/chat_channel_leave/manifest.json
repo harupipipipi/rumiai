@@ -1,0 +1,44 @@
+{
+  "function_id": "chat_channel_leave",
+  "description": "Leave a chat channel.",
+  "tags": [
+    "chat",
+    "channel"
+  ],
+  "risk": "medium",
+  "requires": [
+    "chat.channel.leave"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.chat.channel_leave",
+    "defaultspack.chat.channel_leave",
+    "defaults.chat.channel.leave",
+    "defaultspack.chat.channel.leave"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.chat.channel.leave",
+      "default_args": {}
+    }
+  }
+}

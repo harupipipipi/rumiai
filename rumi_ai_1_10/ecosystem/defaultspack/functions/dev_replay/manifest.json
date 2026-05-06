@@ -1,0 +1,41 @@
+{
+  "function_id": "dev_replay",
+  "description": "Replay a request.",
+  "tags": [
+    "dev"
+  ],
+  "risk": "medium",
+  "requires": [
+    "dev.replay"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.dev.replay",
+    "defaultspack.dev.replay"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.dev.replay",
+      "default_args": {}
+    }
+  }
+}

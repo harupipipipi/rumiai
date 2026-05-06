@@ -1,0 +1,44 @@
+{
+  "function_id": "ai_routing_rules_list",
+  "description": "List AI routing rules.",
+  "tags": [
+    "ai",
+    "routing"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ai.routing_rules_list",
+    "defaultspack.ai.routing_rules_list",
+    "defaults.ai.routing.rules.list",
+    "defaultspack.ai.routing.rules.list"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.ai.routing.rules",
+      "default_args": {
+        "_method": "GET"
+      }
+    }
+  }
+}

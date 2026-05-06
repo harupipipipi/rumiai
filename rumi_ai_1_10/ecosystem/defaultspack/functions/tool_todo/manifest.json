@@ -1,0 +1,42 @@
+{
+  "function_id": "tool_todo",
+  "description": "Run the default todo tool.",
+  "tags": [
+    "tool",
+    "planning"
+  ],
+  "risk": "medium",
+  "requires": [
+    "tool.todo"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.tool.todo",
+    "defaultspack.tool.todo"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

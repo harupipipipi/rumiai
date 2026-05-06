@@ -1,0 +1,41 @@
+{
+  "function_id": "memory_store",
+  "description": "Store memory.",
+  "tags": [
+    "memory"
+  ],
+  "risk": "medium",
+  "requires": [
+    "memory.store"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.memory.store",
+    "defaultspack.memory.store"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.memory.store",
+      "default_args": {}
+    }
+  }
+}

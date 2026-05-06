@@ -1,0 +1,41 @@
+{
+  "function_id": "management_list_modules",
+  "description": "List defaultspack modules.",
+  "tags": [
+    "management"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.management.list_modules",
+    "defaultspack.management.list_modules",
+    "defaults.management.list.modules",
+    "defaultspack.management.list.modules"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

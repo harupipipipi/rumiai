@@ -1,0 +1,45 @@
+{
+  "function_id": "chat_delete_conversation",
+  "description": "Delete a chat conversation.",
+  "tags": [
+    "chat"
+  ],
+  "risk": "high",
+  "requires": [
+    "chat.delete.conversation"
+  ],
+  "caller_requires": [
+    "user.approved.high_risk"
+  ],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.chat.delete_conversation",
+    "defaultspack.chat.delete_conversation",
+    "defaults.chat.delete.conversation",
+    "defaultspack.chat.delete.conversation"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.chat.delete_conversation",
+      "default_args": {}
+    }
+  }
+}

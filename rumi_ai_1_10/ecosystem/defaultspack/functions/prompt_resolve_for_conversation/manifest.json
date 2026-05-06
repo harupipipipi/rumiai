@@ -1,0 +1,41 @@
+{
+  "function_id": "prompt_resolve_for_conversation",
+  "description": "Resolve prompt context for a conversation.",
+  "tags": [
+    "prompt"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.prompt.resolve_for_conversation",
+    "defaultspack.prompt.resolve_for_conversation",
+    "defaults.prompt.resolve.for.conversation",
+    "defaultspack.prompt.resolve.for.conversation"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

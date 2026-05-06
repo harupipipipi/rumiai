@@ -1,0 +1,41 @@
+{
+  "function_id": "tool_invoke",
+  "description": "Invoke a registered tool.",
+  "tags": [
+    "tool"
+  ],
+  "risk": "medium",
+  "requires": [
+    "tool.invoke"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.tool.invoke",
+    "defaultspack.tool.invoke"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.tool.invoke",
+      "default_args": {}
+    }
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "function_id": "research_cache_result",
+  "description": "Cache a research result.",
+  "tags": [
+    "research"
+  ],
+  "risk": "medium",
+  "requires": [
+    "research.cache.result"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.research.cache_result",
+    "defaultspack.research.cache_result",
+    "defaults.research.cache.result",
+    "defaultspack.research.cache.result"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

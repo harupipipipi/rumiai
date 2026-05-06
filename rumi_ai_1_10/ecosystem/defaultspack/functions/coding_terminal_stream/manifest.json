@@ -1,0 +1,45 @@
+{
+  "function_id": "coding_terminal_stream",
+  "description": "Stream a terminal command.",
+  "tags": [
+    "coding"
+  ],
+  "risk": "high",
+  "requires": [
+    "coding.terminal.stream"
+  ],
+  "caller_requires": [
+    "user.approved.high_risk"
+  ],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.coding.terminal_stream",
+    "defaultspack.coding.terminal_stream",
+    "defaults.coding.terminal.stream",
+    "defaultspack.coding.terminal.stream"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.coding.terminal_stream",
+      "default_args": {}
+    }
+  }
+}

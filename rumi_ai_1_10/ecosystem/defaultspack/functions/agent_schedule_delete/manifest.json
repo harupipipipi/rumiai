@@ -1,0 +1,46 @@
+{
+  "function_id": "agent_schedule_delete",
+  "description": "Delete an agent schedule.",
+  "tags": [
+    "agent",
+    "scheduler"
+  ],
+  "risk": "high",
+  "requires": [
+    "agent.schedule.delete"
+  ],
+  "caller_requires": [
+    "user.approved.high_risk"
+  ],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.agent.schedule_delete",
+    "defaultspack.agent.schedule_delete",
+    "defaults.agent.schedule.delete",
+    "defaultspack.agent.schedule.delete"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.agent.scheduler.delete",
+      "default_args": {}
+    }
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "function_id": "media_clipboard_write",
+  "description": "Write clipboard content.",
+  "tags": [
+    "media"
+  ],
+  "risk": "high",
+  "requires": [
+    "media.clipboard.write"
+  ],
+  "caller_requires": [
+    "user.approved.high_risk"
+  ],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.media.clipboard_write",
+    "defaultspack.media.clipboard_write",
+    "defaults.media.clipboard.write",
+    "defaultspack.media.clipboard.write"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.media.clipboard_write",
+      "default_args": {}
+    }
+  }
+}

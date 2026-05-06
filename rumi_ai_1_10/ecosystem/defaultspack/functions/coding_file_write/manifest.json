@@ -1,0 +1,45 @@
+{
+  "function_id": "coding_file_write",
+  "description": "Write a workspace file.",
+  "tags": [
+    "coding"
+  ],
+  "risk": "high",
+  "requires": [
+    "coding.file.write"
+  ],
+  "caller_requires": [
+    "user.approved.high_risk"
+  ],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.coding.file_write",
+    "defaultspack.coding.file_write",
+    "defaults.coding.file.write",
+    "defaultspack.coding.file.write"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.coding.file_write",
+      "default_args": {}
+    }
+  }
+}

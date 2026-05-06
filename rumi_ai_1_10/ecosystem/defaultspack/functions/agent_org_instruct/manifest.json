@@ -1,0 +1,44 @@
+{
+  "function_id": "agent_org_instruct",
+  "description": "Instruct an agent organization.",
+  "tags": [
+    "agent",
+    "org"
+  ],
+  "risk": "medium",
+  "requires": [
+    "agent.org.instruct"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.agent.org_instruct",
+    "defaultspack.agent.org_instruct",
+    "defaults.agent.org.instruct",
+    "defaultspack.agent.org.instruct"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.agent.org.instruct",
+      "default_args": {}
+    }
+  }
+}

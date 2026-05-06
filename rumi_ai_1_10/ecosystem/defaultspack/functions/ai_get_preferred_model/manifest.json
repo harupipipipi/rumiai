@@ -1,0 +1,42 @@
+{
+  "function_id": "ai_get_preferred_model",
+  "description": "Get the preferred model profile.",
+  "tags": [
+    "ai",
+    "model_runtime"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ai.get_preferred_model",
+    "defaultspack.ai.get_preferred_model",
+    "defaults.ai.get.preferred.model",
+    "defaultspack.ai.get.preferred.model"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

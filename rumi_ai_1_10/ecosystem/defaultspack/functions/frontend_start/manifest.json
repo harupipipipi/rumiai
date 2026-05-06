@@ -1,0 +1,41 @@
+{
+  "function_id": "frontend_start",
+  "description": "Start the frontend.",
+  "tags": [
+    "frontend"
+  ],
+  "risk": "medium",
+  "requires": [
+    "frontend.start"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.frontend.start",
+    "defaultspack.frontend.start"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.frontend.start",
+      "default_args": {}
+    }
+  }
+}

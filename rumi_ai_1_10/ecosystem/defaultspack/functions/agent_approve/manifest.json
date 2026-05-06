@@ -1,0 +1,41 @@
+{
+  "function_id": "agent_approve",
+  "description": "Approve an agent action.",
+  "tags": [
+    "agent"
+  ],
+  "risk": "medium",
+  "requires": [
+    "agent.approve"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.agent.approve",
+    "defaultspack.agent.approve"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.agent.approve",
+      "default_args": {}
+    }
+  }
+}

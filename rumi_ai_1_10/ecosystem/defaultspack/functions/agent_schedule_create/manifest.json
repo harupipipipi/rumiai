@@ -1,0 +1,44 @@
+{
+  "function_id": "agent_schedule_create",
+  "description": "Create an agent schedule.",
+  "tags": [
+    "agent",
+    "scheduler"
+  ],
+  "risk": "medium",
+  "requires": [
+    "agent.schedule.create"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.agent.schedule_create",
+    "defaultspack.agent.schedule_create",
+    "defaults.agent.schedule.create",
+    "defaultspack.agent.schedule.create"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.agent.scheduler.create",
+      "default_args": {}
+    }
+  }
+}

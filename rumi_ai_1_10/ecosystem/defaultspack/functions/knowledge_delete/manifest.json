@@ -1,0 +1,43 @@
+{
+  "function_id": "knowledge_delete",
+  "description": "Delete knowledge.",
+  "tags": [
+    "knowledge"
+  ],
+  "risk": "high",
+  "requires": [
+    "knowledge.delete"
+  ],
+  "caller_requires": [
+    "user.approved.high_risk"
+  ],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.knowledge.delete",
+    "defaultspack.knowledge.delete"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.knowledge.delete",
+      "default_args": {}
+    }
+  }
+}

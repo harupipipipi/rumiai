@@ -1,0 +1,43 @@
+{
+  "function_id": "ui_model_selector_config_set",
+  "description": "Set model selector config.",
+  "tags": [
+    "ui"
+  ],
+  "risk": "medium",
+  "requires": [
+    "ui.model.selector.config.set"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ui.model_selector_config_set",
+    "defaultspack.ui.model_selector_config_set",
+    "defaults.ui.model.selector.config.set",
+    "defaultspack.ui.model.selector.config.set"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

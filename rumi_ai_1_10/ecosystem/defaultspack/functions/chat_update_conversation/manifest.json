@@ -1,0 +1,43 @@
+{
+  "function_id": "chat_update_conversation",
+  "description": "Update a chat conversation.",
+  "tags": [
+    "chat"
+  ],
+  "risk": "medium",
+  "requires": [
+    "chat.update.conversation"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.chat.update_conversation",
+    "defaultspack.chat.update_conversation",
+    "defaults.chat.update.conversation",
+    "defaultspack.chat.update.conversation"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.chat.update_conversation",
+      "default_args": {}
+    }
+  }
+}

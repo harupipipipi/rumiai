@@ -1,0 +1,44 @@
+{
+  "function_id": "agent_schedule_trigger",
+  "description": "Trigger an agent schedule.",
+  "tags": [
+    "agent",
+    "scheduler"
+  ],
+  "risk": "medium",
+  "requires": [
+    "agent.schedule.trigger"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.agent.schedule_trigger",
+    "defaultspack.agent.schedule_trigger",
+    "defaults.agent.schedule.trigger",
+    "defaultspack.agent.schedule.trigger"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.agent.scheduler.trigger",
+      "default_args": {}
+    }
+  }
+}

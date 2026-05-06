@@ -1,0 +1,43 @@
+{
+  "function_id": "ai_complete",
+  "description": "Complete a chat request using the configured AI provider.",
+  "tags": [
+    "ai",
+    "model",
+    "completion"
+  ],
+  "risk": "medium",
+  "requires": [
+    "ai.complete"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ai.complete",
+    "defaultspack.ai.complete"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.ai.complete",
+      "default_args": {}
+    }
+  }
+}

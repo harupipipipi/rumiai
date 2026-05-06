@@ -1,0 +1,41 @@
+{
+  "function_id": "ui_conversation_preview",
+  "description": "Build a conversation UI preview.",
+  "tags": [
+    "ui"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ui.conversation_preview",
+    "defaultspack.ui.conversation_preview",
+    "defaults.ui.conversation.preview",
+    "defaultspack.ui.conversation.preview"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.ui.conversation_preview",
+      "default_args": {}
+    }
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "function_id": "agent_multi_execute",
+  "description": "Start a multi-agent execution.",
+  "tags": [
+    "agent"
+  ],
+  "risk": "medium",
+  "requires": [
+    "agent.multi.execute"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.agent.multi_execute",
+    "defaultspack.agent.multi_execute",
+    "defaults.agent.multi.execute",
+    "defaultspack.agent.multi.execute"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.agent.multi_execute",
+      "default_args": {}
+    }
+  }
+}

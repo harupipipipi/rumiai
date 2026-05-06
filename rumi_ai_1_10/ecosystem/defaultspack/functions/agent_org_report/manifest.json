@@ -1,0 +1,44 @@
+{
+  "function_id": "agent_org_report",
+  "description": "Request an agent organization report.",
+  "tags": [
+    "agent",
+    "org"
+  ],
+  "risk": "medium",
+  "requires": [
+    "agent.org.report"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.agent.org_report",
+    "defaultspack.agent.org_report",
+    "defaults.agent.org.report",
+    "defaultspack.agent.org.report"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.agent.org.report",
+      "default_args": {}
+    }
+  }
+}

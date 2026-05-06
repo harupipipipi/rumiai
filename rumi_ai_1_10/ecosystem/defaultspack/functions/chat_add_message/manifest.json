@@ -1,0 +1,43 @@
+{
+  "function_id": "chat_add_message",
+  "description": "Add a chat message.",
+  "tags": [
+    "chat"
+  ],
+  "risk": "medium",
+  "requires": [
+    "chat.add.message"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.chat.add_message",
+    "defaultspack.chat.add_message",
+    "defaults.chat.add.message",
+    "defaultspack.chat.add.message"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.chat.add_message",
+      "default_args": {}
+    }
+  }
+}

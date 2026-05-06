@@ -1,0 +1,45 @@
+{
+  "function_id": "tool_mcp_connect",
+  "description": "Connect an MCP server.",
+  "tags": [
+    "tool"
+  ],
+  "risk": "high",
+  "requires": [
+    "tool.mcp.connect"
+  ],
+  "caller_requires": [
+    "user.approved.high_risk"
+  ],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.tool.mcp_connect",
+    "defaultspack.tool.mcp_connect",
+    "defaults.tool.mcp.connect",
+    "defaultspack.tool.mcp.connect"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.tool.mcp_connect",
+      "default_args": {}
+    }
+  }
+}

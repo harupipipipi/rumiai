@@ -1,0 +1,39 @@
+{
+  "function_id": "prompt_render",
+  "description": "Render a prompt.",
+  "tags": [
+    "prompt"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.prompt.render",
+    "defaultspack.prompt.render"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.prompt.render",
+      "default_args": {}
+    }
+  }
+}

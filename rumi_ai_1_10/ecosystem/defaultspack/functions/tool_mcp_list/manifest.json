@@ -1,0 +1,41 @@
+{
+  "function_id": "tool_mcp_list",
+  "description": "List MCP servers.",
+  "tags": [
+    "tool"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.tool.mcp_list",
+    "defaultspack.tool.mcp_list",
+    "defaults.tool.mcp.list",
+    "defaultspack.tool.mcp.list"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.tool.mcp_list",
+      "default_args": {}
+    }
+  }
+}

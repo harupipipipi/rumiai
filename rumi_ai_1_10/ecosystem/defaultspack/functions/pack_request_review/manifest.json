@@ -1,0 +1,43 @@
+{
+  "function_id": "pack_request_review",
+  "description": "Review a pack request.",
+  "tags": [
+    "pack_request"
+  ],
+  "risk": "medium",
+  "requires": [
+    "pack.request.review"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.pack.request_review",
+    "defaultspack.pack.request_review",
+    "defaults.pack.request.review",
+    "defaultspack.pack.request.review"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

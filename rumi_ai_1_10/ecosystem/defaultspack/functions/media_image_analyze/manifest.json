@@ -1,0 +1,43 @@
+{
+  "function_id": "media_image_analyze",
+  "description": "Analyze an image.",
+  "tags": [
+    "media"
+  ],
+  "risk": "medium",
+  "requires": [
+    "media.image.analyze"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.media.image_analyze",
+    "defaultspack.media.image_analyze",
+    "defaults.media.image.analyze",
+    "defaultspack.media.image.analyze"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

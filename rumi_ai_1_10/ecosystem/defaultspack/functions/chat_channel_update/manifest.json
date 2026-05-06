@@ -1,0 +1,44 @@
+{
+  "function_id": "chat_channel_update",
+  "description": "Update a chat channel.",
+  "tags": [
+    "chat",
+    "channel"
+  ],
+  "risk": "medium",
+  "requires": [
+    "chat.channel.update"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.chat.channel_update",
+    "defaultspack.chat.channel_update",
+    "defaults.chat.channel.update",
+    "defaultspack.chat.channel.update"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.chat.channel.update",
+      "default_args": {}
+    }
+  }
+}

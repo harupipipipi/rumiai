@@ -1,0 +1,43 @@
+{
+  "function_id": "ui_settings_update",
+  "description": "Update UI settings.",
+  "tags": [
+    "ui"
+  ],
+  "risk": "medium",
+  "requires": [
+    "ui.settings.update"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ui.settings_update",
+    "defaultspack.ui.settings_update",
+    "defaults.ui.settings.update",
+    "defaultspack.ui.settings.update"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.ui.settings",
+      "default_args": {}
+    }
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "function_id": "management_set_module_state",
+  "description": "Set defaultspack module state.",
+  "tags": [
+    "management"
+  ],
+  "risk": "high",
+  "requires": [
+    "management.set.module.state"
+  ],
+  "caller_requires": [
+    "user.approved.high_risk"
+  ],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.management.set_module_state",
+    "defaultspack.management.set_module_state",
+    "defaults.management.set.module.state",
+    "defaultspack.management.set.module.state"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

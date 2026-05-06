@@ -1,0 +1,41 @@
+{
+  "function_id": "dev_get_request_log",
+  "description": "Get a developer request log.",
+  "tags": [
+    "dev"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.dev.get_request_log",
+    "defaultspack.dev.get_request_log",
+    "defaults.dev.get.request.log",
+    "defaultspack.dev.get.request.log"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

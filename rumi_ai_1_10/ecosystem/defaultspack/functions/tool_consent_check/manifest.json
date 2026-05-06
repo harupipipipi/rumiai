@@ -1,0 +1,41 @@
+{
+  "function_id": "tool_consent_check",
+  "description": "Check tool consent.",
+  "tags": [
+    "tool"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.tool.consent_check",
+    "defaultspack.tool.consent_check",
+    "defaults.tool.consent.check",
+    "defaultspack.tool.consent.check"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.tool.consent_check",
+      "default_args": {}
+    }
+  }
+}

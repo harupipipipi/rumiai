@@ -1,0 +1,46 @@
+{
+  "function_id": "ai_routing_profiles_delete",
+  "description": "Delete an AI routing profile.",
+  "tags": [
+    "ai",
+    "routing"
+  ],
+  "risk": "medium",
+  "requires": [
+    "ai.routing.profiles.delete"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ai.routing_profiles_delete",
+    "defaultspack.ai.routing_profiles_delete",
+    "defaults.ai.routing.profiles.delete",
+    "defaultspack.ai.routing.profiles.delete"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.ai.routing.profiles",
+      "default_args": {
+        "_method": "DELETE"
+      }
+    }
+  }
+}

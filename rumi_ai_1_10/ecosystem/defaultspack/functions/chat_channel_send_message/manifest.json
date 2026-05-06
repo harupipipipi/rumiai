@@ -1,0 +1,44 @@
+{
+  "function_id": "chat_channel_send_message",
+  "description": "Send a message to a chat channel.",
+  "tags": [
+    "chat",
+    "channel"
+  ],
+  "risk": "medium",
+  "requires": [
+    "chat.channel.send.message"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.chat.channel_send_message",
+    "defaultspack.chat.channel_send_message",
+    "defaults.chat.channel.send.message",
+    "defaultspack.chat.channel.send.message"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.chat.channel.send_message",
+      "default_args": {}
+    }
+  }
+}

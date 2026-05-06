@@ -1,0 +1,39 @@
+{
+  "function_id": "artifact_get",
+  "description": "Get an artifact.",
+  "tags": [
+    "artifact"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.artifact.get",
+    "defaultspack.artifact.get"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.artifact.get",
+      "default_args": {}
+    }
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "function_id": "ai_routing_profiles_list",
+  "description": "List AI routing profiles.",
+  "tags": [
+    "ai",
+    "routing"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ai.routing_profiles_list",
+    "defaultspack.ai.routing_profiles_list",
+    "defaults.ai.routing.profiles.list",
+    "defaultspack.ai.routing.profiles.list"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.ai.routing.profiles",
+      "default_args": {
+        "_method": "GET"
+      }
+    }
+  }
+}
