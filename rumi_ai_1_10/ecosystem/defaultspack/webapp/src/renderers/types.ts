@@ -120,6 +120,7 @@ export type ComposerRendererProps = {
   onModeChange?: (mode: AppMode) => void;
   onFileAttach?: (files: AttachedFile[]) => void;
   onAtFileAttach?: (path: string) => void;
+  onToolMentionSelect?: (tool: ComposerExtensionItem) => void;
   onFileRemove?: (fileId: string) => void;
   onDropWidget?: (widget: DroppedWidget) => void;
   onWidgetAction?: (widget: DroppedWidget) => void;

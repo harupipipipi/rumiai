@@ -37,9 +37,11 @@ import type {
 import type { ModelProfile } from "../lib/api";
 import { fileToAttachment } from "../lib/attachments";
 import { resolveComposerWidgetDrop } from "../lib/composerWidgets";
+import { filterAtMentionTools, insertToolMentionText, toolMentionDisplayName } from "../lib/toolMentions";
 import { sortedToolGroups, toolGroupFor } from "../lib/toolUi";
 
 export { resolveComposerWidgetDrop } from "../lib/composerWidgets";
+export { filterAtMentionTools, insertToolMentionText } from "../lib/toolMentions";
 
 const THINKING_LABELS: Record<string, string> = {
   none: "なし",
@@ -468,41 +470,70 @@ function ModeSelector({
   );
 }
 
-function AtFileMention({
+function AtMentionPalette({
   query,
   files,
+  tools,
   onSelect,
+  onToolSelect,
   onClose,
 }: {
   query: string;
   files: string[];
+  tools: ComposerExtensionItem[];
   onSelect: (file: string) => void;
+  onToolSelect: (tool: ComposerExtensionItem) => void;
   onClose: () => void;
 }) {
   const filtered = useMemo(() => filterAtMentionFiles(files, query), [files, query]);
+  const filteredTools = useMemo(() => filterAtMentionTools(tools, query), [tools, query]);
 
-  if (filtered.length === 0) return null;
+  if (filtered.length === 0 && filteredTools.length === 0) return null;
 
   return (
     <>
       <button type="button" aria-label="close file mention" className="fixed inset-0 z-20 cursor-default" onClick={onClose} />
       <div className="absolute bottom-full left-4 mb-2 z-30 w-[min(400px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl">
         <div className="border-b border-zinc-800 px-3 py-2 flex items-center gap-2">
-          <Folder size={13} className="text-zinc-500" />
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">ファイルを選択</p>
+          <Wrench size={13} className="text-zinc-500" />
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">@ で追加</p>
         </div>
         <div className="max-h-56 overflow-y-auto py-1">
+          {filteredTools.length > 0 && (
+            <div className="px-2 pb-1">
+              <div className="px-1 py-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-600">Tools</div>
+              {filteredTools.map((tool) => (
+                <button
+                  key={tool.id}
+                  type="button"
+                  onClick={() => onToolSelect(tool)}
+                  className="w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-zinc-800/80 transition-colors"
+                >
+                  <Wrench size={13} className="text-zinc-500 flex-shrink-0" />
+                  <span className="min-w-0">
+                    <span className="block truncate text-[13px] text-zinc-200">{toolMentionDisplayName(tool)}</span>
+                    <span className="block truncate text-[10px] text-zinc-500">{tool.description ?? tool.id}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+          {filtered.length > 0 && (
+            <div className="px-2 pb-1">
+              <div className="px-1 py-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-600">Files</div>
           {filtered.map((file) => (
             <button
               key={file}
               type="button"
               onClick={() => onSelect(file)}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-zinc-800/80 transition-colors"
+                  className="w-full flex items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-zinc-800/80 transition-colors"
             >
               <FileText size={13} className="text-zinc-500 flex-shrink-0" />
               <span className="truncate text-[13px] text-zinc-200">{file}</span>
             </button>
           ))}
+            </div>
+          )}
         </div>
       </div>
     </>
@@ -555,6 +586,7 @@ export function ComposerRenderer({
   onModeChange,
   onFileAttach,
   onAtFileAttach,
+  onToolMentionSelect,
   onFileRemove,
   onDropWidget,
   onWidgetAction,
@@ -572,12 +604,14 @@ export function ComposerRenderer({
   const [modeSelectorOpen, setModeSelectorOpen] = useState(false);
   const [atMentionOpen, setAtMentionOpen] = useState(false);
   const [atMentionQuery, setAtMentionQuery] = useState("");
+  const [isDragPromptVisible, setIsDragPromptVisible] = useState(false);
   const [newBranchName, setNewBranchName] = useState("");
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const dragDepthRef = useRef(0);
   const profileName = selectedProfile?.display_name ?? selectedProfile?.profile_id ?? "model";
   const levels = selectedProfile?.supports_thinking
     ? selectedProfile.thinking_levels?.length
@@ -590,6 +624,7 @@ export function ComposerRenderer({
       ? `${contextUsage.usedTokens} tokens / unlimited`
       : `${contextUsage.usedTokens} / ${contextUsage.maxContext || "unknown"} tokens`;
   const toolItems = useMemo(() => [...inlineExtensions, ...belowExtensions], [inlineExtensions, belowExtensions]);
+  const toolMentionItems = useMemo(() => toolItems.filter((item) => item.category === "tool"), [toolItems]);
   const selectableProfiles = modelProfiles.length > 0 ? modelProfiles : favoriteProfiles;
   const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
   const toolGroups = useMemo(() => groupToolItems(toolItems), [toolItems]);
@@ -695,7 +730,7 @@ export function ComposerRenderer({
       const textBeforeCursor = value.slice(0, cursorPos);
       const atMatch = textBeforeCursor.match(/@(\S*)$/);
 
-      if (atMatch && mode === "coding" && codingContext?.files?.length) {
+      if (atMatch && (toolMentionItems.length > 0 || (mode === "coding" && codingContext?.files?.length))) {
         setAtMentionOpen(true);
         setAtMentionQuery(atMatch[1]);
       } else {
@@ -707,7 +742,7 @@ export function ComposerRenderer({
         setSelectedCommandIndex(0);
       }
     },
-    [onInputChange, mode, codingContext],
+    [onInputChange, mode, codingContext, toolMentionItems],
   );
 
   const handleAtFileSelect = useCallback(
@@ -732,6 +767,26 @@ export function ComposerRenderer({
     [input, mode, onAtFileAttach, onInputChange],
   );
 
+  const handleAtToolSelect = useCallback(
+    (tool: ComposerExtensionItem) => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+
+      const cursorPos = textarea.selectionStart;
+      const next = insertToolMentionText(input, cursorPos, tool);
+      onInputChange(next.value);
+      onToolMentionSelect?.(tool);
+      setAtMentionOpen(false);
+      setAtMentionQuery("");
+
+      setTimeout(() => {
+        textarea.setSelectionRange(next.cursor, next.cursor);
+        textarea.focus();
+      }, 0);
+    },
+    [input, onInputChange, onToolMentionSelect],
+  );
+
   const attachFiles = useCallback(async (files: FileList | null) => {
     if (!files?.length) return;
     const newFiles: AttachedFile[] = await Promise.all(Array.from(files).map(fileToAttachment));
@@ -743,6 +798,8 @@ export function ComposerRenderer({
       event.preventDefault();
       if (event.dataTransfer.files.length > 0) {
         void attachFiles(event.dataTransfer.files);
+        dragDepthRef.current = 0;
+        setIsDragPromptVisible(false);
         return;
       }
 
@@ -762,6 +819,8 @@ export function ComposerRenderer({
           // invalid drop data
         }
       }
+      dragDepthRef.current = 0;
+      setIsDragPromptVisible(false);
     },
     [attachFiles, onDropWidget, requestModelProfileSelect, toolItems],
   );
@@ -769,6 +828,23 @@ export function ComposerRenderer({
   const handleDragOver = useCallback((event: React.DragEvent) => {
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
+  }, []);
+
+  const handleDragEnter = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    dragDepthRef.current += 1;
+    const types = Array.from(event.dataTransfer.types ?? []);
+    if (types.includes("Files") || types.includes("application/rumi-widget")) {
+      setIsDragPromptVisible(true);
+    }
+  }, []);
+
+  const handleDragLeave = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) {
+      setIsDragPromptVisible(false);
+    }
   }, []);
 
   const handleSubmitWithApiKeyGuard = useCallback(
@@ -821,7 +897,18 @@ export function ComposerRenderer({
       className={`${isNewConversation ? "w-full px-5" : "px-5 pb-5 pt-2 bg-[#09090b] flex-shrink-0 max-[640px]:px-2 max-[640px]:pb-2"}`}
       onDrop={handleDrop}
       onDragOver={handleDragOver}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
     >
+      {isDragPromptVisible && (
+        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/55 backdrop-blur-[2px]">
+          <div className="flex min-h-[180px] w-[min(520px,calc(100vw-40px))] flex-col items-center justify-center rounded-xl border border-dashed border-emerald-400/70 bg-zinc-950/90 px-6 text-center shadow-2xl shadow-emerald-950/30">
+            <Paperclip size={28} className="text-emerald-300" />
+            <p className="mt-3 text-lg font-semibold text-zinc-100">ここに持ってきて</p>
+            <p className="mt-1 text-sm text-zinc-500">ファイルや widget をこのチャットに追加します</p>
+          </div>
+        </div>
+      )}
       <div className={`rumi-composer-shell ${isNewConversation ? "rumi-composer-shell-new mx-auto" : "mx-auto"}`}>
         <form
           onSubmit={handleSubmitWithApiKeyGuard}
@@ -869,11 +956,13 @@ export function ComposerRenderer({
             </div>
           )}
 
-          {atMentionOpen && codingContext?.files && (
-            <AtFileMention
+          {atMentionOpen && (
+            <AtMentionPalette
               query={atMentionQuery}
-              files={codingContext.files}
+              files={mode === "coding" ? codingContext?.files ?? [] : []}
+              tools={toolMentionItems}
               onSelect={handleAtFileSelect}
+              onToolSelect={handleAtToolSelect}
               onClose={() => setAtMentionOpen(false)}
             />
           )}
@@ -887,28 +976,39 @@ export function ComposerRenderer({
                 onClick={() => setMenuOpen(false)}
               />
               <div ref={menuRef} className="absolute bottom-[52px] left-4 z-30 grid w-[min(480px,calc(100vw-32px))] grid-cols-[120px_minmax(0,1fr)] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl max-[640px]:left-2 max-[640px]:grid-cols-1">
-                <div className="border-r border-zinc-800 bg-zinc-950/90 p-1.5 max-[640px]:flex max-[640px]:border-b max-[640px]:border-r-0">
-                  {(
-                    [
-                      ["tools", "Tools", Wrench],
-                      ["models", "AI Models", Sparkles],
-                      ["commands", "Commands", Folder],
-                    ] as const
-                  ).map(([id, label, Icon]) => (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => setOpenFolder(id)}
-                      className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors ${
-                        openFolder === id
-                          ? "bg-zinc-800 text-zinc-100"
-                          : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
-                      }`}
-                    >
-                      <Icon size={13} />
-                      <span>{label}</span>
-                    </button>
-                  ))}
+                <div className="flex min-h-[220px] flex-col border-r border-zinc-800 bg-zinc-950/90 p-1.5 max-[640px]:min-h-0 max-[640px]:flex-row max-[640px]:border-b max-[640px]:border-r-0">
+                  <div className="grid content-start gap-0.5 max-[640px]:flex max-[640px]:flex-1">
+                    {(
+                      [
+                        ["tools", "Tools", Wrench],
+                        ["models", "AI Models", Sparkles],
+                        ["commands", "Commands", Folder],
+                      ] as const
+                    ).map(([id, label, Icon]) => (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => setOpenFolder(id)}
+                        className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors ${
+                          openFolder === id
+                            ? "bg-zinc-800 text-zinc-100"
+                            : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+                        }`}
+                      >
+                        <Icon size={13} />
+                        <span>{label}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    aria-label="composer menu を閉じる"
+                    title="閉じる"
+                    onClick={() => setMenuOpen(false)}
+                    className="mt-auto flex h-8 w-8 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100 max-[640px]:ml-auto max-[640px]:mt-0"
+                  >
+                    <X size={15} />
+                  </button>
                 </div>
                 <div className="max-h-72 overflow-y-auto p-2">
                   {openFolder === "tools" && !showToolGroups && (

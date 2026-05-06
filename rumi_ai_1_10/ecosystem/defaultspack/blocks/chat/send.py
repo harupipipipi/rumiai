@@ -522,6 +522,7 @@ def _compact_tool_log_value(value):
 
 def _tool_visibility_message(tools):
     names = []
+    details = []
     connected_tool_names_lower = set()
     for tool in tools or []:
         name = tool_name_from_definition(tool)
@@ -533,6 +534,25 @@ def _tool_visibility_message(tools):
             function_def = tool.get("function")
             if isinstance(function_def, dict):
                 description = str(function_def.get("description") or "")
+                details.append(
+                    _redact_sensitive_value(
+                        {
+                            "name": name,
+                            "description": description,
+                            "parameters": function_def.get("parameters") or function_def.get("input_schema") or {},
+                        }
+                    )
+                )
+            else:
+                details.append(
+                    _redact_sensitive_value(
+                        {
+                            "name": name,
+                            "description": tool.get("description") or tool.get("summary") or "",
+                            "schema": tool.get("input_schema") or tool.get("parameters") or {},
+                        }
+                    )
+                )
             description = description or str(tool.get("description") or tool.get("summary") or "")
         label = name if not description else "{}: {}".format(name, description)
         names.append(label)
@@ -555,7 +575,23 @@ def _tool_visibility_message(tools):
         "content": (
             "Available tools are connected for this turn. "
             "Use them when they are relevant, and do not claim that no tools are available. "
-            "Connected tools: " + "; ".join(names) + computer_guidance
+            "The user may mention a tool casually (for example @computer use); map that to the JSON tool names below. "
+            "Connected tools: " + "; ".join(names) + "\n\n"
+            "Connected tool details JSON:\n" + json.dumps(details, ensure_ascii=False, sort_keys=True) + computer_guidance
+        ),
+    }
+
+
+def _tool_mentions_message(metadata):
+    mentions = metadata.get("tool_mentions") if isinstance(metadata, dict) else None
+    if not isinstance(mentions, list) or not mentions:
+        return None
+    return {
+        "role": "system",
+        "content": (
+            "The latest user message included @ tool mentions. "
+            "The user-facing text is casual; use this JSON as the precise tool reference:\n"
+            + json.dumps(_redact_sensitive_value(mentions), ensure_ascii=False, sort_keys=True)
         ),
     }
 
@@ -968,6 +1004,9 @@ def run(input_data, context):
             pass
     chain = store.get_message_chain(conversation_id, user_msg["id"])
     standard_messages = convert_to_standard(chain)
+    tool_mentions_context = _tool_mentions_message(metadata)
+    if tool_mentions_context is not None:
+        standard_messages.insert(max(0, len(standard_messages) - 1), tool_mentions_context)
     model = conv.get("model", "stub/default")
 
     # P1-4: Inspector 用のリクエストID を生成

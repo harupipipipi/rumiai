@@ -1098,7 +1098,7 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
           )}
         </div>
 
-        <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto px-1.5 py-2">
+        <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-1.5 overflow-y-auto px-1.5 py-2">
           {compactChats.map((chat) => {
             const isActive = activeChatId === chat.id;
             return (
@@ -1107,14 +1107,14 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
                 type="button"
                 onClick={() => onChatSelect(chat.id)}
                 className={cn(
-                  "relative flex h-9 w-9 items-center justify-center rounded-md transition-colors",
+                  "relative flex h-10 w-10 items-center justify-center rounded-md transition-colors",
                   isActive ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:bg-zinc-800/70 hover:text-zinc-100"
                 )}
                 title={chat.title}
                 aria-label={chat.title}
               >
-                <MessageSquare size={15} />
-                {isActive && <span className="absolute left-0 h-4 w-0.5 rounded-r bg-emerald-400" />}
+                <MessageSquare size={17} strokeWidth={1.9} />
+                {isActive && <span className="absolute left-0 h-5 w-0.5 rounded-r bg-emerald-400" />}
               </button>
             );
           })}
@@ -1146,6 +1146,17 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
       <div className="relative flex flex-col h-full min-w-0">
         {/* Top action bar */}
         <div className="flex flex-col gap-1 px-3 py-2 border-b border-zinc-800/60 flex-shrink-0">
+          {onMinimize && (
+            <button
+              type="button"
+              onClick={onMinimize}
+              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs font-medium text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+              title="チャット欄を閉じる"
+            >
+              <PanelLeftClose size={15} />
+              <span>閉じる</span>
+            </button>
+          )}
           <button
             onClick={handleCreateChat}
             className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs font-medium text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
@@ -1162,17 +1173,6 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
             <FolderPlus size={14} />
             <span>New Group</span>
           </button>
-          {onMinimize && (
-            <button
-              type="button"
-              onClick={onMinimize}
-              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs font-medium text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
-              title="チャット欄を閉じる"
-            >
-              <PanelLeftClose size={15} />
-              <span>閉じる</span>
-            </button>
-          )}
         </div>
 
         {/* Columns */}

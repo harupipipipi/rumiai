@@ -704,6 +704,26 @@ def test_chat_tool_inference_accepts_common_computer_use_typos():
     assert result["message"]["metadata"]["auto_selected_tools"] == ["computer_use", "zoom"]
 
 
+def test_chat_tool_mentions_become_system_json_context():
+    from blocks.chat.send import _tool_mentions_message
+
+    message = _tool_mentions_message(
+        {
+            "tool_mentions": [
+                {
+                    "id": "computer_use",
+                    "label": "Computer Use",
+                    "description": "Inspect and control desktop apps.",
+                }
+            ]
+        }
+    )
+
+    assert message["role"] == "system"
+    assert '"id": "computer_use"' in message["content"]
+    assert "casual" in message["content"]
+
+
 def test_chat_stream_fallback_emits_live_tool_events_before_final_message(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from blocks.chat.stream import run

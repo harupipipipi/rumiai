@@ -8,6 +8,7 @@ import { api, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, t
 import { deriveConversationTitle, formatRelativeTime, messageToText } from "./lib/chat";
 import { cn } from "./lib/cn";
 import { canExecuteComposerEndpointAction } from "./lib/composerWidgets";
+import { mentionedToolDetailsFromText } from "./lib/toolMentions";
 import { extractToolVisual } from "./lib/toolVisuals";
 import { hasShellRegion } from "./lib/uiShell";
 import { hasWorkspaceAttachment, workspaceFileToAttachment } from "./lib/workspaceAttachments";
@@ -861,6 +862,10 @@ export default function App() {
   const composerExtensions = composerExtensionItems(sidebarItems);
   const selectedToolIds = useMemo(() => selectedTools.map((tool) => tool.id), [selectedTools]);
   const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
+  const installedToolIds = useMemo(
+    () => composerExtensions.filter((tool) => tool.category === "tool" && !tool.disabled).map((tool) => tool.id),
+    [composerExtensions],
+  );
   const pendingRequest = activeConversationId ? pendingRequests[activeConversationId] : null;
   const isConversationPending = Boolean(
     pendingRequest && Date.now() - pendingRequest.startedAt < 10 * 60_000,
@@ -1340,6 +1345,10 @@ export default function App() {
       });
   };
 
+  const handleToolMentionSelect = (tool: ComposerExtensionItem) => {
+    setSelectedTools((current) => current.some((selected) => selected.id === tool.id) ? current : [...current, tool]);
+  };
+
   const handleFileRemove = (fileId: string) => {
     setAttachedFiles((prev) => prev.filter((f) => f.id !== fileId));
   };
@@ -1666,6 +1675,11 @@ export default function App() {
     setInput("");
     setAttachedFiles([]);
     let submittedConversationId: string | null = null;
+    const connectedToolIds = installedToolIds;
+    const mentionedToolDetails = mentionedToolDetailsFromText(
+      userText,
+      composerExtensions.filter((tool) => tool.category === "tool"),
+    );
     const selectedToolLabels = [
       ...selectedTools.map((item) => item.label || item.id),
     ];
@@ -1850,10 +1864,10 @@ export default function App() {
         tool_policy: {
           ...(yoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
           ...operationsPolicy,
-          ...(selectedToolIds.length ? { selected_tools: selectedToolIds } : {}),
+          ...(connectedToolIds.length ? { selected_tools: connectedToolIds } : {}),
         },
         attachments: submittedAttachments,
-        tools: selectedToolIds,
+        tools: connectedToolIds,
         metadata: {
           mode: isOperationsMode ? "operations_company" : "chat",
           ...(isOperationsMode ? {
@@ -1864,6 +1878,8 @@ export default function App() {
           } : {}),
           attachments: submittedAttachments.map(({ name, size, type, truncated, source, sourcePath }) => ({ name, size, type, truncated, source, sourcePath })),
           selected_tools: selectedToolIds,
+          connected_tools: connectedToolIds,
+          tool_mentions: mentionedToolDetails,
           dropped_widgets: droppedWidgets
             .filter((widget) => widget.widgetKind === "tool_toggle" || widget.type === "tool" ? selectedToolIdSet.has(widget.sourceItemId || widget.id) : widget.enabled !== false)
             .map(({ id, type, label, widgetKind, sourceItemId }) => ({ id, type, label, widgetKind, sourceItemId })),
@@ -1960,6 +1976,7 @@ export default function App() {
       onModeChange={handleModeChange}
       onFileAttach={handleFileAttach}
       onAtFileAttach={handleAtFileAttach}
+      onToolMentionSelect={handleToolMentionSelect}
       onFileRemove={handleFileRemove}
       onDropWidget={handleDropWidget}
       onWidgetAction={handleWidgetAction}

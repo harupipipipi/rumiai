@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { filterAtMentionFiles, insertAtMentionText, profileNeedsApiKey, resolveComposerWidgetDrop } from "./ComposerRenderer";
+import { filterAtMentionFiles, filterAtMentionTools, insertAtMentionText, insertToolMentionText, profileNeedsApiKey, resolveComposerWidgetDrop } from "./ComposerRenderer";
 import { COMPOSER_BUTTON_DROP, COMPOSER_PANEL_DROP, COMPOSER_SELECTOR_DROP, COMPOSER_TOGGLE_DROP } from "../lib/toolUi";
 
 test("composer file mention filters string context files", () => {
@@ -16,6 +16,19 @@ test("composer file mention insertion keeps @ text for workspace attachment flow
 
   assert.deepEqual(result, {
     value: "please @README.md  now",
+    cursor: 18,
+  });
+});
+
+test("composer tool mention filters and inserts user-facing tool names", () => {
+  const tools = [
+    { id: "computer_use", label: "Computer Use", description: "Control desktop apps" },
+    { id: "browser_use", label: "Browser Use", description: "Use the browser" },
+  ];
+
+  assert.deepEqual(filterAtMentionTools(tools, "computer").map((tool) => tool.id), ["computer_use"]);
+  assert.deepEqual(insertToolMentionText("use @comp now", 9, tools[0]), {
+    value: "use @Computer Use  now",
     cursor: 18,
   });
 });
