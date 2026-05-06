@@ -12,6 +12,15 @@ function formatReadonlyValue(value: unknown, fallback: unknown): string {
   return String(resolved);
 }
 
+function apiProviderRows(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object") : [];
+}
+
+function namedApiRows(provider: Record<string, unknown>): Array<Record<string, unknown>> {
+  const apis = provider.apis;
+  return Array.isArray(apis) ? apis.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object") : [];
+}
+
 function SettingsField({
   sectionId,
   field,
@@ -25,11 +34,109 @@ function SettingsField({
 }) {
   const [secretDraft, setSecretDraft] = useState("");
   const [secretState, setSecretState] = useState<"idle" | "saved">("idle");
+  const [apiProvider, setApiProvider] = useState("google");
+  const [apiName, setApiName] = useState("main");
+  const [apiSecret, setApiSecret] = useState("");
+  const [apiSaveState, setApiSaveState] = useState<"idle" | "saved">("idle");
   const commonLabel = <span className="text-sm text-zinc-300">{field.label}</span>;
   const isSecretConfigured = Boolean(value);
 
   let control: ReactElement;
   switch (field.type) {
+    case "api_keys": {
+      const providers = apiProviderRows(value);
+      const providerOptions = providers.length
+        ? providers.map((provider) => String(provider.provider_id ?? ""))
+        : ["google", "openrouter", "openai", "anthropic"];
+      control = (
+        <div className="space-y-4">
+          <div className="grid gap-2 md:grid-cols-[160px_1fr_1.4fr_auto]">
+            <select
+              value={apiProvider}
+              onChange={(event) => setApiProvider(event.target.value)}
+              className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none"
+            >
+              {[...new Set(providerOptions.filter(Boolean))].map((providerId) => (
+                <option key={providerId} value={providerId}>
+                  {providerId}
+                </option>
+              ))}
+            </select>
+            <input
+              value={apiName}
+              onChange={(event) => {
+                setApiName(event.target.value);
+                setApiSaveState("idle");
+              }}
+              placeholder="api name"
+              className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none"
+            />
+            <input
+              type="password"
+              autoComplete="off"
+              value={apiSecret}
+              onChange={(event) => {
+                setApiSecret(event.target.value);
+                setApiSaveState("idle");
+              }}
+              placeholder={`${apiProvider} API key`}
+              className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none"
+            />
+            <button
+              type="button"
+              disabled={!apiProvider.trim() || !apiName.trim() || !apiSecret.trim()}
+              onClick={() => {
+                if (!apiProvider.trim() || !apiName.trim() || !apiSecret.trim()) return;
+                onChange(sectionId, field.id, {
+                  action: "upsert",
+                  provider_id: apiProvider,
+                  name: apiName,
+                  value: apiSecret,
+                });
+                setApiSecret("");
+                setApiSaveState("saved");
+              }}
+              className={cn(
+                "rounded-lg border px-3 py-2 text-xs transition-colors",
+                apiProvider.trim() && apiName.trim() && apiSecret.trim()
+                  ? "bg-zinc-100 text-zinc-950 border-zinc-100"
+                  : "bg-zinc-900 text-zinc-600 border-zinc-800 cursor-not-allowed",
+              )}
+            >
+              Save API
+            </button>
+          </div>
+          {apiSaveState === "saved" && <p className="text-[11px] text-emerald-400">Saved</p>}
+          <div className="grid gap-2 md:grid-cols-2">
+            {providers.map((provider) => {
+              const rows = namedApiRows(provider);
+              const configured = Boolean(provider.configured);
+              return (
+                <div key={String(provider.provider_id)} className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm font-medium text-zinc-200">{String(provider.provider_id)}</span>
+                    <span className={cn("text-[11px]", configured ? "text-emerald-400" : "text-zinc-600")}>
+                      {configured ? "configured" : "not set"}
+                    </span>
+                  </div>
+                  <div className="mt-2 space-y-1">
+                    {rows.length > 0 ? rows.map((api) => (
+                      <div key={String(api.key)} className="flex items-center justify-between gap-2 text-xs text-zinc-500">
+                        <span>{String(api.name ?? api.api_id)}</span>
+                        <span className="font-mono">{String(api.key ?? "")}</span>
+                      </div>
+                    )) : (
+                      <p className="text-xs text-zinc-600">No named APIs yet.</p>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+      break;
+    }
     case "secret":
       control = (
         <div className="flex flex-wrap items-center gap-2 min-w-0">
@@ -167,7 +274,7 @@ export function SettingsModalRenderer({
       key={`${activeSection?.id}.${field.id}`}
       className={cn(
         "rounded-lg border border-zinc-800 bg-zinc-950/50 p-4",
-        field.type === "textarea" || field.type === "secret" ? "lg:col-span-2" : "",
+        field.type === "textarea" || field.type === "secret" || field.type === "api_keys" ? "lg:col-span-2" : "",
       )}
     >
       <SettingsField

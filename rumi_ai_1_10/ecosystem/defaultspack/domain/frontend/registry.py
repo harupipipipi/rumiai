@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from domain.ai_client.client import AIClient
-from domain.ai_client.api_key_store import provider_has_api_key, set_provider_api_key
+from domain.ai_client.api_key_store import provider_has_api_key, provider_key_status, set_provider_api_key
 from domain.capability.catalog import CapabilityCatalog
 from domain.chat.store import ChatStore
 from domain.dev.inspector import Inspector
@@ -109,7 +109,7 @@ class FrontendRegistry:
     def _app_metadata(self, ui_surfaces: list[dict[str, Any]]) -> dict[str, Any]:
         app: dict[str, Any] = {
             "id": "defaultspack",
-            "name": "Rumi Defaultspack",
+            "name": "RumiDP",
             "icon": "/static/assets/icons/defaultspack-icon.png",
             "account": self._rumi_account_metadata(),
         }
@@ -507,8 +507,8 @@ class FrontendRegistry:
             },
             {
                 "id": "models",
-                "label": "Models & Providers",
-                "description": "会話で使うモデルと provider API key。",
+                "label": "Models",
+                "description": "会話で使うモデルと thinking 設定。",
                 "fields": [
                     {
                         "id": "preferred_model",
@@ -533,38 +533,6 @@ class FrontendRegistry:
                         "help": "Rumi は none/low/medium/high/xhigh を送り、各 provider が対応する API パラメータへ変換します。Gemini/Gemma では未対応の値を自動で近い値へ落とします。",
                     },
                     {
-                        "id": "google_api_key",
-                        "label": "Gemini API Key",
-                        "type": "secret",
-                        "default": "",
-                        "provider_id": "google",
-                        "configured_field": "google_api_key_configured",
-                        "help": "Google AI Studio の Gemini API key。保存後も値は再表示されません。",
-                    },
-                    {
-                        "id": "google_api_key_configured",
-                        "label": "Gemini Key",
-                        "type": "readonly",
-                        "default": provider_has_api_key("google", pack_root=self._pack_root),
-                        "advanced": True,
-                    },
-                    {
-                        "id": "openrouter_api_key",
-                        "label": "OpenRouter API Key",
-                        "type": "secret",
-                        "default": "",
-                        "provider_id": "openrouter",
-                        "configured_field": "openrouter_api_key_configured",
-                        "help": "OpenRouter の API key。Tencent Hy3 preview free 用です。",
-                    },
-                    {
-                        "id": "openrouter_api_key_configured",
-                        "label": "OpenRouter Key",
-                        "type": "readonly",
-                        "default": provider_has_api_key("openrouter", pack_root=self._pack_root),
-                        "advanced": True,
-                    },
-                    {
                         "id": "favorite_profiles",
                         "label": "Composer Model Pins",
                         "type": "textarea",
@@ -579,6 +547,27 @@ class FrontendRegistry:
                         "default": '{"openrouter/tencent/hy3-preview:free":"medium"}',
                         "help": "高度設定: profile_id ごとの上書き。通常は Thinking Level を使います。",
                         "advanced": True,
+                    },
+                ],
+            },
+            {
+                "id": "apis",
+                "label": "APIs",
+                "description": "名前付き API key と、モデルごとの API 優先順位。",
+                "fields": [
+                    {
+                        "id": "api_keys",
+                        "label": "API Keys",
+                        "type": "api_keys",
+                        "default": [],
+                        "help": "provider と名前を付けて複数の API key を保存できます。値は再表示されません。",
+                    },
+                    {
+                        "id": "model_api_routes",
+                        "label": "Model API Priority",
+                        "type": "textarea",
+                        "default": "openrouter/tencent/hy3-preview:free: openrouter/main\n",
+                        "help": "1行に model: provider/api-name を優先順で書きます。例: google/gemini-2.5-pro: google/main, google/backup",
                     },
                 ],
             },
@@ -1038,6 +1027,10 @@ class FrontendRegistry:
                 "openrouter_api_key": "",
                 "openrouter_api_key_configured": provider_has_api_key("openrouter", pack_root=self._pack_root),
             },
+            "apis": {
+                "api_keys": [],
+                "model_api_routes": "openrouter/tencent/hy3-preview:free: openrouter/main\n",
+            },
         }
 
     def _model_options(self) -> list[dict[str, str]]:
@@ -1185,6 +1178,22 @@ class FrontendRegistry:
 
     def _sanitize_settings_patch(self, patch: dict[str, Any]) -> dict[str, Any]:
         sanitized = deepcopy(patch)
+        apis = sanitized.get("apis")
+        if isinstance(apis, dict):
+            api_key_patch = apis.pop("api_keys", None)
+            if isinstance(api_key_patch, dict) and api_key_patch.get("action") == "upsert":
+                provider_id = str(api_key_patch.get("provider_id") or "").strip()
+                name = str(api_key_patch.get("name") or api_key_patch.get("api_id") or "").strip()
+                value = str(api_key_patch.get("value") or "")
+                if provider_id and name and value.strip():
+                    set_provider_api_key(
+                        provider_id,
+                        value,
+                        pack_root=self._pack_root,
+                        api_id=name,
+                        name=name,
+                    )
+            apis["api_keys"] = []
         models = sanitized.get("models")
         if isinstance(models, dict):
             for provider_id, field_id, configured_field in (
@@ -1209,6 +1218,13 @@ class FrontendRegistry:
 
     def _refresh_derived_settings(self, values: dict[str, Any]) -> dict[str, Any]:
         refreshed = deepcopy(values)
+        apis = refreshed.setdefault("apis", {})
+        if isinstance(apis, dict):
+            apis["api_keys"] = provider_key_status(pack_root=self._pack_root)
+            routes = apis.get("model_api_routes")
+            if isinstance(routes, list):
+                routes = "\n".join(str(item).strip() for item in routes if str(item).strip())
+            apis["model_api_routes"] = str(routes or "").strip() + ("\n" if str(routes or "").strip() else "")
         models = refreshed.setdefault("models", {})
         if isinstance(models, dict):
             models["google_api_key"] = ""

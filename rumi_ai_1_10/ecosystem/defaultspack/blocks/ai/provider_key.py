@@ -15,7 +15,14 @@ def run(input_data, context):
     if method == "POST":
         provider_id = str((input_data or {}).get("provider_id", "")).strip()
         value = str((input_data or {}).get("value", ""))
-        result = set_provider_api_key(provider_id, value)
+        api_id = str((input_data or {}).get("api_id", "")).strip()
+        name = str((input_data or {}).get("name", "")).strip()
+        result = set_provider_api_key(
+            provider_id,
+            value,
+            api_id=api_id or None,
+            name=name or None,
+        )
         if not result.get("success"):
             return error(result.get("error") or "failed to save api key", "API_KEY_SAVE_FAILED")
         return ok({key: value for key, value in result.items() if key != "error"})

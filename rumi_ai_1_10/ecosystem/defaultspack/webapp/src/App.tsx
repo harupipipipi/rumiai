@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { Activity, Building2, MessageSquare, Play, RefreshCw, ShieldCheck, Users, Zap } from "lucide-react";
+import { MessageSquare } from "lucide-react";
 
 import type { ChatItem } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
@@ -313,113 +313,6 @@ function settingNumber(value: unknown, fallback: number): number {
   return Number.isFinite(numeric) ? numeric : fallback;
 }
 
-function OperationsCompanyPanel({
-  status,
-  isBusy,
-  active,
-  onStart,
-  onOpenChat,
-  onRefresh,
-  onTriggerHeartbeat,
-}: {
-  status: OperationsCompanyStatus | null;
-  isBusy: boolean;
-  active: boolean;
-  onStart: () => void;
-  onOpenChat: () => void;
-  onRefresh: () => void;
-  onTriggerHeartbeat: () => void;
-}) {
-  const roleCount = status?.manifest.roles?.length ?? 7;
-  const activeSchedules = (status?.schedules ?? []).filter((schedule) => schedule.status === "active").length;
-  const modelCount = status?.manifest.model_self_selection?.allowlist?.length ?? 0;
-  const heartbeat = (status?.schedules ?? []).find((schedule) => String(schedule.name ?? "").toLowerCase().includes("heartbeat"));
-  const nextExecution = heartbeat?.next_execution_at ? Date.parse(String(heartbeat.next_execution_at)) : 0;
-  const heartbeatLabel = nextExecution ? `next ${formatRelativeTime(nextExecution)}` : "not scheduled";
-  const bootstrapped = status?.bootstrapped === true;
-
-  return (
-    <section className={cn(
-      "border-b border-zinc-800/60 bg-zinc-950/70 px-4 py-3",
-      active && "bg-emerald-950/10",
-    )}>
-      <div className="mx-auto flex max-w-[1180px] flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-[260px] flex-1 items-center gap-3">
-          <span className={cn(
-            "flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border",
-            bootstrapped ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" : "border-zinc-800 bg-zinc-900 text-zinc-400",
-          )}>
-            <Building2 size={19} />
-          </span>
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-sm font-semibold text-zinc-100">Rumi Operations Company</h2>
-              <span className={cn(
-                "rounded-full border px-2 py-0.5 text-[10px] font-medium",
-                bootstrapped ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-300" : "border-zinc-800 bg-zinc-900 text-zinc-500",
-              )}>
-                {bootstrapped ? "24/7 active" : "not started"}
-              </span>
-              {active && <span className="rounded-full border border-sky-500/20 bg-sky-500/10 px-2 py-0.5 text-[10px] font-medium text-sky-300">client chat</span>}
-            </div>
-            <p className="mt-1 line-clamp-1 text-[11px] text-zinc-500">
-              ops-company · Client Manager · PM · Coding · Research · Review · Monitor · Scheduler
-            </p>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-400">
-          <span className="inline-flex h-7 items-center gap-1 rounded-md border border-zinc-800 bg-zinc-900/70 px-2">
-            <Users size={13} /> {roleCount} roles
-          </span>
-          <span className="inline-flex h-7 items-center gap-1 rounded-md border border-zinc-800 bg-zinc-900/70 px-2">
-            <Activity size={13} /> {activeSchedules} schedules
-          </span>
-          <span className="inline-flex h-7 items-center gap-1 rounded-md border border-zinc-800 bg-zinc-900/70 px-2">
-            <ShieldCheck size={13} /> {modelCount} models
-          </span>
-          <span className="hidden h-7 items-center gap-1 rounded-md border border-zinc-800 bg-zinc-900/70 px-2 lg:inline-flex">
-            <Zap size={13} /> {heartbeatLabel}
-          </span>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={onRefresh}
-            disabled={isBusy}
-            className="flex h-8 items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-900 px-2.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
-            title="Refresh operations status"
-          >
-            <RefreshCw size={14} /> Refresh
-          </button>
-          <button
-            type="button"
-            onClick={bootstrapped ? onOpenChat : onStart}
-            disabled={isBusy}
-            className="flex h-8 items-center gap-1.5 rounded-md bg-zinc-100 px-2.5 text-xs font-semibold text-zinc-950 hover:bg-white disabled:opacity-50"
-            title={bootstrapped ? "Open Client Manager chat" : "Start 24/7 company agent"}
-          >
-            {bootstrapped ? <MessageSquare size={14} /> : <Play size={14} />}
-            {bootstrapped ? "Open Chat" : "Start 24/7"}
-          </button>
-          {bootstrapped && (
-            <button
-              type="button"
-              onClick={onTriggerHeartbeat}
-              disabled={isBusy || !heartbeat}
-              className="flex h-8 items-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-900 px-2.5 text-xs font-medium text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
-              title="Trigger heartbeat schedule"
-            >
-              <Activity size={14} /> Tick
-            </button>
-          )}
-        </div>
-      </div>
-    </section>
-  );
-}
-
 function isAbortError(errorValue: unknown): boolean {
   return Boolean(
     errorValue
@@ -454,7 +347,25 @@ function findProfile(profiles: ModelProfile[], modelId: string): ModelProfile | 
 }
 
 const CORE_MODEL_PROVIDERS = new Set(["google", "openrouter", "stub"]);
-const API_KEY_PROVIDER_IDS = new Set(["google", "openrouter"]);
+const API_KEY_PROVIDER_IDS = new Set([
+  "anthropic",
+  "deepseek",
+  "glm",
+  "google",
+  "groq",
+  "llama_cpp",
+  "lmstudio",
+  "longcat",
+  "mistral",
+  "ollama",
+  "openai",
+  "openai_compatible",
+  "openrouter",
+  "perplexity",
+  "together",
+  "vllm",
+  "xai",
+]);
 
 function isConfiguredProfile(profile: ModelProfile): boolean {
   const availability = profile.availability ?? {};
@@ -601,6 +512,7 @@ function isPendingInLocation(): boolean {
 
 function replaceChatIdInUrl(conversationId: string | null, pending?: boolean) {
   const url = new URL(window.location.href);
+  url.pathname = "/chat";
   if (conversationId) {
     url.searchParams.set("chat", conversationId);
   } else {
@@ -735,7 +647,6 @@ export default function App() {
   const showActivityInMessages = settingsValues.general?.show_activity_in_messages !== false;
   const showRegion = (regionId: string) => !catalog?.shell || hasShellRegion(catalog, regionId);
   const operationsProfileAvailable = hasOperationsProfile(catalog);
-  const operationsConversationActive = isOperationsConversation(activeConversation);
 
   const updatePendingRequests = (updater: (current: Record<string, PendingChatRequest>) => Record<string, PendingChatRequest>) => {
     setPendingRequests((current) => {
@@ -1018,10 +929,20 @@ export default function App() {
         ...current,
         [sectionId]: {
           ...(current[sectionId] ?? {}),
-          [fieldId]: field?.type === "secret" ? "" : value,
+          [fieldId]: field?.type === "secret" || field?.type === "api_keys" ? "" : value,
         },
       };
-      if (field?.type === "secret") {
+      if (field?.type === "api_keys") {
+        const payload = value && typeof value === "object" ? value as Record<string, unknown> : {};
+        const providerId = String(payload.provider_id ?? "").trim();
+        const name = String(payload.name ?? payload.api_id ?? "").trim();
+        const secret = String(payload.value ?? "");
+        if (providerId && name && secret.trim()) {
+          void api.saveProviderApiKey(providerId, secret, { apiId: name, name })
+            .then(() => refreshCatalog())
+            .catch(console.error);
+        }
+      } else if (field?.type === "secret") {
         const providerId = field.provider_id ?? fieldId.replace(/_api_key$/, "");
         void api.saveProviderApiKey(providerId, String(value ?? ""))
           .then(() => refreshCatalog())
@@ -1650,18 +1571,6 @@ export default function App() {
                   if (canShowCanvas) setShowPreview((value) => !value);
                 }}
                 onOpenSettings={() => setIsSettingsOpen(true)}
-              />
-            )}
-
-            {operationsProfileAvailable && (
-              <OperationsCompanyPanel
-                status={operationsStatus}
-                isBusy={operationsBusy}
-                active={operationsConversationActive}
-                onStart={handleStartOperationsCompany}
-                onOpenChat={handleOpenOperationsChat}
-                onRefresh={() => void refreshOperationsStatus()}
-                onTriggerHeartbeat={handleTriggerOperationsHeartbeat}
               />
             )}
 

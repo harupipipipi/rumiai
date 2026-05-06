@@ -10,6 +10,7 @@ import os
 from typing import Any, Dict, List
 
 from ecosystem.defaultspack.domain.ai_client.providers import build_profile_catalog, get_all_known_models, get_provider_catalog
+from ecosystem.defaultspack.domain.ai_client.api_key_store import provider_named_api_keys
 
 
 def list_provider_catalog() -> List[Dict[str, Any]]:
@@ -45,6 +46,9 @@ def _with_legacy_provider_fields(provider: Dict[str, Any]) -> Dict[str, Any]:
     item["openai_compatible"] = "openai_compatible" in capabilities or bool(metadata.get("openai_compatible"))
     item["catalog_only"] = bool(metadata.get("catalog_only", availability.get("catalog_only", False)))
     item["supports_invoke"] = bool(metadata.get("supports_invoke", availability.get("supports_invoke", False)))
+    named_apis = provider_named_api_keys(str(item.get("provider_id") or item.get("id") or ""))
+    item["configured_api_count"] = len([api for api in named_apis if api.get("configured")])
+    item["named_apis"] = named_apis
     return item
 
 
@@ -64,11 +68,13 @@ def _model_context(model: Dict[str, Any]) -> int:
 
 
 def _supports_thinking(model: Dict[str, Any]) -> bool:
-    if "supports_thinking" in model:
-        return bool(model.get("supports_thinking"))
     model_type = str(model.get("type") or "chat").lower()
     model_id = str(model.get("model_id") or model.get("id") or "").lower()
-    return model_type in {"chat", "reasoning"} and any(token in model_id for token in ("gpt-5", "claude", "gemini", "deepseek"))
+    if model_type not in {"chat", "reasoning"}:
+        return False
+    if bool(model.get("supports_thinking")):
+        return True
+    return any(token in model_id for token in ("gpt-5", "claude", "gemini", "gemma", "deepseek"))
 
 
 def _with_legacy_model_fields(model: Dict[str, Any]) -> Dict[str, Any]:
@@ -105,6 +111,9 @@ def _with_legacy_profile_fields(profile: Dict[str, Any]) -> Dict[str, Any]:
         "model_id": item.get("model_id"),
         "type": item.get("type", "chat"),
         "context_window": item.get("context_window", item.get("max_context", 0)),
+        "supports_thinking": item.get("supports_thinking"),
+        "thinking_levels": item.get("thinking_levels"),
+        "default_thinking_level": item.get("default_thinking_level"),
         "metadata": item.get("metadata", {}),
     }
     enriched = _with_legacy_model_fields(model_like)

@@ -17,7 +17,7 @@
     },
     "app": {
       "id": "defaultspack",
-      "name": "Rumi Defaultspack",
+      "name": "RumiDP",
       "icon": "/static/assets/icons/defaultspack-icon.png"
     },
     "shell_layout": {

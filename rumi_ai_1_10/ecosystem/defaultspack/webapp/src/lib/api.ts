@@ -175,7 +175,7 @@ export type SidebarFieldOption = {
 export type SidebarField = {
   id: string;
   label: string;
-  type: "text" | "textarea" | "number" | "toggle" | "select" | "readonly" | "secret";
+  type: "text" | "textarea" | "number" | "toggle" | "select" | "readonly" | "secret" | "api_keys";
   default?: unknown;
   required?: boolean;
   help?: string;
@@ -591,10 +591,15 @@ export const api = {
     });
   },
 
-  saveProviderApiKey(providerId: string, value: string) {
+  saveProviderApiKey(providerId: string, value: string, options?: { apiId?: string; name?: string }) {
     return request<{ provider_id: string; configured: boolean }>("/api/ai/provider-key", {
       method: "POST",
-      body: JSON.stringify({ provider_id: providerId, value }),
+      body: JSON.stringify({
+        provider_id: providerId,
+        value,
+        api_id: options?.apiId,
+        name: options?.name,
+      }),
     });
   },
 

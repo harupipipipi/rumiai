@@ -55,7 +55,25 @@ const MODE_META: Record<AppMode, { label: string; icon: typeof MessageSquare; de
   agent: { label: "Agent", icon: Bot, description: "自律エージェント" },
 };
 
-const API_KEY_PROVIDER_IDS = new Set(["google", "openrouter"]);
+const API_KEY_PROVIDER_IDS = new Set([
+  "anthropic",
+  "deepseek",
+  "glm",
+  "google",
+  "groq",
+  "llama_cpp",
+  "lmstudio",
+  "longcat",
+  "mistral",
+  "ollama",
+  "openai",
+  "openai_compatible",
+  "openrouter",
+  "perplexity",
+  "together",
+  "vllm",
+  "xai",
+]);
 
 function profileProviderId(profile: ModelProfile | null | undefined): string {
   return String(profile?.provider_id ?? "").trim();
@@ -1203,19 +1221,22 @@ export function ComposerRenderer({
                   )}
                 </div>
                 {levels.length > 0 && (
-                  <select
-                    value={thinkingLevel ?? levels[0]}
-                    onChange={(event) => onThinkingLevelChange(event.target.value)}
-                    disabled={isGenerating}
-                    className="bg-transparent text-[11px] font-medium text-zinc-400 outline-none cursor-pointer hover:text-zinc-200 transition-colors disabled:opacity-50 border-l border-zinc-700/50 pl-1.5 ml-0.5"
-                    title="Thinking level"
-                  >
-                    {levels.map((level) => (
-                      <option key={level} value={level} className="bg-zinc-900 text-zinc-100">
-                        {THINKING_LABELS[level] ?? level}
-                      </option>
-                    ))}
-                  </select>
+                  <label className="inline-flex items-center gap-1 border-l border-zinc-700/50 pl-1.5 ml-0.5 text-[11px] font-medium text-zinc-500">
+                    <span>thinking</span>
+                    <select
+                      value={thinkingLevel ?? levels[0]}
+                      onChange={(event) => onThinkingLevelChange(event.target.value)}
+                      disabled={isGenerating}
+                      className="bg-transparent text-[11px] font-medium text-zinc-400 outline-none cursor-pointer hover:text-zinc-200 transition-colors disabled:opacity-50"
+                      title="Thinking level"
+                    >
+                      {levels.map((level) => (
+                        <option key={level} value={level} className="bg-zinc-900 text-zinc-100">
+                          {THINKING_LABELS[level] ?? level}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 )}
               </div>
               <button

@@ -22,12 +22,12 @@ def _ensure_import_path() -> None:
 
 def _url() -> str:
     port = os.environ.get("RUMI_DEFAULTSPACK_PORT") or os.environ.get("DEFAULTS_HTTP_PORT") or "8766"
-    return f"http://127.0.0.1:{port}/"
+    return f"http://127.0.0.1:{port}/chat"
 
 
 def _wait_until_ready(url: str, timeout: float = 10.0) -> bool:
     deadline = time.time() + timeout
-    health_url = url.rstrip("/") + "/api/health"
+    health_url = url.split("/chat", 1)[0].rstrip("/") + "/api/health"
     while time.time() < deadline:
         try:
             with urllib.request.urlopen(health_url, timeout=1.0) as response:

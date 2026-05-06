@@ -1069,6 +1069,17 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
     return (
       <div className="flex h-full w-full flex-col items-center bg-[#09090b] text-zinc-400">
         <div className="flex w-full flex-col items-center gap-1 border-b border-zinc-800/60 px-1.5 py-2">
+          {onRestore && (
+            <button
+              type="button"
+              onClick={onRestore}
+              className="flex h-9 w-9 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+              title="RumiDP を開く"
+              aria-label="RumiDP を開く"
+            >
+              <PanelLeftOpen size={16} />
+            </button>
+          )}
           <button
             onClick={handleCreateChat}
             className="flex h-9 w-9 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
@@ -1085,17 +1096,6 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
           >
             <FolderPlus size={16} />
           </button>
-          {onRestore && (
-            <button
-              type="button"
-              onClick={onRestore}
-              className="flex h-9 w-9 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
-              title="チャット欄を開く"
-              aria-label="チャット欄を開く"
-            >
-              <PanelLeftOpen size={16} />
-            </button>
-          )}
         </div>
 
         <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-1.5 overflow-y-auto px-1.5 py-2">
@@ -1146,17 +1146,20 @@ export function HistoryBoard({ activeChatId, chatItems, account, onChatSelect, o
       <div className="relative flex flex-col h-full min-w-0">
         {/* Top action bar */}
         <div className="flex flex-col gap-1 px-3 py-2 border-b border-zinc-800/60 flex-shrink-0">
-          {onMinimize && (
-            <button
-              type="button"
-              onClick={onMinimize}
-              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs font-medium text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
-              title="チャット欄を閉じる"
-            >
-              <PanelLeftClose size={15} />
-              <span>閉じる</span>
-            </button>
-          )}
+          <div className="flex h-8 items-center justify-between gap-2 px-2.5">
+            <span className="text-xs font-semibold tracking-wide text-zinc-400">RumiDP</span>
+            {onMinimize && (
+              <button
+                type="button"
+                onClick={onMinimize}
+                className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+                title="RumiDP を閉じる"
+                aria-label="RumiDP を閉じる"
+              >
+                <PanelLeftClose size={15} />
+              </button>
+            )}
+          </div>
           <button
             onClick={handleCreateChat}
             className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs font-medium text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
