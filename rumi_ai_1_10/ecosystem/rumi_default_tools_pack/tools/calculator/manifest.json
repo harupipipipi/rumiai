@@ -48,7 +48,7 @@
     },
     "execution": {
       "type": "rumi_function",
-      "qualified_name": "rumi_default_tools_pack:calculator"
+      "qualified_name": "defaultspack:tool_calculator"
     }
   }
 }

@@ -23,7 +23,7 @@
     },
     "execution": {
       "type": "rumi_function",
-      "qualified_name": "rumi_default_tools_pack:subagent"
+      "qualified_name": "defaultspack:tool_subagent"
     },
     "ui": {
       "group_id": "agent",
