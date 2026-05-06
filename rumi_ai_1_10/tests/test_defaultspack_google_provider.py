@@ -304,6 +304,35 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
 
         self.assertTrue(loaded["google"])
 
+    def test_named_provider_api_key_can_be_saved_and_listed(self):
+        from core_runtime.secrets_store import SecretsStore
+        from domain.ai_client.api_key_store import (
+            named_provider_secret_key,
+            provider_has_api_key,
+            provider_named_api_keys,
+            read_provider_api_key,
+            set_provider_api_key,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            secrets_dir = Path(tmpdir) / "secrets"
+            with patch.dict(os.environ, {"RUMI_DEFAULTSPACK_SECRETS_DIR": str(secrets_dir)}, clear=True):
+                result = set_provider_api_key(
+                    "google",
+                    "google-main-secret",
+                    api_id="main",
+                    name="Main",
+                )
+                key = named_provider_secret_key("google", api_id="main")
+                store = SecretsStore(str(secrets_dir))
+
+                self.assertTrue(result["success"])
+                self.assertEqual(result["key"], key)
+                self.assertTrue(store.has_secret(key))
+                self.assertTrue(provider_has_api_key("google"))
+                self.assertEqual(read_provider_api_key("google", "main"), "google-main-secret")
+                self.assertEqual(provider_named_api_keys("google")[0]["api_id"], "main")
+
     def test_google_provider_loads_profile_models_from_user_data(self):
         from domain.ai_client.providers.google_provider import GoogleProvider
 

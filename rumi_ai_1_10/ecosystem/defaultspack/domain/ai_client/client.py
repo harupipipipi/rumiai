@@ -1,8 +1,12 @@
 import os
 import sys
+import json
+import re
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
+from domain.ai_client.api_key_store import read_provider_api_key
 from domain.ai_client.providers import (
     build_profile_catalog,
     detect_available_providers,
@@ -257,7 +261,141 @@ class AIClient:
         provider = self._providers.get(provider_name, self._providers["stub"])
         return provider, model_name
 
+    def _settings_path(self):
+        return Path(__file__).resolve().parents[2] / "user_data" / "shared" / "frontend_settings.json"
+
+    def _api_routes(self):
+        try:
+            data = json.loads(self._settings_path().read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        raw_routes = ((data.get("apis") or {}).get("model_api_routes") or "")
+        if isinstance(raw_routes, list):
+            raw_routes = "\n".join(str(item) for item in raw_routes)
+        routes = {}
+        for raw_line in str(raw_routes or "").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            match = re.match(r"^(.+?):\s+(.+)$", line)
+            if not match:
+                continue
+            model_ref = match.group(1).strip()
+            route_refs = [item.strip() for item in match.group(2).split(",") if item.strip()]
+            if model_ref and route_refs:
+                routes[model_ref] = route_refs
+        return routes
+
+    def _routes_for_model(self, model):
+        routes = self._api_routes()
+        if model in routes:
+            return routes[model]
+        if isinstance(model, str) and "/" in model:
+            model_id = model.split("/", 1)[1]
+            return routes.get(model_id, [])
+        return []
+
+    @staticmethod
+    def _route_parts(route_ref):
+        cleaned = str(route_ref or "").strip()
+        if "/" not in cleaned:
+            return cleaned, "main"
+        provider_id, api_id = cleaned.split("/", 1)
+        return provider_id.strip(), api_id.strip() or "main"
+
+    @staticmethod
+    def _is_rate_limit_error(exc):
+        message = str(exc).lower()
+        return any(token in message for token in ("429", "rate limit", "rate_limit", "quota", "resource_exhausted"))
+
+    def _model_for_route(self, model, provider_id):
+        if isinstance(model, str) and "/" in model:
+            _, model_id = model.split("/", 1)
+            return f"{provider_id}/{model_id}"
+        return f"{provider_id}/{model}"
+
+    def _api_route_attempts(self, model, route_refs):
+        attempts = []
+        for route_ref in route_refs:
+            provider_id, api_id = self._route_parts(route_ref)
+            if not provider_id:
+                continue
+            api_key = read_provider_api_key(provider_id, api_id)
+            if not api_key:
+                continue
+            route_model = self._model_for_route(model, provider_id)
+            provider, model_name = self.resolve_provider(route_model)
+            if provider.__class__.__name__ == "StubProvider":
+                continue
+            attempts.append((provider, model_name, api_key))
+        return attempts
+
+    def _call_with_api_routes(self, method_name, model, messages, tools=None, params=None):
+        route_refs = self._routes_for_model(model)
+        if not route_refs:
+            return None, False
+
+        if method_name == "stream":
+            route_attempts = self._api_route_attempts(model, route_refs)
+            if not route_attempts:
+                return None, False
+            return self._stream_with_api_routes(route_attempts, messages, tools, params), True
+
+        last_error = None
+        for route_ref in route_refs:
+            provider_id, api_id = self._route_parts(route_ref)
+            if not provider_id:
+                continue
+            api_key = read_provider_api_key(provider_id, api_id)
+            if not api_key:
+                continue
+            route_model = self._model_for_route(model, provider_id)
+            provider, model_name = self.resolve_provider(route_model)
+            if provider.__class__.__name__ == "StubProvider":
+                continue
+            previous_key = getattr(provider, "_api_key", None)
+            try:
+                if previous_key is not None:
+                    provider._api_key = api_key
+                method = getattr(provider, method_name)
+                return method(model_name, messages, tools or [], params or {}), True
+            except Exception as exc:
+                last_error = exc
+                if not self._is_rate_limit_error(exc):
+                    raise
+            finally:
+                if previous_key is not None:
+                    provider._api_key = previous_key
+        if last_error is not None:
+            raise last_error
+        return None, False
+
+    def _stream_with_api_routes(self, route_attempts, messages, tools=None, params=None):
+        last_error = None
+        for provider, model_name, api_key in route_attempts:
+            previous_key = getattr(provider, "_api_key", None)
+            yielded = False
+            try:
+                if previous_key is not None:
+                    provider._api_key = api_key
+                for chunk in provider.stream(model_name, messages, tools or [], params or {}):
+                    yielded = True
+                    yield chunk
+                return
+            except Exception as exc:
+                last_error = exc
+                if yielded or not self._is_rate_limit_error(exc):
+                    raise
+            finally:
+                if previous_key is not None:
+                    provider._api_key = previous_key
+        if last_error is not None:
+            raise last_error
+
     def complete(self, model, messages, tools=None, params=None):
+        routed, handled = self._call_with_api_routes("complete", model, messages, tools, params)
+        if handled:
+            return routed
         provider, model_name = self.resolve_provider(model)
         if (
             provider.__class__.__name__ == "StubProvider"
@@ -276,6 +414,9 @@ class AIClient:
             raise RuntimeError(str(e)) from None
 
     def stream(self, model, messages, tools=None, params=None):
+        routed, handled = self._call_with_api_routes("stream", model, messages, tools, params)
+        if handled:
+            return routed
         provider, model_name = self.resolve_provider(model)
         if (
             provider.__class__.__name__ == "StubProvider"

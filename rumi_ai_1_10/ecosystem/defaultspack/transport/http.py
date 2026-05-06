@@ -421,6 +421,15 @@ class DefaultsHttpServer:
 
     # ---- Static Handlers (fallback) ----
 
+    def _handle_chat_redirect(self, request_data, path_params):
+        query = urllib.parse.urlencode({
+            key: value
+            for key, value in (request_data or {}).items()
+            if not str(key).startswith("_")
+        })
+        location = "/chat" + (("?" + query) if query else "")
+        return {"_redirect": True, "location": location, "status_code": 302}
+
     def _handle_static(self, request_data, path_params):
         shell_path = os.path.join(
             os.path.dirname(__file__), "..", "ui", "shell.html"
@@ -609,6 +618,11 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
 
             if isinstance(result, dict) and result.get("_static"):
                 self._send_static(200, result.get("content_type", "text/html"), result.get("body", ""))
+            elif isinstance(result, dict) and result.get("_redirect"):
+                self._send_redirect(
+                    int(result.get("status_code", 302)),
+                    str(result.get("location") or "/chat"),
+                )
             elif isinstance(result, dict) and result.get("_sse"):
                 self._send_sse(result.get("events", []))
             else:
@@ -650,6 +664,13 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             pass
         finally:
             self.close_connection = True
+
+    def _send_redirect(self, status_code, location):
+        self.send_response(status_code)
+        self._send_cors_headers()
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def _send_static(self, status_code, content_type, body):
         if isinstance(body, str):

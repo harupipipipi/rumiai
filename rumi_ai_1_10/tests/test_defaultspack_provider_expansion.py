@@ -117,6 +117,44 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
             finally:
                 AIClient._instance = None
 
+    def test_api_route_stream_keeps_named_key_until_generator_is_consumed(self):
+        from domain.ai_client import client as client_module
+        from domain.ai_client.client import AIClient
+
+        class StreamingProvider:
+            def __init__(self):
+                self._api_key = "original-secret"
+                self.keys_seen = []
+
+            def stream(self, model, messages, tools, params):
+                def chunks():
+                    self.keys_seen.append(self._api_key)
+                    yield {"type": "delta", "model": model, "api_key": self._api_key}
+
+                return chunks()
+
+        provider = StreamingProvider()
+        AIClient._instance = None
+        with patch.dict(os.environ, {}, clear=True):
+            client = AIClient()
+        client.register_provider("google", provider)
+
+        try:
+            with (
+                patch.object(client, "_api_routes", return_value={"google/gemini-test": ["google/backup"]}),
+                patch.object(client_module, "read_provider_api_key", return_value="named-route-secret"),
+            ):
+                stream = client.stream("google/gemini-test", [{"role": "user", "content": "hello"}])
+
+                self.assertEqual(provider._api_key, "original-secret")
+                chunks = list(stream)
+
+            self.assertEqual(provider.keys_seen, ["named-route-secret"])
+            self.assertEqual(chunks[0]["api_key"], "named-route-secret")
+            self.assertEqual(provider._api_key, "original-secret")
+        finally:
+            AIClient._instance = None
+
 
 if __name__ == "__main__":
     unittest.main()

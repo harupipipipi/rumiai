@@ -82,6 +82,31 @@ test("sendMessage preserves an empty selected tools filter", async () => {
   assert.deepEqual(requestBody?.message?.metadata, { selected_tools: [] });
 });
 
+test("saveProviderApiKey serializes named API metadata", async () => {
+  let requestBody: any = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: { provider_id: "google", configured: true },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.saveProviderApiKey("google", "secret", { apiId: "main", name: "Main" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(requestBody, {
+    provider_id: "google",
+    value: "secret",
+    api_id: "main",
+    name: "Main",
+  });
+});
+
 test("streamMessage parses SSE deltas and final message", async () => {
   const originalFetch = globalThis.fetch;
   const events: string[] = [];

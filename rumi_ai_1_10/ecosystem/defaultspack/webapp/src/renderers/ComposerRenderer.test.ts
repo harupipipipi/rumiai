@@ -55,6 +55,14 @@ test("composer asks for an API key when an unconfigured Gemini model is selected
   }), false);
 
   assert.equal(profileNeedsApiKey({
+    profile_id: "openai/gpt-5.4",
+    display_name: "GPT-5.4",
+    provider_id: "openai",
+    model_id: "gpt-5.4",
+    availability: { configured: false, status: "catalog" },
+  }), true);
+
+  assert.equal(profileNeedsApiKey({
     profile_id: "stub/default",
     display_name: "Stub Default",
     provider_id: "stub",
