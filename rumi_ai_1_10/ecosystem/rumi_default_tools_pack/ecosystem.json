@@ -11,6 +11,9 @@
   "runtime": {
     "type": "python_host"
   },
+  "vocabulary": {
+    "types": ["tool"]
+  },
   "components": {},
   "load_order": []
 }

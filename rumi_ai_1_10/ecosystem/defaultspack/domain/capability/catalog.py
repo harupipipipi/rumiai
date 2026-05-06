@@ -17,15 +17,24 @@ class CapabilityCatalog:
         return self._load_yaml_dir_from_roots(directory_name, suffix, self._catalog_roots())
 
     def _catalog_roots(self) -> List[Path]:
-        ecosystem_dir = self.pack_root.parent
+        ecosystem_dir = self._ecosystem_root()
         roots: List[Path] = []
         if ecosystem_dir.is_dir():
             for path in sorted(ecosystem_dir.iterdir()):
-                if path.is_dir() and (path / "ecosystem.json").is_file():
+                try:
+                    is_pack_root = path.is_dir() and (path / "ecosystem.json").is_file()
+                except OSError:
+                    continue
+                if is_pack_root:
                     roots.append(path)
         if self.pack_root not in roots:
             roots.insert(0, self.pack_root)
         return roots
+
+    def _ecosystem_root(self) -> Path:
+        if (self.pack_root / "ecosystem.json").exists() and self.pack_root.parent.name == "ecosystem":
+            return self.pack_root.parent
+        return Path(__file__).resolve().parents[3]
 
     @staticmethod
     def _pack_id(pack_root: Path) -> str:

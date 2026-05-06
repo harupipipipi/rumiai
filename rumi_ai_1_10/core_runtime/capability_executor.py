@@ -1142,9 +1142,10 @@ class CapabilityExecutor:
             if detail_reason is not None: details["detail_reason"] = detail_reason
             if extra_details: details.update(extra_details)
             if response.error: details["error"] = response.error; details["error_type"] = response.error_type
+            rejection_reason = str(detail_reason or grant_reason or response.error or "")
             audit.log_permission_event(pack_id=principal_id, permission_type="capability", action="execute",
                                         success=response.success, details=details,
-                                        rejection_reason=(detail_reason or grant_reason or response.error) if not response.success else None)
+                                        rejection_reason=rejection_reason if not response.success else "")
         except Exception:
             logger.debug("Capability audit logging failed", exc_info=True)
 

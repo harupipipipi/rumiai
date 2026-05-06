@@ -8,6 +8,9 @@
     "author": "Rumi AI Team",
     "license": "MIT"
   },
+  "vocabulary": {
+    "types": ["agent"]
+  },
   "components": {
     "operations_company": {
       "type": "agent",

@@ -1,0 +1,16 @@
+{
+  "id": "genspark/gpt-4o",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "genspark",
+  "model_id": "gpt-4o",
+  "display_name": "GPT-4o",
+  "type": "chat",
+  "enabled": true,
+  "priority": 20,
+  "context_window": 128000,
+  "defaults": {
+    "chat": true,
+    "vision": true
+  }
+}

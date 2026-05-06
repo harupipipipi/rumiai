@@ -113,6 +113,13 @@ def _with_legacy_profile_fields(profile: Dict[str, Any]) -> Dict[str, Any]:
     item["supports_thinking"] = enriched["supports_thinking"]
     item["thinking_levels"] = enriched["thinking_levels"]
     item["default_thinking_level"] = enriched["default_thinking_level"]
+    item["same_model_across_providers_key"] = str(
+        item.get("same_model_across_providers_key")
+        or item.get("canonical_model_id")
+        or item.get("model_id")
+        or item.get("model_name")
+        or ""
+    )
     metadata = dict(item.get("metadata", {}))
     metadata.update(enriched["metadata"])
     item["metadata"] = metadata
