@@ -19,7 +19,8 @@ class SchedulerJob:
     runtime_profile_key: str = ""
     deliver: str = "local"
     no_agent: bool = False
-    script: str | None = None
+    script: list[str] | None = None
+    timeout_seconds: int = 60
     enabled: bool = True
     next_run_at: str = ""
     last_run_at: str = ""

@@ -66,7 +66,7 @@ def read_tail_jsonl(path: str | Path, limit: int = 100) -> list[dict[str, Any]]:
 def sqlite_wal_connection(path: str | Path, *, timeout: float = 30.0) -> sqlite3.Connection:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(target), timeout=timeout, isolation_level=None)
+    conn = sqlite3.connect(str(target), timeout=timeout, isolation_level=None, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")

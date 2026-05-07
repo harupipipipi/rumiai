@@ -254,10 +254,21 @@ class AgentEngine:
         queued = parsed.get("tool_calls", []) if isinstance(parsed.get("tool_calls"), list) else []
         execution.queued_tool_calls = queued[1:] if queued and queued[0].get("raw") == parsed.get("raw") else queued
         execution.status = "waiting_approval"
+        raw = parsed.get("raw", {}) if isinstance(parsed.get("raw"), dict) else {}
+        tool_call_id = str(
+            raw.get("id")
+            or raw.get("tool_call_id")
+            or parsed.get("tool_call_id")
+            or gen_id("call_")
+        )
+        approval_id = gen_id("approval_")
         execution.pending_tool_call = {
+            "id": tool_call_id,
+            "tool_call_id": tool_call_id,
+            "approval_id": approval_id,
             "tool_name": parsed["tool_name"],
             "tool_args": self._normalize_tool_args(parsed["tool_args"]),
-            "raw": parsed.get("raw", {}),
+            "raw": raw,
         }
         execution.add_step("tool_call", {
             "tool_name": parsed["tool_name"],
@@ -403,9 +414,19 @@ class AgentEngine:
             return {"execution_id": execution_id, "status": "error", "result": {"error": "no pending tool call"}}
         execution.status = "running"
         execution.pending_tool_call = None
+        tool_call_id = pending.get("tool_call_id") or pending.get("id") or gen_id("call_")
+        approval_id = pending.get("approval_id") or f"approval_{tool_call_id}"
+        self._run_store.record_approval(
+            str(approval_id),
+            execution.execution_id,
+            str(tool_call_id),
+            status="approved",
+            decision={"source": "agent.approve"},
+        )
         context_for_tool = dict(getattr(execution, "context", {}) or {})
         context_for_tool["agent_run_id"] = execution.execution_id
-        context_for_tool["_agent_approval_granted"] = True
+        context_for_tool["tool_call_id"] = str(tool_call_id)
+        context_for_tool["approval_id"] = str(approval_id)
         context_for_tool["profile_policy"] = policy_from_context(context_for_tool)
         context_for_tool = build_tool_execution_context(
             context_for_tool,

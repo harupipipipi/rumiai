@@ -4,10 +4,12 @@ from typing import Any
 
 from blocks._common import error
 from domain.agent_runtime.tool_ledger import ToolLedger
+from domain.agent_runtime.run_store import AgentRunStore
 from domain.hooks.dispatcher import dispatch_hook
 from domain.tool.registry import ToolRegistry
 
 from .audit import audit_tool_policy
+from .internal_context import sanitize_tool_context, seal_tool_context
 from .policy import decide_tool_policy
 
 
@@ -17,15 +19,19 @@ class ToolOrchestrator:
     def __init__(self, registry: ToolRegistry | None = None) -> None:
         self.registry = registry or ToolRegistry()
         self.ledger = ToolLedger()
+        self.store = AgentRunStore()
 
     def run(self, tool_name: str, arguments: dict[str, Any] | None, context: dict[str, Any] | None) -> dict[str, Any]:
-        context = dict(context or {})
+        context = sanitize_tool_context(context)
         tool_def = self._resolve_tool(tool_name)
+        run_id = context.get("agent_run_id") or context.get("run_id")
+        tool_call_id = context.get("tool_call_id")
+        approval_id = context.get("approval_id")
         decision = decide_tool_policy(
             tool_def,
             context,
             tool_name=tool_name,
-            approval_granted=bool(context.get("_agent_approval_granted") or context.get("approval_granted")),
+            approval_granted=self._server_approval_granted(run_id, tool_call_id, approval_id),
         )
         audit_tool_policy(
             context,
@@ -44,8 +50,7 @@ class ToolOrchestrator:
                 },
             }
 
-        run_id = context.get("agent_run_id") or context.get("run_id")
-        tool_call_id = context.get("tool_call_id") or "call_{}_{}".format(run_id or "adhoc", tool_name)
+        tool_call_id = tool_call_id or "call_{}_{}".format(run_id or "adhoc", tool_name)
         if run_id:
             self.ledger.started(str(run_id), str(tool_call_id), tool_name, arguments or {})
         dispatch_hook(
@@ -55,8 +60,7 @@ class ToolOrchestrator:
 
         from blocks.tool.invoke import run as invoke_tool
 
-        invoke_context = dict(context)
-        invoke_context["tool_policy_decision"] = decision.to_dict()
+        invoke_context = seal_tool_context(context, decision.to_dict())
         invoke_context["sandbox_mode"] = decision.sandbox_mode
         result = invoke_tool({"tool_name": tool_name, "arguments": arguments or {}}, invoke_context)
 
@@ -77,3 +81,8 @@ class ToolOrchestrator:
             if item.get("name") == tool_name:
                 return item
         return None
+
+    def _server_approval_granted(self, run_id: Any, tool_call_id: Any, approval_id: Any) -> bool:
+        if not run_id or not tool_call_id or not approval_id:
+            return False
+        return self.store.is_approval_granted(str(run_id), str(tool_call_id), str(approval_id))

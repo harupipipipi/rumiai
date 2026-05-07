@@ -8,6 +8,7 @@ from .delivery import deliver
 from .job_store import SchedulerJobStore
 from .runner import SchedulerRunner
 from .schedule_parser import is_due, iso, parse_next_run
+from .security import SchedulerPolicyError, validate_scheduler_enabled
 
 
 class Scheduler:
@@ -16,6 +17,10 @@ class Scheduler:
         self.runner = runner or SchedulerRunner()
 
     def tick(self) -> dict[str, Any]:
+        try:
+            validate_scheduler_enabled()
+        except SchedulerPolicyError as exc:
+            return {"ran": [], "count": 0, "status": "error", "error": str(exc)}
         ran = []
         for job in self.store.list():
             if not job.get("enabled", True) or not is_due(job.get("next_run_at", "")):
@@ -34,6 +39,10 @@ class Scheduler:
         return {"ran": ran, "count": len(ran)}
 
     def run_now(self, job_id: str) -> dict[str, Any]:
+        try:
+            validate_scheduler_enabled()
+        except SchedulerPolicyError as exc:
+            return {"status": "error", "error": str(exc)}
         job = self.store.get(job_id)
         if not job:
             return {"status": "error", "error": "job not found"}

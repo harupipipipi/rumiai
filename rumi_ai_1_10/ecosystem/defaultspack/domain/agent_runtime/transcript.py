@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from blocks._common import gen_id
+from core_runtime.runtime_audit_helpers import redact_sensitive
 from core_runtime.runtime_events import utc_now
 from core_runtime.runtime_state import append_jsonl, read_tail_jsonl
 
@@ -47,7 +48,7 @@ class TranscriptStore:
         entry = {
             "id": gen_id("te_"),
             "type": entry_type,
-            "payload": payload or {},
+            "payload": redact_sensitive(payload or {}),
             "created_at": utc_now(),
         }
         append_jsonl(self.path_for(transcript_id), entry)

@@ -4,6 +4,7 @@ import subprocess
 from typing import Any
 
 from core_runtime.runtime_events import utc_now
+from .security import SchedulerPolicyError, validate_no_agent_argv
 
 
 class SchedulerRunner:
@@ -13,16 +14,26 @@ class SchedulerRunner:
         return self._run_agent(job)
 
     def _run_script(self, job: dict[str, Any]) -> dict[str, Any]:
-        script = job.get("script")
-        if not script:
-            return {"status": "error", "error": "script is required for no_agent job", "created_at": utc_now()}
-        completed = subprocess.run(
-            str(script),
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=int(job.get("timeout_seconds") or 60),
-        )
+        try:
+            argv = validate_no_agent_argv(job)
+            completed = subprocess.run(
+                argv,
+                shell=False,
+                capture_output=True,
+                text=True,
+                timeout=int(job.get("timeout_seconds") or 60),
+            )
+        except SchedulerPolicyError as exc:
+            return {"status": "error", "error": str(exc), "created_at": utc_now()}
+        except subprocess.TimeoutExpired as exc:
+            return {
+                "status": "failed",
+                "error": "script timed out",
+                "stdout": exc.stdout or "",
+                "stderr": exc.stderr or "",
+                "returncode": None,
+                "created_at": utc_now(),
+            }
         return {
             "status": "completed" if completed.returncode == 0 else "failed",
             "stdout": completed.stdout,

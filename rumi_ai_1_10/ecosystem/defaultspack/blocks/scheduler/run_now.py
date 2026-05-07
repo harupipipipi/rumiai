@@ -13,5 +13,7 @@ def run(input_data, context=None):
         return error("job_id is required", "INVALID_INPUT")
     result = Scheduler().run_now(job_id)
     if result.get("status") == "error":
+        if "disabled" in str(result.get("error", "")).lower():
+            return error(result.get("error", "scheduler disabled"), "PERMISSION_DENIED")
         return error(result.get("error", "job not found"), "NOT_FOUND")
     return ok(result)

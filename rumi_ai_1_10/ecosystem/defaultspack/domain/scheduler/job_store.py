@@ -11,12 +11,16 @@ from core_runtime.runtime_state import append_jsonl, atomic_write_json
 
 from .models import SchedulerJob
 from .schedule_parser import iso, parse_next_run
+from .security import resolve_jobs_path, validate_no_agent_job
 
 
 def default_scheduler_dir() -> Path:
     override = os.environ.get("RUMI_DEFAULTSPACK_SCHEDULER_DIR")
     if override:
         return Path(override)
+    jobs_path = resolve_jobs_path()
+    if jobs_path is not None:
+        return jobs_path.parent
     return Path(__file__).resolve().parents[2] / "user_data" / "shared" / "scheduler"
 
 
@@ -42,6 +46,7 @@ class SchedulerJobStore:
         atomic_write_json(self.jobs_path, payload)
 
     def create(self, data: dict[str, Any]) -> dict[str, Any]:
+        validate_no_agent_job(data)
         payload = self.load()
         now = utc_now_text()
         job = SchedulerJob(
@@ -58,7 +63,8 @@ class SchedulerJobStore:
             runtime_profile_key=str(data.get("runtime_profile_key") or ""),
             deliver=str(data.get("deliver") or "local"),
             no_agent=bool(data.get("no_agent", False)),
-            script=data.get("script"),
+            script=_normalize_script(data.get("script")),
+            timeout_seconds=_normalize_timeout(data.get("timeout_seconds")),
             enabled=bool(data.get("enabled", True)),
             next_run_at=iso(parse_next_run(str(data.get("schedule") or data.get("when") or "now"))),
             created_at=now,
@@ -79,6 +85,13 @@ class SchedulerJobStore:
         job = payload["jobs"].get(job_id)
         if not job:
             return None
+        prospective = dict(job)
+        prospective.update(updates or {})
+        validate_no_agent_job(prospective)
+        if "script" in updates:
+            updates["script"] = _normalize_script(updates.get("script"))
+        if "timeout_seconds" in updates:
+            updates["timeout_seconds"] = _normalize_timeout(updates.get("timeout_seconds"))
         job.update(updates or {})
         job["updated_at"] = utc_now_text()
         if "schedule" in updates:
@@ -96,3 +109,19 @@ class SchedulerJobStore:
 
     def append_run(self, job_id: str, record: dict[str, Any]) -> None:
         append_jsonl(self.root / "runs" / f"{job_id}.jsonl", record)
+
+
+def _normalize_script(value: Any) -> list[str] | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item)]
+    return None
+
+
+def _normalize_timeout(value: Any) -> int:
+    try:
+        timeout = int(value or 60)
+    except (TypeError, ValueError):
+        return 60
+    return max(1, min(timeout, 3600))

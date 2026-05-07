@@ -43,12 +43,15 @@
   "scheduler": {
     "enabled": true,
     "tick_seconds": 60,
-    "jobs_path": "user_data/shared/scheduler/jobs.json"
+    "jobs_path": "user_data/shared/scheduler/jobs.json",
+    "allow_no_agent_scripts": false,
+    "no_agent_command_allowlist": []
   },
   "gateway": {
     "enabled": false,
     "host": "127.0.0.1",
     "port": 18789,
+    "allow_external": false,
     "auth": {
       "mode": "local"
     }

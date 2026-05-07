@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+import hmac
 
 
 class LocalGatewayAuth:
@@ -8,4 +9,4 @@ class LocalGatewayAuth:
         self.token = secrets.token_urlsafe(24)
 
     def check(self, token: str | None) -> bool:
-        return bool(token) and token == self.token
+        return bool(token) and hmac.compare_digest(str(token), self.token)

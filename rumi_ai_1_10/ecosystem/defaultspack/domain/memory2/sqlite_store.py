@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any
 
 from blocks._common import gen_id
+from core_runtime.runtime_audit_helpers import redact_sensitive
 from core_runtime.runtime_events import utc_now
 from core_runtime.runtime_state import run_migrations, sqlite_wal_connection
 
@@ -38,12 +40,23 @@ class MemorySQLiteStore:
             return
         self.root = Path(db_path).parent if db_path is not None else default_memory_dir()
         self.db_path = Path(db_path) if db_path is not None else self.root / "state.db"
-        self.conn = sqlite_wal_connection(self.db_path)
-        self._migrate()
+        self._local = threading.local()
+        self._migrate_lock = threading.RLock()
+        _ = self.conn
         self._initialized = True
 
-    def _migrate(self) -> None:
-        run_migrations(self.conn, [(1, self._migration_1)], table_name="memory_migrations")
+    @property
+    def conn(self) -> sqlite3.Connection:
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = sqlite_wal_connection(self.db_path)
+            with self._migrate_lock:
+                self._migrate(conn)
+            self._local.conn = conn
+        return conn
+
+    def _migrate(self, conn: sqlite3.Connection) -> None:
+        run_migrations(conn, [(1, self._migration_1)], table_name="memory_migrations")
 
     @staticmethod
     def _migration_1(conn: sqlite3.Connection) -> None:
@@ -97,8 +110,8 @@ class MemorySQLiteStore:
             scope=scope,
             agent_id=agent_id,
             project_id=project_id,
-            content=str(content),
-            metadata=metadata or {},
+            content=str(redact_sensitive(content)),
+            metadata=redact_sensitive(metadata or {}),
             source=source,
             confidence=float(confidence),
             created_at=now,

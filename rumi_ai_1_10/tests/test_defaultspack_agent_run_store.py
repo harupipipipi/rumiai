@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -9,6 +10,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from domain.agent.engine import AgentEngine  # noqa: E402
+from domain.agent_runtime.models import AgentRun  # noqa: E402
 from domain.agent_runtime.run_store import AgentRunStore  # noqa: E402
 from domain.agent_runtime.transcript import TranscriptStore  # noqa: E402
 
@@ -87,3 +89,39 @@ def test_agent_approval_can_resume_from_store(tmp_path, monkeypatch):
     assert approved["status"] == "completed"
     assert approved["result"]["result"] == "used durable tool"
     assert AgentRunStore().get_run(started["execution_id"])["status"] == "completed"
+
+
+def test_agent_run_store_supports_parallel_thread_access(tmp_path, monkeypatch):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_RUNTIME_DIR", str(tmp_path / "agent_runtime"))
+    AgentRunStore._instance = None
+    store = AgentRunStore()
+
+    def write_and_read(index: int):
+        run = AgentRun(
+            run_id=f"run_{index}",
+            session_key="agent:thread:main",
+            task=f"task {index}",
+            status="completed",
+        )
+        store.upsert_run(run)
+        return store.get_run(run.run_id)["task"]
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(write_and_read, range(24)))
+
+    assert results == [f"task {index}" for index in range(24)]
+
+
+def test_agent_run_store_redacts_tool_arguments_before_persisting(tmp_path, monkeypatch):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_RUNTIME_DIR", str(tmp_path / "agent_runtime"))
+    AgentRunStore._instance = None
+    store = AgentRunStore()
+
+    store.record_tool_call("run_secret", "call_secret", "secret_tool", {"api_key": "sk-live"}, status="running")
+    row = store.conn.execute(
+        "SELECT arguments_json FROM agent_tool_calls WHERE tool_call_id = ?",
+        ("call_secret",),
+    ).fetchone()
+
+    assert "sk-live" not in row["arguments_json"]
+    assert "[REDACTED]" in row["arguments_json"]

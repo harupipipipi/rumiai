@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -48,3 +49,19 @@ def test_memory_flush_returns_refs(tmp_path, monkeypatch):
 
     assert len(refs) == 1
     assert refs[0]["scope"] == "session"
+
+
+def test_memory_sqlite_store_supports_parallel_thread_access(tmp_path, monkeypatch):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_MEMORY2_DIR", str(tmp_path / "memory"))
+    MemorySQLiteStore._instance = None
+    store = MemorySQLiteStore()
+
+    def add_and_search(index: int):
+        store.add(f"parallel memory {index}", {"token": "secret-value"}, scope="session")
+        return len(store.search("parallel", limit=50, scope="session"))
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(add_and_search, range(20)))
+
+    assert max(results) >= 1
+    assert store.search("secret-value", limit=5) == []

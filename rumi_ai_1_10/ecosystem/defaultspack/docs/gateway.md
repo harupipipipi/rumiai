@@ -2,8 +2,11 @@
 
 `domain/gateway` provides a local control-plane shell with session routing and
 channel adapters. The first implementation starts a lightweight local HTTP
-server for status and event intake; WebSocket protocol helpers are represented
-as typed request/event envelopes in `domain/gateway/ws.py`.
+server for status and authenticated event intake; WebSocket protocol helpers are
+represented as typed request/event envelopes in `domain/gateway/ws.py`.
+Gateway binds to `127.0.0.1` by default, rejects external bind addresses unless
+runtime config explicitly enables them, and requires a bearer or
+`x-rumi-gateway-token` token for POST intake.
 
 Session keys follow:
 

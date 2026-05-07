@@ -11,5 +11,6 @@ Compatibility behavior:
 - old memory calls continue through `MemoryStore` and mirror into Memory2
 
 The runtime is feature-flag friendly through
-`user_data/shared/runtime_config.json`, but this patch keeps the durable store
-enabled by default because the legacy API shape is preserved.
+`config/default_runtime_config.json` plus an optional
+`user_data/shared/runtime_config.json` override, but this patch keeps the
+durable store enabled by default because the legacy API shape is preserved.

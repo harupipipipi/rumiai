@@ -12,6 +12,7 @@ from domain.context_engine.builder import ContextBuilder  # noqa: E402
 from domain.context_engine.compact_packet import build_compact_packet  # noqa: E402
 from domain.context_engine.overflow import is_context_overflow_error  # noqa: E402
 from domain.context_engine.replacement_history import build_replacement_history  # noqa: E402
+from blocks.context.restore import run as restore_compact_context  # noqa: E402
 
 
 def test_context_builder_separates_stable_and_ephemeral_layers():
@@ -63,3 +64,10 @@ def test_replacement_history_preserves_tool_call_result_pair():
 def test_context_overflow_detection():
     assert is_context_overflow_error("context length exceeded")
     assert not is_context_overflow_error("permission denied")
+
+
+def test_context_restore_rejects_path_traversal_compact_id():
+    result = restore_compact_context({"compact_id": "../secret"}, {})
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "INVALID_INPUT"

@@ -3,10 +3,16 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from domain.tool.permission_checker import PermissionChecker
 from domain.tool.executor import ToolExecutor
 from domain.tool.registry import ToolRegistry
+from domain.tool_policy.internal_context import (
+    internal_tool_decision,
+    sanitize_tool_context,
+    seal_tool_context,
+)
 
 
 def run(input_data, context):
     """defaults.tool.invoke — ツールを実行する"""
+    context = context if isinstance(context, dict) else {}
     tool_name = input_data.get("tool_name")
     if not tool_name:
         return error("tool_name is required", "MISSING_PARAM")
@@ -24,8 +30,13 @@ def run(input_data, context):
                 tool_name = item.get("tool_id", tool_name)
                 break
 
-    checker = PermissionChecker(registry=registry)
-    decision = checker.decide(tool_name, context=context, arguments=arguments, tool_def=tool_def)
+    sealed_decision = internal_tool_decision(context)
+    clean_context = sanitize_tool_context(context)
+    if sealed_decision is not None:
+        decision = sealed_decision
+    else:
+        checker = PermissionChecker(registry=registry)
+        decision = checker.decide(tool_name, context=clean_context, arguments=arguments, tool_def=tool_def)
     if not decision.get("allowed", False):
         return {
             "status": "error",
@@ -41,8 +52,7 @@ def run(input_data, context):
             },
         }
 
-    executor_context = dict(context or {})
-    executor_context["_tool_permission_decision"] = decision
+    executor_context = seal_tool_context(clean_context, decision)
     executor = ToolExecutor()
     try:
         result = executor.execute(tool_name, arguments, executor_context)

@@ -17,6 +17,8 @@ flow.iranai
 .env.local
 deploy.py
 todo.md
+ecosystem/defaultspack/user_data/
+ecosystem/rumi_default_tools_pack/user_data/
 
 # Frontend build artifacts (配布に必要なので除外しない)
 !core_runtime/core_pack/*/web/

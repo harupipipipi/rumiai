@@ -1,6 +1,7 @@
 from .registry import ToolRegistry
 from .mcp_client import McpClient
 from .schema_adapter import is_tool_rejected_by_policy, policy_from_context
+from domain.tool_policy.internal_context import internal_tool_decision_allows
 from pathlib import Path
 import json
 
@@ -232,11 +233,34 @@ class ToolExecutor:
             )
         except Exception:
             return None
+        return ToolExecutor._tool_response_from_pack_function_output(output)
+
+    @staticmethod
+    def _tool_response_from_pack_function_output(output):
+        if isinstance(output, dict) and output.get("status") in {"ok", "error"}:
+            if output.get("status") == "error":
+                error_payload = output.get("error")
+                if isinstance(error_payload, dict):
+                    message = error_payload.get("message") or error_payload.get("code")
+                else:
+                    message = error_payload
+                return {
+                    "result": str(message or "Pack function failed"),
+                    "is_error": True,
+                    "widget": None,
+                }
+            output = output.get("data")
         if isinstance(output, dict):
+            if "result" in output or "is_error" in output or "widget" in output:
+                return {
+                    "result": output.get("result", output.get("summary", "")),
+                    "is_error": bool(output.get("is_error", False)),
+                    "widget": output.get("widget"),
+                }
             return {
-                "result": output.get("result", json_dumps(output)),
-                "is_error": bool(output.get("is_error", False)),
-                "widget": output.get("widget"),
+                "result": json_dumps(output),
+                "is_error": False,
+                "widget": output,
             }
         return {"result": "" if output is None else str(output), "is_error": False, "widget": None}
 
@@ -310,42 +334,6 @@ class ToolExecutor:
                     )
                 except Exception:
                     continue
-
-    @staticmethod
-    def _build_function_registry():
-        from core_runtime.function_registry import FunctionRegistry
-
-        registry = FunctionRegistry()
-        ecosystem_dir = Path(__file__).resolve().parents[3]
-        for pack_root in sorted(ecosystem_dir.iterdir()):
-            if not pack_root.is_dir() or not (pack_root / "ecosystem.json").exists():
-                continue
-            try:
-                pack_manifest = json.loads((pack_root / "ecosystem.json").read_text(encoding="utf-8"))
-            except Exception:
-                pack_manifest = {}
-            pack_id = str(pack_manifest.get("pack_id") or pack_root.name).strip() or pack_root.name
-            functions_root = pack_root / "functions"
-            if not functions_root.exists():
-                continue
-            for function_dir in sorted(path for path in functions_root.iterdir() if path.is_dir()):
-                manifest_path = function_dir / "manifest.json"
-                if not manifest_path.is_file():
-                    continue
-                try:
-                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-                except Exception:
-                    continue
-                function_id = str(manifest.get("function_id") or function_dir.name).strip()
-                if not function_id:
-                    continue
-                registry.register(
-                    pack_id=pack_id,
-                    function_id=function_id,
-                    manifest=manifest,
-                    function_dir=function_dir,
-                )
-        return registry
 
     @staticmethod
     def _principal_id(tool_def, context):
@@ -763,7 +751,4 @@ def _is_shell_or_git(tool_def):
 
 
 def _is_policy_allow_context(context):
-    if not isinstance(context, dict):
-        return False
-    decision = context.get("_tool_permission_decision")
-    return isinstance(decision, dict) and decision.get("action") == "allow" and bool(decision.get("allowed"))
+    return internal_tool_decision_allows(context)

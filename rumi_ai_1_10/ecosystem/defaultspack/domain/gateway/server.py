@@ -5,6 +5,8 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+from domain.runtime_config import gateway_config
+from .auth import LocalGatewayAuth
 from .delivery import GatewayDelivery
 
 
@@ -15,12 +17,17 @@ class GatewayServer:
         self._httpd: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
         self.delivery = GatewayDelivery()
+        self.auth = LocalGatewayAuth()
 
     def start(self, host: str = "127.0.0.1", port: int = 18789) -> dict[str, Any]:
         if self._httpd is not None:
             return self.status()
-        self.host = host
-        self.port = int(port)
+        config = gateway_config()
+        requested_host = str(host or config.get("host") or "127.0.0.1")
+        if not _is_loopback_host(requested_host) and config.get("allow_external") is not True:
+            return {"enabled": False, "status": "error", "error": "gateway external bind disabled", "host": self.host, "port": self.port}
+        self.host = requested_host
+        self.port = int(port or config.get("port") or 18789)
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -31,7 +38,13 @@ class GatewayServer:
                 self._json(404, {"error": "not found"})
 
             def do_POST(self):  # noqa: N802
+                if not outer._authorized(self):
+                    self._json(401, {"status": "error", "error": "unauthorized"})
+                    return
                 length = int(self.headers.get("content-length", "0") or 0)
+                if length > 1024 * 1024:
+                    self._json(413, {"status": "error", "error": "request too large"})
+                    return
                 raw = self.rfile.read(length).decode("utf-8") if length else "{}"
                 try:
                     payload = json.loads(raw)
@@ -71,7 +84,16 @@ class GatewayServer:
             "host": self.host,
             "port": self.port,
             "message_count": len(self.delivery.messages),
+            "auth_required": True,
         }
+
+    def _authorized(self, request: BaseHTTPRequestHandler) -> bool:
+        header = request.headers.get("authorization", "")
+        token = ""
+        if header.lower().startswith("bearer "):
+            token = header.split(" ", 1)[1].strip()
+        token = token or request.headers.get("x-rumi-gateway-token", "")
+        return self.auth.check(token)
 
 
 _server = GatewayServer()
@@ -79,3 +101,8 @@ _server = GatewayServer()
 
 def get_gateway_server() -> GatewayServer:
     return _server
+
+
+def _is_loopback_host(host: str) -> bool:
+    normalized = str(host or "").strip().lower()
+    return normalized in {"127.0.0.1", "localhost", "::1"}

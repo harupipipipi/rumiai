@@ -185,30 +185,7 @@ class ToolPermissionPolicyStore:
         arguments: Optional[Dict[str, Any]] = None,
         context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        if isinstance(context, dict):
-            decision = context.get("tool_policy_decision")
-            if isinstance(decision, dict) and decision.get("action") == "allow":
-                result = self.evaluate(tool_name=tool_name, tool_def=tool_def, arguments=arguments)
-                result.update({
-                    "action": "allow",
-                    "allowed": True,
-                    "requires_approval": False,
-                    "matched_by": "tool_policy_decision",
-                    "matched_value": decision.get("risk"),
-                    "reason": "",
-                })
-                return result
-            if context.get("_agent_approval_granted") is True or context.get("approval_granted") is True:
-                result = self.evaluate(tool_name=tool_name, tool_def=tool_def, arguments=arguments)
-                result.update({
-                    "action": "allow",
-                    "allowed": True,
-                    "requires_approval": False,
-                    "matched_by": "agent_approval",
-                    "matched_value": tool_name,
-                    "reason": "",
-                })
-                return result
+        del context
         return self.evaluate(tool_name=tool_name, tool_def=tool_def, arguments=arguments)
 
     def check(

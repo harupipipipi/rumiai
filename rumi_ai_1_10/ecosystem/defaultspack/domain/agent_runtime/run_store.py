@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
+from core_runtime.runtime_audit_helpers import redact_sensitive
 from core_runtime.runtime_events import RuntimeEvent, utc_now
 from core_runtime.runtime_state import run_migrations, sqlite_wal_connection
 
@@ -39,12 +41,23 @@ class AgentRunStore:
             return
         self.runtime_dir = Path(db_path).parent if db_path is not None else default_runtime_dir()
         self.db_path = Path(db_path) if db_path is not None else self.runtime_dir / "state.db"
-        self.conn = sqlite_wal_connection(self.db_path)
-        self._migrate()
+        self._local = threading.local()
+        self._migrate_lock = threading.RLock()
+        _ = self.conn
         self._initialized = True
 
-    def _migrate(self) -> None:
-        run_migrations(self.conn, [(1, self._migration_1)], table_name="agent_runtime_migrations")
+    @property
+    def conn(self) -> sqlite3.Connection:
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = sqlite_wal_connection(self.db_path)
+            with self._migrate_lock:
+                self._migrate(conn)
+            self._local.conn = conn
+        return conn
+
+    def _migrate(self, conn: sqlite3.Connection) -> None:
+        run_migrations(conn, [(1, self._migration_1)], table_name="agent_runtime_migrations")
 
     @staticmethod
     def _migration_1(conn: sqlite3.Connection) -> None:
@@ -215,8 +228,8 @@ class AgentRunStore:
                     run.system_prompt_id,
                     run.system_prompt_hash,
                     run.runtime_profile_key,
-                    json_dumps(run.runtime_profile_json),
-                    json_dumps(run.capability_graph_json),
+                    json_dumps(redact_sensitive(run.runtime_profile_json)),
+                    json_dumps(redact_sensitive(run.capability_graph_json)),
                     created_at,
                     updated_at,
                     run.started_at,
@@ -227,8 +240,8 @@ class AgentRunStore:
                     run.compaction_count,
                     run.heartbeat_at,
                     run.error,
-                    json_dumps(run.result_json),
-                    json_dumps(run.execution_json),
+                    json_dumps(redact_sensitive(run.result_json)),
+                    json_dumps(redact_sensitive(run.execution_json)),
                 ),
             )
 
@@ -287,7 +300,7 @@ class AgentRunStore:
                         int(data.get("step_number") or data.get("step_no") or index),
                         str(data.get("step_type") or ""),
                         str(data.get("status") or "completed"),
-                        json_dumps(data.get("content", data.get("content_json", {}))),
+                        json_dumps(redact_sensitive(data.get("content", data.get("content_json", {})))),
                         str(data.get("created_at") or utc_now()),
                         str(data.get("updated_at") or utc_now()),
                     ),
@@ -311,7 +324,7 @@ class AgentRunStore:
                         run_id,
                         transcript_id,
                         role,
-                        json_dumps(message),
+                        json_dumps(redact_sensitive(message)),
                         message.get("tool_call_id"),
                         tool_name,
                         token_estimate,
@@ -339,7 +352,7 @@ class AgentRunStore:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(tool_call_id) DO UPDATE SET
                   status=excluded.status,
-                  approval_id=excluded.approval_id,
+                      approval_id=COALESCE(excluded.approval_id, agent_tool_calls.approval_id),
                   result_json=excluded.result_json,
                   completed_at=excluded.completed_at
                 """,
@@ -347,10 +360,10 @@ class AgentRunStore:
                     tool_call_id,
                     run_id,
                     tool_name,
-                    json_dumps(arguments or {}),
+                    json_dumps(redact_sensitive(arguments or {})),
                     status,
                     approval_id,
-                    json_dumps(result),
+                    json_dumps(redact_sensitive(result)),
                     now,
                     now if status in {"completed", "failed", "rejected"} else None,
                 ),
@@ -389,9 +402,21 @@ class AgentRunStore:
                     reason,
                     now,
                     now if status != "pending" else None,
-                    json_dumps(decision or {}),
+                    json_dumps(redact_sensitive(decision or {})),
                 ),
             )
+
+    def is_approval_granted(self, run_id: str, tool_call_id: str, approval_id: str) -> bool:
+        row = self.conn.execute(
+            """
+            SELECT status FROM agent_approvals
+            WHERE run_id = ? AND tool_call_id = ? AND approval_id = ?
+            """,
+            (run_id, tool_call_id, approval_id),
+        ).fetchone()
+        if row is None:
+            return False
+        return str(row["status"]).lower() in {"approved", "allow", "allowed", "granted"}
 
     def record_compaction(
         self,
@@ -420,7 +445,7 @@ class AgentRunStore:
                     transcript_id,
                     reason,
                     summary,
-                    json_dumps(packet),
+                    json_dumps(redact_sensitive(packet)),
                     replacement_transcript_id,
                     tokens_before,
                     tokens_after,
@@ -437,7 +462,7 @@ class AgentRunStore:
             )
 
     def add_event(self, run_id: str, event_type: str, payload: dict[str, Any] | None = None) -> None:
-        event = RuntimeEvent(event_type=event_type, run_id=run_id, payload=payload or {})
+        event = RuntimeEvent(event_type=event_type, run_id=run_id, payload=redact_sensitive(payload or {}))
         with self.conn:
             self.conn.execute(
                 "INSERT INTO agent_events(run_id, event_type, payload_json, created_at) VALUES (?, ?, ?, ?)",
@@ -468,6 +493,7 @@ class AgentRunStore:
         execution_json = execution.to_dict() if hasattr(execution, "to_dict") else dict(execution)
         execution_json["context"] = context
         execution_json["messages"] = list(getattr(execution, "messages", []) or [])
+        execution_json = redact_sensitive(execution_json)
         status = str(getattr(execution, "status", RunStatus.CREATED.value))
         completed = status in {"completed", "planned", "cancelled", "error", "failed"}
         run = AgentRun(
@@ -497,15 +523,16 @@ class AgentRunStore:
         pending = getattr(execution, "pending_tool_call", None)
         if isinstance(pending, dict):
             call_id = str(pending.get("id") or pending.get("tool_call_id") or f"call_{run_id}_{len(getattr(execution, 'steps', []))}")
+            approval_id = str(pending.get("approval_id") or f"approval_{call_id}")
             self.record_tool_call(
                 run_id,
                 call_id,
                 str(pending.get("tool_name") or "unknown"),
                 pending.get("tool_args") or {},
                 status="pending",
-                approval_id=f"approval_{call_id}",
+                approval_id=approval_id,
             )
-            self.record_approval(f"approval_{call_id}", run_id, call_id)
+            self.record_approval(approval_id, run_id, call_id)
         self.add_event(run_id, "run_step", {"status": status})
 
     def load_execution_dict(self, run_id: str) -> Optional[dict[str, Any]]:
