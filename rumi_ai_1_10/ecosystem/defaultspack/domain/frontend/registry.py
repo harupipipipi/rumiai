@@ -1079,11 +1079,27 @@ class FrontendRegistry:
             return model_id == "default"
         if profile.get("local") or availability.get("local") or availability.get("offline"):
             return True
+        if self._is_unconfigured_direct_cloud_profile(provider_id, availability):
+            return True
         return bool(
             availability.get("configured")
             or availability.get("active")
             or availability.get("status") in {"configured", "active"}
         )
+
+    def _is_unconfigured_direct_cloud_profile(
+        self,
+        provider_id: str,
+        availability: dict[str, Any],
+    ) -> bool:
+        """Expose direct cloud models as selectable setup targets without enabling runtime calls."""
+        if provider_id not in {"openai", "anthropic", "google", "genspark"}:
+            return False
+        if availability.get("configured") or availability.get("active"):
+            return False
+        if availability.get("catalog_only"):
+            return False
+        return bool(availability.get("supports_invoke"))
 
     def _model_profile_sort_key(self, profile: dict[str, Any]) -> tuple[int, int, str]:
         model_id = str(profile.get("model_id") or "").strip()

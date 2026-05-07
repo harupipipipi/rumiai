@@ -44,6 +44,23 @@ def test_sensitive_coding_http_path_requires_csrf_for_local_origin():
     assert handler._sensitive_request_error("POST", "/api/coding/terminal/exec") is None
 
 
+def test_git_branch_post_is_guarded_but_get_remains_read_only():
+    from transport.http import _RequestHandler, _is_sensitive_http_path
+
+    assert _is_sensitive_http_path("/api/coding/git/branch") is True
+
+    handler = _RequestHandler.__new__(_RequestHandler)
+    handler.headers = {"Origin": "http://localhost:8766"}
+    handler.client_address = ("127.0.0.1", 54321)
+
+    assert handler._sensitive_request_error("GET", "/api/coding/git/branch") is None
+    assert handler._sensitive_request_error("POST", "/api/coding/git/branch") == (
+        403,
+        "CSRF header required for sensitive coding mutation",
+        "CSRF_REQUIRED",
+    )
+
+
 def test_audit_redacts_secrets(tmp_path, monkeypatch):
     from domain.safety.audit import audit_path, record_attempt
 

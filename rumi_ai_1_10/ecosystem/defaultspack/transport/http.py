@@ -15,7 +15,9 @@ import urllib.parse
 
 from bridge.block_adapter import invoke_block
 from domain.safety.local_guard import (
+    METHOD_SENSITIVE_CODING_PATHS,
     SENSITIVE_CODING_PATHS,
+    is_sensitive_coding_path as _local_is_sensitive_coding_path,
     origin_allowed as _local_origin_allowed,
     require_local_guard,
 )
@@ -507,7 +509,7 @@ class DefaultsHttpServer:
         return {"_static": True, "content_type": ct, "body": body}
 
 
-_SENSITIVE_CODING_PATHS = set(SENSITIVE_CODING_PATHS)
+_SENSITIVE_CODING_PATHS = set(SENSITIVE_CODING_PATHS) | set(METHOD_SENSITIVE_CODING_PATHS)
 
 _SENSITIVE_INTEGRATION_PATHS = {
     "/api/integrations/secrets",
@@ -520,7 +522,7 @@ _LOCAL_ORIGIN_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 def _is_sensitive_coding_path(path):
-    return path in _SENSITIVE_CODING_PATHS
+    return _local_is_sensitive_coding_path(path)
 
 
 def _is_sensitive_http_path(path):

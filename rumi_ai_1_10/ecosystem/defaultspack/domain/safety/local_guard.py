@@ -21,6 +21,10 @@ SENSITIVE_CODING_PATHS = {
     "/api/coding/approvals/deny",
 }
 
+METHOD_SENSITIVE_CODING_PATHS = {
+    "/api/coding/git/branch": {"POST"},
+}
+
 
 def is_loopback_request(headers: dict[str, Any] | None = None, client_address: Any = None) -> bool:
     del headers
@@ -59,8 +63,16 @@ def csrf_required(method: str, origin: str | None) -> bool:
     return str(method or "").upper() in {"POST", "PUT", "DELETE"} and bool(origin)
 
 
-def is_sensitive_coding_path(path: str) -> bool:
-    return str(path) in SENSITIVE_CODING_PATHS
+def is_sensitive_coding_path(path: str, method: str | None = None) -> bool:
+    normalized_path = str(path)
+    if normalized_path in SENSITIVE_CODING_PATHS:
+        return True
+    methods = METHOD_SENSITIVE_CODING_PATHS.get(normalized_path)
+    if not methods:
+        return False
+    if method is None:
+        return True
+    return str(method or "").upper() in methods
 
 
 def require_local_guard(
@@ -69,7 +81,7 @@ def require_local_guard(
     headers: dict[str, Any] | None,
     client_address: Any = None,
 ) -> tuple[int, str, str] | None:
-    if not is_sensitive_coding_path(path):
+    if not is_sensitive_coding_path(path, method):
         return None
     headers = headers or {}
     if not is_loopback_request(headers, client_address):
