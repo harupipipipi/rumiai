@@ -92,6 +92,21 @@ class MemoryStore:
         }
         with self._lock:
             self.long_term.append(entry)
+        try:
+            from domain.memory2.markdown_store import MarkdownMemoryStore
+            from domain.memory2.sqlite_store import MemorySQLiteStore
+
+            durable = MemorySQLiteStore().add(
+                content,
+                metadata or {},
+                scope=(metadata or {}).get("scope", "user") if isinstance(metadata, dict) else "user",
+                source="legacy_memory_store",
+                memory_id=entry["id"],
+            )
+            MarkdownMemoryStore().append_memory(content, metadata or {})
+            entry.update({"durable": True, "durable_id": durable["id"]})
+        except Exception:
+            entry["durable"] = False
         return entry
 
     def recall(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
@@ -111,6 +126,23 @@ class MemoryStore:
                 })
 
         results.sort(key=lambda r: r["score"], reverse=True)
+        try:
+            from domain.memory2.search import MemorySearch
+
+            seen = {item["id"] for item in results}
+            for item in MemorySearch().search(query, limit=limit):
+                if item["id"] in seen:
+                    continue
+                results.append({
+                    "id": item["id"],
+                    "content": item["content"],
+                    "metadata": item.get("metadata", {}),
+                    "score": item.get("score", 0.0),
+                })
+        except Exception:
+            pass
+
+        results.sort(key=lambda r: r["score"], reverse=True)
         return results[:limit]
 
     def search(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
@@ -128,6 +160,18 @@ class MemoryStore:
         }
         with self._lock:
             self.vector_store.append(entry)
+        try:
+            from domain.memory2.sqlite_store import MemorySQLiteStore
+
+            MemorySQLiteStore().add(
+                content,
+                metadata or {},
+                scope=(metadata or {}).get("scope", "user") if isinstance(metadata, dict) else "user",
+                source="legacy_vector_store",
+                memory_id=entry["id"],
+            )
+        except Exception:
+            pass
         return entry
 
     def vector_search(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
@@ -163,6 +207,12 @@ class MemoryStore:
             self.vector_store = [e for e in self.vector_store if e["id"] != memory_id]
             if len(self.vector_store) < before_vs:
                 found = True
+        try:
+            from domain.memory2.sqlite_store import MemorySQLiteStore
+
+            found = MemorySQLiteStore().delete(memory_id) or found
+        except Exception:
+            pass
         return found
 
     def clear(self) -> None:

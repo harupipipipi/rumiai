@@ -1,0 +1,56 @@
+{
+  "agent_runtime": {
+    "enabled": true,
+    "max_concurrent_runs": 4,
+    "default_timeout_seconds": 172800,
+    "stale_run_after_seconds": 600,
+    "session_lock_timeout_ms": 60000
+  },
+  "context": {
+    "engine": "default",
+    "context_window": 200000,
+    "compression": {
+      "enabled": true,
+      "agent_threshold": 0.5,
+      "gateway_threshold": 0.85,
+      "reserve_tokens": 20000,
+      "keep_recent_tokens": 20000,
+      "target_ratio": 0.2,
+      "model": null,
+      "memory_flush": true,
+      "truncate_after_compaction": true,
+      "max_active_transcript_bytes": "20mb"
+    }
+  },
+  "memory": {
+    "enabled": true,
+    "backend": "sqlite_markdown",
+    "memory_file": "MEMORY.md",
+    "user_file": "USER.md",
+    "daily_notes": true,
+    "search": {
+      "fts": true,
+      "embedding": false,
+      "hybrid": true
+    }
+  },
+  "tool_policy": {
+    "write_actions_require_approval": true,
+    "destructive_actions_require_approval": true,
+    "allow_shell": false,
+    "allow_network": false
+  },
+  "scheduler": {
+    "enabled": true,
+    "tick_seconds": 60,
+    "jobs_path": "user_data/shared/scheduler/jobs.json"
+  },
+  "gateway": {
+    "enabled": false,
+    "host": "127.0.0.1",
+    "port": 18789,
+    "auth": {
+      "mode": "local"
+    }
+  }
+}
