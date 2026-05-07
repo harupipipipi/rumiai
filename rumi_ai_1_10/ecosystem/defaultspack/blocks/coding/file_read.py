@@ -18,7 +18,7 @@ def run(input_data, context=None):
         return error("'path' is required", code="INVALID_INPUT")
 
     try:
-        ops = FileOps()
+        ops = FileOps(input_data.get("workspace_root"))
         content = ops.read_file(path)
         return ok({
             "path": path,

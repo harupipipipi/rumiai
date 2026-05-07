@@ -15,7 +15,7 @@ from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService 
 def test_model_runtime_settings_preferred_model_and_thinking_level(tmp_path):
     service = ModelRuntimeSettingsService(tmp_path)
 
-    assert service.get_preferred_model() == "openrouter/tencent/hy3-preview:free"
+    assert service.get_preferred_model() == "stub/default"
     preferred = service.set_preferred_model("stub/default")
     assert preferred["profile_id"] == "stub/default"
 

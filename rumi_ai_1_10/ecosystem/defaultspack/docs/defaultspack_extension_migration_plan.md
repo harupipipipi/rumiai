@@ -129,3 +129,31 @@ ecosystem/defaultspack/extensions/
 - provider migration は途中で、package import path の正規化と model metadata の寄せ先整理が必要
 - prompt / tool / transport は雛形追加済みだが、既存 manager / route table への接続が未完了
 - Copilot 変更には互換 shim 削除が含まれていたため、このPRでは shim を戻して互換優先にする
+## Local-first completion status
+
+This PR fixes the local-first runtime baseline without moving Cloudflare,
+Supabase, login, account creation, or user management into defaultspack scope.
+
+Completed in this slice:
+
+- canonical implementation is `rumi_ai_1_10/ecosystem/defaultspack/`;
+- old `defaults.*` compatibility should delegate to defaultspack behavior rather
+  than becoming a second source of truth;
+- `stub/default` is the guaranteed no-key model default;
+- cloud provider auto-registration is opt-in through
+  `RUMI_DEFAULTSPACK_ENABLE_CLOUD_PROVIDERS`;
+- local providers are treated as no-key providers in backend and frontend
+  catalogs;
+- sensitive coding HTTP routes pass the local guard;
+- write/delete/patch/restore, terminal medium/high-risk execution, git commit,
+  and git push require signed one-time approval tokens;
+- approval tokens are bound to operation and argument hash;
+- local action attempts and outcomes are written to a redacted JSONL audit log;
+- frontend model fallback and optional operations-company calls are catalog
+  driven;
+- `scripts/quality/scan_defaultspack_integrity.py --strict` checks route/block
+  parity, frontend/backend route parity, local-first defaults, sensitive route
+  guard wiring, and syntax for the new safety modules.
+
+Remaining extension work should stay manifest-driven and should avoid adding
+cloud defaults back into the fresh local runtime.

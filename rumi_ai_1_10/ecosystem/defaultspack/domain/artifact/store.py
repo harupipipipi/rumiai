@@ -53,7 +53,7 @@ class ArtifactStore:
             "type": artifact_type,
             "title": title,
             "path": safe_name,
-            "content_ref": str(content_path.relative_to(self.pack_root)),
+            "content_ref": content_path.relative_to(self.pack_root).as_posix(),
             "created_by": "defaultspack",
             "source_task": source_task,
             "version": 1,

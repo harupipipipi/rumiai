@@ -7,13 +7,13 @@ from typing import Any
 
 from domain.ai_client.api_key_store import (
     provider_has_api_key,
-    provider_key_status,
     set_provider_api_key,
 )
 
 
 VALID_THINKING_LEVELS = {"none", "low", "medium", "high", "xhigh"}
-DEFAULT_MODEL = "openrouter/tencent/hy3-preview:free"
+DEFAULT_MODEL = "stub/default"
+LEGACY_CLOUD_DEFAULT_MODEL = "openrouter/tencent/hy3-preview:free"
 DEFAULT_THINKING_LEVEL = "medium"
 
 
@@ -168,7 +168,7 @@ class ModelRuntimeSettingsService:
         return {
             "preferred_model": DEFAULT_MODEL,
             "thinking_level": DEFAULT_THINKING_LEVEL,
-            "favorite_profiles": [DEFAULT_MODEL, "stub/default"],
+            "favorite_profiles": [DEFAULT_MODEL],
             "thinking_level_by_profile": {DEFAULT_MODEL: DEFAULT_THINKING_LEVEL},
             "thinking_level_by_conversation": {},
             "google_api_key": "",
@@ -214,6 +214,11 @@ class ModelRuntimeSettingsService:
             if profile_id and profile_id not in normalized_favorites:
                 normalized_favorites.append(profile_id)
         preferred_model = str(models.get("preferred_model") or DEFAULT_MODEL).strip() or DEFAULT_MODEL
+        if preferred_model == LEGACY_CLOUD_DEFAULT_MODEL and not provider_has_api_key(
+            "openrouter",
+            pack_root=self._pack_root,
+        ):
+            preferred_model = DEFAULT_MODEL
         if preferred_model not in normalized_favorites:
             normalized_favorites.insert(0, preferred_model)
         models["preferred_model"] = preferred_model

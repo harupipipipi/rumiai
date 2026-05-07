@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from domain.ai_client.client import AIClient
-from domain.ai_client.api_key_store import provider_has_api_key, provider_key_status, set_provider_api_key
+from domain.ai_client.api_key_store import provider_key_status, set_provider_api_key
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 from domain.capability.catalog import CapabilityCatalog
 from domain.chat.store import ChatStore
@@ -515,7 +515,7 @@ class FrontendRegistry:
                         "id": "preferred_model",
                         "label": "Preferred Model",
                         "type": "select",
-                        "default": "openrouter/tencent/hy3-preview:free",
+                        "default": "stub/default",
                         "options": self._model_options(),
                         "help": "新しい会話と composer の既定モデルです。",
                     },
@@ -537,7 +537,7 @@ class FrontendRegistry:
                         "id": "favorite_profiles",
                         "label": "Composer Model Pins",
                         "type": "textarea",
-                        "default": "openrouter/tencent/hy3-preview:free\nstub/default",
+                        "default": "stub/default",
                         "help": "高度設定: composer に優先表示する profile_id。通常は Preferred Model だけで十分です。",
                         "advanced": True,
                     },
@@ -545,7 +545,7 @@ class FrontendRegistry:
                         "id": "thinking_level_by_profile",
                         "label": "Per-profile Thinking Map",
                         "type": "textarea",
-                        "default": '{"openrouter/tencent/hy3-preview:free":"medium"}',
+                        "default": '{"stub/default":"medium"}',
                         "help": "高度設定: profile_id ごとの上書き。通常は Thinking Level を使います。",
                         "advanced": True,
                     },
@@ -567,7 +567,7 @@ class FrontendRegistry:
                         "id": "model_api_routes",
                         "label": "Model API Priority",
                         "type": "textarea",
-                        "default": "openrouter/tencent/hy3-preview:free: openrouter/main\n",
+                        "default": "",
                         "help": "1行に model: provider/api-name を優先順で書きます。例: google/gemini-2.5-pro: google/main, google/backup",
                     },
                 ],
@@ -1023,7 +1023,7 @@ class FrontendRegistry:
             },
             "apis": {
                 "api_keys": [],
-                "model_api_routes": "openrouter/tencent/hy3-preview:free: openrouter/main\n",
+                "model_api_routes": "",
             },
         }
 
@@ -1077,43 +1077,42 @@ class FrontendRegistry:
             return False
         if provider_id == "stub":
             return model_id == "default"
-        if provider_id == "openrouter":
-            return model_id == "tencent/hy3-preview:free"
-        if provider_id == "google":
-            return model_id.startswith(("gemini-", "gemma-"))
+        if profile.get("local") or availability.get("local") or availability.get("offline"):
+            return True
+        if self._is_unconfigured_direct_cloud_profile(provider_id, availability):
+            return True
         return bool(
             availability.get("configured")
             or availability.get("active")
             or availability.get("status") in {"configured", "active"}
         )
 
+    def _is_unconfigured_direct_cloud_profile(
+        self,
+        provider_id: str,
+        availability: dict[str, Any],
+    ) -> bool:
+        """Expose direct cloud models as selectable setup targets without enabling runtime calls."""
+        if provider_id not in {"openai", "anthropic", "google", "genspark"}:
+            return False
+        if availability.get("configured") or availability.get("active"):
+            return False
+        if availability.get("catalog_only"):
+            return False
+        return bool(availability.get("supports_invoke"))
+
     def _model_profile_sort_key(self, profile: dict[str, Any]) -> tuple[int, int, str]:
-        provider_id = str(profile.get("provider_id") or profile.get("provider") or "").strip()
         model_id = str(profile.get("model_id") or "").strip()
-        provider_order = {
-            "google": 0,
-            "openrouter": 1,
-            "openai": 2,
-            "anthropic": 3,
-            "genspark": 4,
-            "ollama": 7,
-            "lmstudio": 8,
-            "stub": 99,
-        }.get(provider_id, 50)
-        model_order = {
-            "gemini-2.5-pro": 0,
-            "gemini-2.5-flash": 1,
-            "gemini-3-pro-preview": 2,
-            "gemini-3-flash-preview": 3,
-            "gemini-2.5-flash-lite": 4,
-            "gemini-2.0-flash-lite": 5,
-            "gemma-4-31b-it": 6,
-            "gemma-4-26b-a4b-it": 7,
-            "gemma-3-27b-it": 8,
-            "gemma-3n-e4b-it": 9,
-            "tencent/hy3-preview:free": 0,
-            "default": 0,
-        }.get(model_id, 20)
+        availability = profile.get("availability") if isinstance(profile.get("availability"), dict) else {}
+        is_default = str(profile.get("profile_id") or "") == "stub/default"
+        is_local = bool(profile.get("local") or availability.get("local") or availability.get("offline"))
+        is_configured = bool(
+            availability.get("configured")
+            or availability.get("active")
+            or str(availability.get("status", "")).lower() in {"configured", "active"}
+        )
+        provider_order = 0 if is_default else (1 if is_local else (2 if is_configured else 9))
+        model_order = 0 if model_id == "default" else 20
         return (provider_order, model_order, str(profile.get("display_name") or profile.get("profile_id") or ""))
 
     def _model_option_label(self, profile: dict[str, Any]) -> str:
@@ -1126,7 +1125,11 @@ class FrontendRegistry:
         name = str(profile.get("display_name") or profile.get("profile_id") or "").strip()
         availability = profile.get("availability") if isinstance(profile.get("availability"), dict) else {}
         provider_id = str(profile.get("provider_id") or profile.get("provider") or "").strip()
-        requires_key = provider_id in {"google", "openrouter"} and not availability.get("configured")
+        requires_key = (
+            not (profile.get("local") or availability.get("local") or availability.get("offline"))
+            and provider_id not in {"stub", "rumi"}
+            and not availability.get("configured")
+        )
         suffix = " - API key required" if requires_key else ""
         return f"{provider} / {name}{suffix}" if provider else f"{name}{suffix}"
 

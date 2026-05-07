@@ -7,7 +7,7 @@ import re
 import base64
 from pathlib import Path
 
-DEFAULT_CHAT_MODEL = "openrouter/tencent/hy3-preview:free"
+DEFAULT_CHAT_MODEL = "stub/default"
 
 
 def _default_conversation_model(settings_path=None):
@@ -29,7 +29,7 @@ def _default_conversation_model(settings_path=None):
         model = profile.get("model")
         if provider and model:
             candidate = "{}/{}".format(provider, model)
-            if not candidate.startswith("stub/"):
+            if candidate.startswith(("ollama/", "lmstudio/", "vllm/", "llamacpp/", "stub/")):
                 return candidate
     except Exception:
         pass
@@ -448,7 +448,6 @@ class ChatStore:
         for old_msg in chain:
             new_msg_id = _gen_id()
             old_to_new[old_msg["id"]] = new_msg_id
-        prev_new_id = None
         for idx, old_msg in enumerate(chain):
             new_msg_id = old_to_new[old_msg["id"]]
             new_parent = None
@@ -475,7 +474,6 @@ class ChatStore:
                         break
             new_conv_obj["messages"].append(new_msg)
             new_conv_obj["current_node_id"] = new_msg_id
-            prev_new_id = new_msg_id
         new_conv_obj["updated_at"] = _now_ms()
         self._save_conversations()
         return copy.deepcopy(new_conv_obj)
@@ -601,7 +599,7 @@ class ChatStore:
                     "type": attachment.get("type"),
                     "source": attachment.get("source"),
                     "sourcePath": attachment.get("sourcePath"),
-                    "workspace_path": str(path.relative_to(self.conversation_dir(conversation_id))),
+                    "workspace_path": path.relative_to(self.conversation_dir(conversation_id)).as_posix(),
                 }
             )
         return refs

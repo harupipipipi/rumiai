@@ -1,8 +1,9 @@
 """defaults.coding.file_create — ファイル新規作成ブロック"""
 
 from blocks._common import ok, error
-from blocks.coding._approval import approval_required, is_server_approved
+from blocks.coding._approval import approval_invalid_response, approval_required, is_server_approved
 from domain.coding.file_ops import FileOps
+from domain.safety.audit import record_attempt, record_execution, record_failure
 
 
 def run(input_data, context=None):
@@ -20,12 +21,18 @@ def run(input_data, context=None):
         return error("'path' is required", code="INVALID_INPUT")
 
     content = input_data.get("content", "")
-    if not is_server_approved(context):
-        return ok(approval_required("file.create", "medium", path=path))
+    operation = "file.create"
+    record_attempt(operation, "medium", {"path": path})
+    if not is_server_approved(context, operation, input_data):
+        invalid = approval_invalid_response(operation, input_data, error)
+        if invalid:
+            return invalid
+        return ok(approval_required(operation, "medium", args=input_data, path=path))
 
     try:
-        ops = FileOps()
+        ops = FileOps(input_data.get("workspace_root"))
         ops.create_file(path, content)
+        record_execution(operation, "medium", {"path": path})
         return ok({
             "path": path,
             "created": True,
@@ -35,4 +42,5 @@ def run(input_data, context=None):
     except ValueError as e:
         return error(str(e), code="PATH_TRAVERSAL")
     except Exception as e:
+        record_failure(operation, "medium", str(e), {"path": path})
         return error(str(e), code="CREATE_ERROR")

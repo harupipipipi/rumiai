@@ -504,12 +504,12 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(result["block_module"], "blocks.tool.list")
         self.assertEqual(result["request_data"]["_method"], "GET")
 
-    def test_default_conversation_model_uses_openrouter_when_unconfigured(self):
+    def test_default_conversation_model_uses_stub_when_unconfigured(self):
         from domain.chat import store as chat_store
 
         self.assertEqual(
             chat_store._default_conversation_model(Path("/tmp/defaultspack-settings-does-not-exist.json")),
-            "openrouter/tencent/hy3-preview:free",
+            "stub/default",
         )
 
     def test_model_settings_are_editable_contracts(self):
@@ -518,7 +518,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             pack_root = Path(tmpdir)
             with patch("domain.frontend.registry.AIClient") as mock_client:
-                mock_client.return_value.list_models.return_value = [{"id": "openrouter/tencent/hy3-preview:free"}]
+                mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
                 registry = FrontendRegistry(pack_root=pack_root)
                 settings = registry.get_settings()
                 values = registry.update_settings(
@@ -540,9 +540,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         model_option_values = {option["value"] for option in model_fields["preferred_model"]["options"]}
         self.assertIn("google/gemini-2.5-flash", model_option_values)
         self.assertIn("google/gemma-4-26b-a4b-it", model_option_values)
-        self.assertIn("openrouter/tencent/hy3-preview:free", model_option_values)
+        self.assertIn("stub/default", model_option_values)
         self.assertNotIn("openrouter/openai/gpt-4o", model_option_values)
-        self.assertNotIn("ollama/llama3.2", model_option_values)
+        self.assertIn("ollama/llama3.1:8b", model_option_values)
         self.assertEqual(model_fields["thinking_level"]["type"], "select")
         self.assertIn(
             "xhigh",
@@ -550,7 +550,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         )
         self.assertNotIn("model_profile", model_fields)
         self.assertNotIn("detected_provider_count", model_fields)
-        self.assertEqual(values["models"]["preferred_model"], "openrouter/tencent/hy3-preview:free")
+        self.assertEqual(values["models"]["preferred_model"], "stub/default")
 
     def test_conversation_preview_uses_inspector_and_message_widgets(self):
         from domain.chat.store import ChatStore

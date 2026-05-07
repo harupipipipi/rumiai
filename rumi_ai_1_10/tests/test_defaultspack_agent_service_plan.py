@@ -634,6 +634,9 @@ def test_coding_context_and_branch_blocks(tmp_path):
 
     from blocks.coding.context import run as context_run
     from blocks.coding.git_branch import run as branch_run
+    from domain.safety.approval import approve, reset_approval_state_for_tests
+
+    reset_approval_state_for_tests()
 
     context_result = context_run({"workspace_root": str(tmp_path)}, {})
     assert context_result["status"] == "ok"
@@ -657,6 +660,20 @@ def test_coding_context_and_branch_blocks(tmp_path):
 
     switched_result = branch_run(
         {"workspace_root": str(tmp_path), "action": "switch", "branch": "feature/footer", "create": True},
+        {},
+    )
+    assert switched_result["status"] == "ok"
+    assert switched_result["data"]["approval_required"] is True
+
+    approval = approve(switched_result["data"]["approval_request_id"])
+    switched_result = branch_run(
+        {
+            "workspace_root": str(tmp_path),
+            "action": "switch",
+            "branch": "feature/footer",
+            "create": True,
+            "approval_token": approval["token"],
+        },
         {},
     )
     assert switched_result["status"] == "ok"

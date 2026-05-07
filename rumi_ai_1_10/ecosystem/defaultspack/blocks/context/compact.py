@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from blocks._common import error, ok
+from blocks._common import ok
 
 
 def _pack_root():
@@ -46,5 +46,5 @@ def run(input_data, context=None):
     }
     path = _context_root() / (compact_id + ".json")
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    payload["content_ref"] = str(path.relative_to(_pack_root()))
+    payload["content_ref"] = path.relative_to(_pack_root()).as_posix()
     return ok(payload)

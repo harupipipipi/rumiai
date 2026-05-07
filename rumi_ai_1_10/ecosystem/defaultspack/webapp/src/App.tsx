@@ -7,7 +7,7 @@ import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolP
 import { api, type ChatContentBlock, type ChatMessage, type ComposerWidgetAction, type Conversation, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
 import { deriveConversationTitle, formatRelativeTime, messageToText } from "./lib/chat";
 import { cn } from "./lib/cn";
-import { canExecuteComposerEndpointAction } from "./lib/composerWidgets";
+import { canExecuteComposerEndpointAction, isSafeLocalEndpoint } from "./lib/composerWidgets";
 import { hasShellRegion } from "./lib/uiShell";
 import { hasWorkspaceAttachment, workspaceFileToAttachment } from "./lib/workspaceAttachments";
 import { resolveDefaultspackRenderers } from "./renderers/defaultspackRenderers";
@@ -346,24 +346,20 @@ function findProfile(profiles: ModelProfile[], modelId: string): ModelProfile | 
   )) ?? null;
 }
 
-const CORE_MODEL_PROVIDERS = new Set(["google", "openrouter", "stub"]);
+const LOCAL_MODEL_PROVIDER_IDS = new Set(["stub", "ollama", "lmstudio", "vllm", "llamacpp", "llama_cpp"]);
 const API_KEY_PROVIDER_IDS = new Set([
   "anthropic",
   "deepseek",
   "glm",
   "google",
   "groq",
-  "llama_cpp",
-  "lmstudio",
   "longcat",
   "mistral",
-  "ollama",
   "openai",
   "openai_compatible",
   "openrouter",
   "perplexity",
   "together",
-  "vllm",
   "xai",
 ]);
 
@@ -380,9 +376,9 @@ function isConfiguredProfile(profile: ModelProfile): boolean {
 export function profileNeedsApiKey(profile: ModelProfile | null | undefined): boolean {
   if (!profile) return false;
   const providerId = String(profile.provider_id ?? "").trim();
-  if (!providerId || providerId === "stub" || providerId === "rumi") return false;
+  if (!providerId || providerId === "rumi" || LOCAL_MODEL_PROVIDER_IDS.has(providerId)) return false;
   const availability = profile.availability ?? {};
-  if (profile.local || availability.local || isConfiguredProfile(profile)) return false;
+  if (profile.local || availability.local || availability.offline || isConfiguredProfile(profile)) return false;
   return API_KEY_PROVIDER_IDS.has(providerId);
 }
 
@@ -396,41 +392,26 @@ function isUserFacingModelProfile(profile: ModelProfile, preferredModel: string)
   if (type && type !== "chat") return false;
   if (providerId === "rumi") return false;
   if (providerId === "stub") return modelId === "default";
-  if (providerId === "openrouter") return modelId === "tencent/hy3-preview:free";
-  if (providerId === "google") return modelId.startsWith("gemini-") || modelId.startsWith("gemma-");
+  if (profile.local || profile.availability?.local || profile.availability?.offline || LOCAL_MODEL_PROVIDER_IDS.has(providerId)) return true;
   return isConfiguredProfile(profile);
 }
 
 function modelProfileSortKey(profile: ModelProfile): [number, number, string] {
-  const providerId = String(profile.provider_id ?? "").trim();
   const modelId = String(profile.model_id ?? "").trim();
-  const providerOrder: Record<string, number> = {
-    google: 0,
-    openrouter: 1,
-    openai: 2,
-    anthropic: 3,
-    genspark: 4,
-    ollama: 7,
-    lmstudio: 8,
-    stub: 99,
-  };
-  const modelOrder: Record<string, number> = {
-    "gemini-2.5-pro": 0,
-    "gemini-2.5-flash": 1,
-    "gemini-3-pro-preview": 2,
-    "gemini-3-flash-preview": 3,
-    "gemini-2.5-flash-lite": 4,
-    "gemini-2.0-flash-lite": 5,
-    "gemma-4-31b-it": 6,
-    "gemma-4-26b-a4b-it": 7,
-    "gemma-3-27b-it": 8,
-    "gemma-3n-e4b-it": 9,
-    "tencent/hy3-preview:free": 0,
-    default: 0,
-  };
+  const providerId = String(profile.provider_id ?? "").trim();
+  const isDefault = profile.profile_id === "stub/default";
+  const isLocal = Boolean(
+    profile.local
+    || profile.availability?.local
+    || profile.availability?.offline
+    || LOCAL_MODEL_PROVIDER_IDS.has(providerId),
+  );
+  const isConfigured = isConfiguredProfile(profile);
+  const providerOrder = isDefault ? 0 : isLocal ? 1 : isConfigured ? 2 : 9;
+  const modelOrder = modelId === "default" ? 0 : 20;
   return [
-    providerOrder[providerId] ?? 50,
-    modelOrder[modelId] ?? 20,
+    providerOrder,
+    modelOrder,
     profile.display_name || profile.profile_id,
   ];
 }
@@ -590,7 +571,7 @@ export default function App() {
 
   const sidebarItems: SidebarItem[] = catalog?.sidebar.items ?? [];
   const chatItems = buildChatItems(conversations);
-  const activeModelId = activeConversation?.model ?? String(settingsValues.models?.preferred_model ?? "openrouter/tencent/hy3-preview:free").trim();
+  const activeModelId = activeConversation?.model ?? String(settingsValues.models?.preferred_model ?? "stub/default").trim();
   const activeProfile = findProfile(modelProfiles, activeModelId);
   const messages = activeConversation ? activeConversation.messages.map((message) => toUiMessage(message, activeProfile)) : [];
   const activeChatTitle = activeConversation?.title ?? "New Conversation";
@@ -731,6 +712,7 @@ export default function App() {
     if (defaultMode === "auto" || defaultMode === "manual") {
       setPreviewMode(defaultMode);
     }
+    return nextCatalog;
   }
 
   async function refreshOperationsStatus() {
@@ -804,8 +786,10 @@ export default function App() {
     async function bootstrap() {
       setIsLoading(true);
       try {
-        await Promise.all([refreshHealth(), refreshCatalog()]);
-        await refreshOperationsStatus();
+        const [, nextCatalog] = await Promise.all([refreshHealth(), refreshCatalog()]);
+        if (hasOperationsProfile(nextCatalog)) {
+          await refreshOperationsStatus();
+        }
         const pendingConversationId = chatIdFromLocation();
         if (pendingConversationId && isPendingInLocation()) {
           rememberPendingRequest({
@@ -1281,6 +1265,9 @@ export default function App() {
         });
         setOperationsStatus(result as OperationsCompanyStatus);
       } else if (action.endpoint) {
+        if (!isSafeLocalEndpoint(action.endpoint) || action.requires_approval) {
+          throw new Error("この action は安全な /api/ endpoint ではないか、承認が必要なため直接実行できません。");
+        }
         result = await fetch(action.endpoint, { method: action.method ?? "GET" }).then((response) => response.json());
       } else {
         result = { item: item.id, action: action.id, status: "ready" };

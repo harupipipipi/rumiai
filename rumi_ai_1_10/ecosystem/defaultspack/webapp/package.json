@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 38766",
-    "build": "vite build && rm -f ../ui/index.html",
+    "build": "vite build && node -e \"require('node:fs').rmSync('../ui/index.html', { force: true })\"",
     "lint": "tsc --noEmit",
     "test": "tsx --test src/lib/api.test.ts src/lib/attachments.test.ts src/lib/chat.test.ts src/lib/composerWidgets.test.ts src/lib/toolActivity.test.ts src/lib/toolUi.test.ts src/lib/uiShell.test.ts src/lib/workspaceAttachments.test.ts src/components/ToolPreview.test.ts src/renderers/ComposerRenderer.test.ts src/renderers/defaultspackRenderers.test.ts src/renderers/trustedRendererLoader.test.ts"
   },

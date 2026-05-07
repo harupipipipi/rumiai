@@ -1,7 +1,8 @@
-import sys, os
+import os
+import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from blocks._common import ok, error, not_implemented, timestamp, gen_id
+from blocks._common import ok, error, timestamp
 
 import base64
 import hmac
@@ -13,6 +14,13 @@ import http.server
 import urllib.parse
 
 from bridge.block_adapter import invoke_block
+from domain.safety.local_guard import (
+    METHOD_SENSITIVE_CODING_PATHS,
+    SENSITIVE_CODING_PATHS,
+    is_sensitive_coding_path as _local_is_sensitive_coding_path,
+    origin_allowed as _local_origin_allowed,
+    require_local_guard,
+)
 from transport.registry import build_always_available_http_routes, build_fallback_http_routes
 
 
@@ -501,17 +509,7 @@ class DefaultsHttpServer:
         return {"_static": True, "content_type": ct, "body": body}
 
 
-_SENSITIVE_CODING_PATHS = {
-    "/api/coding/files/write",
-    "/api/coding/files/create",
-    "/api/coding/files/delete",
-    "/api/coding/files/patch",
-    "/api/coding/files/restore",
-    "/api/coding/terminal/exec",
-    "/api/coding/terminal/stream",
-    "/api/coding/git/commit",
-    "/api/coding/git/push",
-}
+_SENSITIVE_CODING_PATHS = set(SENSITIVE_CODING_PATHS) | set(METHOD_SENSITIVE_CODING_PATHS)
 
 _SENSITIVE_INTEGRATION_PATHS = {
     "/api/integrations/secrets",
@@ -524,7 +522,7 @@ _LOCAL_ORIGIN_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 def _is_sensitive_coding_path(path):
-    return path in _SENSITIVE_CODING_PATHS
+    return _local_is_sensitive_coding_path(path)
 
 
 def _is_sensitive_http_path(path):
@@ -536,15 +534,7 @@ def _is_sensitive_http_path(path):
 
 
 def _is_allowed_sensitive_origin(origin):
-    if not origin:
-        return True
-    try:
-        parsed = urllib.parse.urlsplit(origin)
-    except Exception:
-        return False
-    if parsed.scheme not in {"http", "https"}:
-        return False
-    return parsed.hostname in _LOCAL_ORIGIN_HOSTS
+    return _local_origin_allowed(origin)
 
 
 def _configured_local_auth_token():
@@ -712,6 +702,16 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             pass
 
     def _sensitive_request_error(self, method, path):
+        coding_error = require_local_guard(
+            path,
+            method,
+            {str(key): str(value) for key, value in self.headers.items()},
+            self.client_address,
+        )
+        if coding_error:
+            return coding_error
+        if _is_sensitive_coding_path(path):
+            return None
         if path not in _SENSITIVE_INTEGRATION_PATHS and _SENSITIVE_CHAT_PATH_RE.match(path) is None:
             return None
         origin = self.headers.get("Origin", "")
@@ -736,7 +736,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                     self.send_header("Access-Control-Allow-Origin", origin)
                     self.send_header("Vary", "Origin")
             self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-            self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Rumi-CSRF")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Rumi-CSRF, X-Rumi-Approval")
             return
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")

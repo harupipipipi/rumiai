@@ -69,7 +69,11 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
         from domain.ai_client.client import AIClient
 
         AIClient._instance = None
-        with patch.dict(os.environ, {"MISTRAL_API_KEY": "m-key"}, clear=True):
+        with patch.dict(
+            os.environ,
+            {"MISTRAL_API_KEY": "m-key", "RUMI_DEFAULTSPACK_ENABLE_CLOUD_PROVIDERS": "1"},
+            clear=True,
+        ):
             client = AIClient()
 
         try:
@@ -85,7 +89,11 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
         from domain.ai_client.client import AIClient
 
         AIClient._instance = None
-        with patch.dict(os.environ, {"OPENROUTER_API_KEY": "or-key"}, clear=True):
+        with patch.dict(
+            os.environ,
+            {"OPENROUTER_API_KEY": "or-key", "RUMI_DEFAULTSPACK_ENABLE_CLOUD_PROVIDERS": "1"},
+            clear=True,
+        ):
             client = AIClient()
 
         try:

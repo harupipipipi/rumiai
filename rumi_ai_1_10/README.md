@@ -383,3 +383,16 @@ curl -X POST http://localhost:8765/api/packs/{pack_id}/approve \
 
 MIT License
 詳細はリポジトリルートの LICENSE を参照してください。
+## defaultspack source of truth
+
+The canonical defaultspack implementation in this repository is
+`ecosystem/defaultspack/`. The older `ecosystem/defaults/` path and the separate
+`harupipipipi/rumiai_defaults` repository are compatibility or snapshot sources.
+New local-first runtime behavior should land in defaultspack, with legacy
+aliases delegating back to it where needed.
+
+The defaultspack runtime is designed to start without cloud API keys or external
+network access. Its guaranteed default model is `stub/default`; cloud providers
+are optional and must be selected/configured explicitly. Local file, terminal,
+and git mutations are protected with local request guards, one-time signed
+approval tokens, and redacted audit records.

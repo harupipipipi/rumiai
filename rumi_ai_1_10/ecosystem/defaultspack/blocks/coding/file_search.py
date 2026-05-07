@@ -21,7 +21,7 @@ def run(input_data, context=None):
     directory = input_data.get("directory", ".")
 
     try:
-        ops = FileOps()
+        ops = FileOps(input_data.get("workspace_root"))
         matches = ops.search_files(pattern, directory)
         return ok({
             "pattern": pattern,
