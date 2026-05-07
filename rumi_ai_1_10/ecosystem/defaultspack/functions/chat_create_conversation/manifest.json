@@ -1,0 +1,43 @@
+{
+  "function_id": "chat_create_conversation",
+  "description": "Create a chat conversation.",
+  "tags": [
+    "chat"
+  ],
+  "risk": "medium",
+  "requires": [
+    "chat.create.conversation"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.chat.create_conversation",
+    "defaultspack.chat.create_conversation",
+    "defaults.chat.create.conversation",
+    "defaultspack.chat.create.conversation"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.chat.create_conversation",
+      "default_args": {}
+    }
+  }
+}

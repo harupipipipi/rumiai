@@ -1,0 +1,43 @@
+{
+  "function_id": "agent_multi_message",
+  "description": "Send a multi-agent message.",
+  "tags": [
+    "agent"
+  ],
+  "risk": "medium",
+  "requires": [
+    "agent.multi.message"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.agent.multi_message",
+    "defaultspack.agent.multi_message",
+    "defaults.agent.multi.message",
+    "defaultspack.agent.multi.message"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.agent.multi_message",
+      "default_args": {}
+    }
+  }
+}

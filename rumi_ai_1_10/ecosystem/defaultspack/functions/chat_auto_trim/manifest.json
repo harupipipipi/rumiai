@@ -1,0 +1,43 @@
+{
+  "function_id": "chat_auto_trim",
+  "description": "Auto trim a chat.",
+  "tags": [
+    "chat"
+  ],
+  "risk": "medium",
+  "requires": [
+    "chat.auto.trim"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.chat.auto_trim",
+    "defaultspack.chat.auto_trim",
+    "defaults.chat.auto.trim",
+    "defaultspack.chat.auto.trim"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.chat.auto_trim",
+      "default_args": {}
+    }
+  }
+}

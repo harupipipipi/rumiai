@@ -1,0 +1,42 @@
+{
+  "function_id": "ai_routing_log",
+  "description": "Get AI routing logs.",
+  "tags": [
+    "ai",
+    "routing"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ai.routing_log",
+    "defaultspack.ai.routing_log",
+    "defaults.ai.routing.log",
+    "defaultspack.ai.routing.log"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.ai.routing.log",
+      "default_args": {}
+    }
+  }
+}

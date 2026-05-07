@@ -56,7 +56,7 @@
     },
     "execution": {
       "type": "rumi_function",
-      "qualified_name": "rumi_default_tools_pack:file_reader"
+      "qualified_name": "defaultspack:tool_file_reader"
     }
   }
 }

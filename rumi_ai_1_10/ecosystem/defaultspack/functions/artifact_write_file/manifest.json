@@ -1,0 +1,45 @@
+{
+  "function_id": "artifact_write_file",
+  "description": "Write an artifact file.",
+  "tags": [
+    "artifact"
+  ],
+  "risk": "high",
+  "requires": [
+    "artifact.write.file"
+  ],
+  "caller_requires": [
+    "user.approved.high_risk"
+  ],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.artifact.write_file",
+    "defaultspack.artifact.write_file",
+    "defaults.artifact.write.file",
+    "defaultspack.artifact.write.file"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

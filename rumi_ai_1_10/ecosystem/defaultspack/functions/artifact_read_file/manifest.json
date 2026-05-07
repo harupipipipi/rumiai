@@ -1,0 +1,41 @@
+{
+  "function_id": "artifact_read_file",
+  "description": "Read an artifact file.",
+  "tags": [
+    "artifact"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.artifact.read_file",
+    "defaultspack.artifact.read_file",
+    "defaults.artifact.read.file",
+    "defaultspack.artifact.read.file"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

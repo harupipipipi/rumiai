@@ -1,0 +1,41 @@
+{
+  "function_id": "share_create",
+  "description": "Create a share.",
+  "tags": [
+    "share"
+  ],
+  "risk": "medium",
+  "requires": [
+    "share.create"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.share.create",
+    "defaultspack.share.create"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.share.create",
+      "default_args": {}
+    }
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "function_id": "ai_get_provider_key_status",
+  "description": "Get provider API key status.",
+  "tags": [
+    "ai",
+    "provider_key"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ai.get_provider_key_status",
+    "defaultspack.ai.get_provider_key_status",
+    "defaults.ai.get.provider.key.status",
+    "defaultspack.ai.get.provider.key.status"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "function_id": "knowledge_update",
+  "description": "Update knowledge.",
+  "tags": [
+    "knowledge"
+  ],
+  "risk": "medium",
+  "requires": [
+    "knowledge.update"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.knowledge.update",
+    "defaultspack.knowledge.update"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.knowledge.update",
+      "default_args": {}
+    }
+  }
+}

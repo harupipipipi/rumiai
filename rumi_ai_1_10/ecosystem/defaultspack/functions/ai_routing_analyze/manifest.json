@@ -1,0 +1,44 @@
+{
+  "function_id": "ai_routing_analyze",
+  "description": "Analyze a request for model routing.",
+  "tags": [
+    "ai",
+    "routing"
+  ],
+  "risk": "medium",
+  "requires": [
+    "ai.routing.analyze"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ai.routing_analyze",
+    "defaultspack.ai.routing_analyze",
+    "defaults.ai.routing.analyze",
+    "defaultspack.ai.routing.analyze"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.ai.routing.analyze",
+      "default_args": {}
+    }
+  }
+}

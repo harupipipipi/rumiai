@@ -8,6 +8,7 @@ from typing import Any
 
 from domain.ai_client.client import AIClient
 from domain.ai_client.api_key_store import provider_has_api_key, provider_key_status, set_provider_api_key
+from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 from domain.capability.catalog import CapabilityCatalog
 from domain.chat.store import ChatStore
 from domain.dev.inspector import Inspector
@@ -1018,14 +1019,7 @@ class FrontendRegistry:
             "preview": {"auto_open": False, "default_mode": "auto", "max_items": 12},
             "chat_rendering": {"show_widgets": True, "unknown_block_strategy": "hidden"},
             "models": {
-                "preferred_model": "openrouter/tencent/hy3-preview:free",
-                "thinking_level": "medium",
-                "favorite_profiles": ["openrouter/tencent/hy3-preview:free", "stub/default"],
-                "thinking_level_by_profile": {"openrouter/tencent/hy3-preview:free": "medium"},
-                "google_api_key": "",
-                "google_api_key_configured": provider_has_api_key("google", pack_root=self._pack_root),
-                "openrouter_api_key": "",
-                "openrouter_api_key_configured": provider_has_api_key("openrouter", pack_root=self._pack_root),
+                **ModelRuntimeSettingsService(self._pack_root).default_model_settings(),
             },
             "apis": {
                 "api_keys": [],
@@ -1196,24 +1190,9 @@ class FrontendRegistry:
             apis["api_keys"] = []
         models = sanitized.get("models")
         if isinstance(models, dict):
-            for provider_id, field_id, configured_field in (
-                ("google", "google_api_key", "google_api_key_configured"),
-                ("openrouter", "openrouter_api_key", "openrouter_api_key_configured"),
-            ):
-                raw_key = models.pop(field_id, None)
-                if isinstance(raw_key, str) and raw_key.strip():
-                    result = set_provider_api_key(
-                        provider_id,
-                        raw_key,
-                        pack_root=self._pack_root,
-                    )
-                    models[configured_field] = bool(result.get("success"))
-                else:
-                    models[configured_field] = provider_has_api_key(
-                        provider_id,
-                        pack_root=self._pack_root,
-                    )
-                models[field_id] = ""
+            sanitized["models"] = ModelRuntimeSettingsService(
+                self._pack_root
+            ).sanitize_models_patch(models)
         return sanitized
 
     def _refresh_derived_settings(self, values: dict[str, Any]) -> dict[str, Any]:
@@ -1227,44 +1206,7 @@ class FrontendRegistry:
             apis["model_api_routes"] = str(routes or "").strip() + ("\n" if str(routes or "").strip() else "")
         models = refreshed.setdefault("models", {})
         if isinstance(models, dict):
-            models["google_api_key"] = ""
-            models["google_api_key_configured"] = provider_has_api_key(
-                "google",
-                pack_root=self._pack_root,
-            )
-            models["openrouter_api_key"] = ""
-            models["openrouter_api_key_configured"] = provider_has_api_key(
-                "openrouter",
-                pack_root=self._pack_root,
-            )
-            favorite_profiles = models.get("favorite_profiles")
-            if isinstance(favorite_profiles, str):
-                try:
-                    parsed = json.loads(favorite_profiles)
-                    favorite_profiles = parsed
-                except json.JSONDecodeError:
-                    favorite_profiles = [line.strip() for line in favorite_profiles.splitlines()]
-            if not isinstance(favorite_profiles, list):
-                preferred = str(models.get("preferred_model") or "stub/default").strip()
-                favorite_profiles = [preferred] if preferred else ["stub/default"]
-            normalized_favorites = []
-            for item in favorite_profiles:
-                profile_id = str(item or "").strip()
-                if profile_id and profile_id not in normalized_favorites:
-                    normalized_favorites.append(profile_id)
-            models["favorite_profiles"] = normalized_favorites or ["stub/default"]
-            levels = models.get("thinking_level_by_profile")
-            if isinstance(levels, str):
-                try:
-                    levels = json.loads(levels)
-                except json.JSONDecodeError:
-                    levels = {}
-            models["thinking_level_by_profile"] = levels if isinstance(levels, dict) else {}
-            thinking_level = str(models.get("thinking_level") or "").strip()
-            valid_thinking_levels = {"none", "low", "medium", "high", "xhigh"}
-            if thinking_level not in valid_thinking_levels:
-                preferred = str(models.get("preferred_model") or "").strip()
-                profile_level = models["thinking_level_by_profile"].get(preferred)
-                thinking_level = str(profile_level or "medium").strip()
-            models["thinking_level"] = thinking_level if thinking_level in valid_thinking_levels else "medium"
+            refreshed["models"] = ModelRuntimeSettingsService(
+                self._pack_root
+            ).refresh_models_settings(models)
         return refreshed

@@ -1,0 +1,41 @@
+{
+  "function_id": "media_image_read",
+  "description": "Read image metadata.",
+  "tags": [
+    "media"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.media.image_read",
+    "defaultspack.media.image_read",
+    "defaults.media.image.read",
+    "defaultspack.media.image.read"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.media.image_read",
+      "default_args": {}
+    }
+  }
+}

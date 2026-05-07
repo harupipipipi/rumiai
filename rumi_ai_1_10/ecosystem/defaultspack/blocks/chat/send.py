@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from blocks._common import ok, error, gen_id, timestamp
 
 from domain.ai_client.client import AIClient
+from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 from domain.chat.store import ChatStore
 from domain.chat.message_converter import convert_to_standard
 from domain.chat.message_builder import build_assistant_message
@@ -697,6 +698,11 @@ def run(input_data, context):
 
     call_handler = context.get("call_handler") if context else None
     params = dict(input_data.get("params") or {})
+    if "thinking_level" not in params:
+        params["thinking_level"] = ModelRuntimeSettingsService().get_effective_thinking_level(
+            profile_id=model,
+            conversation_id=conversation_id,
+        )["level"]
     request_context = dict(context or {})
     request_context["conversation_id"] = conversation_id
     request_context["conversation_workspace_dir"] = str(store.conversation_workspace_dir(conversation_id))

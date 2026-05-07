@@ -1,0 +1,9 @@
+- id: set_reasoning
+  phase: prepare
+  priority: 10
+  type: function
+  function: defaultspack.ai.set_thinking_level
+  input:
+    scope: turn
+    level: high
+  output: thinking_level_result

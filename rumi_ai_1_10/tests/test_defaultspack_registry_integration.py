@@ -8,7 +8,9 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from backend_core.ecosystem.registry import Registry
+from core_runtime.capability_executor import CapabilityExecutor
 from core_runtime.function_registry import FunctionRegistry
+from core_runtime.permission_manager import PermissionManager
 
 
 class _FakeContainer:
@@ -32,6 +34,11 @@ class _FakeActiveEcosystem:
 
     def is_component_disabled(self, component_full_id):
         return component_full_id in self._disabled
+
+
+class _FakeApprovalManager:
+    def is_pack_approved_and_verified(self, pack_id):
+        return (pack_id == "defaultspack", None)
 
 
 class TestDefaultspackRegistryIntegration(unittest.TestCase):
@@ -112,6 +119,46 @@ class TestDefaultspackRegistryIntegration(unittest.TestCase):
         self.assertTrue(
             any(route["path"] == "/api/packs/defaultspack/chat/conversations" for route in routes)
         )
+
+    def test_high_risk_defaultspack_function_denies_unapproved_caller(self):
+        function_registry = FunctionRegistry()
+        with patch(
+            "core_runtime.di_container.get_container",
+            return_value=_FakeContainer(function_registry),
+        ):
+            Registry().load_all_packs()
+
+        entry = function_registry.get("defaultspack:coding_file_write")
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry.risk, "high")
+        self.assertIn("user.approved.high_risk", entry.caller_requires)
+
+        permission_manager = PermissionManager(mode="secure")
+        permission_manager._audit_log = lambda *args, **kwargs: None
+        permission_manager.grant("defaultspack", "coding.file.write")
+        permission_manager.grant("external_pack", "function.call")
+
+        executor = CapabilityExecutor()
+        executor._initialized = True
+        executor._function_registry = function_registry
+        executor._approval_manager = _FakeApprovalManager()
+        executor._permission_manager = permission_manager
+        executor._trust_store = None
+        executor._grant_manager = None
+        executor._audit = lambda *args, **kwargs: None
+
+        response = executor.execute(
+            "external_pack",
+            {
+                "type": "function.call",
+                "qualified_name": "defaultspack:coding_file_write",
+                "args": {"path": "noop.txt", "content": "blocked"},
+                "request_id": "req-high-risk-registry",
+            },
+        )
+
+        self.assertFalse(response.success)
+        self.assertEqual(response.error_type, "caller_requires_denied")
 
 
 if __name__ == "__main__":

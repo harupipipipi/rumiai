@@ -1,0 +1,43 @@
+{
+  "function_id": "ui_composer_config_set",
+  "description": "Set composer UI config.",
+  "tags": [
+    "ui"
+  ],
+  "risk": "medium",
+  "requires": [
+    "ui.composer.config.set"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ui.composer_config_set",
+    "defaultspack.ui.composer_config_set",
+    "defaults.ui.composer.config.set",
+    "defaultspack.ui.composer.config.set"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

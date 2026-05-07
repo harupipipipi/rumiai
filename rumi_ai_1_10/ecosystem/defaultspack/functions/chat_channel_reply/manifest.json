@@ -1,0 +1,44 @@
+{
+  "function_id": "chat_channel_reply",
+  "description": "Reply in a chat channel.",
+  "tags": [
+    "chat",
+    "channel"
+  ],
+  "risk": "medium",
+  "requires": [
+    "chat.channel.reply"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.chat.channel_reply",
+    "defaultspack.chat.channel_reply",
+    "defaults.chat.channel.reply",
+    "defaultspack.chat.channel.reply"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.chat.channel.reply",
+      "default_args": {}
+    }
+  }
+}

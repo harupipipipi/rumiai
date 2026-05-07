@@ -1,0 +1,45 @@
+{
+  "function_id": "pack_request_forced_patch",
+  "description": "Request a forced patch.",
+  "tags": [
+    "pack_request"
+  ],
+  "risk": "high",
+  "requires": [
+    "pack.request.forced.patch"
+  ],
+  "caller_requires": [
+    "user.approved.high_risk"
+  ],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.pack.request_forced_patch",
+    "defaultspack.pack.request_forced_patch",
+    "defaults.pack.request.forced.patch",
+    "defaultspack.pack.request.forced.patch"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

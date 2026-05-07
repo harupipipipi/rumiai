@@ -1,0 +1,41 @@
+{
+  "function_id": "research_report",
+  "description": "Create a research report.",
+  "tags": [
+    "research"
+  ],
+  "risk": "medium",
+  "requires": [
+    "research.report"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.research.report",
+    "defaultspack.research.report"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.research.report",
+      "default_args": {}
+    }
+  }
+}

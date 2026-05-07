@@ -1,0 +1,42 @@
+{
+  "function_id": "ai_validate_model_params",
+  "description": "Validate model runtime parameters.",
+  "tags": [
+    "ai",
+    "model_runtime"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ai.validate_model_params",
+    "defaultspack.ai.validate_model_params",
+    "defaults.ai.validate.model.params",
+    "defaultspack.ai.validate.model.params"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "function_id": "coding_git_commit",
+  "description": "Create a git commit.",
+  "tags": [
+    "coding"
+  ],
+  "risk": "high",
+  "requires": [
+    "coding.git.commit"
+  ],
+  "caller_requires": [
+    "user.approved.high_risk"
+  ],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.coding.git_commit",
+    "defaultspack.coding.git_commit",
+    "defaults.coding.git.commit",
+    "defaultspack.coding.git.commit"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.coding.git_commit",
+      "default_args": {}
+    }
+  }
+}

@@ -4,6 +4,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import ok, error, gen_id
 from domain.ai_client.client import AIClient
+from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 from domain.dev.inspector import Inspector
 from domain.prompt.manager import get_manager
 
@@ -16,7 +17,12 @@ def run(input_data, context):
     if not messages:
         return error("messages is required", "MISSING_PARAM")
     tools = input_data.get("tools", [])
-    params = input_data.get("params", {})
+    params = dict(input_data.get("params") or {})
+    if "thinking_level" not in params:
+        params["thinking_level"] = ModelRuntimeSettingsService().get_effective_thinking_level(
+            profile_id=model,
+            conversation_id=input_data.get("conversation_id"),
+        )["level"]
 
     # P1-4: Inspector 用のリクエストID を生成
     request_id = gen_id()

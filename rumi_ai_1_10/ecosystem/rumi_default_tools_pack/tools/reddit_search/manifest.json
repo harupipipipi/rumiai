@@ -61,7 +61,7 @@
     },
     "execution": {
       "type": "rumi_function",
-      "qualified_name": "rumi_default_tools_pack:reddit_search"
+      "qualified_name": "defaultspack:tool_reddit_search"
     }
   }
 }

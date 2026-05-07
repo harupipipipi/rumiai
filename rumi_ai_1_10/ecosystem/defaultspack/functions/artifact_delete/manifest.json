@@ -1,0 +1,43 @@
+{
+  "function_id": "artifact_delete",
+  "description": "Delete an artifact.",
+  "tags": [
+    "artifact"
+  ],
+  "risk": "high",
+  "requires": [
+    "artifact.delete"
+  ],
+  "caller_requires": [
+    "user.approved.high_risk"
+  ],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.artifact.delete",
+    "defaultspack.artifact.delete"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "function_id": "ai_models",
+  "description": "List available AI models.",
+  "tags": [
+    "ai",
+    "model",
+    "catalog"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ai.models",
+    "defaultspack.ai.models"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.ai.models",
+      "default_args": {}
+    }
+  }
+}

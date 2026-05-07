@@ -1,0 +1,42 @@
+{
+  "function_id": "tool_file_reader",
+  "description": "Run the default file reader tool.",
+  "tags": [
+    "tool",
+    "file"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.tool.file_reader",
+    "defaultspack.tool.file_reader",
+    "defaults.tool.file.reader",
+    "defaultspack.tool.file.reader"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

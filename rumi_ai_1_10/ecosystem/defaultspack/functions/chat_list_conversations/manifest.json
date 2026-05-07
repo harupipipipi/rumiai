@@ -1,0 +1,41 @@
+{
+  "function_id": "chat_list_conversations",
+  "description": "List chat conversations.",
+  "tags": [
+    "chat"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.chat.list_conversations",
+    "defaultspack.chat.list_conversations",
+    "defaults.chat.list.conversations",
+    "defaultspack.chat.list.conversations"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.chat.list_conversations",
+      "default_args": {}
+    }
+  }
+}

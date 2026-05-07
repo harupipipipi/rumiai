@@ -1,0 +1,46 @@
+{
+  "function_id": "ai_set_provider_key",
+  "description": "Set a provider API key.",
+  "tags": [
+    "ai",
+    "provider_key"
+  ],
+  "risk": "high",
+  "requires": [
+    "ai.set.provider.key"
+  ],
+  "caller_requires": [
+    "user.approved.high_risk"
+  ],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ai.set_provider_key",
+    "defaultspack.ai.set_provider_key",
+    "defaults.ai.set.provider.key",
+    "defaultspack.ai.set.provider.key"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

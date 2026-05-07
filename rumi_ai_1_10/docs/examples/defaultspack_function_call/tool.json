@@ -1,0 +1,9 @@
+{
+  "tool_id": "set_thinking_level",
+  "name": "set_thinking_level",
+  "description": "Change model thinking level for this conversation.",
+  "execution": {
+    "type": "rumi_function",
+    "qualified_name": "defaultspack:ai_set_thinking_level"
+  }
+}

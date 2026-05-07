@@ -1,0 +1,43 @@
+{
+  "function_id": "media_audio_transcribe",
+  "description": "Transcribe audio media.",
+  "tags": [
+    "media"
+  ],
+  "risk": "medium",
+  "requires": [
+    "media.audio.transcribe"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.media.audio_transcribe",
+    "defaultspack.media.audio_transcribe",
+    "defaults.media.audio.transcribe",
+    "defaultspack.media.audio.transcribe"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

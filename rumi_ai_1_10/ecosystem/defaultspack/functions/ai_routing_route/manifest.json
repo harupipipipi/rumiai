@@ -1,0 +1,44 @@
+{
+  "function_id": "ai_routing_route",
+  "description": "Route a request to an AI model profile.",
+  "tags": [
+    "ai",
+    "routing"
+  ],
+  "risk": "medium",
+  "requires": [
+    "ai.routing.route"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ai.routing_route",
+    "defaultspack.ai.routing_route",
+    "defaults.ai.routing.route",
+    "defaultspack.ai.routing.route"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.ai.routing.route",
+      "default_args": {}
+    }
+  }
+}

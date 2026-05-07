@@ -1,0 +1,41 @@
+{
+  "function_id": "memory_compact",
+  "description": "Compact memory.",
+  "tags": [
+    "memory"
+  ],
+  "risk": "medium",
+  "requires": [
+    "memory.compact"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.memory.compact",
+    "defaultspack.memory.compact"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

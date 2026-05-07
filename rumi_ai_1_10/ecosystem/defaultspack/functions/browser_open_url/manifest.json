@@ -1,0 +1,46 @@
+{
+  "function_id": "browser_open_url",
+  "description": "Open a URL in a browser session.",
+  "tags": [
+    "tool",
+    "browser"
+  ],
+  "risk": "high",
+  "requires": [
+    "browser.open.url"
+  ],
+  "caller_requires": [
+    "user.approved.high_risk"
+  ],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.browser.open_url",
+    "defaultspack.browser.open_url",
+    "defaults.browser.open.url",
+    "defaultspack.browser.open.url"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

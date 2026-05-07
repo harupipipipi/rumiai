@@ -1,0 +1,41 @@
+{
+  "function_id": "agent_pause",
+  "description": "Pause an agent.",
+  "tags": [
+    "agent"
+  ],
+  "risk": "medium",
+  "requires": [
+    "agent.pause"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.agent.pause",
+    "defaultspack.agent.pause"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.agent.interrupt.pause",
+      "default_args": {}
+    }
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "function_id": "agent_org_list",
+  "description": "List agent organizations.",
+  "tags": [
+    "agent",
+    "org"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.agent.org_list",
+    "defaultspack.agent.org_list",
+    "defaults.agent.org.list",
+    "defaultspack.agent.org.list"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.agent.org.list",
+      "default_args": {}
+    }
+  }
+}

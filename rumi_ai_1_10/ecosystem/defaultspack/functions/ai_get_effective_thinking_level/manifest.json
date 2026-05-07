@@ -1,0 +1,44 @@
+{
+  "function_id": "ai_get_effective_thinking_level",
+  "description": "Resolve the effective thinking level.",
+  "tags": [
+    "ai",
+    "model_runtime"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ai.get_effective_thinking_level",
+    "defaultspack.ai.get_effective_thinking_level",
+    "defaults.ai.get.effective.thinking.level",
+    "defaultspack.ai.get.effective.thinking.level",
+    "defaults.model_runtime.get_effective_thinking_level",
+    "defaultspack.model_runtime.get_effective_thinking_level"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

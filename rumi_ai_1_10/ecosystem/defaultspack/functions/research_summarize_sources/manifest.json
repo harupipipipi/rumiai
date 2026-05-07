@@ -1,0 +1,43 @@
+{
+  "function_id": "research_summarize_sources",
+  "description": "Summarize research sources.",
+  "tags": [
+    "research"
+  ],
+  "risk": "medium",
+  "requires": [
+    "research.summarize.sources"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.research.summarize_sources",
+    "defaultspack.research.summarize_sources",
+    "defaults.research.summarize.sources",
+    "defaultspack.research.summarize.sources"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

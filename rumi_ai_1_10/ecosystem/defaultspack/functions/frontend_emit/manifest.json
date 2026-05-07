@@ -1,0 +1,41 @@
+{
+  "function_id": "frontend_emit",
+  "description": "Emit a frontend event.",
+  "tags": [
+    "frontend"
+  ],
+  "risk": "medium",
+  "requires": [
+    "frontend.emit"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.frontend.emit",
+    "defaultspack.frontend.emit"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.frontend.emit",
+      "default_args": {}
+    }
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "function_id": "tool_subagent",
+  "description": "Run the default subagent tool.",
+  "tags": [
+    "tool",
+    "agent"
+  ],
+  "risk": "medium",
+  "requires": [
+    "tool.subagent"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.tool.subagent",
+    "defaultspack.tool.subagent"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

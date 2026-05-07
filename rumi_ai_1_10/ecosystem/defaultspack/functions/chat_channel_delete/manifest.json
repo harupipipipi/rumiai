@@ -1,0 +1,46 @@
+{
+  "function_id": "chat_channel_delete",
+  "description": "Delete a chat channel.",
+  "tags": [
+    "chat",
+    "channel"
+  ],
+  "risk": "high",
+  "requires": [
+    "chat.channel.delete"
+  ],
+  "caller_requires": [
+    "user.approved.high_risk"
+  ],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.chat.channel_delete",
+    "defaultspack.chat.channel_delete",
+    "defaults.chat.channel.delete",
+    "defaultspack.chat.channel.delete"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.chat.channel.delete",
+      "default_args": {}
+    }
+  }
+}

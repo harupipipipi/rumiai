@@ -1,0 +1,44 @@
+{
+  "function_id": "ai_image_analyze",
+  "description": "Analyze an image with the configured AI provider.",
+  "tags": [
+    "ai",
+    "image"
+  ],
+  "risk": "medium",
+  "requires": [
+    "ai.image.analyze"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ai.image_analyze",
+    "defaultspack.ai.image_analyze",
+    "defaults.ai.image.analyze",
+    "defaultspack.ai.image.analyze"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.ai.image_analyze",
+      "default_args": {}
+    }
+  }
+}

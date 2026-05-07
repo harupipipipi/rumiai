@@ -1,0 +1,43 @@
+{
+  "function_id": "agent_add_instruction",
+  "description": "Add an instruction to an agent.",
+  "tags": [
+    "agent"
+  ],
+  "risk": "medium",
+  "requires": [
+    "agent.add.instruction"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.agent.add_instruction",
+    "defaultspack.agent.add_instruction",
+    "defaults.agent.add.instruction",
+    "defaultspack.agent.add.instruction"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.agent.add_instruction",
+      "default_args": {}
+    }
+  }
+}

@@ -1,0 +1,43 @@
+{
+  "function_id": "chat_summarize_and_trim",
+  "description": "Summarize and trim a chat.",
+  "tags": [
+    "chat"
+  ],
+  "risk": "medium",
+  "requires": [
+    "chat.summarize.and.trim"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.chat.summarize_and_trim",
+    "defaultspack.chat.summarize_and_trim",
+    "defaults.chat.summarize.and.trim",
+    "defaultspack.chat.summarize.and.trim"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.chat.summarize_and_trim",
+      "default_args": {}
+    }
+  }
+}

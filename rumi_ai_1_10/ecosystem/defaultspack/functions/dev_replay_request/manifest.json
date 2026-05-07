@@ -1,0 +1,43 @@
+{
+  "function_id": "dev_replay_request",
+  "description": "Replay a developer request.",
+  "tags": [
+    "dev"
+  ],
+  "risk": "medium",
+  "requires": [
+    "dev.replay.request"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.dev.replay_request",
+    "defaultspack.dev.replay_request",
+    "defaults.dev.replay.request",
+    "defaultspack.dev.replay.request"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

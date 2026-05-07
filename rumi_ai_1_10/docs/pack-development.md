@@ -2076,3 +2076,6 @@ curl -X POST http://localhost:8765/api/capability/grants/grant \
 curl http://localhost:8765/api/weather/Tokyo \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
+# Defaultspack Function Contracts
+
+Defaultspack capabilities are available as Rumi functions. Prefer calling aliases such as `defaults.ai.complete`, `defaultspack.chat.send`, or `defaultspack.ai.set_thinking_level` instead of depending on HTTP routes or defaultspack file paths. See [defaultspack-functions.md](defaultspack-functions.md) for examples, permissions, and AI tool wrapper guidance.

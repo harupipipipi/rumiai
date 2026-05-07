@@ -1,0 +1,43 @@
+{
+  "function_id": "tool_consent_confirm",
+  "description": "Confirm tool consent.",
+  "tags": [
+    "tool"
+  ],
+  "risk": "medium",
+  "requires": [
+    "tool.consent.confirm"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.tool.consent_confirm",
+    "defaultspack.tool.consent_confirm",
+    "defaults.tool.consent.confirm",
+    "defaultspack.tool.consent.confirm"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.tool.consent_confirm",
+      "default_args": {}
+    }
+  }
+}

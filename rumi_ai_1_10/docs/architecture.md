@@ -1131,3 +1131,6 @@ python -m backend_core.pack_scaffold --template full --pack-id my_pack --output 
 | `capability_handler_registry.py` | `function_registry.py` | FunctionRegistry に統合（Phase A〜D） |
 | `builtin_capability_handlers/` | `core_pack/` | core_pack に移行 |
 
+# Defaultspack Function Boundary
+
+Defaultspack now treats function manifests as the public operation boundary. HTTP routes are compatibility adapters, AI tools are optional facades, and Flow/function.call invocations all converge on the same defaultspack functions before reaching domain services.

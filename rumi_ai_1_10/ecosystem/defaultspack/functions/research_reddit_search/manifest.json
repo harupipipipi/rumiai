@@ -1,0 +1,43 @@
+{
+  "function_id": "research_reddit_search",
+  "description": "Run reddit research search.",
+  "tags": [
+    "research"
+  ],
+  "risk": "medium",
+  "requires": [
+    "research.reddit.search"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.research.reddit_search",
+    "defaultspack.research.reddit_search",
+    "defaults.research.reddit.search",
+    "defaultspack.research.reddit.search"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.research.reddit_search",
+      "default_args": {}
+    }
+  }
+}

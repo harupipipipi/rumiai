@@ -1,0 +1,41 @@
+{
+  "function_id": "media_pdf_parse",
+  "description": "Parse a PDF.",
+  "tags": [
+    "media"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.media.pdf_parse",
+    "defaultspack.media.pdf_parse",
+    "defaults.media.pdf.parse",
+    "defaultspack.media.pdf.parse"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": null,
+      "default_args": {}
+    }
+  }
+}

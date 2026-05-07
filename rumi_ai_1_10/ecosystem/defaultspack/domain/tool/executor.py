@@ -166,20 +166,36 @@ class ToolExecutor:
 
     def _execute_capability_request(self, tool_def, request, context):
         try:
-            from core_runtime.capability_executor import CapabilityExecutor
+            from core_runtime.di_container import get_container
         except Exception as exc:
             return {
-                "result": "CapabilityExecutor is not available: {}".format(exc),
+                "result": "Capability runtime is not available: {}".format(exc),
                 "is_error": True,
                 "widget": None,
             }
         principal_id = self._principal_id(tool_def, context)
         try:
-            executor = CapabilityExecutor()
-            if request.get("type") == "function.call":
-                executor._function_registry = self._build_function_registry()
-                executor._initialized = True
+            container = get_container()
+            executor = None
+            if isinstance(context, dict):
+                executor = context.get("capability_executor")
+            if executor is None:
+                if request.get("type") == "function.call":
+                    try:
+                        from domain.function_runtime.bridge import ensure_defaultspack_functions_registered
+
+                        ensure_defaultspack_functions_registered(container)
+                    except Exception:
+                        pass
+                executor = container.get_or_none("capability_executor")
+            if executor is None:
+                from core_runtime.capability_executor import get_capability_executor
+
+                executor = get_capability_executor()
             response = executor.execute(principal_id, request)
+            fallback = self._local_tool_fallback_for_capability_response(response, request)
+            if fallback:
+                return self._execute_local(fallback, request.get("args") or {}, context)
         except Exception as exc:
             return {
                 "result": "Capability execution failed: {}".format(exc),
@@ -189,40 +205,22 @@ class ToolExecutor:
         return self._tool_response_from_capability(response)
 
     @staticmethod
-    def _build_function_registry():
-        from core_runtime.function_registry import FunctionRegistry
-
-        registry = FunctionRegistry()
-        ecosystem_dir = Path(__file__).resolve().parents[3]
-        for pack_root in sorted(ecosystem_dir.iterdir()):
-            if not pack_root.is_dir() or not (pack_root / "ecosystem.json").exists():
-                continue
-            try:
-                pack_manifest = json.loads((pack_root / "ecosystem.json").read_text(encoding="utf-8"))
-            except Exception:
-                pack_manifest = {}
-            pack_id = str(pack_manifest.get("pack_id") or pack_root.name).strip() or pack_root.name
-            functions_root = pack_root / "functions"
-            if not functions_root.exists():
-                continue
-            for function_dir in sorted(path for path in functions_root.iterdir() if path.is_dir()):
-                manifest_path = function_dir / "manifest.json"
-                if not manifest_path.is_file():
-                    continue
-                try:
-                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-                except Exception:
-                    continue
-                function_id = str(manifest.get("function_id") or function_dir.name).strip()
-                if not function_id:
-                    continue
-                registry.register(
-                    pack_id=pack_id,
-                    function_id=function_id,
-                    manifest=manifest,
-                    function_dir=function_dir,
-                )
-        return registry
+    def _local_tool_fallback_for_capability_response(response, request):
+        if bool(getattr(response, "success", False)):
+            return None
+        if request.get("type") != "function.call":
+            return None
+        if getattr(response, "error_type", None) not in {"function_not_found", "pack_not_approved"}:
+            return None
+        qualified_name = str(request.get("qualified_name") or "")
+        return {
+            "defaultspack:tool_calculator": "calculator",
+            "defaultspack:tool_web_search": "web_search",
+            "defaultspack:tool_reddit_search": "reddit_search",
+            "defaultspack:tool_file_reader": "file_reader",
+            "defaultspack:tool_todo": "todo",
+            "defaultspack:tool_subagent": "subagent",
+        }.get(qualified_name)
 
     @staticmethod
     def _principal_id(tool_def, context):

@@ -671,6 +671,17 @@ class CapabilityExecutor:
                         detail_reason="FunctionRegistry not available in DI container")
             return resp
         entry = self._function_registry.get(qualified_name)
+        if entry is None and hasattr(self._function_registry, "resolve_by_alias"):
+            try:
+                alias_entry = self._function_registry.resolve_by_alias(qualified_name)
+                if (
+                    alias_entry is not None
+                    and isinstance(getattr(alias_entry, "pack_id", None), str)
+                    and isinstance(getattr(alias_entry, "function_id", None), str)
+                ):
+                    entry = alias_entry
+            except Exception:
+                logger.debug("Function alias lookup failed for '%s'", qualified_name, exc_info=True)
         if entry is None:
             resp = CapabilityResponse(success=False, error=f"Function not found: {qualified_name}",
                                       error_type="function_not_found", latency_ms=(time.time() - start_time) * 1000)

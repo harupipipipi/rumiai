@@ -1,0 +1,45 @@
+{
+  "function_id": "dev_edit_prompt_live",
+  "description": "Edit prompt live.",
+  "tags": [
+    "dev"
+  ],
+  "risk": "high",
+  "requires": [
+    "dev.edit.prompt.live"
+  ],
+  "caller_requires": [
+    "user.approved.high_risk"
+  ],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.dev.edit_prompt_live",
+    "defaultspack.dev.edit_prompt_live",
+    "defaults.dev.edit.prompt.live",
+    "defaultspack.dev.edit.prompt.live"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.dev.edit_prompt_live",
+      "default_args": {}
+    }
+  }
+}

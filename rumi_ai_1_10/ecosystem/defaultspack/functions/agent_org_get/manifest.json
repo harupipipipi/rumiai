@@ -1,0 +1,42 @@
+{
+  "function_id": "agent_org_get",
+  "description": "Get an agent organization.",
+  "tags": [
+    "agent",
+    "org"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.agent.org_get",
+    "defaultspack.agent.org_get",
+    "defaults.agent.org.get",
+    "defaultspack.agent.org.get"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.agent.org.get",
+      "default_args": {}
+    }
+  }
+}

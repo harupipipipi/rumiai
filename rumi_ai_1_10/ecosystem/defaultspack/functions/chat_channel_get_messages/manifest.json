@@ -1,0 +1,42 @@
+{
+  "function_id": "chat_channel_get_messages",
+  "description": "Get messages from a chat channel.",
+  "tags": [
+    "chat",
+    "channel"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.chat.channel_get_messages",
+    "defaultspack.chat.channel_get_messages",
+    "defaults.chat.channel.get.messages",
+    "defaultspack.chat.channel.get.messages"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.chat.channel.get_messages",
+      "default_args": {}
+    }
+  }
+}
