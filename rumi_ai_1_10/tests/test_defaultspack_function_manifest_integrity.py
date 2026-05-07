@@ -13,6 +13,7 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from core_runtime.function_registry import FunctionRegistry  # noqa: E402
 from domain.function_runtime.manifest_factory import FUNCTION_SPECS_BY_ID  # noqa: E402
+from domain.function_runtime.registry import TOOL_FUNCTION_ACTIONS  # noqa: E402
 from domain.function_runtime.security import HIGH_RISK_CALLER_REQUIREMENT  # noqa: E402
 
 
@@ -71,3 +72,10 @@ def test_function_registry_resolves_defaultspack_aliases():
     assert registry.resolve_by_alias("defaults.ai.set_thinking_level").qualified_name == "defaultspack:ai_set_thinking_level"
     assert registry.resolve_by_alias("defaultspack.chat.send").qualified_name == "defaultspack:chat_send"
     assert registry.resolve_by_alias("defaults.coding.file_read").qualified_name == "defaultspack:coding_file_read"
+
+
+def test_browser_screenshot_alias_uses_implemented_screenshot_action():
+    assert TOOL_FUNCTION_ACTIONS["browser_screenshot"] == (
+        "browser_computer",
+        {"action": "computer.screenshot"},
+    )

@@ -67,3 +67,5 @@ When chat or AI completion params do not include `thinking_level`, defaultspack 
 ## Security
 
 Read/list/search/status functions are low risk. Mutating chat, AI invocation, memory, and artifacts are usually medium risk. File writes, terminal execution, git push/commit, provider key changes, browser/computer control, clipboard writes, and forced pack patch operations are high risk and declare `caller_requires`.
+
+Pack authors should call defaultspack functions through `ToolExecutor` or the shared `CapabilityExecutor` so the caller principal is preserved. `domain.function_runtime.bridge.invoke_function()` defaults to the internal `defaultspack` principal for HTTP route adapters and other defaultspack-owned fallbacks; external packs that call it directly must pass an explicit `principal_id`.

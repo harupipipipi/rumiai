@@ -28,6 +28,8 @@ TOOL_FUNCTION_ACTIONS = {
     "tool_subagent": ("subagent", {}),
     "browser_session": ("browser_computer", {"action": "browser.session"}),
     "browser_open_url": ("browser_computer", {"action": "browser.open_url"}),
+    # The current browser controller captures the visible desktop/screen.
+    # Keep the browser function alias, but route it to the implemented action.
     "browser_screenshot": ("browser_computer", {"action": "computer.screenshot"}),
     "computer_screenshot": ("browser_computer", {"action": "computer.screenshot"}),
     "computer_move": ("browser_computer", {"action": "computer.move"}),
