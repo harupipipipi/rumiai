@@ -2,6 +2,30 @@
 ```markdown
 # rumiai_defaults
 
+## Canonical implementation
+
+For this repository, the canonical defaultspack implementation is
+`rumi_ai_1_10/ecosystem/defaultspack/`.
+
+The older `ecosystem/defaults/` package and the separate
+`harupipipipi/rumiai_defaults` repository are treated as compatibility or
+snapshot sources, not as the source of truth for new runtime behavior. New
+handler implementations, local safety policy, frontend routes, model defaults,
+and quality checks should land in `ecosystem/defaultspack/` first. Legacy
+`defaults.*` callers should be served through compatibility aliases or shims
+that delegate to defaultspack behavior.
+
+defaultspack is local-first by default:
+
+- A fresh runtime starts with `stub/default`; cloud model providers are opt-in.
+- Coding, terminal, and git mutations are protected as local operations, not as
+  user-account authentication.
+- Sensitive local HTTP mutations require loopback access, local origins, CSRF
+  metadata when an Origin is present, signed one-time approval tokens, and
+  redacted JSONL audit records.
+- Cloudflare, Supabase, login, account creation, and user management are out of
+  scope for defaultspack local operation protection.
+
 rumiai のデフォルトパック。
 
 rumiai 本体はドメイン知識を持たない汎用カーネルである。defaults は rumiai ecosystem に「AI サービスとして動作するための全ての仕組み」を提供する。チャット、エージェント、ツール、プロンプト、AI クライアント、コーディング支援、マルチモーダル処理、フロントエンド通信の全てが defaults の handler と domain コードによって動作する。

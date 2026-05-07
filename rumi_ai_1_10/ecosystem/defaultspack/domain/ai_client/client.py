@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from domain.ai_client.api_key_store import read_provider_api_key
 from domain.ai_client.providers import (
+    _cloud_runtime_enabled,
     build_profile_catalog,
     detect_available_providers,
     detect_rumi_provider,
@@ -47,7 +48,12 @@ class AIClient:
         """環境変数が設定されているプロバイダーを自動登録する。"""
         try:
             available = detect_available_providers()
+            provider_catalog = get_provider_catalog_map()
+            cloud_enabled = _cloud_runtime_enabled()
             for name, instance in available.items():
+                entry = provider_catalog.get(name, {})
+                if not cloud_enabled and entry.get("kind") not in {"builtin", "local"}:
+                    continue
                 self._providers[name] = instance
         except Exception:
             pass

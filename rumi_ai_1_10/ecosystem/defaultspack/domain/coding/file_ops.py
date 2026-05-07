@@ -7,8 +7,12 @@ import difflib
 import glob
 import os
 import shutil
+import tempfile
 import time
 import uuid
+
+MAX_TEXT_FILE_BYTES = 2 * 1024 * 1024
+PROTECTED_PATHS = {".git", ".rumi_snapshots"}
 
 
 class FileOps:
@@ -44,11 +48,36 @@ class FileOps:
             )
         return resolved
 
+    def _relative(self, resolved):
+        return os.path.relpath(resolved, self._root).replace(os.sep, "/")
+
+    def _ensure_unprotected_mutation(self, resolved):
+        rel = self._relative(resolved)
+        parts = set(rel.replace("\\", "/").split("/"))
+        if rel in PROTECTED_PATHS or parts & PROTECTED_PATHS:
+            raise PermissionError("Protected workspace path cannot be modified: " + rel)
+
+    def _ensure_text_size(self, resolved):
+        if os.path.exists(resolved) and os.path.isfile(resolved):
+            size = os.path.getsize(resolved)
+            if size > MAX_TEXT_FILE_BYTES:
+                raise ValueError(f"File is too large for text operation: {size} bytes")
+
+    def _looks_binary(self, resolved):
+        if not os.path.isfile(resolved):
+            return False
+        with open(resolved, "rb") as handle:
+            sample = handle.read(4096)
+        return b"\0" in sample
+
     def read_file(self, path):
         """ファイルを読み取り、内容を文字列で返す。"""
         resolved = self._resolve(path)
         if not os.path.isfile(resolved):
             raise FileNotFoundError(f"File not found: {path}")
+        self._ensure_text_size(resolved)
+        if self._looks_binary(resolved):
+            raise ValueError("Binary file cannot be read as text: " + str(path))
         with open(resolved, "r", encoding="utf-8") as f:
             return f.read()
 
@@ -58,13 +87,30 @@ class FileOps:
         親ディレクトリが存在しない場合は自動作成する。
         """
         resolved = self._resolve(path)
+        self._ensure_unprotected_mutation(resolved)
         parent = os.path.dirname(resolved)
         if parent and not os.path.isdir(parent):
             os.makedirs(parent, exist_ok=True)
         encoded = content.encode("utf-8")
-        with open(resolved, "w", encoding="utf-8") as f:
-            f.write(content)
+        fd, tmp_path = tempfile.mkstemp(prefix=".rumi-write-", dir=parent or self._root, text=True)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(content)
+            os.replace(tmp_path, resolved)
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
         return len(encoded)
+
+    def write_file_atomic(self, path, content):
+        """Write a text file using the same atomic path as write_file."""
+        return self.write_file(path, content)
+
+    def preview_write(self, path, content):
+        return {
+            "path": path,
+            "diff": self.diff_text(path, content),
+        }
 
     def create_file(self, path, content=""):
         """ファイルを新規作成する。既に存在する場合はエラー。
@@ -72,6 +118,7 @@ class FileOps:
         親ディレクトリが存在しない場合は自動作成する。
         """
         resolved = self._resolve(path)
+        self._ensure_unprotected_mutation(resolved)
         if os.path.exists(resolved):
             raise FileExistsError(f"File already exists: {path}")
         parent = os.path.dirname(resolved)
@@ -83,14 +130,22 @@ class FileOps:
     def delete_file(self, path):
         """ファイルを削除する。"""
         resolved = self._resolve(path)
+        self._ensure_unprotected_mutation(resolved)
         if not os.path.isfile(resolved):
             raise FileNotFoundError(f"File not found: {path}")
         os.remove(resolved)
+
+    def safe_delete(self, path):
+        snapshot = self.snapshot([path])
+        self.delete_file(path)
+        return {"path": path, "deleted": True, "snapshot": snapshot}
 
     def move_file(self, source, destination):
         """ファイルまたはディレクトリを移動する。"""
         resolved_source = self._resolve(source)
         resolved_destination = self._resolve(destination)
+        self._ensure_unprotected_mutation(resolved_source)
+        self._ensure_unprotected_mutation(resolved_destination)
         if not os.path.exists(resolved_source):
             raise FileNotFoundError(f"Path not found: {source}")
         parent = os.path.dirname(resolved_destination)
@@ -154,8 +209,8 @@ class FileOps:
             resolved = self._resolve(item)
             if not os.path.exists(resolved):
                 continue
-            rel = os.path.relpath(resolved, self._root)
-            if rel == ".rumi_snapshots" or rel.startswith(".rumi_snapshots" + os.sep):
+            rel = self._relative(resolved)
+            if rel == ".rumi_snapshots" or rel.startswith(".rumi_snapshots/"):
                 continue
             destination = os.path.join(snapshot_root, rel)
             parent = os.path.dirname(destination)
@@ -168,7 +223,7 @@ class FileOps:
             copied.append(rel)
         return {
             "snapshot_id": snapshot_id,
-            "path": os.path.relpath(snapshot_root, self._root),
+            "path": self._relative(snapshot_root),
             "files": copied,
         }
 
@@ -211,7 +266,7 @@ class FileOps:
             real_m = os.path.realpath(m)
             # ワークスペース外のシンボリックリンク先を除外
             if real_m == self._root or real_m.startswith(self._root + os.sep):
-                result.append(os.path.relpath(real_m, self._root))
+                result.append(self._relative(real_m))
         return result
 
     def list_files(self, directory=".", recursive=False):
@@ -228,7 +283,7 @@ class FileOps:
                 dirnames.sort()
                 for d in sorted(dirnames):
                     full = os.path.join(dirpath, d)
-                    rel = os.path.relpath(full, self._root)
+                    rel = self._relative(full)
                     result.append({
                         "name": d,
                         "path": rel,
@@ -237,7 +292,7 @@ class FileOps:
                     })
                 for fname in sorted(filenames):
                     full = os.path.join(dirpath, fname)
-                    rel = os.path.relpath(full, self._root)
+                    rel = self._relative(full)
                     try:
                         size = os.path.getsize(full)
                     except OSError:
@@ -252,7 +307,7 @@ class FileOps:
             entries = sorted(os.listdir(resolved_dir))
             for entry in entries:
                 full = os.path.join(resolved_dir, entry)
-                rel = os.path.relpath(full, self._root)
+                rel = self._relative(full)
                 is_dir = os.path.isdir(full)
                 try:
                     size = 0 if is_dir else os.path.getsize(full)

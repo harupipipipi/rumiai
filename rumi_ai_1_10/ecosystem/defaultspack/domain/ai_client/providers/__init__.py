@@ -891,6 +891,15 @@ def _credentials_ready(manifest: Dict[str, Any], provider_id: str) -> bool:
     return False
 
 
+def _cloud_runtime_enabled() -> bool:
+    return str(os.environ.get("RUMI_DEFAULTSPACK_ENABLE_CLOUD_PROVIDERS", "")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def _instantiate_manifest_provider(manifest: Dict[str, Any]):
     provider_id = str(manifest.get("id", "")).strip()
     if not provider_id or provider_id == "rumi":

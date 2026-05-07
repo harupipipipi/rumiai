@@ -55,23 +55,20 @@ const MODE_META: Record<AppMode, { label: string; icon: typeof MessageSquare; de
   agent: { label: "Agent", icon: Bot, description: "自律エージェント" },
 };
 
+const LOCAL_MODEL_PROVIDER_IDS = new Set(["stub", "ollama", "lmstudio", "vllm", "llamacpp", "llama_cpp"]);
 const API_KEY_PROVIDER_IDS = new Set([
   "anthropic",
   "deepseek",
   "glm",
   "google",
   "groq",
-  "llama_cpp",
-  "lmstudio",
   "longcat",
   "mistral",
-  "ollama",
   "openai",
   "openai_compatible",
   "openrouter",
   "perplexity",
   "together",
-  "vllm",
   "xai",
 ]);
 
@@ -100,9 +97,9 @@ function profileIsConfigured(profile: ModelProfile | null | undefined): boolean 
 
 export function profileNeedsApiKey(profile: ModelProfile | null | undefined): boolean {
   const providerId = profileProviderId(profile);
-  if (!providerId || providerId === "stub" || providerId === "rumi") return false;
+  if (!providerId || providerId === "rumi" || LOCAL_MODEL_PROVIDER_IDS.has(providerId)) return false;
   const availability = profile?.availability ?? {};
-  if (profile?.local || availability.local || profileIsConfigured(profile)) return false;
+  if (profile?.local || availability.local || availability.offline || profileIsConfigured(profile)) return false;
   return API_KEY_PROVIDER_IDS.has(providerId);
 }
 

@@ -68,6 +68,14 @@ test("composer asks for an API key when an unconfigured Gemini model is selected
     provider_id: "stub",
     model_id: "default",
   }), false);
+
+  assert.equal(profileNeedsApiKey({
+    profile_id: "ollama/llama3.2",
+    display_name: "Llama 3.2",
+    provider_id: "ollama",
+    model_id: "llama3.2",
+    availability: { configured: false, local: true, status: "catalog" },
+  }), false);
 });
 
 test("composer widget drop requires explicit kind capability contract", () => {

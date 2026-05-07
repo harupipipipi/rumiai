@@ -195,6 +195,7 @@ export type SidebarAction = {
   endpoint?: string;
   payload?: Record<string, unknown>;
   preview_type?: "web" | "code" | "file" | "image";
+  requires_approval?: boolean;
 };
 
 export type ComposerWidgetKind = "tool_toggle" | "button" | "panel" | "selector";
