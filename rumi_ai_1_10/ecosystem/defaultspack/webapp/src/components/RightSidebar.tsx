@@ -44,6 +44,8 @@ import {
   CalendarClock,
   MessageSquareText,
   Monitor,
+  AppWindow,
+  MousePointerClick,
   Archive,
   Code2,
   MoreVertical,
@@ -110,12 +112,12 @@ function readStoredStringArrayRecord(key: string): Record<string, string[]> {
 }
 
 const CATEGORY_META: Record<SidebarCategory | "all", { label: string; icon: ReactElement }> = {
-  all: { label: "All", icon: <Layers size={14} /> },
-  tool: { label: "Tools", icon: <Wrench size={14} /> },
-  widget: { label: "Widgets", icon: <LayoutGrid size={14} /> },
-  system: { label: "System", icon: <Settings size={14} /> },
-  integration: { label: "Integrations", icon: <Blocks size={14} /> },
-  capability: { label: "Capabilities", icon: <ShieldCheck size={14} /> },
+  all: { label: "All", icon: <Layers size={16} /> },
+  tool: { label: "Tools", icon: <Wrench size={16} /> },
+  widget: { label: "Widgets", icon: <LayoutGrid size={16} /> },
+  system: { label: "System", icon: <Settings size={16} /> },
+  integration: { label: "Integrations", icon: <Blocks size={16} /> },
+  capability: { label: "Capabilities", icon: <ShieldCheck size={16} /> },
 };
 
 const TOOL_GROUP_ICONS: Record<string, ReactElement> = {
@@ -149,6 +151,8 @@ const ITEM_ICONS: Record<string, ReactElement> = {
   agent: <Sparkles size={18} />,
   artifacts: <Archive size={18} />,
   browser: <Monitor size={18} />,
+  browser_use: <AppWindow size={18} />,
+  browser_computer: <MousePointerClick size={18} />,
   browser_open_url: <Globe size={18} />,
   browser_screenshot: <Monitor size={18} />,
   calculator: <BrainCircuit size={18} />,
@@ -172,6 +176,7 @@ const ITEM_ICONS: Record<string, ReactElement> = {
   computer_screenshot: <Monitor size={18} />,
   computer_scroll: <Monitor size={18} />,
   computer_type: <Monitor size={18} />,
+  computer_use: <Monitor size={18} />,
   code: <Terminal size={18} />,
   file: <FileText size={18} />,
   file_reader: <FileText size={18} />,
@@ -185,6 +190,7 @@ const ITEM_ICONS: Record<string, ReactElement> = {
   media_image_analyze: <Image size={18} />,
   media_pdf_parse: <FileText size={18} />,
   memory: <Cpu size={18} />,
+  "mouse-pointer-click": <MousePointerClick size={18} />,
   music: <Music size={18} />,
   news: <Newspaper size={18} />,
   notebook: <NotebookPen size={18} />,
@@ -281,7 +287,7 @@ function iconForItem(item: SidebarItem) {
   return byCategory[item.category];
 }
 
-function railIcon(item: ReactElement, size = 15): ReactElement {
+function railIcon(item: ReactElement, size = 18): ReactElement {
   return cloneElement(item as ReactElement<Record<string, unknown>>, { size });
 }
 
@@ -523,7 +529,7 @@ function CategorySwitcher({
         aria-expanded={isOpen}
         aria-pressed={hasActiveFilter}
         className={cn(
-          "w-8 h-8 rounded-md flex items-center justify-center transition-colors relative",
+          "w-9 h-9 rounded-md flex items-center justify-center transition-colors relative",
           hasActiveFilter
             ? "bg-zinc-800 text-zinc-100 ring-1 ring-zinc-600/70"
             : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/50",
@@ -889,7 +895,7 @@ export function RightSidebar({
       onClick={() => setActivePanel((current) => (current === item.id ? null : item.id))}
       className={cn(
         "rounded-md flex items-center justify-center relative transition-colors duration-150 ease-out group/btn flex-shrink-0",
-        pinnedZone ? "h-9 w-9" : "h-8 w-8",
+        "h-9 w-9",
         activePanel === item.id
           ? "bg-zinc-800 text-zinc-100 ring-1 ring-zinc-600/70"
           : item.category === "tool" && !selectedToolIdSet.has(item.id)
@@ -900,16 +906,14 @@ export function RightSidebar({
       )}
       title={item.label}
     >
-      {railIcon(iconForItem(item), pinnedZone ? 17 : 15)}
+      {railIcon(iconForItem(item), pinnedZone ? 21 : 20)}
 
       {activePanel === item.id && (
         <div className={cn("absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-r-full", categoryColor(item.category, "indicator"))} />
       )}
 
       {item.category === "tool" && !selectedToolIdSet.has(item.id) && (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="w-5 h-px bg-zinc-600 rotate-45" />
-        </div>
+        <span className="absolute bottom-1 right-1 h-1.5 w-1.5 rounded-full bg-zinc-700 ring-1 ring-[#09090b]" />
       )}
 
       {item.badge && (
@@ -1221,7 +1225,7 @@ export function RightSidebar({
         </div>
       )}
 
-      <div className="w-10 flex flex-col flex-shrink-0 overflow-hidden">
+      <div className="w-11 flex flex-col flex-shrink-0 overflow-hidden">
         <div
           className="flex-1 flex flex-col items-center gap-1 overflow-y-auto w-full py-1.5 scrollbar-none"
           onDragOver={(event) => {
@@ -1244,14 +1248,14 @@ export function RightSidebar({
             onClick={() => setShowStarredOnly((value) => !value)}
             aria-pressed={showStarredOnly}
             className={cn(
-              "w-8 h-8 rounded-md flex items-center justify-center relative transition-colors",
+              "w-9 h-9 rounded-md flex items-center justify-center relative transition-colors",
               showStarredOnly
                 ? "bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30"
                 : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
             )}
             title="Starred tools"
           >
-            <Star size={14} className={cn(starredItemIds.length > 0 && "fill-current")} />
+            <Star size={16} className={cn(starredItemIds.length > 0 && "fill-current")} />
             {starredItemIds.length > 0 && (
               <span className="absolute -top-0.5 -right-0.5 rounded-full bg-zinc-700 px-0.5 text-[7px] leading-tight text-zinc-200">
                 {starredItemIds.length}
@@ -1262,14 +1266,14 @@ export function RightSidebar({
             type="button"
             onClick={() => setActivePanel((current) => (current === "__tool_manager__" ? null : "__tool_manager__"))}
             className={cn(
-              "w-8 h-8 rounded-md flex items-center justify-center relative transition-colors",
+              "w-9 h-9 rounded-md flex items-center justify-center relative transition-colors",
               activePanel === "__tool_manager__"
                 ? "bg-zinc-800 text-zinc-100 ring-1 ring-zinc-600/70"
                 : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
             )}
             title="Tool manager"
           >
-            <SlidersHorizontal size={14} />
+            <SlidersHorizontal size={16} />
             {selectedToolIds.length > 0 && (
               <span className="absolute -top-0.5 -right-0.5 rounded-full bg-emerald-500 px-0.5 text-[7px] font-bold leading-tight text-black">
                 {selectedToolIds.length}
@@ -1300,14 +1304,14 @@ export function RightSidebar({
                       openToolGroup(group.id, event.currentTarget);
                     }}
                     className={cn(
-                      "group/group w-8 h-8 rounded-md flex items-center justify-center relative transition-colors flex-shrink-0",
+                      "group/group w-9 h-9 rounded-md flex items-center justify-center relative transition-colors flex-shrink-0",
                       isGroupOpen || isGroupActive
                         ? "bg-emerald-900/40 text-emerald-300 border border-emerald-500/30"
                         : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
                     )}
                     title={`${group.path?.length ? group.path.join(" / ") : group.label || TOOL_GROUP_LABELS[group.id] || group.id} (${group.count})`}
                   >
-                    {railIcon((group.icon && TOOL_GROUP_ICONS[group.icon]) || TOOL_GROUP_ICONS[group.id] || <Wrench size={16} />)}
+                    {railIcon((group.icon && TOOL_GROUP_ICONS[group.icon]) || TOOL_GROUP_ICONS[group.id] || <Wrench size={20} />, 20)}
                     <span className="absolute -top-0.5 -right-0.5 text-[7px] bg-zinc-700 text-zinc-300 px-0.5 rounded-full leading-tight">
                       {group.count}
                     </span>
@@ -1466,10 +1470,10 @@ export function RightSidebar({
 
           <button
             onClick={onOpenSettings}
-            className="relative w-8 h-8 rounded-md flex items-center justify-center text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors group/btn flex-shrink-0"
+            className="relative w-9 h-9 rounded-md flex items-center justify-center text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors group/btn flex-shrink-0"
             title="Settings"
           >
-            <Settings size={14} />
+            <Settings size={16} />
             <span className="absolute right-full mr-2 px-2 py-1 bg-zinc-800 text-zinc-200 text-[10px] rounded-md opacity-0 group-hover/btn:opacity-100 pointer-events-none transition-opacity whitespace-nowrap border border-zinc-700 shadow-lg z-50">
               Settings
             </span>

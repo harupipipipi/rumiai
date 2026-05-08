@@ -13,6 +13,9 @@ from domain.tool_policy.internal_context import (
 def run(input_data, context):
     """defaults.tool.invoke — ツールを実行する"""
     context = context if isinstance(context, dict) else {}
+    payload_context = input_data.get("context")
+    if isinstance(payload_context, dict):
+        context = {**context, **payload_context}
     tool_name = input_data.get("tool_name")
     if not tool_name:
         return error("tool_name is required", "MISSING_PARAM")

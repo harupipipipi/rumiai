@@ -235,9 +235,6 @@ class BrowserComputerController:
     def _screenshot(self, *, payload: dict[str, Any], dry_run: bool, yolo_mode: bool) -> dict[str, Any]:
         if dry_run:
             return {"action": "computer.screenshot", "dry_run": True, "requires_approval": False}
-        approved = yolo_mode or self._consume_approval(payload, "computer.screenshot", {})
-        if not approved:
-            return self._approval_required("computer.screenshot", {})
         self._artifact_root.mkdir(parents=True, exist_ok=True)
         path = self._artifact_root / f"screenshot-{int(time.time() * 1000)}.png"
         system = platform.system()

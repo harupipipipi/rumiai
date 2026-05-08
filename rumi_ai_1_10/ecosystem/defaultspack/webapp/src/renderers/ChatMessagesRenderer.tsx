@@ -1,10 +1,10 @@
-import { AlertTriangle, Check, CheckCircle2, ChevronDown, Clock, Copy, Image as ImageIcon, Loader2, Pencil } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, ChevronDown, Clock, Copy, Image as ImageIcon, Loader2 } from "lucide-react";
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 
 import { cn } from "../lib/cn";
 import { buildToolActivityGroups, toolFolderFor, type ToolActivityItem } from "../lib/toolActivity";
-import type { ChatContentBlock } from "../lib/api";
+import { api, type ChatContentBlock } from "../lib/api";
 import type { ChatMessagesRendererProps } from "./types";
 
 function MessageBlock({ block, unknownStrategy }: { block: ChatContentBlock; unknownStrategy: string }) {
@@ -87,30 +87,44 @@ export function messageCopyText(message: ChatMessagesRendererProps["messages"][n
 }
 
 async function writeClipboardText(text: string): Promise<void> {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+  } catch {
+    // Fall through to the textarea fallback for in-app browsers that expose but deny Clipboard API.
   }
 
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.setAttribute("readonly", "true");
-  textarea.style.position = "fixed";
-  textarea.style.left = "-9999px";
-  document.body.appendChild(textarea);
-  textarea.select();
-  document.execCommand("copy");
-  textarea.remove();
+  if (typeof document !== "undefined" && document.body) {
+    const textarea = document.createElement("textarea");
+    const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    textarea.value = text;
+    textarea.setAttribute("readonly", "true");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    textarea.style.top = "0";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    const copied = document.execCommand("copy");
+    textarea.remove();
+    activeElement?.focus({ preventScroll: true });
+    if (copied) {
+      return;
+    }
+  }
+
+  await api.writeClipboard(text);
 }
 
 function MessageActionBar({
   message,
-  onEdit,
 }: {
   message: ChatMessagesRendererProps["messages"][number];
-  onEdit?: (text: string) => void;
 }) {
-  const [copied, setCopied] = useState(false);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
 
   const text = messageCopyText(message);
   const actions: Array<{
@@ -121,28 +135,23 @@ function MessageActionBar({
   }> = [
     {
       id: "copy",
-      label: copied ? "コピー済み" : "コピー",
-      icon: copied ? Check : Copy,
+      label: copyState === "failed" ? "コピー失敗" : copyState === "copied" ? "コピー済み" : "コピー",
+      icon: copyState === "failed" ? AlertTriangle : copyState === "copied" ? Check : Copy,
       run: async () => {
         if (!text) return;
-        await writeClipboardText(text);
-        setCopied(true);
-        window.setTimeout(() => setCopied(false), 1200);
+        try {
+          await writeClipboardText(text);
+          setCopyState("copied");
+        } catch {
+          setCopyState("failed");
+        }
+        window.setTimeout(() => setCopyState("idle"), 1800);
       },
     },
   ];
 
-  if (message.role === "user" && onEdit && text) {
-    actions.push({
-      id: "edit",
-      label: "編集",
-      icon: Pencil,
-      run: () => onEdit(text),
-    });
-  }
-
   return (
-    <div className="rumi-message-actions mt-1.5 flex min-h-6 items-center justify-start gap-1 opacity-60 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100">
+    <div className="rumi-message-actions mt-1.5 flex min-h-6 items-center justify-start gap-1 opacity-80 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100">
       {actions.map((action) => {
         const Icon = action.icon;
         return (
@@ -156,7 +165,13 @@ function MessageActionBar({
             }}
             className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-zinc-800/85 hover:text-zinc-100 focus-visible:bg-zinc-800/85 focus-visible:text-zinc-100 focus-visible:outline-none"
           >
-            <Icon size={14} />
+            <Icon
+              size={14}
+              className={cn(
+                copyState === "copied" && "rumi-copy-icon-pop text-emerald-300",
+                copyState === "failed" && "rumi-copy-icon-pop text-red-300",
+              )}
+            />
           </button>
         );
       })}
@@ -320,7 +335,6 @@ export function ChatMessagesRenderer({
   unknownBlockStrategy,
   showActivityInMessages,
   showWidgets,
-  onSuggestionClick,
 }: ChatMessagesRendererProps) {
   return (
     <>
@@ -351,9 +365,8 @@ export function ChatMessagesRenderer({
 
                   <div className={cn("flex max-w-full flex-col", message.role === "user" ? "items-start" : "w-full items-start")}>
                     <div
-                      tabIndex={0}
                       className={cn(
-                        "relative rounded-2xl max-w-full sm:px-4 px-3 py-3 text-[14px] outline-none select-text",
+                        "rumi-message-bubble relative rounded-2xl max-w-full sm:px-4 px-3 py-3 text-[14px] outline-none select-text",
                         message.role === "user"
                           ? "bg-zinc-800/80 text-zinc-100 rounded-tr-sm shadow-sm border border-zinc-700/50"
                           : "w-full text-zinc-200 bg-transparent",
@@ -372,7 +385,7 @@ export function ChatMessagesRenderer({
                         </details>
                       )}
 
-                      <div className="markdown-body select-text leading-relaxed break-words space-y-4">
+                      <div className="rumi-message-content markdown-body select-text leading-relaxed break-words space-y-4">
                         {message.content.length > 0 && (messageVisibleText(message) || message.content.some((block) => String(block.type ?? "text") !== "text"))
                           ? message.content.map((block, index) => (
                               <MessageBlock key={`${message.id}-${index}`} block={block} unknownStrategy={unknownBlockStrategy} />
@@ -390,7 +403,7 @@ export function ChatMessagesRenderer({
                       {showWidgets && message.widget && <WidgetCard widget={message.widget} />}
                     </div>
 
-                    <MessageActionBar message={message} onEdit={onSuggestionClick} />
+                    <MessageActionBar message={message} />
                   </div>
                 </div>
               </div>

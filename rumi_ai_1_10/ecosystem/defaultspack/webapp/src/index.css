@@ -162,20 +162,52 @@ body {
 
 .rumi-message-row {
   animation: rumi-message-enter 280ms cubic-bezier(0.2, 0.82, 0.2, 1) both;
-  user-select: text;
-  -webkit-user-select: text;
+}
+
+.rumi-message-row,
+.rumi-message-bubble,
+.rumi-message-content {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  cursor: text;
 }
 
 .rumi-message-row .markdown-body,
-.rumi-message-row .markdown-body * {
-  user-select: text;
-  -webkit-user-select: text;
+.rumi-message-row .markdown-body *,
+.rumi-message-row p,
+.rumi-message-row li,
+.rumi-message-row pre,
+.rumi-message-row code {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+.rumi-message-row ::selection,
+.rumi-composer-textarea::selection {
+  background: rgba(37, 99, 235, 0.78);
+  color: #ffffff;
+}
+
+.rumi-message-row ::-moz-selection,
+.rumi-composer-textarea::-moz-selection {
+  background: rgba(37, 99, 235, 0.78);
+  color: #ffffff;
 }
 
 .rumi-message-actions,
 .rumi-message-actions * {
   user-select: none;
   -webkit-user-select: none;
+}
+
+.rumi-composer-textarea {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  cursor: text;
+}
+
+.rumi-copy-icon-pop {
+  animation: rumi-copy-icon-pop 720ms cubic-bezier(0.2, 0.82, 0.2, 1) both;
 }
 
 .rumi-tool-activity summary::-webkit-details-marker {
@@ -279,6 +311,21 @@ body {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes rumi-copy-icon-pop {
+  0% {
+    opacity: 0.4;
+    transform: translateY(1px) scale(0.75) rotate(-10deg);
+  }
+  38% {
+    opacity: 1;
+    transform: translateY(-1px) scale(1.24) rotate(0deg);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1) rotate(0deg);
   }
 }
 

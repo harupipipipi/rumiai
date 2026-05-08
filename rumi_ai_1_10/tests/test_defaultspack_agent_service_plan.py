@@ -852,6 +852,97 @@ def test_chat_tool_loop_replays_openai_tool_call_messages():
     assert seen_messages[1][-1]["tool_call_id"] == "call_1"
 
 
+def test_chat_tool_loop_passes_execution_context_to_tool_invoke():
+    import blocks.chat.send as send
+
+    calls = {"ai": 0}
+    captured_tool_payload = {}
+
+    def call_handler(name, payload):
+        if name == "defaults.ai.complete":
+            calls["ai"] += 1
+            if calls["ai"] == 1:
+                return {
+                    "status": "ok",
+                    "data": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "call_1",
+                                "name": "browser_use",
+                                "input": "{\"action\":\"screenshot\"}",
+                            }
+                        ],
+                        "finish_reason": "tool_calls",
+                    },
+                }
+            return {
+                "status": "ok",
+                "data": {
+                    "content": [{"type": "text", "text": "done"}],
+                    "finish_reason": "stop",
+                },
+            }
+        if name == "defaults.tool.invoke":
+            captured_tool_payload.update(payload)
+            return {"status": "ok", "data": {"result": "screenshot ready"}}
+        raise AssertionError(name)
+
+    send._complete_with_tools(
+        "google/gemma-4-31b-it",
+        [{"role": "user", "content": "look at the screen"}],
+        [{"type": "function", "function": {"name": "browser_use", "parameters": {"type": "object"}}}],
+        {
+            "conversation_id": "c1",
+            "conversation_workspace_dir": "/tmp/rumi-c1",
+            "profile_policy": {"selected_tools": ["browser_use"]},
+        },
+        call_handler,
+        {"max_tool_calls": 2},
+    )
+
+    assert captured_tool_payload["tool_name"] == "browser_use"
+    assert captured_tool_payload["context"]["conversation_id"] == "c1"
+    assert captured_tool_payload["context"]["conversation_workspace_dir"] == "/tmp/rumi-c1"
+    assert captured_tool_payload["context"]["capability_graph"]["tool_name"] == "browser_use"
+
+
+def test_tool_invoke_merges_payload_context(monkeypatch):
+    import blocks.tool.invoke as invoke
+
+    captured = {}
+
+    class DummyChecker:
+        def decide(self, tool_name, context=None, arguments=None, tool_def=None):
+            captured["permission_context"] = context
+            return {"allowed": True, "action": "allow", "matched_by": "test"}
+
+    class DummyExecutor:
+        def execute(self, tool_name, arguments, context):
+            captured["executor_context"] = context
+            return {"result": "ok", "is_error": False, "widget": None}
+
+    monkeypatch.setattr(invoke, "PermissionChecker", lambda registry=None: DummyChecker())
+    monkeypatch.setattr(invoke, "ToolExecutor", lambda: DummyExecutor())
+
+    result = invoke.run(
+        {
+            "tool_name": "calculator",
+            "arguments": {"expression": "2+2"},
+            "context": {
+                "conversation_id": "c1",
+                "conversation_workspace_dir": "/tmp/rumi-c1",
+            },
+        },
+        {"request_id": "outer"},
+    )
+
+    assert result["status"] == "ok"
+    assert captured["permission_context"]["conversation_id"] == "c1"
+    assert captured["permission_context"]["request_id"] == "outer"
+    assert captured["executor_context"]["conversation_workspace_dir"] == "/tmp/rumi-c1"
+
+
 def test_browser_screenshot_tool_result_adds_image_for_vision_models():
     import blocks.chat.send as send
 
@@ -1298,10 +1389,33 @@ def test_fallback_routes_expose_agent_service_and_coding_surfaces():
     assert ("POST", "/api/research/reddit-search", "blocks.research.reddit_search") in routes
     assert ("POST", "/api/tools/browser-computer", "blocks.tool.browser_computer") in routes
     assert ("GET", "/api/ai/profiles", "blocks.ai.profiles") in routes
+    assert ("POST", "/api/ui/clipboard", "blocks.ui.clipboard") in routes
     assert ("GET", "/api/agent/schedules", "blocks.agent.scheduler.list") in routes
     assert ("GET", "/api/agent/org/roles", "blocks.agent.org.list_roles") in routes
     assert ("GET", "/api/chat/channels", "blocks.chat.channel.list") in routes
     assert ("POST", "/api/share", "blocks.share.create") in routes
+
+
+def test_ui_clipboard_write_uses_local_clipboard(monkeypatch):
+    from blocks.ui import clipboard
+
+    written = []
+    monkeypatch.setattr(clipboard, "write_clipboard", lambda content: written.append(content) or True)
+
+    result = clipboard.run(
+        {"content": "hello", "_headers": {"Origin": "http://127.0.0.1:8767"}},
+        {},
+    )
+    denied = clipboard.run(
+        {"content": "nope", "_headers": {"Origin": "https://example.com"}},
+        {},
+    )
+
+    assert result["status"] == "ok"
+    assert result["data"]["written"] is True
+    assert written == ["hello"]
+    assert denied["status"] == "error"
+    assert denied["_http_status"] == 403
 
 
 def test_transport_direct_routes_json_has_interface_registry_parity():
@@ -1395,6 +1509,29 @@ def test_browser_computer_controller_gates_desktop_actions():
     assert approval["requires_approval"] is True
     assert approval["approval_token"]
     assert controller.run("computer.click", {"x": 1, "y": 2, "approved": True})["requires_approval"] is True
+
+
+def test_browser_computer_screenshot_is_read_only_without_approval(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    png_header = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR"
+    png_body = png_header + b"\x00\x00\x02\x80\x00\x00\x01\x90"
+
+    def fake_run(command, **kwargs):
+        Path(command[-1]).write_bytes(png_body)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+    monkeypatch.setattr(BrowserComputerController, "_model_screenshot_copy", lambda self, path: path)
+
+    result = BrowserComputerController(artifact_root=tmp_path).run("computer.screenshot")
+
+    assert result["action"] == "computer.screenshot"
+    assert result.get("requires_approval") is not True
+    assert result["data_url"].startswith("data:image/png;base64,")
+    assert Path(result["path"]).exists()
 
 
 def test_browser_use_maps_cursor_move_to_browser_computer_payload():

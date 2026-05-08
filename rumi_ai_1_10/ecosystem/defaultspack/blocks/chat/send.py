@@ -483,7 +483,11 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
             if call_handler is not None:
                 result = call_handler(
                     "defaults.tool.invoke",
-                    {"tool_name": tool_name, "arguments": arguments},
+                    {
+                        "tool_name": tool_name,
+                        "arguments": arguments,
+                        "context": invoke_context,
+                    },
                 )
             else:
                 from domain.tool.executor import ToolExecutor

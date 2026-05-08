@@ -681,6 +681,13 @@ export const api = {
     });
   },
 
+  writeClipboard(content: string) {
+    return request<{ written: boolean }>("/api/ui/clipboard", {
+      method: "POST",
+      body: JSON.stringify({ content }),
+    });
+  },
+
   saveProviderApiKey(providerId: string, value: string, options?: { apiId?: string; name?: string }) {
     return request<{ provider_id: string; api_id?: string; name?: string; configured: boolean }>("/api/ai/provider-key", {
       method: "POST",
