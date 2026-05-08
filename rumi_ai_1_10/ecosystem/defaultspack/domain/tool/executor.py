@@ -720,6 +720,7 @@ def _browser_computer_action_payload(tool_name, arguments):
         action = action_map.get(raw_action, raw_action)
         for key in (
             "url",
+            "url_contains",
             "x",
             "y",
             "text",
@@ -730,6 +731,12 @@ def _browser_computer_action_payload(tool_name, arguments):
             "target",
             "app",
             "title",
+            "title_contains",
+            "window",
+            "window_index",
+            "tab_index",
+            "button",
+            "include_screenshot",
             "coordinate_space",
             "physical",
             "focus",
@@ -758,6 +765,8 @@ def _browser_computer_action_payload(tool_name, arguments):
         }
         action = action_map.get(raw_action, raw_action)
         for key in (
+            "url",
+            "url_contains",
             "x",
             "y",
             "text",
@@ -768,6 +777,12 @@ def _browser_computer_action_payload(tool_name, arguments):
             "target",
             "app",
             "title",
+            "title_contains",
+            "window",
+            "window_index",
+            "tab_index",
+            "button",
+            "include_screenshot",
             "coordinate_space",
             "physical",
             "focus",
@@ -793,6 +808,13 @@ def _computer_use_payload_with_context_defaults(action, payload, context):
     payload = dict(payload or {})
     if not isinstance(context, dict):
         return payload
+    if action.startswith("computer.") and action != "computer.windows":
+        target_app = context.get("computer_use_target_app")
+        target_title = context.get("computer_use_target_title")
+        if isinstance(target_app, str) and target_app.strip():
+            payload.setdefault("app", target_app.strip())
+        if isinstance(target_title, str) and target_title.strip():
+            payload.setdefault("title", target_title.strip())
     if context.get("computer_use_allow_foreground_fallback") is True:
         payload.setdefault("allow_foreground_fallback", True)
         payload.setdefault("allow_user_input_overlap", True)
@@ -801,6 +823,12 @@ def _computer_use_payload_with_context_defaults(action, payload, context):
         payload.setdefault("driver", "auto")
     if context.get("computer_use_background_required") is True:
         payload.setdefault("allow_foreground_fallback", False)
+    if (
+        context.get("user_requested_computer_use") is True
+        and action == "computer.click"
+        and context.get("computer_use_background_required") is not True
+    ):
+        payload.setdefault("physical", True)
     return payload
 
 

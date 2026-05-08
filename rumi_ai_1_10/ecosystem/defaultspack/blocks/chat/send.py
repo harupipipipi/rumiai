@@ -37,7 +37,7 @@ _SECRET_KEY_RE = re.compile(
 _PROMPT_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _COMPUTER_USE_REQUEST_RE = re.compile(
     r"compute[\s_-]*use|compu?ter[\s_-]*use|computer\s+ツール|コンピューター操作|pc操作|"
-    r"(google\s*chrome|chrome|chatgpt|vivaldi|vivladi|line|ブラウザ|browser).{0,24}(操作|送信|入力|クリック|開いて|開く)",
+    r"(google\s*chrome|chrome|chatgpt|vivaldi|vivladi|line|ブラウザ|browser).{0,80}(操作|送信|入力|クリック|開いて|開く)",
     re.IGNORECASE,
 )
 _COMPUTER_USE_BACKGROUND_RE = re.compile(
@@ -51,6 +51,9 @@ _COMPUTER_USE_FOREGROUND_FALLBACK_RE = re.compile(
     r"無理な場合.{0,24}(ok|OK|いい)|foreground\s*fallback|allow\s*foreground|overlap\s*ok|fallback",
     re.IGNORECASE,
 )
+_COMPUTER_USE_CHROME_TARGET_RE = re.compile(r"google\s*chrome|chrome|グーグル\s*クローム|クローム", re.IGNORECASE)
+_COMPUTER_USE_LINE_TARGET_RE = re.compile(r"(?<![A-Za-z])line(?![A-Za-z])|ライン", re.IGNORECASE)
+_COMPUTER_USE_CHATGPT_TARGET_RE = re.compile(r"chat\s*gpt|chatgpt", re.IGNORECASE)
 
 
 def _stub_response():
@@ -220,18 +223,25 @@ def _computer_use_preferences_from_text(user_text):
     text = user_text if isinstance(user_text, str) else ""
     background_preferred = bool(_COMPUTER_USE_BACKGROUND_RE.search(text))
     allow_foreground = bool(_COMPUTER_USE_FOREGROUND_FALLBACK_RE.search(text))
-    return {
+    preferences = {
         "computer_use_background_preferred": background_preferred,
         "computer_use_allow_foreground_fallback": allow_foreground,
         "computer_use_background_required": background_preferred and not allow_foreground,
     }
+    if _COMPUTER_USE_CHROME_TARGET_RE.search(text):
+        preferences["computer_use_target_app"] = "Google Chrome"
+    if _COMPUTER_USE_LINE_TARGET_RE.search(text):
+        preferences["computer_use_target_title"] = "LINE"
+    elif _COMPUTER_USE_CHATGPT_TARGET_RE.search(text):
+        preferences["computer_use_target_title"] = "ChatGPT"
+    return preferences
 
 
 def _apply_computer_use_context_preferences(context, user_text):
     updated = dict(context or {})
     preferences = _computer_use_preferences_from_text(user_text)
     for key, value in preferences.items():
-        if value:
+        if value not in (None, "", False):
             updated[key] = value
     return updated
 

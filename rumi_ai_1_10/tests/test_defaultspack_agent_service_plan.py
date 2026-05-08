@@ -2516,6 +2516,7 @@ def test_browser_computer_screenshot_is_read_only_without_approval(tmp_path, mon
     monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
     monkeypatch.setattr(BrowserComputerController, "_model_screenshot_copy", lambda self, path: path)
+    monkeypatch.setattr(BrowserComputerController, "_cursor_position", staticmethod(lambda: None))
 
     result = BrowserComputerController(artifact_root=tmp_path).run("computer.screenshot")
 
@@ -2567,6 +2568,141 @@ def test_browser_computer_screenshot_uses_window_id_for_selected_macos_window(tm
     assert result["action"] == "computer.screenshot"
     assert calls[0][:4] == ["screencapture", "-x", "-l", "12345"]
     assert result["target_window"]["window_id"] == 12345
+
+
+def test_browser_computer_screenshot_resolves_app_filter_without_prior_select(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    png_header = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR"
+    png_body = png_header + b"\x00\x00\x02\x80\x00\x00\x01\x90"
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if command[0] == "screencapture":
+            Path(command[-1]).write_bytes(png_body)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+    monkeypatch.setattr(BrowserComputerController, "_model_screenshot_copy", lambda self, path: path)
+    monkeypatch.setattr(BrowserComputerController, "_cursor_position", staticmethod(lambda: None))
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._list_windows = lambda: [
+        {"app": "Codex", "title": "RumiDP", "x": 0, "y": 0, "width": 1470, "height": 900, "active": True, "window_id": 111},
+        {"app": "Google Chrome", "title": "LINE Chat", "x": 40, "y": 70, "width": 1200, "height": 780, "active": False, "window_id": 222},
+    ]
+    controller._active_window = lambda: {"app": "Codex", "title": "RumiDP", "x": 0, "y": 0, "width": 1470, "height": 900}
+    controller._chrome_tabs = lambda: []
+
+    result = controller.run("computer.screenshot", {"app": "Google Chrome", "title": "LINE"}, yolo_mode=True)
+
+    assert result["action"] == "computer.screenshot"
+    assert calls[0][:4] == ["screencapture", "-x", "-l", "222"]
+    assert result["target_window"]["app"] == "Google Chrome"
+    assert result["target_window"]["title"] == "LINE Chat"
+    assert controller._computer_state()["target_window"]["window_id"] == 222
+
+
+def test_browser_computer_screenshot_missing_app_filter_refuses_front_desktop(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._list_windows = lambda: [
+        {"app": "Codex", "title": "RumiDP", "x": 0, "y": 0, "width": 1470, "height": 900, "active": True, "window_id": 111},
+    ]
+
+    result = controller.run("computer.screenshot", {"app": "Google Chrome", "title": "LINE"}, yolo_mode=True)
+
+    assert result["supported"] is False
+    assert "No visible window matched" in result["reason"]
+    assert result["target_filter"] == {"app": "Google Chrome", "title": "LINE"}
+    assert not [command for command in calls if command and command[0] == "screencapture"]
+
+
+def test_browser_computer_screenshot_activates_hidden_chrome_tab_when_fallback_allowed(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    png_header = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR"
+    png_body = png_header + b"\x00\x00\x02\x80\x00\x00\x01\x90"
+    calls = []
+    window_calls = {"count": 0}
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if command[0] == "screencapture":
+            Path(command[-1]).write_bytes(png_body)
+        return subprocess.CompletedProcess(command, 0)
+
+    def fake_windows():
+        window_calls["count"] += 1
+        if window_calls["count"] == 1:
+            return [{"app": "Codex", "title": "RumiDP", "x": 0, "y": 0, "width": 1470, "height": 900, "active": True}]
+        return [
+            {"app": "Google Chrome", "title": "LINE Chat", "x": 40, "y": 70, "width": 1200, "height": 780, "active": True, "window_id": 333},
+        ]
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+    monkeypatch.setattr(BrowserComputerController, "_model_screenshot_copy", lambda self, path: path)
+    monkeypatch.setattr(BrowserComputerController, "_cursor_position", staticmethod(lambda: None))
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._list_windows = fake_windows
+    controller._chrome_tabs = lambda: [
+        {"app": "Google Chrome", "window_index": 1, "tab_index": 2, "active": True, "title": "LINE Chat", "url": "https://chat.line.biz/chat"}
+    ]
+    controller._activate_chrome_target = lambda payload: True
+    controller._active_window = lambda: None
+
+    result = controller.run(
+        "computer.screenshot",
+        {"app": "Google Chrome", "title": "LINE", "allow_foreground_fallback": True},
+        yolo_mode=True,
+    )
+
+    assert result["action"] == "computer.screenshot"
+    assert calls[0][:4] == ["screencapture", "-x", "-l", "333"]
+    assert result["target_window"]["title"] == "LINE Chat"
+
+
+def test_browser_computer_screenshot_hidden_chrome_tab_reports_fallback_needed(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._list_windows = lambda: [
+        {"app": "Codex", "title": "RumiDP", "x": 0, "y": 0, "width": 1470, "height": 900, "active": True},
+    ]
+    controller._chrome_tabs = lambda: [
+        {"app": "Google Chrome", "window_index": 1, "tab_index": 2, "active": True, "title": "LINE Chat", "url": "https://chat.line.biz/chat"}
+    ]
+
+    result = controller.run("computer.screenshot", {"app": "Google Chrome", "title": "LINE"}, yolo_mode=True)
+
+    assert result["supported"] is False
+    assert result["background_target_only"] is True
+    assert result["chrome_target"]["tab_index"] == 2
+    assert result["recovery"]["kind"] == "foreground_fallback"
 
 
 def test_browser_use_maps_cursor_move_to_browser_computer_payload():
@@ -2636,6 +2772,24 @@ def test_computer_use_context_defaults_enable_background_then_foreground_fallbac
     assert payload["allow_user_input_overlap"] is True
 
 
+def test_computer_use_context_defaults_add_target_and_physical_click():
+    from domain.tool.executor import _computer_use_payload_with_context_defaults
+
+    payload = _computer_use_payload_with_context_defaults(
+        "computer.click",
+        {"x": 20, "y": 30},
+        {
+            "user_requested_computer_use": True,
+            "computer_use_target_app": "Google Chrome",
+            "computer_use_target_title": "LINE",
+        },
+    )
+
+    assert payload["app"] == "Google Chrome"
+    assert payload["title"] == "LINE"
+    assert payload["physical"] is True
+
+
 def test_chat_text_sets_computer_use_foreground_fallback_preferences():
     import blocks.chat.send as send
 
@@ -2646,6 +2800,17 @@ def test_chat_text_sets_computer_use_foreground_fallback_preferences():
     assert prefs["computer_use_background_preferred"] is True
     assert prefs["computer_use_allow_foreground_fallback"] is True
     assert prefs["computer_use_background_required"] is False
+
+
+def test_chat_text_sets_computer_use_chrome_line_target_preferences():
+    import blocks.chat.send as send
+
+    prefs = send._computer_use_preferences_from_text(
+        "google chromeでLINEのチャット画面を開いてるのでメッセージを送って"
+    )
+
+    assert prefs["computer_use_target_app"] == "Google Chrome"
+    assert prefs["computer_use_target_title"] == "LINE"
 
 
 def test_user_requested_computer_use_preapproves_interactive_actions(monkeypatch):

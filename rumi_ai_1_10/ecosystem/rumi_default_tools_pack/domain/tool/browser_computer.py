@@ -294,12 +294,16 @@ return "window_index=" & targetWindowIndex & tabChar & "tab_index=" & targetTabI
         capture = self._capture_screenshot(path, payload)
         system = capture.get("platform", platform.system())
         if not capture.get("supported", True):
-            return {
+            result = {
                 "action": "computer.screenshot",
                 "supported": False,
                 "platform": system,
-                "reason": "Screenshots are supported on macOS and Windows.",
+                "reason": capture.get("reason") or "Screenshots are supported on macOS and Windows.",
             }
+            for key in ("target_filter", "chrome_target", "recovery", "background_target_only"):
+                if capture.get(key) is not None:
+                    result[key] = capture.get(key)
+            return result
         model_path = self._model_screenshot_copy(path)
         data_url = self._image_data_url(model_path)
         result = self._screenshot_result(path, model_path, system, capture_target=capture.get("target_window"))
@@ -406,7 +410,7 @@ return "window_index=" & targetWindowIndex & tabChar & "tab_index=" & targetTabI
             "chrome_tabs": chrome_tabs,
             "chrome_background_control": self._chrome_background_control(chrome_tabs) if system == "Darwin" else None,
             "notes": [
-                "Use computer.select_window with app/title and focus=false before window-scoped screenshots.",
+                "Use computer.screenshot with app/title, or computer.select_window with app/title and focus=false, before window-scoped screenshots.",
                 "computer.move and computer.click use a virtual AI cursor unless physical=true is explicitly provided.",
                 "If Google Chrome tabs are listed but no Chrome window appears in windows, Chrome is open outside the visible app-window context; target it by chrome_target/url_contains for background-capable actions.",
                 "chrome_background_control only describes Chrome DOM entry through Apple Events; screenshots, windows, and the virtual AI cursor are still normal computer-use capabilities.",
@@ -1161,6 +1165,40 @@ end tell
     def _capture_screenshot(self, path: Path, payload: dict[str, Any]) -> dict[str, Any]:
         system = platform.system()
         target = self._capture_target(payload)
+        chrome_target = None
+        if target is None and self._has_window_filter(payload) and self._payload_targets_chrome(payload):
+            chrome_target = self._select_chrome_tab(payload)
+            if chrome_target and self._allow_foreground_fallback(payload):
+                if self._activate_chrome_target(payload):
+                    time.sleep(0.25)
+                    target = self._capture_target(payload)
+        explicit_desktop = str(payload.get("target") or payload.get("capture_target") or "").strip().lower() in {
+            "primary_display",
+            "all_displays",
+            "screen",
+            "display",
+            "desktop",
+        }
+        if target is None and self._has_window_filter(payload) and not explicit_desktop:
+            reason = "No visible window matched the requested app/title; refusing to capture the front desktop because it would mislead the model."
+            recovery = None
+            if chrome_target:
+                reason = (
+                    "A matching Google Chrome tab was found, but no visible Chrome window was available for a window-scoped screenshot. "
+                    "Allow foreground fallback to activate the existing Chrome tab, or use background DOM entry when Chrome permits it."
+                )
+                recovery = {
+                    "kind": "foreground_fallback",
+                    "note": "Set allow_foreground_fallback=true or input_overlap_ok=true when the user permits switching to the existing app.",
+                }
+            return {
+                "platform": system,
+                "supported": False,
+                "reason": reason,
+                "target_filter": self._window_filter(payload),
+                **({"chrome_target": chrome_target, "background_target_only": True} if chrome_target else {}),
+                **({"recovery": recovery} if recovery else {}),
+            }
         if system == "Darwin":
             if target:
                 window_id = target.get("window_id")
@@ -1192,12 +1230,44 @@ end tell
         if isinstance(payload.get("window"), dict):
             selected = self._normalize_window_record(payload.get("window"))
             return selected if self._is_usable_target_window(selected) else None
+        if self._has_window_filter(payload):
+            selected = self._matching_window(payload)
+            if selected is not None:
+                state = self._computer_state()
+                state["target_window"] = selected
+                self._write_computer_state(state)
+                return selected
+            return None
         selected = self._computer_state().get("target_window")
         if target in {"selected_window", "window", "app"} or (not target and isinstance(selected, dict)):
             selected = self._normalize_window_record(selected)
             if self._is_usable_target_window(selected):
                 return selected
             self._clear_target_window()
+        return None
+
+    @staticmethod
+    def _window_filter(payload: dict[str, Any] | None = None) -> dict[str, str]:
+        payload = payload or {}
+        app = str(payload.get("app") or payload.get("application") or "").strip()
+        title = str(payload.get("title") or payload.get("title_contains") or "").strip()
+        return {"app": app, "title": title}
+
+    def _has_window_filter(self, payload: dict[str, Any] | None = None) -> bool:
+        filters = self._window_filter(payload)
+        return bool(filters.get("app") or filters.get("title"))
+
+    def _matching_window(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        filters = self._window_filter(payload)
+        app = filters.get("app", "").lower()
+        title = filters.get("title", "").lower()
+        selected = self._normalize_window_record(self._computer_state().get("target_window"))
+        if selected and self._is_usable_target_window(selected) and self._window_matches_filter(selected, app=app, title=title):
+            return selected
+        for item in self._list_windows():
+            window = self._normalize_window_record(item)
+            if window and self._is_usable_target_window(window) and self._window_matches_filter(window, app=app, title=title):
+                return window
         return None
 
     def _resolve_action_point(self, payload: dict[str, Any], *, infer_window: bool = False) -> tuple[dict[str, Any], dict[str, Any] | None]:
@@ -1508,11 +1578,34 @@ print(json.dumps(windows))
         return normalized
 
     def _focus_window(self, window: dict[str, Any]) -> None:
-        app = str(window.get("app") or "").replace('"', '\\"')
+        raw_app = str(window.get("app") or "")
+        raw_title = str(window.get("title") or "")
+        if platform.system() == "Darwin" and "chrome" in raw_app.lower() and raw_title:
+            if self._activate_chrome_target({"app": raw_app, "title_contains": raw_title}):
+                return
+        app = raw_app.replace('"', '\\"')
         if not app:
             return
         if platform.system() == "Darwin":
-            script = f'tell application "System Events" to set frontmost of first application process whose name is "{app}" to true'
+            script = """
+tell application "System Events"
+  set appName to %s
+  set titleNeedle to %s
+  tell application process appName
+    set frontmost to true
+    if titleNeedle is not "" then
+      repeat with candidateWindow in windows
+        try
+          if (name of candidateWindow) contains titleNeedle then
+            perform action "AXRaise" of candidateWindow
+            exit repeat
+          end if
+        end try
+      end repeat
+    end if
+  end tell
+end tell
+""" % (json.dumps(raw_app), json.dumps(raw_title))
             try:
                 subprocess.run(["osascript", "-e", script], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             except Exception:
