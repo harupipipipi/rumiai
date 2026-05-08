@@ -87,11 +87,12 @@ class BrowserComputerController:
             subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             opened_with_managed_profile = True
         else:
-            webbrowser.open(url)
+            self._open_in_existing_browser(url)
         sessions = self._read_sessions()
         sessions["last_url"] = url
         sessions["active_profile_id"] = profile_id
         sessions["last_opened_with_managed_profile"] = opened_with_managed_profile
+        sessions["last_opened_background"] = not opened_with_managed_profile
         sessions["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self._write_sessions(sessions)
         return {
@@ -103,6 +104,32 @@ class BrowserComputerController:
             "managed_profile": opened_with_managed_profile,
             "launch": launch_plan,
         }
+
+    @staticmethod
+    def _open_in_existing_browser(url: str) -> None:
+        if platform.system() == "Darwin":
+            try:
+                script = """
+tell application "System Events"
+  set previousFrontApp to name of first application process whose frontmost is true
+end tell
+tell application "Google Chrome"
+  if (count of windows) is 0 then
+    make new window
+  end if
+  set targetWindow to window 1
+  set newTab to make new tab at end of tabs of targetWindow with properties {URL:%s}
+  set active tab index of targetWindow to (count of tabs of targetWindow)
+end tell
+try
+  tell application "System Events" to set frontmost of first application process whose name is previousFrontApp to true
+end try
+""" % json.dumps(url)
+                subprocess.run(["osascript", "-e", script], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return
+            except Exception:
+                pass
+        webbrowser.open(url)
 
     def _create_profile(self, payload: dict[str, Any]) -> dict[str, Any]:
         profile_id = self._profile_id(payload.get("profile_id") or payload.get("name") or f"profile-{int(time.time())}")
@@ -513,6 +540,15 @@ class BrowserComputerController:
             if click_marker:
                 result["marker"] = click_marker
             return result
+        if system == "Darwin" and action == "computer.type" and self._should_type_in_chrome_background(action_payload):
+            if self._darwin_type_in_chrome_background(str(action_payload.get("text") or "")):
+                return {
+                    "action": action,
+                    "executed": True,
+                    "platform": system,
+                    "background": True,
+                    "target_app": "Google Chrome",
+                }
         if system == "Darwin" and action == "computer.move":
             self._darwin_move_cursor(action_payload)
         elif system == "Darwin" and action == "computer.click":
@@ -540,6 +576,65 @@ class BrowserComputerController:
             screenshot = self._capture_action_result_screenshot(action_payload, click_marker)
             result.update(screenshot)
         return result
+
+    def _should_type_in_chrome_background(self, payload: dict[str, Any]) -> bool:
+        if payload.get("background") is True:
+            return True
+        app = str(payload.get("app") or payload.get("target") or "").lower()
+        if "chrome" in app:
+            return True
+        sessions = self._read_sessions()
+        return bool(
+            sessions.get("last_opened_background")
+            and "chatgpt" in str(sessions.get("last_url") or "").lower()
+        )
+
+    @staticmethod
+    def _darwin_type_in_chrome_background(text: str) -> bool:
+        if not text:
+            return True
+        js = r"""
+(function() {
+  const text = %s;
+  const candidates = [
+    document.querySelector('#prompt-textarea'),
+    document.querySelector('[data-testid="composer-root"] textarea'),
+    document.querySelector('textarea'),
+    document.querySelector('[contenteditable="true"]')
+  ].filter(Boolean);
+  const el = candidates.find((node) => {
+    const rect = node.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }) || candidates[0];
+  if (!el) return 'composer_not_found';
+  el.focus();
+  if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
+    el.value = text;
+  } else {
+    el.textContent = text;
+  }
+  el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+  return 'typed';
+})();
+""" % json.dumps(text)
+        script = """
+tell application "Google Chrome"
+  if (count of windows) is 0 then return "no_window"
+  set resultText to execute active tab of window 1 javascript %s
+  return resultText
+end tell
+""" % json.dumps(js)
+        try:
+            completed = subprocess.run(
+                ["osascript", "-e", script],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            return "typed" in (completed.stdout or "")
+        except Exception:
+            return False
 
     def _capture_action_result_screenshot(self, payload: dict[str, Any], marker: dict[str, Any] | None) -> dict[str, Any]:
         self._artifact_root.mkdir(parents=True, exist_ok=True)

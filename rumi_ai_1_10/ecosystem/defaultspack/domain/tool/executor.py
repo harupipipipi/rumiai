@@ -571,10 +571,23 @@ class ToolExecutor:
 
             policy = policy_from_context(context if isinstance(context, dict) else {})
             action, payload = _browser_computer_action_payload(tool_name, arguments)
+            user_requested = bool(isinstance(context, dict) and context.get("user_requested_computer_use"))
+            user_approved_actions = {
+                "browser.open_url",
+                "computer.move",
+                "computer.click",
+                "computer.type",
+                "computer.key",
+                "computer.scroll",
+            }
+            if user_requested and action == "browser.open_url" and not any(
+                key in payload for key in ("persistent", "profile_id", "session_id")
+            ):
+                payload["persistent"] = False
             result = BrowserComputerController(artifact_root=_conversation_tool_artifact_root(context)).run(
                 action,
                 payload,
-                yolo_mode=bool(policy.get("yolo_mode")),
+                yolo_mode=bool(policy.get("yolo_mode")) or (user_requested and action in user_approved_actions),
             )
             summary = "{} {} completed".format(tool_name, result.get("action", "action"))
             if result.get("path"):

@@ -522,6 +522,7 @@ def test_chat_stream_infers_computer_tools_before_stream_decision(tmp_path, monk
 
     def fake_fallback_send(input_data, context):
         captured["tools"] = input_data.get("tools")
+        captured["user_requested_computer_use"] = context.get("user_requested_computer_use")
         yield {"type": "message", "message": {"role": "assistant", "raw_text": "ok"}}
         yield {"type": "done", "message": {"role": "assistant", "raw_text": "ok"}}
 
@@ -534,6 +535,40 @@ def test_chat_stream_infers_computer_tools_before_stream_decision(tmp_path, monk
             "conversation_id": conversation["id"],
             "message": {"role": "user", "content": "computer useでchromeを開いて"},
             "tools": [],
+        },
+        {},
+    )
+
+    events = list(result["events"])
+    assert events[-1]["type"] == "done"
+    assert captured["tools"] == ["computer_use", "browser_computer"]
+    assert captured["user_requested_computer_use"] is True
+    ChatStore._instance = None
+
+
+def test_chat_stream_infers_computer_tools_when_tools_are_omitted(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    import blocks.chat.stream as stream_module
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    captured = {}
+
+    def fake_fallback_send(input_data, context):
+        captured["tools"] = input_data.get("tools")
+        yield {"type": "message", "message": {"role": "assistant", "raw_text": "ok"}}
+        yield {"type": "done", "message": {"role": "assistant", "raw_text": "ok"}}
+
+    monkeypatch.setattr(stream_module, "_fallback_send", fake_fallback_send)
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="google/gemma-4-31b-it")
+    result = stream_module.run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "Google Chromeを操作してChatGPTを開いて"},
         },
         {},
     )
@@ -1708,6 +1743,87 @@ def test_browser_use_maps_cursor_move_to_browser_computer_payload():
 
     assert action == "computer.move"
     assert payload == {"x": 120, "y": 240, "dry_run": True}
+
+
+def test_user_requested_computer_use_preapproves_interactive_actions(monkeypatch):
+    from domain.tool.executor import ToolExecutor
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    captured = {}
+
+    def fake_run(self, action, payload=None, *, yolo_mode=False):
+        captured["action"] = action
+        captured["payload"] = payload
+        captured["yolo_mode"] = yolo_mode
+        return {"action": action, "executed": True}
+
+    monkeypatch.setattr(BrowserComputerController, "run", fake_run)
+
+    result = ToolExecutor().execute(
+        "browser_computer",
+        {"action": "browser.open_url", "payload": {"url": "https://chatgpt.com"}},
+        {"user_requested_computer_use": True},
+    )
+
+    assert result["is_error"] is False
+    assert captured == {
+        "action": "browser.open_url",
+        "payload": {"url": "https://chatgpt.com", "persistent": False},
+        "yolo_mode": True,
+    }
+
+
+def test_browser_open_url_uses_existing_chrome_without_stealing_focus(monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+
+    controller = BrowserComputerController()
+    result = controller.run(
+        "browser.open_url",
+        {"url": "https://chatgpt.com", "persistent": False},
+        yolo_mode=True,
+    )
+
+    assert result["opened"] is True
+    assert result["managed_profile"] is False
+    assert result["launch"]["mode"] == "default_browser"
+    assert calls[0][0][:2] == ["osascript", "-e"]
+    assert "previousFrontApp" in calls[0][0][2]
+    assert "Google Chrome" in calls[0][0][2]
+
+
+def test_computer_type_can_target_background_chrome(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="typed\n")
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._write_sessions({"last_opened_background": True, "last_url": "https://chatgpt.com"})
+
+    result = controller.run("computer.type", {"text": "hello"}, yolo_mode=True)
+
+    assert result["executed"] is True
+    assert result["background"] is True
+    assert calls[0][0][:2] == ["osascript", "-e"]
+    assert "#prompt-textarea" in calls[0][0][2]
 
 
 def test_computer_move_uses_cliclick_on_macos(monkeypatch):

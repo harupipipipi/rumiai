@@ -37,7 +37,7 @@ _SECRET_KEY_RE = re.compile(
 _PROMPT_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _COMPUTER_USE_REQUEST_RE = re.compile(
     r"compute[\s_-]*use|compu?ter[\s_-]*use|computer\s+ツール|コンピューター操作|pc操作|"
-    r"(vivaldi|vivladi|line|ブラウザ|browser).{0,24}(操作|送信|入力|クリック|開いて|開く)",
+    r"(google\s*chrome|chrome|chatgpt|vivaldi|vivladi|line|ブラウザ|browser).{0,24}(操作|送信|入力|クリック|開いて|開く)",
     re.IGNORECASE,
 )
 
@@ -159,11 +159,13 @@ def _infer_requested_tools_from_message(user_text):
 
 
 def _with_inferred_tools(input_data, inferred_tool_ids):
-    if not inferred_tool_ids or not isinstance(input_data.get("tools"), list):
+    if not inferred_tool_ids:
         return input_data
+    raw_tools = input_data.get("tools")
+    existing_tools = list(raw_tools) if isinstance(raw_tools, list) else []
     merged = []
     seen = set()
-    for item in list(input_data.get("tools") or []) + list(inferred_tool_ids):
+    for item in existing_tools + list(inferred_tool_ids):
         key = item if isinstance(item, str) else id(item)
         if key in seen:
             continue
@@ -494,6 +496,8 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
     if limit is None:
         limit = int(params.get("max_tool_calls", 4) or 4)
     connected_names = connected_tool_names(tools, context.get("runtime_profile") if isinstance(context, dict) else None)
+    if limit == 4 and connected_names.intersection({"browser_computer", "browser_use", "computer_use"}):
+        limit = 12
 
     for step_index in range(max(1, limit + 1)):
         ai_params = {
@@ -774,7 +778,8 @@ def run(input_data, context):
 
     # --- 9b: ナレッジ / メモリ自動検索 & コンテキスト変数実動化 ---
     user_text = extract_user_text(content)
-    input_data = _with_inferred_tools(input_data, _infer_requested_tools_from_message(user_text))
+    inferred_tool_ids = _infer_requested_tools_from_message(user_text)
+    input_data = _with_inferred_tools(input_data, inferred_tool_ids)
     try:
         enrich_info = enrich_messages(
             standard_messages, system_prompt, conversation_id, user_text, manager,
@@ -806,6 +811,8 @@ def run(input_data, context):
             conversation_id=conversation_id,
         )["level"]
     request_context = dict(context or {})
+    if inferred_tool_ids:
+        request_context["user_requested_computer_use"] = True
     request_context["conversation_id"] = conversation_id
     request_context["conversation_workspace_dir"] = str(store.conversation_workspace_dir(conversation_id))
     request_context["model"] = model

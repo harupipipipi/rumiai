@@ -209,7 +209,11 @@ def _stream_response(input_data, context):
     manager = get_manager()
     system_prompt = _conversation_system_prompt(conv, manager)
     user_text = extract_user_text(content)
-    input_data = _with_inferred_tools(input_data, _infer_requested_tools_from_message(user_text))
+    inferred_tool_ids = _infer_requested_tools_from_message(user_text)
+    input_data = _with_inferred_tools(input_data, inferred_tool_ids)
+    if inferred_tool_ids:
+        context = dict(context or {})
+        context["user_requested_computer_use"] = True
     try:
         enrich_messages(standard_messages, system_prompt, conversation_id, user_text, manager)
     except Exception:
@@ -350,7 +354,11 @@ def run(input_data, context):
         return error("message content must not be empty", "INVALID_INPUT")
 
     message_text = extract_user_text(raw_content)
-    input_data = _with_inferred_tools(input_data, _infer_requested_tools_from_message(message_text))
+    inferred_tool_ids = _infer_requested_tools_from_message(message_text)
+    input_data = _with_inferred_tools(input_data, inferred_tool_ids)
+    if inferred_tool_ids:
+        context = dict(context or {})
+        context["user_requested_computer_use"] = True
     tools = input_data.get("tools")
     selected_tools = [item for item in tools if item] if isinstance(tools, list) else []
     client = AIClient()
