@@ -36,16 +36,24 @@ def _is_allowed_image_path(path, roots):
     return None
 
 
-def _candidate_paths(value):
+def _candidate_image_records(value, inherited=None):
+    inherited = dict(inherited or {})
     if isinstance(value, dict):
+        local = dict(inherited)
+        for meta_key in ("click_marker", "marker", "target", "target_window", "image_size", "action"):
+            if meta_key in value:
+                local[meta_key] = value.get(meta_key)
         for key, item in value.items():
             if key in {"path", "model_image_path", "screenshot_path"} and isinstance(item, str):
-                yield item
+                record = dict(local)
+                record["path"] = item
+                record["path_key"] = key
+                yield record
             else:
-                yield from _candidate_paths(item)
+                yield from _candidate_image_records(item, local)
     elif isinstance(value, list):
         for item in value:
-            yield from _candidate_paths(item)
+            yield from _candidate_image_records(item, inherited)
 
 
 def _owner_error(conversation, headers):
@@ -94,8 +102,8 @@ def run(input_data, context):
         tool_name = str(log.get("tool_name") or "")
         if tool_name not in {"browser_computer", "browser_use", "computer_use"}:
             continue
-        for candidate in _candidate_paths(log.get("result")):
-            resolved = _is_allowed_image_path(candidate, roots)
+        for candidate in _candidate_image_records(log.get("result")):
+            resolved = _is_allowed_image_path(candidate.get("path"), roots)
             if resolved is None or str(resolved) in seen:
                 continue
             seen.add(str(resolved))
@@ -104,15 +112,17 @@ def run(input_data, context):
                 mime_type,
                 base64.b64encode(resolved.read_bytes()).decode("ascii"),
             )
-            screenshots.append(
-                {
-                    "id": "screenshot-{}".format(len(screenshots) + 1),
-                    "run_id": run_id,
-                    "tool_call_id": log.get("tool_call_id"),
-                    "tool_name": tool_name,
-                    "mime_type": mime_type,
-                    "data_url": data_url,
-                }
-            )
+            item = {
+                "id": "screenshot-{}".format(len(screenshots) + 1),
+                "run_id": run_id,
+                "tool_call_id": log.get("tool_call_id"),
+                "tool_name": tool_name,
+                "mime_type": mime_type,
+                "data_url": data_url,
+            }
+            for meta_key in ("click_marker", "marker", "target", "target_window", "image_size", "action"):
+                if meta_key in candidate:
+                    item[meta_key] = candidate.get(meta_key)
+            screenshots.append(item)
 
     return ok({"conversation_id": conversation_id, "run_id": run_id, "screenshots": screenshots})

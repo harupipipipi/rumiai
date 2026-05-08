@@ -242,6 +242,7 @@ def test_external_integration_routes_are_registered():
     assert "/api/integrations/line/webhook" in patterns
     assert "/api/integrations/discord/interactions" in patterns
     assert "/api/integrations/secrets" in patterns
+    assert "/api/chat/conversations/{id}/run-results/{run_id}/browser-screenshots" in patterns
     assert "/v1/conversations/{id}/run-results/{run_id}/browser-screenshots" in patterns
 
 
@@ -1168,7 +1169,14 @@ def test_browser_screenshots_endpoint_is_conversation_and_owner_scoped(tmp_path,
                 {
                     "tool_name": "browser_computer",
                     "tool_call_id": "call_1",
-                    "result": {"data": {"path": str(screenshot_path)}},
+                    "result": {
+                        "data": {
+                            "path": str(screenshot_path),
+                            "action": "computer.click",
+                            "click_marker": {"x": 10, "y": 20},
+                            "image_size": {"width": 100, "height": 80},
+                        }
+                    },
                 }
             ],
         },
@@ -1201,6 +1209,8 @@ def test_browser_screenshots_endpoint_is_conversation_and_owner_scoped(tmp_path,
 
     assert ok_result["status"] == "ok"
     assert ok_result["data"]["screenshots"][0]["data_url"].startswith("data:image/png;base64,")
+    assert ok_result["data"]["screenshots"][0]["click_marker"] == {"x": 10, "y": 20}
+    assert ok_result["data"]["screenshots"][0]["image_size"] == {"width": 100, "height": 80}
     assert wrong_conversation["status"] == "error"
     assert wrong_conversation["error"]["code"] == "NOT_FOUND"
     assert wrong_owner["status"] == "error"
@@ -1366,6 +1376,7 @@ def test_sensitive_routes_do_not_use_wildcard_cors():
     assert _is_sensitive_http_path("/api/coding/files/write") is True
     assert _is_sensitive_http_path("/api/integrations/secrets") is True
     assert _is_sensitive_http_path("/v1/conversations/c1/run-results/r1/browser-screenshots") is True
+    assert _is_sensitive_http_path("/api/chat/conversations/c1/run-results/r1/browser-screenshots") is False
     assert _is_sensitive_http_path("/api/coding/files/read") is False
 
 
@@ -1391,9 +1402,36 @@ def test_fallback_routes_expose_agent_service_and_coding_surfaces():
     assert ("GET", "/api/ai/profiles", "blocks.ai.profiles") in routes
     assert ("POST", "/api/ui/clipboard", "blocks.ui.clipboard") in routes
     assert ("GET", "/api/agent/schedules", "blocks.agent.scheduler.list") in routes
+    assert ("GET", "/api/agent/company/manifest", "ecosystem.rumi_operations_company_pack.blocks.agent.company.manifest") in routes
+    assert ("GET", "/api/agent/company/status", "ecosystem.rumi_operations_company_pack.blocks.agent.company.status") in routes
+    assert ("POST", "/api/agent/company/bootstrap", "ecosystem.rumi_operations_company_pack.blocks.agent.company.bootstrap") in routes
     assert ("GET", "/api/agent/org/roles", "blocks.agent.org.list_roles") in routes
     assert ("GET", "/api/chat/channels", "blocks.chat.channel.list") in routes
     assert ("POST", "/api/share", "blocks.share.create") in routes
+
+
+def test_fallback_operations_company_routes_precede_generic_agent_status():
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+
+    server = DefaultsHttpServer(facade=None)
+    captured = {}
+
+    def fake_invoke(block_module, request_data, path_params, inject=None):
+        captured["block_module"] = block_module
+        captured["path_params"] = path_params
+        return {"status": "ok"}
+
+    server._invoke_fallback_block = fake_invoke
+    handler, params, _, path_inject = server._match_route("GET", "/api/agent/company/status")
+
+    assert params == {}
+    assert path_inject == {}
+    assert handler is not None
+    assert handler({}, params) == {"status": "ok"}
+    assert captured == {
+        "block_module": "ecosystem.rumi_operations_company_pack.blocks.agent.company.status",
+        "path_params": {},
+    }
 
 
 def test_ui_clipboard_write_uses_local_clipboard(monkeypatch):
@@ -1560,11 +1598,34 @@ def test_computer_move_uses_cliclick_on_macos(monkeypatch):
     monkeypatch.setattr(browser_computer.shutil, "which", lambda name: "/opt/homebrew/bin/cliclick" if name == "cliclick" else None)
     monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
 
-    result = BrowserComputerController().run("computer.move", {"x": 120, "y": 240}, yolo_mode=True)
+    result = BrowserComputerController().run("computer.move", {"x": 120, "y": 240, "physical": True}, yolo_mode=True)
 
     assert result["executed"] is True
     assert result["target"] == {"x": 120, "y": 240}
     assert calls[0][0] == ["/opt/homebrew/bin/cliclick", "m:120,240"]
+
+
+def test_computer_move_defaults_to_virtual_ai_cursor(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+
+    result = controller.run("computer.move", {"x": 120, "y": 240}, yolo_mode=True)
+
+    assert result["executed"] is True
+    assert result["virtual_cursor"] is True
+    assert result["target"] == {"x": 120, "y": 240}
+    assert calls == []
 
 
 def test_browser_computer_manages_persistent_profiles_and_cookie_jars(tmp_path):

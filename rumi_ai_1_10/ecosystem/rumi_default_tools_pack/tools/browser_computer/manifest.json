@@ -15,7 +15,7 @@
         "properties": {
           "action": {
             "type": "string",
-            "enum": ["browser.open_url", "browser.session", "computer.screenshot", "computer.move", "computer.click", "computer.type", "computer.key", "computer.scroll"]
+            "enum": ["browser.open_url", "browser.session", "computer.screenshot", "computer.move", "computer.click", "computer.select_window", "computer.windows", "computer.type", "computer.key", "computer.scroll"]
           },
           "payload": {"type": "object"}
         },
@@ -36,7 +36,7 @@
       "widget_kind": "tool_toggle",
       "settings_fields": [
         {
-          "id": "target",
+          "id": "default_target",
           "label": "Default Target",
           "type": "select",
           "default": "active_context",

@@ -17,12 +17,16 @@ def run(context, args):
         "cursor_move": "computer.move",
         "mouse_move": "computer.move",
         "click": "computer.click",
+        "select_window": "computer.select_window",
+        "window": "computer.select_window",
+        "windows": "computer.windows",
+        "list_windows": "computer.windows",
         "type": "computer.type",
         "key": "computer.key",
         "scroll": "computer.scroll",
     }
     action = action_map.get(str(raw.get("action") or "").strip(), str(raw.get("action") or "").strip())
-    for key in ("x", "y", "text", "key", "amount", "dry_run", "approval_token"):
+    for key in ("x", "y", "text", "key", "amount", "target", "app", "title", "coordinate_space", "physical", "focus", "dry_run", "approval_token"):
         if key in raw:
             payload[key] = raw.get(key)
     return _run_browser_computer(context, {"action": action, "payload": payload})

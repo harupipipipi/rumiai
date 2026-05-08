@@ -119,6 +119,7 @@ function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatU
   const attachedToolCount = Number(metadata.attached_tool_count ?? 0);
   return {
     id: message.id,
+    conversationId: message.conversation_id,
     role: isUser ? "user" : "agent",
     content: normalizeBlocks(message),
     rawText: messageToText(message),

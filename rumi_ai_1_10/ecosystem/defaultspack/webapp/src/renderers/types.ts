@@ -9,6 +9,7 @@ export type { ComposerCommandItem } from "../lib/api";
 
 export type ChatUiMessage = {
   id: string;
+  conversationId?: string;
   role: "user" | "agent";
   content: ChatContentBlock[];
   rawText: string;

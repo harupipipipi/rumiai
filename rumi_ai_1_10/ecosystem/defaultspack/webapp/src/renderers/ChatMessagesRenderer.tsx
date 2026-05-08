@@ -1,10 +1,10 @@
 import { AlertTriangle, Check, CheckCircle2, ChevronDown, Clock, Copy, Image as ImageIcon, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
 import { cn } from "../lib/cn";
 import { buildToolActivityGroups, toolFolderFor, type ToolActivityItem } from "../lib/toolActivity";
-import { api, type ChatContentBlock } from "../lib/api";
+import { api, type BrowserScreenshot, type ChatContentBlock } from "../lib/api";
 import type { ChatMessagesRendererProps } from "./types";
 
 function MessageBlock({ block, unknownStrategy }: { block: ChatContentBlock; unknownStrategy: string }) {
@@ -187,6 +187,82 @@ function WidgetCard({ widget }: { widget: Record<string, unknown> }) {
       </summary>
       <pre className="mt-2 overflow-x-auto text-[11px] font-mono text-zinc-200">{JSON.stringify(widget, null, 2)}</pre>
     </details>
+  );
+}
+
+function BrowserScreenshotPreview({ screenshot }: { screenshot: BrowserScreenshot }) {
+  const marker = screenshot.click_marker ?? screenshot.marker;
+  const imageWidth = Number(screenshot.image_size?.width ?? 0);
+  const imageHeight = Number(screenshot.image_size?.height ?? 0);
+  const markerX = Number(marker?.x ?? NaN);
+  const markerY = Number(marker?.y ?? NaN);
+  const canPlaceMarker = Number.isFinite(markerX) && Number.isFinite(markerY) && imageWidth > 0 && imageHeight > 0;
+
+  return (
+    <figure className="overflow-hidden rounded-lg border border-zinc-800 bg-black/30">
+      <div className="relative">
+        <img
+          src={screenshot.data_url}
+          alt={screenshot.action === "computer.click" ? "Clicked screen" : "Screen capture"}
+          className="block max-h-[520px] w-full object-contain"
+        />
+        {canPlaceMarker && (
+          <span
+            className="pointer-events-none absolute h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-red-300 bg-red-500/25 shadow-[0_0_0_4px_rgba(239,68,68,0.22)]"
+            style={{ left: `${(markerX / imageWidth) * 100}%`, top: `${(markerY / imageHeight) * 100}%` }}
+          >
+            <span className="absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-red-200" />
+          </span>
+        )}
+      </div>
+      <figcaption className="flex items-center gap-2 border-t border-zinc-800 px-3 py-2 text-[11px] text-zinc-500">
+        <ImageIcon size={12} />
+        <span>{screenshot.action === "computer.click" ? "クリック位置つきスクリーンショット" : "スクリーンショット"}</span>
+      </figcaption>
+    </figure>
+  );
+}
+
+function BrowserScreenshotStrip({ message }: { message: ChatMessagesRendererProps["messages"][number] }) {
+  const [screenshots, setScreenshots] = useState<BrowserScreenshot[]>([]);
+  const [failed, setFailed] = useState(false);
+  const hasBrowserTool = (message.toolLogs ?? []).some((log) => (
+    log.tool_name === "browser_computer" || log.tool_name === "browser_use" || log.tool_name === "computer_use"
+  ));
+
+  useEffect(() => {
+    let cancelled = false;
+    setScreenshots([]);
+    setFailed(false);
+    if (!message.conversationId || !hasBrowserTool) return () => {
+      cancelled = true;
+    };
+    void api.getBrowserScreenshots(message.conversationId, message.id)
+      .then((result) => {
+        if (!cancelled) setScreenshots(result.screenshots ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [message.conversationId, message.id, hasBrowserTool]);
+
+  if (!hasBrowserTool || screenshots.length === 0) {
+    return failed ? (
+      <div className="mb-3 rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-[11px] text-zinc-500">
+        スクリーンショットを読み込めませんでした。
+      </div>
+    ) : null;
+  }
+
+  return (
+    <div className="mb-4 grid gap-3">
+      {screenshots.map((screenshot) => (
+        <BrowserScreenshotPreview key={screenshot.id} screenshot={screenshot} />
+      ))}
+    </div>
   );
 }
 
@@ -373,6 +449,7 @@ export function ChatMessagesRenderer({
                       )}
                     >
                       {showActivityInMessages && message.role === "agent" && <ToolActivityTray message={message} />}
+                      {message.role === "agent" && <BrowserScreenshotStrip message={message} />}
 
                       {message.role === "agent" && message.metadata?.thinkingTranscript && (
                         <details className="mb-3 rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2 text-xs text-zinc-400">

@@ -108,7 +108,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(provider_item["ui"]["composer_action"]["target_item_id"], "provider-catalog")
         browser_use_item = next(item for item in catalog["sidebar"]["items"] if item["id"] == "browser_use")
         browser_use_field_ids = {field["id"] for field in browser_use_item["panel"]["fields"]}
-        self.assertEqual(browser_use_field_ids, {"target", "mode", "safety", "quality"})
+        self.assertEqual(browser_use_field_ids, {"default_target", "mode", "safety", "quality"})
         self.assertNotIn("url", browser_use_field_ids)
         self.assertNotIn("x", browser_use_field_ids)
         self.assertIn("Runtime arguments: action, url", " ".join(browser_use_item["panel"]["notes"]))

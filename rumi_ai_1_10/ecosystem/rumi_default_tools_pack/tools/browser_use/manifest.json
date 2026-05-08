@@ -15,7 +15,7 @@
         "properties": {
           "action": {
             "type": "string",
-            "enum": ["session", "open_url", "screenshot", "move", "click", "type", "key", "scroll"],
+            "enum": ["session", "open_url", "screenshot", "move", "click", "select_window", "windows", "type", "key", "scroll"],
             "default": "session"
           },
           "url": {"type": "string"},
@@ -24,6 +24,12 @@
           "text": {"type": "string"},
           "key": {"type": "string"},
           "amount": {"type": "integer"},
+          "target": {"type": "string"},
+          "app": {"type": "string"},
+          "title": {"type": "string"},
+          "coordinate_space": {"type": "string"},
+          "physical": {"type": "boolean"},
+          "focus": {"type": "boolean"},
           "dry_run": {"type": "boolean"},
           "approval_token": {"type": "string"},
           "payload": {"type": "object"}
@@ -44,7 +50,7 @@
       "widget_kind": "tool_toggle",
       "settings_fields": [
         {
-          "id": "target",
+          "id": "default_target",
           "label": "Default Target",
           "type": "select",
           "default": "active_session",

@@ -36,6 +36,20 @@ export type ChatAttachment = {
   sourcePath?: string;
 };
 
+export type BrowserScreenshot = {
+  id: string;
+  run_id: string;
+  tool_call_id?: string | null;
+  tool_name?: string;
+  mime_type?: string;
+  data_url: string;
+  action?: string;
+  image_size?: { width?: number; height?: number };
+  click_marker?: { x?: number; y?: number; screen_x?: number; screen_y?: number; coordinate_space?: string };
+  marker?: { x?: number; y?: number; screen_x?: number; screen_y?: number; coordinate_space?: string };
+  target_window?: Record<string, unknown>;
+};
+
 export type CodingContextEntry = {
   name: string;
   path: string;
@@ -763,6 +777,12 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ action, payload: payload ?? {} }),
     });
+  },
+
+  getBrowserScreenshots(conversationId: string, runId: string) {
+    return request<{ screenshots: BrowserScreenshot[] }>(
+      `/api/chat/conversations/${conversationId}/run-results/${runId}/browser-screenshots`,
+    );
   },
 
   listSchedules() {
