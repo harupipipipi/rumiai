@@ -1103,13 +1103,13 @@ phases:
   - postprocess
 
 steps:
-  - id: load_tools
+  - id: load_capabilities
     phase: prepare
     priority: 50
     type: python_file_call
-    owner_pack: tool_pack
-    file: blocks/load_tools.py
-    output: tools
+    owner_pack: capability_provider
+    file: blocks/load_capabilities.py
+    output: capabilities
 
   - id: generate
     phase: generate
@@ -1118,7 +1118,7 @@ steps:
     owner_pack: ai_client
     file: blocks/generate.py
     input:
-      tools: "${ctx.tools}"
+      capabilities: "${ctx.capabilities}"
     output: response
 ```
 

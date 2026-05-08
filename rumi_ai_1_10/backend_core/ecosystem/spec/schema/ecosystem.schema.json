@@ -102,11 +102,11 @@
           "minItems": 1,
           "examples": [
             [
-              "chats",
-              "tool_pack",
-              "prompt_pack",
-              "supporter_pack",
-              "ai_client_provider"
+              "data_provider",
+              "model_provider",
+              "ui_surface",
+              "workflow_provider",
+              "capability_provider"
             ]
           ]
         },

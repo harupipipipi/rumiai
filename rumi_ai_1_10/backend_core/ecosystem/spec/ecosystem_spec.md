@@ -31,7 +31,7 @@ Ecosystemは、AIチャットアプリケーションの機能をモジュール
   "pack_identity": "github:haru/default-pack",
   "version": "1.0.0",
   "vocabulary": {
-    "types": ["chats", "tool_pack", "prompt_pack"]
+    "types": ["data_provider", "model_provider", "workflow_provider"]
   }
 }
 ```
@@ -52,12 +52,12 @@ Pack内の個別機能モジュール。`components/[component_dir]/` に配置�
 **例:**
 ```json
 {
-  "type": "chats",
-  "id": "chats_v1",
+  "type": "workflow_provider",
+  "id": "workflow_v1",
   "version": "1.0.0",
   "connectivity": {
-    "accepts": ["tool_pack", "prompt_pack"],
-    "provides": ["chat_history", "agent_runtime"]
+    "accepts": ["data_provider", "model_provider"],
+    "provides": ["agent_runtime"]
   }
 }
 ```
@@ -226,9 +226,11 @@ ecosystem/[pack_id]/
 
 ---
 
-## Component Types（標準vocabulary）
+## Component Types（vocabulary）
 
-Default Packで定義される標準的なComponent type：
+Core does not define built-in standard component types. Component type names are pack vocabulary and are interpreted by the pack's manifests, nodes, functions, and domain registries.
+
+Historical example component types from the legacy default pack:
 
 | Type | 説明 | 主な機能 |
 |------|------|----------|
@@ -240,6 +242,8 @@ Default Packで定義される標準的なComponent type：
 | frontend_pack | フロントエンドUI | シェル、パネル、ボタン |
 | ui_panel_pack | UIパネル | 左ペイン、中央、設定 |
 | ui_button_pack | UIボタン | プロンプト切替、モデル切替 |
+
+Current defaultspack behavior is implemented through functions, manifests, nodes, and domain registries. Prompt behavior lives in `ecosystem/defaultspack/domain/prompt/` and `ecosystem/defaultspack/blocks/prompt/`; tool behavior lives in `ecosystem/defaultspack/domain/tool/` and `ecosystem/defaultspack/blocks/tool/`. Supporter is a legacy concept; new behavior should be modeled as defaultspack functions, agents, prompts, memory, or extensions.
 
 ---
 
@@ -260,8 +264,8 @@ Componentは他のComponentと接続できる。接続性は`connectivity`フィ
 ```json
 {
   "connectivity": {
-    "accepts": ["tool_pack", "prompt_pack", "supporter_pack"],
-    "provides": ["chat_history", "agent_runtime"],
+    "accepts": ["data_provider", "model_provider", "capability_provider"],
+    "provides": ["agent_runtime"],
     "requires": []
   }
 }
@@ -405,11 +409,10 @@ Componentはaddon_policyでAddonによる変更を制御する。
 {
   "active_pack_identity": "github:haru/default-pack",
   "overrides": {
-    "chats": "chats_v1",
-    "tool_pack": "tool_v1",
-    "prompt_pack": "prompt_v1",
-    "supporter_pack": "supporter_v1",
-    "ai_client_provider": "ai_client_v1"
+    "data_provider": "data_v1",
+    "model_provider": "model_v1",
+    "workflow_provider": "workflow_v1",
+    "capability_provider": "capability_v1"
   },
   "disabled_components": [],
   "disabled_addons": [],
@@ -424,15 +427,15 @@ Componentはaddon_policyでAddonによる変更を制御する。
 ```json
 {
   "overrides": {
-    "chats": "chats_v2",
-    "tool_pack": "tool_v1"
+    "data_provider": "data_v2",
+    "model_provider": "model_v1"
   }
 }
 ```
 
 上記の場合：
-- chatsはchats_v2を使用
-- tool_packはtool_v1を使用
+- data_providerはdata_v2を使用
+- model_providerはmodel_v1を使用
 
 ### Component/Addonの無効化
 
@@ -592,7 +595,7 @@ Pack固有のComponent typeを定義：
 ```json
 {
   "vocabulary": {
-    "types": ["chats", "tool_pack", "custom_type"],
+    "types": ["data_provider", "model_provider", "custom_type"],
     "custom_types": {
       "custom_type": {
         "description": "カスタムコンポーネント",

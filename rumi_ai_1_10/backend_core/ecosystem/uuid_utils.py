@@ -47,8 +47,8 @@ def generate_component_uuid(
     
     Args:
         pack_uuid: 親PackのUUID
-        component_type: コンポーネントタイプ（例: "chats", "tool_pack"）
-        component_id: コンポーネントID（例: "chats_v1"）
+        component_type: コンポーネントタイプ（例: "data_provider", "model_provider"）
+        component_id: コンポーネントID（例: "data_v1"）
     
     Returns:
         決定論的に生成されたUUID v5
