@@ -11,9 +11,9 @@ mod updater;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::{fs, io};
 use std::thread;
 use std::time::Duration;
+use std::{fs, io};
 
 use anyhow::{anyhow, bail, Context, Result as AnyResult};
 use log::{error, info, warn};
@@ -184,6 +184,22 @@ fn request_panel_bootstrap_code_with_retry(port: u16, bootstrap_secret: &str) ->
     }
 }
 
+fn panel_session_url(port: u16, panel_code: &str) -> AnyResult<String> {
+    let mut url = reqwest::Url::parse(&format!("http://127.0.0.1:{port}/panel/"))
+        .context("failed to build panel URL")?;
+    url.query_pairs_mut().append_pair("code", panel_code);
+    Ok(url.to_string())
+}
+
+fn open_panel_session_in_default_browser(port: u16, bootstrap_secret: &str) -> AnyResult<()> {
+    let browser_code = request_panel_bootstrap_code_with_retry(port, bootstrap_secret)
+        .context("failed to authorize browser panel session")?;
+    let url = panel_session_url(port, &browser_code)?;
+    open::that_detached(url).context("failed to open panel in default browser")?;
+    info!("Opened Rumi panel in the default browser");
+    Ok(())
+}
+
 fn ensure_kernel_ready_for_panel_auth(
     config: &AppConfig,
     km: &Arc<Mutex<KernelManager>>,
@@ -227,10 +243,10 @@ fn navigate_window_to_panel_session(
     panel_code: &str,
 ) -> Result<(), tauri::Error> {
     let panel_code = serde_json::to_string(panel_code).unwrap_or_else(|_| "\"\"".into());
-    let loopback_origin =
-        serde_json::to_string(&format!("http://127.0.0.1:{port}")).unwrap_or_else(|_| "\"\"".into());
-    let localhost_origin =
-        serde_json::to_string(&format!("http://localhost:{port}")).unwrap_or_else(|_| "\"\"".into());
+    let loopback_origin = serde_json::to_string(&format!("http://127.0.0.1:{port}"))
+        .unwrap_or_else(|_| "\"\"".into());
+    let localhost_origin = serde_json::to_string(&format!("http://localhost:{port}"))
+        .unwrap_or_else(|_| "\"\"".into());
 
     let js = format!(
         r#"
@@ -268,20 +284,22 @@ pub(crate) fn refresh_panel_session_for_window(app: &AppHandle, window_label: &s
     let handle = app.clone();
     let label = window_label.to_string();
 
-    std::thread::spawn(move || match request_fresh_panel_session_code(&config, &km) {
-        Ok(panel_code) => {
-            if let Some(win) = handle.get_webview_window(&label) {
-                if let Err(error) =
-                    navigate_window_to_panel_session(&win, config.kernel_port, &panel_code)
-                {
-                    error!("Failed to refresh panel session for {label}: {error}");
+    std::thread::spawn(
+        move || match request_fresh_panel_session_code(&config, &km) {
+            Ok(panel_code) => {
+                if let Some(win) = handle.get_webview_window(&label) {
+                    if let Err(error) =
+                        navigate_window_to_panel_session(&win, config.kernel_port, &panel_code)
+                    {
+                        error!("Failed to refresh panel session for {label}: {error}");
+                    }
                 }
             }
-        }
-        Err(error) => {
-            warn!("Failed to refresh panel session for {label}: {error}");
-        }
-    });
+            Err(error) => {
+                warn!("Failed to refresh panel session for {label}: {error}");
+            }
+        },
+    );
 }
 
 pub(crate) fn request_app_exit(app: &AppHandle) {
@@ -364,6 +382,12 @@ fn spawn_kernel_exit_monitor(
                         {
                             error!("Failed to refresh panel after Kernel restart: {error}");
                         }
+                    }
+                    if let Err(error) = open_panel_session_in_default_browser(
+                        config.kernel_port,
+                        &panel_bootstrap_secret,
+                    ) {
+                        warn!("Failed to open browser after Kernel restart: {error}");
                     }
                 }
                 Err(error) => {
@@ -609,6 +633,11 @@ pub fn run() {
                                     error!("Failed to navigate to panel: {e}");
                                 }
                             }
+                            if let Err(e) =
+                                open_panel_session_in_default_browser(port, &panel_bootstrap_secret)
+                            {
+                                warn!("Failed to open browser panel session: {e}");
+                            }
                             // Delayed background update check.
                             run_delayed_update_check();
                             return;
@@ -650,6 +679,10 @@ pub fn run() {
                     if let Err(e) = navigate_window_to_panel_session(&win, port, &panel_code) {
                         error!("Failed to navigate to panel: {e}");
                     }
+                }
+                if let Err(e) = open_panel_session_in_default_browser(port, &panel_bootstrap_secret)
+                {
+                    warn!("Failed to open browser panel session: {e}");
                 }
 
                 // Delayed background update check.
@@ -721,6 +754,16 @@ mod tests {
         );
 
         fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn panel_session_url_encodes_one_time_code() {
+        let url = panel_session_url(8765, "code with spaces/&?").unwrap();
+
+        assert_eq!(
+            url,
+            "http://127.0.0.1:8765/panel/?code=code+with+spaces%2F%26%3F"
+        );
     }
 
     #[test]
