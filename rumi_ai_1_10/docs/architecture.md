@@ -223,11 +223,11 @@ requires:
 step:
   id: inject_tools
   type: python_file_call
-  owner_pack: tool_pack
-  file: blocks/tool_selector.py
+  owner_pack: capability_provider
+  file: blocks/capability_selector.py
   input:
     context: "${ctx.context}"
-  output: selected_tools
+  output: selected_capabilities
 ```
 
 ### Modifier 配置パス

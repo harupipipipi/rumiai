@@ -33,7 +33,7 @@ run python -m ruff check tests/test_entrypoint_contracts.py
 run python -m ruff format --check tests/test_entrypoint_contracts.py
 run python -m mypy tests/test_entrypoint_contracts.py
 
-cd "$ROOT_DIR/rumi_ai_1_10/frontend"
+cd "$ROOT_DIR/rumi_viewer/frontend"
 run npm run lint
 run npm run build
 

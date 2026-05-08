@@ -314,7 +314,12 @@ project_root/
 
 ## Viewer Graph Editor
 
-`frontend/src/pages/Flows.tsx` の graph editor は、Pack 特化の固定 UI ではなく、拡張用の graph metadata を持つ editor として扱います。
+The canonical frontend source for the control panel lives in `../rumi_viewer/frontend`.
+`core_runtime/core_pack/core_control_panel/web` contains the built static artifact served by the kernel at `/panel/`.
+
+Prompt behavior lives in `ecosystem/defaultspack/domain/prompt/` and `ecosystem/defaultspack/blocks/prompt/`. Tool behavior lives in `ecosystem/defaultspack/domain/tool/` and `ecosystem/defaultspack/blocks/tool/`. The top-level `prompt/`, `tool/`, and `supporter/` packages are deprecated legacy import shims only; new supporter-like behavior should be implemented as defaultspack functions, agents, prompts, memory, or extensions.
+
+`../rumi_viewer/frontend/src/pages/Flows.tsx` の graph editor は、Pack 特化の固定 UI ではなく、拡張用の graph metadata を持つ editor として扱います。
 
 - 起点ノードは `rumi_start`
 - ノードは複数ポートを持てる

@@ -15,12 +15,11 @@
       "description": "Component の種類（Pack の vocabulary.types で定義されたもの）",
       "pattern": "^[a-z][a-z0-9_]*$",
       "examples": [
-        "chats",
-        "tool_pack",
-        "prompt_pack",
-        "supporter_pack",
-        "ai_client_provider",
-        "frontend_pack"
+        "data_provider",
+        "model_provider",
+        "ui_surface",
+        "workflow_provider",
+        "capability_provider"
       ]
     },
     "id": {

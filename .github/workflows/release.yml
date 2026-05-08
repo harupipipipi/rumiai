@@ -53,6 +53,17 @@ jobs:
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "^2" --locked
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: rumi_viewer/frontend/package-lock.json
+
+      - name: Build panel frontend
+        working-directory: rumi_viewer/frontend
+        run: npm ci && npm run build
+
       - name: Build with cargo tauri
         working-directory: rumi_viewer
         run: cargo tauri build --target ${{ matrix.target }}

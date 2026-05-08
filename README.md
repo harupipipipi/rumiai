@@ -2,7 +2,7 @@
 
 Rumi AI is a modular AI runtime and tooling workspace.
 
-The repository keeps the runtime implementation under `rumi_ai_1_10/`, while `rumi_ai/` provides a version-stable Python entrypoint.
+The repository keeps the runtime implementation under `rumi_ai_1_10/`, while `rumi_ai/` provides a version-stable Python entrypoint. The canonical control panel frontend source lives in `rumi_viewer/frontend`; the kernel serves its built artifact at `/panel/`.
 
 ## Read This When...
 
@@ -23,10 +23,10 @@ The repository keeps the runtime implementation under `rumi_ai_1_10/`, while `ru
 
 ## Repository Layout
 
-- `rumi_ai_1_10/`: current kernel/runtime source tree
+- `rumi_ai_1_10/`: kernel/runtime/API/backend source tree
 - `rumi_ai/`: version-stable Python entrypoint package
 - `pack-shell/`: desktop pack launcher
-- `rumi_viewer/`: viewer application
+- `rumi_viewer/`: desktop shell and control panel frontend source
 
 ## Start
 
@@ -83,8 +83,8 @@ python -m rumi_ai migrate-hmac
 ## Components
 
 - `rumi_ai`: stable CLI and module entrypoint
-- `rumi_ai_1_10`: kernel, runtime, frontend, and docs
+- `rumi_ai_1_10`: kernel, runtime, API, backend, and docs
 - `pack-shell`: launches desktop packs and brokers token/bootstrap flow
-- `rumi_viewer`: viewer-side application shell
+- `rumi_viewer`: viewer-side application shell and canonical panel frontend source
 
 For architecture and runtime details, see [rumi_ai_1_10/README.md](./rumi_ai_1_10/README.md).

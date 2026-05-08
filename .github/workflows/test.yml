@@ -188,15 +188,19 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: rumi_ai_1_10/frontend/package-lock.json
+          cache-dependency-path: rumi_viewer/frontend/package-lock.json
 
       - name: Install frontend dependencies
-        working-directory: rumi_ai_1_10/frontend
+        working-directory: rumi_viewer/frontend
         run: npm ci
 
       - name: Run frontend panel auth tests
-        working-directory: rumi_ai_1_10/frontend
+        working-directory: rumi_viewer/frontend
         run: npm test
+
+      - name: Build panel frontend
+        working-directory: rumi_viewer/frontend
+        run: npm run build
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable

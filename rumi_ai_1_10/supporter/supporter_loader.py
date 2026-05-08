@@ -4,6 +4,9 @@ from pathlib import Path
 
 from backend_core.ecosystem import compat
 
+# DEPRECATED: legacy import compatibility only.
+# New code must use defaultspack functions, agents, memory, or extensions.
+
 
 class SupporterLoader:
     """Legacy shim for supporter directory loading."""
