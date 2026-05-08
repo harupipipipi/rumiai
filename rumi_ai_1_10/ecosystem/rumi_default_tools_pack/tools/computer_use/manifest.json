@@ -3,11 +3,11 @@
   "category": "tool",
   "version": "1",
   "display_name": "Computer Use",
-  "description": "Capture the screen and run approved desktop actions on macOS or Windows. Use context/windows/select_window focus=false to understand and choose an app/window, click only to mark a target with the virtual AI cursor, and use type with text to enter words such as hello. For existing user Chrome, target Google Chrome instead of opening a managed profile. If type/key returns recovery.kind=chrome_setting, stop retrying and report that Chrome blocks true background control until the setting is enabled.",
+  "description": "Capture the screen and run approved desktop actions on macOS or Windows. Use context/windows/select_window focus=false to understand and choose an app/window, click only to mark a target with the virtual AI cursor, and use type with text to enter words such as hello. Chrome background_control only reports whether Chrome DOM entry through Apple Events is available; it is not the whole computer-use capability. Use background=true only when the user forbids foreground focus and you need Chrome background text/key entry. If that type/key returns recovery.kind=chrome_setting, stop retrying and report that Chrome blocks true background text entry until the setting is enabled.",
   "enabled": true,
   "config": {
     "name": "computer_use",
-    "summary": "コンピューター操作。まず action=context で開いているアプリとAIカーソルを確認し、文字入力は action=type と text を優先し、既存Chrome/ChatGPTには app=Google Chrome または select_window focus=false を指定してください。Chrome設定ブロックが返ったら再試行せず理由を報告してください。",
+    "summary": "コンピューター操作。まず action=context で開いているアプリとAIカーソルを確認し、文字入力は action=type と text を優先してください。既存Chrome/ChatGPTには app=Google Chrome または select_window focus=false を指定できますが、background=true はユーザーが前面化を禁じてChrome背景DOM入力が必要な時だけ使います。実際の type/key でChrome設定ブロックが返ったら再試行せず理由を報告してください。",
     "tags": ["computer", "desktop", "screenshot", "approval"],
     "schema": {
       "parameters": {
@@ -32,6 +32,9 @@
           "coordinate_space": {"type": "string"},
           "physical": {"type": "boolean"},
           "focus": {"type": "boolean"},
+          "background": {"type": "boolean", "description": "For Chrome only: request DOM/Apple Events background text/key entry when foreground focus is not allowed."},
+          "mode": {"type": "string"},
+          "method": {"type": "string"},
           "dry_run": {"type": "boolean"},
           "approval_token": {"type": "string"},
           "payload": {"type": "object"}

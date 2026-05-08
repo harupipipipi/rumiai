@@ -409,7 +409,8 @@ return "window_index=" & targetWindowIndex & tabChar & "tab_index=" & targetTabI
                 "Use computer.select_window with app/title and focus=false before window-scoped screenshots.",
                 "computer.move and computer.click use a virtual AI cursor unless physical=true is explicitly provided.",
                 "If Google Chrome tabs are listed but no Chrome window appears in windows, Chrome is open outside the visible app-window context; target it by chrome_target/url_contains for background-capable actions.",
-                "If chrome_background_control.available is false, do not retry background text entry; report the blocker or ask for foreground permission.",
+                "chrome_background_control only describes Chrome DOM entry through Apple Events; screenshots, windows, and the virtual AI cursor are still normal computer-use capabilities.",
+                "Use background=true only when the user forbids foreground focus and you need Chrome DOM text/key entry; if that actual entry returns recovery.kind=chrome_setting, stop and report the blocker.",
             ],
         }
         if payload.get("include_windows", True) is not False:
@@ -697,20 +698,8 @@ return "window_index=" & targetWindowIndex & tabChar & "tab_index=" & targetTabI
     def _should_type_in_chrome_background(self, payload: dict[str, Any]) -> bool:
         if payload.get("background") is True:
             return True
-        app = str(payload.get("app") or payload.get("target") or "").lower()
-        if "chrome" in app:
-            return True
-        target_window = self._computer_state().get("target_window")
-        if isinstance(target_window, dict):
-            window_app = str(target_window.get("app") or "").lower()
-            window_title = str(target_window.get("title") or "").lower()
-            if "chrome" in window_app or "chatgpt" in window_title:
-                return True
-        sessions = self._read_sessions()
-        return bool(
-            sessions.get("last_opened_background")
-            and "chatgpt" in str(sessions.get("last_url") or "").lower()
-        )
+        mode = str(payload.get("mode") or payload.get("method") or "").strip().lower()
+        return mode in {"background", "chrome_background", "chrome_background_dom", "background_dom"}
 
     def _chrome_background_target(self, payload: dict[str, Any]) -> dict[str, Any]:
         sessions = self._read_sessions()

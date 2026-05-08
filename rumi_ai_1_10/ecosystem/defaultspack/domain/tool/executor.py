@@ -733,6 +733,9 @@ def _browser_computer_action_payload(tool_name, arguments):
             "coordinate_space",
             "physical",
             "focus",
+            "background",
+            "mode",
+            "method",
         ):
             if key in arguments:
                 raw_payload[key] = arguments.get(key)
@@ -763,6 +766,9 @@ def _browser_computer_action_payload(tool_name, arguments):
             "coordinate_space",
             "physical",
             "focus",
+            "background",
+            "mode",
+            "method",
         ):
             if key in arguments:
                 raw_payload[key] = arguments.get(key)

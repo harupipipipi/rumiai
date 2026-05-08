@@ -350,23 +350,6 @@ def _tool_result_recovery_kind(result):
     return ""
 
 
-def _chrome_context_blocker(result):
-    data = _tool_result_data(result)
-    widget = data.get("widget") if isinstance(data.get("widget"), dict) else {}
-    for source in (data, widget):
-        control = source.get("chrome_background_control") if isinstance(source, dict) else None
-        if not isinstance(control, dict) or control.get("available") is not False:
-            continue
-        recovery = control.get("recovery") if isinstance(control.get("recovery"), dict) else {}
-        if str(recovery.get("kind") or "") == "chrome_setting":
-            reason = str(control.get("reason") or "").strip()
-            return {
-                "recovery": recovery,
-                "reason": reason or "Chrome background control is unavailable.",
-            }
-    return {}
-
-
 def _message_content_text(content):
     if isinstance(content, str):
         return content
@@ -381,31 +364,6 @@ def _message_content_text(content):
             if isinstance(text, str):
                 parts.append(text)
     return "\n".join(parts)
-
-
-def _requires_background_chrome_control(messages):
-    parts = []
-    for message in messages or []:
-        if isinstance(message, dict) and message.get("role") == "user":
-            parts.append(_message_content_text(message.get("content")))
-    text = "\n".join(parts)
-    lower = text.lower()
-    mentions_chrome = "chrome" in lower or "chatgpt" in lower or "google chrome" in lower
-    wants_background = any(
-        token in text
-        for token in (
-            "バックグラウンド",
-            "画面を切り替え",
-            "画面きり変え",
-            "画面切り替え",
-            "邪魔",
-            "既存",
-            "今開いて",
-            "今開いてる",
-        )
-    )
-    wants_background = wants_background or any(token in lower for token in ("background", "existing chrome"))
-    return bool(mentions_chrome and wants_background)
 
 
 def _chrome_setting_block_message(tool_name, result, recovery):
@@ -690,7 +648,8 @@ def _tool_visibility_message(tools):
             "target existing user Chrome with app='Google Chrome' or select_window focus=false; "
             "prefer one type call for words like hello and key only for shortcuts/return; "
             "click/move without physical=true only moves the virtual AI cursor and does not move the user's mouse; "
-            "if a tool result says recovery.kind=chrome_setting, stop instead of retrying."
+            "chrome_background_control only describes Chrome's DOM/Apple Events background entry, not computer-use as a whole; "
+            "if an actual background text/key entry returns recovery.kind=chrome_setting, stop instead of retrying."
         )
     return {
         "role": "system",
@@ -732,7 +691,6 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
         limit = 12
 
     blocked_response = None
-    background_chrome_required = _requires_background_chrome_control(messages)
     for step_index in range(max(1, limit + 1)):
         _raise_if_cancelled(context)
         ai_params = {
@@ -883,32 +841,6 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
                 tool_call_id,
                 model=model,
             )
-            chrome_context_blocker = _chrome_context_blocker(result) if background_chrome_required else {}
-            if chrome_context_blocker:
-                blocked_response = _tool_blocked_response(
-                    tool_name,
-                    {
-                        "status": "ok",
-                        "data": {
-                            "result": chrome_context_blocker.get("reason"),
-                            "is_error": True,
-                            "recovery": chrome_context_blocker.get("recovery"),
-                        },
-                    },
-                )
-                _append_event(
-                    events,
-                    context,
-                    _event(
-                        "status",
-                        "Chrome設定ブロックのため tool 実行を停止しました",
-                        phase="tool_blocked",
-                        tool_name=tool_name,
-                        tool_call_id=tool_call_id,
-                        recovery_kind="chrome_setting",
-                    )
-                )
-                break
             if _tool_result_recovery_kind(result) == "chrome_setting":
                 blocked_response = _tool_blocked_response(tool_name, result)
                 _append_event(

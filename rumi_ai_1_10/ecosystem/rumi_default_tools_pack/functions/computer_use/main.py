@@ -43,6 +43,9 @@ def run(context, args):
         "coordinate_space",
         "physical",
         "focus",
+        "background",
+        "mode",
+        "method",
         "dry_run",
         "approval_token",
     ):

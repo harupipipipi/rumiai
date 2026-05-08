@@ -3,7 +3,7 @@
   "category": "tool",
   "version": "1",
   "display_name": "Browser Use",
-  "description": "Open URLs, inspect browser/app state, capture screenshots for vision-capable models, and move the virtual AI cursor from screenshot coordinates. If existing Chrome returns a chrome_setting recovery for background entry, stop retrying and report the blocker.",
+  "description": "Open URLs, inspect browser/app state, capture screenshots for vision-capable models, and move the virtual AI cursor from screenshot coordinates. chrome_background_control only reports Chrome DOM/Apple Events background-entry availability, not whether computer-use itself works. Use background=true only for actual Chrome background text/key entry; if that entry returns chrome_setting, stop retrying and report the blocker.",
   "enabled": true,
   "config": {
     "name": "browser_use",
@@ -30,6 +30,9 @@
           "coordinate_space": {"type": "string"},
           "physical": {"type": "boolean"},
           "focus": {"type": "boolean"},
+          "background": {"type": "boolean"},
+          "mode": {"type": "string"},
+          "method": {"type": "string"},
           "dry_run": {"type": "boolean"},
           "approval_token": {"type": "string"},
           "payload": {"type": "object"}

@@ -733,7 +733,7 @@ def test_browser_computer_key_clears_chrome_background(tmp_path, monkeypatch):
 
     result = controller.run(
         "computer.key",
-        {"key": "backspace", "app": "Google Chrome"},
+        {"key": "backspace", "app": "Google Chrome", "background": True},
         yolo_mode=True,
     )
 
@@ -766,7 +766,8 @@ def test_browser_computer_click_sets_target_window_for_background_keys(tmp_path,
 
     state = controller._computer_state()
     assert state["target_window"]["app"] == "Google Chrome"
-    assert controller._should_type_in_chrome_background({}) is True
+    assert controller._should_type_in_chrome_background({}) is False
+    assert controller._should_type_in_chrome_background({"background": True}) is True
 
 
 def test_browser_computer_background_type_failure_does_not_fall_back_to_physical(tmp_path, monkeypatch):
@@ -796,7 +797,7 @@ def test_browser_computer_background_type_failure_does_not_fall_back_to_physical
         lambda action, payload: (_ for _ in ()).throw(AssertionError("physical typing should not run")),
     )
 
-    result = controller.run("computer.type", {"text": "hello"}, yolo_mode=True)
+    result = controller.run("computer.type", {"text": "hello", "background": True}, yolo_mode=True)
 
     assert result["is_error"] is True
     assert result["executed"] is False
@@ -1530,7 +1531,7 @@ def test_chat_tool_loop_stops_on_chrome_setting_recovery():
     assert [event["phase"] for event in emitted if event["type"] == "status"][-1] == "tool_blocked"
 
 
-def test_chat_tool_loop_stops_when_context_reports_required_background_chrome_blocker():
+def test_chat_tool_loop_does_not_stop_when_context_reports_chrome_dom_probe_failure():
     import blocks.chat.send as send
 
     calls = {"ai": 0, "tool": 0}
@@ -1538,6 +1539,11 @@ def test_chat_tool_loop_stops_when_context_reports_required_background_chrome_bl
     def call_handler(name, payload):
         if name == "defaults.ai.complete":
             calls["ai"] += 1
+            if calls["ai"] > 1:
+                return {
+                    "status": "ok",
+                    "data": {"content": [{"type": "text", "text": "context noted"}], "finish_reason": "stop"},
+                }
             return {
                 "status": "ok",
                 "data": {
@@ -1584,10 +1590,9 @@ def test_chat_tool_loop_stops_when_context_reports_required_background_chrome_bl
         {"max_tool_calls": 12},
     )
 
-    assert calls == {"ai": 1, "tool": 1}
-    assert response["finish_reason"] == "tool_blocked"
-    assert response["metadata"]["tool_blocked_kind"] == "chrome_setting"
-    assert "Allow JavaScript from Apple Events" in response["content"][0]["text"]
+    assert calls == {"ai": 2, "tool": 1}
+    assert response["finish_reason"] == "stop"
+    assert response["content"][0]["text"] == "context noted"
 
 
 def test_tool_result_recovery_kind_infers_legacy_chrome_setting_error():
@@ -2476,6 +2481,8 @@ def test_computer_use_payload_preserves_window_targeting_fields():
             "title": "ChatGPT",
             "focus": False,
             "physical": False,
+            "background": True,
+            "method": "chrome_background",
             "modifier": "meta",
         },
     )
@@ -2487,6 +2494,8 @@ def test_computer_use_payload_preserves_window_targeting_fields():
         "title": "ChatGPT",
         "focus": False,
         "physical": False,
+        "background": True,
+        "method": "chrome_background",
         "modifier": "meta",
     }
 
@@ -2592,7 +2601,7 @@ def test_computer_type_can_target_background_chrome(tmp_path, monkeypatch):
     controller._session_path = tmp_path / "shared" / "browser_sessions.json"
     controller._write_sessions({"last_opened_background": True, "last_url": "https://chatgpt.com"})
 
-    result = controller.run("computer.type", {"text": "hello"}, yolo_mode=True)
+    result = controller.run("computer.type", {"text": "hello", "background": True}, yolo_mode=True)
 
     assert result["executed"] is True
     assert result["background"] is True
@@ -2624,7 +2633,7 @@ def test_computer_type_targets_last_opened_existing_chrome_tab(tmp_path, monkeyp
         }
     )
 
-    result = controller.run("computer.type", {"text": "hello"}, yolo_mode=True)
+    result = controller.run("computer.type", {"text": "hello", "background": True}, yolo_mode=True)
 
     assert result["executed"] is True
     assert result["chrome_target"]["window_index"] == 2
