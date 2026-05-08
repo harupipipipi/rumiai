@@ -199,12 +199,18 @@ function BrowserScreenshotPreview({ screenshot }: { screenshot: BrowserScreensho
   const canPlaceMarker = Number.isFinite(markerX) && Number.isFinite(markerY) && imageWidth > 0 && imageHeight > 0;
 
   return (
-    <figure className="overflow-hidden rounded-lg border border-zinc-800 bg-black/30">
-      <div className="relative">
+    <figure className="w-fit max-w-full overflow-hidden rounded-lg border border-zinc-800 bg-black/30">
+      <a
+        href={screenshot.data_url}
+        target="_blank"
+        rel="noreferrer"
+        className="relative inline-block max-w-full cursor-zoom-in align-top"
+      >
         <img
           src={screenshot.data_url}
           alt={screenshot.action === "computer.click" ? "Clicked screen" : "Screen capture"}
-          className="block max-h-[520px] w-full object-contain"
+          className="block h-auto max-h-64 object-contain"
+          style={{ maxWidth: "min(100%, 32rem)" }}
         />
         {canPlaceMarker && (
           <span
@@ -214,7 +220,7 @@ function BrowserScreenshotPreview({ screenshot }: { screenshot: BrowserScreensho
             <span className="absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-red-200" />
           </span>
         )}
-      </div>
+      </a>
       <figcaption className="flex items-center gap-2 border-t border-zinc-800 px-3 py-2 text-[11px] text-zinc-500">
         <ImageIcon size={12} />
         <span>{screenshot.action === "computer.click" ? "クリック位置つきスクリーンショット" : "スクリーンショット"}</span>
