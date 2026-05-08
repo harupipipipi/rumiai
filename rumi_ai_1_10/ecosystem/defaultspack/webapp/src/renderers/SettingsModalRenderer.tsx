@@ -35,6 +35,24 @@ function apiRowLabel(api: Record<string, unknown>): string {
   return String(api.label ?? `${api.provider_id}:${api.api_id}:***`);
 }
 
+function MaskedApiLabel({ api }: { api: Record<string, unknown> }) {
+  const providerId = String(api.provider_id ?? "");
+  const apiId = String(api.api_id ?? "");
+  const fallback = apiRowLabel(api);
+  if (!providerId || !apiId) {
+    return <span className="truncate text-xs text-zinc-300">{fallback}</span>;
+  }
+  return (
+    <span className="inline-flex max-w-full items-center overflow-hidden rounded-md border border-zinc-800 bg-zinc-900/70 px-2 py-0.5 text-xs leading-5 text-zinc-300">
+      <span className="truncate">{providerId}</span>
+      <span className="px-0.5 text-zinc-600">:</span>
+      <span className="truncate">{apiId}</span>
+      <span className="px-0.5 text-zinc-600">:</span>
+      <span className="font-sans leading-none tracking-normal text-zinc-400">***</span>
+    </span>
+  );
+}
+
 function CustomSelect({
   value,
   options,
@@ -130,7 +148,7 @@ function SettingsField({
                 return (
                   <div key={key} className="flex flex-wrap items-center justify-between gap-3 px-3 py-2">
                     <div className="min-w-0">
-                      <div className="truncate font-mono text-xs text-zinc-200">{apiRowLabel(api)}</div>
+                      <MaskedApiLabel api={api} />
                       <div className="truncate text-[11px] text-zinc-500">{String(api.name ?? api.api_id ?? "")}</div>
                     </div>
                     <div className="flex items-center gap-1.5">
@@ -278,8 +296,8 @@ function SettingsField({
                   <div className="mt-2 space-y-1">
                     {rows.length > 0 ? rows.map((api) => (
                       <div key={String(api.key)} className="flex items-center justify-between gap-2 text-xs text-zinc-500">
-                        <span>{String(api.name ?? api.api_id)}</span>
-                        <span className="font-mono">{apiRowLabel(api)}</span>
+                        <span className="truncate">{String(api.name ?? api.api_id)}</span>
+                        <MaskedApiLabel api={api} />
                       </div>
                     )) : (
                       <p className="text-xs text-zinc-600">No named APIs yet.</p>

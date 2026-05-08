@@ -76,9 +76,11 @@ def _supports_thinking(model: Dict[str, Any]) -> bool:
     model_id = str(model.get("model_id") or model.get("id") or "").lower()
     if model_type not in {"chat", "reasoning"}:
         return False
+    if model.get("supports_thinking") is not None:
+        return bool(model.get("supports_thinking"))
     if bool(model.get("supports_thinking")):
         return True
-    return any(token in model_id for token in ("gpt-5", "claude", "gemini", "gemma", "deepseek"))
+    return any(token in model_id for token in ("gpt-5", "claude", "gemini", "deepseek"))
 
 
 def _with_legacy_model_fields(model: Dict[str, Any]) -> Dict[str, Any]:

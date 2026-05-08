@@ -494,6 +494,10 @@ function profileSupportsFast(profile: ModelProfile | null | undefined): boolean 
   return Boolean(defaults.fast || tags.includes("fast") || traits.includes("fast_response"));
 }
 
+function profileSupportsThinking(profile: ModelProfile | null | undefined): boolean {
+  return Boolean(profile?.supports_thinking && profile.thinking_levels?.length);
+}
+
 function bestConfiguredCandidate(candidates: ModelProfile[]): ModelProfile | null {
   if (candidates.length === 0) return null;
   return [...candidates].sort((a, b) => {
@@ -543,18 +547,14 @@ function priceCandidateForProfile(activeProfile: ModelProfile | null, profiles: 
     return activeProfile;
   }
   const sameModelKey = String(activeProfile.same_model_across_providers_key ?? activeProfile.model_id ?? "").toLowerCase();
+  if (!sameModelKey) return null;
   const sameModelCandidates = profiles.filter((profile) => (
     profileIdentity(profile) !== profileIdentity(activeProfile)
     && String(profile.same_model_across_providers_key ?? profile.model_id ?? "").toLowerCase() === sameModelKey
     && (profilePriceTier(profile) === normalizedTier || Boolean(profileDefaults(profile)[`price_${normalizedTier}`]))
   ));
   if (sameModelCandidates.length) return bestConfiguredCandidate(sameModelCandidates);
-  const providerCandidates = profiles.filter((profile) => (
-    profile.provider_id === activeProfile.provider_id
-    && String(profile.type ?? "chat").toLowerCase() === "chat"
-    && (profilePriceTier(profile) === normalizedTier || Boolean(profileDefaults(profile)[`price_${normalizedTier}`]))
-  ));
-  return bestConfiguredCandidate(providerCandidates);
+  return null;
 }
 
 function contextUsageFor(conversation: Conversation | null, profile: ModelProfile | null): ContextUsageInfo {
@@ -768,6 +768,7 @@ export default function App() {
       .filter((command) => !command.modes?.length || command.modes.includes(mode as ComposerCommandMode))
       .filter((command) => command.id !== "fast" || Boolean(fastCandidate))
       .filter((command) => command.id !== "price" || Boolean(priceLowCandidate || priceHighCandidate))
+      .filter((command) => command.id !== "think" || profileSupportsThinking(activeProfile))
       .map((command) => ({
         ...command,
         active: command.id === "yolo" ? yoloMode : command.id === mode,
@@ -1353,11 +1354,6 @@ export default function App() {
       setError(`/${commandId} は未登録の command です。`);
       return;
     }
-    if (parsed.command.id === "think" && !("level" in parsed.args)) {
-      setIsSettingsOpen(true);
-      return;
-    }
-
     try {
       setError(null);
       const result = await api.executeUiCommand({

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 import re
+import urllib.error
+import urllib.parse
+import urllib.request
 from typing import Any, Dict, List
 
 from .openai_compatible_provider import OpenAICompatibleProvider
@@ -104,7 +107,7 @@ class GoogleProvider(OpenAICompatibleProvider):
             "type": "chat",
             "capabilities": ["chat", "tool_calls", "vision"],
             "supports_thinking": True,
-            "thinking_levels": ["low", "high"],
+            "thinking_levels": ["none", "high"],
             "default_thinking_level": "high",
         },
         {
@@ -117,7 +120,7 @@ class GoogleProvider(OpenAICompatibleProvider):
             "type": "chat",
             "capabilities": ["chat", "tool_calls", "vision"],
             "supports_thinking": True,
-            "thinking_levels": ["low", "high"],
+            "thinking_levels": ["none", "high"],
             "default_thinking_level": "high",
         },
         {
@@ -219,6 +222,10 @@ class GoogleProvider(OpenAICompatibleProvider):
 
         return None
 
+    @staticmethod
+    def _use_native_generative_api(model: str) -> bool:
+        return str(model or "").strip().startswith("gemma-4")
+
     @classmethod
     def _translate_params(cls, params, model: str = ""):
         translated = dict(params or {})
@@ -227,6 +234,186 @@ class GoogleProvider(OpenAICompatibleProvider):
         if reasoning_effort and "reasoning_effort" not in translated:
             translated["reasoning_effort"] = reasoning_effort
         return translated
+
+    @staticmethod
+    def _native_thinking_config(params: Dict[str, Any]) -> Dict[str, Any] | None:
+        level = str(params.get("thinking_level") or params.get("reasoning_effort") or "").strip().lower()
+        if level == "xhigh":
+            level = "high"
+        if level == "high":
+            return {"thinkingLevel": "HIGH"}
+        return None
+
+    @staticmethod
+    def _native_text_part(value: Any) -> Dict[str, Any] | None:
+        if isinstance(value, str):
+            return {"text": value}
+        if not isinstance(value, dict):
+            return None
+        block_type = str(value.get("type") or "").lower()
+        if block_type == "text":
+            return {"text": str(value.get("text") or "")}
+        if block_type == "image_url":
+            image_url = value.get("image_url")
+            url = image_url.get("url") if isinstance(image_url, dict) else value.get("url")
+            if isinstance(url, str) and url.startswith("data:") and ";base64," in url:
+                header, data = url.split(";base64,", 1)
+                mime_type = header.replace("data:", "", 1) or "image/png"
+                return {"inlineData": {"mimeType": mime_type, "data": data}}
+        return None
+
+    @classmethod
+    def _native_build_contents(cls, messages: Any) -> tuple[List[Dict[str, Any]], Dict[str, Any] | None]:
+        contents: List[Dict[str, Any]] = []
+        system_parts: List[Dict[str, Any]] = []
+        for message in list(messages or []):
+            if not isinstance(message, dict):
+                continue
+            role = str(message.get("role") or "user").lower()
+            raw_content = message.get("content", "")
+            raw_parts = raw_content if isinstance(raw_content, list) else [raw_content]
+            parts = [part for part in (cls._native_text_part(item) for item in raw_parts) if part]
+            if not parts:
+                continue
+            if role == "system":
+                system_parts.extend(parts)
+                continue
+            native_role = "model" if role == "assistant" else "user"
+            contents.append({"role": native_role, "parts": parts})
+        system_instruction = {"parts": system_parts} if system_parts else None
+        return contents, system_instruction
+
+    @staticmethod
+    def _native_tools(tools: Any) -> List[Dict[str, Any]]:
+        if not isinstance(tools, list):
+            return []
+        native_tools: List[Dict[str, Any]] = []
+        for tool in tools:
+            function_def = tool.get("function") if isinstance(tool, dict) else None
+            name = str(function_def.get("name") if isinstance(function_def, dict) else tool.get("name") if isinstance(tool, dict) else "").strip()
+            normalized = name.lower().replace("-", "_").replace(".", "_")
+            if normalized in {"google_search", "googlesearch"}:
+                native_tools.append({"googleSearch": {}})
+        return native_tools
+
+    def _native_body(self, model: str, messages: Any, tools: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+        contents, system_instruction = self._native_build_contents(messages)
+        body: Dict[str, Any] = {"contents": contents}
+        if system_instruction:
+            body["systemInstruction"] = system_instruction
+        generation_config: Dict[str, Any] = {}
+        thinking_config = self._native_thinking_config(params)
+        if thinking_config:
+            generation_config["thinkingConfig"] = thinking_config
+        for source, target in (("temperature", "temperature"), ("max_tokens", "maxOutputTokens"), ("top_p", "topP")):
+            if source in params:
+                generation_config[target] = params[source]
+        if generation_config:
+            body["generationConfig"] = generation_config
+        native_tools = self._native_tools(tools)
+        if native_tools:
+            body["tools"] = native_tools
+        return body
+
+    def _native_request_json(self, model: str, body: Dict[str, Any], *, stream: bool = False):
+        self._ensure_runtime_config()
+        action = "streamGenerateContent" if stream else "generateContent"
+        quoted_model = urllib.parse.quote(str(model), safe="")
+        url = "https://generativelanguage.googleapis.com/v1beta/models/{}:{}".format(quoted_model, action)
+        if stream:
+            url += "?alt=sse"
+        data = json.dumps(body).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": self._api_key,
+        }
+        req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+        try:
+            return urllib.request.urlopen(req, context=self._ssl_ctx, timeout=120)
+        except urllib.error.HTTPError as exc:
+            err_body = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError("Google API error {}: {}".format(exc.code, err_body))
+        except urllib.error.URLError as exc:
+            raise RuntimeError("Google API connection error: {}".format(exc.reason))
+
+    @staticmethod
+    def _native_usage(raw: Dict[str, Any]) -> Dict[str, int]:
+        usage = raw.get("usageMetadata") if isinstance(raw, dict) else {}
+        if not isinstance(usage, dict):
+            usage = {}
+        input_tokens = int(usage.get("promptTokenCount") or 0)
+        output_tokens = int(usage.get("candidatesTokenCount") or 0)
+        return {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": int(usage.get("totalTokenCount") or input_tokens + output_tokens),
+        }
+
+    @classmethod
+    def _native_extract_parts(cls, raw: Dict[str, Any]) -> tuple[str, str, str]:
+        text_parts: List[str] = []
+        thought_parts: List[str] = []
+        finish_reason = "stop"
+        candidates = raw.get("candidates") if isinstance(raw, dict) else []
+        for candidate in candidates if isinstance(candidates, list) else []:
+            if isinstance(candidate, dict) and candidate.get("finishReason"):
+                finish_reason = str(candidate.get("finishReason") or "stop").lower()
+            content = candidate.get("content") if isinstance(candidate, dict) else {}
+            parts = content.get("parts") if isinstance(content, dict) else []
+            for part in parts if isinstance(parts, list) else []:
+                if not isinstance(part, dict):
+                    continue
+                text = str(part.get("text") or "")
+                if not text:
+                    continue
+                if part.get("thought") is True:
+                    thought_parts.append(text)
+                else:
+                    text_parts.append(text)
+        return "".join(text_parts), "".join(thought_parts), finish_reason
+
+    def _native_complete(self, model, messages, tools, params):
+        body = self._native_body(model, messages, tools, dict(params or {}))
+        with self._native_request_json(model, body) as resp:
+            raw = json.loads(resp.read().decode("utf-8"))
+        text, thought, finish_reason = self._native_extract_parts(raw)
+        response = {
+            "content": [{"type": "text", "text": text}],
+            "finish_reason": finish_reason,
+            "usage": self._native_usage(raw),
+        }
+        if thought:
+            response["metadata"] = {
+                "thinking": {
+                    "state": "completed",
+                    "transcript": thought,
+                    "source": "google_native_thought",
+                }
+            }
+        return response
+
+    def _native_stream(self, model, messages, tools, params):
+        body = self._native_body(model, messages, tools, dict(params or {}))
+        resp = self._native_request_json(model, body, stream=True)
+        finish_reason = "stop"
+        usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+        try:
+            for payload in self._parse_sse_lines(resp):
+                try:
+                    obj = json.loads(payload)
+                except json.JSONDecodeError:
+                    continue
+                text, thought, candidate_finish = self._native_extract_parts(obj)
+                if thought:
+                    yield {"type": "thinking_delta", "delta": {"type": "text", "text": thought}}
+                if text:
+                    yield {"type": "content_delta", "delta": {"type": "text", "text": text}}
+                if candidate_finish:
+                    finish_reason = candidate_finish
+                usage = self._native_usage(obj) or usage
+            yield {"type": "stream_end", "finish_reason": finish_reason, "usage": usage}
+        finally:
+            resp.close()
 
     @staticmethod
     def _copy_chat_params(body, params):
@@ -310,6 +497,8 @@ class GoogleProvider(OpenAICompatibleProvider):
         return sanitized
 
     def complete(self, model, messages, tools, params):
+        if self._use_native_generative_api(model):
+            return self._native_complete(model, messages, tools, params)
         translated = self._translate_params(params, model)
         body = {"model": model, "messages": self.build_request(messages)}
         sanitized_tools = self._sanitize_tools(tools)
@@ -320,6 +509,9 @@ class GoogleProvider(OpenAICompatibleProvider):
         return self.parse_response(raw)
 
     def stream(self, model, messages, tools, params):
+        if self._use_native_generative_api(model):
+            yield from self._native_stream(model, messages, tools, params)
+            return
         translated = self._translate_params(params, model)
         body = {"model": model, "messages": self.build_request(messages)}
         sanitized_tools = self._sanitize_tools(tools)

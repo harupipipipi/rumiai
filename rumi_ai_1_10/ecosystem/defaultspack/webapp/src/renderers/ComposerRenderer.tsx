@@ -119,6 +119,12 @@ export function profileNeedsApiKey(profile: ModelProfile | null | undefined): bo
   return API_KEY_PROVIDER_IDS.has(providerId);
 }
 
+function thinkingCommandMatch(input: string): { query: string } | null {
+  const match = input.trimStart().match(/^\/(?:think|thinking|t)(?:\s+(\S*))?$/i);
+  if (!match) return null;
+  return { query: String(match[1] ?? "").toLowerCase() };
+}
+
 function compactProfileName(name: string): string {
   return name
     .replace(/^GPT-/i, "")
@@ -631,11 +637,23 @@ export function ComposerRenderer({
   const slashText = input.startsWith("/") && !isEscapedSlash ? input.slice(1) : "";
   const slashCommandName = slashText.trimStart().split(/\s+/, 1)[0] ?? "";
   const slashQuery = slashCommandName.toLowerCase();
+  const thinkingCommand = commands.find((command) => command.id === "think");
+  const thinkingMatch = input.startsWith("/") && !isEscapedSlash ? thinkingCommandMatch(input) : null;
   const matchedCommands = input.startsWith("/") && !isEscapedSlash
-    ? commands.filter((command) => {
-        const haystack = `${command.id} ${command.name} ${(command.aliases ?? []).join(" ")} ${command.label} ${command.description ?? ""}`.toLowerCase();
-        return !slashQuery || haystack.includes(slashQuery);
-      })
+    ? thinkingMatch && thinkingCommand && levels.length > 0
+      ? levels
+          .filter((level) => !thinkingMatch.query || level.toLowerCase().includes(thinkingMatch.query))
+          .map((level) => ({
+            ...thinkingCommand,
+            id: `think:${level}`,
+            name: `think ${level}`,
+            label: `Thinking ${THINKING_LABELS[level] ?? level}`,
+            description: `思考レベルを ${THINKING_LABELS[level] ?? level} に変更`,
+          }))
+      : commands.filter((command) => {
+          const haystack = `${command.id} ${command.name} ${(command.aliases ?? []).join(" ")} ${command.label} ${command.description ?? ""}`.toLowerCase();
+          return !slashQuery || haystack.includes(slashQuery);
+        })
     : [];
   const currentModeMeta = MODE_META[mode];
   const ModeIcon = currentModeMeta.icon;
@@ -723,6 +741,13 @@ export function ComposerRenderer({
   }, []);
 
   const chooseCommand = (commandId: string, rawInput = input) => {
+    const thinkingLevelMatch = commandId.match(/^think:(.+)$/);
+    if (thinkingLevelMatch) {
+      onCommandSelect?.("think", `/think ${thinkingLevelMatch[1]}`);
+      onInputChange("");
+      return;
+    }
+
     const command = commands.find((item) => item.id === commandId);
     const action = command?.execution.type === "frontend" ? command.execution.action : "";
     if (action === "open_model_picker" && !rawInput.trim().includes(" ")) {
@@ -734,6 +759,10 @@ export function ComposerRenderer({
     } else if (action === "open_command_help") {
       setOpenFolder("commands");
       setMenuOpen(true);
+    } else if (command?.id === "think" && !thinkingCommandMatch(rawInput)) {
+      onInputChange("/think ");
+      window.setTimeout(() => textareaRef.current?.focus(), 0);
+      return;
     }
     onCommandSelect?.(commandId, rawInput);
     onInputChange("");
