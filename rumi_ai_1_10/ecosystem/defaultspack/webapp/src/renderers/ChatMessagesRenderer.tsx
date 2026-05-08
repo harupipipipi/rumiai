@@ -1,4 +1,5 @@
-import { AlertTriangle, CheckCircle2, ChevronDown, Clock, Image as ImageIcon, Loader2 } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, ChevronDown, Clock, Copy, Image as ImageIcon, Loader2 } from "lucide-react";
+import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 
 import { cn } from "../lib/cn";
@@ -59,6 +60,91 @@ function messageVisibleText(message: ChatMessagesRendererProps["messages"][numbe
     .join("")
     .trim();
   return blockText || String(message.rawText ?? "").trim();
+}
+
+export function messageCopyText(message: ChatMessagesRendererProps["messages"][number]): string {
+  const blockText = message.content
+    .map((block) => {
+      const blockType = String(block.type ?? "text");
+      if (blockType === "text" || blockType === "markdown" || blockType === "code") {
+        return String(block.text ?? "");
+      }
+      if (blockType === "image" || blockType === "image_url") {
+        const imageUrl = block.image_url;
+        const url = String(
+          block.url
+          ?? (typeof imageUrl === "object" && imageUrl !== null && "url" in imageUrl ? imageUrl.url : "")
+          ?? "",
+        );
+        return url;
+      }
+      return "";
+    })
+    .filter((text) => text.trim().length > 0)
+    .join("\n\n")
+    .trim();
+  return blockText || String(message.rawText ?? "").trim();
+}
+
+async function writeClipboardText(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
+}
+
+function MessageActionBar({ message, align }: { message: ChatMessagesRendererProps["messages"][number]; align: "left" | "right" }) {
+  const [copied, setCopied] = useState(false);
+
+  const actions = [
+    {
+      id: "copy",
+      label: copied ? "コピー済み" : "コピー",
+      icon: copied ? Check : Copy,
+      run: async () => {
+        const text = messageCopyText(message);
+        if (!text) return;
+        await writeClipboardText(text);
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1200);
+      },
+    },
+  ];
+
+  return (
+    <div className={cn(
+      "rumi-message-actions absolute -top-3 z-10 flex items-center gap-1 rounded-lg border border-zinc-700/70 bg-zinc-950/95 p-1 opacity-0 shadow-xl transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100",
+      align === "right" ? "right-2" : "left-2",
+    )}>
+      {actions.map((action) => {
+        const Icon = action.icon;
+        return (
+          <button
+            key={action.id}
+            type="button"
+            aria-label={action.label}
+            title={action.label}
+            onClick={() => {
+              void action.run();
+            }}
+            className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100 focus-visible:bg-zinc-800 focus-visible:text-zinc-100 focus-visible:outline-none"
+          >
+            <Icon size={14} />
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 function WidgetCard({ widget }: { widget: Record<string, unknown> }) {
@@ -232,7 +318,7 @@ export function ChatMessagesRenderer({
         <div className="flex-1 overflow-y-auto px-4 py-3">
           <div className="w-full max-w-5xl mx-auto space-y-4">
             {messages.map((message) => (
-              <div key={message.id} className={cn("rumi-message-row flex gap-3", message.role === "user" ? "flex-row-reverse" : "")}>
+              <div key={message.id} className={cn("rumi-message-row group/message flex gap-3", message.role === "user" ? "flex-row-reverse" : "")}>
                 <div className={cn("flex flex-col min-w-0 pt-1", message.role === "user" ? "items-end max-w-[80%]" : "items-start flex-1")}>
                   {message.role === "agent" && (
                     <div className="flex items-center gap-2 mb-1.5">
@@ -245,12 +331,16 @@ export function ChatMessagesRenderer({
                     </div>
                   )}
 
-                  <div className={cn(
-                    "rounded-2xl max-w-full sm:px-4 px-3 py-3 text-[14px]", 
-                    message.role === "user" 
-                      ? "bg-zinc-800/80 text-zinc-100 rounded-tr-sm shadow-sm border border-zinc-700/50" 
-                      : "w-full text-zinc-200 bg-transparent"
-                  )}>
+                  <div
+                    tabIndex={0}
+                    className={cn(
+                      "relative rounded-2xl max-w-full sm:px-4 px-3 py-3 text-[14px] outline-none",
+                      message.role === "user"
+                        ? "bg-zinc-800/80 text-zinc-100 rounded-tr-sm shadow-sm border border-zinc-700/50"
+                        : "w-full text-zinc-200 bg-transparent",
+                    )}
+                  >
+                    <MessageActionBar message={message} align={message.role === "user" ? "right" : "left"} />
                     {showActivityInMessages && message.role === "agent" && <ToolActivityTray message={message} />}
 
                     {message.role === "agent" && message.metadata?.thinkingTranscript && (
@@ -264,7 +354,7 @@ export function ChatMessagesRenderer({
                       </details>
                     )}
 
-                    <div className="markdown-body leading-relaxed break-words space-y-4">
+                    <div className="markdown-body select-text leading-relaxed break-words space-y-4">
                       {message.content.length > 0 && (messageVisibleText(message) || message.content.some((block) => String(block.type ?? "text") !== "text"))
                         ? message.content.map((block, index) => (
                             <MessageBlock key={`${message.id}-${index}`} block={block} unknownStrategy={unknownBlockStrategy} />

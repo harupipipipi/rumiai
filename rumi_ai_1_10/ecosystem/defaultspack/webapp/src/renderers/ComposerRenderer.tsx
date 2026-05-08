@@ -874,7 +874,14 @@ export function ComposerRenderer({
   );
 
   const handleKeyDown = useCallback(
-    (event: React.KeyboardEvent) => {
+    (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+        event.preventDefault();
+        event.stopPropagation();
+        event.currentTarget.select();
+        return;
+      }
+
       if (matchedCommands.length > 0) {
         if (event.key === "ArrowDown") {
           event.preventDefault();
@@ -1176,6 +1183,11 @@ export function ComposerRenderer({
                 ? "rumi-composer-input-new min-h-[64px] px-6 pt-5 text-[18px] font-medium leading-[1.55] placeholder:text-zinc-500"
                 : "min-h-[34px] px-5 pt-3 text-[15px] max-[640px]:min-h-[32px] max-[640px]:px-3 max-[640px]:pt-2.5 max-[640px]:pb-0 max-[640px]:text-[13px]"
             } w-full bg-transparent border-none outline-none text-zinc-100 pb-0 resize-none max-h-[130px] disabled:opacity-50`}
+            onKeyDownCapture={(event) => {
+              if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+                event.stopPropagation();
+              }
+            }}
             onKeyDown={handleKeyDown}
           />
 
