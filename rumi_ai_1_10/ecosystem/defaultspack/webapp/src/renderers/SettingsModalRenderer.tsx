@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactElement } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Check, ChevronDown, Pencil, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, MoreVertical, Pencil, Trash2, X } from "lucide-react";
 
 import { cn } from "../lib/cn";
 import type { SettingsSection } from "../lib/api";
@@ -43,12 +43,12 @@ function MaskedApiLabel({ api }: { api: Record<string, unknown> }) {
     return <span className="truncate text-xs text-zinc-300">{fallback}</span>;
   }
   return (
-    <span className="inline-flex max-w-full items-center overflow-hidden rounded-md border border-zinc-800 bg-zinc-900/70 px-2 py-0.5 text-xs leading-5 text-zinc-300">
+    <span className="inline-flex max-w-full items-center overflow-hidden font-mono text-xs leading-5 text-zinc-500">
       <span className="truncate">{providerId}</span>
       <span className="px-0.5 text-zinc-600">:</span>
       <span className="truncate">{apiId}</span>
       <span className="px-0.5 text-zinc-600">:</span>
-      <span className="font-sans leading-none tracking-normal text-zinc-400">***</span>
+      <span className="tracking-normal text-zinc-500">***</span>
     </span>
   );
 }
@@ -123,6 +123,8 @@ function SettingsField({
   const [apiSaveState, setApiSaveState] = useState<"idle" | "saved">("idle");
   const [renamingKey, setRenamingKey] = useState("");
   const [renameDraft, setRenameDraft] = useState("");
+  const [selectedApiKey, setSelectedApiKey] = useState("");
+  const [openApiMenuKey, setOpenApiMenuKey] = useState("");
   const commonLabel = <span className="text-sm text-zinc-300">{field.label}</span>;
   const isSecretConfigured = Boolean(value);
 
@@ -137,23 +139,34 @@ function SettingsField({
       const registeredApis = registeredApiRows(providers);
       control = (
         <div className="space-y-4">
-          <div className="rounded-lg border border-zinc-800 bg-zinc-950/70">
-            <div className="border-b border-zinc-800 px-3 py-2 text-xs font-medium text-zinc-300">
-              Registered API keys
+          <div className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/70">
+            <div className="grid grid-cols-[36px_minmax(220px,1.4fr)_minmax(120px,0.8fr)_minmax(90px,0.6fr)_minmax(90px,0.6fr)_48px] items-center gap-3 border-b border-zinc-800 bg-zinc-900/70 px-3 py-2 text-[11px] font-medium text-zinc-500">
+              <span className="h-4 w-4 rounded border border-indigo-500/70" />
+              <span>Key</span>
+              <span>Guardrails</span>
+              <span>Expires</span>
+              <span>Last Used</span>
+              <span />
             </div>
-            <div className="divide-y divide-zinc-900">
+            <div className="divide-y divide-zinc-800/80">
               {registeredApis.length > 0 ? registeredApis.map((api) => {
                 const key = String(api.key ?? `${api.provider_id}:${api.api_id}`);
                 const isRenaming = renamingKey === key;
+                const isMenuOpen = openApiMenuKey === key;
+                const isSelected = selectedApiKey === key;
                 return (
-                  <div key={key} className="flex flex-wrap items-center justify-between gap-3 px-3 py-2">
+                  <div
+                    key={key}
+                    className={cn(
+                      "grid grid-cols-[36px_minmax(220px,1.4fr)_minmax(120px,0.8fr)_minmax(90px,0.6fr)_minmax(90px,0.6fr)_48px] items-center gap-3 px-3 py-3 transition-colors",
+                      isSelected ? "bg-zinc-900/85" : "bg-zinc-950/20 hover:bg-zinc-900/45",
+                    )}
+                    onClick={() => setSelectedApiKey(key)}
+                  >
+                    <span className={cn("h-4 w-4 rounded border", isSelected ? "border-indigo-400 bg-indigo-500/20" : "border-indigo-500/70")} />
                     <div className="min-w-0">
-                      <MaskedApiLabel api={api} />
-                      <div className="truncate text-[11px] text-zinc-500">{String(api.name ?? api.api_id ?? "")}</div>
-                    </div>
-                    <div className="flex items-center gap-1.5">
                       {isRenaming ? (
-                        <>
+                        <div className="flex items-center gap-1.5">
                           <input
                             value={renameDraft}
                             autoFocus
@@ -170,12 +183,13 @@ function SettingsField({
                               });
                               setRenamingKey("");
                             }}
-                            className="w-32 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 outline-none"
+                            className="min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 outline-none"
                           />
                           <button
                             type="button"
                             disabled={!renameDraft.trim()}
-                            onClick={() => {
+                            onClick={(event) => {
+                              event.stopPropagation();
                               if (!renameDraft.trim()) return;
                               onChange(sectionId, field.id, {
                                 action: "rename",
@@ -190,42 +204,88 @@ function SettingsField({
                           >
                             <Check size={13} />
                           </button>
-                          <button type="button" onClick={() => setRenamingKey("")} className="rounded-md border border-zinc-800 p-1 text-zinc-500 hover:text-zinc-300">
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setRenamingKey("");
+                            }}
+                            className="rounded-md border border-zinc-800 p-1 text-zinc-500 hover:text-zinc-300"
+                          >
                             <X size={13} />
                           </button>
-                        </>
+                        </div>
                       ) : (
+                        <>
+                          <div className="truncate text-sm font-medium text-zinc-200">{String(api.name ?? api.api_id ?? "")}</div>
+                          <MaskedApiLabel api={api} />
+                        </>
+                      )}
+                    </div>
+                    <span className="truncate text-sm text-zinc-500">No guardrails</span>
+                    <span className="truncate text-sm text-zinc-500">Never</span>
+                    <span className="truncate text-sm text-zinc-500">Never</span>
+                    <div className="relative flex justify-end">
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setOpenApiMenuKey(isMenuOpen ? "" : key);
+                        }}
+                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-800 text-zinc-500 transition-colors hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-200"
+                        title="Actions"
+                      >
+                        <MoreVertical size={15} />
+                      </button>
+                      {isMenuOpen && (
                         <>
                           <button
                             type="button"
-                            onClick={() => {
-                              setRenamingKey(key);
-                              setRenameDraft(String(api.name ?? api.api_id ?? ""));
+                            aria-label="close api menu"
+                            className="fixed inset-0 z-10 cursor-default"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setOpenApiMenuKey("");
                             }}
-                            className="rounded-md border border-zinc-800 p-1.5 text-zinc-500 transition-colors hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-200"
-                            title="Rename"
-                          >
-                            <Pencil size={13} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => onChange(sectionId, field.id, {
-                              action: "delete",
-                              provider_id: api.provider_id,
-                              api_id: api.api_id,
-                            })}
-                            className="rounded-md border border-zinc-800 p-1.5 text-zinc-500 transition-colors hover:border-rose-500/40 hover:bg-rose-950/20 hover:text-rose-300"
-                            title="Delete"
-                          >
-                            <Trash2 size={13} />
-                          </button>
+                          />
+                          <div className="absolute right-0 top-[calc(100%+6px)] z-20 w-32 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 py-1 shadow-2xl">
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setRenamingKey(key);
+                                setRenameDraft(String(api.name ?? api.api_id ?? ""));
+                                setOpenApiMenuKey("");
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
+                            >
+                              <Pencil size={13} />
+                              Rename
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setOpenApiMenuKey("");
+                                onChange(sectionId, field.id, {
+                                  action: "delete",
+                                  provider_id: api.provider_id,
+                                  api_id: api.api_id,
+                                });
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-rose-300 hover:bg-rose-950/30"
+                            >
+                              <Trash2 size={13} />
+                              Delete
+                            </button>
+                          </div>
                         </>
                       )}
                     </div>
                   </div>
                 );
               }) : (
-                <div className="px-3 py-4 text-xs text-zinc-600">No registered API keys yet.</div>
+                <div className="px-3 py-5 text-xs text-zinc-600">No registered API keys yet.</div>
               )}
             </div>
           </div>
@@ -281,32 +341,6 @@ function SettingsField({
             </button>
           </div>
           {apiSaveState === "saved" && <p className="text-[11px] text-emerald-400">Saved</p>}
-          <div className="grid gap-2 md:grid-cols-2">
-            {providers.map((provider) => {
-              const rows = namedApiRows(provider);
-              const configured = Boolean(provider.configured);
-              return (
-                <div key={String(provider.provider_id)} className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-sm font-medium text-zinc-200">{String(provider.provider_id)}</span>
-                    <span className={cn("text-[11px]", configured ? "text-emerald-400" : "text-zinc-600")}>
-                      {configured ? "configured" : "not set"}
-                    </span>
-                  </div>
-                  <div className="mt-2 space-y-1">
-                    {rows.length > 0 ? rows.map((api) => (
-                      <div key={String(api.key)} className="flex items-center justify-between gap-2 text-xs text-zinc-500">
-                        <span className="truncate">{String(api.name ?? api.api_id)}</span>
-                        <MaskedApiLabel api={api} />
-                      </div>
-                    )) : (
-                      <p className="text-xs text-zinc-600">No named APIs yet.</p>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
         </div>
       );
       break;

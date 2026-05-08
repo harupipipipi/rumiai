@@ -710,7 +710,7 @@ export default function App() {
   const [codingDirectory, setCodingDirectory] = useState(".");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [droppedWidgets, setDroppedWidgets] = useState<DroppedWidget[]>([]);
-  const [selectedTools, setSelectedTools] = useState<ComposerExtensionItem[]>([]);
+  const [storedSelectedToolIds, setStoredSelectedToolIds] = useLocalStorage<string[]>("rumi-selected-tool-ids", []);
   const pendingStorageKey = "rumi-pending-chat-requests";
   const [pendingRequests, setPendingRequests] = useLocalStorage<Record<string, PendingChatRequest>>(pendingStorageKey, {});
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -737,6 +737,9 @@ export default function App() {
   );
   const contextUsage = contextUsageFor(activeConversation, activeProfile);
   const composerExtensions = composerExtensionItems(sidebarItems);
+  const selectedTools = useMemo(() => storedSelectedToolIds
+    .map((toolId) => composerExtensions.find((tool) => tool.id === toolId))
+    .filter((tool): tool is ComposerExtensionItem => Boolean(tool)), [composerExtensions, storedSelectedToolIds]);
   const selectedToolIds = useMemo(() => selectedTools.map((tool) => tool.id), [selectedTools]);
   const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
   const pendingRequest = activeConversationId ? pendingRequests[activeConversationId] : null;
@@ -1178,11 +1181,11 @@ export default function App() {
   };
 
   const toggleSelectedTool = (item: ComposerExtensionItem) => {
-    setSelectedTools((current) => {
-      if (current.some((selected) => selected.id === item.id)) {
-        return current.filter((selected) => selected.id !== item.id);
+    setStoredSelectedToolIds((current) => {
+      if (current.includes(item.id)) {
+        return current.filter((selectedId) => selectedId !== item.id);
       }
-      return [...current, item];
+      return [...current, item.id];
     });
   };
 
@@ -1253,7 +1256,6 @@ export default function App() {
         setInput("");
         setAttachedFiles([]);
         setDroppedWidgets([]);
-        setSelectedTools([]);
         if (activeConversationId) {
           forgetPendingRequest(activeConversationId);
           replaceChatIdInUrl(activeConversationId, false);
@@ -1434,7 +1436,7 @@ export default function App() {
       const toolId = widget.sourceItemId || widget.id;
       const item = composerExtensions.find((candidate) => candidate.id === toolId);
       if (item) {
-        setSelectedTools((current) => current.some((selected) => selected.id === item.id) ? current : [...current, item]);
+        setStoredSelectedToolIds((current) => current.includes(item.id) ? current : [...current, item.id]);
       }
     }
   };
@@ -1853,7 +1855,6 @@ export default function App() {
         signal: abortController.signal,
       });
       setAttachedFiles([]);
-      setSelectedTools([]);
       setDroppedWidgets([]);
       forgetPendingRequest(conversation.id);
       replaceChatIdInUrl(conversation.id, false);

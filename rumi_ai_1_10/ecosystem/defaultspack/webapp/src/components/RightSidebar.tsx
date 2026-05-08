@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactElement } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type ReactElement } from "react";
 import {
   Blocks,
   BrainCircuit,
@@ -17,6 +17,8 @@ import {
   Power,
   Search,
   Settings,
+  SlidersHorizontal,
+  Star,
   Terminal,
   Wrench,
   GitBranch,
@@ -29,6 +31,9 @@ import {
   Monitor,
   Archive,
   Code2,
+  MoreVertical,
+  Pin,
+  PinOff,
 } from "lucide-react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
@@ -44,6 +49,32 @@ import { compareToolUiItems, sortedToolGroups, sortedToolUiItems, supportedCompo
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
+}
+
+function readStoredStringArray(key: string): string[] {
+  try {
+    const raw = localStorage.getItem(key);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.map((item) => String(item)).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function useStoredStringArray(key: string): [string[], (updater: (current: string[]) => string[]) => void] {
+  const [value, setValue] = useState<string[]>(() => readStoredStringArray(key));
+  const update = (updater: (current: string[]) => string[]) => {
+    setValue((current) => {
+      const next = [...new Set(updater(current).filter(Boolean))];
+      try {
+        localStorage.setItem(key, JSON.stringify(next));
+      } catch {
+        // Storage may be unavailable in restricted browser contexts.
+      }
+      return next;
+    });
+  };
+  return [value, update];
 }
 
 const CATEGORY_META: Record<SidebarCategory | "all", { label: string; icon: ReactElement }> = {
@@ -475,9 +506,14 @@ export function RightSidebar({
   const [categoryFilter, setCategoryFilter] = useState<"all" | SidebarCategory>("all");
   const [openToolGroupMenu, setOpenToolGroupMenu] = useState<string | null>(null);
   const [toolGroupMenuPosition, setToolGroupMenuPosition] = useState<{ top: number; right: number } | null>(null);
-  const [shortcutItemIds, setShortcutItemIds] = useState<string[]>([]);
+  const [pinnedItemIds, setPinnedItemIds] = useStoredStringArray("rumi-sidebar-pinned-item-ids");
+  const [starredItemIds, setStarredItemIds] = useStoredStringArray("rumi-sidebar-starred-item-ids");
+  const [showStarredOnly, setShowStarredOnly] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ itemId: string; x: number; y: number } | null>(null);
   const toolGroupMenuRef = useRef<HTMLDivElement | null>(null);
   const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
+  const pinnedItemIdSet = useMemo(() => new Set(pinnedItemIds), [pinnedItemIds]);
+  const starredItemIdSet = useMemo(() => new Set(starredItemIds), [starredItemIds]);
 
   useEffect(() => {
     const requestedId = activeItemId?.split(":").slice(0, -1).join(":") || activeItemId;
@@ -488,6 +524,7 @@ export function RightSidebar({
 
   useEffect(() => {
     if (!activePanel) return;
+    if (activePanel === "__tool_manager__") return;
     if (!items.some((item) => item.id === activePanel)) {
       setActivePanel(null);
     }
@@ -509,11 +546,13 @@ export function RightSidebar({
       if (!(target instanceof Node)) return;
       if (toolGroupMenuRef.current?.contains(target)) return;
       setOpenToolGroupMenu(null);
+      setContextMenu(null);
     };
 
     const handleDocumentKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setOpenToolGroupMenu(null);
+        setContextMenu(null);
       }
     };
 
@@ -525,6 +564,21 @@ export function RightSidebar({
     };
   }, [openToolGroupMenu]);
 
+  useEffect(() => {
+    if (!contextMenu) return;
+
+    const close = () => setContextMenu(null);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [contextMenu]);
+
   const counts = useMemo(() => {
     const next: Record<string, number> = { all: items.length };
     for (const item of items) {
@@ -533,9 +587,11 @@ export function RightSidebar({
     return next;
   }, [items]);
 
-  const toolItems = useMemo(() => sortedToolUiItems(items.filter((item) => item.category === "tool")), [items]);
+  const toolItems = useMemo(() => sortedToolUiItems(items.filter((item) => (
+    item.category === "tool"
+    && (!showStarredOnly || starredItemIdSet.has(item.id))
+  ))), [items, showStarredOnly, starredItemIdSet]);
   const groupedToolIds = useMemo(() => new Set(toolItems.map((item) => item.id)), [toolItems]);
-  const shortcutIdSet = useMemo(() => new Set(shortcutItemIds), [shortcutItemIds]);
   const toolGroups = useMemo(() => {
     const groups = new Map<string, SidebarItem[]>();
     for (const item of toolItems) {
@@ -553,13 +609,15 @@ export function RightSidebar({
   const showToolGroups = (categoryFilter === "all" || categoryFilter === "tool") && toolGroups.length > 0;
 
   const visibleItems = useMemo(() => {
-    const base = categoryFilter === "all" ? items : items.filter((item) => item.category === categoryFilter);
+    const base = (categoryFilter === "all" ? items : items.filter((item) => item.category === categoryFilter))
+      .filter((item) => !showStarredOnly || starredItemIdSet.has(item.id));
     return [...base]
       .sort(compareSidebarItems)
-      .filter((item) => item.category !== "tool" || !showToolGroups || !groupedToolIds.has(item.id) || shortcutIdSet.has(item.id));
-  }, [items, categoryFilter, groupedToolIds, shortcutIdSet, showToolGroups]);
+      .filter((item) => item.category !== "tool" || !showToolGroups || !groupedToolIds.has(item.id) || pinnedItemIdSet.has(item.id));
+  }, [items, categoryFilter, groupedToolIds, pinnedItemIdSet, showStarredOnly, showToolGroups, starredItemIdSet]);
 
   const activeItem = items.find((item) => item.id === activePanel) ?? null;
+  const isToolManagerActive = activePanel === "__tool_manager__";
   const activeToolGroupId = activeItem?.category === "tool" ? toolGroupFor(activeItem).id : null;
 
   const handleDragStart = (event: DragEvent, item: SidebarItem) => {
@@ -590,10 +648,28 @@ export function RightSidebar({
 
   const handleShortcutDrop = (event: DragEvent) => {
     const itemId = event.dataTransfer.getData("application/rumi-sidebar-shortcut");
-    if (!itemId || shortcutIdSet.has(itemId) || !items.some((item) => item.id === itemId)) return;
+    if (!itemId || pinnedItemIdSet.has(itemId) || !items.some((item) => item.id === itemId)) return;
     event.preventDefault();
-    setShortcutItemIds((current) => [...current, itemId]);
+    setPinnedItemIds((current) => [...current, itemId]);
     setOpenToolGroupMenu(null);
+  };
+
+  const togglePin = (itemId: string) => {
+    setPinnedItemIds((current) => current.includes(itemId) ? current.filter((id) => id !== itemId) : [...current, itemId]);
+  };
+
+  const toggleStar = (itemId: string) => {
+    setStarredItemIds((current) => current.includes(itemId) ? current.filter((id) => id !== itemId) : [...current, itemId]);
+  };
+
+  const openItemContextMenu = (event: MouseEvent, item: SidebarItem) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu({
+      itemId: item.id,
+      x: Math.min(event.clientX, window.innerWidth - 190),
+      y: Math.min(event.clientY, window.innerHeight - 150),
+    });
   };
 
   const openToolGroup = (groupId: string, button: HTMLButtonElement) => {
@@ -607,19 +683,19 @@ export function RightSidebar({
 
   return (
     <aside className="flex-shrink-0 border-l border-zinc-800/60 bg-[#09090b] hidden md:flex h-full transition-[width,opacity] duration-200 ease-out">
-      {activeItem && (
+      {(activeItem || isToolManagerActive) && (
         <div className="w-[250px] xl:w-[270px] flex flex-col border-r border-zinc-800/40 bg-[#0a0a0c] animate-in slide-in-from-right-2 duration-200">
           <div className="h-10 flex items-center justify-between px-2.5 border-b border-zinc-800/60 flex-shrink-0">
             <div className="flex items-center gap-2 min-w-0 overflow-hidden">
-              <div className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", categoryColor(activeItem.category, "bg"))} />
-              <h3 className="text-[13px] font-medium text-zinc-100 truncate">{activeItem.label}</h3>
-              {activeItem.badge && (
+              <div className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", activeItem ? categoryColor(activeItem.category, "bg") : "bg-emerald-500")} />
+              <h3 className="text-[13px] font-medium text-zinc-100 truncate">{activeItem?.label ?? "Tool manager"}</h3>
+              {activeItem?.badge && (
                 <span className="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 py-0.5 rounded-full font-bold flex-shrink-0">
                   {activeItem.badge}
                 </span>
               )}
             </div>
-            {activeItem.category === "tool" && (
+            {activeItem?.category === "tool" && (
               <button
                 type="button"
                 onClick={() => onToolToggle?.(activeItem)}
@@ -634,14 +710,90 @@ export function RightSidebar({
             )}
           </div>
 
-          {activeItem.description && (
+          {activeItem?.description && (
             <div className="px-2.5 py-1.5 border-b border-zinc-800/40">
               <p className="text-[10px] text-zinc-500">{activeItem.description}</p>
             </div>
           )}
 
           <div className="flex-1 overflow-y-auto p-2.5">
-            <SidebarPanel item={activeItem} settingsValues={settingsValues} onSettingChange={onSettingChange} onPanelAction={onPanelAction} />
+            {activeItem ? (
+              <SidebarPanel item={activeItem} settingsValues={settingsValues} onSettingChange={onSettingChange} onPanelAction={onPanelAction} />
+            ) : (
+              <div className="space-y-3">
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-2">
+                    <p className="text-[9px] uppercase tracking-wider text-zinc-600">Tools</p>
+                    <p className="mt-1 text-lg font-semibold text-zinc-100">{toolItems.length}</p>
+                  </div>
+                  <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-2">
+                    <p className="text-[9px] uppercase tracking-wider text-zinc-600">On</p>
+                    <p className="mt-1 text-lg font-semibold text-emerald-300">{selectedToolIds.length}</p>
+                  </div>
+                  <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-2">
+                    <p className="text-[9px] uppercase tracking-wider text-zinc-600">Star</p>
+                    <p className="mt-1 text-lg font-semibold text-amber-300">{starredItemIds.length}</p>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  {toolItems.map((item) => {
+                    const enabled = selectedToolIdSet.has(item.id);
+                    const pinned = pinnedItemIdSet.has(item.id);
+                    const starred = starredItemIdSet.has(item.id);
+                    return (
+                      <div key={item.id} className="rounded-lg border border-zinc-800/70 bg-zinc-950/45 p-2">
+                        <div className="flex items-start gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setActivePanel(item.id)}
+                            onContextMenu={(event) => openItemContextMenu(event, item)}
+                            className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-zinc-900 text-zinc-500 hover:text-zinc-200"
+                            title={item.label}
+                          >
+                            {iconForItem(item)}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setActivePanel(item.id)}
+                            onContextMenu={(event) => openItemContextMenu(event, item)}
+                            className="min-w-0 flex-1 text-left"
+                          >
+                            <span className="block truncate text-[12px] font-medium text-zinc-200">{item.label}</span>
+                            {item.description && <span className="block truncate text-[10px] text-zinc-500">{item.description}</span>}
+                          </button>
+                          <div className="flex flex-shrink-0 items-center gap-0.5">
+                            <button
+                              type="button"
+                              onClick={() => toggleStar(item.id)}
+                              className={cn("rounded-md p-1 transition-colors", starred ? "text-amber-300 hover:bg-amber-500/10" : "text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300")}
+                              title={starred ? "スター解除" : "スター"}
+                            >
+                              <Star size={13} className={cn(starred && "fill-current")} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => togglePin(item.id)}
+                              className={cn("rounded-md p-1 transition-colors", pinned ? "text-sky-300 hover:bg-sky-500/10" : "text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300")}
+                              title={pinned ? "ピン留め解除" : "ピン留め"}
+                            >
+                              {pinned ? <PinOff size={13} /> : <Pin size={13} />}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => onToolToggle?.(item)}
+                              className={cn("rounded-md p-1 transition-colors", enabled ? "text-emerald-300 hover:bg-emerald-500/10" : "text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300")}
+                              title={enabled ? "無効にする" : "有効にする"}
+                            >
+                              <Power size={13} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -658,6 +810,43 @@ export function RightSidebar({
           onDrop={handleShortcutDrop}
         >
           <CategorySwitcher active={categoryFilter} counts={counts} onChange={(id) => { setCategoryFilter(id); setOpenToolGroupMenu(null); }} />
+          <button
+            type="button"
+            onClick={() => setShowStarredOnly((value) => !value)}
+            aria-pressed={showStarredOnly}
+            className={cn(
+              "w-9 h-9 rounded-lg flex items-center justify-center relative transition-all",
+              showStarredOnly
+                ? "bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30"
+                : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
+            )}
+            title="Starred tools"
+          >
+            <Star size={16} className={cn(starredItemIds.length > 0 && "fill-current")} />
+            {starredItemIds.length > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 rounded-full bg-zinc-700 px-0.5 text-[7px] leading-tight text-zinc-200">
+                {starredItemIds.length}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setActivePanel((current) => (current === "__tool_manager__" ? null : "__tool_manager__"))}
+            className={cn(
+              "w-9 h-9 rounded-lg flex items-center justify-center relative transition-all",
+              activePanel === "__tool_manager__"
+                ? "bg-zinc-800 text-zinc-100 ring-1 ring-zinc-600/70"
+                : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
+            )}
+            title="Tool manager"
+          >
+            <SlidersHorizontal size={16} />
+            {selectedToolIds.length > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 rounded-full bg-emerald-500 px-0.5 text-[7px] font-bold leading-tight text-black">
+                {selectedToolIds.length}
+              </span>
+            )}
+          </button>
           <div className="w-5 h-px bg-zinc-800 my-1" />
 
           {showToolGroups && (
@@ -719,6 +908,7 @@ export function RightSidebar({
                             type="button"
                             draggable={supportsComposerDrop(item)}
                             onDragStart={supportsComposerDrop(item) ? (event) => handleShortcutDragStart(event, item) : undefined}
+                            onContextMenu={(event) => openItemContextMenu(event, item)}
                             onClick={(event) => {
                               event.stopPropagation();
                               setActivePanel(item.id);
@@ -736,7 +926,11 @@ export function RightSidebar({
                               </span>
                             </span>
                             {item.category === "tool" && (
-                              <span className={cn("h-1.5 w-1.5 flex-shrink-0 rounded-full", selectedToolIdSet.has(item.id) ? "bg-emerald-400" : "bg-zinc-700")} />
+                              <span className="flex flex-shrink-0 items-center gap-1">
+                                {starredItemIdSet.has(item.id) && <Star size={10} className="fill-current text-amber-300" />}
+                                {pinnedItemIdSet.has(item.id) && <Pin size={10} className="text-sky-300" />}
+                                <span className={cn("h-1.5 w-1.5 rounded-full", selectedToolIdSet.has(item.id) ? "bg-emerald-400" : "bg-zinc-700")} />
+                              </span>
                             )}
                           </button>
                         ))}
@@ -758,6 +952,7 @@ export function RightSidebar({
               key={item.id}
               draggable={supportsComposerDrop(item)}
               onDragStart={supportsComposerDrop(item) ? (e) => handleDragStart(e, item) : undefined}
+              onContextMenu={(event) => openItemContextMenu(event, item)}
               onClick={() => setActivePanel((current) => (current === item.id ? null : item.id))}
               className={cn(
                 "w-9 h-9 rounded-lg flex items-center justify-center relative transition-all duration-150 ease-out group/btn flex-shrink-0 hover:scale-[1.03] active:scale-95",
@@ -787,6 +982,13 @@ export function RightSidebar({
                 </span>
               )}
 
+              {(starredItemIdSet.has(item.id) || pinnedItemIdSet.has(item.id)) && !item.badge && (
+                <span className="absolute -top-0.5 -right-0.5 flex items-center gap-px rounded-full bg-zinc-900 px-0.5 text-[7px] leading-tight ring-1 ring-zinc-700">
+                  {starredItemIdSet.has(item.id) && <Star size={8} className="fill-current text-amber-300" />}
+                  {pinnedItemIdSet.has(item.id) && <Pin size={8} className="text-sky-300" />}
+                </span>
+              )}
+
               {activePanel !== item.id && (
                 <div
                   className={cn(
@@ -804,6 +1006,72 @@ export function RightSidebar({
               </span>
             </button>
           ))}
+
+          {contextMenu && (() => {
+            const item = items.find((candidate) => candidate.id === contextMenu.itemId);
+            if (!item) return null;
+            const pinned = pinnedItemIdSet.has(item.id);
+            const starred = starredItemIdSet.has(item.id);
+            const enabled = selectedToolIdSet.has(item.id);
+            return (
+              <div
+                className="fixed z-[70] w-44 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 text-left shadow-2xl"
+                style={{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }}
+                onPointerDown={(event) => event.stopPropagation()}
+              >
+                <div className="border-b border-zinc-800 px-3 py-2">
+                  <p className="truncate text-[11px] font-semibold text-zinc-200">{item.label}</p>
+                  <p className="truncate text-[10px] text-zinc-500">{item.category}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    togglePin(item.id);
+                    setContextMenu(null);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-zinc-300 hover:bg-zinc-800/80 hover:text-zinc-100"
+                >
+                  {pinned ? <PinOff size={13} /> : <Pin size={13} />}
+                  <span>{pinned ? "ピン留め解除" : "ピン留め"}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    toggleStar(item.id);
+                    setContextMenu(null);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-zinc-300 hover:bg-zinc-800/80 hover:text-zinc-100"
+                >
+                  <Star size={13} className={cn(starred && "fill-current text-amber-300")} />
+                  <span>{starred ? "スター解除" : "スター"}</span>
+                </button>
+                {item.category === "tool" && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onToolToggle?.(item);
+                      setContextMenu(null);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-zinc-300 hover:bg-zinc-800/80 hover:text-zinc-100"
+                  >
+                    <Power size={13} className={enabled ? "text-emerald-300" : undefined} />
+                    <span>{enabled ? "Tool を off" : "Tool を on"}</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActivePanel(item.id);
+                    setContextMenu(null);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-zinc-300 hover:bg-zinc-800/80 hover:text-zinc-100"
+                >
+                  <MoreVertical size={13} />
+                  <span>詳細を開く</span>
+                </button>
+              </div>
+            );
+          })()}
 
           <div className="mt-auto w-5 h-px bg-zinc-800 my-1" />
 

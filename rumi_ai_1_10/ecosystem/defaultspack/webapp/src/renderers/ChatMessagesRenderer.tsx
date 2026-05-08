@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, CheckCircle2, ChevronDown, Clock, Copy, Image as ImageIcon, Loader2 } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, ChevronDown, Clock, Copy, Image as ImageIcon, Loader2, Pencil } from "lucide-react";
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 
@@ -103,16 +103,27 @@ async function writeClipboardText(text: string): Promise<void> {
   textarea.remove();
 }
 
-function MessageActionBar({ message }: { message: ChatMessagesRendererProps["messages"][number] }) {
+function MessageActionBar({
+  message,
+  onEdit,
+}: {
+  message: ChatMessagesRendererProps["messages"][number];
+  onEdit?: (text: string) => void;
+}) {
   const [copied, setCopied] = useState(false);
 
-  const actions = [
+  const text = messageCopyText(message);
+  const actions: Array<{
+    id: string;
+    label: string;
+    icon: typeof Copy;
+    run: () => Promise<void> | void;
+  }> = [
     {
       id: "copy",
       label: copied ? "コピー済み" : "コピー",
       icon: copied ? Check : Copy,
       run: async () => {
-        const text = messageCopyText(message);
         if (!text) return;
         await writeClipboardText(text);
         setCopied(true);
@@ -121,8 +132,17 @@ function MessageActionBar({ message }: { message: ChatMessagesRendererProps["mes
     },
   ];
 
+  if (message.role === "user" && onEdit && text) {
+    actions.push({
+      id: "edit",
+      label: "編集",
+      icon: Pencil,
+      run: () => onEdit(text),
+    });
+  }
+
   return (
-    <div className="rumi-message-actions mt-2 flex min-h-7 items-center justify-start gap-1 opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100">
+    <div className="rumi-message-actions mt-1.5 flex min-h-6 items-center justify-start gap-1 opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100">
       {actions.map((action) => {
         const Icon = action.icon;
         return (
@@ -134,7 +154,7 @@ function MessageActionBar({ message }: { message: ChatMessagesRendererProps["mes
             onClick={() => {
               void action.run();
             }}
-            className="flex h-7 w-7 items-center justify-center rounded-md border border-zinc-700/70 bg-zinc-950/85 text-zinc-400 shadow-lg transition-colors hover:bg-zinc-800 hover:text-zinc-100 focus-visible:bg-zinc-800 focus-visible:text-zinc-100 focus-visible:outline-none"
+            className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-zinc-800/85 hover:text-zinc-100 focus-visible:bg-zinc-800/85 focus-visible:text-zinc-100 focus-visible:outline-none"
           >
             <Icon size={14} />
           </button>
@@ -300,6 +320,7 @@ export function ChatMessagesRenderer({
   unknownBlockStrategy,
   showActivityInMessages,
   showWidgets,
+  onSuggestionClick,
 }: ChatMessagesRendererProps) {
   return (
     <>
@@ -328,46 +349,48 @@ export function ChatMessagesRenderer({
                     </div>
                   )}
 
-                  <div
-                    tabIndex={0}
-                    className={cn(
-                      "relative rounded-2xl max-w-full sm:px-4 px-3 py-3 text-[14px] outline-none",
-                      message.role === "user"
-                        ? "bg-zinc-800/80 text-zinc-100 rounded-tr-sm shadow-sm border border-zinc-700/50"
-                        : "w-full text-zinc-200 bg-transparent",
-                    )}
-                  >
-                    {showActivityInMessages && message.role === "agent" && <ToolActivityTray message={message} />}
+                  <div className={cn("flex max-w-full flex-col", message.role === "user" ? "items-start" : "w-full items-start")}>
+                    <div
+                      tabIndex={0}
+                      className={cn(
+                        "relative rounded-2xl max-w-full sm:px-4 px-3 py-3 text-[14px] outline-none",
+                        message.role === "user"
+                          ? "bg-zinc-800/80 text-zinc-100 rounded-tr-sm shadow-sm border border-zinc-700/50"
+                          : "w-full text-zinc-200 bg-transparent",
+                      )}
+                    >
+                      {showActivityInMessages && message.role === "agent" && <ToolActivityTray message={message} />}
 
-                    {message.role === "agent" && message.metadata?.thinkingTranscript && (
-                      <details className="mb-3 rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2 text-xs text-zinc-400">
-                        <summary className="cursor-pointer select-none text-[11px] font-medium text-zinc-300">
-                          Thinking
-                        </summary>
-                        <pre className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-zinc-400">
-                          {message.metadata.thinkingTranscript}
-                        </pre>
-                      </details>
-                    )}
+                      {message.role === "agent" && message.metadata?.thinkingTranscript && (
+                        <details className="mb-3 rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2 text-xs text-zinc-400">
+                          <summary className="cursor-pointer select-none text-[11px] font-medium text-zinc-300">
+                            Thinking
+                          </summary>
+                          <pre className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-zinc-400">
+                            {message.metadata.thinkingTranscript}
+                          </pre>
+                        </details>
+                      )}
 
-                    <div className="markdown-body select-text leading-relaxed break-words space-y-4">
-                      {message.content.length > 0 && (messageVisibleText(message) || message.content.some((block) => String(block.type ?? "text") !== "text"))
-                        ? message.content.map((block, index) => (
-                            <MessageBlock key={`${message.id}-${index}`} block={block} unknownStrategy={unknownBlockStrategy} />
-                          ))
-                        : message.role === "agent" && !messageVisibleText(message)
-                          ? (
-                              <div className="flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-amber-100">
-                                <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-300" />
-                                <span>レスポンス本文が空でした。stream が途中で閉じたか、thinking のみで終了した可能性があります。</span>
-                              </div>
-                            )
-                          : <ReactMarkdown>{message.rawText}</ReactMarkdown>}
+                      <div className="markdown-body select-text leading-relaxed break-words space-y-4">
+                        {message.content.length > 0 && (messageVisibleText(message) || message.content.some((block) => String(block.type ?? "text") !== "text"))
+                          ? message.content.map((block, index) => (
+                              <MessageBlock key={`${message.id}-${index}`} block={block} unknownStrategy={unknownBlockStrategy} />
+                            ))
+                          : message.role === "agent" && !messageVisibleText(message)
+                            ? (
+                                <div className="flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-amber-100">
+                                  <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-300" />
+                                  <span>レスポンス本文が空でした。stream が途中で閉じたか、thinking のみで終了した可能性があります。</span>
+                                </div>
+                              )
+                            : <ReactMarkdown>{message.rawText}</ReactMarkdown>}
+                      </div>
+
+                      {showWidgets && message.widget && <WidgetCard widget={message.widget} />}
                     </div>
 
-                    <MessageActionBar message={message} />
-
-                    {showWidgets && message.widget && <WidgetCard widget={message.widget} />}
+                    <MessageActionBar message={message} onEdit={onSuggestionClick} />
                   </div>
                 </div>
               </div>
