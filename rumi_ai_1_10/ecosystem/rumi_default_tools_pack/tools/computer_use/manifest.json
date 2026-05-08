@@ -3,11 +3,11 @@
   "category": "tool",
   "version": "1",
   "display_name": "Computer Use",
-  "description": "Capture the screen and run approved desktop actions on macOS or Windows.",
+  "description": "Capture the screen and run approved desktop actions on macOS or Windows. Use windows/select_window to choose an app/window, click only to mark a target with the AI cursor, and use type with text to enter words such as hello. Avoid repeated key presses when a single type action can enter text.",
   "enabled": true,
   "config": {
     "name": "computer_use",
-    "summary": "コンピューター操作",
+    "summary": "コンピューター操作。文字入力は action=type と text を優先し、既存Chrome/ChatGPTには app=Google Chrome または select_window を指定してください。",
     "tags": ["computer", "desktop", "screenshot", "approval"],
     "schema": {
       "parameters": {
@@ -16,12 +16,15 @@
           "action": {
             "type": "string",
             "enum": ["screenshot", "move", "click", "select_window", "windows", "type", "key", "scroll"],
+            "description": "Use windows to inspect apps, select_window with app/title and focus=false to target one app, click to place the AI cursor/marker, type to enter text, key for shortcuts or single keys, and screenshot to inspect.",
             "default": "screenshot"
           },
           "x": {"type": "integer"},
           "y": {"type": "integer"},
-          "text": {"type": "string"},
-          "key": {"type": "string"},
+          "text": {"type": "string", "description": "Text to enter when action is type. Prefer this over repeated key presses for words."},
+          "key": {"type": "string", "description": "Single key or shortcut key for action=key, for example backspace, return, or a with modifier=meta."},
+          "modifier": {"type": "string", "description": "Optional single key modifier such as meta, command, control, shift, or alt."},
+          "modifiers": {"type": "array", "items": {"type": "string"}, "description": "Optional key modifiers for action=key."},
           "amount": {"type": "integer"},
           "target": {"type": "string"},
           "app": {"type": "string"},

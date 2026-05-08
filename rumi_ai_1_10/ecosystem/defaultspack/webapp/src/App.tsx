@@ -660,6 +660,8 @@ function commandSearchText(command: ComposerCommandItem): string {
 
 function pendingBrowserApproval(messages: ChatUiMessage[]): BrowserApproval | null {
   for (const message of [...messages].reverse()) {
+    if (message.role === "user") return null;
+    if (message.role !== "agent") continue;
     for (const log of [...(message.toolLogs ?? [])].reverse()) {
       if (log.tool_name !== "browser_computer") continue;
       const result = log.result as Record<string, unknown> | undefined;

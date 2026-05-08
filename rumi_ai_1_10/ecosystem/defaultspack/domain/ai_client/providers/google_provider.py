@@ -434,14 +434,15 @@ class GoogleProvider(OpenAICompatibleProvider):
             "Content-Type": "application/json",
             "x-goog-api-key": self._api_key,
         }
-        for attempt in range(2):
+        max_attempts = 4
+        for attempt in range(max_attempts):
             req = urllib.request.Request(url, data=data, headers=headers, method="POST")
             try:
                 return urllib.request.urlopen(req, context=self._ssl_ctx, timeout=120)
             except urllib.error.HTTPError as exc:
                 err_body = exc.read().decode("utf-8", errors="replace")
-                if exc.code in {500, 503} and attempt == 0:
-                    time.sleep(0.6)
+                if exc.code in {500, 503} and attempt < max_attempts - 1:
+                    time.sleep(0.5 * (attempt + 1))
                     continue
                 transient = " (temporary Google backend error; retry shortly)" if exc.code in {500, 503} else ""
                 raise RuntimeError("Google API error {}{}: {}".format(exc.code, transient, err_body))

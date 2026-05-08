@@ -222,6 +222,8 @@ class ToolExecutor:
         pack_id, _, function_id = qualified_name.partition(":")
         if pack_id not in {"defaultspack", "rumi_default_tools_pack"} or not function_id:
             return None
+        if pack_id == "rumi_default_tools_pack" and function_id == "browser_computer":
+            return ToolExecutor()._execute_local("browser_computer", request.get("args") or {}, context)
         try:
             from core_runtime.pack_function_runtime import invoke_pack_function
 

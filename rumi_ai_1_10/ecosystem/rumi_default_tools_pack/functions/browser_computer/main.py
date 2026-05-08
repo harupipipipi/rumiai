@@ -36,6 +36,10 @@ def run(context, args):
         yolo_mode=yolo_mode or (user_requested and action in user_approved_actions),
     )
     summary = "browser_computer {} completed".format(result.get("action", "action"))
+    if result.get("is_error"):
+        summary = "browser_computer {} failed".format(result.get("action", "action"))
+        if result.get("reason"):
+            summary += ": {}".format(result.get("reason"))
     if result.get("path"):
         summary += "; artifact: {}".format(result.get("path"))
-    return tool_result(summary, widget={"type": "browser_computer", **result})
+    return tool_result(summary, widget={"type": "browser_computer", **result}, is_error=bool(result.get("is_error")))

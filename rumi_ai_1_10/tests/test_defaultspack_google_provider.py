@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import io
 import os
 import sys
 import tempfile
+import urllib.error
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -115,6 +117,35 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
             provider.BASE_URL,
             "https://generativelanguage.googleapis.com/v1beta/openai",
         )
+
+    def test_google_native_request_retries_transient_backend_errors(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        calls = []
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-key"}, clear=True):
+            provider = GoogleProvider()
+
+        def fake_urlopen(request, context=None, timeout=None):
+            calls.append((request, context, timeout))
+            if len(calls) < 3:
+                raise urllib.error.HTTPError(
+                    request.full_url,
+                    500,
+                    "Internal error encountered.",
+                    {},
+                    io.BytesIO(b'{"error":{"code":500}}'),
+                )
+            return io.BytesIO(b'{"ok":true}')
+
+        with patch("domain.ai_client.providers.google_provider.urllib.request.urlopen", fake_urlopen), patch(
+            "domain.ai_client.providers.google_provider.time.sleep"
+        ) as sleep:
+            response = provider._native_request_json("gemini-test", {"contents": []})
+
+        self.assertEqual(response.read(), b'{"ok":true}')
+        self.assertEqual(len(calls), 3)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [0.5, 1.0])
 
     def test_google_provider_streams_openai_compatible_tool_call_deltas(self):
         from domain.ai_client.providers.google_provider import GoogleProvider

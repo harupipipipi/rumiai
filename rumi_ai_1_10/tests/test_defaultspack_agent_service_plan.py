@@ -617,6 +617,159 @@ def test_chat_send_retries_empty_thinking_response_without_thinking(monkeypatch)
     ]
 
 
+def test_browser_computer_pack_not_approved_falls_back_to_local(monkeypatch):
+    from domain.tool.executor import ToolExecutor
+
+    captured = {}
+
+    def fake_execute_local(self, tool_name, arguments, context):
+        captured["tool_name"] = tool_name
+        captured["arguments"] = arguments
+        captured["context"] = context
+        return {
+            "result": "browser_computer computer.click completed",
+            "is_error": False,
+            "widget": {"type": "browser_computer", "action": "computer.click"},
+        }
+
+    class FakeResponse:
+        success = False
+        error_type = "pack_not_approved"
+
+    monkeypatch.setattr(ToolExecutor, "_execute_local", fake_execute_local)
+
+    result = ToolExecutor._fallback_function_call_if_first_party_unapproved(
+        {"name": "browser_computer"},
+        {
+            "type": "function.call",
+            "qualified_name": "rumi_default_tools_pack:browser_computer",
+            "args": {"action": "computer.click", "payload": {"x": 10, "y": 20}},
+        },
+        {"user_requested_computer_use": True},
+        FakeResponse(),
+    )
+
+    assert result["is_error"] is False
+    assert captured["tool_name"] == "browser_computer"
+    assert captured["arguments"]["action"] == "computer.click"
+    assert captured["context"]["user_requested_computer_use"] is True
+
+
+def test_browser_computer_click_uses_virtual_cursor_by_default(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    monkeypatch.setattr(controller, "_capture_action_result_screenshot", lambda payload, marker: {"click_marker": marker})
+    monkeypatch.setattr(controller, "_window_at_point", lambda x, y: None)
+    monkeypatch.setattr(
+        controller,
+        "_darwin_click",
+        lambda payload: (_ for _ in ()).throw(AssertionError("physical click should not run")),
+    )
+
+    result = controller.run("computer.click", {"x": 10, "y": 20}, yolo_mode=True)
+
+    assert result["executed"] is True
+    assert result["virtual_cursor"] is True
+    assert result["target"] == {"x": 10, "y": 20}
+    assert result["click_marker"]["screen_x"] == 10
+    assert result["click_marker"]["screen_y"] == 20
+
+
+def test_browser_computer_key_clears_chrome_background(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+
+    captured = {}
+
+    def fake_run(cmd, check=False, capture_output=False, text=False, **kwargs):
+        captured["cmd"] = cmd
+
+        class Completed:
+            stdout = "cleared\n"
+
+        return Completed()
+
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+
+    result = controller.run(
+        "computer.key",
+        {"key": "backspace", "app": "Google Chrome"},
+        yolo_mode=True,
+    )
+
+    assert result["background"] is True
+    assert result["target_app"] == "Google Chrome"
+    assert captured["cmd"][0] == "osascript"
+
+
+def test_browser_computer_click_sets_target_window_for_background_keys(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    monkeypatch.setattr(controller, "_capture_action_result_screenshot", lambda payload, marker: {})
+    monkeypatch.setattr(
+        controller,
+        "_window_at_point",
+        lambda x, y: {
+            "app": "Google Chrome",
+            "title": "ChatGPT - Google Chrome",
+            "x": 20,
+            "y": 40,
+            "width": 1200,
+            "height": 800,
+            "active": False,
+        },
+    )
+
+    controller.run("computer.click", {"x": 120, "y": 140}, yolo_mode=True)
+
+    state = controller._computer_state()
+    assert state["target_window"]["app"] == "Google Chrome"
+    assert controller._should_type_in_chrome_background({}) is True
+
+
+def test_browser_computer_background_type_failure_does_not_fall_back_to_physical(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._write_computer_state(
+        {
+            "target_window": {
+                "app": "Google Chrome",
+                "title": "ChatGPT - Google Chrome",
+                "x": 20,
+                "y": 40,
+                "width": 1200,
+                "height": 800,
+                "active": False,
+            }
+        }
+    )
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(controller, "_darwin_type_in_chrome_background", lambda text: False)
+    monkeypatch.setattr(
+        controller,
+        "_apple_script",
+        lambda action, payload: (_ for _ in ()).throw(AssertionError("physical typing should not run")),
+    )
+
+    result = controller.run("computer.type", {"text": "hello"}, yolo_mode=True)
+
+    assert result["is_error"] is True
+    assert result["executed"] is False
+    assert result["background"] is True
+    assert "Chrome background text entry failed" in result["reason"]
+
+
 def test_chat_send_persists_user_attachment_metadata(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from blocks.chat.send import run
@@ -1012,6 +1165,44 @@ def test_chat_tool_loop_replays_openai_tool_call_messages():
     assert seen_messages[1][-2]["tool_calls"][0]["function"]["name"] == "calculator"
     assert seen_messages[1][-1]["role"] == "tool"
     assert seen_messages[1][-1]["tool_call_id"] == "call_1"
+
+
+def test_chat_tool_loop_returns_text_when_tool_limit_reached():
+    import blocks.chat.send as send
+
+    def call_handler(name, payload):
+        if name == "defaults.ai.complete":
+            return {
+                "status": "ok",
+                "data": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "call_limit",
+                            "name": "calculator",
+                            "input": "{\"expression\":\"2+2\"}",
+                        }
+                    ],
+                    "finish_reason": "tool_calls",
+                },
+            }
+        if name == "defaults.tool.invoke":
+            return {"status": "ok", "data": {"result": "4"}}
+        raise AssertionError(name)
+
+    response = send._complete_with_tools(
+        "openrouter/test-model",
+        [{"role": "user", "content": "keep using tools"}],
+        [{"type": "function", "function": {"name": "calculator", "parameters": {"type": "object"}}}],
+        {},
+        call_handler,
+        {"max_tool_calls": 1},
+    )
+
+    assert response["content"][0]["type"] == "text"
+    assert "tool call の上限" in response["content"][0]["text"]
+    assert response["metadata"]["max_tool_calls_reached"] is True
+    assert response["metadata"]["pending_tool_uses"][0]["name"] == "calculator"
 
 
 def test_chat_tool_loop_passes_execution_context_to_tool_invoke():
@@ -1826,7 +2017,7 @@ def test_computer_type_can_target_background_chrome(tmp_path, monkeypatch):
     assert "#prompt-textarea" in calls[0][0][2]
 
 
-def test_computer_move_uses_cliclick_on_macos(monkeypatch):
+def test_computer_move_uses_cliclick_on_macos(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
     import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
 
@@ -1840,7 +2031,10 @@ def test_computer_move_uses_cliclick_on_macos(monkeypatch):
     monkeypatch.setattr(browser_computer.shutil, "which", lambda name: "/opt/homebrew/bin/cliclick" if name == "cliclick" else None)
     monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
 
-    result = BrowserComputerController().run("computer.move", {"x": 120, "y": 240, "physical": True}, yolo_mode=True)
+    controller = BrowserComputerController()
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+
+    result = controller.run("computer.move", {"x": 120, "y": 240, "physical": True}, yolo_mode=True)
 
     assert result["executed"] is True
     assert result["target"] == {"x": 120, "y": 240}

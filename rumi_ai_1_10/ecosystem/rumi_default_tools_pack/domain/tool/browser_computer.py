@@ -532,15 +532,19 @@ end try
         action_payload = dict(payload)
         click_marker = None
         if action in {"computer.move", "computer.click"}:
-            action_payload, click_marker = self._resolve_action_point(payload)
-        if action == "computer.move" and payload.get("physical") is not True:
+            action_payload, click_marker = self._resolve_action_point(payload, infer_window=action == "computer.click")
+        if action in {"computer.move", "computer.click"} and payload.get("physical") is not True:
             self._set_ai_cursor(action_payload)
             result: dict[str, Any] = {"action": action, "executed": True, "platform": system, "virtual_cursor": True}
             result["target"] = {"x": int(action_payload.get("x", 0)), "y": int(action_payload.get("y", 0))}
             if click_marker:
                 result["marker"] = click_marker
+            if action == "computer.click" and payload.get("include_screenshot", True) is not False:
+                screenshot = self._capture_action_result_screenshot(action_payload, click_marker)
+                result.update(screenshot)
             return result
-        if system == "Darwin" and action == "computer.type" and self._should_type_in_chrome_background(action_payload):
+        background_chrome = system == "Darwin" and self._should_type_in_chrome_background(action_payload)
+        if action == "computer.type" and background_chrome:
             if self._darwin_type_in_chrome_background(str(action_payload.get("text") or "")):
                 return {
                     "action": action,
@@ -549,6 +553,38 @@ end try
                     "background": True,
                     "target_app": "Google Chrome",
                 }
+            return {
+                "action": action,
+                "executed": False,
+                "is_error": True,
+                "platform": system,
+                "background": True,
+                "target_app": "Google Chrome",
+                "reason": "Chrome background text entry failed. Enable Chrome's 'Allow JavaScript from Apple Events' setting or use an interactive foreground action.",
+            }
+        if action == "computer.key" and background_chrome:
+            key = str(action_payload.get("key") or "").strip().lower()
+            modifiers = action_payload.get("modifiers")
+            if not isinstance(modifiers, list):
+                modifier = action_payload.get("modifier")
+                modifiers = [modifier] if modifier else []
+            if self._darwin_key_in_chrome_background(key, modifiers):
+                return {
+                    "action": action,
+                    "executed": True,
+                    "platform": system,
+                    "background": True,
+                    "target_app": "Google Chrome",
+                }
+            return {
+                "action": action,
+                "executed": False,
+                "is_error": True,
+                "platform": system,
+                "background": True,
+                "target_app": "Google Chrome",
+                "reason": "Chrome background key entry failed or unsupported. Use computer.type for text, or enable Chrome's 'Allow JavaScript from Apple Events' setting.",
+            }
         if system == "Darwin" and action == "computer.move":
             self._darwin_move_cursor(action_payload)
         elif system == "Darwin" and action == "computer.click":
@@ -583,6 +619,12 @@ end try
         app = str(payload.get("app") or payload.get("target") or "").lower()
         if "chrome" in app:
             return True
+        target_window = self._computer_state().get("target_window")
+        if isinstance(target_window, dict):
+            window_app = str(target_window.get("app") or "").lower()
+            window_title = str(target_window.get("title") or "").lower()
+            if "chrome" in window_app or "chatgpt" in window_title:
+                return True
         sessions = self._read_sessions()
         return bool(
             sessions.get("last_opened_background")
@@ -633,6 +675,56 @@ end tell
                 text=True,
             )
             return "typed" in (completed.stdout or "")
+        except Exception:
+            return False
+
+    @staticmethod
+    def _darwin_key_in_chrome_background(key: str, modifiers: list[Any]) -> bool:
+        normalized_modifiers = {str(item).strip().lower() for item in modifiers}
+        command_down = bool(normalized_modifiers.intersection({"command", "cmd", "meta", "super"}))
+        if command_down and key == "a":
+            return True
+        if key not in {"backspace", "delete", "del"}:
+            return False
+        js = r"""
+(function() {
+  const candidates = [
+    document.querySelector('#prompt-textarea'),
+    document.querySelector('[data-testid="composer-root"] textarea'),
+    document.querySelector('textarea'),
+    document.querySelector('[contenteditable="true"]')
+  ].filter(Boolean);
+  const el = candidates.find((node) => {
+    const rect = node.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }) || candidates[0];
+  if (!el) return 'composer_not_found';
+  el.focus();
+  if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
+    el.value = '';
+  } else {
+    el.textContent = '';
+  }
+  el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+  return 'cleared';
+})();
+"""
+        script = """
+tell application "Google Chrome"
+  if (count of windows) is 0 then return "no_window"
+  set resultText to execute active tab of window 1 javascript %s
+  return resultText
+end tell
+""" % json.dumps(js)
+        try:
+            completed = subprocess.run(
+                ["osascript", "-e", script],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            return "cleared" in (completed.stdout or "")
         except Exception:
             return False
 
@@ -689,12 +781,17 @@ end tell
             return self._normalize_window_record(selected)
         return None
 
-    def _resolve_action_point(self, payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    def _resolve_action_point(self, payload: dict[str, Any], *, infer_window: bool = False) -> tuple[dict[str, Any], dict[str, Any] | None]:
         state = self._computer_state()
         cursor = state.get("ai_cursor") if isinstance(state.get("ai_cursor"), dict) else {}
         x = int(payload.get("x", cursor.get("x", 0)))
         y = int(payload.get("y", cursor.get("y", 0)))
         target = self._capture_target(payload)
+        if target is None and infer_window:
+            target = self._window_at_point(x, y)
+            if target is not None:
+                state["target_window"] = target
+                self._write_computer_state(state)
         coordinate_space = str(payload.get("coordinate_space") or payload.get("space") or "auto").strip().lower()
         use_window_space = False
         if target and coordinate_space in {"auto", "window", "target", "screenshot", "image"}:
@@ -745,6 +842,19 @@ end tell
             "updated_at": self._now_iso(),
         }
         self._write_computer_state(state)
+
+    def _window_at_point(self, x: int, y: int) -> dict[str, Any] | None:
+        for item in self._list_windows():
+            window = self._normalize_window_record(item)
+            if window is None:
+                continue
+            left = int(window.get("x", 0))
+            top = int(window.get("y", 0))
+            right = left + int(window.get("width", 0))
+            bottom = top + int(window.get("height", 0))
+            if left <= x <= right and top <= y <= bottom:
+                return window
+        return None
 
     def _select_window(self, payload: dict[str, Any]) -> dict[str, Any]:
         windows = self._list_windows()

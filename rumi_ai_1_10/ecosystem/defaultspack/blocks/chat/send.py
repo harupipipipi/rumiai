@@ -233,6 +233,20 @@ def _empty_response_message(finish_reason):
     )
 
 
+def _tool_limit_message(limit, tool_uses):
+    names = []
+    for block in tool_uses:
+        name = str(block.get("name") or block.get("tool_name") or "").strip()
+        if name:
+            names.append(name)
+    suffix = " pending_tools=" + ", ".join(names) if names else ""
+    return (
+        "tool call の上限に達したため停止しました。"
+        "同じ依頼を続ける場合は、もう一度送信してください。"
+        f" (max_tool_calls: {limit}{suffix})"
+    )
+
+
 def _tool_arguments(block):
     value = block.get("input", block.get("arguments", {}))
     if isinstance(value, str):
@@ -497,7 +511,7 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
         limit = int(params.get("max_tool_calls", 4) or 4)
     connected_names = connected_tool_names(tools, context.get("runtime_profile") if isinstance(context, dict) else None)
     if limit == 4 and connected_names.intersection({"browser_computer", "browser_use", "computer_use"}):
-        limit = 12
+        limit = 24
 
     for step_index in range(max(1, limit + 1)):
         ai_params = {
@@ -552,7 +566,33 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
                     retry_response["metadata"] = retry_metadata
                     response = retry_response
                     tool_uses = _tool_use_blocks(response)
-        if not tool_uses or step_index >= limit:
+        if tool_uses and step_index >= limit:
+            response = {
+                "content": [{"type": "text", "text": _tool_limit_message(limit, tool_uses)}],
+                "finish_reason": "tool_call_limit",
+                "usage": response.get("usage", {}) if isinstance(response, dict) else {},
+                "metadata": {
+                    "max_tool_calls_reached": True,
+                    "pending_tool_uses": [
+                        {
+                            "name": str(block.get("name") or block.get("tool_name") or ""),
+                            "id": str(block.get("id") or block.get("tool_call_id") or ""),
+                        }
+                        for block in tool_uses
+                    ],
+                },
+            }
+            events.append(
+                _event(
+                    "status",
+                    "tool call の上限に達したため停止しました",
+                    phase="tool_call_limit",
+                    tool_count=len(tool_logs),
+                    max_tool_calls=limit,
+                )
+            )
+            break
+        if not tool_uses:
             break
 
         _append_assistant_tool_use_message(working_messages, tool_uses)

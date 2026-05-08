@@ -26,7 +26,23 @@ def run(context, args):
         "scroll": "computer.scroll",
     }
     action = action_map.get(str(raw.get("action") or "").strip(), str(raw.get("action") or "").strip())
-    for key in ("x", "y", "text", "key", "amount", "target", "app", "title", "coordinate_space", "physical", "focus", "dry_run", "approval_token"):
+    for key in (
+        "x",
+        "y",
+        "text",
+        "key",
+        "modifier",
+        "modifiers",
+        "amount",
+        "target",
+        "app",
+        "title",
+        "coordinate_space",
+        "physical",
+        "focus",
+        "dry_run",
+        "approval_token",
+    ):
         if key in raw:
             payload[key] = raw.get(key)
     return _run_browser_computer(context, {"action": action, "payload": payload})
