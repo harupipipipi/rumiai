@@ -103,7 +103,7 @@ async function writeClipboardText(text: string): Promise<void> {
   textarea.remove();
 }
 
-function MessageActionBar({ message, align }: { message: ChatMessagesRendererProps["messages"][number]; align: "left" | "right" }) {
+function MessageActionBar({ message }: { message: ChatMessagesRendererProps["messages"][number] }) {
   const [copied, setCopied] = useState(false);
 
   const actions = [
@@ -122,10 +122,7 @@ function MessageActionBar({ message, align }: { message: ChatMessagesRendererPro
   ];
 
   return (
-    <div className={cn(
-      "rumi-message-actions absolute -top-3 z-10 flex items-center gap-1 rounded-lg border border-zinc-700/70 bg-zinc-950/95 p-1 opacity-0 shadow-xl transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100",
-      align === "right" ? "right-2" : "left-2",
-    )}>
+    <div className="rumi-message-actions mt-2 flex min-h-7 items-center justify-start gap-1 opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100">
       {actions.map((action) => {
         const Icon = action.icon;
         return (
@@ -137,7 +134,7 @@ function MessageActionBar({ message, align }: { message: ChatMessagesRendererPro
             onClick={() => {
               void action.run();
             }}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-100 focus-visible:bg-zinc-800 focus-visible:text-zinc-100 focus-visible:outline-none"
+            className="flex h-7 w-7 items-center justify-center rounded-md border border-zinc-700/70 bg-zinc-950/85 text-zinc-400 shadow-lg transition-colors hover:bg-zinc-800 hover:text-zinc-100 focus-visible:bg-zinc-800 focus-visible:text-zinc-100 focus-visible:outline-none"
           >
             <Icon size={14} />
           </button>
@@ -340,7 +337,6 @@ export function ChatMessagesRenderer({
                         : "w-full text-zinc-200 bg-transparent",
                     )}
                   >
-                    <MessageActionBar message={message} align={message.role === "user" ? "right" : "left"} />
                     {showActivityInMessages && message.role === "agent" && <ToolActivityTray message={message} />}
 
                     {message.role === "agent" && message.metadata?.thinkingTranscript && (
@@ -368,6 +364,8 @@ export function ChatMessagesRenderer({
                             )
                           : <ReactMarkdown>{message.rawText}</ReactMarkdown>}
                     </div>
+
+                    <MessageActionBar message={message} />
 
                     {showWidgets && message.widget && <WidgetCard widget={message.widget} />}
                   </div>
