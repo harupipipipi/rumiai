@@ -85,7 +85,7 @@ def test_desktop_capability_can_launch_registered_pack_with_issued_token():
     from core_runtime.desktop_capability import DesktopCapabilityHandler
 
     handler = DesktopCapabilityHandler()
-    with mock.patch("core_runtime.desktop_app_manager.DesktopAppManager.launch_app") as mock_launch:
+    with mock.patch("core_runtime.desktop_app_manager.DesktopAppManager.launch_app_with_env") as mock_launch:
         mock_launch.return_value = {"success": True, "status": "launched", "pid": 123}
         result = handler.handle_execute(
             principal_id="defaultspack",
@@ -117,7 +117,7 @@ def test_desktop_capability_allows_only_explicit_pack_list():
 
     handler = DesktopCapabilityHandler()
 
-    with mock.patch("core_runtime.desktop_app_manager.DesktopAppManager.launch_app") as mock_launch:
+    with mock.patch("core_runtime.desktop_app_manager.DesktopAppManager.launch_app_with_env") as mock_launch:
         mock_launch.return_value = {"success": True, "status": "launched", "pid": 123}
         allowed = handler.handle_execute(
             principal_id="defaultspack",

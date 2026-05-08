@@ -165,6 +165,15 @@ class DesktopAppManager:
 
     def launch_app(self, pack_id: str, api_token: Optional[str] = None) -> Dict[str, Any]:
         """Pack のデスクトップアプリを起動する。"""
+        return self.launch_app_with_env(pack_id, api_token=api_token, env_overrides=None)
+
+    def launch_app_with_env(
+        self,
+        pack_id: str,
+        api_token: Optional[str] = None,
+        env_overrides: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """Launch a Pack app, optionally overriding launch-time environment."""
         if pack_id in self._running:
             proc = self._running[pack_id]
             if proc.poll() is None:
@@ -199,6 +208,8 @@ class DesktopAppManager:
 
         env = dict(os.environ)
         env.update(meta.get("env", {}))
+        if env_overrides:
+            env.update({str(key): str(value) for key, value in env_overrides.items()})
         env["RUMI_PACK_ID"] = pack_id
         if effective_api_token:
             env[_PACK_API_TOKEN_ENV] = effective_api_token

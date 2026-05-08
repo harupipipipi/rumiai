@@ -90,7 +90,13 @@ class DesktopCapabilityHandler:
 
         action = str(args.get("action", "token")).strip().lower()
         if action in {"launch", "stop", "status"}:
-            result["app"] = self._desktop_action(action, target_pack_id, token)
+            env_overrides = args.get("env") if isinstance(args.get("env"), dict) else None
+            result["app"] = self._desktop_action(
+                action,
+                target_pack_id,
+                token,
+                env_overrides=env_overrides,
+            )
         return result
 
     def verify_token(self, token: str) -> Optional[Dict[str, Any]]:
@@ -113,9 +119,20 @@ class DesktopCapabilityHandler:
         normalized = {pack_id for pack_id in allowed_packs if isinstance(pack_id, str)}
         return "*" in normalized or target_pack_id in normalized
 
-    def _desktop_action(self, action: str, pack_id: str, token: str) -> dict:
+    def _desktop_action(
+        self,
+        action: str,
+        pack_id: str,
+        token: str,
+        *,
+        env_overrides: Optional[Dict[str, Any]] = None,
+    ) -> dict:
         if action == "launch":
-            return self._desktop_app_manager.launch_app(pack_id, api_token=token)
+            return self._desktop_app_manager.launch_app_with_env(
+                pack_id,
+                api_token=token,
+                env_overrides=env_overrides,
+            )
         if action == "stop":
             return self._desktop_app_manager.stop_app(pack_id)
         return {"success": True, "registered_apps": self._desktop_app_manager.list_registered_apps()}

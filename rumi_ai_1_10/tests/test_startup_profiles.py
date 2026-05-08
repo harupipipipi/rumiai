@@ -899,3 +899,51 @@ def test_empty_state_returns_empty_profiles(tmp_path: Path):
     payload = manager.list_profiles_payload()
     assert payload["profiles"] == []
     assert payload["active_profile_id"] is None
+
+
+def test_existing_default_profile_is_upgraded_to_browser_surface(tmp_path: Path):
+    eco_root = tmp_path / "ecosystem"
+    _write_pack(
+        eco_root,
+        "defaultspack",
+        graphs=[_startup_graph("defaultspack")],
+        nodes=["agent", "ai_client", "tool", "memory", "frontend"],
+    )
+    locations = _discover_locations(eco_root, ["defaultspack"])
+    state_path = tmp_path / "startup_profiles.json"
+    created_at = 1_700_000_000
+    state_path.write_text(
+        json.dumps(
+            {
+                "version": PROFILE_VERSION,
+                "active_profile_id": "default-profile",
+                "last_launched_profile_id": None,
+                "profiles": [
+                    {
+                        "version": PROFILE_VERSION,
+                        "profile_id": "default-profile",
+                        "name": "Default Profile",
+                        "base_pack": "defaultspack",
+                        "graph_id": "defaultspack.startup",
+                        "graph_ports": [],
+                        "packs": ["defaultspack"],
+                        "node_overrides": {},
+                        "surfaces": {"preferred": "desktop", "enabled": ["desktop", "cli"]},
+                        "created_at": created_at,
+                        "updated_at": created_at,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manager = StartupProfileManager(storage_path=state_path)
+
+    with patch("core_runtime.startup_profiles.discover_pack_locations", return_value=locations):
+        payload = manager.list_profiles_payload()
+
+    profile = payload["profiles"][0]
+    assert profile["surfaces"] == {"preferred": "browser", "enabled": ["browser", "cli"]}
+    assert profile["default_graph"] == "defaultspack.startup"
+    assert profile["capability_profile_id"] == "defaultspack.startup"
+    assert profile["launch_capability_graph"] is True

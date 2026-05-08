@@ -343,8 +343,6 @@ export interface ApiCapabilityGraph {
   display_name?: Record<string, string>;
   description?: Record<string, string>;
   description_label: string;
-  display_name?: Record<string, string>;
-  description?: Record<string, string>;
   nodes: Array<{id: string; ref: string; display_name?: Record<string, string>; metadata?: Record<string, unknown>}>;
   edges: Array<{id: string; from: string; to: string; kind: string; metadata?: Record<string, unknown>}>;
   metadata: Record<string, unknown>;

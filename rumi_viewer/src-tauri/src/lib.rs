@@ -184,22 +184,6 @@ fn request_panel_bootstrap_code_with_retry(port: u16, bootstrap_secret: &str) ->
     }
 }
 
-fn panel_session_url(port: u16, panel_code: &str) -> AnyResult<String> {
-    let mut url = reqwest::Url::parse(&format!("http://127.0.0.1:{port}/panel/"))
-        .context("failed to build panel URL")?;
-    url.query_pairs_mut().append_pair("code", panel_code);
-    Ok(url.to_string())
-}
-
-fn open_panel_session_in_default_browser(port: u16, bootstrap_secret: &str) -> AnyResult<()> {
-    let browser_code = request_panel_bootstrap_code_with_retry(port, bootstrap_secret)
-        .context("failed to authorize browser panel session")?;
-    let url = panel_session_url(port, &browser_code)?;
-    open::that_detached(url).context("failed to open panel in default browser")?;
-    info!("Opened Rumi panel in the default browser");
-    Ok(())
-}
-
 fn ensure_kernel_ready_for_panel_auth(
     config: &AppConfig,
     km: &Arc<Mutex<KernelManager>>,
@@ -382,12 +366,6 @@ fn spawn_kernel_exit_monitor(
                         {
                             error!("Failed to refresh panel after Kernel restart: {error}");
                         }
-                    }
-                    if let Err(error) = open_panel_session_in_default_browser(
-                        config.kernel_port,
-                        &panel_bootstrap_secret,
-                    ) {
-                        warn!("Failed to open browser after Kernel restart: {error}");
                     }
                 }
                 Err(error) => {
@@ -633,11 +611,6 @@ pub fn run() {
                                     error!("Failed to navigate to panel: {e}");
                                 }
                             }
-                            if let Err(e) =
-                                open_panel_session_in_default_browser(port, &panel_bootstrap_secret)
-                            {
-                                warn!("Failed to open browser panel session: {e}");
-                            }
                             // Delayed background update check.
                             run_delayed_update_check();
                             return;
@@ -679,10 +652,6 @@ pub fn run() {
                     if let Err(e) = navigate_window_to_panel_session(&win, port, &panel_code) {
                         error!("Failed to navigate to panel: {e}");
                     }
-                }
-                if let Err(e) = open_panel_session_in_default_browser(port, &panel_bootstrap_secret)
-                {
-                    warn!("Failed to open browser panel session: {e}");
                 }
 
                 // Delayed background update check.
@@ -754,16 +723,6 @@ mod tests {
         );
 
         fs::remove_dir_all(root).ok();
-    }
-
-    #[test]
-    fn panel_session_url_encodes_one_time_code() {
-        let url = panel_session_url(8765, "code with spaces/&?").unwrap();
-
-        assert_eq!(
-            url,
-            "http://127.0.0.1:8765/panel/?code=code+with+spaces%2F%26%3F"
-        );
     }
 
     #[test]

@@ -287,6 +287,24 @@ def main():
                     mark_ecosystem_initialized()
                 except Exception:
                     _logger.debug("mark_ecosystem_initialized failed", exc_info=True)
+                try:
+                    from core_runtime.startup_surface_launcher import (
+                        launch_pending_startup_profile_surface,
+                    )
+
+                    launch_result = launch_pending_startup_profile_surface()
+                    if launch_result.get("launched"):
+                        _logger.info(
+                            "Startup profile surface launched: %s",
+                            launch_result,
+                        )
+                    elif launch_result.get("reason") not in {None, "not_pending"}:
+                        _logger.warning(
+                            "Startup profile surface launch skipped: %s",
+                            launch_result,
+                        )
+                except Exception:
+                    _logger.debug("startup profile surface launch skipped", exc_info=True)
                 print(f"[Rumi] {L('startup.success')}")
                 _start_auto_update_thread()
             except Exception as e:

@@ -471,6 +471,10 @@ class StartupProfileManager:
                     {
                         "name": "Default Profile",
                         "display_name": {"en": "Default Profile", "ja": "Default Profile"},
+                        "default_graph": graph_id,
+                        "capability_profile_id": graph_id,
+                        "launch_capability_graph": True,
+                        "surfaces": {"preferred": "browser", "enabled": ["browser", "cli"]},
                     },
                 ),
             }
@@ -492,6 +496,7 @@ class StartupProfileManager:
                 normalized["profile_id"] = profile_id
             else:
                 normalized = self._migrate_profile(profile_id, raw_profile, catalog)
+            normalized = self._normalize_default_profile_launch_fields(normalized)
             normalized["name"] = str(raw_profile.get("name") or normalized.get("name") or profile_id)
             normalized["created_at"] = int(raw_profile.get("created_at") or _now_ts())
             normalized["updated_at"] = int(raw_profile.get("updated_at") or normalized["created_at"])
@@ -568,6 +573,32 @@ class StartupProfileManager:
             "node_overrides": node_overrides,
             **runtime,
         }
+
+    def _normalize_default_profile_launch_fields(self, profile: Dict[str, Any]) -> Dict[str, Any]:
+        if (
+            profile.get("profile_id") != "default-profile"
+            or profile.get("base_pack") != "defaultspack"
+            or profile.get("graph_id") != "defaultspack.startup"
+        ):
+            return profile
+
+        normalized = copy.deepcopy(profile)
+        normalized["default_graph"] = normalized.get("default_graph") or "defaultspack.startup"
+        normalized["capability_profile_id"] = (
+            normalized.get("capability_profile_id") or "defaultspack.startup"
+        )
+        normalized["launch_capability_graph"] = True
+
+        surfaces = normalized.get("surfaces")
+        legacy_default = surfaces in (
+            None,
+            {},
+            {"preferred": "desktop", "enabled": ["desktop", "cli"]},
+            {"preferred": "desktop", "enabled": ["cli", "desktop"]},
+        )
+        if legacy_default:
+            normalized["surfaces"] = {"preferred": "browser", "enabled": ["browser", "cli"]}
+        return normalized
 
     def _default_graph_for_pack(self, pack_id: str, catalog: Dict[str, Any]) -> str:
         for pack_info in catalog.get("packs", []):
@@ -1047,8 +1078,12 @@ class StartupProfileManager:
         active.set_metadata("startup_graph_id", profile.get("graph_id", ""))
         active.set_metadata("startup_packs", list(profile.get("packs", [])))
         active.set_metadata("startup_node_overrides", dict(profile.get("node_overrides", {})))
+        active.set_metadata("startup_profile_surfaces", dict(profile.get("surfaces", {})))
         active.set_metadata("startup_launched", bool(launched))
         active.set_metadata("startup_launch_requested_at", _now_ts() if launched else None)
+        active.set_metadata("startup_surface_open_pending", bool(launched))
+        if launched:
+            active.set_metadata("startup_surface_open_result", None)
 
         runtime_bindings = self._resolve_runtime_component_bindings(profile, catalog)
         active.set_metadata("startup_port_resolutions", runtime_bindings["port_resolutions"])
@@ -1250,7 +1285,7 @@ class StartupProfileManager:
 
         surfaces = payload.get("surfaces")
         if not isinstance(surfaces, dict):
-            surfaces = {"preferred": "desktop", "enabled": ["desktop", "cli"]}
+            surfaces = {"preferred": "browser", "enabled": ["browser", "cli"]}
         node_settings = payload.get("node_settings")
         policy = payload.get("policy")
         permissions = payload.get("permissions")

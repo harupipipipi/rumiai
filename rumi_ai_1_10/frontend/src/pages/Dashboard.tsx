@@ -365,8 +365,10 @@ export function Dashboard() {
     setFeedback(null);
     try {
       const response = await launchStartupProfile(profileId);
-      await refreshProfiles(editProfileId);
-      await refreshDashboard();
+      if (!response.restart_requested) {
+        await refreshProfiles(editProfileId);
+        await refreshDashboard();
+      }
       setSuccessFeedback(
         response.restart_requested
           ? 'Profile launched. Kernel restart handoff was requested.'
