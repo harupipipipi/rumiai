@@ -281,8 +281,8 @@ function iconForItem(item: SidebarItem) {
   return byCategory[item.category];
 }
 
-function railIcon(item: ReactElement): ReactElement {
-  return cloneElement(item as ReactElement<Record<string, unknown>>, { size: 14 });
+function railIcon(item: ReactElement, size = 15): ReactElement {
+  return cloneElement(item as ReactElement<Record<string, unknown>>, { size });
 }
 
 function categoryColor(cat: SidebarCategory, variant: "bg" | "indicator" | "dot" | "badge") {
@@ -888,7 +888,8 @@ export function RightSidebar({
       onContextMenu={(event) => openItemContextMenu(event, item)}
       onClick={() => setActivePanel((current) => (current === item.id ? null : item.id))}
       className={cn(
-        "h-8 w-8 rounded-md flex items-center justify-center relative transition-colors duration-150 ease-out group/btn flex-shrink-0",
+        "rounded-md flex items-center justify-center relative transition-colors duration-150 ease-out group/btn flex-shrink-0",
+        pinnedZone ? "h-9 w-9" : "h-8 w-8",
         activePanel === item.id
           ? "bg-zinc-800 text-zinc-100 ring-1 ring-zinc-600/70"
           : item.category === "tool" && !selectedToolIdSet.has(item.id)
@@ -899,7 +900,7 @@ export function RightSidebar({
       )}
       title={item.label}
     >
-      {railIcon(iconForItem(item))}
+      {railIcon(iconForItem(item), pinnedZone ? 17 : 15)}
 
       {activePanel === item.id && (
         <div className={cn("absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-r-full", categoryColor(item.category, "indicator"))} />

@@ -142,7 +142,7 @@ function MessageActionBar({
   }
 
   return (
-    <div className="rumi-message-actions mt-1.5 flex min-h-6 items-center justify-start gap-1 opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100">
+    <div className="rumi-message-actions mt-1.5 flex min-h-6 items-center justify-start gap-1 opacity-60 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100">
       {actions.map((action) => {
         const Icon = action.icon;
         return (
@@ -336,7 +336,7 @@ export function ChatMessagesRenderer({
         <div className="flex-1 overflow-y-auto px-4 py-3">
           <div className="w-full max-w-5xl mx-auto space-y-4">
             {messages.map((message) => (
-              <div key={message.id} className={cn("rumi-message-row group/message flex gap-3", message.role === "user" ? "flex-row-reverse" : "")}>
+              <div key={message.id} className={cn("rumi-message-row group/message flex gap-3 select-text", message.role === "user" ? "flex-row-reverse" : "")}>
                 <div className={cn("flex flex-col min-w-0 pt-1", message.role === "user" ? "items-end max-w-[80%]" : "items-start flex-1")}>
                   {message.role === "agent" && (
                     <div className="flex items-center gap-2 mb-1.5">
@@ -353,7 +353,7 @@ export function ChatMessagesRenderer({
                     <div
                       tabIndex={0}
                       className={cn(
-                        "relative rounded-2xl max-w-full sm:px-4 px-3 py-3 text-[14px] outline-none",
+                        "relative rounded-2xl max-w-full sm:px-4 px-3 py-3 text-[14px] outline-none select-text",
                         message.role === "user"
                           ? "bg-zinc-800/80 text-zinc-100 rounded-tr-sm shadow-sm border border-zinc-700/50"
                           : "w-full text-zinc-200 bg-transparent",

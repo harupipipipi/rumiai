@@ -340,6 +340,94 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
         self.assertEqual(response["content"][0]["text"], "gemma answer")
         self.assertEqual(response["usage"]["total_tokens"], 5)
 
+    def test_google_native_gemma_sends_function_declarations_and_parses_calls(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        captured = {}
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-key"}, clear=True):
+            provider = GoogleProvider()
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps(
+                    {
+                        "candidates": [
+                            {
+                                "content": {
+                                    "parts": [
+                                        {
+                                            "functionCall": {
+                                                "id": "call_browser_1",
+                                                "name": "browser_use",
+                                                "args": {"action": "screenshot"},
+                                            }
+                                        }
+                                    ]
+                                },
+                                "finishReason": "STOP",
+                            }
+                        ],
+                    }
+                ).encode("utf-8")
+
+        def fake_native_request_json(model, body, stream=False):
+            captured["body"] = body
+            return FakeResponse()
+
+        provider._native_request_json = fake_native_request_json
+        response = provider.complete(
+            "gemma-4-31b-it",
+            [
+                {"role": "user", "content": "use the browser"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "previous_call",
+                            "type": "function",
+                            "function": {"name": "browser_use", "arguments": "{\"action\":\"screenshot\"}"},
+                        }
+                    ],
+                },
+                {"role": "tool", "name": "browser_use", "tool_call_id": "previous_call", "content": "{\"result\":\"ok\"}"},
+            ],
+            [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "browser_use",
+                        "description": "Control the browser.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"action": {"type": "string"}},
+                            "required": ["action"],
+                        },
+                    },
+                }
+            ],
+            {"thinking_level": "high"},
+        )
+
+        self.assertEqual(captured["body"]["tools"][0]["functionDeclarations"][0]["name"], "browser_use")
+        self.assertEqual(
+            captured["body"]["tools"][0]["functionDeclarations"][0]["parameters"]["properties"]["action"]["type"],
+            "string",
+        )
+        self.assertEqual(captured["body"]["contents"][1]["parts"][0]["functionCall"]["id"], "previous_call")
+        self.assertEqual(captured["body"]["contents"][2]["parts"][0]["functionResponse"]["id"], "previous_call")
+        self.assertEqual(response["finish_reason"], "tool_calls")
+        self.assertEqual(response["content"][1]["type"], "tool_use")
+        self.assertEqual(response["content"][1]["id"], "call_browser_1")
+        self.assertEqual(response["content"][1]["name"], "browser_use")
+
     def test_openai_provider_translates_generic_thinking_level(self):
         from domain.ai_client.providers.openai_provider import OpenAIProvider
 
