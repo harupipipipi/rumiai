@@ -1,11 +1,11 @@
 {
-  "name": "rumi-ai-frontend",
+  "name": "rumi-viewer-frontend",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
-    "build": "vite build && cp -r dist/ ../core_runtime/core_pack/core_control_panel/web/",
+    "build": "vite build && rm -rf ../../rumi_ai_1_10/core_runtime/core_pack/core_control_panel/web && mkdir -p ../../rumi_ai_1_10/core_runtime/core_pack/core_control_panel/web && cp -R dist/* ../../rumi_ai_1_10/core_runtime/core_pack/core_control_panel/web/",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",

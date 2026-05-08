@@ -53,7 +53,7 @@ python -m ruff format --check tests/test_entrypoint_contracts.py
 python -m mypy tests/test_entrypoint_contracts.py
 
 # Frontend/Viewer/Pack-shell
-cd rumi_ai_1_10/frontend && npm run lint && npm run build && cd ../..
+cd rumi_viewer/frontend && npm run lint && npm run build && cd ../..
 cd pack-shell && cargo test && cd ..
 ```
 

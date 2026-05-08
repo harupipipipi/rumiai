@@ -95,7 +95,7 @@ def test_ui_security_and_frontend_contracts():
     viewer_cap = json.loads(
         _read(REPO_ROOT / "rumi_viewer" / "src-tauri" / "capabilities" / "default.json")
     )
-    frontend_package = json.loads(_read(PACKAGE_ROOT / "frontend" / "package.json"))
+    frontend_package = json.loads(_read(REPO_ROOT / "rumi_viewer" / "frontend" / "package.json"))
 
     csp = tauri_conf["app"]["security"]["csp"]
     assert "http://localhost:8765" in csp

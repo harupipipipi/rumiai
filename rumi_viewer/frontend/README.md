@@ -1,6 +1,9 @@
-# Rumi AI Frontend
+# Rumi Viewer Frontend
 
 Rumi AI のコントロールパネル用フロントエンドアプリケーション。
+このディレクトリが `/panel/` UI の canonical source です。
+
+`npm run build` は Vite の成果物を `../../rumi_ai_1_10/core_runtime/core_pack/core_control_panel/web` にコピーします。viewer と browser はどちらも kernel が配信する同じ `/panel/` artifact を使用します。Tauri の `splash` は kernel 起動前の viewer 専用画面で、panel frontend とは別です。
 
 ## 技術スタック
 

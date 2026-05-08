@@ -1,6 +1,7 @@
 # rumi_viewer Start Guide
 
 `rumi_viewer` は Tauri 製の desktop shell です。開発起動では repo 内の `rumi_ai_1_10/` を自動検出し、Python kernel を起動して panel UI へ接続します。
+control panel frontend の source は `rumi_viewer/frontend` が所有し、kernel は build 済み artifact を `rumi_ai_1_10/core_runtime/core_pack/core_control_panel/web` から `/panel/` として配信します。
 
 ## これを読むタイミング
 
@@ -49,6 +50,7 @@ RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev
 ## defaultspack との関係
 
 - viewer が直接開くのは kernel の control panel (`/panel/`) です
+- frontend source は viewer 側にありますが、配信経路は kernel の `/panel/` のままです
 - `defaultspack` 自体は kernel から component として読み込まれます
 - `defaultspack` の独立 HTTP frontend は `DEFAULTS_HTTP_PORT` 既定値 `8766` ですが、viewer の初期導線とは別です
 
@@ -89,5 +91,5 @@ curl http://127.0.0.1:8766/api/health
 - `rumi_viewer/src-tauri/src/config.rs`
 - `rumi_viewer/src-tauri/src/kernel_manager.rs`
 - `rumi_viewer/src-tauri/src/lib.rs`
-- `rumi_ai_1_10/frontend/src/App.tsx`
-- `rumi_ai_1_10/frontend/src/lib/routes.ts`
+- `rumi_viewer/frontend/src/App.tsx`
+- `rumi_viewer/frontend/src/lib/routes.ts`
