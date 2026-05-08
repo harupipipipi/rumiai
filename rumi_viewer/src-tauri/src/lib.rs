@@ -315,6 +315,67 @@ pub(crate) fn request_app_exit(app: &AppHandle) {
     });
 }
 
+fn spawn_kernel_exit_monitor(
+    app: AppHandle,
+    config: AppConfig,
+    km: Arc<Mutex<KernelManager>>,
+    shutdown_flag: Arc<AtomicBool>,
+    panel_bootstrap_secret: String,
+) {
+    thread::spawn(move || loop {
+        if shutdown_flag.load(Ordering::SeqCst) {
+            break;
+        }
+
+        let mut restarted = false;
+        match km.lock() {
+            Ok(mut kernel) => {
+                if !kernel.is_running() {
+                    match kernel.wait_and_handle_restart() {
+                        Ok(true) => match kernel.start() {
+                            Ok(()) => {
+                                restarted = true;
+                                info!("Kernel restart handoff completed");
+                            }
+                            Err(error) => {
+                                error!("Failed to restart Kernel after handoff: {error}");
+                            }
+                        },
+                        Ok(false) => {}
+                        Err(error) => {
+                            warn!("Failed to inspect Kernel exit status: {error}");
+                        }
+                    }
+                }
+            }
+            Err(error) => {
+                error!("Failed to lock kernel manager for exit monitor: {error}");
+            }
+        }
+
+        if restarted {
+            match health_check::wait_for_healthy(config.kernel_port, 60).and_then(|_| {
+                request_panel_bootstrap_code_with_retry(config.kernel_port, &panel_bootstrap_secret)
+            }) {
+                Ok(panel_code) => {
+                    if let Some(win) = app.get_webview_window("main") {
+                        if let Err(error) =
+                            navigate_window_to_panel_session(&win, config.kernel_port, &panel_code)
+                        {
+                            error!("Failed to refresh panel after Kernel restart: {error}");
+                        }
+                    }
+                }
+                Err(error) => {
+                    warn!("Kernel restarted, but panel session refresh failed: {error}");
+                }
+            }
+        }
+
+        thread::sleep(Duration::from_millis(500));
+    });
+}
+
 fn update_setup_progress(app_handle: Option<&AppHandle>, progress: &Arc<Mutex<String>>, msg: &str) {
     match progress.lock() {
         Ok(mut state) => {
@@ -512,6 +573,7 @@ pub fn run() {
                 panel_bootstrap_secret.clone(),
             )));
             let km_for_thread = km.clone();
+            let km_for_monitor = km.clone();
             app.manage(km);
 
             app.manage(config.clone());
@@ -521,7 +583,16 @@ pub fn run() {
             }
 
             let handle = app.handle().clone();
+            let monitor_handle = app.handle().clone();
             let port = config.kernel_port;
+
+            spawn_kernel_exit_monitor(
+                monitor_handle,
+                config.clone(),
+                km_for_monitor,
+                Arc::clone(&app.state::<ShutdownState>().inner().0),
+                panel_bootstrap_secret.clone(),
+            );
 
             std::thread::spawn(move || {
                 // --- Fast path: existing healthy kernel ---

@@ -12,6 +12,7 @@ Kernel の _h_exec_python または直接 import から呼ばれる。
 """
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -21,6 +22,13 @@ ALLOWED_LANGUAGES = frozenset({
 })
 
 PROFILE_SCHEMA_VERSION = 1
+
+
+def _profile_path(base_dir):
+    user_data_dir = os.environ.get("RUMI_USER_DATA")
+    if user_data_dir:
+        return Path(user_data_dir) / "settings" / "profile.json"
+    return base_dir / "user_data" / "settings" / "profile.json"
 
 
 def validate_profile_data(data):
@@ -92,7 +100,7 @@ def save_profile(data, base_dir=None):
     }
 
     # ディレクトリ作成 + 書き込み
-    profile_path = base_dir / "user_data" / "settings" / "profile.json"
+    profile_path = _profile_path(base_dir)
     try:
         profile_path.parent.mkdir(parents=True, exist_ok=True)
         profile_path.write_text(

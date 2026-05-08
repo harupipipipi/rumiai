@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import os
 import time
 import uuid
 from pathlib import Path
@@ -73,12 +74,15 @@ class StartupProfileManager:
         interface_registry: Any = None,
         approval_manager: Any = None,
         ecosystem_dir: Optional[str] = None,
+        seed_default_profile: Optional[bool] = None,
     ) -> None:
         base_dir = Path(__file__).resolve().parent.parent
-        self._storage_path = storage_path or (base_dir / "user_data" / "settings" / "startup_profiles.json")
+        user_data_dir = Path(os.environ.get("RUMI_USER_DATA") or (base_dir / "user_data"))
+        self._storage_path = storage_path or (user_data_dir / "settings" / "startup_profiles.json")
         self.interface_registry = interface_registry
         self.approval_manager = approval_manager
         self.ecosystem_dir = ecosystem_dir
+        self.seed_default_profile = storage_path is None if seed_default_profile is None else seed_default_profile
 
     @property
     def storage_path(self) -> Path:
@@ -412,12 +416,65 @@ class StartupProfileManager:
         tmp_path.replace(path)
 
     def _default_state(self, catalog: Dict[str, Any]) -> Dict[str, Any]:
+        default_profile = self._default_startup_profile(catalog) if self.seed_default_profile else None
+        if default_profile:
+            return {
+                "version": PROFILE_VERSION,
+                "active_profile_id": default_profile["profile_id"],
+                "last_launched_profile_id": None,
+                "profiles": [default_profile],
+            }
         return {
             "version": PROFILE_VERSION,
             "active_profile_id": None,
             "last_launched_profile_id": None,
             "profiles": [],
         }
+
+    def _default_startup_profile(self, catalog: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        preferred_pack_ids = ("defaultspack", "defaults")
+        packs = list(catalog.get("packs", []))
+        ordered_packs = [
+            pack
+            for preferred in preferred_pack_ids
+            for pack in packs
+            if pack.get("pack_id") == preferred
+        ]
+        ordered_packs.extend(
+            pack
+            for pack in packs
+            if pack.get("pack_id") not in preferred_pack_ids
+        )
+
+        for pack_info in ordered_packs:
+            base_pack = str(pack_info.get("pack_id") or "").strip()
+            if not base_pack:
+                continue
+            graph_id = self._default_graph_for_pack(base_pack, catalog)
+            graph_ports = self._extract_graph_ports(graph_id, base_pack, catalog) if graph_id else []
+            if not graph_id or not graph_ports:
+                continue
+            created_at = _now_ts()
+            return {
+                "version": PROFILE_VERSION,
+                "profile_id": "default-profile",
+                "name": "Default Profile",
+                "base_pack": base_pack,
+                "graph_id": graph_id,
+                "graph_ports": graph_ports,
+                "packs": [base_pack],
+                "node_overrides": {},
+                "created_at": created_at,
+                "updated_at": created_at,
+                **self._runtime_profile_fields(
+                    "default-profile",
+                    {
+                        "name": "Default Profile",
+                        "display_name": {"en": "Default Profile", "ja": "Default Profile"},
+                    },
+                ),
+            }
+        return None
 
     def _normalize_state(self, state: Dict[str, Any], catalog: Dict[str, Any]) -> Dict[str, Any]:
         profiles = state.get("profiles")

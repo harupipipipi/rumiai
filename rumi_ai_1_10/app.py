@@ -16,6 +16,7 @@ Wave 19-A 変更:
 import sys
 import atexit
 import argparse
+import os
 import traceback
 import threading
 from pathlib import Path
@@ -360,6 +361,7 @@ def main():
                         _logger.error("Pack HTTP server failed", exc_info=True)
 
                 threading.Thread(target=_run_pack_http_server, daemon=True).start()
+            _start_restart_signal_monitor()
             http_server(kernel_facade)
             _wait_for_signal()
         else:
@@ -394,18 +396,42 @@ def main():
 
 def _wait_for_signal():
     """停止シグナルまたは restart 要求を待機する。"""
-    from core_runtime.api.control_panel_handlers import (
-        _RESTART_EXIT_CODE,
-        clear_kernel_restart_request,
-        is_kernel_restart_requested,
-    )
+    from core_runtime.api.control_panel_handlers import is_kernel_restart_requested
 
     stop_event = threading.Event()
     while not stop_event.wait(timeout=1.0):
         if is_kernel_restart_requested():
-            clear_kernel_restart_request()
-            print(f"[Rumi] {L('shutdown.starting')}")
-            raise SystemExit(_RESTART_EXIT_CODE)
+            _exit_for_restart_request()
+
+
+def _start_restart_signal_monitor():
+    """ブロッキング HTTP server 実行中も restart 要求を処理する。"""
+
+    def _monitor():
+        stop_event = threading.Event()
+        while not stop_event.wait(timeout=1.0):
+            from core_runtime.api.control_panel_handlers import is_kernel_restart_requested
+
+            if is_kernel_restart_requested():
+                _exit_for_restart_request()
+
+    thread = threading.Thread(target=_monitor, daemon=True)
+    thread.start()
+    return thread
+
+
+def _exit_for_restart_request():
+    """restart 要求を exit code 42 としてプロセス全体へ反映する。"""
+    from core_runtime.api.control_panel_handlers import (
+        _RESTART_EXIT_CODE,
+        clear_kernel_restart_request,
+    )
+
+    clear_kernel_restart_request()
+    print(f"[Rumi] {L('shutdown.starting')}")
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(_RESTART_EXIT_CODE)
 
 
 def _run_validation():

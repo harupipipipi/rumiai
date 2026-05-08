@@ -292,6 +292,35 @@ def test_list_profiles_returns_catalog_with_packs_and_graphs(tmp_path: Path):
     assert any(node["node_id"] == "rumi.start" for node in pack["nodes"])
 
 
+def test_default_manager_uses_rumi_user_data_and_seeds_default_profile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    eco_root = tmp_path / "ecosystem"
+    _write_pack(
+        eco_root,
+        "defaultspack",
+        graphs=[_startup_graph("defaultspack")],
+        nodes=["agent", "ai_client", "tool", "memory", "frontend"],
+    )
+    locations = _discover_locations(eco_root, ["defaultspack"])
+    user_data_dir = tmp_path / "app-data" / "user_data"
+    monkeypatch.setenv("RUMI_USER_DATA", str(user_data_dir))
+    manager = StartupProfileManager()
+
+    with patch("core_runtime.startup_profiles.discover_pack_locations", return_value=locations):
+        payload = manager.list_profiles_payload()
+
+    assert manager.storage_path == user_data_dir / "settings" / "startup_profiles.json"
+    assert payload["active_profile_id"] == "default-profile"
+    assert len(payload["profiles"]) == 1
+    profile = payload["profiles"][0]
+    assert profile["profile_id"] == "default-profile"
+    assert profile["base_pack"] == "defaultspack"
+    assert profile["graph_id"] == "defaultspack.startup"
+    assert any(port["port_key"] == "agent.start" for port in profile["graph_ports"])
+
+
 def test_add_pack_to_profile(tmp_path: Path):
     eco_root = tmp_path / "ecosystem"
     _write_pack(

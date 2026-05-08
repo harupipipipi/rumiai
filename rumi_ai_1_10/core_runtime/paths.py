@@ -14,6 +14,7 @@ paths.py - パス定義とPack探索の集約モジュール
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -24,6 +25,16 @@ from typing import Dict, List, Optional, Tuple
 # ======================================================================
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def _resolve_user_data_dir() -> Path:
+    configured = os.environ.get("RUMI_USER_DATA")
+    if configured:
+        return Path(configured)
+    return BASE_DIR / "user_data"
+
+
+USER_DATA_DIR = _resolve_user_data_dir()
 
 # Pack供給元のルートディレクトリ
 ECOSYSTEM_DIR = str(BASE_DIR / "ecosystem")
@@ -42,9 +53,9 @@ LEGACY_PACKS_SUBDIR = "packs"
 OFFICIAL_FLOWS_DIR = str(BASE_DIR / "flows")
 
 # ユーザー管理の共有 Flow/Modifier ディレクトリ（承認不要）
-USER_SHARED_DIR = str(BASE_DIR / "user_data" / "shared")
-USER_SHARED_FLOWS_DIR = str(BASE_DIR / "user_data" / "shared" / "flows")
-USER_SHARED_MODIFIERS_DIR = str(BASE_DIR / "user_data" / "shared" / "flows" / "modifiers")
+USER_SHARED_DIR = str(USER_DATA_DIR / "shared")
+USER_SHARED_FLOWS_DIR = str(USER_DATA_DIR / "shared" / "flows")
+USER_SHARED_MODIFIERS_DIR = str(USER_DATA_DIR / "shared" / "flows" / "modifiers")
 
 # local_pack 互換（deprecated、優先順位最低）
 LOCAL_PACK_ID = "local_pack"
@@ -52,10 +63,10 @@ LOCAL_PACK_DIR = str(BASE_DIR / "ecosystem" / "flows")
 LOCAL_PACK_MODIFIERS_DIR = str(BASE_DIR / "ecosystem" / "flows" / "modifiers")
 
 # 承認データ保存先
-GRANTS_DIR = str(BASE_DIR / "user_data" / "permissions")
+GRANTS_DIR = str(USER_DATA_DIR / "permissions")
 
 # Pack data 保存先
-PACK_DATA_BASE_DIR = str(BASE_DIR / "user_data" / "packs")
+PACK_DATA_BASE_DIR = str(USER_DATA_DIR / "packs")
 
 # Pack discovery 時に除外するディレクトリ名
 EXCLUDED_DIRS = frozenset({

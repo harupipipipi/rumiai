@@ -180,3 +180,4 @@ class TestHealthPayload:
         assert result["status"] == "error"
         assert result["runtime_status"] == "error"
         assert result["runtime_error"] == "runtime crashed"
+        reset_runtime_readiness()

@@ -74,6 +74,8 @@ class ActiveEcosystemManager:
         """
         if config_path:
             self.config_path = Path(config_path)
+        elif os.environ.get("RUMI_USER_DATA"):
+            self.config_path = Path(os.environ["RUMI_USER_DATA"]) / "active_ecosystem.json"
         else:
             settings_dir = get_mount_path("data.settings", ensure_exists=True)
             self.config_path = settings_dir.parent / "active_ecosystem.json"
@@ -85,8 +87,13 @@ class ActiveEcosystemManager:
         if secret_key:
             self._secret_key: bytes = secret_key.encode("utf-8")
         else:
+            secret_key_file = (
+                Path(os.environ["RUMI_USER_DATA"]) / "permissions" / ".secret_key"
+                if os.environ.get("RUMI_USER_DATA")
+                else Path(self.SECRET_KEY_FILE)
+            )
             self._secret_key = generate_or_load_signing_key(
-                Path(self.SECRET_KEY_FILE),
+                secret_key_file,
             )
         
         # 設定を読み込み
