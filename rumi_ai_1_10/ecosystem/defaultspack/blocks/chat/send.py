@@ -35,6 +35,11 @@ _SECRET_KEY_RE = re.compile(
     re.IGNORECASE,
 )
 _PROMPT_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_COMPUTER_USE_REQUEST_RE = re.compile(
+    r"compute[\s_-]*use|compu?ter[\s_-]*use|computer\s+ツール|コンピューター操作|pc操作|"
+    r"(vivaldi|vivladi|line|ブラウザ|browser).{0,24}(操作|送信|入力|クリック|開いて|開く)",
+    re.IGNORECASE,
+)
 
 
 def _stub_response():
@@ -145,6 +150,28 @@ def _resolve_selected_tools(raw_tools):
             continue
         resolved.append(tool_def)
     return resolved, unknown
+
+
+def _infer_requested_tools_from_message(user_text):
+    if not isinstance(user_text, str) or not _COMPUTER_USE_REQUEST_RE.search(user_text):
+        return []
+    return ["computer_use", "browser_computer"]
+
+
+def _with_inferred_tools(input_data, inferred_tool_ids):
+    if not inferred_tool_ids or not isinstance(input_data.get("tools"), list):
+        return input_data
+    merged = []
+    seen = set()
+    for item in list(input_data.get("tools") or []) + list(inferred_tool_ids):
+        key = item if isinstance(item, str) else id(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(item)
+    updated = dict(input_data)
+    updated["tools"] = merged
+    return updated
 
 
 def _available_tools(context, input_data):
@@ -677,6 +704,7 @@ def run(input_data, context):
 
     # --- 9b: ナレッジ / メモリ自動検索 & コンテキスト変数実動化 ---
     user_text = extract_user_text(content)
+    input_data = _with_inferred_tools(input_data, _infer_requested_tools_from_message(user_text))
     try:
         enrich_info = enrich_messages(
             standard_messages, system_prompt, conversation_id, user_text, manager,

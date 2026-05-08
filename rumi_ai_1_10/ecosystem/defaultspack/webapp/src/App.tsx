@@ -1844,7 +1844,7 @@ export default function App() {
           ...(selectedToolIds.length ? { selected_tools: selectedToolIds } : {}),
         },
         attachments: submittedAttachments,
-        tools: selectedToolIds,
+        tools: selectedToolIds.length ? selectedToolIds : undefined,
         metadata: {
           mode: isOperationsMode ? "operations_company" : "chat",
           ...(isOperationsMode ? {
