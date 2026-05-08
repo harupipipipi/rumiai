@@ -87,6 +87,11 @@ class SlashCommandRegistry:
             function_args = dict(args)
             if payload.get("conversation_id"):
                 function_args.setdefault("conversation_id", payload.get("conversation_id"))
+            builtin_result = self._execute_builtin_rumi_function(qualified_name, function_args)
+            if builtin_result is not None:
+                if isinstance(builtin_result, dict) and builtin_result.get("status") == "error":
+                    return builtin_result
+                return ok({"command": command, "executed": True, "result": builtin_result})
             result = invoke_function(qualified_name, function_args, context or {}, principal_id="defaultspack")
             if isinstance(result, dict) and result.get("status") == "ok":
                 return ok({"command": command, "executed": True, "result": result.get("data")})
@@ -130,6 +135,42 @@ class SlashCommandRegistry:
         if isinstance(result, dict) and result.get("status") == "ok":
             return ok({"command": command, "executed": True, "result": result.get("data")})
         return result if isinstance(result, dict) else error("compact command failed", "EXECUTION_FAILED")
+
+    def _execute_builtin_rumi_function(self, qualified_name: str, args: dict[str, Any]) -> dict[str, Any] | None:
+        function_id = str(qualified_name or "").strip().split(":", 1)[-1]
+        if function_id not in {
+            "ai_get_preferred_model",
+            "ai_set_preferred_model",
+            "ai_get_thinking_level",
+            "ai_set_thinking_level",
+            "ai_get_effective_thinking_level",
+            "ai_normalize_thinking_level",
+        }:
+            return None
+
+        try:
+            from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
+
+            service = ModelRuntimeSettingsService(self._pack_root)
+            if function_id == "ai_get_preferred_model":
+                return {"profile_id": service.get_preferred_model()}
+            if function_id == "ai_set_preferred_model":
+                return service.set_preferred_model(str(args.get("profile_id") or args.get("model") or ""))
+            if function_id == "ai_get_thinking_level":
+                return service.get_thinking_level(args.get("scope", "global"), args.get("profile_id"), args.get("conversation_id"))
+            if function_id == "ai_set_thinking_level":
+                return service.set_thinking_level(str(args.get("level") or ""), args.get("scope", "global"), args.get("profile_id"), args.get("conversation_id"))
+            if function_id == "ai_get_effective_thinking_level":
+                return service.get_effective_thinking_level(args.get("profile_id"), args.get("conversation_id"))
+            if function_id == "ai_normalize_thinking_level":
+                return service.normalize_for_provider(
+                    str(args.get("provider_id") or ""),
+                    str(args.get("model_id") or args.get("model") or ""),
+                    str(args.get("level") or args.get("thinking_level") or ""),
+                )
+        except Exception as exc:
+            return error(str(exc), "EXECUTION_FAILED")
+        return None
 
     def _load_manifest_dir(self, path: Path) -> list[dict[str, Any]]:
         if not path.exists():

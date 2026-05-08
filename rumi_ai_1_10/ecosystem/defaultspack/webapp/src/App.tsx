@@ -730,8 +730,8 @@ export default function App() {
   const favoriteProfiles = favoriteModelProfiles(settingsValues.models?.favorite_profiles, selectableModelProfiles, preferredModel);
   const thinkingLevels = (settingsValues.models?.thinking_level_by_profile ?? {}) as Record<string, unknown>;
   const selectedThinkingLevel = String(
-    settingsValues.models?.thinking_level
-    ?? thinkingLevels[profileKey(activeProfile, preferredModel)]
+    thinkingLevels[profileKey(activeProfile, preferredModel)]
+    ?? settingsValues.models?.thinking_level
     ?? activeProfile?.default_thinking_level
     ?? "medium",
   );
@@ -1356,9 +1356,14 @@ export default function App() {
     }
     try {
       setError(null);
+      const commandArgs = { ...parsed.args };
+      if (parsed.command.id === "think" && commandArgs.level && activeProfile) {
+        commandArgs.scope = "profile";
+        commandArgs.profile_id = profileKey(activeProfile, preferredModel);
+      }
       const result = await api.executeUiCommand({
         command: parsed.command.name ?? parsed.command.id,
-        args: parsed.args,
+        args: commandArgs,
         conversation_id: activeConversationId,
         mode: mode as ComposerCommandMode,
       });

@@ -655,6 +655,7 @@ export function ComposerRenderer({
           return !slashQuery || haystack.includes(slashQuery);
         })
     : [];
+  const showThinkingLevelChips = Boolean(thinkingMatch && thinkingCommand && levels.length > 0);
   const currentModeMeta = MODE_META[mode];
   const ModeIcon = currentModeMeta.icon;
   const directoryEntries = (codingContext?.entries ?? []).filter((entry) => entry.is_dir);
@@ -923,41 +924,65 @@ export function ComposerRenderer({
             />
           )}
           {matchedCommands.length > 0 && (
-            <div className="absolute bottom-full left-4 z-30 mb-2 w-[min(420px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl">
-              <div className="border-b border-zinc-800 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
-                Commands
+            showThinkingLevelChips ? (
+              <div className="absolute bottom-full left-4 z-30 mb-2 flex w-[min(520px,calc(100vw-32px))] flex-wrap items-center gap-2 rounded-xl border border-zinc-700/70 bg-zinc-950/95 px-3 py-2 shadow-2xl">
+                <span className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Thinking</span>
+                {matchedCommands.map((command, index) => {
+                  const level = command.id.replace(/^think:/, "");
+                  return (
+                    <button
+                      key={command.id}
+                      type="button"
+                      onMouseEnter={() => setSelectedCommandIndex(index)}
+                      onClick={() => chooseCommand(command.id)}
+                      className={`h-8 rounded-lg border px-3 text-xs font-medium transition-colors ${
+                        index === selectedCommandIndex
+                          ? "border-zinc-400 bg-zinc-100 text-zinc-950"
+                          : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:border-zinc-500 hover:text-zinc-100"
+                      }`}
+                    >
+                      {THINKING_LABELS[level] ?? level}
+                    </button>
+                  );
+                })}
               </div>
-              <div className="max-h-56 overflow-y-auto py-1">
-                {matchedCommands.map((command, index) => (
-                  <button
-                    key={command.id}
-                    type="button"
-                    onMouseEnter={() => setSelectedCommandIndex(index)}
-                    onClick={() => chooseCommand(command.id)}
-                    className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left ${
-                      index === selectedCommandIndex ? "bg-zinc-800 text-zinc-100" : "hover:bg-zinc-900"
-                    }`}
-                  >
-                    <span className="min-w-0">
-                      <span className="block truncate text-sm text-zinc-100">/{command.name ?? command.id}</span>
-                      {command.description && (
-                        <span className="block truncate text-[11px] text-zinc-500">{command.description}</span>
-                      )}
-                    </span>
-                    <span className="flex flex-shrink-0 items-center gap-1">
-                      {command.risk && (
-                        <span className={`rounded-full border px-2 py-0.5 text-[10px] ${RISK_BADGE_STYLES[command.risk] ?? "border-zinc-700 text-zinc-400"}`}>
-                          {command.risk}
-                        </span>
-                      )}
-                      {(command.enabled || command.active) && (
-                        <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] text-emerald-300">on</span>
-                      )}
-                    </span>
-                  </button>
-                ))}
+            ) : (
+              <div className="absolute bottom-full left-4 z-30 mb-2 w-[min(420px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl">
+                <div className="border-b border-zinc-800 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+                  Commands
+                </div>
+                <div className="max-h-56 overflow-y-auto py-1">
+                  {matchedCommands.map((command, index) => (
+                    <button
+                      key={command.id}
+                      type="button"
+                      onMouseEnter={() => setSelectedCommandIndex(index)}
+                      onClick={() => chooseCommand(command.id)}
+                      className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left ${
+                        index === selectedCommandIndex ? "bg-zinc-800 text-zinc-100" : "hover:bg-zinc-900"
+                      }`}
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm text-zinc-100">/{command.name ?? command.id}</span>
+                        {command.description && (
+                          <span className="block truncate text-[11px] text-zinc-500">{command.description}</span>
+                        )}
+                      </span>
+                      <span className="flex flex-shrink-0 items-center gap-1">
+                        {command.risk && (
+                          <span className={`rounded-full border px-2 py-0.5 text-[10px] ${RISK_BADGE_STYLES[command.risk] ?? "border-zinc-700 text-zinc-400"}`}>
+                            {command.risk}
+                          </span>
+                        )}
+                        {(command.enabled || command.active) && (
+                          <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] text-emerald-300">on</span>
+                        )}
+                      </span>
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            )
           )}
 
           {atMentionOpen && codingContext?.files && (

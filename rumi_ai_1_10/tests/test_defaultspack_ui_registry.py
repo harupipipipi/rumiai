@@ -681,13 +681,14 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertIn("commit", ids)
         self.assertEqual(next(command for command in commands if command["id"] == "commit")["risk"], "high")
 
-        with patch("domain.frontend.command_registry.invoke_function") as invoke:
-            invoke.return_value = {"status": "ok", "data": {"level": "high"}}
+        with patch("domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService") as service_cls:
+            service = service_cls.return_value
+            service.set_thinking_level.return_value = {"level": "high", "scope": "profile"}
             result = registry.execute(
                 {
                     "command": "thinking",
                     "mode": "chat",
-                    "args": {"level": "high"},
+                    "args": {"level": "high", "scope": "profile", "profile_id": "google/gemma-4-31b-it"},
                     "conversation_id": "conv-1",
                 },
                 {},
@@ -695,10 +696,12 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
 
         self.assertEqual(result["status"], "ok")
         self.assertTrue(result["data"]["executed"])
-        invoke.assert_called_once()
-        self.assertEqual(invoke.call_args.args[0], "defaultspack:ai_set_thinking_level")
-        self.assertEqual(invoke.call_args.args[1]["level"], "high")
-        self.assertEqual(invoke.call_args.args[1]["conversation_id"], "conv-1")
+        service.set_thinking_level.assert_called_once_with(
+            "high",
+            "profile",
+            "google/gemma-4-31b-it",
+            "conv-1",
+        )
 
     def test_slash_command_registry_rejects_invalid_enum_args(self):
         from domain.frontend.command_registry import SlashCommandRegistry
