@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type ReactElement } from "react";
+import { cloneElement, useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent, type ReactElement } from "react";
 import {
   Blocks,
   BrainCircuit,
@@ -78,20 +78,21 @@ function readStoredStringArray(key: string): string[] {
   }
 }
 
-function useStoredStringArray(key: string): [string[], (updater: (current: string[]) => string[]) => void] {
-  const [value, setValue] = useState<string[]>(() => readStoredStringArray(key));
-  const update = (updater: (current: string[]) => string[]) => {
-    setValue((current) => {
-      const next = [...new Set(updater(current).filter(Boolean))];
-      try {
-        localStorage.setItem(key, JSON.stringify(next));
-      } catch {
-        // Storage may be unavailable in restricted browser contexts.
-      }
-      return next;
-    });
-  };
-  return [value, update];
+function settingStringArray(value: unknown, fallbackKey?: string): string[] {
+  if (Array.isArray(value)) {
+    return [...new Set(value.map((item) => String(item)).filter(Boolean))];
+  }
+  return fallbackKey ? readStoredStringArray(fallbackKey) : [];
+}
+
+function settingStringArrayRecord(value: unknown, fallbackKey?: string): Record<string, string[]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return fallbackKey ? readStoredStringArrayRecord(fallbackKey) : {};
+  }
+  return Object.fromEntries(Object.entries(value).map(([id, values]) => [
+    id,
+    Array.isArray(values) ? [...new Set(values.map((item) => normalizeTag(String(item))).filter(Boolean))] : [],
+  ]).filter(([, values]) => values.length > 0));
 }
 
 function readStoredStringArrayRecord(key: string): Record<string, string[]> {
@@ -106,25 +107,6 @@ function readStoredStringArrayRecord(key: string): Record<string, string[]> {
   } catch {
     return {};
   }
-}
-
-function useStoredStringArrayRecord(key: string): [Record<string, string[]>, (updater: (current: Record<string, string[]>) => Record<string, string[]>) => void] {
-  const [value, setValue] = useState<Record<string, string[]>>(() => readStoredStringArrayRecord(key));
-  const update = (updater: (current: Record<string, string[]>) => Record<string, string[]>) => {
-    setValue((current) => {
-      const next = Object.fromEntries(Object.entries(updater(current)).map(([id, values]) => [
-        id,
-        [...new Set(values.map((item) => normalizeTag(String(item))).filter(Boolean))],
-      ]).filter(([, values]) => values.length > 0));
-      try {
-        localStorage.setItem(key, JSON.stringify(next));
-      } catch {
-        // Storage may be unavailable in restricted browser contexts.
-      }
-      return next;
-    });
-  };
-  return [value, update];
 }
 
 const CATEGORY_META: Record<SidebarCategory | "all", { label: string; icon: ReactElement }> = {
@@ -297,6 +279,10 @@ function iconForItem(item: SidebarItem) {
     capability: <ShieldCheck size={18} />,
   };
   return byCategory[item.category];
+}
+
+function railIcon(item: ReactElement): ReactElement {
+  return cloneElement(item as ReactElement<Record<string, unknown>>, { size: 14 });
 }
 
 function categoryColor(cat: SidebarCategory, variant: "bg" | "indicator" | "dot" | "badge") {
@@ -537,7 +523,7 @@ function CategorySwitcher({
         aria-expanded={isOpen}
         aria-pressed={hasActiveFilter}
         className={cn(
-          "w-9 h-9 rounded-lg flex items-center justify-center transition-all relative",
+          "w-8 h-8 rounded-md flex items-center justify-center transition-colors relative",
           hasActiveFilter
             ? "bg-zinc-800 text-zinc-100 ring-1 ring-zinc-600/70"
             : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/50",
@@ -615,9 +601,19 @@ export function RightSidebar({
   const [categoryFilter, setCategoryFilter] = useState<"all" | SidebarCategory>("all");
   const [openToolGroupMenu, setOpenToolGroupMenu] = useState<string | null>(null);
   const [toolGroupMenuPosition, setToolGroupMenuPosition] = useState<{ top: number; right: number } | null>(null);
-  const [pinnedItemIds, setPinnedItemIds] = useStoredStringArray("rumi-sidebar-pinned-item-ids");
-  const [starredItemIds, setStarredItemIds] = useStoredStringArray("rumi-sidebar-starred-item-ids");
-  const [customTagMap, setCustomTagMap] = useStoredStringArrayRecord("rumi-tool-custom-tags");
+  const sidebarSettings = settingsValues.sidebar ?? {};
+  const pinnedItemIds = useMemo(
+    () => settingStringArray(sidebarSettings.pinned_item_ids, "rumi-sidebar-pinned-item-ids"),
+    [sidebarSettings.pinned_item_ids],
+  );
+  const starredItemIds = useMemo(
+    () => settingStringArray(sidebarSettings.starred_item_ids, "rumi-sidebar-starred-item-ids"),
+    [sidebarSettings.starred_item_ids],
+  );
+  const customTagMap = useMemo(
+    () => settingStringArrayRecord(sidebarSettings.custom_tool_tags, "rumi-tool-custom-tags"),
+    [sidebarSettings.custom_tool_tags],
+  );
   const [showStarredOnly, setShowStarredOnly] = useState(false);
   const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
   const [tagDraftByItemId, setTagDraftByItemId] = useState<Record<string, string>>({});
@@ -745,6 +741,15 @@ export function RightSidebar({
       .sort(compareSidebarItems)
       .filter((item) => item.category !== "tool" || !showToolGroups || !groupedToolIds.has(item.id) || pinnedItemIdSet.has(item.id));
   }, [activeTagFilter, items, categoryFilter, groupedToolIds, pinnedItemIdSet, showStarredOnly, showToolGroups, starredItemIdSet, tagMap]);
+  const pinnedRailItems = useMemo(() => (
+    pinnedItemIds
+      .map((itemId) => items.find((item) => item.id === itemId))
+      .filter((item): item is SidebarItem => Boolean(item))
+  ), [items, pinnedItemIds]);
+  const unpinnedVisibleItems = useMemo(
+    () => visibleItems.filter((item) => !pinnedItemIdSet.has(item.id)),
+    [pinnedItemIdSet, visibleItems],
+  );
 
   const activeItem = items.find((item) => item.id === activePanel) ?? null;
   const isToolManagerActive = activePanel === "__tool_manager__";
@@ -780,16 +785,52 @@ export function RightSidebar({
     const itemId = event.dataTransfer.getData("application/rumi-sidebar-shortcut");
     if (!itemId || pinnedItemIdSet.has(itemId) || !items.some((item) => item.id === itemId)) return;
     event.preventDefault();
-    setPinnedItemIds((current) => [...current, itemId]);
+    updatePinnedItemIds((current) => [...current, itemId]);
     setOpenToolGroupMenu(null);
   };
 
+  const updateSidebarStringArray = (
+    fieldId: "pinned_item_ids" | "starred_item_ids",
+    current: string[],
+    updater: (current: string[]) => string[],
+    legacyKey: string,
+  ) => {
+    const next = [...new Set(updater(current).filter(Boolean))];
+    try {
+      localStorage.setItem(legacyKey, JSON.stringify(next));
+    } catch {
+      // Keep local fallback best-effort only; user_data is the source of truth.
+    }
+    onSettingChange("sidebar", fieldId, next);
+  };
+
+  const updatePinnedItemIds = (updater: (current: string[]) => string[]) => {
+    updateSidebarStringArray("pinned_item_ids", pinnedItemIds, updater, "rumi-sidebar-pinned-item-ids");
+  };
+
+  const updateStarredItemIds = (updater: (current: string[]) => string[]) => {
+    updateSidebarStringArray("starred_item_ids", starredItemIds, updater, "rumi-sidebar-starred-item-ids");
+  };
+
+  const updateCustomTagMap = (updater: (current: Record<string, string[]>) => Record<string, string[]>) => {
+    const next = Object.fromEntries(Object.entries(updater(customTagMap)).map(([id, values]) => [
+      id,
+      [...new Set(values.map((item) => normalizeTag(String(item))).filter(Boolean))],
+    ]).filter(([, values]) => values.length > 0));
+    try {
+      localStorage.setItem("rumi-tool-custom-tags", JSON.stringify(next));
+    } catch {
+      // Keep local fallback best-effort only; user_data is the source of truth.
+    }
+    onSettingChange("sidebar", "custom_tool_tags", next);
+  };
+
   const togglePin = (itemId: string) => {
-    setPinnedItemIds((current) => current.includes(itemId) ? current.filter((id) => id !== itemId) : [...current, itemId]);
+    updatePinnedItemIds((current) => current.includes(itemId) ? current.filter((id) => id !== itemId) : [...current, itemId]);
   };
 
   const toggleStar = (itemId: string) => {
-    setStarredItemIds((current) => current.includes(itemId) ? current.filter((id) => id !== itemId) : [...current, itemId]);
+    updateStarredItemIds((current) => current.includes(itemId) ? current.filter((id) => id !== itemId) : [...current, itemId]);
   };
 
   const setToolsEnabled = (toolIds: string[], enabled: boolean) => {
@@ -803,7 +844,7 @@ export function RightSidebar({
   const addCustomTag = (itemId: string, rawTag: string) => {
     const tag = normalizeTag(rawTag);
     if (!tag) return;
-    setCustomTagMap((current) => ({
+    updateCustomTagMap((current) => ({
       ...current,
       [itemId]: [...new Set([...(current[itemId] ?? []), tag])],
     }));
@@ -811,7 +852,7 @@ export function RightSidebar({
   };
 
   const removeCustomTag = (itemId: string, tag: string) => {
-    setCustomTagMap((current) => ({
+    updateCustomTagMap((current) => ({
       ...current,
       [itemId]: (current[itemId] ?? []).filter((candidate) => candidate !== tag),
     }));
@@ -838,6 +879,68 @@ export function RightSidebar({
     });
     setOpenToolGroupMenu(groupId);
   };
+
+  const renderRailItemButton = (item: SidebarItem, pinnedZone = false) => (
+    <button
+      key={item.id}
+      draggable={supportsComposerDrop(item)}
+      onDragStart={supportsComposerDrop(item) ? (e) => handleDragStart(e, item) : undefined}
+      onContextMenu={(event) => openItemContextMenu(event, item)}
+      onClick={() => setActivePanel((current) => (current === item.id ? null : item.id))}
+      className={cn(
+        "h-8 w-8 rounded-md flex items-center justify-center relative transition-colors duration-150 ease-out group/btn flex-shrink-0",
+        activePanel === item.id
+          ? "bg-zinc-800 text-zinc-100 ring-1 ring-zinc-600/70"
+          : item.category === "tool" && !selectedToolIdSet.has(item.id)
+            ? "text-zinc-700 hover:text-zinc-500 hover:bg-zinc-800/30"
+            : pinnedZone
+              ? "text-sky-300 hover:text-sky-100 hover:bg-sky-500/10"
+              : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
+      )}
+      title={item.label}
+    >
+      {railIcon(iconForItem(item))}
+
+      {activePanel === item.id && (
+        <div className={cn("absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-r-full", categoryColor(item.category, "indicator"))} />
+      )}
+
+      {item.category === "tool" && !selectedToolIdSet.has(item.id) && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="w-5 h-px bg-zinc-600 rotate-45" />
+        </div>
+      )}
+
+      {item.badge && (
+        <span className="absolute -top-0.5 -right-0.5 text-[6px] bg-emerald-500 text-black px-0.5 rounded-full font-bold leading-tight">
+          {item.badge}
+        </span>
+      )}
+
+      {(starredItemIdSet.has(item.id) || pinnedItemIdSet.has(item.id)) && !item.badge && (
+        <span className="absolute -top-0.5 -right-0.5 flex items-center gap-px rounded-full bg-zinc-900 px-0.5 text-[7px] leading-tight ring-1 ring-zinc-700">
+          {starredItemIdSet.has(item.id) && <Star size={8} className="fill-current text-amber-300" />}
+          {pinnedItemIdSet.has(item.id) && <Pin size={8} className="text-sky-300" />}
+        </span>
+      )}
+
+      {activePanel !== item.id && (
+        <div
+          className={cn(
+            "absolute bottom-0.5 right-0.5 w-1 h-1 rounded-full opacity-0 group-hover/btn:opacity-100 transition-opacity",
+            categoryColor(item.category, "dot"),
+          )}
+        />
+      )}
+
+      <span className="absolute right-full mr-2 px-2 py-1 bg-zinc-800 text-zinc-200 text-[10px] rounded-md opacity-0 group-hover/btn:opacity-100 pointer-events-none transition-opacity whitespace-nowrap border border-zinc-700 shadow-lg z-50">
+        {item.label}
+        <span className={cn("ml-1 text-[8px] px-1 py-px rounded", categoryColor(item.category, "badge"))}>
+          {item.category}
+        </span>
+      </span>
+    </button>
+  );
 
   return (
     <aside className="flex-shrink-0 border-l border-zinc-800/60 bg-[#09090b] hidden md:flex h-full transition-[width,opacity] duration-200 ease-out">
@@ -1117,9 +1220,9 @@ export function RightSidebar({
         </div>
       )}
 
-      <div className="w-11 flex flex-col flex-shrink-0 overflow-hidden">
+      <div className="w-10 flex flex-col flex-shrink-0 overflow-hidden">
         <div
-          className="flex-1 flex flex-col items-center gap-px overflow-y-auto w-full py-1 scrollbar-none"
+          className="flex-1 flex flex-col items-center gap-1 overflow-y-auto w-full py-1.5 scrollbar-none"
           onDragOver={(event) => {
             if (event.dataTransfer.types.includes("application/rumi-sidebar-shortcut")) {
               event.preventDefault();
@@ -1128,20 +1231,26 @@ export function RightSidebar({
           }}
           onDrop={handleShortcutDrop}
         >
+          {pinnedRailItems.length > 0 && (
+            <div className="flex w-full flex-col items-center gap-1">
+              {pinnedRailItems.map((item) => renderRailItemButton(item, true))}
+              <div className="w-5 h-px bg-sky-500/20 my-0.5" />
+            </div>
+          )}
           <CategorySwitcher active={categoryFilter} counts={counts} onChange={(id) => { setCategoryFilter(id); setOpenToolGroupMenu(null); }} />
           <button
             type="button"
             onClick={() => setShowStarredOnly((value) => !value)}
             aria-pressed={showStarredOnly}
             className={cn(
-              "w-9 h-9 rounded-lg flex items-center justify-center relative transition-all",
+              "w-8 h-8 rounded-md flex items-center justify-center relative transition-colors",
               showStarredOnly
                 ? "bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30"
                 : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
             )}
             title="Starred tools"
           >
-            <Star size={16} className={cn(starredItemIds.length > 0 && "fill-current")} />
+            <Star size={14} className={cn(starredItemIds.length > 0 && "fill-current")} />
             {starredItemIds.length > 0 && (
               <span className="absolute -top-0.5 -right-0.5 rounded-full bg-zinc-700 px-0.5 text-[7px] leading-tight text-zinc-200">
                 {starredItemIds.length}
@@ -1152,14 +1261,14 @@ export function RightSidebar({
             type="button"
             onClick={() => setActivePanel((current) => (current === "__tool_manager__" ? null : "__tool_manager__"))}
             className={cn(
-              "w-9 h-9 rounded-lg flex items-center justify-center relative transition-all",
+              "w-8 h-8 rounded-md flex items-center justify-center relative transition-colors",
               activePanel === "__tool_manager__"
                 ? "bg-zinc-800 text-zinc-100 ring-1 ring-zinc-600/70"
                 : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
             )}
             title="Tool manager"
           >
-            <SlidersHorizontal size={16} />
+            <SlidersHorizontal size={14} />
             {selectedToolIds.length > 0 && (
               <span className="absolute -top-0.5 -right-0.5 rounded-full bg-emerald-500 px-0.5 text-[7px] font-bold leading-tight text-black">
                 {selectedToolIds.length}
@@ -1190,14 +1299,14 @@ export function RightSidebar({
                       openToolGroup(group.id, event.currentTarget);
                     }}
                     className={cn(
-                      "group/group w-9 h-9 rounded-lg flex items-center justify-center relative transition-all flex-shrink-0",
+                      "group/group w-8 h-8 rounded-md flex items-center justify-center relative transition-colors flex-shrink-0",
                       isGroupOpen || isGroupActive
                         ? "bg-emerald-900/40 text-emerald-300 border border-emerald-500/30"
                         : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
                     )}
                     title={`${group.path?.length ? group.path.join(" / ") : group.label || TOOL_GROUP_LABELS[group.id] || group.id} (${group.count})`}
                   >
-                    {(group.icon && TOOL_GROUP_ICONS[group.icon]) || TOOL_GROUP_ICONS[group.id] || <Wrench size={16} />}
+                    {railIcon((group.icon && TOOL_GROUP_ICONS[group.icon]) || TOOL_GROUP_ICONS[group.id] || <Wrench size={16} />)}
                     <span className="absolute -top-0.5 -right-0.5 text-[7px] bg-zinc-700 text-zinc-300 px-0.5 rounded-full leading-tight">
                       {group.count}
                     </span>
@@ -1280,69 +1389,11 @@ export function RightSidebar({
             </div>
           )}
 
-          {showToolGroups && visibleItems.length > 0 && (
+          {showToolGroups && unpinnedVisibleItems.length > 0 && (
             <div className="w-5 h-px bg-zinc-800 my-1" />
           )}
 
-          {visibleItems.map((item) => (
-            <button
-              key={item.id}
-              draggable={supportsComposerDrop(item)}
-              onDragStart={supportsComposerDrop(item) ? (e) => handleDragStart(e, item) : undefined}
-              onContextMenu={(event) => openItemContextMenu(event, item)}
-              onClick={() => setActivePanel((current) => (current === item.id ? null : item.id))}
-              className={cn(
-                "w-9 h-9 rounded-lg flex items-center justify-center relative transition-all duration-150 ease-out group/btn flex-shrink-0 hover:scale-[1.03] active:scale-95",
-                activePanel === item.id
-                  ? "bg-zinc-800 text-zinc-100 ring-1 ring-zinc-600/70"
-                  : item.category === "tool" && !selectedToolIdSet.has(item.id)
-                    ? "text-zinc-700 hover:text-zinc-500 hover:bg-zinc-800/30"
-                    : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
-              )}
-              title={item.label}
-            >
-              {iconForItem(item)}
-
-              {activePanel === item.id && (
-                <div className={cn("absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-r-full", categoryColor(item.category, "indicator"))} />
-              )}
-
-              {item.category === "tool" && !selectedToolIdSet.has(item.id) && (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="w-6 h-px bg-zinc-600 rotate-45" />
-                </div>
-              )}
-
-              {item.badge && (
-                <span className="absolute -top-0.5 -right-0.5 text-[6px] bg-emerald-500 text-black px-0.5 rounded-full font-bold leading-tight">
-                  {item.badge}
-                </span>
-              )}
-
-              {(starredItemIdSet.has(item.id) || pinnedItemIdSet.has(item.id)) && !item.badge && (
-                <span className="absolute -top-0.5 -right-0.5 flex items-center gap-px rounded-full bg-zinc-900 px-0.5 text-[7px] leading-tight ring-1 ring-zinc-700">
-                  {starredItemIdSet.has(item.id) && <Star size={8} className="fill-current text-amber-300" />}
-                  {pinnedItemIdSet.has(item.id) && <Pin size={8} className="text-sky-300" />}
-                </span>
-              )}
-
-              {activePanel !== item.id && (
-                <div
-                  className={cn(
-                    "absolute bottom-0.5 right-0.5 w-1 h-1 rounded-full opacity-0 group-hover/btn:opacity-100 transition-opacity",
-                    categoryColor(item.category, "dot"),
-                  )}
-                />
-              )}
-
-              <span className="absolute right-full mr-2 px-2 py-1 bg-zinc-800 text-zinc-200 text-[10px] rounded-md opacity-0 group-hover/btn:opacity-100 pointer-events-none transition-opacity whitespace-nowrap border border-zinc-700 shadow-lg z-50">
-                {item.label}
-                <span className={cn("ml-1 text-[8px] px-1 py-px rounded", categoryColor(item.category, "badge"))}>
-                  {item.category}
-                </span>
-              </span>
-            </button>
-          ))}
+          {unpinnedVisibleItems.map((item) => renderRailItemButton(item))}
 
           {contextMenu && (() => {
             const item = items.find((candidate) => candidate.id === contextMenu.itemId);
@@ -1414,10 +1465,10 @@ export function RightSidebar({
 
           <button
             onClick={onOpenSettings}
-            className="relative w-9 h-9 rounded-lg flex items-center justify-center text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 transition-all group/btn flex-shrink-0"
+            className="relative w-8 h-8 rounded-md flex items-center justify-center text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 transition-colors group/btn flex-shrink-0"
             title="Settings"
           >
-            <Settings size={18} />
+            <Settings size={14} />
             <span className="absolute right-full mr-2 px-2 py-1 bg-zinc-800 text-zinc-200 text-[10px] rounded-md opacity-0 group-hover/btn:opacity-100 pointer-events-none transition-opacity whitespace-nowrap border border-zinc-700 shadow-lg z-50">
               Settings
             </span>

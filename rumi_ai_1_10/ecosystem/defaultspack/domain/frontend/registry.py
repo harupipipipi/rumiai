@@ -1043,6 +1043,11 @@ class FrontendRegistry:
             "commands": {
                 "show_advanced_commands": False,
             },
+            "sidebar": {
+                "pinned_item_ids": [],
+                "starred_item_ids": [],
+                "custom_tool_tags": {},
+            },
             "apis": {
                 "api_keys": [],
                 "model_api_routes": "",

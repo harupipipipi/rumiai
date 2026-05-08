@@ -347,6 +347,30 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertTrue(reloaded["preview"]["auto_open"])
         self.assertEqual(reloaded["preview"]["max_items"], 5)
 
+    def test_update_settings_persists_sidebar_user_data(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            with patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+                registry = FrontendRegistry(pack_root=pack_root)
+                values = registry.update_settings(
+                    {
+                        "sidebar": {
+                            "pinned_item_ids": ["browser_use"],
+                            "starred_item_ids": ["web_search"],
+                            "custom_tool_tags": {"browser_use": ["coding"]},
+                        }
+                    }
+                )
+                reloaded = registry.get_settings()["values"]
+
+        self.assertEqual(values["sidebar"]["pinned_item_ids"], ["browser_use"])
+        self.assertEqual(values["sidebar"]["starred_item_ids"], ["web_search"])
+        self.assertEqual(values["sidebar"]["custom_tool_tags"], {"browser_use": ["coding"]})
+        self.assertEqual(reloaded["sidebar"]["pinned_item_ids"], ["browser_use"])
+
     def test_update_settings_stores_openrouter_key_as_secret(self):
         from core_runtime.secrets_store import SecretsStore
         from domain.frontend.registry import FrontendRegistry
