@@ -108,6 +108,35 @@ def _event(event_type, message, **extra):
     return payload
 
 
+class _ChatCancelled(Exception):
+    pass
+
+
+def _is_cancelled(context):
+    checker = (context or {}).get("is_cancelled") if isinstance(context, dict) else None
+    if callable(checker):
+        try:
+            return bool(checker())
+        except Exception:
+            return False
+    return False
+
+
+def _raise_if_cancelled(context):
+    if _is_cancelled(context):
+        raise _ChatCancelled()
+
+
+def _append_event(events, context, event):
+    events.append(event)
+    callback = (context or {}).get("stream_event_callback") if isinstance(context, dict) else None
+    if callable(callback):
+        try:
+            callback(event)
+        except Exception:
+            pass
+
+
 def _redact_sensitive_value(value, *, parent_key=""):
     if isinstance(value, dict):
         redacted = {}
@@ -488,10 +517,13 @@ def _tool_visibility_message(tools):
 
 
 def _complete_with_tools(model, messages, tools, context, call_handler, params):
-    events = [_event("status", "{} が考えています".format(model), phase="thinking", model=model)]
+    events = []
+    _append_event(events, context, _event("status", "{} が考えています".format(model), phase="thinking", model=model))
     tool_logs = []
     if tools:
-        events.append(
+        _append_event(
+            events,
+            context,
             _event(
                 "status",
                 "{} 個の tool を接続しました".format(len(tools)),
@@ -514,6 +546,7 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
         limit = 24
 
     for step_index in range(max(1, limit + 1)):
+        _raise_if_cancelled(context)
         ai_params = {
             "model": model,
             "messages": working_messages,
@@ -531,6 +564,7 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
             response, ai_error = _ai_direct_complete(model, working_messages, tools, params)
             if ai_error is not None:
                 raise RuntimeError(ai_error)
+        _raise_if_cancelled(context)
 
         if not isinstance(response, dict):
             response = _stub_response()
@@ -582,7 +616,9 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
                     ],
                 },
             }
-            events.append(
+            _append_event(
+                events,
+                context,
                 _event(
                     "status",
                     "tool call の上限に達したため停止しました",
@@ -597,12 +633,15 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
 
         _append_assistant_tool_use_message(working_messages, tool_uses)
         for block in tool_uses:
+            _raise_if_cancelled(context)
             tool_name = str(block.get("name") or block.get("tool_name") or "")
             if not tool_name:
                 continue
             tool_call_id = str(block.get("id") or block.get("tool_call_id") or gen_id())
             arguments = _tool_arguments(block)
-            events.append(
+            _append_event(
+                events,
+                context,
                 _event(
                     "tool_call_started",
                     "{} を使用中".format(tool_name),
@@ -627,6 +666,7 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
 
                 executed = ToolExecutor().execute(tool_name, arguments, invoke_context)
                 result = {"status": "ok", "data": executed}
+            _raise_if_cancelled(context)
             log = {
                 "tool_name": tool_name,
                 "tool_call_id": tool_call_id,
@@ -635,7 +675,9 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
                 "timestamp": timestamp(),
             }
             tool_logs.append(log)
-            events.append(
+            _append_event(
+                events,
+                context,
                 _event(
                     "tool_call_completed",
                     "{} の結果を受け取りました".format(tool_name),
@@ -874,6 +916,8 @@ def run(input_data, context):
             call_handler,
             params,
         )
+    except _ChatCancelled:
+        return error("Chat request cancelled", "CANCELLED")
     except RuntimeError as exc:
         return error(str(exc), "AI_ERROR")
     except Exception as exc:

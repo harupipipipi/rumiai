@@ -221,6 +221,34 @@ test("streamMessage forwards thinking deltas", async () => {
   assert.deepEqual(thinkingEvents, ["private ", "plan"]);
 });
 
+test("streamMessage forwards realtime tool activity events", async () => {
+  const originalFetch = globalThis.fetch;
+  const activityEvents: string[] = [];
+  globalThis.fetch = (async () => {
+    const body = [
+      'data: {"type":"status","message":"toolを接続しました","phase":"tools_attached"}\n\n',
+      'data: {"type":"tool_call_started","tool_name":"browser_computer","tool_call_id":"call_1","arguments":{"action":"computer.screenshot"},"message":"browser_computer を使用中"}\n\n',
+      'data: {"type":"message","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"done"}],"created_at":1,"conversation_id":"c1"}}\n\n',
+    ].join("");
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream; charset=utf-8" },
+    });
+  }) as typeof fetch;
+
+  try {
+    await api.streamMessage("c1", "hello", undefined, {
+      onEvent(event) {
+        activityEvents.push(event.type);
+      },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(activityEvents, ["status", "tool_call_started", "message"]);
+});
+
 test("streamMessage surfaces structured stream errors", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => {

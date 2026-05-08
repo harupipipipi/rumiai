@@ -579,6 +579,40 @@ def test_chat_stream_infers_computer_tools_when_tools_are_omitted(tmp_path, monk
     ChatStore._instance = None
 
 
+def test_chat_stream_fallback_yields_realtime_tool_progress(monkeypatch):
+    import blocks.chat.send as send_module
+    import blocks.chat.stream as stream_module
+
+    def fake_send_run(input_data, context):
+        context["stream_event_callback"](
+            {
+                "type": "tool_call_started",
+                "tool_name": "browser_computer",
+                "tool_call_id": "call_1",
+                "message": "browser_computer を使用中",
+            }
+        )
+        assert context["is_cancelled"]() is False
+        return {
+            "status": "ok",
+            "data": {
+                "id": "m1",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "done"}],
+                "raw_text": "done",
+            },
+        }
+
+    monkeypatch.setattr(send_module, "run", fake_send_run)
+
+    events = list(stream_module._fallback_send({"conversation_id": "c1"}, {}))
+
+    assert events[0]["type"] == "tool_call_started"
+    assert events[0]["tool_name"] == "browser_computer"
+    assert events[-2]["type"] == "message"
+    assert events[-1]["type"] == "done"
+
+
 def test_chat_send_retries_empty_thinking_response_without_thinking(monkeypatch):
     import blocks.chat.send as send_module
 
@@ -755,7 +789,7 @@ def test_browser_computer_background_type_failure_does_not_fall_back_to_physical
         }
     )
     monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(controller, "_darwin_type_in_chrome_background", lambda text: False)
+    monkeypatch.setattr(controller, "_darwin_type_in_chrome_background", lambda text, payload: False)
     monkeypatch.setattr(
         controller,
         "_apple_script",
@@ -1165,6 +1199,101 @@ def test_chat_tool_loop_replays_openai_tool_call_messages():
     assert seen_messages[1][-2]["tool_calls"][0]["function"]["name"] == "calculator"
     assert seen_messages[1][-1]["role"] == "tool"
     assert seen_messages[1][-1]["tool_call_id"] == "call_1"
+
+
+def test_chat_tool_loop_emits_realtime_tool_events():
+    import blocks.chat.send as send
+
+    calls = {"ai": 0}
+    emitted = []
+
+    def call_handler(name, payload):
+        if name == "defaults.ai.complete":
+            calls["ai"] += 1
+            if calls["ai"] == 1:
+                return {
+                    "status": "ok",
+                    "data": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "call_1",
+                                "name": "calculator",
+                                "input": "{\"expression\":\"2+2\"}",
+                            }
+                        ],
+                        "finish_reason": "tool_calls",
+                    },
+                }
+            return {
+                "status": "ok",
+                "data": {
+                    "content": [{"type": "text", "text": "4"}],
+                    "finish_reason": "stop",
+                },
+            }
+        if name == "defaults.tool.invoke":
+            return {"status": "ok", "data": {"result": "4"}}
+        raise AssertionError(name)
+
+    response = send._complete_with_tools(
+        "openrouter/test-model",
+        [{"role": "user", "content": "2+2"}],
+        [{"type": "function", "function": {"name": "calculator", "parameters": {"type": "object"}}}],
+        {"stream_event_callback": emitted.append},
+        call_handler,
+        {"max_tool_calls": 3},
+    )
+
+    assert response["content"][0]["text"] == "4"
+    assert [event["type"] for event in emitted] == [
+        "status",
+        "status",
+        "tool_call_started",
+        "tool_call_completed",
+    ]
+    assert emitted[2]["tool_name"] == "calculator"
+
+
+def test_chat_tool_loop_honors_stream_cancel_before_tool_execution():
+    import blocks.chat.send as send
+
+    cancelled = {"value": False}
+
+    def call_handler(name, payload):
+        if name == "defaults.ai.complete":
+            cancelled["value"] = True
+            return {
+                "status": "ok",
+                "data": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "call_1",
+                            "name": "calculator",
+                            "input": "{\"expression\":\"2+2\"}",
+                        }
+                    ],
+                    "finish_reason": "tool_calls",
+                },
+            }
+        if name == "defaults.tool.invoke":
+            raise AssertionError("tool should not run after cancellation")
+        raise AssertionError(name)
+
+    try:
+        send._complete_with_tools(
+            "openrouter/test-model",
+            [{"role": "user", "content": "2+2"}],
+            [{"type": "function", "function": {"name": "calculator", "parameters": {"type": "object"}}}],
+            {"is_cancelled": lambda: cancelled["value"]},
+            call_handler,
+            {"max_tool_calls": 3},
+        )
+    except send._ChatCancelled:
+        pass
+    else:
+        raise AssertionError("expected chat cancellation")
 
 
 def test_chat_tool_loop_returns_text_when_tool_limit_reached():
@@ -1972,7 +2101,7 @@ def test_browser_open_url_uses_existing_chrome_without_stealing_focus(monkeypatc
 
     def fake_run(command, **kwargs):
         calls.append((command, kwargs))
-        return subprocess.CompletedProcess(command, 0)
+        return subprocess.CompletedProcess(command, 0, stdout="window_index=2\ttab_index=5\n")
 
     monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
@@ -1987,6 +2116,8 @@ def test_browser_open_url_uses_existing_chrome_without_stealing_focus(monkeypatc
     assert result["opened"] is True
     assert result["managed_profile"] is False
     assert result["launch"]["mode"] == "default_browser"
+    assert result["chrome_target"]["window_index"] == 2
+    assert result["chrome_target"]["tab_index"] == 5
     assert calls[0][0][:2] == ["osascript", "-e"]
     assert "previousFrontApp" in calls[0][0][2]
     assert "Google Chrome" in calls[0][0][2]
@@ -2015,6 +2146,40 @@ def test_computer_type_can_target_background_chrome(tmp_path, monkeypatch):
     assert result["background"] is True
     assert calls[0][0][:2] == ["osascript", "-e"]
     assert "#prompt-textarea" in calls[0][0][2]
+    assert "chatgpt.com" in calls[0][0][2]
+
+
+def test_computer_type_targets_last_opened_existing_chrome_tab(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="typed\n")
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._write_sessions(
+        {
+            "last_opened_background": True,
+            "last_url": "https://chatgpt.com/",
+            "chrome_target": {"app": "Google Chrome", "url": "https://chatgpt.com/", "window_index": 2, "tab_index": 5},
+        }
+    )
+
+    result = controller.run("computer.type", {"text": "hello"}, yolo_mode=True)
+
+    assert result["executed"] is True
+    assert result["chrome_target"]["window_index"] == 2
+    assert result["chrome_target"]["tab_index"] == 5
+    script = calls[0][0][2]
+    assert "set targetWindowIndex to 2" in script
+    assert "set targetTabIndex to 5" in script
 
 
 def test_computer_move_uses_cliclick_on_macos(tmp_path, monkeypatch):

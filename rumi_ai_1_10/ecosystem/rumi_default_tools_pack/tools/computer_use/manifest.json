@@ -3,11 +3,11 @@
   "category": "tool",
   "version": "1",
   "display_name": "Computer Use",
-  "description": "Capture the screen and run approved desktop actions on macOS or Windows. Use windows/select_window to choose an app/window, click only to mark a target with the AI cursor, and use type with text to enter words such as hello. Avoid repeated key presses when a single type action can enter text.",
+  "description": "Capture the screen and run approved desktop actions on macOS or Windows. Use windows/select_window focus=false to choose an app/window, click only to mark a target with the AI cursor, and use type with text to enter words such as hello. For existing user Chrome, target Google Chrome instead of opening a managed profile.",
   "enabled": true,
   "config": {
     "name": "computer_use",
-    "summary": "コンピューター操作。文字入力は action=type と text を優先し、既存Chrome/ChatGPTには app=Google Chrome または select_window を指定してください。",
+    "summary": "コンピューター操作。文字入力は action=type と text を優先し、既存Chrome/ChatGPTには app=Google Chrome または select_window focus=false を指定してください。",
     "tags": ["computer", "desktop", "screenshot", "approval"],
     "schema": {
       "parameters": {

@@ -446,6 +446,9 @@ export function ChatMessagesRenderer({
                   )}
 
                   <div className={cn("flex max-w-full flex-col", message.role === "user" ? "items-start" : "w-full items-start")}>
+                    {(() => {
+                      const hasToolActivity = buildToolActivityGroups(message.toolLogs ?? [], message.events ?? []).length > 0;
+                      return (
                     <div
                       className={cn(
                         "rumi-message-bubble relative rounded-2xl max-w-full sm:px-4 px-3 py-3 text-[14px] outline-none select-text",
@@ -473,7 +476,7 @@ export function ChatMessagesRenderer({
                           ? message.content.map((block, index) => (
                               <MessageBlock key={`${message.id}-${index}`} block={block} unknownStrategy={unknownBlockStrategy} />
                             ))
-                          : message.role === "agent" && !messageVisibleText(message)
+                          : message.role === "agent" && !messageVisibleText(message) && !hasToolActivity
                             ? (
                                 <div className="flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-amber-100">
                                   <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-300" />
@@ -485,6 +488,8 @@ export function ChatMessagesRenderer({
 
                       {showWidgets && message.widget && <WidgetCard widget={message.widget} />}
                     </div>
+                      );
+                    })()}
 
                     <MessageActionBar message={message} />
                   </div>

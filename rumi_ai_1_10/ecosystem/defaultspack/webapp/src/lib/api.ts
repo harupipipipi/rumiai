@@ -441,11 +441,16 @@ type SendMessageOptions = {
 
 type ChatStreamError = string | { code?: string; message?: string };
 
+export type ChatToolStreamEvent = ChatActivityEvent & {
+  type: "status" | "tool_call" | "tool_call_started" | "tool_call_completed" | "tool_result" | "approval_requested";
+};
+
 export type ChatStreamEvent =
   | { type: "delta"; delta: string }
   | { type: "thinking_delta"; delta: string }
   | { type: "message" | "done" | "user_message"; message?: ChatMessage }
-  | { type: "error"; error?: ChatStreamError };
+  | { type: "error"; error?: ChatStreamError }
+  | ChatToolStreamEvent;
 
 type ChatStreamHandlers = {
   onEvent?: (event: ChatStreamEvent) => void;

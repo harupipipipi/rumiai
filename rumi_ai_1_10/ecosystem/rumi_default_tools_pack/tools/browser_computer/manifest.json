@@ -3,11 +3,11 @@
   "category": "tool",
   "version": "1",
   "display_name": "Browser / Computer",
-  "description": "Open browser URLs, inspect sessions, and run approved desktop actions. For existing Chrome/ChatGPT, open URLs with persistent=false, choose windows with computer.select_window, mark clicks with the AI cursor, and enter words with computer.type instead of repeated key presses.",
+  "description": "Open browser URLs, inspect sessions, and run approved desktop actions. For existing user Chrome/ChatGPT, open URLs with persistent=false, choose windows with computer.select_window focus=false, mark clicks with the AI cursor, and enter words with computer.type instead of repeated key presses.",
   "enabled": true,
   "config": {
     "name": "browser_computer",
-    "summary": "Approved browser and computer actions. Use computer.type for text input and computer.select_window with focus=false when targeting an app/window in the background.",
+    "summary": "Approved browser and computer actions. Use persistent=false for the user's existing Chrome, computer.type for text input, and computer.select_window with focus=false when targeting an app/window in the background.",
     "tags": ["browser", "computer", "approval"],
     "schema": {
       "parameters": {

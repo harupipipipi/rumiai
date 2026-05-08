@@ -53,6 +53,7 @@ import {
   PinOff,
   FolderCheck,
   FolderX,
+  X,
 } from "lucide-react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
@@ -238,6 +239,29 @@ function compareText(left: string, right: string): number {
 
 function normalizeTag(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9_:-]/g, "").slice(0, 32);
+}
+
+function sidebarItemMatchesSearch(item: SidebarItem, tags: string[], query: string): boolean {
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return true;
+  const group = item.category === "tool" ? toolGroupFor(item) : null;
+  const haystack = [
+    item.id,
+    item.label,
+    item.category,
+    item.description ?? "",
+    item.badge ?? "",
+    ...(item.tags ?? []),
+    ...tags,
+    item.ui?.composer_label ?? "",
+    item.ui?.composer_description ?? "",
+    item.ui?.group_id ?? "",
+    item.ui?.group_label ?? "",
+    group?.id ?? "",
+    group?.label ?? "",
+    ...(group?.path ?? []),
+  ].join(" ").toLowerCase();
+  return terms.every((term) => haystack.includes(term));
 }
 
 function baseTagsForItem(item: SidebarItem): string[] {
@@ -580,6 +604,105 @@ function CategorySwitcher({
   );
 }
 
+function SidebarSearchControl({
+  query,
+  resultCount,
+  totalCount,
+  onQueryChange,
+}: {
+  query: string;
+  resultCount: number;
+  totalCount: number;
+  onQueryChange: (value: string) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const hasQuery = query.trim().length > 0;
+  const rect = buttonRef.current?.getBoundingClientRect();
+  const menuPosition = rect
+    ? {
+        top: `${Math.max(8, rect.top)}px`,
+        right: `${Math.max(8, window.innerWidth - rect.left + 8)}px`,
+      }
+    : undefined;
+
+  useEffect(() => {
+    if (isOpen) {
+      window.setTimeout(() => inputRef.current?.focus(), 0);
+    }
+  }, [isOpen]);
+
+  return (
+    <div className="relative">
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={() => setIsOpen((value) => !value)}
+        aria-expanded={isOpen}
+        aria-pressed={hasQuery}
+        className={cn(
+          "w-9 h-9 rounded-md flex items-center justify-center relative transition-colors",
+          hasQuery || isOpen
+            ? "bg-zinc-800 text-zinc-100 ring-1 ring-zinc-600/70"
+            : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
+        )}
+        title="名前検索"
+      >
+        <Search size={16} />
+        {hasQuery && (
+          <span className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r-full bg-cyan-400" />
+        )}
+      </button>
+
+      {isOpen && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
+          <div
+            className="fixed z-50 w-64 rounded-xl border border-zinc-700/70 bg-zinc-950 p-2 shadow-2xl"
+            style={menuPosition}
+          >
+            <label className="relative block">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-600" />
+              <input
+                ref={inputRef}
+                type="text"
+                value={query}
+                onChange={(event) => onQueryChange(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    if (query) {
+                      onQueryChange("");
+                    } else {
+                      setIsOpen(false);
+                    }
+                  }
+                }}
+                placeholder="名前で検索"
+                className="h-9 w-full rounded-lg border border-zinc-800 bg-zinc-900/80 pl-8 pr-8 text-[12px] text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-zinc-600"
+              />
+              {hasQuery && (
+                <button
+                  type="button"
+                  onClick={() => onQueryChange("")}
+                  className="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+                  title="検索をクリア"
+                >
+                  <X size={13} />
+                </button>
+              )}
+            </label>
+            <div className="mt-2 flex items-center justify-between px-1 text-[10px] text-zinc-600">
+              <span>matches</span>
+              <span>{resultCount} / {totalCount}</span>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function RightSidebar({
   items,
   activeItemId,
@@ -605,6 +728,7 @@ export function RightSidebar({
 }) {
   const [activePanel, setActivePanel] = useState<string | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<"all" | SidebarCategory>("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [openToolGroupMenu, setOpenToolGroupMenu] = useState<string | null>(null);
   const [toolGroupMenuPosition, setToolGroupMenuPosition] = useState<{ top: number; right: number } | null>(null);
   const sidebarSettings = settingsValues.sidebar ?? {};
@@ -693,14 +817,6 @@ export function RightSidebar({
     };
   }, [contextMenu]);
 
-  const counts = useMemo(() => {
-    const next: Record<string, number> = { all: items.length };
-    for (const item of items) {
-      next[item.category] = (next[item.category] ?? 0) + 1;
-    }
-    return next;
-  }, [items]);
-
   const tagMap = useMemo(() => {
     const next = new Map<string, string[]>();
     for (const item of items) {
@@ -708,7 +824,24 @@ export function RightSidebar({
     }
     return next;
   }, [customTagMap, items]);
-  const allToolItems = useMemo(() => sortedToolUiItems(items.filter((item) => item.category === "tool")), [items]);
+  const searchFilteredItems = useMemo(
+    () => items.filter((item) => sidebarItemMatchesSearch(item, tagMap.get(item.id) ?? [], searchQuery)),
+    [items, searchQuery, tagMap],
+  );
+  useEffect(() => {
+    if (!activePanel || activePanel === "__tool_manager__" || !searchQuery.trim()) return;
+    if (!searchFilteredItems.some((item) => item.id === activePanel)) {
+      setActivePanel(null);
+    }
+  }, [activePanel, searchFilteredItems, searchQuery]);
+  const counts = useMemo(() => {
+    const next: Record<string, number> = { all: searchFilteredItems.length };
+    for (const item of searchFilteredItems) {
+      next[item.category] = (next[item.category] ?? 0) + 1;
+    }
+    return next;
+  }, [searchFilteredItems]);
+  const allToolItems = useMemo(() => sortedToolUiItems(searchFilteredItems.filter((item) => item.category === "tool")), [searchFilteredItems]);
   const allToolTags = useMemo(() => {
     const counts = new Map<string, number>();
     for (const item of allToolItems) {
@@ -740,18 +873,18 @@ export function RightSidebar({
   const showToolGroups = (categoryFilter === "all" || categoryFilter === "tool") && toolGroups.length > 0;
 
   const visibleItems = useMemo(() => {
-    const base = (categoryFilter === "all" ? items : items.filter((item) => item.category === categoryFilter))
+    const base = (categoryFilter === "all" ? searchFilteredItems : searchFilteredItems.filter((item) => item.category === categoryFilter))
       .filter((item) => !showStarredOnly || starredItemIdSet.has(item.id))
       .filter((item) => item.category !== "tool" || !activeTagFilter || tagMap.get(item.id)?.includes(activeTagFilter));
     return [...base]
       .sort(compareSidebarItems)
       .filter((item) => item.category !== "tool" || !showToolGroups || !groupedToolIds.has(item.id) || pinnedItemIdSet.has(item.id));
-  }, [activeTagFilter, items, categoryFilter, groupedToolIds, pinnedItemIdSet, showStarredOnly, showToolGroups, starredItemIdSet, tagMap]);
+  }, [activeTagFilter, searchFilteredItems, categoryFilter, groupedToolIds, pinnedItemIdSet, showStarredOnly, showToolGroups, starredItemIdSet, tagMap]);
   const pinnedRailItems = useMemo(() => (
     pinnedItemIds
-      .map((itemId) => items.find((item) => item.id === itemId))
+      .map((itemId) => searchFilteredItems.find((item) => item.id === itemId))
       .filter((item): item is SidebarItem => Boolean(item))
-  ), [items, pinnedItemIds]);
+  ), [searchFilteredItems, pinnedItemIds]);
   const unpinnedVisibleItems = useMemo(
     () => visibleItems.filter((item) => !pinnedItemIdSet.has(item.id)),
     [pinnedItemIdSet, visibleItems],
@@ -1243,6 +1376,15 @@ export function RightSidebar({
             </div>
           )}
           <CategorySwitcher active={categoryFilter} counts={counts} onChange={(id) => { setCategoryFilter(id); setOpenToolGroupMenu(null); }} />
+          <SidebarSearchControl
+            query={searchQuery}
+            resultCount={searchFilteredItems.length}
+            totalCount={items.length}
+            onQueryChange={(value) => {
+              setSearchQuery(value);
+              setOpenToolGroupMenu(null);
+            }}
+          />
           <button
             type="button"
             onClick={() => setShowStarredOnly((value) => !value)}

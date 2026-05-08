@@ -1,5 +1,7 @@
 import sys
 import os
+import queue
+import threading
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -148,9 +150,46 @@ def _fallback_complete_without_thinking(client, model, messages, params, transcr
 
 
 def _fallback_send(input_data, context):
-    from blocks.chat.send import run as send_run
+    event_queue = queue.Queue()
+    done = object()
+    cancel_event = threading.Event()
+    result_box = {}
 
-    result = send_run(input_data, context)
+    def emit_event(event):
+        event_queue.put(event)
+
+    def is_cancelled():
+        return cancel_event.is_set()
+
+    def worker():
+        from blocks.chat.send import run as send_run
+
+        try:
+            stream_context = dict(context or {})
+            stream_context["stream_event_callback"] = emit_event
+            stream_context["is_cancelled"] = is_cancelled
+            result_box["result"] = send_run(input_data, stream_context)
+        except BaseException as exc:
+            result_box["exception"] = exc
+        finally:
+            event_queue.put(done)
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    try:
+        while True:
+            event = event_queue.get()
+            if event is done:
+                break
+            yield event
+    finally:
+        cancel_event.set()
+
+    if "exception" in result_box:
+        yield {"type": "error", "error": "AI request failed: " + str(result_box["exception"])}
+        return
+
+    result = result_box.get("result")
     if isinstance(result, dict) and result.get("status") == "ok":
         message = result.get("data")
         yield {"type": "message", "message": message}

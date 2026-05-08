@@ -4,7 +4,7 @@ import { MessageSquare } from "lucide-react";
 import type { ChatItem } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { api, type ChatContentBlock, type ChatMessage, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { api, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
 import { deriveConversationTitle, formatRelativeTime, messageToText } from "./lib/chat";
 import { cn } from "./lib/cn";
 import { canExecuteComposerEndpointAction, isSafeLocalEndpoint } from "./lib/composerWidgets";
@@ -322,6 +322,17 @@ function isAbortError(errorValue: unknown): boolean {
     && typeof errorValue === "object"
     && "name" in errorValue
     && String((errorValue as { name?: unknown }).name) === "AbortError",
+  );
+}
+
+function isActivityStreamEvent(event: ChatStreamEvent): event is ChatToolStreamEvent {
+  return (
+    event.type === "status"
+    || event.type === "tool_call"
+    || event.type === "tool_call_started"
+    || event.type === "tool_call_completed"
+    || event.type === "tool_result"
+    || event.type === "approval_requested"
   );
 }
 
@@ -1808,6 +1819,50 @@ export default function App() {
           };
         });
       };
+      const updateStreamingActivity = (streamEvent: ChatStreamEvent) => {
+        if (!isActivityStreamEvent(streamEvent)) return;
+        const activityEvent: ChatActivityEvent = { ...streamEvent };
+        setActiveConversation((current) => {
+          if (!current || current.id !== conversation.id) return current;
+          const existing = current.messages.find((message) => message.id === assistantDraft.id);
+          const appendEvent = (message: ChatMessage): ChatMessage => ({
+            ...message,
+            events: [...(message.events ?? []), activityEvent],
+          });
+          if (!existing) {
+            return {
+              ...current,
+              messages: [...current.messages, appendEvent(assistantDraft)],
+            };
+          }
+          return {
+            ...current,
+            messages: current.messages.map((message) => message.id === assistantDraft.id ? appendEvent(message) : message),
+          };
+        });
+
+        const status = typeof activityEvent.message === "string" && activityEvent.message.trim()
+          ? activityEvent.message.trim()
+          : pendingRequests[conversation.id]?.status ?? `${activeProfile?.display_name ?? preferredModel} が思考中`;
+        const toolName = typeof activityEvent.tool_name === "string" ? activityEvent.tool_name.trim() : "";
+        updatePendingRequests((current) => {
+          const existing = current[conversation.id] ?? {
+            conversationId: conversation.id,
+            startedAt: Date.now(),
+            status,
+            toolNames: selectedToolLabels,
+          };
+          const toolNames = toolName ? [...new Set([...existing.toolNames, toolName])] : existing.toolNames;
+          return {
+            ...current,
+            [conversation.id]: {
+              ...existing,
+              status,
+              toolNames,
+            },
+          };
+        });
+      };
       const replaceStreamingAssistant = (message: ChatMessage) => {
         setActiveConversation((current) => {
           if (!current || current.id !== conversation.id) return current;
@@ -1863,6 +1918,7 @@ export default function App() {
             .map(({ id, type, label, widgetKind, sourceItemId }) => ({ id, type, label, widgetKind, sourceItemId })),
         },
       }, {
+        onEvent: updateStreamingActivity,
         onDelta: updateStreamingAssistant,
         onThinkingDelta: updateStreamingThinking,
         onMessage: replaceStreamingAssistant,

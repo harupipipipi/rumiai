@@ -87,12 +87,14 @@ class BrowserComputerController:
             subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             opened_with_managed_profile = True
         else:
-            self._open_in_existing_browser(url)
+            chrome_target = self._open_in_existing_browser(url)
         sessions = self._read_sessions()
         sessions["last_url"] = url
         sessions["active_profile_id"] = profile_id
         sessions["last_opened_with_managed_profile"] = opened_with_managed_profile
         sessions["last_opened_background"] = not opened_with_managed_profile
+        if not opened_with_managed_profile and chrome_target:
+            sessions["chrome_target"] = chrome_target
         sessions["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self._write_sessions(sessions)
         return {
@@ -103,10 +105,11 @@ class BrowserComputerController:
             "persistent": persistent,
             "managed_profile": opened_with_managed_profile,
             "launch": launch_plan,
+            **({"chrome_target": chrome_target} if not opened_with_managed_profile and chrome_target else {}),
         }
 
     @staticmethod
-    def _open_in_existing_browser(url: str) -> None:
+    def _open_in_existing_browser(url: str) -> dict[str, Any] | None:
         if platform.system() == "Darwin":
             try:
                 script = """
@@ -118,18 +121,30 @@ tell application "Google Chrome"
     make new window
   end if
   set targetWindow to window 1
+  set targetWindowIndex to 1
   set newTab to make new tab at end of tabs of targetWindow with properties {URL:%s}
   set active tab index of targetWindow to (count of tabs of targetWindow)
+  set targetTabIndex to active tab index of targetWindow
 end tell
 try
   tell application "System Events" to set frontmost of first application process whose name is previousFrontApp to true
 end try
+return "window_index=" & targetWindowIndex & tab & "tab_index=" & targetTabIndex
 """ % json.dumps(url)
-                subprocess.run(["osascript", "-e", script], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                return
+                completed = subprocess.run(["osascript", "-e", script], check=True, capture_output=True, text=True)
+                target = {"app": "Google Chrome", "url": url}
+                for part in (completed.stdout or "").strip().split("\t"):
+                    key, _, value = part.partition("=")
+                    if key in {"window_index", "tab_index"}:
+                        try:
+                            target[key] = int(value)
+                        except ValueError:
+                            pass
+                return target
             except Exception:
                 pass
         webbrowser.open(url)
+        return {"url": url}
 
     def _create_profile(self, payload: dict[str, Any]) -> dict[str, Any]:
         profile_id = self._profile_id(payload.get("profile_id") or payload.get("name") or f"profile-{int(time.time())}")
@@ -545,13 +560,15 @@ end try
             return result
         background_chrome = system == "Darwin" and self._should_type_in_chrome_background(action_payload)
         if action == "computer.type" and background_chrome:
-            if self._darwin_type_in_chrome_background(str(action_payload.get("text") or "")):
+            chrome_target = self._chrome_background_target(action_payload)
+            if self._darwin_type_in_chrome_background(str(action_payload.get("text") or ""), action_payload):
                 return {
                     "action": action,
                     "executed": True,
                     "platform": system,
                     "background": True,
                     "target_app": "Google Chrome",
+                    "chrome_target": chrome_target,
                 }
             return {
                 "action": action,
@@ -560,6 +577,7 @@ end try
                 "platform": system,
                 "background": True,
                 "target_app": "Google Chrome",
+                "chrome_target": chrome_target,
                 "reason": "Chrome background text entry failed. Enable Chrome's 'Allow JavaScript from Apple Events' setting or use an interactive foreground action.",
             }
         if action == "computer.key" and background_chrome:
@@ -568,13 +586,15 @@ end try
             if not isinstance(modifiers, list):
                 modifier = action_payload.get("modifier")
                 modifiers = [modifier] if modifier else []
-            if self._darwin_key_in_chrome_background(key, modifiers):
+            chrome_target = self._chrome_background_target(action_payload)
+            if self._darwin_key_in_chrome_background(key, modifiers, action_payload):
                 return {
                     "action": action,
                     "executed": True,
                     "platform": system,
                     "background": True,
                     "target_app": "Google Chrome",
+                    "chrome_target": chrome_target,
                 }
             return {
                 "action": action,
@@ -583,6 +603,7 @@ end try
                 "platform": system,
                 "background": True,
                 "target_app": "Google Chrome",
+                "chrome_target": chrome_target,
                 "reason": "Chrome background key entry failed or unsupported. Use computer.type for text, or enable Chrome's 'Allow JavaScript from Apple Events' setting.",
             }
         if system == "Darwin" and action == "computer.move":
@@ -631,8 +652,86 @@ end try
             and "chatgpt" in str(sessions.get("last_url") or "").lower()
         )
 
-    @staticmethod
-    def _darwin_type_in_chrome_background(text: str) -> bool:
+    def _chrome_background_target(self, payload: dict[str, Any]) -> dict[str, Any]:
+        sessions = self._read_sessions()
+        target: dict[str, Any] = {}
+        session_target = sessions.get("chrome_target")
+        if isinstance(session_target, dict):
+            target.update(session_target)
+        for key in ("window_index", "tab_index", "url_contains", "title_contains"):
+            if payload.get(key) is not None:
+                target[key] = payload.get(key)
+        selected_window = self._computer_state().get("target_window")
+        if isinstance(selected_window, dict):
+            app = str(selected_window.get("app") or "").lower()
+            title = str(selected_window.get("title") or "").strip()
+            if "chrome" in app and title:
+                target.setdefault("title_contains", title)
+                target["selected_window"] = selected_window
+        last_url = str(sessions.get("last_url") or "")
+        if "url_contains" not in target and "chatgpt" in last_url.lower():
+            target["url_contains"] = "chatgpt.com"
+        elif "url_contains" not in target and last_url:
+            target["url_contains"] = last_url
+        return target
+
+    def _darwin_execute_chrome_background_js(self, js: str, payload: dict[str, Any]) -> str:
+        target = self._chrome_background_target(payload)
+        try:
+            window_index = int(target.get("window_index") or 0)
+        except Exception:
+            window_index = 0
+        try:
+            tab_index = int(target.get("tab_index") or 0)
+        except Exception:
+            tab_index = 0
+        title_contains = str(target.get("title_contains") or "")
+        url_contains = str(target.get("url_contains") or "")
+        script = """
+tell application "Google Chrome"
+  if (count of windows) is 0 then return "no_window"
+  set jsCode to %s
+  set targetWindowIndex to %d
+  set targetTabIndex to %d
+  set titleNeedle to %s
+  set urlNeedle to %s
+  try
+    if targetWindowIndex > 0 and targetWindowIndex <= (count of windows) then
+      set candidateWindow to window targetWindowIndex
+      if targetTabIndex > 0 and targetTabIndex <= (count of tabs of candidateWindow) then
+        return execute tab targetTabIndex of candidateWindow javascript jsCode
+      end if
+    end if
+  end try
+  if titleNeedle is not "" or urlNeedle is not "" then
+    repeat with wi from 1 to count of windows
+      set candidateWindow to window wi
+      repeat with ti from 1 to count of tabs of candidateWindow
+        set candidateTab to tab ti of candidateWindow
+        set tabTitle to ""
+        set tabUrl to ""
+        try
+          set tabTitle to title of candidateTab
+          set tabUrl to URL of candidateTab
+        end try
+        if (titleNeedle is not "" and tabTitle contains titleNeedle) or (urlNeedle is not "" and tabUrl contains urlNeedle) then
+          return execute candidateTab javascript jsCode
+        end if
+      end repeat
+    end repeat
+  end if
+  return execute active tab of window 1 javascript jsCode
+end tell
+""" % (json.dumps(js), window_index, tab_index, json.dumps(title_contains), json.dumps(url_contains))
+        completed = subprocess.run(
+            ["osascript", "-e", script],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return completed.stdout or ""
+
+    def _darwin_type_in_chrome_background(self, text: str, payload: dict[str, Any]) -> bool:
         if not text:
             return True
         js = r"""
@@ -660,26 +759,12 @@ end try
   return 'typed';
 })();
 """ % json.dumps(text)
-        script = """
-tell application "Google Chrome"
-  if (count of windows) is 0 then return "no_window"
-  set resultText to execute active tab of window 1 javascript %s
-  return resultText
-end tell
-""" % json.dumps(js)
         try:
-            completed = subprocess.run(
-                ["osascript", "-e", script],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            return "typed" in (completed.stdout or "")
+            return "typed" in self._darwin_execute_chrome_background_js(js, payload)
         except Exception:
             return False
 
-    @staticmethod
-    def _darwin_key_in_chrome_background(key: str, modifiers: list[Any]) -> bool:
+    def _darwin_key_in_chrome_background(self, key: str, modifiers: list[Any], payload: dict[str, Any]) -> bool:
         normalized_modifiers = {str(item).strip().lower() for item in modifiers}
         command_down = bool(normalized_modifiers.intersection({"command", "cmd", "meta", "super"}))
         if command_down and key == "a":
@@ -710,21 +795,8 @@ end tell
   return 'cleared';
 })();
 """
-        script = """
-tell application "Google Chrome"
-  if (count of windows) is 0 then return "no_window"
-  set resultText to execute active tab of window 1 javascript %s
-  return resultText
-end tell
-""" % json.dumps(js)
         try:
-            completed = subprocess.run(
-                ["osascript", "-e", script],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            return "cleared" in (completed.stdout or "")
+            return "cleared" in self._darwin_execute_chrome_background_js(js, payload)
         except Exception:
             return False
 
