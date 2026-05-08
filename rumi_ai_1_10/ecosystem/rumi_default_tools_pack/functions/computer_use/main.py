@@ -46,6 +46,11 @@ def run(context, args):
         "background",
         "mode",
         "method",
+        "driver",
+        "allow_foreground_fallback",
+        "foreground_fallback",
+        "allow_user_input_overlap",
+        "input_overlap_ok",
         "dry_run",
         "approval_token",
     ):

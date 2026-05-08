@@ -3,11 +3,11 @@
   "category": "tool",
   "version": "1",
   "display_name": "Computer Use",
-  "description": "Capture the screen and run approved desktop actions on macOS or Windows. Use context/windows/select_window focus=false to understand and choose an app/window, click only to mark a target with the virtual AI cursor, and use type with text to enter words such as hello. Chrome background_control only reports whether Chrome DOM entry through Apple Events is available; it is not the whole computer-use capability. Use background=true only when the user forbids foreground focus and you need Chrome background text/key entry. If that type/key returns recovery.kind=chrome_setting, stop retrying and report that Chrome blocks true background text entry until the setting is enabled.",
+  "description": "Capture the screen and run approved desktop actions on macOS or Windows. Use context/windows/select_window focus=false to understand and choose an app/window, click only to mark a target with the virtual AI cursor, and use type with text to enter words such as hello. Chrome background_control only reports whether Chrome DOM entry through Apple Events is available; it is not the whole computer-use capability. For Chrome text/key entry, driver=auto or background=true can try Chrome DOM background entry first; set allow_foreground_fallback=true when the user permits overlap so the tool can focus the target and use normal keyboard input if the background route is blocked.",
   "enabled": true,
   "config": {
     "name": "computer_use",
-    "summary": "コンピューター操作。まず action=context で開いているアプリとAIカーソルを確認し、文字入力は action=type と text を優先してください。既存Chrome/ChatGPTには app=Google Chrome または select_window focus=false を指定できますが、background=true はユーザーが前面化を禁じてChrome背景DOM入力が必要な時だけ使います。実際の type/key でChrome設定ブロックが返ったら再試行せず理由を報告してください。",
+    "summary": "コンピューター操作。まず action=context で開いているアプリとAIカーソルを確認し、文字入力は action=type と text を優先してください。既存Chrome/ChatGPTには app=Google Chrome または select_window focus=false を指定できます。バックグラウンド優先なら background=true または driver=auto、ユーザー入力と被ってよい場合は allow_foreground_fallback=true を付けると、Chrome DOM背景入力がブロックされた時に前面入力へ自動切り替えします。",
     "tags": ["computer", "desktop", "screenshot", "approval"],
     "schema": {
       "parameters": {
@@ -33,8 +33,12 @@
           "physical": {"type": "boolean"},
           "focus": {"type": "boolean"},
           "background": {"type": "boolean", "description": "For Chrome only: request DOM/Apple Events background text/key entry when foreground focus is not allowed."},
-          "mode": {"type": "string"},
           "method": {"type": "string"},
+          "driver": {"type": "string", "description": "Optional driver hint such as auto, chrome_background_dom, foreground_input, or physical."},
+          "allow_foreground_fallback": {"type": "boolean", "description": "Allow the tool to focus the target app and use foreground keyboard input if a background route is blocked."},
+          "foreground_fallback": {"type": "boolean", "description": "Alias for allow_foreground_fallback."},
+          "allow_user_input_overlap": {"type": "boolean", "description": "Set true only when the user says overlapping with their input is acceptable."},
+          "input_overlap_ok": {"type": "boolean", "description": "Alias for allow_user_input_overlap."},
           "dry_run": {"type": "boolean"},
           "approval_token": {"type": "string"},
           "payload": {"type": "object"}

@@ -40,6 +40,17 @@ _COMPUTER_USE_REQUEST_RE = re.compile(
     r"(google\s*chrome|chrome|chatgpt|vivaldi|vivladi|line|ブラウザ|browser).{0,24}(操作|送信|入力|クリック|開いて|開く)",
     re.IGNORECASE,
 )
+_COMPUTER_USE_BACKGROUND_RE = re.compile(
+    r"バックグラウンド|裏で|画面.{0,12}切り替えない|画面.{0,12}変えない|邪魔しない|"
+    r"既存.{0,16}(google\s*chrome|chrome|ブラウザ)|メイン画面|foreground\s*なし|without\s+foreground",
+    re.IGNORECASE,
+)
+_COMPUTER_USE_FOREGROUND_FALLBACK_RE = re.compile(
+    r"かぶってもいい|被ってもいい|重なってもいい|邪魔してもいい|"
+    r"前面操作.{0,12}(許可|ok|OK|いい)|フォアグラウンド.{0,12}(許可|ok|OK|いい)|"
+    r"無理な場合.{0,24}(ok|OK|いい)|foreground\s*fallback|allow\s*foreground|overlap\s*ok|fallback",
+    re.IGNORECASE,
+)
 
 
 def _stub_response():
@@ -202,6 +213,26 @@ def _with_inferred_tools(input_data, inferred_tool_ids):
         merged.append(item)
     updated = dict(input_data)
     updated["tools"] = merged
+    return updated
+
+
+def _computer_use_preferences_from_text(user_text):
+    text = user_text if isinstance(user_text, str) else ""
+    background_preferred = bool(_COMPUTER_USE_BACKGROUND_RE.search(text))
+    allow_foreground = bool(_COMPUTER_USE_FOREGROUND_FALLBACK_RE.search(text))
+    return {
+        "computer_use_background_preferred": background_preferred,
+        "computer_use_allow_foreground_fallback": allow_foreground,
+        "computer_use_background_required": background_preferred and not allow_foreground,
+    }
+
+
+def _apply_computer_use_context_preferences(context, user_text):
+    updated = dict(context or {})
+    preferences = _computer_use_preferences_from_text(user_text)
+    for key, value in preferences.items():
+        if value:
+            updated[key] = value
     return updated
 
 
@@ -649,7 +680,8 @@ def _tool_visibility_message(tools):
             "prefer one type call for words like hello and key only for shortcuts/return; "
             "click/move without physical=true only moves the virtual AI cursor and does not move the user's mouse; "
             "chrome_background_control only describes Chrome's DOM/Apple Events background entry, not computer-use as a whole; "
-            "if an actual background text/key entry returns recovery.kind=chrome_setting, stop instead of retrying."
+            "for text/key, use driver=auto or background=true to try background entry, and add allow_foreground_fallback=true only when the user allows overlap; "
+            "if an actual background text/key entry returns recovery.kind=chrome_setting without foreground_fallback, stop instead of retrying."
         )
     return {
         "role": "system",
@@ -1060,6 +1092,7 @@ def run(input_data, context):
     request_context = dict(context or {})
     if inferred_tool_ids:
         request_context["user_requested_computer_use"] = True
+        request_context = _apply_computer_use_context_preferences(request_context, user_text)
     request_context["conversation_id"] = conversation_id
     request_context["conversation_workspace_dir"] = str(store.conversation_workspace_dir(conversation_id))
     request_context["model"] = model

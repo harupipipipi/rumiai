@@ -15,6 +15,7 @@ from blocks.chat._context_helpers import extract_user_text, enrich_messages
 from blocks.chat.send import (
     _attachment_image_blocks,
     _attachment_text_blocks,
+    _apply_computer_use_context_preferences,
     _conversation_system_prompt,
     _infer_requested_tools_from_message,
     _sanitize_attachment_metadata,
@@ -253,6 +254,7 @@ def _stream_response(input_data, context):
     if inferred_tool_ids:
         context = dict(context or {})
         context["user_requested_computer_use"] = True
+        context = _apply_computer_use_context_preferences(context, user_text)
     try:
         enrich_messages(standard_messages, system_prompt, conversation_id, user_text, manager)
     except Exception:
@@ -398,6 +400,7 @@ def run(input_data, context):
     if inferred_tool_ids:
         context = dict(context or {})
         context["user_requested_computer_use"] = True
+        context = _apply_computer_use_context_preferences(context, message_text)
     tools = input_data.get("tools")
     selected_tools = [item for item in tools if item] if isinstance(tools, list) else []
     client = AIClient()

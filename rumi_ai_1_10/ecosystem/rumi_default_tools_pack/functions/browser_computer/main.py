@@ -30,6 +30,7 @@ def run(context, args):
         key in payload for key in ("persistent", "profile_id", "session_id")
     ):
         payload["persistent"] = False
+    payload = _payload_with_context_defaults(action, payload, context)
     result = BrowserComputerController(artifact_root=artifact_root).run(
         action,
         payload,
@@ -43,3 +44,18 @@ def run(context, args):
     if result.get("path"):
         summary += "; artifact: {}".format(result.get("path"))
     return tool_result(summary, widget={"type": "browser_computer", **result}, is_error=bool(result.get("is_error")))
+
+
+def _payload_with_context_defaults(action, payload, context):
+    payload = dict(payload or {})
+    if not isinstance(context, dict):
+        return payload
+    if context.get("computer_use_allow_foreground_fallback") is True:
+        payload.setdefault("allow_foreground_fallback", True)
+        payload.setdefault("allow_user_input_overlap", True)
+    if context.get("computer_use_background_preferred") is True and action in {"computer.type", "computer.key"}:
+        payload.setdefault("background", True)
+        payload.setdefault("driver", "auto")
+    if context.get("computer_use_background_required") is True:
+        payload.setdefault("allow_foreground_fallback", False)
+    return payload

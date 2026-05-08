@@ -410,7 +410,8 @@ return "window_index=" & targetWindowIndex & tabChar & "tab_index=" & targetTabI
                 "computer.move and computer.click use a virtual AI cursor unless physical=true is explicitly provided.",
                 "If Google Chrome tabs are listed but no Chrome window appears in windows, Chrome is open outside the visible app-window context; target it by chrome_target/url_contains for background-capable actions.",
                 "chrome_background_control only describes Chrome DOM entry through Apple Events; screenshots, windows, and the virtual AI cursor are still normal computer-use capabilities.",
-                "Use background=true only when the user forbids foreground focus and you need Chrome DOM text/key entry; if that actual entry returns recovery.kind=chrome_setting, stop and report the blocker.",
+                "For text/key entry, prefer driver=auto: the harness can try Chrome DOM background entry first, then fall back to foreground input when allow_foreground_fallback=true.",
+                "Use background=true without allow_foreground_fallback only when the user forbids foreground focus; if that actual entry returns recovery.kind=chrome_setting, stop and report the blocker.",
             ],
         }
         if payload.get("include_windows", True) is not False:
@@ -606,6 +607,7 @@ return "window_index=" & targetWindowIndex & tabChar & "tab_index=" & targetTabI
                 result.update(screenshot)
             return result
         background_chrome = system == "Darwin" and self._should_type_in_chrome_background(action_payload)
+        background_failure: dict[str, Any] | None = None
         if action == "computer.type" and background_chrome:
             chrome_target = self._chrome_background_target(action_payload)
             if self._darwin_type_in_chrome_background(str(action_payload.get("text") or ""), action_payload):
@@ -614,11 +616,13 @@ return "window_index=" & targetWindowIndex & tabChar & "tab_index=" & targetTabI
                     "executed": True,
                     "platform": system,
                     "background": True,
+                    "driver": "chrome_background_dom",
+                    "driver_sequence": ["chrome_background_dom"],
                     "target_app": "Google Chrome",
                     "chrome_target": chrome_target,
                 }
             reason = self._chrome_background_failure_reason("Chrome background text entry failed.")
-            return {
+            background_failure = {
                 "action": action,
                 "executed": False,
                 "is_error": True,
@@ -634,6 +638,9 @@ return "window_index=" & targetWindowIndex & tabChar & "tab_index=" & targetTabI
                     "note": "Without this Chrome setting, background DOM entry into an existing user Chrome tab is blocked by Chrome.",
                 },
             }
+            if not self._allow_foreground_fallback(action_payload):
+                return background_failure
+            action_payload["background"] = False
         if action == "computer.key" and background_chrome:
             key = str(action_payload.get("key") or "").strip().lower()
             modifiers = action_payload.get("modifiers")
@@ -647,11 +654,13 @@ return "window_index=" & targetWindowIndex & tabChar & "tab_index=" & targetTabI
                     "executed": True,
                     "platform": system,
                     "background": True,
+                    "driver": "chrome_background_dom",
+                    "driver_sequence": ["chrome_background_dom"],
                     "target_app": "Google Chrome",
                     "chrome_target": chrome_target,
                 }
             reason = self._chrome_background_failure_reason("Chrome background key entry failed or unsupported.")
-            return {
+            background_failure = {
                 "action": action,
                 "executed": False,
                 "is_error": True,
@@ -667,6 +676,11 @@ return "window_index=" & targetWindowIndex & tabChar & "tab_index=" & targetTabI
                     "note": "Without this Chrome setting, background key entry into an existing user Chrome tab is blocked by Chrome.",
                 },
             }
+            if not self._allow_foreground_fallback(action_payload):
+                return background_failure
+            action_payload["background"] = False
+        if action in {"computer.type", "computer.key", "computer.scroll"}:
+            self._focus_action_target(action_payload)
         if system == "Darwin" and action == "computer.move":
             self._darwin_move_cursor(action_payload)
         elif system == "Darwin" and action == "computer.click":
@@ -684,6 +698,8 @@ return "window_index=" & targetWindowIndex & tabChar & "tab_index=" & targetTabI
                 "reason": "Desktop actions are supported on macOS and Windows.",
             }
         result: dict[str, Any] = {"action": action, "executed": True, "platform": system}
+        if action in {"computer.type", "computer.key", "computer.scroll"}:
+            result["driver"] = "foreground_input"
         if action in {"computer.move", "computer.click"}:
             result["target"] = {"x": int(action_payload.get("x", 0)), "y": int(action_payload.get("y", 0))}
             if click_marker:
@@ -693,13 +709,97 @@ return "window_index=" & targetWindowIndex & tabChar & "tab_index=" & targetTabI
         if action == "computer.click" and payload.get("include_screenshot", True) is not False:
             screenshot = self._capture_action_result_screenshot(action_payload, click_marker)
             result.update(screenshot)
+        if background_failure:
+            result["background_attempted"] = True
+            result["foreground_fallback"] = True
+            result["driver_sequence"] = ["chrome_background_dom", "foreground_input"]
+            result["background_failure"] = {
+                "reason": background_failure.get("reason"),
+                "recovery": background_failure.get("recovery"),
+                "chrome_target": background_failure.get("chrome_target"),
+            }
         return result
 
     def _should_type_in_chrome_background(self, payload: dict[str, Any]) -> bool:
+        if not self._payload_targets_chrome(payload):
+            return False
         if payload.get("background") is True:
             return True
         mode = str(payload.get("mode") or payload.get("method") or "").strip().lower()
         return mode in {"background", "chrome_background", "chrome_background_dom", "background_dom"}
+
+    def _payload_targets_chrome(self, payload: dict[str, Any]) -> bool:
+        app = str(payload.get("app") or payload.get("application") or "").strip().lower()
+        if app:
+            return "chrome" in app
+        title = str(payload.get("title") or payload.get("title_contains") or "").strip().lower()
+        url = str(payload.get("url") or payload.get("url_contains") or "").strip().lower()
+        if "chatgpt" in title or "chrome" in title or "chatgpt" in url or "chrome://" in url:
+            return True
+        if payload.get("window_index") is not None or payload.get("tab_index") is not None:
+            return True
+        selected_window = self._computer_state().get("target_window")
+        if isinstance(selected_window, dict) and "chrome" in str(selected_window.get("app") or "").lower():
+            return True
+        sessions = self._read_sessions()
+        if isinstance(sessions.get("chrome_target"), dict):
+            return True
+        last_url = str(sessions.get("last_url") or "").lower()
+        return "chatgpt.com" in last_url or "chrome" in last_url
+
+    @staticmethod
+    def _allow_foreground_fallback(payload: dict[str, Any]) -> bool:
+        if payload.get("allow_foreground_fallback") is False or payload.get("foreground_fallback") is False:
+            return False
+        if payload.get("physical") is False:
+            return False
+        if (
+            payload.get("allow_foreground_fallback") is True
+            or payload.get("foreground_fallback") is True
+            or payload.get("allow_user_input_overlap") is True
+            or payload.get("input_overlap_ok") is True
+            or payload.get("physical") is True
+        ):
+            return True
+        mode = str(payload.get("mode") or payload.get("method") or payload.get("driver") or "").strip().lower()
+        return mode in {
+            "auto",
+            "auto_fallback",
+            "foreground",
+            "foreground_input",
+            "foreground_fallback",
+            "physical",
+            "overlap_ok",
+        }
+
+    def _focus_action_target(self, payload: dict[str, Any]) -> bool:
+        if payload.get("focus") is False and not self._allow_foreground_fallback(payload):
+            return False
+        app = str(payload.get("app") or payload.get("application") or "").strip().lower()
+        title = str(payload.get("title") or "").strip().lower()
+        selected = self._capture_target(payload)
+        if selected and self._window_matches_filter(selected, app=app, title=title):
+            self._focus_window(selected)
+            return True
+        if app or title:
+            for item in self._list_windows():
+                window = self._normalize_window_record(item)
+                if window and self._is_usable_target_window(window) and self._window_matches_filter(window, app=app, title=title):
+                    self._focus_window(window)
+                    return True
+        if platform.system() == "Darwin" and (("chrome" in app) or self._chrome_background_target(payload)):
+            return self._activate_chrome_target(payload)
+        return False
+
+    @staticmethod
+    def _window_matches_filter(window: dict[str, Any], *, app: str = "", title: str = "") -> bool:
+        item_app = str(window.get("app") or "").lower()
+        item_title = str(window.get("title") or "").lower()
+        if app and app not in item_app:
+            return False
+        if title and title not in item_title:
+            return False
+        return True
 
     def _chrome_background_target(self, payload: dict[str, Any]) -> dict[str, Any]:
         sessions = self._read_sessions()
@@ -869,6 +969,64 @@ end tell
             self._last_background_error = (exc.stderr or exc.stdout or str(exc)).strip()
             raise
         return completed.stdout or ""
+
+    def _activate_chrome_target(self, payload: dict[str, Any]) -> bool:
+        target = self._chrome_background_target(payload)
+        try:
+            window_index = int(target.get("window_index") or 0)
+        except Exception:
+            window_index = 0
+        try:
+            tab_index = int(target.get("tab_index") or 0)
+        except Exception:
+            tab_index = 0
+        title_contains = str(target.get("title_contains") or "")
+        url_contains = str(target.get("url_contains") or "")
+        script = """
+tell application "Google Chrome"
+  if (count of windows) is 0 then return "no_window"
+  set targetWindowIndex to %d
+  set targetTabIndex to %d
+  set titleNeedle to %s
+  set urlNeedle to %s
+  if targetWindowIndex > 0 and targetWindowIndex <= (count of windows) then
+    set candidateWindow to window targetWindowIndex
+    set index of candidateWindow to 1
+    if targetTabIndex > 0 and targetTabIndex <= (count of tabs of candidateWindow) then
+      set active tab index of candidateWindow to targetTabIndex
+      activate
+      return "activated"
+    end if
+  end if
+  if titleNeedle is not "" or urlNeedle is not "" then
+    repeat with wi from 1 to count of windows
+      set candidateWindow to window wi
+      repeat with ti from 1 to count of tabs of candidateWindow
+        set candidateTab to tab ti of candidateWindow
+        set tabTitle to ""
+        set tabUrl to ""
+        try
+          set tabTitle to title of candidateTab
+          set tabUrl to URL of candidateTab
+        end try
+        if (titleNeedle is not "" and tabTitle contains titleNeedle) or (urlNeedle is not "" and tabUrl contains urlNeedle) then
+          set index of candidateWindow to 1
+          set active tab index of candidateWindow to ti
+          activate
+          return "activated"
+        end if
+      end repeat
+    end repeat
+  end if
+  activate
+  return "activated"
+end tell
+""" % (window_index, tab_index, json.dumps(title_contains), json.dumps(url_contains))
+        try:
+            completed = subprocess.run(["osascript", "-e", script], check=True, capture_output=True, text=True)
+            return "activated" in (completed.stdout or "")
+        except Exception:
+            return False
 
     def _chrome_background_failure_reason(self, fallback: str) -> str:
         detail = str(getattr(self, "_last_background_error", "") or "").strip()
@@ -1567,6 +1725,9 @@ ConvertTo-Json @{ app = ""; title = $titleBuilder.ToString(); x = $r.Left; y = $
             "desktop_actions": system in {"Darwin", "Windows"},
             "cursor_move": system in {"Darwin", "Windows"},
             "virtual_ai_cursor": True,
+            "driver_auto_switch": system in {"Darwin", "Windows"},
+            "foreground_input_fallback": system in {"Darwin", "Windows"},
+            "chrome_background_dom": system == "Darwin",
         }
 
     def _read_sessions(self) -> dict[str, Any]:

@@ -588,7 +588,7 @@ class ToolExecutor:
                 payload["persistent"] = False
             result = BrowserComputerController(artifact_root=_conversation_tool_artifact_root(context)).run(
                 action,
-                payload,
+                _computer_use_payload_with_context_defaults(action, payload, context),
                 yolo_mode=bool(policy.get("yolo_mode")) or (user_requested and action in user_approved_actions),
             )
             is_error = bool(result.get("is_error"))
@@ -736,6 +736,11 @@ def _browser_computer_action_payload(tool_name, arguments):
             "background",
             "mode",
             "method",
+            "driver",
+            "allow_foreground_fallback",
+            "foreground_fallback",
+            "allow_user_input_overlap",
+            "input_overlap_ok",
         ):
             if key in arguments:
                 raw_payload[key] = arguments.get(key)
@@ -769,6 +774,11 @@ def _browser_computer_action_payload(tool_name, arguments):
             "background",
             "mode",
             "method",
+            "driver",
+            "allow_foreground_fallback",
+            "foreground_fallback",
+            "allow_user_input_overlap",
+            "input_overlap_ok",
         ):
             if key in arguments:
                 raw_payload[key] = arguments.get(key)
@@ -777,6 +787,21 @@ def _browser_computer_action_payload(tool_name, arguments):
     if "approval_token" in arguments:
         raw_payload["approval_token"] = arguments.get("approval_token")
     return action, raw_payload
+
+
+def _computer_use_payload_with_context_defaults(action, payload, context):
+    payload = dict(payload or {})
+    if not isinstance(context, dict):
+        return payload
+    if context.get("computer_use_allow_foreground_fallback") is True:
+        payload.setdefault("allow_foreground_fallback", True)
+        payload.setdefault("allow_user_input_overlap", True)
+    if context.get("computer_use_background_preferred") is True and action in {"computer.type", "computer.key"}:
+        payload.setdefault("background", True)
+        payload.setdefault("driver", "auto")
+    if context.get("computer_use_background_required") is True:
+        payload.setdefault("allow_foreground_fallback", False)
+    return payload
 
 
 def _conversation_tool_artifact_root(context):

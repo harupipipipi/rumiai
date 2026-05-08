@@ -767,7 +767,7 @@ def test_browser_computer_click_sets_target_window_for_background_keys(tmp_path,
     state = controller._computer_state()
     assert state["target_window"]["app"] == "Google Chrome"
     assert controller._should_type_in_chrome_background({}) is False
-    assert controller._should_type_in_chrome_background({"background": True}) is True
+    assert controller._should_type_in_chrome_background({"app": "Google Chrome", "background": True}) is True
 
 
 def test_browser_computer_background_type_failure_does_not_fall_back_to_physical(tmp_path, monkeypatch):
@@ -803,6 +803,55 @@ def test_browser_computer_background_type_failure_does_not_fall_back_to_physical
     assert result["executed"] is False
     assert result["background"] is True
     assert "Chrome background text entry failed" in result["reason"]
+
+
+def test_browser_computer_background_type_can_fall_back_to_foreground_when_allowed(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._write_sessions(
+        {
+            "chrome_target": {
+                "app": "Google Chrome",
+                "url": "https://chatgpt.com/",
+                "window_index": 2,
+                "tab_index": 5,
+            }
+        }
+    )
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(controller, "_darwin_type_in_chrome_background", lambda text, payload: False)
+    monkeypatch.setattr(controller, "_list_windows", lambda: [])
+    monkeypatch.setattr(controller, "_activate_chrome_target", lambda payload: True)
+
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+
+    result = controller.run(
+        "computer.type",
+        {
+            "text": "hello",
+            "app": "Google Chrome",
+            "background": True,
+            "allow_foreground_fallback": True,
+        },
+        yolo_mode=True,
+    )
+
+    assert result["executed"] is True
+    assert result["foreground_fallback"] is True
+    assert result["background_attempted"] is True
+    assert result["driver_sequence"] == ["chrome_background_dom", "foreground_input"]
+    assert result["background_failure"]["recovery"]["kind"] == "chrome_setting"
+    assert calls[-1][:2] == ["osascript", "-e"]
+    assert "keystroke" in calls[-1][2]
 
 
 def test_browser_computer_select_window_respects_app_filter(tmp_path):
@@ -1593,6 +1642,69 @@ def test_chat_tool_loop_does_not_stop_when_context_reports_chrome_dom_probe_fail
     assert calls == {"ai": 2, "tool": 1}
     assert response["finish_reason"] == "stop"
     assert response["content"][0]["text"] == "context noted"
+
+
+def test_chat_tool_loop_does_not_stop_after_successful_foreground_fallback():
+    import blocks.chat.send as send
+
+    calls = {"ai": 0, "tool": 0}
+
+    def call_handler(name, payload):
+        if name == "defaults.ai.complete":
+            calls["ai"] += 1
+            if calls["ai"] > 1:
+                return {
+                    "status": "ok",
+                    "data": {"content": [{"type": "text", "text": "sent with fallback"}], "finish_reason": "stop"},
+                }
+            return {
+                "status": "ok",
+                "data": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "call_type",
+                            "name": "computer_use",
+                            "input": "{\"action\":\"type\",\"text\":\"hello\",\"app\":\"Google Chrome\",\"background\":true,\"allow_foreground_fallback\":true}",
+                        }
+                    ],
+                    "finish_reason": "tool_calls",
+                },
+            }
+        if name == "defaults.tool.invoke":
+            calls["tool"] += 1
+            return {
+                "status": "ok",
+                "data": {
+                    "result": "computer_use computer.type completed",
+                    "is_error": False,
+                    "widget": {
+                        "action": "computer.type",
+                        "executed": True,
+                        "foreground_fallback": True,
+                        "background_failure": {
+                            "recovery": {
+                                "kind": "chrome_setting",
+                                "setting": "Allow JavaScript from Apple Events",
+                            }
+                        },
+                    },
+                },
+            }
+        raise AssertionError(name)
+
+    response = send._complete_with_tools(
+        "google/gemma-4-31b-it",
+        [{"role": "user", "content": "background first, fallback ok"}],
+        [{"type": "function", "function": {"name": "computer_use", "parameters": {"type": "object"}}}],
+        {},
+        call_handler,
+        {"max_tool_calls": 12},
+    )
+
+    assert calls == {"ai": 2, "tool": 1}
+    assert response["finish_reason"] == "stop"
+    assert response["content"][0]["text"] == "sent with fallback"
 
 
 def test_tool_result_recovery_kind_infers_legacy_chrome_setting_error():
@@ -2483,6 +2595,9 @@ def test_computer_use_payload_preserves_window_targeting_fields():
             "physical": False,
             "background": True,
             "method": "chrome_background",
+            "driver": "auto",
+            "allow_foreground_fallback": True,
+            "allow_user_input_overlap": True,
             "modifier": "meta",
         },
     )
@@ -2496,8 +2611,41 @@ def test_computer_use_payload_preserves_window_targeting_fields():
         "physical": False,
         "background": True,
         "method": "chrome_background",
+        "driver": "auto",
+        "allow_foreground_fallback": True,
+        "allow_user_input_overlap": True,
         "modifier": "meta",
     }
+
+
+def test_computer_use_context_defaults_enable_background_then_foreground_fallback():
+    from domain.tool.executor import _computer_use_payload_with_context_defaults
+
+    payload = _computer_use_payload_with_context_defaults(
+        "computer.type",
+        {"text": "hello", "app": "Google Chrome"},
+        {
+            "computer_use_background_preferred": True,
+            "computer_use_allow_foreground_fallback": True,
+        },
+    )
+
+    assert payload["background"] is True
+    assert payload["driver"] == "auto"
+    assert payload["allow_foreground_fallback"] is True
+    assert payload["allow_user_input_overlap"] is True
+
+
+def test_chat_text_sets_computer_use_foreground_fallback_preferences():
+    import blocks.chat.send as send
+
+    prefs = send._computer_use_preferences_from_text(
+        "バックグラウンドでChrome操作。無理な場合はユーザー入力と被ってもいいのでOK。"
+    )
+
+    assert prefs["computer_use_background_preferred"] is True
+    assert prefs["computer_use_allow_foreground_fallback"] is True
+    assert prefs["computer_use_background_required"] is False
 
 
 def test_user_requested_computer_use_preapproves_interactive_actions(monkeypatch):

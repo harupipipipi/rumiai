@@ -3,7 +3,7 @@
   "category": "tool",
   "version": "1",
   "display_name": "Browser Use",
-  "description": "Open URLs, inspect browser/app state, capture screenshots for vision-capable models, and move the virtual AI cursor from screenshot coordinates. chrome_background_control only reports Chrome DOM/Apple Events background-entry availability, not whether computer-use itself works. Use background=true only for actual Chrome background text/key entry; if that entry returns chrome_setting, stop retrying and report the blocker.",
+  "description": "Open URLs, inspect browser/app state, capture screenshots for vision-capable models, and move the virtual AI cursor from screenshot coordinates. chrome_background_control only reports Chrome DOM/Apple Events background-entry availability, not whether computer-use itself works. Use background=true or driver=auto for Chrome background text/key entry; add allow_foreground_fallback=true when the user permits overlap so the tool can focus the target and use normal input if the background route is blocked.",
   "enabled": true,
   "config": {
     "name": "browser_use",
@@ -31,8 +31,12 @@
           "physical": {"type": "boolean"},
           "focus": {"type": "boolean"},
           "background": {"type": "boolean"},
-          "mode": {"type": "string"},
           "method": {"type": "string"},
+          "driver": {"type": "string"},
+          "allow_foreground_fallback": {"type": "boolean"},
+          "foreground_fallback": {"type": "boolean"},
+          "allow_user_input_overlap": {"type": "boolean"},
+          "input_overlap_ok": {"type": "boolean"},
           "dry_run": {"type": "boolean"},
           "approval_token": {"type": "string"},
           "payload": {"type": "object"}
