@@ -456,6 +456,132 @@ def test_chat_stream_recovers_when_provider_returns_only_thinking(tmp_path, monk
     ChatStore._instance = None
 
 
+def test_chat_stream_recovers_when_provider_returns_empty_text(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    import blocks.chat.stream as stream_module
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    captured = {}
+
+    class FakeAIClient:
+        def supports_stream(self, model):
+            return True
+
+        def stream(self, model, messages, tools, params):
+            yield {
+                "type": "stream_end",
+                "finish_reason": "malformed_function_call",
+                "usage": {"input_tokens": 1, "output_tokens": 0, "total_tokens": 1},
+            }
+
+        def complete(self, model, messages, tools, params):
+            captured["retry_params"] = params
+            return {
+                "content": [{"type": "text", "text": "Recovered after empty stream."}],
+                "finish_reason": "stop",
+                "usage": {"input_tokens": 2, "output_tokens": 3, "total_tokens": 5},
+            }
+
+    monkeypatch.setattr(stream_module, "AIClient", FakeAIClient)
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="google/gemma-4-31b-it")
+    result = stream_module.run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "hello"},
+            "tools": [],
+            "params": {"thinking_level": "high", "temperature": 0.2},
+        },
+        {},
+    )
+
+    events = list(result["events"])
+    deltas = [event["delta"] for event in events if event.get("type") == "delta"]
+    final = [event["message"] for event in events if event.get("type") == "message"][-1]
+
+    assert "".join(deltas) == "Recovered after empty stream."
+    assert final["raw_text"] == "Recovered after empty stream."
+    assert final["metadata"]["recovered_from_empty_stream"] is True
+    assert captured["retry_params"] == {"temperature": 0.2}
+    ChatStore._instance = None
+
+
+def test_chat_stream_infers_computer_tools_before_stream_decision(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    import blocks.chat.stream as stream_module
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    captured = {}
+
+    def fake_fallback_send(input_data, context):
+        captured["tools"] = input_data.get("tools")
+        yield {"type": "message", "message": {"role": "assistant", "raw_text": "ok"}}
+        yield {"type": "done", "message": {"role": "assistant", "raw_text": "ok"}}
+
+    monkeypatch.setattr(stream_module, "_fallback_send", fake_fallback_send)
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="google/gemma-4-31b-it")
+    result = stream_module.run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "computer useでchromeを開いて"},
+            "tools": [],
+        },
+        {},
+    )
+
+    events = list(result["events"])
+    assert events[-1]["type"] == "done"
+    assert captured["tools"] == ["computer_use", "browser_computer"]
+    ChatStore._instance = None
+
+
+def test_chat_send_retries_empty_thinking_response_without_thinking(monkeypatch):
+    import blocks.chat.send as send_module
+
+    calls = []
+
+    def fake_direct_complete(model, messages, tools=None, params=None):
+        calls.append(dict(params or {}))
+        if len(calls) == 1:
+            return {
+                "content": [{"type": "text", "text": ""}],
+                "finish_reason": "malformed_function_call",
+                "usage": {},
+            }, None
+        return {
+            "content": [{"type": "text", "text": "Recovered send response."}],
+            "finish_reason": "stop",
+            "usage": {},
+        }, None
+
+    monkeypatch.setattr(send_module, "_ai_direct_complete", fake_direct_complete)
+
+    response = send_module._complete_with_tools(
+        "google/gemma-4-31b-it",
+        [{"role": "user", "content": "hello"}],
+        [],
+        {},
+        None,
+        {"thinking_level": "high", "temperature": 0.1},
+    )
+
+    assert response["content"][0]["text"] == "Recovered send response."
+    assert response["metadata"]["recovered_from_empty_response"] is True
+    assert calls == [
+        {"thinking_level": "high", "temperature": 0.1},
+        {"temperature": 0.1},
+    ]
+
+
 def test_chat_send_persists_user_attachment_metadata(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from blocks.chat.send import run

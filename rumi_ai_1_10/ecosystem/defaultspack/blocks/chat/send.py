@@ -200,6 +200,37 @@ def _tool_use_blocks(response):
     ]
 
 
+def _response_text(response):
+    blocks = response.get("content", []) if isinstance(response, dict) else []
+    if isinstance(blocks, str):
+        return blocks
+    if not isinstance(blocks, list):
+        return ""
+    parts = []
+    for block in blocks:
+        if isinstance(block, str):
+            parts.append(block)
+        elif isinstance(block, dict) and block.get("type") == "text":
+            parts.append(str(block.get("text") or ""))
+    return "".join(parts)
+
+
+def _params_without_thinking(params):
+    retry_params = dict(params or {})
+    for key in ("thinking", "thinking_level", "reasoning_effort"):
+        retry_params.pop(key, None)
+    return retry_params
+
+
+def _empty_response_message(finish_reason):
+    reason = str(finish_reason or "unknown").strip() or "unknown"
+    return (
+        "モデルから本文のない応答が返りました。"
+        "もう一度送信するか、thinkingを「なし」にして試してください。"
+        f" (finish_reason: {reason})"
+    )
+
+
 def _tool_arguments(block):
     value = block.get("input", block.get("arguments", {}))
     if isinstance(value, str):
@@ -486,6 +517,37 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
         if not isinstance(response, dict):
             response = _stub_response()
         tool_uses = _tool_use_blocks(response)
+        if not tool_uses and not _response_text(response).strip():
+            retry_params = _params_without_thinking(params)
+            if retry_params != params:
+                retry_response = None
+                if call_handler is not None:
+                    retry_payload = {
+                        "model": model,
+                        "messages": working_messages,
+                        "tools": tools,
+                        "params": retry_params,
+                    }
+                    retry_response = call_handler("defaults.ai.complete", retry_payload)
+                    if isinstance(retry_response, dict) and retry_response.get("status") == "ok":
+                        retry_response = retry_response.get("data", {})
+                else:
+                    retry_response, ai_error = _ai_direct_complete(
+                        model,
+                        working_messages,
+                        tools,
+                        retry_params,
+                    )
+                    if ai_error is not None:
+                        retry_response = None
+                if isinstance(retry_response, dict) and (
+                    _response_text(retry_response).strip() or _tool_use_blocks(retry_response)
+                ):
+                    retry_metadata = dict(retry_response.get("metadata") or {})
+                    retry_metadata["recovered_from_empty_response"] = True
+                    retry_response["metadata"] = retry_metadata
+                    response = retry_response
+                    tool_uses = _tool_use_blocks(response)
         if not tool_uses or step_index >= limit:
             break
 
@@ -548,6 +610,14 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
             )
 
     response = response or _stub_response()
+    if not _tool_use_blocks(response) and not _response_text(response).strip():
+        content = response.get("content")
+        if not isinstance(content, list):
+            content = []
+        response["content"] = [{"type": "text", "text": _empty_response_message(response.get("finish_reason"))}]
+        metadata = dict(response.get("metadata") or {})
+        metadata["empty_ai_response"] = True
+        response["metadata"] = metadata
     existing_events = response.get("events", [])
     response["events"] = events + (existing_events if isinstance(existing_events, list) else [])
     response["tool_logs"] = tool_logs

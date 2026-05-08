@@ -14,7 +14,9 @@ from blocks.chat.send import (
     _attachment_image_blocks,
     _attachment_text_blocks,
     _conversation_system_prompt,
+    _infer_requested_tools_from_message,
     _sanitize_attachment_metadata,
+    _with_inferred_tools,
 )
 
 
@@ -111,9 +113,16 @@ def _params_without_thinking(params):
     return retry_params
 
 
-def _fallback_complete_without_thinking(client, model, messages, params, transcript):
-    if not transcript:
-        return None
+def _empty_stream_message(finish_reason):
+    reason = str(finish_reason or "unknown").strip() or "unknown"
+    return (
+        "モデルから本文のない応答が返りました。"
+        "もう一度送信するか、thinkingを「なし」にして試してください。"
+        f" (finish_reason: {reason})"
+    )
+
+
+def _fallback_complete_without_thinking(client, model, messages, params, transcript=""):
     try:
         response = client.complete(model, messages, tools=[], params=_params_without_thinking(params))
     except Exception:
@@ -121,11 +130,14 @@ def _fallback_complete_without_thinking(client, model, messages, params, transcr
     if not isinstance(response, dict) or not _text_from_content_blocks(response.get("content")):
         return None
     metadata = dict(response.get("metadata") or {})
-    metadata["thinking"] = {
-        "state": "completed",
-        "transcript": transcript,
-        "source": "inline_thought_stream",
-    }
+    if transcript:
+        metadata["thinking"] = {
+            "state": "completed",
+            "transcript": transcript,
+            "source": "inline_thought_stream",
+        }
+    else:
+        metadata.setdefault("thinking", {"state": "completed"})
     metadata["recovered_from_empty_stream"] = True
     metadata.setdefault("model", model)
     metadata.setdefault("attached_tool_count", 0)
@@ -197,6 +209,7 @@ def _stream_response(input_data, context):
     manager = get_manager()
     system_prompt = _conversation_system_prompt(conv, manager)
     user_text = extract_user_text(content)
+    input_data = _with_inferred_tools(input_data, _infer_requested_tools_from_message(user_text))
     try:
         enrich_messages(standard_messages, system_prompt, conversation_id, user_text, manager)
     except Exception:
@@ -255,7 +268,7 @@ def _stream_response(input_data, context):
         if part
     ).strip()
     fallback_response = None
-    if transcript and not "".join(text_parts).strip():
+    if not "".join(text_parts).strip():
         fallback_response = _fallback_complete_without_thinking(
             client,
             model,
@@ -272,8 +285,13 @@ def _stream_response(input_data, context):
     if fallback_response is not None:
         response = fallback_response
     else:
+        response_text = "".join(text_parts)
+        recovered_empty = False
+        if not response_text.strip():
+            response_text = _empty_stream_message(finish_reason)
+            recovered_empty = True
         response = {
-            "content": [{"type": "text", "text": "".join(text_parts)}],
+            "content": [{"type": "text", "text": response_text}],
             "finish_reason": finish_reason,
             "usage": usage,
             "metadata": {
@@ -284,6 +302,8 @@ def _stream_response(input_data, context):
                 "thinking_level": params.get("thinking_level"),
             },
         }
+        if recovered_empty:
+            response["metadata"]["empty_stream_response"] = True
     if transcript:
         response["metadata"]["thinking"] = {
             "state": "completed",
@@ -329,6 +349,8 @@ def run(input_data, context):
     if isinstance(raw_content, list) and len(raw_content) == 0 and not has_attachments:
         return error("message content must not be empty", "INVALID_INPUT")
 
+    message_text = extract_user_text(raw_content)
+    input_data = _with_inferred_tools(input_data, _infer_requested_tools_from_message(message_text))
     tools = input_data.get("tools")
     selected_tools = [item for item in tools if item] if isinstance(tools, list) else []
     client = AIClient()
