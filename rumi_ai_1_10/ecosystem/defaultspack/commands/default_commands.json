@@ -40,13 +40,25 @@
     "id": "fast",
     "name": "fast",
     "label": "Fast Mode",
-    "description": "Use a lower thinking preset.",
+    "description": "Switch to a fast-capable model or provider.",
     "category": "model",
     "visibility": "default",
     "risk": "low",
     "modes": ["chat", "coding", "agent"],
     "args": [{ "name": "enabled", "type": "boolean", "required": false }],
     "execution": { "type": "frontend", "action": "set_fast_mode" }
+  },
+  {
+    "id": "price",
+    "name": "price",
+    "label": "Price Mode",
+    "description": "Switch to a low or high price model when available.",
+    "category": "model",
+    "visibility": "default",
+    "risk": "low",
+    "modes": ["chat", "coding", "agent"],
+    "args": [{ "name": "tier", "type": "enum", "required": false, "values": ["low", "high"] }],
+    "execution": { "type": "frontend", "action": "set_price_mode" }
   },
   {
     "id": "compact",

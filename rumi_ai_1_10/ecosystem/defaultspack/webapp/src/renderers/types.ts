@@ -150,6 +150,7 @@ export type RightSidebarRendererProps = {
 
 export type SettingsModalRendererProps = {
   isOpen: boolean;
+  activeSectionId?: string | null;
   catalog: UICatalog | null;
   health: { status: string; pack: string; ts: string } | null;
   previewsCount: number;

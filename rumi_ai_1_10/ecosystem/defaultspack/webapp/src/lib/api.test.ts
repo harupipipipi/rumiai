@@ -107,6 +107,56 @@ test("saveProviderApiKey serializes named API metadata", async () => {
   });
 });
 
+test("renameProviderApiKey serializes rename action", async () => {
+  let requestBody: any = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: { provider_id: "google", api_id: "main", configured: true },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.renameProviderApiKey("google", "main", "work");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(requestBody, {
+    action: "rename",
+    provider_id: "google",
+    api_id: "main",
+    name: "work",
+    new_api_id: "work",
+  });
+});
+
+test("deleteProviderApiKey serializes delete action", async () => {
+  let requestBody: any = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: { provider_id: "google", api_id: "main", configured: false },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.deleteProviderApiKey("google", "main");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(requestBody, {
+    action: "delete",
+    provider_id: "google",
+    api_id: "main",
+  });
+});
+
 test("streamMessage parses SSE deltas and final message", async () => {
   const originalFetch = globalThis.fetch;
   const events: string[] = [];

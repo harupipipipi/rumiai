@@ -1,6 +1,6 @@
-import { useState, type ReactElement } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { X } from "lucide-react";
+import { Check, ChevronDown, Pencil, Trash2, X } from "lucide-react";
 
 import { cn } from "../lib/cn";
 import type { SettingsSection } from "../lib/api";
@@ -21,6 +21,71 @@ function namedApiRows(provider: Record<string, unknown>): Array<Record<string, u
   return Array.isArray(apis) ? apis.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object") : [];
 }
 
+function registeredApiRows(providers: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  const rows: Array<Record<string, unknown>> = providers.flatMap((provider) => (
+    namedApiRows(provider).map((api) => ({
+      ...api,
+      provider_id: api.provider_id ?? provider.provider_id,
+    }))
+  ));
+  return rows.filter((api) => Boolean(api.configured));
+}
+
+function apiRowLabel(api: Record<string, unknown>): string {
+  return String(api.label ?? `${api.provider_id}:${api.api_id}:***`);
+}
+
+function CustomSelect({
+  value,
+  options,
+  onChange,
+  className,
+}: {
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  onChange: (value: string) => void;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = options.find((option) => option.value === value) ?? options[0];
+  return (
+    <div className={cn("relative", className)}>
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className="flex w-full items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-left text-sm text-zinc-200 outline-none transition-colors hover:border-zinc-700"
+      >
+        <span className="truncate">{selected?.label ?? value}</span>
+        <ChevronDown size={14} className={cn("shrink-0 text-zinc-500 transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <>
+          <button type="button" aria-label="close select" className="fixed inset-0 z-10 cursor-default" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-20 max-h-56 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-950 p-1 shadow-2xl">
+            {options.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => {
+                  onChange(option.value);
+                  setOpen(false);
+                }}
+                className={cn(
+                  "flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors",
+                  option.value === value ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200",
+                )}
+              >
+                <span className="truncate">{option.label}</span>
+                {option.value === value && <Check size={13} className="shrink-0 text-emerald-300" />}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function SettingsField({
   sectionId,
   field,
@@ -38,6 +103,8 @@ function SettingsField({
   const [apiName, setApiName] = useState("main");
   const [apiSecret, setApiSecret] = useState("");
   const [apiSaveState, setApiSaveState] = useState<"idle" | "saved">("idle");
+  const [renamingKey, setRenamingKey] = useState("");
+  const [renameDraft, setRenameDraft] = useState("");
   const commonLabel = <span className="text-sm text-zinc-300">{field.label}</span>;
   const isSecretConfigured = Boolean(value);
 
@@ -48,20 +115,108 @@ function SettingsField({
       const providerOptions = providers.length
         ? providers.map((provider) => String(provider.provider_id ?? ""))
         : ["google", "openrouter", "openai", "anthropic"];
+      const uniqueProviderOptions = [...new Set(providerOptions.filter(Boolean))];
+      const registeredApis = registeredApiRows(providers);
       control = (
         <div className="space-y-4">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950/70">
+            <div className="border-b border-zinc-800 px-3 py-2 text-xs font-medium text-zinc-300">
+              Registered API keys
+            </div>
+            <div className="divide-y divide-zinc-900">
+              {registeredApis.length > 0 ? registeredApis.map((api) => {
+                const key = String(api.key ?? `${api.provider_id}:${api.api_id}`);
+                const isRenaming = renamingKey === key;
+                return (
+                  <div key={key} className="flex flex-wrap items-center justify-between gap-3 px-3 py-2">
+                    <div className="min-w-0">
+                      <div className="truncate font-mono text-xs text-zinc-200">{apiRowLabel(api)}</div>
+                      <div className="truncate text-[11px] text-zinc-500">{String(api.name ?? api.api_id ?? "")}</div>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {isRenaming ? (
+                        <>
+                          <input
+                            value={renameDraft}
+                            autoFocus
+                            onChange={(event) => setRenameDraft(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key !== "Enter") return;
+                              event.preventDefault();
+                              if (!renameDraft.trim()) return;
+                              onChange(sectionId, field.id, {
+                                action: "rename",
+                                provider_id: api.provider_id,
+                                api_id: api.api_id,
+                                name: renameDraft.trim(),
+                              });
+                              setRenamingKey("");
+                            }}
+                            className="w-32 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 outline-none"
+                          />
+                          <button
+                            type="button"
+                            disabled={!renameDraft.trim()}
+                            onClick={() => {
+                              if (!renameDraft.trim()) return;
+                              onChange(sectionId, field.id, {
+                                action: "rename",
+                                provider_id: api.provider_id,
+                                api_id: api.api_id,
+                                name: renameDraft.trim(),
+                              });
+                              setRenamingKey("");
+                            }}
+                            className="rounded-md border border-zinc-700 p-1 text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+                            title="Rename"
+                          >
+                            <Check size={13} />
+                          </button>
+                          <button type="button" onClick={() => setRenamingKey("")} className="rounded-md border border-zinc-800 p-1 text-zinc-500 hover:text-zinc-300">
+                            <X size={13} />
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRenamingKey(key);
+                              setRenameDraft(String(api.name ?? api.api_id ?? ""));
+                            }}
+                            className="rounded-md border border-zinc-800 p-1.5 text-zinc-500 transition-colors hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-200"
+                            title="Rename"
+                          >
+                            <Pencil size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onChange(sectionId, field.id, {
+                              action: "delete",
+                              provider_id: api.provider_id,
+                              api_id: api.api_id,
+                            })}
+                            className="rounded-md border border-zinc-800 p-1.5 text-zinc-500 transition-colors hover:border-rose-500/40 hover:bg-rose-950/20 hover:text-rose-300"
+                            title="Delete"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              }) : (
+                <div className="px-3 py-4 text-xs text-zinc-600">No registered API keys yet.</div>
+              )}
+            </div>
+          </div>
           <div className="grid gap-2 md:grid-cols-[160px_1fr_1.4fr_auto]">
-            <select
+            <CustomSelect
               value={apiProvider}
-              onChange={(event) => setApiProvider(event.target.value)}
-              className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none"
-            >
-              {[...new Set(providerOptions.filter(Boolean))].map((providerId) => (
-                <option key={providerId} value={providerId}>
-                  {providerId}
-                </option>
-              ))}
-            </select>
+              onChange={setApiProvider}
+              options={uniqueProviderOptions.map((providerId) => ({ value: providerId, label: providerId }))}
+            />
             <input
               value={apiName}
               onChange={(event) => {
@@ -90,6 +245,7 @@ function SettingsField({
                 onChange(sectionId, field.id, {
                   action: "upsert",
                   provider_id: apiProvider,
+                  api_id: apiName,
                   name: apiName,
                   value: apiSecret,
                 });
@@ -123,7 +279,7 @@ function SettingsField({
                     {rows.length > 0 ? rows.map((api) => (
                       <div key={String(api.key)} className="flex items-center justify-between gap-2 text-xs text-zinc-500">
                         <span>{String(api.name ?? api.api_id)}</span>
-                        <span className="font-mono">{String(api.key ?? "")}</span>
+                        <span className="font-mono">{apiRowLabel(api)}</span>
                       </div>
                     )) : (
                       <p className="text-xs text-zinc-600">No named APIs yet.</p>
@@ -195,17 +351,11 @@ function SettingsField({
       break;
     case "select":
       control = (
-        <select
+        <CustomSelect
           value={String(value ?? field.default ?? "")}
-          onChange={(event) => onChange(sectionId, field.id, event.target.value)}
-          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none"
-        >
-          {(field.options ?? []).map((option) => (
-            <option key={String(option.value)} value={String(option.value)}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+          onChange={(nextValue) => onChange(sectionId, field.id, nextValue)}
+          options={(field.options ?? []).map((option) => ({ value: String(option.value), label: option.label }))}
+        />
       );
       break;
     case "number":
@@ -256,6 +406,7 @@ function SettingsField({
 
 export function SettingsModalRenderer({
   isOpen,
+  activeSectionId: requestedSectionId,
   catalog,
   health,
   previewsCount,
@@ -265,6 +416,12 @@ export function SettingsModalRenderer({
   onSettingChange,
 }: SettingsModalRendererProps) {
   const [activeSectionId, setActiveSectionId] = useState(settingsSections[0]?.id ?? "system");
+  useEffect(() => {
+    if (!requestedSectionId) return;
+    if (settingsSections.some((section) => section.id === requestedSectionId)) {
+      setActiveSectionId(requestedSectionId);
+    }
+  }, [requestedSectionId, settingsSections]);
   const activeSection = settingsSections.find((section) => section.id === activeSectionId) ?? settingsSections[0];
   const primaryFields = activeSection?.fields.filter((field) => !field.advanced) ?? [];
   const advancedFields = activeSection?.fields.filter((field) => field.advanced) ?? [];

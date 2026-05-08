@@ -91,6 +91,16 @@ function profileProviderLabel(profile: ModelProfile | null | undefined): string 
   );
 }
 
+function profileDisplayName(profile: ModelProfile | null | undefined): string {
+  return String(
+    profile?.disambiguated_name
+    ?? profile?.metadata?.disambiguated_name
+    ?? profile?.display_name
+    ?? profile?.profile_id
+    ?? "model",
+  );
+}
+
 function profileIsConfigured(profile: ModelProfile | null | undefined): boolean {
   const availability = profile?.availability ?? {};
   return Boolean(
@@ -416,9 +426,9 @@ function ModelDropdown({
                     }`}
                   >
                     <span className="min-w-0">
-                      <span className="block truncate text-[13px] text-zinc-200">{compactProfileName(profile.display_name)}</span>
+                      <span className="block truncate text-[13px] text-zinc-200">{compactProfileName(profileDisplayName(profile))}</span>
                       <span className="block truncate text-[10px] text-zinc-500">
-                        {profile.provider_id}/{profile.model_id}
+                        {profile.provider_display_name ?? profile.provider_id} · {profile.provider_id}/{profile.model_id}
                       </span>
                     </span>
                     {needsKey ? (
@@ -599,7 +609,8 @@ export function ComposerRenderer({
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const profileName = selectedProfile?.display_name ?? selectedProfile?.profile_id ?? "model";
+  const profileName = profileDisplayName(selectedProfile);
+  const selectedProviderLabel = profileProviderLabel(selectedProfile);
   const levels = selectedProfile?.supports_thinking
     ? selectedProfile.thinking_levels?.length
       ? selectedProfile.thinking_levels
@@ -702,6 +713,14 @@ export function ComposerRenderer({
       return Math.min(current, matchedCommands.length - 1);
     });
   }, [matchedCommands.length]);
+
+  useEffect(() => {
+    textareaRef.current?.focus({ preventScroll: true });
+    const focusTimer = window.setTimeout(() => {
+      textareaRef.current?.focus({ preventScroll: true });
+    }, 80);
+    return () => window.clearTimeout(focusTimer);
+  }, []);
 
   const chooseCommand = (commandId: string, rawInput = input) => {
     const command = commands.find((item) => item.id === commandId);
@@ -1028,10 +1047,10 @@ export function ComposerRenderer({
                           >
                             <span className="min-w-0">
                               <span className="block truncate text-[13px] text-zinc-200">
-                                {compactProfileName(profile.display_name)}
+                                {compactProfileName(profileDisplayName(profile))}
                               </span>
                               <span className="block truncate text-[10px] text-zinc-500">
-                                {profile.provider_id} · {profile.max_context_tokens ?? profile.max_context ?? "?"} ctx
+                                {profile.provider_display_name ?? profile.provider_id} · {profile.provider_id} · {profile.max_context_tokens ?? profile.max_context ?? "?"} ctx
                               </span>
                             </span>
                             {needsKey && (
@@ -1089,6 +1108,7 @@ export function ComposerRenderer({
 
           <textarea
             ref={textareaRef}
+            autoFocus
             value={input}
             onChange={(event) => handleInputChange(event.target.value)}
             placeholder={
@@ -1240,6 +1260,9 @@ export function ComposerRenderer({
                     <span className="max-w-[120px] truncate">{compactProfileName(profileName)}</span>
                     <ChevronDown size={12} className={`transition-transform ${modelDropdownOpen ? "rotate-180" : ""}`} />
                   </button>
+                  <span className="block max-w-[150px] truncate text-[10px] leading-none text-zinc-500">
+                    {selectedProviderLabel}
+                  </span>
                   {modelDropdownOpen && (
                     <ModelDropdown
                       profiles={selectableProfiles}

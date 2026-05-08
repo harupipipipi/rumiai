@@ -142,6 +142,12 @@ export type ModelProfile = {
   default_thinking_level?: string | null;
   availability?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
+  defaults?: Record<string, unknown>;
+  pricing?: Record<string, unknown>;
+  name_collision?: boolean;
+  provider_count_for_model_name?: number;
+  disambiguated_name?: string;
+  same_model_across_providers_key?: string;
   local?: boolean;
 };
 
@@ -675,13 +681,37 @@ export const api = {
   },
 
   saveProviderApiKey(providerId: string, value: string, options?: { apiId?: string; name?: string }) {
-    return request<{ provider_id: string; configured: boolean }>("/api/ai/provider-key", {
+    return request<{ provider_id: string; api_id?: string; name?: string; configured: boolean }>("/api/ai/provider-key", {
       method: "POST",
       body: JSON.stringify({
         provider_id: providerId,
         value,
         api_id: options?.apiId,
         name: options?.name,
+      }),
+    });
+  },
+
+  renameProviderApiKey(providerId: string, apiId: string, name: string) {
+    return request<{ provider_id: string; api_id?: string; name?: string; configured: boolean }>("/api/ai/provider-key", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "rename",
+        provider_id: providerId,
+        api_id: apiId,
+        name,
+        new_api_id: name,
+      }),
+    });
+  },
+
+  deleteProviderApiKey(providerId: string, apiId: string) {
+    return request<{ provider_id: string; api_id?: string; configured: boolean; cleared?: boolean }>("/api/ai/provider-key", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "delete",
+        provider_id: providerId,
+        api_id: apiId,
       }),
     });
   },

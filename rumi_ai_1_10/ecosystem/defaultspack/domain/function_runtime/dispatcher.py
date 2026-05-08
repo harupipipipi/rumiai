@@ -147,9 +147,31 @@ def _set_provider_key(args: dict[str, Any], context: dict[str, Any]) -> dict[str
 
 
 def _delete_provider_key(args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-    next_args = dict(args)
-    next_args["value"] = ""
-    return _set_provider_key(next_args, context)
+    del context
+    from domain.ai_client.api_key_store import delete_provider_api_key
+
+    result = delete_provider_api_key(
+        str(args.get("provider_id") or "").strip(),
+        str(args.get("api_id") or "").strip(),
+    )
+    if not result.get("success"):
+        return error(result.get("error") or "failed to delete api key", "API_KEY_DELETE_FAILED")
+    return ok({key: value for key, value in result.items() if key != "error"})
+
+
+def _rename_provider_key(args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+    del context
+    from domain.ai_client.api_key_store import rename_provider_api_key
+
+    result = rename_provider_api_key(
+        str(args.get("provider_id") or "").strip(),
+        str(args.get("api_id") or "").strip(),
+        str(args.get("name") or args.get("new_name") or "").strip(),
+        new_api_id=args.get("new_api_id"),
+    )
+    if not result.get("success"):
+        return error(result.get("error") or "failed to rename api key", "API_KEY_RENAME_FAILED")
+    return ok({key: value for key, value in result.items() if key != "error"})
 
 
 def _validate_model_params(args: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
@@ -174,4 +196,5 @@ _MODEL_RUNTIME_HANDLERS = {
     "ai_get_provider_key_status": _provider_key_status,
     "ai_set_provider_key": _set_provider_key,
     "ai_delete_provider_key": _delete_provider_key,
+    "ai_rename_provider_key": _rename_provider_key,
 }

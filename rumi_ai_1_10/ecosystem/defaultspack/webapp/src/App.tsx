@@ -454,6 +454,109 @@ function favoriteModelProfiles(rawFavorites: unknown, profiles: ModelProfile[], 
   return fallback ? [fallback] : [];
 }
 
+function profileIdentity(profile: ModelProfile | null | undefined): string {
+  if (!profile) return "";
+  return profile.profile_id || profile.qualified_model_id || `${profile.provider_id ?? ""}/${profile.model_id ?? ""}`;
+}
+
+function profileDefaults(profile: ModelProfile | null | undefined): Record<string, unknown> {
+  if (!profile) return {};
+  const metadataDefaults = profile.metadata?.defaults;
+  if (metadataDefaults && typeof metadataDefaults === "object" && !Array.isArray(metadataDefaults)) {
+    return { ...(metadataDefaults as Record<string, unknown>), ...(profile.defaults ?? {}) };
+  }
+  return profile.defaults ?? {};
+}
+
+function profilePriceTier(profile: ModelProfile | null | undefined): string {
+  if (!profile) return "";
+  const defaults = profileDefaults(profile);
+  const pricing = profile.pricing ?? (profile.metadata?.pricing as Record<string, unknown> | undefined) ?? {};
+  const explicit = String(
+    pricing.tier
+    ?? pricing.price_tier
+    ?? defaults.price
+    ?? defaults.price_tier
+    ?? "",
+  ).toLowerCase();
+  if (explicit) return explicit;
+  const modelId = String(profile.model_id ?? profile.profile_id ?? "").toLowerCase();
+  if (defaults.large || defaults.heavy) return "high";
+  if (defaults.fast || /(?:mini|nano|lite|flash|free|small|cheap)/.test(modelId)) return "low";
+  return "";
+}
+
+function profileSupportsFast(profile: ModelProfile | null | undefined): boolean {
+  if (!profile) return false;
+  const defaults = profileDefaults(profile);
+  const tags = Array.isArray(profile.metadata?.tags) ? profile.metadata?.tags : [];
+  const traits = Array.isArray(profile.metadata?.traits) ? profile.metadata?.traits : [];
+  return Boolean(defaults.fast || tags.includes("fast") || traits.includes("fast_response"));
+}
+
+function bestConfiguredCandidate(candidates: ModelProfile[]): ModelProfile | null {
+  if (candidates.length === 0) return null;
+  return [...candidates].sort((a, b) => {
+    const configured = Number(isConfiguredProfile(b)) - Number(isConfiguredProfile(a));
+    if (configured) return configured;
+    const local = Number(Boolean(b.local)) - Number(Boolean(a.local));
+    if (local) return local;
+    return (a.display_name || a.profile_id).localeCompare(b.display_name || b.profile_id);
+  })[0] ?? null;
+}
+
+function fastCandidateForProfile(activeProfile: ModelProfile | null, profiles: ModelProfile[]): ModelProfile | null {
+  if (!activeProfile) return null;
+  if (profileSupportsFast(activeProfile)) return activeProfile;
+  const providerId = String(activeProfile.provider_id ?? "");
+  const providerDefaults = activeProfile.metadata?.default_model_for;
+  const fastModel = providerDefaults && typeof providerDefaults === "object"
+    ? String((providerDefaults as Record<string, unknown>).fast ?? "")
+    : "";
+  if (providerId && fastModel) {
+    const providerFast = profiles.find((profile) => (
+      profile.provider_id === providerId
+      && (profile.model_id === fastModel || profile.qualified_model_id === `${providerId}/${fastModel}`)
+      && profileSupportsFast(profile)
+    ));
+    if (providerFast) return providerFast;
+  }
+  const sameModelKey = String(activeProfile.same_model_across_providers_key ?? activeProfile.model_id ?? "").toLowerCase();
+  const sameModelFast = profiles.filter((profile) => (
+    profileIdentity(profile) !== profileIdentity(activeProfile)
+    && profileSupportsFast(profile)
+    && String(profile.same_model_across_providers_key ?? profile.model_id ?? "").toLowerCase() === sameModelKey
+  ));
+  if (sameModelFast.length) return bestConfiguredCandidate(sameModelFast);
+  const providerFast = profiles.filter((profile) => (
+    profile.provider_id === providerId
+    && profileSupportsFast(profile)
+    && String(profile.type ?? "chat").toLowerCase() === "chat"
+  ));
+  return bestConfiguredCandidate(providerFast);
+}
+
+function priceCandidateForProfile(activeProfile: ModelProfile | null, profiles: ModelProfile[], tier: string): ModelProfile | null {
+  const normalizedTier = tier === "high" ? "high" : "low";
+  if (!activeProfile) return null;
+  if (profilePriceTier(activeProfile) === normalizedTier || profileDefaults(activeProfile)[`price_${normalizedTier}`]) {
+    return activeProfile;
+  }
+  const sameModelKey = String(activeProfile.same_model_across_providers_key ?? activeProfile.model_id ?? "").toLowerCase();
+  const sameModelCandidates = profiles.filter((profile) => (
+    profileIdentity(profile) !== profileIdentity(activeProfile)
+    && String(profile.same_model_across_providers_key ?? profile.model_id ?? "").toLowerCase() === sameModelKey
+    && (profilePriceTier(profile) === normalizedTier || Boolean(profileDefaults(profile)[`price_${normalizedTier}`]))
+  ));
+  if (sameModelCandidates.length) return bestConfiguredCandidate(sameModelCandidates);
+  const providerCandidates = profiles.filter((profile) => (
+    profile.provider_id === activeProfile.provider_id
+    && String(profile.type ?? "chat").toLowerCase() === "chat"
+    && (profilePriceTier(profile) === normalizedTier || Boolean(profileDefaults(profile)[`price_${normalizedTier}`]))
+  ));
+  return bestConfiguredCandidate(providerCandidates);
+}
+
 function contextUsageFor(conversation: Conversation | null, profile: ModelProfile | null): ContextUsageInfo {
   const usedTokens = (conversation?.messages ?? []).reduce((total, message) => {
     const usage = message.usage ?? {};
@@ -585,6 +688,7 @@ export default function App() {
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
   const [input, setInput] = useLocalStorage("rumi-input", "");
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [requestedSettingsSectionId, setRequestedSettingsSectionId] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -655,16 +759,21 @@ export default function App() {
   const effectiveShowPreview = showPreview && canShowCanvas;
   const composerCommands = useMemo(() => {
     const showAdvanced = settingsValues.commands?.show_advanced_commands === true;
+    const fastCandidate = fastCandidateForProfile(activeProfile, selectableModelProfiles);
+    const priceLowCandidate = priceCandidateForProfile(activeProfile, selectableModelProfiles, "low");
+    const priceHighCandidate = priceCandidateForProfile(activeProfile, selectableModelProfiles, "high");
     return commandCatalog
       .filter((command) => command.visibility !== "hidden")
       .filter((command) => showAdvanced || command.visibility === "default")
       .filter((command) => !command.modes?.length || command.modes.includes(mode as ComposerCommandMode))
+      .filter((command) => command.id !== "fast" || Boolean(fastCandidate))
+      .filter((command) => command.id !== "price" || Boolean(priceLowCandidate || priceHighCandidate))
       .map((command) => ({
         ...command,
         active: command.id === "yolo" ? yoloMode : command.id === mode,
         enabled: command.id === "yolo" ? yoloMode : command.id === mode,
       }));
-  }, [commandCatalog, mode, settingsValues.commands?.show_advanced_commands, yoloMode]);
+  }, [activeProfile, commandCatalog, mode, selectableModelProfiles, settingsValues.commands?.show_advanced_commands, yoloMode]);
   const unknownBlockStrategy = String(settingsValues.chat_rendering?.unknown_block_strategy ?? "hidden");
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
   const showActivityInMessages = settingsValues.general?.show_activity_in_messages !== false;
@@ -994,9 +1103,19 @@ export default function App() {
       if (field?.type === "api_keys") {
         const payload = value && typeof value === "object" ? value as Record<string, unknown> : {};
         const providerId = String(payload.provider_id ?? "").trim();
-        const name = String(payload.name ?? payload.api_id ?? "").trim();
+        const apiId = String(payload.api_id ?? payload.name ?? "").trim();
+        const name = String(payload.name ?? apiId).trim();
         const secret = String(payload.value ?? "");
-        if (providerId && name && secret.trim()) {
+        const action = String(payload.action ?? "upsert").trim();
+        if (action === "delete" && providerId && apiId) {
+          void api.deleteProviderApiKey(providerId, apiId)
+            .then(() => refreshCatalog())
+            .catch(console.error);
+        } else if (action === "rename" && providerId && apiId && name) {
+          void api.renameProviderApiKey(providerId, apiId, name)
+            .then(() => refreshCatalog())
+            .catch(console.error);
+        } else if (providerId && name && secret.trim()) {
           void api.saveProviderApiKey(providerId, secret, { apiId: name, name })
             .then(() => refreshCatalog())
             .catch(console.error);
@@ -1096,7 +1215,34 @@ export default function App() {
       }
       case "set_fast_mode": {
         const enabled = args.enabled === undefined ? true : Boolean(args.enabled);
-        handleThinkingLevelChange(enabled ? "low" : "medium");
+        if (!enabled) {
+          handleThinkingLevelChange("medium");
+          return;
+        }
+        const candidate = fastCandidateForProfile(activeProfile, selectableModelProfiles);
+        if (!candidate) {
+          setError("このモデルには fast 対応モデル/プロバイダーがありません。");
+          return;
+        }
+        if (profileIdentity(candidate) !== profileIdentity(activeProfile)) {
+          handleModelProfileSelect(candidate.profile_id);
+        }
+        if (candidate.supports_thinking) {
+          const levels = candidate.thinking_levels?.length ? candidate.thinking_levels : ["low", "medium", "high"];
+          if (levels.includes("low")) handleThinkingLevelChange("low");
+        }
+        return;
+      }
+      case "set_price_mode": {
+        const tier = String(args.tier ?? "low").trim().toLowerCase() === "high" ? "high" : "low";
+        const candidate = priceCandidateForProfile(activeProfile, selectableModelProfiles, tier);
+        if (!candidate) {
+          setError(`このモデルには price=${tier} の候補がありません。`);
+          return;
+        }
+        if (profileIdentity(candidate) !== profileIdentity(activeProfile)) {
+          handleModelProfileSelect(candidate.profile_id);
+        }
         return;
       }
       case "new_conversation":
@@ -1147,6 +1293,20 @@ export default function App() {
       case "open_permissions":
       case "open_theme_settings":
       case "open_keymap_settings":
+        if (action === "open_settings" && args.section) {
+          const requested = String(args.section).trim().toLowerCase();
+          const matchedSection = settingsSections.find((section) => (
+            section.id.toLowerCase() === requested
+            || section.label.toLowerCase() === requested
+          ));
+          setRequestedSettingsSectionId(matchedSection?.id ?? requested);
+        } else if (action === "open_permissions") {
+          setRequestedSettingsSectionId("permissions");
+        } else if (action === "open_theme_settings") {
+          setRequestedSettingsSectionId("theme");
+        } else if (action === "open_keymap_settings") {
+          setRequestedSettingsSectionId("keymap");
+        }
         setIsSettingsOpen(true);
         return;
       case "open_command_help":
@@ -1928,6 +2088,7 @@ export default function App() {
       {showRegion("settings_modal") && (
         <Renderers.settingsModal
           isOpen={isSettingsOpen}
+          activeSectionId={requestedSettingsSectionId}
           catalog={catalog}
           health={health}
           previewsCount={canvasPreviews.length}

@@ -307,9 +307,11 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
     def test_named_provider_api_key_can_be_saved_and_listed(self):
         from core_runtime.secrets_store import SecretsStore
         from domain.ai_client.api_key_store import (
+            delete_provider_api_key,
             named_provider_secret_key,
             provider_has_api_key,
             provider_named_api_keys,
+            rename_provider_api_key,
             read_provider_api_key,
             set_provider_api_key,
         )
@@ -331,7 +333,36 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
                 self.assertTrue(store.has_secret(key))
                 self.assertTrue(provider_has_api_key("google"))
                 self.assertEqual(read_provider_api_key("google", "main"), "google-main-secret")
-                self.assertEqual(provider_named_api_keys("google")[0]["api_id"], "main")
+                listed = provider_named_api_keys("google")
+                self.assertEqual(listed[0]["api_id"], "main")
+                self.assertEqual(listed[0]["name"], "Main")
+                self.assertEqual(listed[0]["label"], "google:main:***")
+
+                renamed = rename_provider_api_key("google", "main", "work")
+                self.assertTrue(renamed["success"])
+                self.assertEqual(provider_named_api_keys("google")[0]["api_id"], "work")
+                self.assertEqual(read_provider_api_key("google", "work"), "google-main-secret")
+
+                deleted = delete_provider_api_key("google", "work")
+                self.assertTrue(deleted["success"])
+                self.assertFalse(provider_has_api_key("google"))
+
+    def test_named_google_key_registers_runtime_without_cloud_flag(self):
+        from domain.ai_client.api_key_store import set_provider_api_key
+        from domain.ai_client.client import AIClient
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            secrets_dir = Path(tmpdir) / "secrets"
+            env = {
+                "RUMI_DEFAULTSPACK_SECRETS_DIR": str(secrets_dir),
+                "RUMI_DEFAULTSPACK_ENABLE_CLOUD_PROVIDERS": "",
+            }
+            with patch.dict(os.environ, env, clear=True):
+                set_provider_api_key("google", "google-main-secret", api_id="main", name="Main")
+                AIClient._instance = None
+                client = AIClient()
+
+                self.assertIn("google", client._active_provider_ids())
 
     def test_google_provider_loads_profile_models_from_user_data(self):
         from domain.ai_client.providers.google_provider import GoogleProvider

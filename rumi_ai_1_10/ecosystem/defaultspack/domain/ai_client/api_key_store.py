@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import json
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -39,6 +40,27 @@ def _secrets_dir(pack_root: Path | None = None) -> Path:
     if override:
         return Path(override)
     return (pack_root or _pack_root()) / "user_data" / "secrets"
+
+
+def _metadata_path(pack_root: Path | None = None) -> Path:
+    return _secrets_dir(pack_root) / "provider_api_keys.json"
+
+
+def _read_api_metadata(pack_root: Path | None = None) -> dict[str, dict[str, Any]]:
+    path = _metadata_path(pack_root)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(key): value for key, value in data.items() if isinstance(value, dict)}
+
+
+def _write_api_metadata(data: dict[str, dict[str, Any]], pack_root: Path | None = None) -> None:
+    path = _metadata_path(pack_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def _get_store(pack_root: Path | None = None):
@@ -98,6 +120,48 @@ def provider_secret_keys(provider_id: str) -> List[str]:
     return list(PROVIDER_SECRET_KEYS.get(str(provider_id or "").strip(), []))
 
 
+def _read_secret_value(key: str, caller_id: str, *, pack_root: Path | None = None) -> str:
+    value = os.environ.get(key, "").strip()
+    if value:
+        return value
+    return str(
+        _get_store(pack_root)._internal_read_value(
+            key,
+            caller_id=caller_id,
+        )
+        or ""
+    ).strip()
+
+
+def _refresh_provider_env(provider_id: str, *, pack_root: Path | None = None) -> bool:
+    provider_id = str(provider_id or "").strip()
+    keys = provider_secret_keys(provider_id)
+    for key in keys:
+        os.environ.pop(key, None)
+
+    configured = False
+    for key in keys:
+        value = _read_secret_value(key, f"defaultspack.ai_client:{provider_id}:legacy", pack_root=pack_root)
+        if value:
+            os.environ[key] = value
+            configured = True
+
+    if not configured:
+        canonical_key = provider_secret_key(provider_id)
+        for api_key in provider_named_api_keys(provider_id, pack_root=pack_root):
+            value = _read_secret_value(
+                str(api_key.get("key", "")),
+                f"defaultspack.ai_client:{provider_id}:{api_key.get('api_id')}",
+                pack_root=pack_root,
+            )
+            if value and canonical_key:
+                os.environ[canonical_key] = value
+                configured = True
+                break
+    _reset_ai_client()
+    return configured
+
+
 def provider_has_api_key(provider_id: str, *, pack_root: Path | None = None) -> bool:
     keys = provider_secret_keys(provider_id)
     for key in keys:
@@ -137,6 +201,11 @@ def set_provider_api_key(
         )
         os.environ.pop(key, None)
         if result.success:
+            if named:
+                metadata = _read_api_metadata(pack_root)
+                metadata.pop(key, None)
+                _write_api_metadata(metadata, pack_root)
+                _refresh_provider_env(provider_id, pack_root=pack_root)
             _reset_ai_client()
         return {
             "success": bool(result.success),
@@ -156,6 +225,14 @@ def set_provider_api_key(
         reason=f"set {provider_id} api key",
     )
     if result.success:
+        if named:
+            metadata = _read_api_metadata(pack_root)
+            metadata[key] = {
+                "provider_id": str(provider_id or "").strip(),
+                "api_id": normalized_api_id,
+                "name": display_name,
+            }
+            _write_api_metadata(metadata, pack_root)
         if not named:
             os.environ[key] = cleaned
         elif not os.environ.get(provider_secret_key(provider_id), "").strip():
@@ -172,6 +249,102 @@ def set_provider_api_key(
         "configured": bool(result.success),
         "created": bool(result.created),
         "error": result.error,
+    }
+
+
+def delete_provider_api_key(
+    provider_id: str,
+    api_id: str,
+    *,
+    pack_root: Path | None = None,
+) -> dict[str, Any]:
+    api_id = str(api_id or "").strip()
+    if not api_id:
+        return {"success": False, "provider_id": provider_id, "error": "api_id is required"}
+    return set_provider_api_key(provider_id, "", pack_root=pack_root, api_id=api_id)
+
+
+def rename_provider_api_key(
+    provider_id: str,
+    api_id: str,
+    name: str,
+    *,
+    pack_root: Path | None = None,
+    new_api_id: str | None = None,
+) -> dict[str, Any]:
+    provider_id = str(provider_id or "").strip()
+    api_id = str(api_id or "").strip()
+    display_name = str(name or new_api_id or api_id).strip()
+    target_api_id = str(new_api_id or name or api_id).strip()
+    if not provider_id or not api_id or not target_api_id:
+        return {"success": False, "provider_id": provider_id, "api_id": api_id, "error": "provider_id and api_id are required"}
+
+    old_key = named_provider_secret_key(provider_id, api_id=api_id)
+    new_key = named_provider_secret_key(provider_id, api_id=target_api_id)
+    metadata = _read_api_metadata(pack_root)
+    if old_key == new_key:
+        metadata[old_key] = {
+            "provider_id": provider_id,
+            "api_id": api_id,
+            "name": display_name,
+        }
+        _write_api_metadata(metadata, pack_root)
+        return {
+            "success": True,
+            "provider_id": provider_id,
+            "api_id": api_id,
+            "name": display_name,
+            "key": old_key,
+            "configured": True,
+            "renamed": True,
+        }
+
+    if _get_store(pack_root).has_secret(new_key):
+        return {"success": False, "provider_id": provider_id, "api_id": api_id, "error": "target api name already exists"}
+
+    value = _read_secret_value(
+        old_key,
+        f"defaultspack.ai_client:{provider_id}:{api_id}:rename",
+        pack_root=pack_root,
+    )
+    if not value:
+        return {"success": False, "provider_id": provider_id, "api_id": api_id, "error": "api key not found"}
+
+    saved = set_provider_api_key(
+        provider_id,
+        value,
+        pack_root=pack_root,
+        api_id=target_api_id,
+        name=display_name,
+    )
+    if not saved.get("success"):
+        return saved
+
+    deleted = _get_store(pack_root).delete_secret(
+        old_key,
+        actor="defaultspack",
+        reason=f"rename {provider_id} api key",
+    )
+    if deleted.success:
+        os.environ.pop(old_key, None)
+        metadata = _read_api_metadata(pack_root)
+        metadata.pop(old_key, None)
+        metadata[new_key] = {
+            "provider_id": provider_id,
+            "api_id": str(saved.get("api_id") or target_api_id),
+            "name": display_name,
+        }
+        _write_api_metadata(metadata, pack_root)
+        _refresh_provider_env(provider_id, pack_root=pack_root)
+    return {
+        "success": bool(deleted.success),
+        "provider_id": provider_id,
+        "api_id": str(saved.get("api_id") or target_api_id),
+        "name": display_name,
+        "key": new_key,
+        "configured": bool(deleted.success),
+        "renamed": bool(deleted.success),
+        "error": deleted.error,
     }
 
 
@@ -213,6 +386,7 @@ def provider_named_api_keys(provider_id: str = "", *, pack_root: Path | None = N
     if not _secrets_dir(pack_root).exists():
         return []
     store = _get_store(pack_root)
+    metadata = _read_api_metadata(pack_root)
     items: list[dict[str, Any]] = []
     for meta in store.list_keys():
         key = str(meta.key or "")
@@ -222,12 +396,15 @@ def provider_named_api_keys(provider_id: str = "", *, pack_root: Path | None = N
         if requested_provider and key_provider != requested_provider:
             continue
         api_id = _api_id_from_named_key(key, key_provider)
+        stored_meta = metadata.get(key, {})
+        display_name = str(stored_meta.get("name") or api_id.replace("_", " ").title())
         items.append(
             {
                 "api_id": api_id,
-                "name": api_id.replace("_", " ").title(),
+                "name": display_name,
                 "provider_id": key_provider,
                 "key": key,
+                "label": f"{key_provider}:{api_id}:***",
                 "configured": bool(meta.exists),
                 "created_at": meta.created_at,
                 "updated_at": meta.updated_at,

@@ -119,6 +119,7 @@ _CURATED_PROVIDER_METADATA: Dict[str, Dict[str, Any]] = {
         "catalog_only": True,
         "supports_invoke": False,
         "default_model": "llama-3.3-70b-versatile",
+        "default_model_for": {"fast": "llama-3.3-70b-versatile"},
         "capabilities": ["chat", "tool_calls"],
     },
     "mistral": {
@@ -509,6 +510,10 @@ def _merge_provider_entry(provider_id: str, manifest: Optional[Dict[str, Any]] =
         or curated.get("default_base_url")
         or ""
     ).strip()
+    default_model_for = manifest.get("default_model_for", {})
+    if not isinstance(default_model_for, dict):
+        default_model_for = {}
+    default_model_for = {**dict(curated.get("default_model_for", {})), **default_model_for}
     adapter = str(manifest.get("adapter", "")).strip()
     entrypoint = str(manifest.get("entrypoint", "")).strip()
     return {
@@ -521,6 +526,7 @@ def _merge_provider_entry(provider_id: str, manifest: Optional[Dict[str, Any]] =
         "env_vars": env_vars,
         "base_url_envs": base_url_envs,
         "default_model": default_model,
+        "default_model_for": {str(key): str(value) for key, value in default_model_for.items()},
         "default_base_url": default_base_url,
         "catalog_only": _provider_catalog_only(provider_id, manifest, curated),
         "supports_invoke_base": _provider_supports_invoke(provider_id, manifest, curated),
@@ -595,12 +601,14 @@ def get_provider_catalog(active_provider_ids=None):
                 "env_vars": list(entry.get("env_vars", [])),
                 "base_url_envs": list(entry.get("base_url_envs", [])),
                 "default_model": entry.get("default_model", ""),
+                "default_model_for": dict(entry.get("default_model_for", {})),
                 "capabilities": list(entry.get("capabilities", [])),
                 "availability": availability,
                 "metadata": {
                     "catalog_only": bool(entry.get("catalog_only", False)),
                     "supports_invoke": bool(entry.get("supports_invoke_base") or active),
                     "default_base_url": entry.get("default_base_url", ""),
+                    "default_model_for": dict(entry.get("default_model_for", {})),
                     "adapter": entry.get("adapter", ""),
                     "entrypoint": entry.get("entrypoint", ""),
                 },
