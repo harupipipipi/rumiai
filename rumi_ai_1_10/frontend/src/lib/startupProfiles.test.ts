@@ -25,6 +25,13 @@ const catalog: ApiStartupCatalog = {
       graphs: [{ graph_id: 'defaultspack.startup', display_name: { en: 'Startup' } }],
       nodes: [
         {
+          node_id: 'rumi.start',
+          kind: 'core.builtin',
+          component_id: 'start',
+          component_type: 'flow_start',
+          ports: [{ id: 'out', direction: 'output', standards: ['rumi.flow.start'] }],
+        },
+        {
           node_id: 'defaultspack.ai_client',
           kind: 'component',
           component_id: 'ai_client',
@@ -50,6 +57,13 @@ const catalog: ApiStartupCatalog = {
       approval_issues: [],
       graphs: [],
       nodes: [
+        {
+          node_id: 'rumi.start',
+          kind: 'core.builtin',
+          component_id: 'start',
+          component_type: 'flow_start',
+          ports: [{ id: 'out', direction: 'output', standards: ['rumi.flow.start'] }],
+        },
         {
           node_id: 'coolpack.ai_client',
           kind: 'component',
@@ -163,6 +177,30 @@ test('compatibleNodesForPort returns only output nodes matching target standards
   const profile = makeProfile('ready', 'Ready Profile', 30);
   const compatible = compatibleNodesForPort(catalog, profile, profile.graph_ports[0]);
   assert.deepEqual(compatible.map((node) => node.node_id), ['coolpack.ai_client', 'defaultspack.ai_client']);
+});
+
+test('buildStartupProfileView treats the core start node default as healthy', () => {
+  const profile = makeProfile('start-ready', 'Start Ready Profile', 40);
+  profile.graph_ports = [
+    {
+      port_key: 'agent.start',
+      node_id: 'agent',
+      port_id: 'start',
+      target_node_ref: 'defaultspack.agent',
+      target_port: { id: 'start', direction: 'input', standards: ['rumi.flow.start'] },
+      source_node_id: 'start',
+      source_node_ref: 'rumi.start',
+      source_port_id: 'out',
+      source_port: { id: 'out', direction: 'output', standards: ['rumi.flow.start'] },
+      source_ref: 'start.out',
+    },
+  ];
+
+  const view = buildStartupProfileView(profile, catalog, 'start-ready', null);
+
+  assert.equal(view.runtimeReady, true);
+  assert.equal(view.issueCount, 0);
+  assert.deepEqual(compatibleNodesForPort(catalog, profile, profile.graph_ports[0]).map((node) => node.node_id), ['rumi.start']);
 });
 
 test('filterAndSortStartupProfiles prefers active and ready profiles for recommended view', () => {

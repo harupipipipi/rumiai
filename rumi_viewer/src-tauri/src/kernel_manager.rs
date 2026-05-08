@@ -661,6 +661,28 @@ mod tests {
     }
 
     #[test]
+    fn restart_exit_code_requests_restart_without_child() {
+        let config = test_config();
+        let mut km = KernelManager::new(&config, "test-bootstrap".into());
+        km.last_exit_code = Some(RESTART_EXIT_CODE);
+
+        let result = km.wait_and_handle_restart().unwrap();
+
+        assert!(result);
+    }
+
+    #[test]
+    fn clean_exit_does_not_request_restart_without_child() {
+        let config = test_config();
+        let mut km = KernelManager::new(&config, "test-bootstrap".into());
+        km.last_exit_code = Some(0);
+
+        let result = km.wait_and_handle_restart().unwrap();
+
+        assert!(!result);
+    }
+
+    #[test]
     fn explicit_auto_approve_opt_in_is_required() {
         let _guard = env_lock().lock().unwrap();
         std::env::remove_var("RUMI_AUTO_APPROVE_LOCAL");

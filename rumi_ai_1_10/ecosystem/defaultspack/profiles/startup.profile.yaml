@@ -13,12 +13,14 @@ description:
 
 default_graph: defaultspack.startup
 default_flow: defaultspack.compile_coding_workspace
+capability_profile_id: defaultspack.startup
+launch_capability_graph: true
 
 surfaces:
-  preferred: cli
+  preferred: browser
   enabled:
+    - browser
     - cli
-    - desktop
 
 permissions:
   can_add_nodes: true

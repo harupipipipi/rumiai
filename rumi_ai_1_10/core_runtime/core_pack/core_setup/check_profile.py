@@ -12,7 +12,15 @@ Kernel の _h_exec_python から呼ばれる。
 """
 
 import json
+import os
 from pathlib import Path
+
+
+def _profile_path(base_dir):
+    user_data_dir = os.environ.get("RUMI_USER_DATA")
+    if user_data_dir:
+        return Path(user_data_dir) / "settings" / "profile.json"
+    return base_dir / "user_data" / "settings" / "profile.json"
 
 
 def check_profile(base_dir=None):
@@ -31,7 +39,7 @@ def check_profile(base_dir=None):
         # -> parent x4 = rumi_ai_1_10/
         base_dir = Path(__file__).resolve().parent.parent.parent.parent
 
-    profile_path = base_dir / "user_data" / "settings" / "profile.json"
+    profile_path = _profile_path(base_dir)
 
     if not profile_path.exists():
         return {"needs_setup": True, "reason": "profile_not_found"}

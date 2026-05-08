@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import importlib
+import os
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, List
@@ -176,6 +177,10 @@ class KernelSystemHandlersMixin:
 
     def _h_active_ecosystem_load(self, args: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
         config_file = str(args.get("config_file", "user_data/active_ecosystem.json"))
+        user_data_dir = os.environ.get("RUMI_USER_DATA")
+        config_path = Path(config_file)
+        if user_data_dir and not config_path.is_absolute() and config_path.parts[:1] == ("user_data",):
+            config_file = str(Path(user_data_dir).joinpath(*config_path.parts[1:]))
         try:
             import backend_core.ecosystem.active_ecosystem as amod
             from backend_core.ecosystem.active_ecosystem import ActiveEcosystemManager

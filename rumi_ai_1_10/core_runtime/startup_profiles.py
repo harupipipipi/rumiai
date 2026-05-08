@@ -3,12 +3,14 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import os
 import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .paths import discover_pack_locations
+from .node_models import make_core_start_node
 from .port_standards import can_connect_ports as _can_connect_standard_ports
 
 logger = logging.getLogger(__name__)
@@ -72,12 +74,15 @@ class StartupProfileManager:
         interface_registry: Any = None,
         approval_manager: Any = None,
         ecosystem_dir: Optional[str] = None,
+        seed_default_profile: Optional[bool] = None,
     ) -> None:
         base_dir = Path(__file__).resolve().parent.parent
-        self._storage_path = storage_path or (base_dir / "user_data" / "settings" / "startup_profiles.json")
+        user_data_dir = Path(os.environ.get("RUMI_USER_DATA") or (base_dir / "user_data"))
+        self._storage_path = storage_path or (user_data_dir / "settings" / "startup_profiles.json")
         self.interface_registry = interface_registry
         self.approval_manager = approval_manager
         self.ecosystem_dir = ecosystem_dir
+        self.seed_default_profile = storage_path is None if seed_default_profile is None else seed_default_profile
 
     @property
     def storage_path(self) -> Path:
@@ -411,12 +416,69 @@ class StartupProfileManager:
         tmp_path.replace(path)
 
     def _default_state(self, catalog: Dict[str, Any]) -> Dict[str, Any]:
+        default_profile = self._default_startup_profile(catalog) if self.seed_default_profile else None
+        if default_profile:
+            return {
+                "version": PROFILE_VERSION,
+                "active_profile_id": default_profile["profile_id"],
+                "last_launched_profile_id": None,
+                "profiles": [default_profile],
+            }
         return {
             "version": PROFILE_VERSION,
             "active_profile_id": None,
             "last_launched_profile_id": None,
             "profiles": [],
         }
+
+    def _default_startup_profile(self, catalog: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        preferred_pack_ids = ("defaultspack", "defaults")
+        packs = list(catalog.get("packs", []))
+        ordered_packs = [
+            pack
+            for preferred in preferred_pack_ids
+            for pack in packs
+            if pack.get("pack_id") == preferred
+        ]
+        ordered_packs.extend(
+            pack
+            for pack in packs
+            if pack.get("pack_id") not in preferred_pack_ids
+        )
+
+        for pack_info in ordered_packs:
+            base_pack = str(pack_info.get("pack_id") or "").strip()
+            if not base_pack:
+                continue
+            graph_id = self._default_graph_for_pack(base_pack, catalog)
+            graph_ports = self._extract_graph_ports(graph_id, base_pack, catalog) if graph_id else []
+            if not graph_id or not graph_ports:
+                continue
+            created_at = _now_ts()
+            return {
+                "version": PROFILE_VERSION,
+                "profile_id": "default-profile",
+                "name": "Default Profile",
+                "base_pack": base_pack,
+                "graph_id": graph_id,
+                "graph_ports": graph_ports,
+                "packs": [base_pack],
+                "node_overrides": {},
+                "created_at": created_at,
+                "updated_at": created_at,
+                **self._runtime_profile_fields(
+                    "default-profile",
+                    {
+                        "name": "Default Profile",
+                        "display_name": {"en": "Default Profile", "ja": "Default Profile"},
+                        "default_graph": graph_id,
+                        "capability_profile_id": graph_id,
+                        "launch_capability_graph": True,
+                        "surfaces": {"preferred": "browser", "enabled": ["browser", "cli"]},
+                    },
+                ),
+            }
+        return None
 
     def _normalize_state(self, state: Dict[str, Any], catalog: Dict[str, Any]) -> Dict[str, Any]:
         profiles = state.get("profiles")
@@ -434,6 +496,7 @@ class StartupProfileManager:
                 normalized["profile_id"] = profile_id
             else:
                 normalized = self._migrate_profile(profile_id, raw_profile, catalog)
+            normalized = self._normalize_default_profile_launch_fields(normalized)
             normalized["name"] = str(raw_profile.get("name") or normalized.get("name") or profile_id)
             normalized["created_at"] = int(raw_profile.get("created_at") or _now_ts())
             normalized["updated_at"] = int(raw_profile.get("updated_at") or normalized["created_at"])
@@ -510,6 +573,32 @@ class StartupProfileManager:
             "node_overrides": node_overrides,
             **runtime,
         }
+
+    def _normalize_default_profile_launch_fields(self, profile: Dict[str, Any]) -> Dict[str, Any]:
+        if (
+            profile.get("profile_id") != "default-profile"
+            or profile.get("base_pack") != "defaultspack"
+            or profile.get("graph_id") != "defaultspack.startup"
+        ):
+            return profile
+
+        normalized = copy.deepcopy(profile)
+        normalized["default_graph"] = normalized.get("default_graph") or "defaultspack.startup"
+        normalized["capability_profile_id"] = (
+            normalized.get("capability_profile_id") or "defaultspack.startup"
+        )
+        normalized["launch_capability_graph"] = True
+
+        surfaces = normalized.get("surfaces")
+        legacy_default = surfaces in (
+            None,
+            {},
+            {"preferred": "desktop", "enabled": ["desktop", "cli"]},
+            {"preferred": "desktop", "enabled": ["cli", "desktop"]},
+        )
+        if legacy_default:
+            normalized["surfaces"] = {"preferred": "browser", "enabled": ["browser", "cli"]}
+        return normalized
 
     def _default_graph_for_pack(self, pack_id: str, catalog: Dict[str, Any]) -> str:
         for pack_info in catalog.get("packs", []):
@@ -602,9 +691,9 @@ class StartupProfileManager:
         if not pack_subdir:
             return []
         nodes_dir = Path(pack_subdir) / "nodes"
+        result: List[Dict[str, Any]] = self._core_builtin_nodes_for_pack(pack_id)
         if not nodes_dir.is_dir():
-            return []
-        result: List[Dict[str, Any]] = []
+            return result
         for f in sorted(nodes_dir.glob("*.node.json")):
             try:
                 data = json.loads(f.read_text(encoding="utf-8"))
@@ -626,6 +715,25 @@ class StartupProfileManager:
             except Exception:
                 logger.debug("Failed to load node %s", f, exc_info=True)
         return result
+
+    def _core_builtin_nodes_for_pack(self, pack_id: str) -> List[Dict[str, Any]]:
+        start_node = make_core_start_node()
+        node = start_node.to_dict()
+        metadata = dict(node.get("metadata") or {})
+        metadata.setdefault("pack_id", pack_id)
+        metadata["available_in_pack"] = pack_id
+        node["metadata"] = metadata
+        return [
+            {
+                "node_id": start_node.node_id,
+                "kind": start_node.kind,
+                "component_id": start_node.node_id.rsplit(".", 1)[-1],
+                "component_type": "flow_start",
+                "metadata": metadata,
+                "display_name": dict(start_node.display_name),
+                "ports": [port.to_dict() for port in start_node.ports],
+            }
+        ]
 
     # ------------------------------------------------------------------
     # Port extraction from graphs
@@ -970,8 +1078,12 @@ class StartupProfileManager:
         active.set_metadata("startup_graph_id", profile.get("graph_id", ""))
         active.set_metadata("startup_packs", list(profile.get("packs", [])))
         active.set_metadata("startup_node_overrides", dict(profile.get("node_overrides", {})))
+        active.set_metadata("startup_profile_surfaces", dict(profile.get("surfaces", {})))
         active.set_metadata("startup_launched", bool(launched))
         active.set_metadata("startup_launch_requested_at", _now_ts() if launched else None)
+        active.set_metadata("startup_surface_open_pending", bool(launched))
+        if launched:
+            active.set_metadata("startup_surface_open_result", None)
 
         runtime_bindings = self._resolve_runtime_component_bindings(profile, catalog)
         active.set_metadata("startup_port_resolutions", runtime_bindings["port_resolutions"])
@@ -1173,7 +1285,7 @@ class StartupProfileManager:
 
         surfaces = payload.get("surfaces")
         if not isinstance(surfaces, dict):
-            surfaces = {"preferred": "desktop", "enabled": ["desktop", "cli"]}
+            surfaces = {"preferred": "browser", "enabled": ["browser", "cli"]}
         node_settings = payload.get("node_settings")
         policy = payload.get("policy")
         permissions = payload.get("permissions")

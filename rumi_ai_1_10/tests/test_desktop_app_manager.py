@@ -97,6 +97,29 @@ class TestLaunchAppArguments:
         assert env is not None
         assert env.get("RUMI_API_TOKEN") == "secret-token-xyz"
 
+    @mock.patch("subprocess.Popen")
+    @mock.patch("os.path.isfile", return_value=True)
+    def test_launch_app_with_env_overrides_pack_env(
+        self, mock_isfile, mock_popen, manager, sample_meta
+    ):
+        mock_proc = mock.MagicMock()
+        mock_proc.poll.return_value = None
+        mock_proc.pid = 12345
+        mock_popen.return_value = mock_proc
+
+        manager._load_meta = mock.MagicMock(return_value=sample_meta)
+
+        result = manager.launch_app_with_env(
+            "test-pack-001",
+            api_token="issued-token",
+            env_overrides={"CUSTOM_VAR": "override", "RUMI_DEFAULTSPACK_SURFACE": "browser"},
+        )
+
+        assert result["success"] is True
+        env = mock_popen.call_args.kwargs["env"]
+        assert env["CUSTOM_VAR"] == "override"
+        assert env["RUMI_DEFAULTSPACK_SURFACE"] == "browser"
+
     @mock.patch("os.path.isfile", return_value=True)
     def test_launch_app_errors_when_command_is_empty(
         self, mock_isfile, manager, sample_meta

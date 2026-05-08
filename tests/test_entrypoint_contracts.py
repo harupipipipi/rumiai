@@ -28,3 +28,14 @@ def test_version_contract_matches_package_version():
     assert init_match, "rumi_ai.__version__ not found"
     assert pyproject_match, "project.version in pyproject.toml not found"
     assert init_match.group(1) == pyproject_match.group(1)
+
+
+def test_control_panel_bundle_uses_v3_startup_profile_contract():
+    web_root = ROOT / "rumi_ai_1_10" / "core_runtime" / "core_pack" / "core_control_panel" / "web"
+    scripts = list((web_root / "assets").glob("*.js"))
+
+    assert scripts, "control panel web bundle is missing"
+
+    bundle_text = "\n".join(_read(script) for script in scripts)
+    assert "base_pack" in bundle_text
+    assert "standard_pack_id" not in bundle_text
