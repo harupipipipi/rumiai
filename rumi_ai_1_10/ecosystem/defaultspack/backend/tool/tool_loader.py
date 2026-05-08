@@ -4,6 +4,9 @@ from pathlib import Path
 
 from backend_core.ecosystem import compat
 
+# DEPRECATED: legacy import compatibility only.
+# New code must use defaultspack tool registries/functions.
+
 
 class ToolLoader:
     """Compatibility shim when the defaultspack backend shadows the legacy tool package."""
