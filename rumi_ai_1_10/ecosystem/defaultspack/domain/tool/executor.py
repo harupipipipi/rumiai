@@ -1,6 +1,7 @@
 from .registry import ToolRegistry
 from .mcp_client import McpClient
 from .schema_adapter import is_tool_rejected_by_policy, policy_from_context
+from domain.tool_policy.internal_context import internal_tool_decision_allows
 from pathlib import Path
 import json
 
@@ -142,6 +143,9 @@ class ToolExecutor:
             "qualified_name": qualified_name,
             "args": arguments or {},
         }
+        if isinstance(context, dict) and context.get("request_id"):
+            request["request_id"] = context.get("request_id")
+        self._ensure_shared_function_registered(qualified_name)
         return self._execute_capability_request(tool_def, request, context)
 
     def _execute_capability(self, tool_def, arguments, context):
@@ -165,37 +169,21 @@ class ToolExecutor:
         return self._execute_capability_request(tool_def, request, context)
 
     def _execute_capability_request(self, tool_def, request, context):
-        try:
-            from core_runtime.di_container import get_container
-        except Exception as exc:
-            return {
-                "result": "Capability runtime is not available: {}".format(exc),
-                "is_error": True,
-                "widget": None,
-            }
         principal_id = self._principal_id(tool_def, context)
         try:
-            container = get_container()
-            executor = None
-            if isinstance(context, dict):
-                executor = context.get("capability_executor")
-            if executor is None:
-                if request.get("type") == "function.call":
-                    try:
-                        from domain.function_runtime.bridge import ensure_defaultspack_functions_registered
-
-                        ensure_defaultspack_functions_registered(container)
-                    except Exception:
-                        pass
-                executor = container.get_or_none("capability_executor")
-            if executor is None:
-                from core_runtime.capability_executor import get_capability_executor
-
-                executor = get_capability_executor()
+            executor = self._capability_executor(context)
             response = executor.execute(principal_id, request)
-            fallback = self._local_tool_fallback_for_capability_response(response, request)
-            if fallback:
-                return self._execute_local(fallback, request.get("args") or {}, context)
+            fallback = self._fallback_function_call_if_first_party_unapproved(
+                tool_def,
+                request,
+                context,
+                response,
+            )
+            if fallback is not None:
+                return fallback
+            fallback_tool = self._local_tool_fallback_for_capability_response(response, request)
+            if fallback_tool:
+                return self._execute_local(fallback_tool, request.get("args") or {}, context)
         except Exception as exc:
             return {
                 "result": "Capability execution failed: {}".format(exc),
@@ -221,6 +209,131 @@ class ToolExecutor:
             "defaultspack:tool_todo": "todo",
             "defaultspack:tool_subagent": "subagent",
         }.get(qualified_name)
+
+    @staticmethod
+    def _fallback_function_call_if_first_party_unapproved(tool_def, request, context, response):
+        if request.get("type") != "function.call":
+            return None
+        if bool(getattr(response, "success", False)):
+            return None
+        if getattr(response, "error_type", "") != "pack_not_approved":
+            return None
+        qualified_name = str(request.get("qualified_name") or "")
+        pack_id, _, function_id = qualified_name.partition(":")
+        if pack_id not in {"defaultspack", "rumi_default_tools_pack"} or not function_id:
+            return None
+        try:
+            from core_runtime.pack_function_runtime import invoke_pack_function
+
+            output = invoke_pack_function(
+                pack_id,
+                function_id,
+                args=request.get("args") or {},
+                context=context if isinstance(context, dict) else {},
+            )
+        except Exception:
+            return None
+        return ToolExecutor._tool_response_from_pack_function_output(output)
+
+    @staticmethod
+    def _tool_response_from_pack_function_output(output):
+        if isinstance(output, dict) and output.get("status") in {"ok", "error"}:
+            if output.get("status") == "error":
+                error_payload = output.get("error")
+                if isinstance(error_payload, dict):
+                    message = error_payload.get("message") or error_payload.get("code")
+                else:
+                    message = error_payload
+                return {
+                    "result": str(message or "Pack function failed"),
+                    "is_error": True,
+                    "widget": None,
+                }
+            output = output.get("data")
+        if isinstance(output, dict):
+            if "result" in output or "is_error" in output or "widget" in output:
+                return {
+                    "result": output.get("result", output.get("summary", "")),
+                    "is_error": bool(output.get("is_error", False)),
+                    "widget": output.get("widget"),
+                }
+            return {
+                "result": json_dumps(output),
+                "is_error": False,
+                "widget": output,
+            }
+        return {"result": "" if output is None else str(output), "is_error": False, "widget": None}
+
+    @staticmethod
+    def _capability_executor(context):
+        if isinstance(context, dict):
+            for key in ("capability_executor", "_capability_executor"):
+                executor = context.get(key)
+                if executor is not None and callable(getattr(executor, "execute", None)):
+                    return executor
+        try:
+            from core_runtime.di_container import get_container
+
+            executor = get_container().get_or_none("capability_executor")
+            if executor is not None and callable(getattr(executor, "execute", None)):
+                return executor
+        except Exception:
+            pass
+        try:
+            from core_runtime.capability_executor import CapabilityExecutor
+        except Exception as exc:
+            raise RuntimeError("CapabilityExecutor is not available: {}".format(exc)) from exc
+        return CapabilityExecutor()
+
+    @staticmethod
+    def _ensure_shared_function_registered(qualified_name):
+        try:
+            from core_runtime.di_container import get_container
+
+            registry = get_container().get("function_registry")
+        except Exception:
+            return
+        try:
+            if registry.get(qualified_name) is not None:
+                return
+        except Exception:
+            return
+        ToolExecutor._load_pack_functions_into_registry(registry)
+
+    @staticmethod
+    def _load_pack_functions_into_registry(registry):
+        ecosystem_dir = Path(__file__).resolve().parents[3]
+        for pack_root in sorted(ecosystem_dir.iterdir()):
+            if not pack_root.is_dir() or not (pack_root / "ecosystem.json").exists():
+                continue
+            try:
+                pack_manifest = json.loads((pack_root / "ecosystem.json").read_text(encoding="utf-8"))
+            except Exception:
+                pack_manifest = {}
+            pack_id = str(pack_manifest.get("pack_id") or pack_root.name).strip() or pack_root.name
+            functions_root = pack_root / "functions"
+            if not functions_root.exists():
+                continue
+            for function_dir in sorted(path for path in functions_root.iterdir() if path.is_dir()):
+                manifest_path = function_dir / "manifest.json"
+                if not manifest_path.is_file():
+                    continue
+                try:
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                function_id = str(manifest.get("function_id") or function_dir.name).strip()
+                if not function_id:
+                    continue
+                try:
+                    registry.register(
+                        pack_id=pack_id,
+                        function_id=function_id,
+                        manifest=manifest,
+                        function_dir=function_dir,
+                    )
+                except Exception:
+                    continue
 
     @staticmethod
     def _principal_id(tool_def, context):
@@ -638,7 +751,4 @@ def _is_shell_or_git(tool_def):
 
 
 def _is_policy_allow_context(context):
-    if not isinstance(context, dict):
-        return False
-    decision = context.get("_tool_permission_decision")
-    return isinstance(decision, dict) and decision.get("action") == "allow" and bool(decision.get("allowed"))
+    return internal_tool_decision_allows(context)

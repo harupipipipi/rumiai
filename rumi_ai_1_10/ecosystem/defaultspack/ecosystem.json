@@ -19,7 +19,10 @@
       "artifact",
       "research",
       "project",
-      "compact"
+      "compact",
+      "context",
+      "scheduler",
+      "gateway"
     ]
   },
   "components": {
@@ -226,7 +229,40 @@
           "defaults.memory.vector_store",
           "defaultspack.memory.vector_store",
           "defaults.memory.vector_query",
-          "defaultspack.memory.vector_query"
+          "defaultspack.memory.vector_query",
+          "defaults.memory.add",
+          "defaultspack.memory.add",
+          "defaults.memory.search",
+          "defaultspack.memory.search",
+          "defaults.memory.get",
+          "defaultspack.memory.get",
+          "defaults.memory.update",
+          "defaultspack.memory.update",
+          "defaults.memory.delete",
+          "defaultspack.memory.delete",
+          "defaults.memory.flush",
+          "defaultspack.memory.flush",
+          "defaults.memory.status",
+          "defaultspack.memory.status"
+        ]
+      }
+    },
+    "context": {
+      "type": "context",
+      "id": "context",
+      "path": "blocks/context",
+      "connectivity": {
+        "provides": [
+          "defaults.context.compact",
+          "defaultspack.context.compact",
+          "defaults.context.restore",
+          "defaultspack.context.restore",
+          "defaults.context.token_estimate",
+          "defaultspack.context.token_estimate",
+          "defaults.context.system",
+          "defaultspack.context.system",
+          "defaults.context.conversation",
+          "defaultspack.context.conversation"
         ]
       }
     },
@@ -352,6 +388,52 @@
           "defaultspack.dev.replay"
         ]
       }
+    },
+    "scheduler": {
+      "type": "agent",
+      "id": "scheduler",
+      "path": "blocks/scheduler",
+      "connectivity": {
+        "provides": [
+          "defaults.scheduler.create",
+          "defaultspack.scheduler.create",
+          "defaults.scheduler.list",
+          "defaultspack.scheduler.list",
+          "defaults.scheduler.update",
+          "defaultspack.scheduler.update",
+          "defaults.scheduler.delete",
+          "defaultspack.scheduler.delete",
+          "defaults.scheduler.pause",
+          "defaultspack.scheduler.pause",
+          "defaults.scheduler.resume",
+          "defaultspack.scheduler.resume",
+          "defaults.scheduler.run_now",
+          "defaultspack.scheduler.run_now",
+          "defaults.scheduler.tick",
+          "defaultspack.scheduler.tick",
+          "defaults.scheduler.status",
+          "defaultspack.scheduler.status"
+        ]
+      }
+    },
+    "gateway": {
+      "type": "frontend",
+      "id": "gateway",
+      "path": "blocks/gateway",
+      "connectivity": {
+        "provides": [
+          "defaults.gateway.start",
+          "defaultspack.gateway.start",
+          "defaults.gateway.stop",
+          "defaultspack.gateway.stop",
+          "defaults.gateway.status",
+          "defaultspack.gateway.status",
+          "defaults.gateway.send",
+          "defaultspack.gateway.send",
+          "defaults.gateway.pairing",
+          "defaultspack.gateway.pairing"
+        ]
+      }
     }
   },
   "load_order": [
@@ -361,12 +443,15 @@
     "artifact:artifact",
     "artifact:share",
     "prompt:prompt",
+    "context:context",
     "media:media",
     "ai_client:ai_client",
     "tool:tool",
     "coding:coding",
     "chat:chat",
     "agent:agent",
+    "scheduler:scheduler",
+    "gateway:gateway",
     "dev:dev",
     "frontend:frontend"
   ],

@@ -15,6 +15,7 @@ for _path in (str(_PACK_ROOT), str(_DEFAULTSPACK_ROOT)):
         sys.path.insert(0, _path)
 
 from blocks._common import ok, error
+from domain.tool_policy.internal_context import internal_tool_decision_allows
 
 
 SAFE_MUTATION_PREFIXES = {
@@ -121,11 +122,9 @@ def _mutation_allowed(path: str, arguments: dict[str, Any], context: dict[str, A
     if not any(path.startswith(prefix) for prefix in SAFE_MUTATION_PREFIXES):
         return False
     policy = context.get("profile_policy") if isinstance(context.get("profile_policy"), dict) else {}
-    decision = context.get("_tool_permission_decision") if isinstance(context.get("_tool_permission_decision"), dict) else {}
     return (
         bool(policy.get("yolo_mode"))
-        or bool(context.get("_tool_server_approved"))
-        or (decision.get("action") == "allow" and bool(decision.get("allowed")))
+        or internal_tool_decision_allows(context)
     )
 
 

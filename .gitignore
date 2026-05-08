@@ -42,3 +42,5 @@ flow.iranai
 deploy.py
 **/target/
 rumi_ai_1_10/user_data/
+rumi_ai_1_10/ecosystem/defaultspack/user_data/
+rumi_ai_1_10/ecosystem/rumi_default_tools_pack/user_data/

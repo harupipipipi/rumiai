@@ -57,7 +57,7 @@ def filter_tool_definitions_for_runtime_profile(
         agent_id,
         normalized,
     )
-    policy = _policy_from_runtime_profile(runtime_profile)
+    policy = policy_from_context({"runtime_profile": runtime_profile} if runtime_profile else {})
     if enforced is None:
         return [
             tool for tool in normalized
@@ -204,11 +204,16 @@ def tool_requires_approval_by_policy(tool: Any, policy: Optional[Dict[str, Any]]
 
 
 def policy_from_context(context: Dict[str, Any]) -> Dict[str, Any]:
-    policy = context.get("profile_policy")
-    if isinstance(policy, dict):
-        return policy
-    runtime_profile = context.get("runtime_profile")
-    return _policy_from_runtime_profile(runtime_profile)
+    try:
+        from domain.runtime_config import merged_tool_policy
+
+        return merged_tool_policy(context)
+    except Exception:
+        policy = context.get("profile_policy")
+        if isinstance(policy, dict):
+            return policy
+        runtime_profile = context.get("runtime_profile")
+        return _policy_from_runtime_profile(runtime_profile)
 
 
 def _policy_from_runtime_profile(runtime_profile: Any) -> Dict[str, Any]:

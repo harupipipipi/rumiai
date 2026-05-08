@@ -1,0 +1,42 @@
+from __future__ import annotations
+
+from typing import Any
+
+
+SENSITIVE_TOOL_CONTEXT_KEYS = {
+    "approval_granted",
+    "_agent_approval_granted",
+    "tool_policy_decision",
+    "_tool_permission_decision",
+    "_tool_permission_internal",
+}
+
+_INTERNAL_TOOL_PERMISSION = object()
+
+
+def sanitize_tool_context(context: dict[str, Any] | None) -> dict[str, Any]:
+    clean = dict(context or {}) if isinstance(context, dict) else {}
+    for key in SENSITIVE_TOOL_CONTEXT_KEYS:
+        clean.pop(key, None)
+    return clean
+
+
+def seal_tool_context(context: dict[str, Any] | None, decision: dict[str, Any]) -> dict[str, Any]:
+    sealed = sanitize_tool_context(context)
+    sealed["_tool_permission_decision"] = dict(decision or {})
+    sealed["_tool_permission_internal"] = _INTERNAL_TOOL_PERMISSION
+    return sealed
+
+
+def internal_tool_decision(context: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(context, dict):
+        return None
+    if context.get("_tool_permission_internal") is not _INTERNAL_TOOL_PERMISSION:
+        return None
+    decision = context.get("_tool_permission_decision")
+    return dict(decision) if isinstance(decision, dict) else None
+
+
+def internal_tool_decision_allows(context: dict[str, Any] | None) -> bool:
+    decision = internal_tool_decision(context)
+    return bool(decision and decision.get("action") == "allow" and decision.get("allowed"))

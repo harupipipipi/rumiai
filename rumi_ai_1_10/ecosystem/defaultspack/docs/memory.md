@@ -177,3 +177,31 @@ input_data:
   "collection": "default"
 }
 ```
+
+
+## 6. Memory2 durable backend
+
+このPRでは `domain/memory2` を追加し、既存 `MemoryStore` APIを壊さずにSQLite + Markdownへミラーする。
+
+追加保存先:
+
+```text
+user_data/shared/memory/state.db
+user_data/shared/memory/MEMORY.md
+user_data/shared/memory/USER.md
+user_data/shared/memory/daily/YYYY-MM-DD.md
+user_data/shared/memory/DREAMS.md
+user_data/shared/memory/wiki/
+```
+
+追加blocks:
+
+```text
+defaults.memory.add
+defaults.memory.search
+defaults.memory.get
+defaults.memory.update
+defaults.memory.delete
+defaults.memory.flush
+defaults.memory.status
+```
