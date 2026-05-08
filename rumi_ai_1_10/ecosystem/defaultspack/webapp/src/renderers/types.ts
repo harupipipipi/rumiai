@@ -145,6 +145,7 @@ export type RightSidebarRendererProps = {
   onSettingChange: SettingChangeHandler;
   onOpenSettings: () => void;
   onToolToggle?: (item: SidebarItem) => void;
+  onToolBatchSet?: (toolIds: string[], enabled: boolean) => void;
   onPanelAction?: (item: SidebarItem, action: SidebarAction) => void;
 };
 

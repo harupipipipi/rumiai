@@ -92,7 +92,7 @@ _CURATED_PROVIDER_METADATA: Dict[str, Dict[str, Any]] = {
         "display_name": "Google",
         "kind": "cloud",
         "description": "Google Gemini and multimodal APIs.",
-        "env_vars": ["GOOGLE_API_KEY", "GEMINI_API_KEY", "GOOGLE_APPLICATION_CREDENTIALS"],
+        "env_vars": ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
         "base_url_envs": ["GOOGLE_BASE_URL"],
         "catalog_only": False,
         "supports_invoke": True,

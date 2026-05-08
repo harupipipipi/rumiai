@@ -1454,6 +1454,17 @@ export default function App() {
     setDroppedWidgets((prev) => prev.map((w) => (w.id === widgetId ? { ...w, enabled: !w.enabled } : w)));
   };
 
+  const handleToolBatchSet = (toolIds: string[], enabled: boolean) => {
+    const validIds = new Set(composerExtensions.map((tool) => tool.id));
+    const requestedIds = [...new Set(toolIds.filter((toolId) => validIds.has(toolId)))];
+    if (requestedIds.length === 0) return;
+    setStoredSelectedToolIds((current) => {
+      if (enabled) return [...new Set([...current, ...requestedIds])];
+      const requestedIdSet = new Set(requestedIds);
+      return current.filter((toolId) => !requestedIdSet.has(toolId));
+    });
+  };
+
   const handleComposerEndpointAction = async (widget: DroppedWidget, action: Extract<ComposerWidgetAction, { type: "call_endpoint" }>) => {
     if (!canExecuteComposerEndpointAction(action)) {
       setError("この widget action は安全な /api/ endpoint ではないか、承認が必要なため直接実行できません。");
@@ -2082,6 +2093,7 @@ export default function App() {
               tags: item.tags ?? [],
               ui: item.ui,
             })}
+            onToolBatchSet={handleToolBatchSet}
             onPanelAction={handlePanelAction}
           />
         )}

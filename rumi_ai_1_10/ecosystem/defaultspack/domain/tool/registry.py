@@ -146,6 +146,17 @@ class ToolRegistry:
             ui = {}
         execution = dict(config.get("execution", {}))
         handler = str(config.get("handler", "")).strip()
+        write_action = bool(config.get("write_action", False))
+        requires_approval = bool(config.get("requires_approval", False))
+        action_type = str(config.get("action_type", "")).strip()
+        risk = str(config.get("risk", manifest.get("risk", "")) or "").strip().lower()
+        if not risk:
+            risk = "high" if write_action or requires_approval or action_type in {"write", "execute", "delete"} else "low"
+        if risk not in {"low", "medium", "high"}:
+            risk = "low"
+        tags = list(config.get("tags", manifest.get("tags", [])) or [])
+        if risk == "high" and "danger" not in tags:
+            tags.append("danger")
         if not execution:
             execution = {"type": "local"}
         if handler and "handler" not in execution:
@@ -154,7 +165,8 @@ class ToolRegistry:
             "tool_id": tool_id,
             "name": str(config.get("name", tool_id)),
             "summary": str(config.get("summary", manifest.get("description", ""))),
-            "tags": list(config.get("tags", [])),
+            "tags": tags,
+            "risk": risk,
             "schema": dict(
                 config.get(
                     "schema",
@@ -169,18 +181,19 @@ class ToolRegistry:
             ),
             "execution": execution,
             "category": str(config.get("tool_category", config.get("category", ""))),
-            "action_type": str(config.get("action_type", "")),
-            "write_action": bool(config.get("write_action", False)),
-            "requires_approval": bool(config.get("requires_approval", False)),
+            "action_type": action_type,
+            "write_action": write_action,
+            "requires_approval": requires_approval,
             "ui": dict(ui),
             "metadata": {
                 "source": "extension",
                 "manifest_path": manifest.get("source_path", ""),
                 "source_pack_id": manifest.get("source_pack_id", ""),
                 "category": str(config.get("tool_category", config.get("category", ""))),
-                "action_type": str(config.get("action_type", "")),
-                "write_action": bool(config.get("write_action", False)),
-                "requires_approval": bool(config.get("requires_approval", False)),
+                "action_type": action_type,
+                "write_action": write_action,
+                "requires_approval": requires_approval,
+                "risk": risk,
             },
         }
 

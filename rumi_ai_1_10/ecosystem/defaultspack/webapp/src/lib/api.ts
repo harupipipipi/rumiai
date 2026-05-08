@@ -239,6 +239,7 @@ export type SidebarItem = {
   description?: string;
   badge?: string | null;
   tags?: string[];
+  risk?: "low" | "medium" | "high" | string | null;
   ui?: ToolUiMetadata;
   origin?: {
     kind: string;

@@ -350,6 +350,10 @@ class FrontendRegistry:
             schema = tool.get("schema", {}).get("parameters", {})
             execution_type = tool.get("execution", {}).get("type", "local")
             ui = dict(tool.get("ui", {})) if isinstance(tool.get("ui"), dict) else {}
+            risk = str(tool.get("risk") or tool.get("metadata", {}).get("risk") or "low").strip().lower()
+            tags = [str(tag) for tag in tool.get("tags", []) if str(tag)]
+            if risk == "high" and "danger" not in tags:
+                tags.append("danger")
             items.append(
                 {
                     "id": tool.get("tool_id", tool.get("name", "tool")),
@@ -357,7 +361,8 @@ class FrontendRegistry:
                     "category": "tool",
                     "description": tool.get("summary", ""),
                     "badge": "Dynamic" if execution_type == "dynamic" else None,
-                    "tags": tool.get("tags", []),
+                    "tags": tags,
+                    "risk": risk,
                     "ui": ui,
                     "origin": {"kind": "tool_registry", "path": "domain/tool/registry.py"},
                     "panel": {

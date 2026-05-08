@@ -4,24 +4,39 @@ import {
   BrainCircuit,
   ChevronDown,
   Cpu,
+  Database,
   FileText,
+  FilePenLine,
+  FilePlus2,
+  FileSearch,
   Globe,
   GripVertical,
+  Hammer,
   Image,
+  KeyRound,
   Languages,
   LayoutGrid,
   Layers,
+  ListTodo,
   Music,
   Newspaper,
   NotebookPen,
   Power,
+  Route,
   Search,
   Settings,
+  ShieldAlert,
   SlidersHorizontal,
+  Sparkles,
   Star,
+  Tag,
   Terminal,
+  TestTubeDiagonal,
+  Trash2,
   Wrench,
   GitBranch,
+  GitCommit,
+  GitCompare,
   ShieldCheck,
   Download,
   Share2,
@@ -34,6 +49,8 @@ import {
   MoreVertical,
   Pin,
   PinOff,
+  FolderCheck,
+  FolderX,
 } from "lucide-react";
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
@@ -77,6 +94,39 @@ function useStoredStringArray(key: string): [string[], (updater: (current: strin
   return [value, update];
 }
 
+function readStoredStringArrayRecord(key: string): Record<string, string[]> {
+  try {
+    const raw = localStorage.getItem(key);
+    const parsed = raw ? JSON.parse(raw) : {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed).map(([id, values]) => [
+      id,
+      Array.isArray(values) ? [...new Set(values.map((value) => normalizeTag(String(value))).filter(Boolean))] : [],
+    ]).filter(([, values]) => values.length > 0));
+  } catch {
+    return {};
+  }
+}
+
+function useStoredStringArrayRecord(key: string): [Record<string, string[]>, (updater: (current: Record<string, string[]>) => Record<string, string[]>) => void] {
+  const [value, setValue] = useState<Record<string, string[]>>(() => readStoredStringArrayRecord(key));
+  const update = (updater: (current: Record<string, string[]>) => Record<string, string[]>) => {
+    setValue((current) => {
+      const next = Object.fromEntries(Object.entries(updater(current)).map(([id, values]) => [
+        id,
+        [...new Set(values.map((item) => normalizeTag(String(item))).filter(Boolean))],
+      ]).filter(([, values]) => values.length > 0));
+      try {
+        localStorage.setItem(key, JSON.stringify(next));
+      } catch {
+        // Storage may be unavailable in restricted browser contexts.
+      }
+      return next;
+    });
+  };
+  return [value, update];
+}
+
 const CATEGORY_META: Record<SidebarCategory | "all", { label: string; icon: ReactElement }> = {
   all: { label: "All", icon: <Layers size={14} /> },
   tool: { label: "Tools", icon: <Wrench size={14} /> },
@@ -87,9 +137,14 @@ const CATEGORY_META: Record<SidebarCategory | "all", { label: string; icon: Reac
 };
 
 const TOOL_GROUP_ICONS: Record<string, ReactElement> = {
+  agent: <Sparkles size={16} />,
+  browser: <Monitor size={16} />,
+  build: <Hammer size={16} />,
   coding: <Code2 size={16} />,
+  computer: <Monitor size={16} />,
   file: <FileText size={16} />,
   git: <GitBranch size={16} />,
+  planning: <ListTodo size={16} />,
   research: <Search size={16} />,
   operate: <Monitor size={16} />,
   manage: <Cpu size={16} />,
@@ -109,9 +164,32 @@ const TOOL_GROUP_LABELS: Record<string, string> = {
 };
 
 const ITEM_ICONS: Record<string, ReactElement> = {
+  agent: <Sparkles size={18} />,
   artifacts: <Archive size={18} />,
   browser: <Monitor size={18} />,
+  browser_open_url: <Globe size={18} />,
+  browser_screenshot: <Monitor size={18} />,
   calculator: <BrainCircuit size={18} />,
+  coding_context: <Code2 size={18} />,
+  coding_file_create: <FilePlus2 size={18} />,
+  coding_file_delete: <Trash2 size={18} />,
+  coding_file_list: <FileSearch size={18} />,
+  coding_file_read: <FileText size={18} />,
+  coding_file_search: <FileSearch size={18} />,
+  coding_file_write: <FilePenLine size={18} />,
+  coding_git_branch_create: <GitBranch size={18} />,
+  coding_git_branch_get: <GitBranch size={18} />,
+  coding_git_commit: <GitCommit size={18} />,
+  coding_git_diff: <GitCompare size={18} />,
+  coding_git_push: <Share2 size={18} />,
+  coding_git_status: <GitBranch size={18} />,
+  coding_terminal_exec: <Terminal size={18} />,
+  coding_terminal_stream: <Terminal size={18} />,
+  computer_click: <Monitor size={18} />,
+  computer_key: <KeyRound size={18} />,
+  computer_screenshot: <Monitor size={18} />,
+  computer_scroll: <Monitor size={18} />,
+  computer_type: <Monitor size={18} />,
   code: <Terminal size={18} />,
   file: <FileText size={18} />,
   file_reader: <FileText size={18} />,
@@ -120,13 +198,26 @@ const ITEM_ICONS: Record<string, ReactElement> = {
   image: <Image size={18} />,
   inspector: <Cpu size={18} />,
   knowledge: <Search size={18} />,
+  knowledge_index: <Database size={18} />,
+  knowledge_search: <Search size={18} />,
+  media_image_analyze: <Image size={18} />,
+  media_pdf_parse: <FileText size={18} />,
   memory: <Cpu size={18} />,
   music: <Music size={18} />,
   news: <Newspaper size={18} />,
   notebook: <NotebookPen size={18} />,
   provider: <Blocks size={18} />,
   providers: <Blocks size={18} />,
+  research_local_search: <Search size={18} />,
+  research_reddit_search: <Search size={18} />,
+  research_search_sources: <Search size={18} />,
+  research_web_search: <Globe size={18} />,
   search: <Globe size={18} />,
+  tool_invoke: <Wrench size={18} />,
+  tool_list: <ListTodo size={18} />,
+  tool_schema: <Route size={18} />,
+  tool_web_search: <Globe size={18} />,
+  tool_reddit_search: <Search size={18} />,
   translate: <Languages size={18} />,
   web: <Globe size={18} />,
   web_search: <Search size={18} />,
@@ -155,6 +246,22 @@ const SIDEBAR_CATEGORY_ORDER: Record<SidebarCategory, number> = {
 
 function compareText(left: string, right: string): number {
   return left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" });
+}
+
+function normalizeTag(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9_:-]/g, "").slice(0, 32);
+}
+
+function baseTagsForItem(item: SidebarItem): string[] {
+  const tags = [...(item.tags ?? [])].map((tag) => normalizeTag(String(tag))).filter(Boolean);
+  const risk = normalizeTag(String(item.risk ?? ""));
+  if (risk) tags.push(`risk:${risk}`);
+  if (risk === "high") tags.push("danger");
+  const haystack = `${item.id} ${item.label} ${item.description ?? ""} ${tags.join(" ")}`.toLowerCase();
+  if (/(write|delete|patch|restore|terminal|shell|push|commit|exec|approval|danger)/.test(haystack)) {
+    tags.push("danger");
+  }
+  return [...new Set(tags)];
 }
 
 function compareSidebarItems(left: SidebarItem, right: SidebarItem): number {
@@ -490,6 +597,7 @@ export function RightSidebar({
   onSettingChange,
   onOpenSettings,
   onToolToggle,
+  onToolBatchSet,
   onPanelAction,
 }: {
   items: SidebarItem[];
@@ -500,6 +608,7 @@ export function RightSidebar({
   onSettingChange: (sectionId: string, fieldId: string, value: unknown) => void;
   onOpenSettings: () => void;
   onToolToggle?: (item: SidebarItem) => void;
+  onToolBatchSet?: (toolIds: string[], enabled: boolean) => void;
   onPanelAction?: (item: SidebarItem, action: SidebarAction) => void;
 }) {
   const [activePanel, setActivePanel] = useState<string | null>(null);
@@ -508,7 +617,10 @@ export function RightSidebar({
   const [toolGroupMenuPosition, setToolGroupMenuPosition] = useState<{ top: number; right: number } | null>(null);
   const [pinnedItemIds, setPinnedItemIds] = useStoredStringArray("rumi-sidebar-pinned-item-ids");
   const [starredItemIds, setStarredItemIds] = useStoredStringArray("rumi-sidebar-starred-item-ids");
+  const [customTagMap, setCustomTagMap] = useStoredStringArrayRecord("rumi-tool-custom-tags");
   const [showStarredOnly, setShowStarredOnly] = useState(false);
+  const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
+  const [tagDraftByItemId, setTagDraftByItemId] = useState<Record<string, string>>({});
   const [contextMenu, setContextMenu] = useState<{ itemId: string; x: number; y: number } | null>(null);
   const toolGroupMenuRef = useRef<HTMLDivElement | null>(null);
   const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
@@ -587,10 +699,27 @@ export function RightSidebar({
     return next;
   }, [items]);
 
-  const toolItems = useMemo(() => sortedToolUiItems(items.filter((item) => (
-    item.category === "tool"
-    && (!showStarredOnly || starredItemIdSet.has(item.id))
-  ))), [items, showStarredOnly, starredItemIdSet]);
+  const tagMap = useMemo(() => {
+    const next = new Map<string, string[]>();
+    for (const item of items) {
+      next.set(item.id, [...new Set([...baseTagsForItem(item), ...(customTagMap[item.id] ?? [])])]);
+    }
+    return next;
+  }, [customTagMap, items]);
+  const allToolItems = useMemo(() => sortedToolUiItems(items.filter((item) => item.category === "tool")), [items]);
+  const allToolTags = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of allToolItems) {
+      for (const tag of tagMap.get(item.id) ?? []) {
+        counts.set(tag, (counts.get(tag) ?? 0) + 1);
+      }
+    }
+    return [...counts.entries()].sort((left, right) => right[1] - left[1] || compareText(left[0], right[0]));
+  }, [allToolItems, tagMap]);
+  const toolItems = useMemo(() => sortedToolUiItems(allToolItems.filter((item) => (
+    (!showStarredOnly || starredItemIdSet.has(item.id))
+    && (!activeTagFilter || tagMap.get(item.id)?.includes(activeTagFilter))
+  ))), [activeTagFilter, allToolItems, showStarredOnly, starredItemIdSet, tagMap]);
   const groupedToolIds = useMemo(() => new Set(toolItems.map((item) => item.id)), [toolItems]);
   const toolGroups = useMemo(() => {
     const groups = new Map<string, SidebarItem[]>();
@@ -610,11 +739,12 @@ export function RightSidebar({
 
   const visibleItems = useMemo(() => {
     const base = (categoryFilter === "all" ? items : items.filter((item) => item.category === categoryFilter))
-      .filter((item) => !showStarredOnly || starredItemIdSet.has(item.id));
+      .filter((item) => !showStarredOnly || starredItemIdSet.has(item.id))
+      .filter((item) => item.category !== "tool" || !activeTagFilter || tagMap.get(item.id)?.includes(activeTagFilter));
     return [...base]
       .sort(compareSidebarItems)
       .filter((item) => item.category !== "tool" || !showToolGroups || !groupedToolIds.has(item.id) || pinnedItemIdSet.has(item.id));
-  }, [items, categoryFilter, groupedToolIds, pinnedItemIdSet, showStarredOnly, showToolGroups, starredItemIdSet]);
+  }, [activeTagFilter, items, categoryFilter, groupedToolIds, pinnedItemIdSet, showStarredOnly, showToolGroups, starredItemIdSet, tagMap]);
 
   const activeItem = items.find((item) => item.id === activePanel) ?? null;
   const isToolManagerActive = activePanel === "__tool_manager__";
@@ -660,6 +790,34 @@ export function RightSidebar({
 
   const toggleStar = (itemId: string) => {
     setStarredItemIds((current) => current.includes(itemId) ? current.filter((id) => id !== itemId) : [...current, itemId]);
+  };
+
+  const setToolsEnabled = (toolIds: string[], enabled: boolean) => {
+    const uniqueToolIds = [...new Set(toolIds.filter((toolId) => items.some((item) => item.id === toolId && item.category === "tool")))];
+    if (uniqueToolIds.length === 0) return;
+    onToolBatchSet?.(uniqueToolIds, enabled);
+  };
+
+  const toolsWithTag = (tag: string) => allToolItems.filter((item) => tagMap.get(item.id)?.includes(tag)).map((item) => item.id);
+
+  const addCustomTag = (itemId: string, rawTag: string) => {
+    const tag = normalizeTag(rawTag);
+    if (!tag) return;
+    setCustomTagMap((current) => ({
+      ...current,
+      [itemId]: [...new Set([...(current[itemId] ?? []), tag])],
+    }));
+    setTagDraftByItemId((current) => ({ ...current, [itemId]: "" }));
+  };
+
+  const removeCustomTag = (itemId: string, tag: string) => {
+    setCustomTagMap((current) => ({
+      ...current,
+      [itemId]: (current[itemId] ?? []).filter((candidate) => candidate !== tag),
+    }));
+    if (activeTagFilter === tag && toolsWithTag(tag).length <= 1) {
+      setActiveTagFilter(null);
+    }
   };
 
   const openItemContextMenu = (event: MouseEvent, item: SidebarItem) => {
@@ -716,6 +874,73 @@ export function RightSidebar({
             </div>
           )}
 
+          {activeItem?.category === "tool" && (
+            <div className="border-b border-zinc-800/40 px-2.5 py-2">
+              <div className="mb-2 flex flex-wrap gap-1">
+                {(tagMap.get(activeItem.id) ?? []).map((tag) => {
+                  const custom = (customTagMap[activeItem.id] ?? []).includes(tag);
+                  return (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => setActiveTagFilter((current) => current === tag ? null : tag)}
+                      className={cn(
+                        "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px]",
+                        activeTagFilter === tag ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-zinc-800 bg-zinc-950/60 text-zinc-500 hover:text-zinc-300",
+                      )}
+                      title={custom ? "クリックで絞り込み、xで削除" : "クリックで絞り込み"}
+                    >
+                      <Tag size={10} />
+                      <span>{tag}</span>
+                      {custom && (
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            removeCustomTag(activeItem.id, tag);
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              removeCustomTag(activeItem.id, tag);
+                            }
+                          }}
+                          className="ml-0.5 text-zinc-600 hover:text-zinc-200"
+                        >
+                          x
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="text"
+                  value={tagDraftByItemId[activeItem.id] ?? ""}
+                  onChange={(event) => setTagDraftByItemId((current) => ({ ...current, [activeItem.id]: event.target.value }))}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      addCustomTag(activeItem.id, tagDraftByItemId[activeItem.id] ?? "");
+                    }
+                  }}
+                  placeholder="tagを追加"
+                  className="min-w-0 flex-1 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-200 outline-none placeholder:text-zinc-700 focus:border-zinc-600"
+                />
+                <button
+                  type="button"
+                  onClick={() => addCustomTag(activeItem.id, tagDraftByItemId[activeItem.id] ?? "")}
+                  className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-[11px] text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="flex-1 overflow-y-auto p-2.5">
             {activeItem ? (
               <SidebarPanel item={activeItem} settingsValues={settingsValues} onSettingChange={onSettingChange} onPanelAction={onPanelAction} />
@@ -735,11 +960,88 @@ export function RightSidebar({
                     <p className="mt-1 text-lg font-semibold text-amber-300">{starredItemIds.length}</p>
                   </div>
                 </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setToolsEnabled(toolItems.map((item) => item.id), true)}
+                    className="flex items-center justify-center gap-1 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-2 py-1.5 text-[11px] font-medium text-emerald-200 hover:bg-emerald-500/15"
+                  >
+                    <FolderCheck size={13} />
+                    表示中をON
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setToolsEnabled(toolItems.map((item) => item.id), false)}
+                    className="flex items-center justify-center gap-1 rounded-lg border border-zinc-800 bg-zinc-950/60 px-2 py-1.5 text-[11px] font-medium text-zinc-300 hover:bg-zinc-900"
+                  >
+                    <FolderX size={13} />
+                    表示中をOFF
+                  </button>
+                </div>
+                {allToolTags.length > 0 && (
+                  <div className="rounded-lg border border-zinc-800/70 bg-zinc-950/45 p-2">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">Tags</p>
+                      {activeTagFilter && (
+                        <button
+                          type="button"
+                          onClick={() => setActiveTagFilter(null)}
+                          className="text-[10px] text-zinc-500 hover:text-zinc-200"
+                        >
+                          clear
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex max-h-24 flex-wrap gap-1 overflow-y-auto">
+                      {allToolTags.map(([tag, count]) => (
+                        <button
+                          key={tag}
+                          type="button"
+                          onClick={() => setActiveTagFilter((current) => current === tag ? null : tag)}
+                          className={cn(
+                            "inline-flex items-center gap-1 rounded-md border px-1.5 py-1 text-[10px] transition-colors",
+                            activeTagFilter === tag
+                              ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
+                              : tag === "danger"
+                                ? "border-red-500/20 bg-red-500/10 text-red-200 hover:bg-red-500/15"
+                                : "border-zinc-800 bg-zinc-950/60 text-zinc-500 hover:text-zinc-300",
+                          )}
+                        >
+                          {tag === "danger" ? <ShieldAlert size={10} /> : <Tag size={10} />}
+                          <span>{tag}</span>
+                          <span className="text-zinc-600">{count}</span>
+                        </button>
+                      ))}
+                    </div>
+                    {activeTagFilter && (
+                      <div className="mt-2 grid grid-cols-2 gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setToolsEnabled(toolsWithTag(activeTagFilter), true)}
+                          className="rounded-md bg-emerald-500/10 px-2 py-1 text-[10px] font-medium text-emerald-200 hover:bg-emerald-500/15"
+                        >
+                          tag ON
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setToolsEnabled(toolsWithTag(activeTagFilter), false)}
+                          className={cn(
+                            "rounded-md px-2 py-1 text-[10px] font-medium",
+                            activeTagFilter === "danger" ? "bg-red-500/10 text-red-200 hover:bg-red-500/15" : "bg-zinc-900 text-zinc-300 hover:bg-zinc-800",
+                          )}
+                        >
+                          tag OFF
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="space-y-1">
                   {toolItems.map((item) => {
                     const enabled = selectedToolIdSet.has(item.id);
                     const pinned = pinnedItemIdSet.has(item.id);
                     const starred = starredItemIdSet.has(item.id);
+                    const itemTags = tagMap.get(item.id) ?? [];
                     return (
                       <div key={item.id} className="rounded-lg border border-zinc-800/70 bg-zinc-950/45 p-2">
                         <div className="flex items-start gap-2">
@@ -788,6 +1090,23 @@ export function RightSidebar({
                             </button>
                           </div>
                         </div>
+                        {itemTags.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-1 pl-9">
+                            {itemTags.slice(0, 5).map((tag) => (
+                              <button
+                                key={tag}
+                                type="button"
+                                onClick={() => setActiveTagFilter((current) => current === tag ? null : tag)}
+                                className={cn(
+                                  "rounded px-1.5 py-0.5 text-[9px]",
+                                  activeTagFilter === tag ? "bg-emerald-500/15 text-emerald-200" : tag === "danger" ? "bg-red-500/10 text-red-200" : "bg-zinc-900 text-zinc-500 hover:text-zinc-300",
+                                )}
+                              >
+                                {tag}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -900,6 +1219,24 @@ export function RightSidebar({
                           <p className="truncate text-[10px] text-zinc-500">{group.path.join(" / ")}</p>
                         )}
                         <p className="text-[10px] text-zinc-500">{group.count} tools</p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-1 border-b border-zinc-800 p-2">
+                        <button
+                          type="button"
+                          onClick={() => setToolsEnabled(group.items.map((item) => item.id), true)}
+                          className="flex items-center justify-center gap-1 rounded-md bg-emerald-500/10 px-2 py-1 text-[10px] font-medium text-emerald-200 hover:bg-emerald-500/15"
+                        >
+                          <FolderCheck size={11} />
+                          folder ON
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setToolsEnabled(group.items.map((item) => item.id), false)}
+                          className="flex items-center justify-center gap-1 rounded-md bg-zinc-900 px-2 py-1 text-[10px] font-medium text-zinc-300 hover:bg-zinc-800"
+                        >
+                          <FolderX size={11} />
+                          folder OFF
+                        </button>
                       </div>
                       <div className="max-h-64 overflow-y-auto py-1">
                         {group.items.map((item) => (

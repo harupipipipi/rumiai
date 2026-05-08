@@ -88,16 +88,6 @@ class GoogleProvider(OpenAICompatibleProvider):
             "default_thinking_level": "medium",
         },
         {
-            "id": "google/gemini-2.0-flash-lite",
-            "model_id": "gemini-2.0-flash-lite",
-            "name": "Gemini 2.0 Flash-Lite",
-            "display_name": "Gemini 2.0 Flash-Lite",
-            "provider": "google",
-            "provider_id": "google",
-            "type": "chat",
-            "capabilities": ["chat", "tool_calls", "vision"],
-        },
-        {
             "id": "google/gemma-4-31b-it",
             "model_id": "gemma-4-31b-it",
             "name": "Gemma 4 31B IT",
@@ -175,6 +165,21 @@ class GoogleProvider(OpenAICompatibleProvider):
             default_base_url=self.BASE_URL,
             known_models=self.curated_models,
         )
+        self._base_url = self._normalize_google_base_url(self._base_url)
+        self.BASE_URL = self._base_url
+
+    @staticmethod
+    def _normalize_google_base_url(base_url: str) -> str:
+        value = str(base_url or "").strip().rstrip("/")
+        if not value:
+            return value
+        parsed = urllib.parse.urlparse(value)
+        if parsed.netloc != "generativelanguage.googleapis.com":
+            return value
+        path = parsed.path.rstrip("/")
+        if path in {"/v1", "/v1beta"}:
+            return urllib.parse.urlunparse(parsed._replace(path=f"{path}/openai")).rstrip("/")
+        return value
 
     @classmethod
     def _load_profile_models(cls):
@@ -313,6 +318,19 @@ class GoogleProvider(OpenAICompatibleProvider):
         native_tools = self._native_tools(tools)
         if native_tools:
             body["tools"] = native_tools
+        extra_body = params.get("extra_body")
+        google_body = extra_body.get("google") if isinstance(extra_body, dict) and isinstance(extra_body.get("google"), dict) else None
+        if google_body:
+            for key, value in google_body.items():
+                if key == "thinking_config" and isinstance(value, dict):
+                    generation_config = dict(body.get("generationConfig", {}))
+                    generation_config["thinkingConfig"] = {
+                        "thinkingLevel": value.get("thinking_level") or value.get("thinkingLevel") or value.get("level") or "HIGH",
+                        **({"includeThoughts": value.get("include_thoughts")} if "include_thoughts" in value else {}),
+                    }
+                    body["generationConfig"] = generation_config
+                elif key not in {"thinking_config"}:
+                    body[key] = value
         return body
 
     def _native_request_json(self, model: str, body: Dict[str, Any], *, stream: bool = False):
@@ -426,9 +444,15 @@ class GoogleProvider(OpenAICompatibleProvider):
             "stop",
             "response_format",
             "reasoning_effort",
+            "tool_choice",
+            "parallel_tool_calls",
+            "stream_options",
         ):
             if key in params:
                 body[key] = params[key]
+        extra_body = params.get("extra_body")
+        if isinstance(extra_body, dict):
+            body.update(extra_body)
 
     @staticmethod
     def _split_inline_thoughts(text: str) -> tuple[list[str], str]:
@@ -518,7 +542,9 @@ class GoogleProvider(OpenAICompatibleProvider):
         if sanitized_tools:
             body["tools"] = sanitized_tools
         self._copy_chat_params(body, translated)
+        body.setdefault("stream_options", {"include_usage": True})
         resp = self._request_stream("/chat/completions", body)
+        tool_call_state = {}
         try:
             for payload in self._parse_sse_lines(resp):
                 try:
@@ -532,8 +558,13 @@ class GoogleProvider(OpenAICompatibleProvider):
                 text = delta.get("content")
                 if text:
                     yield {"type": "content_delta", "delta": {"type": "text", "text": text}}
+                yield from self._stream_tool_call_events(delta, tool_call_state)
                 finish = choices[0].get("finish_reason")
                 if finish:
+                    for current in tool_call_state.values():
+                        if current.get("started") and not current.get("ended"):
+                            current["ended"] = True
+                            yield {"type": "tool_call_end", "id": current.get("id", ""), "name": current.get("name", "")}
                     usage_raw = obj.get("usage") or {}
                     yield {
                         "type": "stream_end",

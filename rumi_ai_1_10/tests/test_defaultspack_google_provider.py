@@ -79,7 +79,13 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
                     },
                 }
             ],
-            {"temperature": 0.2, "thinking_level": "low"},
+            {
+                "temperature": 0.2,
+                "thinking_level": "low",
+                "tool_choice": "auto",
+                "stream_options": {"include_usage": False},
+                "extra_body": {"google": {"thinking_config": {"include_thoughts": True}}},
+            },
         )
 
         self.assertEqual(captured["path"], "/chat/completions")
@@ -87,7 +93,67 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
         self.assertEqual(captured["body"]["messages"], [{"role": "user", "content": "hello"}])
         self.assertEqual(captured["body"]["tools"][0]["function"]["name"], "lookup")
         self.assertEqual(captured["body"]["reasoning_effort"], "low")
+        self.assertEqual(captured["body"]["tool_choice"], "auto")
+        self.assertEqual(captured["body"]["stream_options"], {"include_usage": False})
+        self.assertEqual(captured["body"]["google"]["thinking_config"]["include_thoughts"], True)
         self.assertEqual(response["content"][0]["text"], "hello from gemini")
+
+    def test_google_provider_autofixes_native_base_url_to_openai_compatible_path(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        with patch.dict(
+            os.environ,
+            {
+                "GEMINI_API_KEY": "gemini-key",
+                "GOOGLE_BASE_URL": "https://generativelanguage.googleapis.com/v1beta",
+            },
+            clear=True,
+        ):
+            provider = GoogleProvider()
+
+        self.assertEqual(
+            provider.BASE_URL,
+            "https://generativelanguage.googleapis.com/v1beta/openai",
+        )
+
+    def test_google_provider_streams_openai_compatible_tool_call_deltas(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        captured = {}
+
+        class FakeStream:
+            def __init__(self):
+                self._chunks = [
+                    b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"lookup","arguments":"{\\"q\\""}}]},"finish_reason":null}]}\n\n',
+                    b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\\"rumi\\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}\n\n',
+                    b"data: [DONE]\n\n",
+                ]
+
+            def read(self, _size=4096):
+                return self._chunks.pop(0) if self._chunks else b""
+
+            def close(self):
+                captured["closed"] = True
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-key"}, clear=True):
+            provider = GoogleProvider()
+
+        def fake_request_stream(path, body):
+            captured["path"] = path
+            captured["body"] = body
+            return FakeStream()
+
+        provider._request_stream = fake_request_stream
+        chunks = list(provider.stream("gemini-2.5-flash", [{"role": "user", "content": "search"}], [], {}))
+
+        self.assertEqual(captured["path"], "/chat/completions")
+        self.assertEqual(captured["body"]["stream_options"], {"include_usage": True})
+        self.assertEqual(chunks[0], {"type": "tool_call_start", "id": "call_1", "name": "lookup"})
+        self.assertEqual(chunks[1]["type"], "tool_call_delta")
+        self.assertEqual(chunks[1]["arguments_chunk"], '{"q"')
+        self.assertEqual(chunks[2]["arguments_chunk"], ':"rumi"}')
+        self.assertEqual(chunks[3], {"type": "tool_call_end", "id": "call_1", "name": "lookup"})
+        self.assertEqual(chunks[-1]["type"], "stream_end")
 
     def test_google_provider_strips_rumi_tool_metadata_before_request(self):
         from domain.ai_client.providers.google_provider import GoogleProvider
@@ -450,6 +516,8 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
 
         self.assertIn("google/gemini-3-pro-preview", model_ids)
         self.assertIn("google/gemini-3-flash-preview", model_ids)
+        self.assertIn("google/gemini-2.5-flash-lite", model_ids)
+        self.assertNotIn("google/gemini-2.0-flash-lite", model_ids)
         self.assertIn("google/gemma-4-31b-it", model_ids)
         self.assertIn("google/gemma-4-26b-a4b-it", model_ids)
         self.assertIn("google/gemma-3-27b-it", model_ids)

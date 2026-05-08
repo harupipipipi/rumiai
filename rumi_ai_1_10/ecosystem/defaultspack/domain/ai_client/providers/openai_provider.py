@@ -222,9 +222,42 @@ class OpenAIProvider(BaseProvider):
             "stop",
             "response_format",
             "reasoning_effort",
+            "tool_choice",
+            "parallel_tool_calls",
+            "stream_options",
         ):
             if k in params:
                 body[k] = params[k]
+        extra_body = params.get("extra_body")
+        if isinstance(extra_body, dict):
+            body.update(extra_body)
+
+    @staticmethod
+    def _stream_tool_call_events(delta, state):
+        for tool_call in delta.get("tool_calls") or []:
+            if not isinstance(tool_call, dict):
+                continue
+            index = str(tool_call.get("index", len(state)))
+            current = state.setdefault(index, {"id": "", "name": "", "started": False, "ended": False})
+            if tool_call.get("id"):
+                current["id"] = str(tool_call.get("id"))
+            function_delta = tool_call.get("function") if isinstance(tool_call.get("function"), dict) else {}
+            if function_delta.get("name"):
+                current["name"] = str(function_delta.get("name"))
+            call_id = current["id"] or f"tool_call_{index}"
+            if not current["id"]:
+                current["id"] = call_id
+            name = current["name"]
+            if not current["started"] and (tool_call.get("id") or name or function_delta.get("arguments")):
+                current["started"] = True
+                yield {"type": "tool_call_start", "id": call_id, "name": name}
+            if function_delta.get("arguments"):
+                yield {
+                    "type": "tool_call_delta",
+                    "id": call_id,
+                    "name": name,
+                    "arguments_chunk": str(function_delta.get("arguments")),
+                }
 
     def complete(self, model, messages, tools, params):
         params = self._translate_params(params)
@@ -241,8 +274,9 @@ class OpenAIProvider(BaseProvider):
         if tools:
             body["tools"] = tools
         self._copy_chat_params(body, params)
-        body["stream_options"] = {"include_usage": True}
+        body.setdefault("stream_options", {"include_usage": True})
         resp = self._request_stream("/chat/completions", body)
+        tool_call_state = {}
         try:
             for payload in self._parse_sse_lines(resp):
                 try:
@@ -255,8 +289,13 @@ class OpenAIProvider(BaseProvider):
                     text = delta.get("content")
                     if text:
                         yield {"type": "content_delta", "delta": {"type": "text", "text": text}}
+                    yield from self._stream_tool_call_events(delta, tool_call_state)
                     finish = choices[0].get("finish_reason")
                     if finish:
+                        for current in tool_call_state.values():
+                            if current.get("started") and not current.get("ended"):
+                                current["ended"] = True
+                                yield {"type": "tool_call_end", "id": current.get("id", ""), "name": current.get("name", "")}
                         usage_raw = obj.get("usage") or {}
                         yield {
                             "type": "stream_end",
