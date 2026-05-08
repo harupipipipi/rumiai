@@ -142,6 +142,73 @@ test("streamMessage parses SSE deltas and final message", async () => {
   assert.equal(finalId, "m2");
 });
 
+test("streamMessage forwards thinking deltas", async () => {
+  const originalFetch = globalThis.fetch;
+  const thinkingEvents: string[] = [];
+  globalThis.fetch = (async () => {
+    const body = [
+      'data: {"type":"thinking_delta","delta":"private "}\n\n',
+      'data: {"type":"thinking_delta","delta":"plan"}\n\n',
+      'data: {"type":"delta","delta":"done"}\n\n',
+      'data: {"type":"message","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"done"}],"created_at":1,"conversation_id":"c1"}}\n\n',
+    ].join("");
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream; charset=utf-8" },
+    });
+  }) as typeof fetch;
+
+  try {
+    await api.streamMessage("c1", "hello", undefined, {
+      onThinkingDelta(delta) {
+        thinkingEvents.push(delta);
+      },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(thinkingEvents, ["private ", "plan"]);
+});
+
+test("streamMessage surfaces structured stream errors", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    return new Response('data: {"type":"error","error":{"code":"STREAM_FAILED","message":"thinking-only stream"}}\n\n', {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream; charset=utf-8" },
+    });
+  }) as typeof fetch;
+
+  try {
+    await assert.rejects(
+      api.streamMessage("c1", "hello"),
+      /thinking-only stream/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("streamMessage rejects streams without a final message", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    return new Response('data: {"type":"delta","delta":"partial"}\n\n', {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream; charset=utf-8" },
+    });
+  }) as typeof fetch;
+
+  try {
+    await assert.rejects(
+      api.streamMessage("c1", "hello"),
+      /ended before a final response/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("streamMessage forwards abort signal to fetch", async () => {
   const originalFetch = globalThis.fetch;
   const controller = new AbortController();

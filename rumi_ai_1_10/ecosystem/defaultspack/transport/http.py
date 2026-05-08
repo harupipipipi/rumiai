@@ -168,6 +168,7 @@ class DefaultsHttpServer:
                     "FUNCTION_NOT_FOUND",
                     "CAPABILITY_RUNTIME_UNAVAILABLE",
                     "CAPABILITY_EXECUTION_FAILED",
+                    "PACK_NOT_APPROVED",
                 }:
                     return result
         except Exception:

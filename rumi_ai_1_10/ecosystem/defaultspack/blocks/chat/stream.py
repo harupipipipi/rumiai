@@ -28,6 +28,7 @@ class _InlineThoughtFilter:
         self._buffer = ""
         self._in_thought = False
         self._thought_parts = []
+        self._streamed_thought_len = 0
 
     def push(self, text):
         self._buffer += str(text or "")
@@ -74,6 +75,12 @@ class _InlineThoughtFilter:
     def transcript(self):
         return "".join(self._thought_parts).strip()
 
+    def pending_thinking_delta(self):
+        thought_text = "".join(self._thought_parts)
+        delta = thought_text[self._streamed_thought_len:]
+        self._streamed_thought_len = len(thought_text)
+        return delta
+
     @classmethod
     def _partial_open_tag_suffix_len(cls, text):
         max_len = min(len(text), len(cls._open_tag) - 1)
@@ -81,6 +88,51 @@ class _InlineThoughtFilter:
             if cls._open_tag.startswith(text[-size:]):
                 return size
         return 0
+
+
+def _text_from_content_blocks(content):
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts = []
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "text":
+            parts.append(str(block.get("text") or ""))
+        elif isinstance(block, str):
+            parts.append(block)
+    return "".join(parts).strip()
+
+
+def _params_without_thinking(params):
+    retry_params = dict(params or {})
+    for key in ("thinking", "thinking_level", "reasoning_effort"):
+        retry_params.pop(key, None)
+    return retry_params
+
+
+def _fallback_complete_without_thinking(client, model, messages, params, transcript):
+    if not transcript:
+        return None
+    try:
+        response = client.complete(model, messages, tools=[], params=_params_without_thinking(params))
+    except Exception:
+        return None
+    if not isinstance(response, dict) or not _text_from_content_blocks(response.get("content")):
+        return None
+    metadata = dict(response.get("metadata") or {})
+    metadata["thinking"] = {
+        "state": "completed",
+        "transcript": transcript,
+        "source": "inline_thought_stream",
+    }
+    metadata["recovered_from_empty_stream"] = True
+    metadata.setdefault("model", model)
+    metadata.setdefault("attached_tool_count", 0)
+    metadata.setdefault("attached_tools", [])
+    metadata["thinking_level"] = params.get("thinking_level")
+    response["metadata"] = metadata
+    return response
 
 
 def _fallback_send(input_data, context):
@@ -159,6 +211,7 @@ def _stream_response(input_data, context):
     client = AIClient()
     thought_filter = _InlineThoughtFilter()
     text_parts = []
+    provider_thinking_parts = []
     finish_reason = "stop"
     usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
     try:
@@ -170,9 +223,18 @@ def _stream_response(input_data, context):
                 text = delta.get("text", "")
                 if text:
                     visible_text = thought_filter.push(text)
+                    thinking_text = thought_filter.pending_thinking_delta()
+                    if thinking_text:
+                        yield {"type": "thinking_delta", "delta": thinking_text}
                     if visible_text:
                         text_parts.append(visible_text)
                         yield {"type": "delta", "delta": visible_text}
+            elif chunk_type in {"thinking_delta", "reasoning_delta"}:
+                delta = chunk.get("delta", {}) if isinstance(chunk.get("delta"), dict) else {}
+                text = delta.get("text") or chunk.get("text") or chunk.get("thinking") or chunk.get("reasoning") or ""
+                if text:
+                    provider_thinking_parts.append(str(text))
+                    yield {"type": "thinking_delta", "delta": str(text)}
             elif chunk_type == "stream_end":
                 finish_reason = chunk.get("finish_reason", "stop")
                 usage = chunk.get("usage", usage)
@@ -181,23 +243,47 @@ def _stream_response(input_data, context):
         return
 
     trailing_text = thought_filter.finish()
+    thinking_text = thought_filter.pending_thinking_delta()
+    if thinking_text:
+        yield {"type": "thinking_delta", "delta": thinking_text}
     if trailing_text:
         text_parts.append(trailing_text)
         yield {"type": "delta", "delta": trailing_text}
 
-    response = {
-        "content": [{"type": "text", "text": "".join(text_parts)}],
-        "finish_reason": finish_reason,
-        "usage": usage,
-        "metadata": {
-            "model": model,
-            "attached_tool_count": 0,
-            "attached_tools": [],
-            "thinking": {"state": "completed"},
-            "thinking_level": params.get("thinking_level"),
-        },
-    }
-    transcript = thought_filter.transcript()
+    transcript = "\n".join(
+        part for part in ["".join(provider_thinking_parts).strip(), thought_filter.transcript()]
+        if part
+    ).strip()
+    fallback_response = None
+    if transcript and not "".join(text_parts).strip():
+        fallback_response = _fallback_complete_without_thinking(
+            client,
+            model,
+            standard_messages,
+            params,
+            transcript,
+        )
+        fallback_text = _text_from_content_blocks(
+            fallback_response.get("content") if isinstance(fallback_response, dict) else None
+        )
+        if fallback_text:
+            yield {"type": "delta", "delta": fallback_text}
+
+    if fallback_response is not None:
+        response = fallback_response
+    else:
+        response = {
+            "content": [{"type": "text", "text": "".join(text_parts)}],
+            "finish_reason": finish_reason,
+            "usage": usage,
+            "metadata": {
+                "model": model,
+                "attached_tool_count": 0,
+                "attached_tools": [],
+                "thinking": {"state": "completed"},
+                "thinking_level": params.get("thinking_level"),
+            },
+        }
     if transcript:
         response["metadata"]["thinking"] = {
             "state": "completed",

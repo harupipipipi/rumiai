@@ -49,6 +49,12 @@ const THINKING_LABELS: Record<string, string> = {
   xhigh: "最高",
 };
 
+const RISK_BADGE_STYLES: Record<string, string> = {
+  low: "border-emerald-500/20 text-emerald-300",
+  medium: "border-amber-500/25 text-amber-300",
+  high: "border-rose-500/30 text-rose-300",
+};
+
 const MODE_META: Record<AppMode, { label: string; icon: typeof MessageSquare; description: string }> = {
   chat: { label: "Chat", icon: MessageSquare, description: "通常チャット" },
   coding: { label: "Coding", icon: Code2, description: "コード編集・Git操作" },
@@ -610,10 +616,13 @@ export function ComposerRenderer({
   const toolGroups = useMemo(() => groupToolItems(toolItems), [toolItems]);
   const activeToolGroup = toolGroups.find((group) => group.id === openToolGroup) ?? toolGroups[0] ?? null;
   const showToolGroups = toolItems.length > 4;
-  const slashQuery = input.startsWith("/") ? input.slice(1).trim().toLowerCase() : "";
-  const matchedCommands = input.startsWith("/")
+  const isEscapedSlash = input.startsWith("//");
+  const slashText = input.startsWith("/") && !isEscapedSlash ? input.slice(1) : "";
+  const slashCommandName = slashText.trimStart().split(/\s+/, 1)[0] ?? "";
+  const slashQuery = slashCommandName.toLowerCase();
+  const matchedCommands = input.startsWith("/") && !isEscapedSlash
     ? commands.filter((command) => {
-        const haystack = `${command.id} ${command.label} ${command.description ?? ""}`.toLowerCase();
+        const haystack = `${command.id} ${command.name} ${(command.aliases ?? []).join(" ")} ${command.label} ${command.description ?? ""}`.toLowerCase();
         return !slashQuery || haystack.includes(slashQuery);
       })
     : [];
@@ -694,8 +703,20 @@ export function ComposerRenderer({
     });
   }, [matchedCommands.length]);
 
-  const chooseCommand = (commandId: string) => {
-    onCommandSelect?.(commandId);
+  const chooseCommand = (commandId: string, rawInput = input) => {
+    const command = commands.find((item) => item.id === commandId);
+    const action = command?.execution.type === "frontend" ? command.execution.action : "";
+    if (action === "open_model_picker" && !rawInput.trim().includes(" ")) {
+      setModelDropdownOpen(true);
+      setMenuOpen(false);
+    } else if (action === "open_tool_picker" && !rawInput.trim().includes(" ")) {
+      setOpenFolder("tools");
+      setMenuOpen(true);
+    } else if (action === "open_command_help") {
+      setOpenFolder("commands");
+      setMenuOpen(true);
+    }
+    onCommandSelect?.(commandId, rawInput);
     onInputChange("");
   };
 
@@ -718,7 +739,7 @@ export function ComposerRenderer({
         setAtMentionQuery("");
       }
 
-      if (!value.startsWith("/")) {
+      if (!value.startsWith("/") || value.startsWith("//")) {
         setSelectedCommandIndex(0);
       }
     },
@@ -870,14 +891,21 @@ export function ComposerRenderer({
                     }`}
                   >
                     <span className="min-w-0">
-                      <span className="block truncate text-sm text-zinc-100">/{command.label}</span>
+                      <span className="block truncate text-sm text-zinc-100">/{command.name ?? command.id}</span>
                       {command.description && (
                         <span className="block truncate text-[11px] text-zinc-500">{command.description}</span>
                       )}
                     </span>
-                    {command.enabled && (
-                      <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] text-emerald-300">on</span>
-                    )}
+                    <span className="flex flex-shrink-0 items-center gap-1">
+                      {command.risk && (
+                        <span className={`rounded-full border px-2 py-0.5 text-[10px] ${RISK_BADGE_STYLES[command.risk] ?? "border-zinc-700 text-zinc-400"}`}>
+                          {command.risk}
+                        </span>
+                      )}
+                      {(command.enabled || command.active) && (
+                        <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] text-emerald-300">on</span>
+                      )}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -1029,14 +1057,19 @@ export function ComposerRenderer({
                           className="flex items-center justify-between gap-3 rounded-lg px-3 py-1.5 text-left hover:bg-zinc-800/80 transition-colors"
                         >
                           <span className="min-w-0">
-                            <span className="block truncate text-[13px] text-zinc-200">/{command.label}</span>
+                            <span className="block truncate text-[13px] text-zinc-200">/{command.name ?? command.id}</span>
                             {command.description && (
                               <span className="block truncate text-[10px] text-zinc-500">{command.description}</span>
                             )}
                           </span>
-                          {command.enabled && (
-                            <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] text-emerald-300">on</span>
-                          )}
+                          <span className="flex flex-shrink-0 items-center gap-1">
+                            {command.visibility === "advanced" && (
+                              <span className="rounded-full border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-500">advanced</span>
+                            )}
+                            {(command.enabled || command.active) && (
+                              <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] text-emerald-300">on</span>
+                            )}
+                          </span>
                         </button>
                       ))}
                     </div>

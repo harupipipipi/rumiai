@@ -386,6 +386,75 @@ def test_inline_thought_stream_filter_separates_thinking():
     assert filter_.transcript() == "private"
 
 
+def test_inline_thought_stream_filter_exposes_incremental_thinking():
+    from blocks.chat.stream import _InlineThoughtFilter
+
+    filter_ = _InlineThoughtFilter()
+    assert filter_.push("<thought>pri") == ""
+    assert filter_.pending_thinking_delta() == "pri"
+    assert filter_.push("vate</thought>public") == "public"
+    assert filter_.pending_thinking_delta() == "vate"
+    assert filter_.transcript() == "private"
+
+
+def test_chat_stream_recovers_when_provider_returns_only_thinking(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    import blocks.chat.stream as stream_module
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    captured = {}
+
+    class FakeAIClient:
+        def supports_stream(self, model):
+            return True
+
+        def stream(self, model, messages, tools, params):
+            yield {"type": "content_delta", "delta": {"type": "text", "text": "<thought>private plan"}}
+            yield {
+                "type": "stream_end",
+                "finish_reason": "stop",
+                "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+            }
+
+        def complete(self, model, messages, tools, params):
+            captured["retry_params"] = params
+            return {
+                "content": [{"type": "text", "text": "Recovered visible answer."}],
+                "finish_reason": "stop",
+                "usage": {"input_tokens": 2, "output_tokens": 3, "total_tokens": 5},
+            }
+
+    monkeypatch.setattr(stream_module, "AIClient", FakeAIClient)
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="google/gemma-4-31b-it")
+    result = stream_module.run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "hello"},
+            "tools": [],
+            "params": {"thinking_level": "high", "temperature": 0.2},
+        },
+        {},
+    )
+
+    events = list(result["events"])
+    deltas = [event["delta"] for event in events if event.get("type") == "delta"]
+    thinking_deltas = [event["delta"] for event in events if event.get("type") == "thinking_delta"]
+    final = [event["message"] for event in events if event.get("type") == "message"][-1]
+
+    assert "".join(deltas) == "Recovered visible answer."
+    assert "".join(thinking_deltas) == "private plan"
+    assert final["raw_text"] == "Recovered visible answer."
+    assert final["metadata"]["thinking"]["transcript"] == "private plan"
+    assert final["metadata"]["recovered_from_empty_stream"] is True
+    assert captured["retry_params"] == {"temperature": 0.2}
+    ChatStore._instance = None
+
+
 def test_chat_send_persists_user_attachment_metadata(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from blocks.chat.send import run

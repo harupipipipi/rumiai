@@ -48,6 +48,19 @@ function MessageBlock({ block, unknownStrategy }: { block: ChatContentBlock; unk
   );
 }
 
+function messageVisibleText(message: ChatMessagesRendererProps["messages"][number]): string {
+  const blockText = message.content
+    .map((block) => {
+      if (String(block.type ?? "text") === "text" || String(block.type ?? "") === "markdown") {
+        return String(block.text ?? "");
+      }
+      return "";
+    })
+    .join("")
+    .trim();
+  return blockText || String(message.rawText ?? "").trim();
+}
+
 function WidgetCard({ widget }: { widget: Record<string, unknown> }) {
   return (
     <details className="mt-2 rounded-lg border border-blue-500/20 bg-blue-500/10 p-3">
@@ -240,12 +253,30 @@ export function ChatMessagesRenderer({
                   )}>
                     {showActivityInMessages && message.role === "agent" && <ToolActivityTray message={message} />}
 
+                    {message.role === "agent" && message.metadata?.thinkingTranscript && (
+                      <details className="mb-3 rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2 text-xs text-zinc-400">
+                        <summary className="cursor-pointer select-none text-[11px] font-medium text-zinc-300">
+                          Thinking
+                        </summary>
+                        <pre className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-zinc-400">
+                          {message.metadata.thinkingTranscript}
+                        </pre>
+                      </details>
+                    )}
+
                     <div className="markdown-body leading-relaxed break-words space-y-4">
-                      {message.content.length > 0
+                      {message.content.length > 0 && (messageVisibleText(message) || message.content.some((block) => String(block.type ?? "text") !== "text"))
                         ? message.content.map((block, index) => (
                             <MessageBlock key={`${message.id}-${index}`} block={block} unknownStrategy={unknownBlockStrategy} />
                           ))
-                        : <ReactMarkdown>{message.rawText}</ReactMarkdown>}
+                        : message.role === "agent" && !messageVisibleText(message)
+                          ? (
+                              <div className="flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-amber-100">
+                                <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-300" />
+                                <span>レスポンス本文が空でした。stream が途中で閉じたか、thinking のみで終了した可能性があります。</span>
+                              </div>
+                            )
+                          : <ReactMarkdown>{message.rawText}</ReactMarkdown>}
                     </div>
 
                     {showWidgets && message.widget && <WidgetCard widget={message.widget} />}

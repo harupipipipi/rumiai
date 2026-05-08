@@ -4,7 +4,7 @@ import { MessageSquare } from "lucide-react";
 import type { ChatItem } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { api, type ChatContentBlock, type ChatMessage, type ComposerWidgetAction, type Conversation, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { api, type ChatContentBlock, type ChatMessage, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
 import { deriveConversationTitle, formatRelativeTime, messageToText } from "./lib/chat";
 import { cn } from "./lib/cn";
 import { canExecuteComposerEndpointAction, isSafeLocalEndpoint } from "./lib/composerWidgets";
@@ -115,6 +115,7 @@ function normalizeBlocks(message: ChatMessage): ChatContentBlock[] {
 function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatUiMessage {
   const isUser = message.role === "user";
   const metadata = message.metadata ?? {};
+  const thinking = metadata.thinking as Record<string, unknown> | undefined;
   const attachedToolCount = Number(metadata.attached_tool_count ?? 0);
   return {
     id: message.id,
@@ -129,7 +130,8 @@ function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatU
       : {
           executionTime: formatRelativeTime(message.created_at),
           modelName: profile?.display_name ?? String(message.model ?? ""),
-          thinkingLabel: String((metadata.thinking as Record<string, unknown> | undefined)?.state ?? ""),
+          thinkingLabel: String(thinking?.state ?? ""),
+          thinkingTranscript: String(thinking?.transcript ?? ""),
           attachedToolCount,
         },
   };
@@ -511,6 +513,47 @@ function replaceChatIdInUrl(conversationId: string | null, pending?: boolean) {
   }
 }
 
+function parseSlashCommandInput(input: string, commands: ComposerCommandItem[]) {
+  const trimmed = input.trim();
+  if (!trimmed.startsWith("/") || trimmed.startsWith("//")) return null;
+  const match = trimmed.match(/^\/(\S+)(?:\s+([\s\S]*))?$/);
+  if (!match) return null;
+  const name = match[1].toLowerCase();
+  const command = commands.find((item) => {
+    const names = [item.id, item.name, ...(item.aliases ?? [])].map((value) => value.toLowerCase());
+    return names.includes(name);
+  });
+  if (!command) return null;
+
+  const rest = (match[2] ?? "").trim();
+  const args: Record<string, unknown> = {};
+  const specs = command.args ?? [];
+  if (specs.length === 1 && rest) {
+    args[specs[0].name] = rest;
+  } else if (specs.length > 1 && rest) {
+    const tokens = rest.split(/\s+/);
+    specs.forEach((spec, index) => {
+      if (index === specs.length - 1) {
+        const remainder = tokens.slice(index).join(" ");
+        if (remainder) args[spec.name] = remainder;
+      } else if (tokens[index]) {
+        args[spec.name] = tokens[index];
+      }
+    });
+  }
+  return { command, args, raw: trimmed };
+}
+
+function commandSearchText(command: ComposerCommandItem): string {
+  return [
+    command.id,
+    command.name,
+    ...(command.aliases ?? []),
+    command.label,
+    command.description ?? "",
+  ].join(" ").toLowerCase();
+}
+
 function pendingBrowserApproval(messages: ChatUiMessage[]): BrowserApproval | null {
   for (const message of [...messages].reverse()) {
     for (const log of [...(message.toolLogs ?? [])].reverse()) {
@@ -536,6 +579,7 @@ export default function App() {
   const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
   const [settingsSections, setSettingsSections] = useState<SettingsSection[]>([]);
   const [settingsValues, setSettingsValues] = useState<Record<string, Record<string, unknown>>>({});
+  const [commandCatalog, setCommandCatalog] = useState<ComposerCommandItem[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
@@ -609,20 +653,18 @@ export default function App() {
   }, [messageToolPreviews, previews]);
   const canShowCanvas = hasCanvasItems(canvasPreviews, canvasMemo);
   const effectiveShowPreview = showPreview && canShowCanvas;
-  const composerCommands = [
-    {
-      id: "yolo",
-      label: "yolo",
-      description: "このチャットの tool 承認を自動化",
-      enabled: yoloMode,
-    },
-    {
-      id: "coding",
-      label: "coding",
-      description: "コーディングモードに切替",
-      enabled: mode === "coding",
-    },
-  ];
+  const composerCommands = useMemo(() => {
+    const showAdvanced = settingsValues.commands?.show_advanced_commands === true;
+    return commandCatalog
+      .filter((command) => command.visibility !== "hidden")
+      .filter((command) => showAdvanced || command.visibility === "default")
+      .filter((command) => !command.modes?.length || command.modes.includes(mode as ComposerCommandMode))
+      .map((command) => ({
+        ...command,
+        active: command.id === "yolo" ? yoloMode : command.id === mode,
+        enabled: command.id === "yolo" ? yoloMode : command.id === mode,
+      }));
+  }, [commandCatalog, mode, settingsValues.commands?.show_advanced_commands, yoloMode]);
   const unknownBlockStrategy = String(settingsValues.chat_rendering?.unknown_block_strategy ?? "hidden");
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
   const showActivityInMessages = settingsValues.general?.show_activity_in_messages !== false;
@@ -703,12 +745,39 @@ export default function App() {
   }
 
   async function refreshCatalog() {
-    const [nextCatalog, nextSettings, profilesResult] = await Promise.all([api.uiCatalog(), api.uiSettings(), api.listModelProfiles()]);
-    setCatalog(nextCatalog);
-    setModelProfiles(profilesResult.profiles);
-    setSettingsSections(nextSettings.sections);
-    setSettingsValues(nextSettings.values);
-    const defaultMode = nextSettings.values.preview?.default_mode;
+    const [catalogResult, settingsResult, profilesResult, commandsResult] = await Promise.allSettled([
+      api.uiCatalog(),
+      api.uiSettings(),
+      api.listModelProfiles(),
+      api.uiCommands(),
+    ]);
+    const nextCatalog = catalogResult.status === "fulfilled" ? catalogResult.value : null;
+    const nextSettings = settingsResult.status === "fulfilled" ? settingsResult.value : null;
+    if (nextCatalog) {
+      setCatalog(nextCatalog);
+    } else {
+      if (catalogResult.status === "rejected") console.error(catalogResult.reason);
+      setCatalog(null);
+    }
+    if (profilesResult.status === "fulfilled") {
+      setModelProfiles(profilesResult.value.profiles);
+    } else {
+      console.error(profilesResult.reason);
+      setModelProfiles([]);
+    }
+    if (nextSettings) {
+      setSettingsSections(nextSettings.sections);
+      setSettingsValues(nextSettings.values);
+    } else {
+      if (settingsResult.status === "rejected") console.error(settingsResult.reason);
+    }
+    if (commandsResult.status === "fulfilled") {
+      setCommandCatalog(commandsResult.value.commands);
+    } else {
+      console.error(commandsResult.reason);
+      setCommandCatalog([]);
+    }
+    const defaultMode = nextSettings?.values.preview?.default_mode;
     if (defaultMode === "auto" || defaultMode === "manual") {
       setPreviewMode(defaultMode);
     }
@@ -857,7 +926,13 @@ export default function App() {
           setIsGenerating(false);
           void refreshConversations(conversation.id);
         }
-      }).catch(console.error);
+      }).catch((pollError) => {
+        console.error(pollError);
+        forgetPendingRequest(activeConversationId);
+        replaceChatIdInUrl(activeConversationId, false);
+        setIsGenerating(false);
+        setError(pollError instanceof Error ? pollError.message : "stream 状態の確認に失敗しました。");
+      });
     }, 1500);
     return () => window.clearInterval(interval);
   }, [activeConversationId, isConversationPending]);
@@ -991,12 +1066,164 @@ export default function App() {
     });
   };
 
-  const handleComposerCommand = (commandId: string) => {
-    if (commandId === "yolo") {
-      setYoloMode((value) => !value);
-    } else if (commandId === "coding") {
-      setMode((value) => (value === "coding" ? "chat" : "coding"));
+  const runFrontendCommandAction = (
+    action: string | undefined,
+    command: ComposerCommandItem,
+    args: Record<string, unknown>,
+  ) => {
+    switch (action) {
+      case "open_model_picker": {
+        const query = String(args.query ?? "").trim().toLowerCase();
+        if (query) {
+          const profile = selectableModelProfiles.find((item) => commandSearchText({
+            id: item.profile_id,
+            name: item.profile_id,
+            aliases: [item.qualified_model_id ?? "", `${item.provider_id ?? ""}/${item.model_id ?? ""}`],
+            label: item.display_name,
+            description: item.provider_display_name,
+            category: "model",
+            visibility: "default",
+            risk: "low",
+            execution: { type: "frontend", action: "open_model_picker" },
+          }).includes(query));
+          if (profile) {
+            handleModelProfileSelect(profile.profile_id);
+          } else {
+            setError(`"${query}" に一致する model が見つかりません。`);
+          }
+        }
+        return;
+      }
+      case "set_fast_mode": {
+        const enabled = args.enabled === undefined ? true : Boolean(args.enabled);
+        handleThinkingLevelChange(enabled ? "low" : "medium");
+        return;
+      }
+      case "new_conversation":
+        handleNewTask();
+        return;
+      case "clear_composer_state":
+        setInput("");
+        setAttachedFiles([]);
+        setDroppedWidgets([]);
+        setSelectedTools([]);
+        if (activeConversationId) {
+          forgetPendingRequest(activeConversationId);
+          replaceChatIdInUrl(activeConversationId, false);
+        }
+        return;
+      case "set_mode_coding":
+        setMode("coding");
+        return;
+      case "set_mode_chat":
+        setMode("chat");
+        return;
+      case "set_mode_agent":
+        setMode("agent");
+        return;
+      case "toggle_yolo":
+        setYoloMode((value) => args.enabled === undefined ? !value : Boolean(args.enabled));
+        return;
+      case "open_tool_picker": {
+        const query = String(args.query ?? "").trim().toLowerCase();
+        if (query) {
+          const item = composerExtensions.find((candidate) => (
+            `${candidate.id} ${candidate.label} ${candidate.description ?? ""}`.toLowerCase().includes(query)
+          ));
+          if (item) {
+            handleComposerExtensionSelect(item);
+          } else {
+            setError(`"${query}" に一致する tool が見つかりません。`);
+          }
+        }
+        return;
+      }
+      case "show_status":
+        setError(
+          `status: mode=${mode}, model=${activeProfile?.display_name ?? preferredModel}, thinking=${selectedThinkingLevel}, yolo=${yoloMode ? "on" : "off"}, tools=${selectedTools.length}`,
+        );
+        return;
+      case "open_settings":
+      case "open_permissions":
+      case "open_theme_settings":
+      case "open_keymap_settings":
+        setIsSettingsOpen(true);
+        return;
+      case "open_command_help":
+        setError(composerCommands.map((item) => `/${item.name}: ${item.description ?? item.label}`).join("\n"));
+        return;
+      case "open_diff_preview":
+        setMode("coding");
+        setInput("Preview the current git diff.");
+        return;
+      case "start_review":
+        setMode("coding");
+        setInput("Review the current diff and call out bugs, risks, and missing tests.");
+        return;
+      case "open_branch_picker":
+        setMode("coding");
+        if (args.name) setInput(`Create or switch to branch ${String(args.name)}.`);
+        return;
+      case "prepare_test_run":
+        setMode("coding");
+        setInput(args.target ? `Run tests for ${String(args.target)}.` : "Run the recommended tests.");
+        return;
+      case "prepare_lint_run":
+        setMode("coding");
+        setInput("Run lint and formatting checks.");
+        return;
+      case "open_file_search":
+        setMode("coding");
+        if (args.query) setInput(`Find workspace files matching ${String(args.query)}.`);
+        return;
+      default:
+        if (command.risk === "high") {
+          setError(`/${command.name} は high risk command のため approval center 経由で実行してください。`);
+        }
     }
+  };
+
+  const executeComposerCommand = async (commandId: string, rawInput = `/${commandId}`) => {
+    const parsed = parseSlashCommandInput(rawInput, commandCatalog) ?? {
+      command: commandCatalog.find((command) => command.id === commandId || command.name === commandId),
+      args: {},
+      raw: rawInput,
+    };
+    if (!parsed.command) {
+      setError(`/${commandId} は未登録の command です。`);
+      return;
+    }
+    if (parsed.command.id === "think" && !("level" in parsed.args)) {
+      setIsSettingsOpen(true);
+      return;
+    }
+
+    try {
+      setError(null);
+      const result = await api.executeUiCommand({
+        command: parsed.command.name ?? parsed.command.id,
+        args: parsed.args,
+        conversation_id: activeConversationId,
+        mode: mode as ComposerCommandMode,
+      });
+      if (result.requires_approval) {
+        setError(result.message ?? `/${parsed.command.name} は approval center 経由で実行してください。`);
+        return;
+      }
+      if (result.action || parsed.command.execution.type === "frontend") {
+        const frontendAction = parsed.command.execution.type === "frontend" ? parsed.command.execution.action : undefined;
+        runFrontendCommandAction(result.action ?? frontendAction, parsed.command, parsed.args);
+      }
+      if (parsed.command.execution.type === "rumi_function") {
+        await refreshCatalog();
+      }
+    } catch (commandError) {
+      setError(commandError instanceof Error ? commandError.message : "command execution に失敗しました。");
+    }
+  };
+
+  const handleComposerCommand = (commandId: string, rawInput?: string) => {
+    void executeComposerCommand(commandId, rawInput);
   };
 
   const handleModeChange = (newMode: AppMode) => {
@@ -1284,7 +1511,15 @@ export default function App() {
     event.preventDefault();
     if ((!input.trim() && attachedFiles.length === 0) || isGenerating) return;
 
-    const userText = input.trim() || "添付ファイルを確認してください。";
+    const commandInput = parseSlashCommandInput(input, commandCatalog);
+    if (commandInput) {
+      await executeComposerCommand(commandInput.command.id, commandInput.raw);
+      setInput("");
+      return;
+    }
+
+    const trimmedInput = input.trim();
+    const userText = (trimmedInput.startsWith("//") ? trimmedInput.slice(1) : trimmedInput) || "添付ファイルを確認してください。";
     const submittedAttachments = attachedFiles;
     const wasNewConversation = isNewConversation;
     setIsGenerating(true);
@@ -1370,6 +1605,32 @@ export default function App() {
           };
         });
       };
+      const updateStreamingThinking = (delta: string) => {
+        setActiveConversation((current) => {
+          if (!current || current.id !== conversation.id) return current;
+          const existing = current.messages.find((message) => message.id === assistantDraft.id);
+          const nextThinking = (message: ChatMessage) => {
+            const metadata = { ...(message.metadata ?? {}) };
+            const thinking = metadata.thinking as Record<string, unknown> | undefined;
+            metadata.thinking = {
+              ...(thinking ?? {}),
+              state: "streaming",
+              transcript: `${String(thinking?.transcript ?? "")}${delta}`,
+            };
+            return { ...message, metadata };
+          };
+          if (!existing) {
+            return {
+              ...current,
+              messages: [...current.messages, nextThinking(assistantDraft)],
+            };
+          }
+          return {
+            ...current,
+            messages: current.messages.map((message) => message.id === assistantDraft.id ? nextThinking(message) : message),
+          };
+        });
+      };
       const replaceStreamingAssistant = (message: ChatMessage) => {
         setActiveConversation((current) => {
           if (!current || current.id !== conversation.id) return current;
@@ -1426,6 +1687,7 @@ export default function App() {
         },
       }, {
         onDelta: updateStreamingAssistant,
+        onThinkingDelta: updateStreamingThinking,
         onMessage: replaceStreamingAssistant,
         signal: abortController.signal,
       });
@@ -1453,6 +1715,8 @@ export default function App() {
       }
       if (submittedConversationId && !isUnloadingRef.current && document.visibilityState !== "hidden") {
         forgetPendingRequest(submittedConversationId);
+        replaceChatIdInUrl(submittedConversationId, false);
+        await refreshConversations(submittedConversationId).catch(console.error);
       }
       setInput(userText);
       setAttachedFiles(submittedAttachments);

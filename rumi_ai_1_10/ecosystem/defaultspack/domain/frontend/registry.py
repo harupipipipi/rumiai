@@ -572,6 +572,20 @@ class FrontendRegistry:
                     },
                 ],
             },
+            {
+                "id": "commands",
+                "label": "Commands",
+                "description": "Slash command visibility and command palette behavior.",
+                "fields": [
+                    {
+                        "id": "show_advanced_commands",
+                        "label": "Show Advanced Commands",
+                        "type": "toggle",
+                        "default": False,
+                        "help": "Advanced slash commandsを候補に含めます。hidden command は直接入力か将来の管理UI向けです。",
+                    },
+                ],
+            },
         ]
 
         sections.extend(self._config_list(ui_surfaces, "settings_sections"))
@@ -1020,6 +1034,9 @@ class FrontendRegistry:
             "chat_rendering": {"show_widgets": True, "unknown_block_strategy": "hidden"},
             "models": {
                 **ModelRuntimeSettingsService(self._pack_root).default_model_settings(),
+            },
+            "commands": {
+                "show_advanced_commands": False,
             },
             "apis": {
                 "api_keys": [],

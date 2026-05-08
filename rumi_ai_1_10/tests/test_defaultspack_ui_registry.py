@@ -504,6 +504,22 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(result["block_module"], "blocks.tool.list")
         self.assertEqual(result["request_data"]["_method"], "GET")
 
+    def test_fallback_http_uses_block_when_function_bridge_rejects_unapproved_pack(self):
+        from transport.http import DefaultsHttpServer
+
+        server = DefaultsHttpServer(facade=None)
+        with patch("domain.function_runtime.bridge.invoke_function") as invoke_function, patch("transport.http.invoke_block") as invoke_block:
+            invoke_function.return_value = {
+                "status": "error",
+                "error": {"code": "PACK_NOT_APPROVED", "message": "Pack not approved: defaultspack"},
+            }
+            invoke_block.return_value = {"status": "ok", "data": {"catalog": "fallback"}}
+            result = server._invoke_fallback_block("blocks.ui.catalog", {}, {})
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["data"]["catalog"], "fallback")
+        invoke_block.assert_called_once()
+
     def test_default_conversation_model_uses_stub_when_unconfigured(self):
         from domain.chat import store as chat_store
 
@@ -645,9 +661,68 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(result["status"], "ok")
         self.assertIn("/api/ui/catalog", registered_patterns)
         self.assertIn("/api/ui/settings", registered_patterns)
+        self.assertIn("/api/ui/commands", registered_patterns)
+        self.assertIn("/api/ui/commands/execute", registered_patterns)
         self.assertIn("/api/ui/conversations/{id}/preview", registered_patterns)
         self.assertTrue(any("api/ui/catalog" in pattern for pattern in fallback_patterns))
+        self.assertTrue(any("api/ui/commands" in pattern for pattern in fallback_patterns))
         self.assertTrue(any("api/ui/conversations" in pattern for pattern in fallback_patterns))
+
+    def test_slash_command_registry_lists_defaults_and_executes_thinking(self):
+        from domain.frontend.command_registry import SlashCommandRegistry
+
+        registry = SlashCommandRegistry(DEFAULTSPACK_ROOT)
+        commands = registry.list_commands()
+        ids = {command["id"] for command in commands}
+
+        self.assertIn("model", ids)
+        self.assertIn("think", ids)
+        self.assertIn("compact", ids)
+        self.assertIn("commit", ids)
+        self.assertEqual(next(command for command in commands if command["id"] == "commit")["risk"], "high")
+
+        with patch("domain.frontend.command_registry.invoke_function") as invoke:
+            invoke.return_value = {"status": "ok", "data": {"level": "high"}}
+            result = registry.execute(
+                {
+                    "command": "thinking",
+                    "mode": "chat",
+                    "args": {"level": "high"},
+                    "conversation_id": "conv-1",
+                },
+                {},
+            )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["data"]["executed"])
+        invoke.assert_called_once()
+        self.assertEqual(invoke.call_args.args[0], "defaultspack:ai_set_thinking_level")
+        self.assertEqual(invoke.call_args.args[1]["level"], "high")
+        self.assertEqual(invoke.call_args.args[1]["conversation_id"], "conv-1")
+
+    def test_slash_command_registry_rejects_invalid_enum_args(self):
+        from domain.frontend.command_registry import SlashCommandRegistry
+
+        result = SlashCommandRegistry(DEFAULTSPACK_ROOT).execute(
+            {"command": "think", "mode": "chat", "args": {"level": "warp"}},
+            {},
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["error"]["code"], "INVALID_ARGUMENT")
+        self.assertEqual(result["error"]["details"]["argument"], "level")
+
+    def test_slash_command_registry_blocks_high_risk_without_approval(self):
+        from domain.frontend.command_registry import SlashCommandRegistry
+
+        result = SlashCommandRegistry(DEFAULTSPACK_ROOT).execute(
+            {"command": "commit", "mode": "coding", "args": {"message": "test"}},
+            {},
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertFalse(result["data"]["executed"])
+        self.assertTrue(result["data"]["requires_approval"])
 
     def test_static_asset_serving_is_binary_and_assets_scoped(self):
         from transport.http import DefaultsHttpServer

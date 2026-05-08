@@ -1,0 +1,222 @@
+from __future__ import annotations
+
+import json
+from copy import deepcopy
+from pathlib import Path
+from typing import Any
+
+from domain.chat.store import ChatStore
+from domain.function_runtime.bridge import invoke_function
+
+
+CATEGORIES = {"chat", "model", "mode", "coding", "tools", "settings", "debug"}
+VISIBILITIES = {"default", "advanced", "hidden"}
+MODES = {"chat", "coding", "agent"}
+RISKS = {"low", "medium", "high"}
+
+
+def ok(data: Any = None) -> dict[str, Any]:
+    return {"status": "ok", "data": data}
+
+
+def error(message: str, code: str = "ERROR", **extra: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {"code": code, "message": message}
+    payload.update(extra)
+    return {"status": "error", "error": payload}
+
+
+class SlashCommandRegistry:
+    """Manifest-driven slash command registry for defaultspack UI commands."""
+
+    def __init__(self, pack_root: Path | None = None) -> None:
+        self._pack_root = pack_root or Path(__file__).resolve().parents[2]
+
+    def list_commands(self) -> list[dict[str, Any]]:
+        commands: list[dict[str, Any]] = []
+        commands.extend(self._load_manifest_file(self._pack_root / "commands" / "default_commands.json"))
+        commands.extend(self._load_manifest_dir(self._pack_root / "commands" / "manifests"))
+        commands.extend(self._load_manifest_dir(self._pack_root / "user_data" / "shared" / "commands"))
+        return self._dedupe_by_id([self._normalize(item) for item in commands if isinstance(item, dict)])
+
+    def find_command(self, name: str) -> dict[str, Any] | None:
+        needle = str(name or "").strip().lower().lstrip("/")
+        if not needle:
+            return None
+        for command in self.list_commands():
+            names = [command.get("id"), command.get("name"), *(command.get("aliases") or [])]
+            if needle in {str(item or "").strip().lower() for item in names}:
+                return command
+        return None
+
+    def execute(self, payload: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
+        command = self.find_command(str(payload.get("command") or ""))
+        if command is None:
+            return error("command not found", "NOT_FOUND")
+
+        mode = str(payload.get("mode") or "chat")
+        if mode not in command.get("modes", []):
+            return error("command is not available in this mode", "COMMAND_UNAVAILABLE", details={"mode": mode})
+
+        args_result = self._coerce_args(command, payload.get("args") if isinstance(payload.get("args"), dict) else {})
+        if isinstance(args_result, dict) and args_result.get("status") == "error":
+            return args_result
+        args = args_result
+        if command.get("risk") == "high":
+            return ok({
+                "command": command,
+                "executed": False,
+                "requires_approval": True,
+                "message": "This command requires approval center confirmation.",
+            })
+
+        execution = command.get("execution") if isinstance(command.get("execution"), dict) else {}
+        execution_type = str(execution.get("type") or "frontend")
+
+        if execution_type == "frontend":
+            return ok({
+                "command": command,
+                "executed": False,
+                "action": execution.get("action"),
+                "args": args,
+            })
+
+        if execution_type == "rumi_function":
+            qualified_name = str(execution.get("qualified_name") or "").strip()
+            if not qualified_name:
+                return error("rumi_function command is missing qualified_name", "INVALID_COMMAND")
+            function_args = dict(args)
+            if payload.get("conversation_id"):
+                function_args.setdefault("conversation_id", payload.get("conversation_id"))
+            result = invoke_function(qualified_name, function_args, context or {}, principal_id="defaultspack")
+            if isinstance(result, dict) and result.get("status") == "ok":
+                return ok({"command": command, "executed": True, "result": result.get("data")})
+            return result if isinstance(result, dict) else error("command execution failed", "EXECUTION_FAILED")
+
+        if execution_type == "chat_action":
+            return self._execute_chat_action(command, execution, args, payload, context or {})
+
+        return error("unsupported command execution type", "INVALID_COMMAND", details={"type": execution_type})
+
+    def _execute_chat_action(
+        self,
+        command: dict[str, Any],
+        execution: dict[str, Any],
+        args: dict[str, Any],
+        payload: dict[str, Any],
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        action = str(execution.get("action") or "")
+        if action != "compact_conversation":
+            return ok({"command": command, "executed": False, "action": action, "args": args})
+
+        conversation_id = str(payload.get("conversation_id") or "").strip()
+        if not conversation_id:
+            return error("conversation_id is required", "INVALID_INPUT")
+        conversation = ChatStore().get_conversation(conversation_id)
+        if conversation is None:
+            return error("Conversation not found", "NOT_FOUND")
+
+        from blocks.context.compact import run as compact_run
+
+        result = compact_run(
+            {
+                "conversation_id": conversation_id,
+                "goal": str(args.get("instruction") or "Compact current conversation"),
+                "messages": conversation.get("messages", []),
+                "summary": args.get("instruction"),
+            },
+            context,
+        )
+        if isinstance(result, dict) and result.get("status") == "ok":
+            return ok({"command": command, "executed": True, "result": result.get("data")})
+        return result if isinstance(result, dict) else error("compact command failed", "EXECUTION_FAILED")
+
+    def _load_manifest_dir(self, path: Path) -> list[dict[str, Any]]:
+        if not path.exists():
+            return []
+        items: list[dict[str, Any]] = []
+        for file_path in sorted(path.glob("*.json")):
+            items.extend(self._load_manifest_file(file_path))
+        return items
+
+    @staticmethod
+    def _load_manifest_file(path: Path) -> list[dict[str, Any]]:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+        if isinstance(payload, list):
+            return [item for item in payload if isinstance(item, dict)]
+        if isinstance(payload, dict):
+            commands = payload.get("commands")
+            if isinstance(commands, list):
+                return [item for item in commands if isinstance(item, dict)]
+            return [payload]
+        return []
+
+    @staticmethod
+    def _normalize(command: dict[str, Any]) -> dict[str, Any]:
+        normalized = deepcopy(command)
+        command_id = str(normalized.get("id") or normalized.get("name") or "").strip().lower().lstrip("/")
+        normalized["id"] = command_id
+        normalized["name"] = str(normalized.get("name") or command_id).strip().lower().lstrip("/")
+        normalized["label"] = str(normalized.get("label") or normalized["name"])
+        normalized["aliases"] = [
+            str(alias).strip().lower().lstrip("/")
+            for alias in normalized.get("aliases", [])
+            if str(alias or "").strip()
+        ]
+        category = str(normalized.get("category") or "chat")
+        normalized["category"] = category if category in CATEGORIES else "chat"
+        visibility = str(normalized.get("visibility") or "default")
+        normalized["visibility"] = visibility if visibility in VISIBILITIES else "default"
+        risk = str(normalized.get("risk") or "low")
+        normalized["risk"] = risk if risk in RISKS else "low"
+        modes = normalized.get("modes")
+        if not isinstance(modes, list) or not modes:
+            normalized["modes"] = ["chat", "coding", "agent"]
+        else:
+            normalized["modes"] = [mode for mode in (str(item) for item in modes) if mode in MODES] or ["chat", "coding", "agent"]
+        if not isinstance(normalized.get("args"), list):
+            normalized["args"] = []
+        if not isinstance(normalized.get("execution"), dict):
+            normalized["execution"] = {"type": "frontend", "action": normalized["id"]}
+        return normalized
+
+    @staticmethod
+    def _dedupe_by_id(commands: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        order: list[str] = []
+        deduped: dict[str, dict[str, Any]] = {}
+        for command in commands:
+            command_id = str(command.get("id") or "")
+            if not command_id:
+                continue
+            if command_id not in deduped:
+                order.append(command_id)
+            deduped[command_id] = command
+        return [deduped[item] for item in order]
+
+    @staticmethod
+    def _coerce_args(command: dict[str, Any], args: dict[str, Any]) -> dict[str, Any]:
+        coerced = dict(args)
+        for spec in command.get("args", []):
+            if not isinstance(spec, dict):
+                continue
+            name = str(spec.get("name") or "")
+            if not name or name not in coerced:
+                continue
+            value = coerced[name]
+            arg_type = spec.get("type")
+            if arg_type == "boolean":
+                coerced[name] = str(value).strip().lower() in {"1", "true", "yes", "on", "enabled"}
+            elif arg_type == "enum":
+                values = [str(item) for item in spec.get("values", [])]
+                if values and str(value) not in values:
+                    return error(
+                        f"{name} must be one of: {', '.join(values)}",
+                        "INVALID_ARGUMENT",
+                        details={"argument": name, "values": values},
+                    )
+            elif arg_type == "string":
+                coerced[name] = str(value)
+        return coerced

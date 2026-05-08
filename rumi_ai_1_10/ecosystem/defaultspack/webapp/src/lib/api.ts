@@ -255,6 +255,50 @@ export type SettingsSection = {
   fields: SidebarField[];
 };
 
+export type ComposerCommandCategory = "chat" | "model" | "mode" | "coding" | "tools" | "settings" | "debug";
+export type ComposerCommandVisibility = "default" | "advanced" | "hidden";
+export type ComposerCommandRisk = "low" | "medium" | "high";
+export type ComposerCommandMode = "chat" | "coding" | "agent";
+
+export type ComposerCommandArg = {
+  name: string;
+  type: "string" | "enum" | "boolean";
+  required?: boolean;
+  values?: string[];
+};
+
+export type ComposerCommandExecution =
+  | { type: "frontend"; action: string }
+  | { type: "settings_patch"; section: string; field: string }
+  | { type: "rumi_function"; qualified_name: string }
+  | { type: "chat_action"; action: string };
+
+export type ComposerCommandItem = {
+  id: string;
+  name: string;
+  aliases?: string[];
+  label: string;
+  description?: string;
+  category: ComposerCommandCategory;
+  visibility: ComposerCommandVisibility;
+  modes?: ComposerCommandMode[];
+  risk: ComposerCommandRisk;
+  enabled?: boolean;
+  active?: boolean;
+  args?: ComposerCommandArg[];
+  execution: ComposerCommandExecution;
+};
+
+export type ComposerCommandExecuteResult = {
+  command: ComposerCommandItem;
+  executed?: boolean;
+  requires_approval?: boolean;
+  action?: string;
+  args?: Record<string, unknown>;
+  result?: unknown;
+  message?: string;
+};
+
 export type ShellRegion = {
   id: string;
   part_id?: string;
@@ -374,14 +418,18 @@ type SendMessageOptions = {
   metadata?: Record<string, unknown>;
 };
 
+type ChatStreamError = string | { code?: string; message?: string };
+
 export type ChatStreamEvent =
   | { type: "delta"; delta: string }
+  | { type: "thinking_delta"; delta: string }
   | { type: "message" | "done" | "user_message"; message?: ChatMessage }
-  | { type: "error"; error?: string };
+  | { type: "error"; error?: ChatStreamError };
 
 type ChatStreamHandlers = {
   onEvent?: (event: ChatStreamEvent) => void;
   onDelta?: (delta: string) => void;
+  onThinkingDelta?: (delta: string) => void;
   onMessage?: (message: ChatMessage) => void;
   onUserMessage?: (message: ChatMessage) => void;
   signal?: AbortSignal;
@@ -445,6 +493,14 @@ async function readStreamEvents(
   let buffer = "";
   let finalMessage: ChatMessage | null = null;
 
+  const streamErrorMessage = (value: ChatStreamError | undefined): string => {
+    if (typeof value === "string" && value.trim()) return value;
+    if (value && typeof value === "object" && typeof value.message === "string") {
+      return value.message;
+    }
+    return "defaultspack stream failed";
+  };
+
   const consumePacket = (packet: string) => {
     const dataLines = packet
       .split(/\r?\n/)
@@ -453,17 +509,24 @@ async function readStreamEvents(
     if (!dataLines.length) return;
     const raw = dataLines.join("\n");
     if (!raw || raw === "[DONE]") return;
-    const event = JSON.parse(raw) as ChatStreamEvent;
+    let event: ChatStreamEvent;
+    try {
+      event = JSON.parse(raw) as ChatStreamEvent;
+    } catch {
+      throw new Error("defaultspack stream returned a malformed event");
+    }
     handlers.onEvent?.(event);
     if (event.type === "delta") {
       handlers.onDelta?.(event.delta);
+    } else if (event.type === "thinking_delta") {
+      handlers.onThinkingDelta?.(event.delta);
     } else if (event.type === "user_message" && event.message) {
       handlers.onUserMessage?.(event.message);
     } else if ((event.type === "message" || event.type === "done") && event.message) {
       finalMessage = event.message;
       handlers.onMessage?.(event.message);
     } else if (event.type === "error") {
-      throw new Error(event.error || "defaultspack stream failed");
+      throw new Error(streamErrorMessage(event.error));
     }
   };
 
@@ -479,6 +542,9 @@ async function readStreamEvents(
   }
   if (buffer.trim()) {
     consumePacket(buffer);
+  }
+  if (!finalMessage) {
+    throw new Error("defaultspack stream ended before a final response arrived");
   }
   return finalMessage;
 }
@@ -583,6 +649,22 @@ export const api = {
     return request<{ sections: SettingsSection[]; values: Record<string, Record<string, unknown>> }>(
       "/api/ui/settings",
     );
+  },
+
+  uiCommands() {
+    return request<{ commands: ComposerCommandItem[] }>("/api/ui/commands");
+  },
+
+  executeUiCommand(payload: {
+    command: string;
+    args?: Record<string, unknown>;
+    conversation_id?: string | null;
+    mode?: ComposerCommandMode;
+  }) {
+    return request<ComposerCommandExecuteResult>("/api/ui/commands/execute", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
   },
 
   updateUiSettings(values: Record<string, Record<string, unknown>>) {

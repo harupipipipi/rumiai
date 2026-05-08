@@ -1,8 +1,11 @@
 import type { FormEvent, MutableRefObject } from "react";
 
 import type { ChatActivityEvent, ChatContentBlock, CodingContextEntry, CodingGitStatus, ComposerWidgetAction, ModelProfile, SettingsSection, SidebarAction, SidebarItem, ToolLogEntry, UICatalog } from "../lib/api";
+import type { ComposerCommandItem } from "../lib/api";
 import type { ChatItem } from "../components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "../components/ToolPreview";
+
+export type { ComposerCommandItem } from "../lib/api";
 
 export type ChatUiMessage = {
   id: string;
@@ -15,6 +18,7 @@ export type ChatUiMessage = {
     toolUsed?: string;
     modelName?: string;
     thinkingLabel?: string;
+    thinkingTranscript?: string;
     attachedToolCount?: number;
   };
   events?: ChatActivityEvent[];
@@ -29,13 +33,6 @@ export type ComposerExtensionItem = {
   tags?: string[];
   disabled?: boolean;
   ui?: SidebarItem["ui"];
-};
-
-export type ComposerCommandItem = {
-  id: string;
-  label: string;
-  description?: string;
-  enabled?: boolean;
 };
 
 export type ContextUsageInfo = {
@@ -109,7 +106,7 @@ export type ComposerRendererProps = {
   droppedWidgets?: DroppedWidget[];
   selectedToolIds?: string[];
   onExtensionSelect?: (item: ComposerExtensionItem) => void;
-  onCommandSelect?: (commandId: string) => void;
+  onCommandSelect?: (commandId: string, rawInput?: string) => void;
   onModelProfileSelect: (profileId: string) => void;
   onProviderApiKeySave?: (providerId: string, value: string) => Promise<void> | void;
   onThinkingLevelChange: (level: string | null) => void;

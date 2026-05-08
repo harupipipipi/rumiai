@@ -27,6 +27,8 @@ def run(context):
         ("GET", "/api/ui/catalog", _lazy("blocks.ui.catalog"), {}),
         ("GET", "/api/ui/settings", _lazy("blocks.ui.settings"), {}),
         ("PUT", "/api/ui/settings", _lazy("blocks.ui.settings"), {}),
+        ("GET", "/api/ui/commands", _lazy("blocks.ui.commands"), {}),
+        ("POST", "/api/ui/commands/execute", _lazy("blocks.ui.commands"), {}),
         (
             "GET",
             "/api/ui/conversations/{id}/preview",
