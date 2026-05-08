@@ -3,11 +3,11 @@
   "category": "tool",
   "version": "1",
   "display_name": "Browser Use",
-  "description": "Open URLs, inspect browser state, capture screenshots for vision-capable models, and move the cursor from screenshot coordinates.",
+  "description": "Open URLs, inspect browser/app state, capture screenshots for vision-capable models, and move the virtual AI cursor from screenshot coordinates. If existing Chrome returns a chrome_setting recovery for background entry, stop retrying and report the blocker.",
   "enabled": true,
   "config": {
     "name": "browser_use",
-    "summary": "ブラウザ操作",
+    "summary": "ブラウザ操作。action=context で開いているアプリ/選択ウィンドウ/AIカーソルも確認できます。",
     "tags": ["browser", "vision", "screenshot", "cursor"],
     "schema": {
       "parameters": {
@@ -15,7 +15,7 @@
         "properties": {
           "action": {
             "type": "string",
-            "enum": ["session", "open_url", "screenshot", "move", "click", "select_window", "windows", "type", "key", "scroll"],
+            "enum": ["session", "open_url", "context", "screenshot", "move", "click", "select_window", "windows", "type", "key", "scroll"],
             "default": "session"
           },
           "url": {"type": "string"},

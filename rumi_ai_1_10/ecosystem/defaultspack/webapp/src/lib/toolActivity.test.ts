@@ -90,6 +90,25 @@ test("dedupes started events when a matching completed log exists", () => {
   assert.equal(groups[0].items[0].status, "completed");
 });
 
+test("marks nested tool errors as failed activity", () => {
+  const groups = buildToolActivityGroups([
+    {
+      tool_name: "computer_use",
+      arguments: { action: "type", text: "hello" },
+      result: {
+        status: "ok",
+        data: {
+          result: "computer_use computer.type failed",
+          is_error: true,
+          widget: { is_error: true },
+        },
+      },
+    },
+  ]);
+
+  assert.equal(groups[0].items[0].status, "failed");
+});
+
 test("classifies common tool families", () => {
   assert.equal(toolFolderFor("browser_computer").id, "browser");
   assert.equal(toolFolderFor("todo").id, "planning/todo");

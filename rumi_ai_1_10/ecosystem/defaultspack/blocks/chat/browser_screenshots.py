@@ -74,6 +74,11 @@ def run(input_data, context):
     run_id = input_data.get("run_id")
     if not conversation_id or not run_id:
         return error("conversation_id and run_id are required", "INVALID_INPUT")
+    try:
+        limit = int(input_data.get("limit", 8))
+    except Exception:
+        limit = 8
+    limit = max(1, min(limit, 12))
 
     store = ChatStore()
     conversation = store.get_conversation(conversation_id)
@@ -125,4 +130,14 @@ def run(input_data, context):
                     item[meta_key] = candidate.get(meta_key)
             screenshots.append(item)
 
-    return ok({"conversation_id": conversation_id, "run_id": run_id, "screenshots": screenshots})
+    omitted_count = max(len(screenshots) - limit, 0)
+    if omitted_count:
+        screenshots = screenshots[-limit:]
+    return ok(
+        {
+            "conversation_id": conversation_id,
+            "run_id": run_id,
+            "screenshots": screenshots,
+            "omitted_count": omitted_count,
+        }
+    )

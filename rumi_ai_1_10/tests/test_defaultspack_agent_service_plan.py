@@ -804,6 +804,171 @@ def test_browser_computer_background_type_failure_does_not_fall_back_to_physical
     assert "Chrome background text entry failed" in result["reason"]
 
 
+def test_browser_computer_select_window_respects_app_filter(tmp_path):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._list_windows = lambda: [
+        {"app": "Codex", "title": "", "x": 0, "y": 0, "width": 1470, "height": 37, "active": True},
+        {"app": "Google Chrome", "title": "", "x": 0, "y": 0, "width": 1470, "height": 37, "active": True},
+        {"app": "Google Chrome", "title": "ChatGPT - Google Chrome", "x": 50, "y": 80, "width": 1200, "height": 800, "active": False},
+    ]
+    controller._active_window = lambda: {"app": "Codex", "title": "", "x": 0, "y": 0, "width": 1470, "height": 37, "active": True}
+
+    result = controller.run("computer.select_window", {"app": "Google Chrome", "focus": False}, yolo_mode=True)
+
+    assert result["selected"] is True
+    assert result["target_window"]["app"] == "Google Chrome"
+    assert controller._computer_state()["target_window"]["title"] == "ChatGPT - Google Chrome"
+
+
+def test_browser_computer_select_window_failure_clears_stale_target(tmp_path):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._write_computer_state(
+        {
+            "target_window": {
+                "app": "Codex",
+                "title": "",
+                "x": 0,
+                "y": 0,
+                "width": 1470,
+                "height": 37,
+                "active": True,
+            }
+        }
+    )
+    controller._list_windows = lambda: [
+        {"app": "Codex", "title": "", "x": 0, "y": 0, "width": 1470, "height": 37, "active": True},
+    ]
+    controller._chrome_tabs = lambda: []
+
+    result = controller.run("computer.select_window", {"app": "Google Chrome", "focus": False}, yolo_mode=True)
+
+    assert result["selected"] is False
+    assert "target_window" not in controller._computer_state()
+
+
+def test_browser_computer_select_window_can_store_hidden_chrome_tab_target(tmp_path):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._list_windows = lambda: [
+        {"app": "Codex", "title": "", "x": 0, "y": 0, "width": 1470, "height": 37, "active": True},
+    ]
+    controller._chrome_tabs = lambda: [
+        {
+            "app": "Google Chrome",
+            "window_index": 2,
+            "tab_index": 5,
+            "active": True,
+            "title": "ChatGPT",
+            "url": "https://chatgpt.com/",
+        }
+    ]
+
+    result = controller.run("computer.select_window", {"app": "Google Chrome", "title": "ChatGPT", "focus": False}, yolo_mode=True)
+
+    assert result["selected"] is True
+    assert result["background_target_only"] is True
+    assert result["chrome_target"]["window_index"] == 2
+    assert controller._read_sessions()["chrome_target"]["tab_index"] == 5
+    assert "target_window" not in controller._computer_state()
+
+
+def test_browser_computer_context_exposes_ai_cursor_and_selected_window(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._write_computer_state(
+        {
+            "ai_cursor": {"x": 10, "y": 20, "origin": "top_left"},
+            "target_window": {
+                "app": "Google Chrome",
+                "title": "ChatGPT - Google Chrome",
+                "x": 50,
+                "y": 80,
+                "width": 1200,
+                "height": 800,
+            },
+        }
+    )
+    controller._active_window = lambda: {"app": "Codex", "title": "", "x": 0, "y": 0, "width": 1470, "height": 900}
+    controller._list_windows = lambda: []
+    controller._chrome_tabs = lambda: []
+    monkeypatch.setattr(BrowserComputerController, "_cursor_position", staticmethod(lambda: {"x": 1, "y": 2, "origin": "top_left"}))
+
+    result = controller.run("computer.context", {"include_windows": False}, yolo_mode=True)
+
+    assert result["ai_cursor"]["x"] == 10
+    assert result["selected_window"]["app"] == "Google Chrome"
+    assert result["active_window"]["app"] == "Codex"
+    assert "windows" not in result
+
+
+def test_browser_computer_context_reports_chrome_background_blocker(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._active_window = lambda: {"app": "Codex", "title": "", "x": 0, "y": 0, "width": 1470, "height": 900}
+    controller._chrome_tabs = lambda: [
+        {
+            "app": "Google Chrome",
+            "window_index": 1,
+            "tab_index": 3,
+            "title": "ChatGPT",
+            "url": "https://chatgpt.com/",
+        }
+    ]
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+
+    def fake_execute(js, payload):
+        controller._last_background_error = "Executing JavaScript through AppleScript is turned off. Apple Events denied."
+        raise RuntimeError("blocked")
+
+    controller._darwin_execute_chrome_background_js = fake_execute
+
+    result = controller.run("computer.context", {"include_windows": False}, yolo_mode=True)
+
+    assert result["chrome_background_control"]["available"] is False
+    assert result["chrome_background_control"]["recovery"]["kind"] == "chrome_setting"
+    assert "Allow JavaScript from Apple Events" in result["chrome_background_control"]["reason"]
+
+
+def test_browser_computer_context_clears_tiny_stale_selected_window(tmp_path):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._write_computer_state(
+        {
+            "target_window": {
+                "app": "Google Chrome",
+                "title": "",
+                "x": 0,
+                "y": 0,
+                "width": 1470,
+                "height": 37,
+                "active": True,
+            }
+        }
+    )
+    controller._active_window = lambda: {"app": "Codex", "title": "", "x": 0, "y": 0, "width": 1470, "height": 900}
+    controller._chrome_tabs = lambda: []
+
+    result = controller.run("computer.context", {"include_windows": False}, yolo_mode=True)
+
+    assert result["selected_window"] is None
+    assert "target_window" not in controller._computer_state()
+
+
 def test_chat_send_persists_user_attachment_metadata(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from blocks.chat.send import run
@@ -1253,6 +1418,196 @@ def test_chat_tool_loop_emits_realtime_tool_events():
         "tool_call_completed",
     ]
     assert emitted[2]["tool_name"] == "calculator"
+
+
+def test_chat_tool_loop_marks_nested_tool_errors_in_events():
+    import blocks.chat.send as send
+
+    calls = {"ai": 0}
+    emitted = []
+
+    def call_handler(name, payload):
+        if name == "defaults.ai.complete":
+            calls["ai"] += 1
+            if calls["ai"] == 1:
+                return {
+                    "status": "ok",
+                    "data": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "call_1",
+                                "name": "computer_use",
+                                "input": "{\"action\":\"type\",\"text\":\"hello\"}",
+                            }
+                        ],
+                        "finish_reason": "tool_calls",
+                    },
+                }
+            return {
+                "status": "ok",
+                "data": {"content": [{"type": "text", "text": "handled"}], "finish_reason": "stop"},
+            }
+        if name == "defaults.tool.invoke":
+            return {
+                "status": "ok",
+                "data": {
+                    "result": "type failed",
+                    "is_error": True,
+                    "widget": {"is_error": True},
+                },
+            }
+        raise AssertionError(name)
+
+    response = send._complete_with_tools(
+        "openrouter/test-model",
+        [{"role": "user", "content": "type hello"}],
+        [{"type": "function", "function": {"name": "computer_use", "parameters": {"type": "object"}}}],
+        {"stream_event_callback": emitted.append},
+        call_handler,
+        {"max_tool_calls": 3},
+    )
+
+    completed = [event for event in response["events"] if event["type"] == "tool_call_completed"][0]
+    streamed_completed = [event for event in emitted if event["type"] == "tool_call_completed"][0]
+    assert completed["is_error"] is True
+    assert streamed_completed["is_error"] is True
+
+
+def test_chat_tool_loop_stops_on_chrome_setting_recovery():
+    import blocks.chat.send as send
+
+    calls = {"ai": 0, "tool": 0}
+    emitted = []
+
+    def call_handler(name, payload):
+        if name == "defaults.ai.complete":
+            calls["ai"] += 1
+            return {
+                "status": "ok",
+                "data": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "call_chrome",
+                            "name": "computer_use",
+                            "input": "{\"action\":\"type\",\"text\":\"hello\",\"app\":\"Google Chrome\"}",
+                        }
+                    ],
+                    "finish_reason": "tool_calls",
+                },
+            }
+        if name == "defaults.tool.invoke":
+            calls["tool"] += 1
+            return {
+                "status": "ok",
+                "data": {
+                    "result": "Chrome background text entry failed.",
+                    "is_error": True,
+                    "recovery": {
+                        "kind": "chrome_setting",
+                        "setting": "Allow JavaScript from Apple Events",
+                        "path": "View > Developer > Allow JavaScript from Apple Events",
+                    },
+                },
+            }
+        raise AssertionError(name)
+
+    response = send._complete_with_tools(
+        "google/gemma-4-31b-it",
+        [{"role": "user", "content": "send hello in existing Chrome"}],
+        [{"type": "function", "function": {"name": "computer_use", "parameters": {"type": "object"}}}],
+        {"stream_event_callback": emitted.append},
+        call_handler,
+        {"max_tool_calls": 12},
+    )
+
+    assert calls == {"ai": 1, "tool": 1}
+    assert response["finish_reason"] == "tool_blocked"
+    assert response["metadata"]["tool_blocked"] is True
+    assert response["metadata"]["tool_blocked_kind"] == "chrome_setting"
+    assert "Allow JavaScript from Apple Events" in response["content"][0]["text"]
+    assert [event["phase"] for event in emitted if event["type"] == "status"][-1] == "tool_blocked"
+
+
+def test_chat_tool_loop_stops_when_context_reports_required_background_chrome_blocker():
+    import blocks.chat.send as send
+
+    calls = {"ai": 0, "tool": 0}
+
+    def call_handler(name, payload):
+        if name == "defaults.ai.complete":
+            calls["ai"] += 1
+            return {
+                "status": "ok",
+                "data": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "call_context",
+                            "name": "computer_use",
+                            "input": "{\"action\":\"context\"}",
+                        }
+                    ],
+                    "finish_reason": "tool_calls",
+                },
+            }
+        if name == "defaults.tool.invoke":
+            calls["tool"] += 1
+            return {
+                "status": "ok",
+                "data": {
+                    "result": "context",
+                    "is_error": False,
+                    "widget": {
+                        "action": "computer.context",
+                        "chrome_background_control": {
+                            "available": False,
+                            "reason": "Chrome background entry failed because Chrome has disabled JavaScript from Apple Events.",
+                            "recovery": {
+                                "kind": "chrome_setting",
+                                "setting": "Allow JavaScript from Apple Events",
+                                "path": "View > Developer > Allow JavaScript from Apple Events",
+                            },
+                        },
+                    },
+                },
+            }
+        raise AssertionError(name)
+
+    response = send._complete_with_tools(
+        "google/gemma-4-31b-it",
+        [{"role": "user", "content": "画面を切り替えず既存のGoogle ChromeのChatGPTにhelloを送って"}],
+        [{"type": "function", "function": {"name": "computer_use", "parameters": {"type": "object"}}}],
+        {},
+        call_handler,
+        {"max_tool_calls": 12},
+    )
+
+    assert calls == {"ai": 1, "tool": 1}
+    assert response["finish_reason"] == "tool_blocked"
+    assert response["metadata"]["tool_blocked_kind"] == "chrome_setting"
+    assert "Allow JavaScript from Apple Events" in response["content"][0]["text"]
+
+
+def test_tool_result_recovery_kind_infers_legacy_chrome_setting_error():
+    import blocks.chat.send as send
+
+    assert (
+        send._tool_result_recovery_kind(
+            {
+                "status": "ok",
+                "data": {
+                    "result": (
+                        "Chrome background text entry failed. "
+                        "Enable Chrome's 'Allow JavaScript from Apple Events' setting."
+                    ),
+                    "is_error": True,
+                },
+            }
+        )
+        == "chrome_setting"
+    )
 
 
 def test_chat_tool_loop_honors_stream_cancel_before_tool_execution():
@@ -2053,6 +2408,50 @@ def test_browser_computer_screenshot_is_read_only_without_approval(tmp_path, mon
     assert Path(result["path"]).exists()
 
 
+def test_browser_computer_screenshot_uses_window_id_for_selected_macos_window(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    png_header = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR"
+    png_body = png_header + b"\x00\x00\x02\x80\x00\x00\x01\x90"
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if command[0] == "screencapture":
+            Path(command[-1]).write_bytes(png_body)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+    monkeypatch.setattr(BrowserComputerController, "_model_screenshot_copy", lambda self, path: path)
+    monkeypatch.setattr(BrowserComputerController, "_cursor_position", staticmethod(lambda: None))
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._write_computer_state(
+        {
+            "target_window": {
+                "app": "Google Chrome",
+                "title": "ChatGPT - Google Chrome",
+                "x": 50,
+                "y": 80,
+                "width": 1200,
+                "height": 800,
+                "window_id": 12345,
+            }
+        }
+    )
+    controller._active_window = lambda: None
+    controller._chrome_tabs = lambda: []
+
+    result = controller.run("computer.screenshot")
+
+    assert result["action"] == "computer.screenshot"
+    assert calls[0][:4] == ["screencapture", "-x", "-l", "12345"]
+    assert result["target_window"]["window_id"] == 12345
+
+
 def test_browser_use_maps_cursor_move_to_browser_computer_payload():
     from domain.tool.executor import _browser_computer_action_payload
 
@@ -2063,6 +2462,33 @@ def test_browser_use_maps_cursor_move_to_browser_computer_payload():
 
     assert action == "computer.move"
     assert payload == {"x": 120, "y": 240, "dry_run": True}
+
+
+def test_computer_use_payload_preserves_window_targeting_fields():
+    from domain.tool.executor import _browser_computer_action_payload
+
+    action, payload = _browser_computer_action_payload(
+        "computer_use",
+        {
+            "action": "type",
+            "text": "hello\n",
+            "app": "Google Chrome",
+            "title": "ChatGPT",
+            "focus": False,
+            "physical": False,
+            "modifier": "meta",
+        },
+    )
+
+    assert action == "computer.type"
+    assert payload == {
+        "text": "hello\n",
+        "app": "Google Chrome",
+        "title": "ChatGPT",
+        "focus": False,
+        "physical": False,
+        "modifier": "meta",
+    }
 
 
 def test_user_requested_computer_use_preapproves_interactive_actions(monkeypatch):
@@ -2091,6 +2517,32 @@ def test_user_requested_computer_use_preapproves_interactive_actions(monkeypatch
         "payload": {"url": "https://chatgpt.com", "persistent": False},
         "yolo_mode": True,
     }
+
+
+def test_browser_computer_executor_propagates_controller_errors(monkeypatch):
+    from domain.tool.executor import ToolExecutor
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    def fake_run(self, action, payload=None, *, yolo_mode=False):
+        return {
+            "action": action,
+            "executed": False,
+            "is_error": True,
+            "reason": "Chrome background text entry failed.",
+            "recovery": {"kind": "chrome_setting"},
+        }
+
+    monkeypatch.setattr(BrowserComputerController, "run", fake_run)
+
+    result = ToolExecutor().execute(
+        "computer_use",
+        {"action": "type", "text": "hello", "app": "Google Chrome"},
+        {"user_requested_computer_use": True},
+    )
+
+    assert result["is_error"] is True
+    assert "failed" in result["result"]
+    assert result["widget"]["recovery"]["kind"] == "chrome_setting"
 
 
 def test_browser_open_url_uses_existing_chrome_without_stealing_focus(monkeypatch):

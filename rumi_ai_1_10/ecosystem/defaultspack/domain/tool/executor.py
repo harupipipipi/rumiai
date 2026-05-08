@@ -591,14 +591,24 @@ class ToolExecutor:
                 payload,
                 yolo_mode=bool(policy.get("yolo_mode")) or (user_requested and action in user_approved_actions),
             )
-            summary = "{} {} completed".format(tool_name, result.get("action", "action"))
+            is_error = bool(result.get("is_error"))
+            summary = "{} {} {}".format(
+                tool_name,
+                result.get("action", "action"),
+                "failed" if is_error else "completed",
+            )
+            if is_error and result.get("reason"):
+                summary += ": {}".format(result.get("reason"))
             if result.get("path"):
                 summary += "; artifact: {}".format(result.get("path"))
-            return {
+            output = {
                 "result": summary,
-                "is_error": False,
-                "widget": {"type": tool_name, **result}
+                "is_error": is_error,
+                "widget": {"type": tool_name, **result},
             }
+            if isinstance(result.get("recovery"), dict):
+                output["recovery"] = result.get("recovery")
+            return output
         elif tool_name == "todo":
             from ecosystem.rumi_default_tools_pack.domain.tool.todo import TodoController
 
@@ -708,7 +718,22 @@ def _browser_computer_action_payload(tool_name, arguments):
             "scroll": "computer.scroll",
         }
         action = action_map.get(raw_action, raw_action)
-        for key in ("url", "x", "y", "text", "key", "amount"):
+        for key in (
+            "url",
+            "x",
+            "y",
+            "text",
+            "key",
+            "modifier",
+            "modifiers",
+            "amount",
+            "target",
+            "app",
+            "title",
+            "coordinate_space",
+            "physical",
+            "focus",
+        ):
             if key in arguments:
                 raw_payload[key] = arguments.get(key)
     else:
@@ -724,7 +749,21 @@ def _browser_computer_action_payload(tool_name, arguments):
             "scroll": "computer.scroll",
         }
         action = action_map.get(raw_action, raw_action)
-        for key in ("x", "y", "text", "key", "amount"):
+        for key in (
+            "x",
+            "y",
+            "text",
+            "key",
+            "modifier",
+            "modifiers",
+            "amount",
+            "target",
+            "app",
+            "title",
+            "coordinate_space",
+            "physical",
+            "focus",
+        ):
             if key in arguments:
                 raw_payload[key] = arguments.get(key)
     if "dry_run" in arguments:

@@ -107,9 +107,21 @@ function summarizeToolResult(toolName: string, result: unknown): string {
   return compact(data, 120);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object";
+}
+
 function statusForLog(log: ToolLogEntry): ToolActivityStatus {
   const result = log.result;
-  if (result && typeof result === "object" && (result as Record<string, unknown>).status === "error") {
+  if (!isRecord(result)) return "completed";
+  const data = isRecord(result.data) ? result.data : result;
+  const widget = isRecord(data.widget) ? data.widget : {};
+  if (
+    result.status === "error" ||
+    data.status === "error" ||
+    data.is_error === true ||
+    widget.is_error === true
+  ) {
     return "failed";
   }
   return "completed";

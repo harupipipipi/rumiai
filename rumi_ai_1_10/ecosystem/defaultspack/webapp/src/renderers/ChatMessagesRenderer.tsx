@@ -209,8 +209,8 @@ function BrowserScreenshotPreview({ screenshot }: { screenshot: BrowserScreensho
         <img
           src={screenshot.data_url}
           alt={screenshot.action === "computer.click" ? "Clicked screen" : "Screen capture"}
-          className="block h-auto max-h-64 object-contain"
-          style={{ maxWidth: "min(100%, 32rem)" }}
+          className="block h-auto max-h-44 object-contain"
+          style={{ maxWidth: "min(100%, 24rem)" }}
         />
         {canPlaceMarker && (
           <span
@@ -231,6 +231,7 @@ function BrowserScreenshotPreview({ screenshot }: { screenshot: BrowserScreensho
 
 function BrowserScreenshotStrip({ message }: { message: ChatMessagesRendererProps["messages"][number] }) {
   const [screenshots, setScreenshots] = useState<BrowserScreenshot[]>([]);
+  const [omittedCount, setOmittedCount] = useState(0);
   const [failed, setFailed] = useState(false);
   const hasBrowserTool = (message.toolLogs ?? []).some((log) => (
     log.tool_name === "browser_computer" || log.tool_name === "browser_use" || log.tool_name === "computer_use"
@@ -239,13 +240,17 @@ function BrowserScreenshotStrip({ message }: { message: ChatMessagesRendererProp
   useEffect(() => {
     let cancelled = false;
     setScreenshots([]);
+    setOmittedCount(0);
     setFailed(false);
     if (!message.conversationId || !hasBrowserTool) return () => {
       cancelled = true;
     };
     void api.getBrowserScreenshots(message.conversationId, message.id)
       .then((result) => {
-        if (!cancelled) setScreenshots(result.screenshots ?? []);
+        if (!cancelled) {
+          setScreenshots(result.screenshots ?? []);
+          setOmittedCount(Number(result.omitted_count ?? 0));
+        }
       })
       .catch(() => {
         if (!cancelled) setFailed(true);
@@ -264,7 +269,12 @@ function BrowserScreenshotStrip({ message }: { message: ChatMessagesRendererProp
   }
 
   return (
-    <div className="mb-4 grid gap-3">
+    <div className="mb-4 grid gap-2">
+      {omittedCount > 0 && (
+        <div className="w-fit rounded-md border border-zinc-800 bg-zinc-950/70 px-2.5 py-1.5 text-[11px] text-zinc-500">
+          古いスクリーンショット {omittedCount} 件を省略しています。
+        </div>
+      )}
       {screenshots.map((screenshot) => (
         <BrowserScreenshotPreview key={screenshot.id} screenshot={screenshot} />
       ))}

@@ -785,7 +785,7 @@ export const api = {
   },
 
   getBrowserScreenshots(conversationId: string, runId: string) {
-    return request<{ screenshots: BrowserScreenshot[] }>(
+    return request<{ screenshots: BrowserScreenshot[]; omitted_count?: number }>(
       `/api/chat/conversations/${conversationId}/run-results/${runId}/browser-screenshots`,
     );
   },

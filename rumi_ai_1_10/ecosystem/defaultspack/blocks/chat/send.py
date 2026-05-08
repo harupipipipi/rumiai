@@ -276,6 +276,182 @@ def _tool_limit_message(limit, tool_uses):
     )
 
 
+def _tool_result_data(result):
+    if not isinstance(result, dict):
+        return {}
+    data = result.get("data", result)
+    return data if isinstance(data, dict) else {}
+
+
+def _tool_result_reason(result):
+    if not isinstance(result, dict):
+        return ""
+    data = _tool_result_data(result)
+    for source in (data, result):
+        if not isinstance(source, dict):
+            continue
+        for key in ("reason", "message", "result", "summary"):
+            value = source.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        error_value = source.get("error")
+        if isinstance(error_value, dict):
+            message = error_value.get("message") or error_value.get("reason")
+            if isinstance(message, str) and message.strip():
+                return message.strip()
+        elif isinstance(error_value, str) and error_value.strip():
+            return error_value.strip()
+    return ""
+
+
+def _tool_result_is_error(result):
+    if not isinstance(result, dict):
+        return False
+    if result.get("status") == "error":
+        return True
+    data = _tool_result_data(result)
+    if data.get("status") == "error" or data.get("is_error") is True:
+        return True
+    widget = data.get("widget") if isinstance(data.get("widget"), dict) else {}
+    return widget.get("is_error") is True
+
+
+def _find_tool_recovery(value):
+    if isinstance(value, dict):
+        recovery = value.get("recovery")
+        if isinstance(recovery, dict):
+            return recovery
+        widget = value.get("widget")
+        if isinstance(widget, dict):
+            recovery = widget.get("recovery")
+            if isinstance(recovery, dict):
+                return recovery
+        data = value.get("data")
+        if isinstance(data, dict):
+            recovery = _find_tool_recovery(data)
+            if recovery:
+                return recovery
+        error_value = value.get("error")
+        if isinstance(error_value, dict):
+            recovery = _find_tool_recovery(error_value)
+            if recovery:
+                return recovery
+    return {}
+
+
+def _tool_result_recovery_kind(result):
+    recovery = _find_tool_recovery(result)
+    kind = str(recovery.get("kind") or "").strip()
+    if kind:
+        return kind
+    reason = _tool_result_reason(result).lower()
+    if "allow javascript from apple events" in reason or "chrome background" in reason:
+        return "chrome_setting"
+    return ""
+
+
+def _chrome_context_blocker(result):
+    data = _tool_result_data(result)
+    widget = data.get("widget") if isinstance(data.get("widget"), dict) else {}
+    for source in (data, widget):
+        control = source.get("chrome_background_control") if isinstance(source, dict) else None
+        if not isinstance(control, dict) or control.get("available") is not False:
+            continue
+        recovery = control.get("recovery") if isinstance(control.get("recovery"), dict) else {}
+        if str(recovery.get("kind") or "") == "chrome_setting":
+            reason = str(control.get("reason") or "").strip()
+            return {
+                "recovery": recovery,
+                "reason": reason or "Chrome background control is unavailable.",
+            }
+    return {}
+
+
+def _message_content_text(content):
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts = []
+    for block in content:
+        if isinstance(block, str):
+            parts.append(block)
+        elif isinstance(block, dict):
+            text = block.get("text")
+            if isinstance(text, str):
+                parts.append(text)
+    return "\n".join(parts)
+
+
+def _requires_background_chrome_control(messages):
+    parts = []
+    for message in messages or []:
+        if isinstance(message, dict) and message.get("role") == "user":
+            parts.append(_message_content_text(message.get("content")))
+    text = "\n".join(parts)
+    lower = text.lower()
+    mentions_chrome = "chrome" in lower or "chatgpt" in lower or "google chrome" in lower
+    wants_background = any(
+        token in text
+        for token in (
+            "バックグラウンド",
+            "画面を切り替え",
+            "画面きり変え",
+            "画面切り替え",
+            "邪魔",
+            "既存",
+            "今開いて",
+            "今開いてる",
+        )
+    )
+    wants_background = wants_background or any(token in lower for token in ("background", "existing chrome"))
+    return bool(mentions_chrome and wants_background)
+
+
+def _chrome_setting_block_message(tool_name, result, recovery):
+    setting = str(recovery.get("setting") or "Allow JavaScript from Apple Events").strip()
+    path = str(recovery.get("path") or "View > Developer > Allow JavaScript from Apple Events").strip()
+    reason = _tool_result_reason(result)
+    detail = " reason: {}".format(reason) if reason else ""
+    return (
+        "既存のGoogle Chromeをバックグラウンド操作しようとしましたが、Chrome側の設定で止まりました。"
+        f"{detail} {tool_name} はここで再試行せず停止しました。"
+        f" Chrome の {path} で {setting} を有効にするか、前面操作を許可しない限り、"
+        "このハーネスでは既存ChromeのChatGPTへ hello を送信できません。"
+    )
+
+
+def _tool_blocked_response(tool_name, result):
+    recovery = _find_tool_recovery(result)
+    kind = str(recovery.get("kind") or "").strip()
+    if not kind and _tool_result_recovery_kind(result) == "chrome_setting":
+        kind = "chrome_setting"
+        recovery = {
+            "kind": "chrome_setting",
+            "setting": "Allow JavaScript from Apple Events",
+            "path": "View > Developer > Allow JavaScript from Apple Events",
+        }
+    if kind == "chrome_setting":
+        message = _chrome_setting_block_message(tool_name, result, recovery)
+    else:
+        reason = _tool_result_reason(result)
+        message = (
+            f"{tool_name} が回復不能な tool ブロックを返したため停止しました。"
+            + (f" reason: {reason}" if reason else "")
+        )
+    return {
+        "content": [{"type": "text", "text": message}],
+        "finish_reason": "tool_blocked",
+        "usage": {},
+        "metadata": {
+            "tool_blocked": True,
+            "tool_blocked_tool": tool_name,
+            "tool_blocked_kind": kind,
+            "tool_blocked_recovery": recovery,
+        },
+    }
+
+
 def _tool_arguments(block):
     value = block.get("input", block.get("arguments", {}))
     if isinstance(value, str):
@@ -506,12 +682,22 @@ def _tool_visibility_message(tools):
         names.append(label)
     if not names:
         return None
+    guidance = ""
+    tool_names = {tool_name_from_definition(tool) for tool in tools or []}
+    if tool_names.intersection({"browser_computer", "browser_use", "computer_use"}):
+        guidance = (
+            " Computer-use harness rules: inspect app state with context before screenshots; "
+            "target existing user Chrome with app='Google Chrome' or select_window focus=false; "
+            "prefer one type call for words like hello and key only for shortcuts/return; "
+            "click/move without physical=true only moves the virtual AI cursor and does not move the user's mouse; "
+            "if a tool result says recovery.kind=chrome_setting, stop instead of retrying."
+        )
     return {
         "role": "system",
         "content": (
             "Available tools are connected for this turn. "
             "Use them when they are relevant, and do not claim that no tools are available. "
-            "Connected tools: " + "; ".join(names)
+            "Connected tools: " + "; ".join(names) + guidance
         ),
     }
 
@@ -543,8 +729,10 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
         limit = int(params.get("max_tool_calls", 4) or 4)
     connected_names = connected_tool_names(tools, context.get("runtime_profile") if isinstance(context, dict) else None)
     if limit == 4 and connected_names.intersection({"browser_computer", "browser_use", "computer_use"}):
-        limit = 24
+        limit = 12
 
+    blocked_response = None
+    background_chrome_required = _requires_background_chrome_control(messages)
     for step_index in range(max(1, limit + 1)):
         _raise_if_cancelled(context)
         ai_params = {
@@ -684,7 +872,8 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
                     phase="tool_call_completed",
                     tool_name=tool_name,
                     tool_call_id=tool_call_id,
-                    is_error=isinstance(result, dict) and result.get("status") == "error",
+                    is_error=_tool_result_is_error(result),
+                    recovery_kind=_tool_result_recovery_kind(result),
                 )
             )
             _append_tool_result_message(
@@ -694,6 +883,50 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
                 tool_call_id,
                 model=model,
             )
+            chrome_context_blocker = _chrome_context_blocker(result) if background_chrome_required else {}
+            if chrome_context_blocker:
+                blocked_response = _tool_blocked_response(
+                    tool_name,
+                    {
+                        "status": "ok",
+                        "data": {
+                            "result": chrome_context_blocker.get("reason"),
+                            "is_error": True,
+                            "recovery": chrome_context_blocker.get("recovery"),
+                        },
+                    },
+                )
+                _append_event(
+                    events,
+                    context,
+                    _event(
+                        "status",
+                        "Chrome設定ブロックのため tool 実行を停止しました",
+                        phase="tool_blocked",
+                        tool_name=tool_name,
+                        tool_call_id=tool_call_id,
+                        recovery_kind="chrome_setting",
+                    )
+                )
+                break
+            if _tool_result_recovery_kind(result) == "chrome_setting":
+                blocked_response = _tool_blocked_response(tool_name, result)
+                _append_event(
+                    events,
+                    context,
+                    _event(
+                        "status",
+                        "Chrome設定ブロックのため tool 実行を停止しました",
+                        phase="tool_blocked",
+                        tool_name=tool_name,
+                        tool_call_id=tool_call_id,
+                        recovery_kind="chrome_setting",
+                    )
+                )
+                break
+        if blocked_response is not None:
+            response = blocked_response
+            break
 
     response = response or _stub_response()
     if not _tool_use_blocks(response) and not _response_text(response).strip():

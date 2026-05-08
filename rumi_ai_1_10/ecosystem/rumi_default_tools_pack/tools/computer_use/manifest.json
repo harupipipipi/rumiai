@@ -3,11 +3,11 @@
   "category": "tool",
   "version": "1",
   "display_name": "Computer Use",
-  "description": "Capture the screen and run approved desktop actions on macOS or Windows. Use windows/select_window focus=false to choose an app/window, click only to mark a target with the AI cursor, and use type with text to enter words such as hello. For existing user Chrome, target Google Chrome instead of opening a managed profile.",
+  "description": "Capture the screen and run approved desktop actions on macOS or Windows. Use context/windows/select_window focus=false to understand and choose an app/window, click only to mark a target with the virtual AI cursor, and use type with text to enter words such as hello. For existing user Chrome, target Google Chrome instead of opening a managed profile. If type/key returns recovery.kind=chrome_setting, stop retrying and report that Chrome blocks true background control until the setting is enabled.",
   "enabled": true,
   "config": {
     "name": "computer_use",
-    "summary": "コンピューター操作。文字入力は action=type と text を優先し、既存Chrome/ChatGPTには app=Google Chrome または select_window focus=false を指定してください。",
+    "summary": "コンピューター操作。まず action=context で開いているアプリとAIカーソルを確認し、文字入力は action=type と text を優先し、既存Chrome/ChatGPTには app=Google Chrome または select_window focus=false を指定してください。Chrome設定ブロックが返ったら再試行せず理由を報告してください。",
     "tags": ["computer", "desktop", "screenshot", "approval"],
     "schema": {
       "parameters": {
@@ -15,8 +15,8 @@
         "properties": {
           "action": {
             "type": "string",
-            "enum": ["screenshot", "move", "click", "select_window", "windows", "type", "key", "scroll"],
-            "description": "Use windows to inspect apps, select_window with app/title and focus=false to target one app, click to place the AI cursor/marker, type to enter text, key for shortcuts or single keys, and screenshot to inspect.",
+            "enum": ["context", "screenshot", "move", "click", "select_window", "windows", "type", "key", "scroll"],
+            "description": "Use context/windows to inspect open apps, select_window with app/title and focus=false to target one app, click to place the virtual AI cursor/marker, type to enter text, key for shortcuts or single keys, and screenshot to inspect.",
             "default": "screenshot"
           },
           "x": {"type": "integer"},
