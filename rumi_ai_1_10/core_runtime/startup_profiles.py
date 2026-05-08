@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .paths import discover_pack_locations
+from .node_models import make_core_start_node
 from .port_standards import can_connect_ports as _can_connect_standard_ports
 
 logger = logging.getLogger(__name__)
@@ -602,9 +603,9 @@ class StartupProfileManager:
         if not pack_subdir:
             return []
         nodes_dir = Path(pack_subdir) / "nodes"
+        result: List[Dict[str, Any]] = self._core_builtin_nodes_for_pack(pack_id)
         if not nodes_dir.is_dir():
-            return []
-        result: List[Dict[str, Any]] = []
+            return result
         for f in sorted(nodes_dir.glob("*.node.json")):
             try:
                 data = json.loads(f.read_text(encoding="utf-8"))
@@ -626,6 +627,25 @@ class StartupProfileManager:
             except Exception:
                 logger.debug("Failed to load node %s", f, exc_info=True)
         return result
+
+    def _core_builtin_nodes_for_pack(self, pack_id: str) -> List[Dict[str, Any]]:
+        start_node = make_core_start_node()
+        node = start_node.to_dict()
+        metadata = dict(node.get("metadata") or {})
+        metadata.setdefault("pack_id", pack_id)
+        metadata["available_in_pack"] = pack_id
+        node["metadata"] = metadata
+        return [
+            {
+                "node_id": start_node.node_id,
+                "kind": start_node.kind,
+                "component_id": start_node.node_id.rsplit(".", 1)[-1],
+                "component_type": "flow_start",
+                "metadata": metadata,
+                "display_name": dict(start_node.display_name),
+                "ports": [port.to_dict() for port in start_node.ports],
+            }
+        ]
 
     # ------------------------------------------------------------------
     # Port extraction from graphs

@@ -81,11 +81,17 @@ export function compatibleNodesForPort(
   profile: ApiStartupProfile,
   graphPort: ApiStartupGraphPort,
 ): ApiStartupNodeDefinition[] {
-  return catalog.packs
+  const compatibleById = new Map<string, ApiStartupNodeDefinition>();
+  catalog.packs
     .filter((pack) => pack.available && profile.packs.includes(pack.pack_id))
     .flatMap((pack) => pack.nodes)
     .filter((node) => isNodeCompatibleWithGraphPort(node, graphPort))
-    .sort((left, right) => left.node_id.localeCompare(right.node_id));
+    .forEach((node) => {
+      if (!compatibleById.has(node.node_id)) {
+        compatibleById.set(node.node_id, node);
+      }
+    });
+  return [...compatibleById.values()].sort((left, right) => left.node_id.localeCompare(right.node_id));
 }
 
 function describeApprovalIssue(issue: string): string | null {

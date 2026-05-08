@@ -229,6 +229,9 @@ def test_create_profile_with_base_pack(tmp_path: Path):
     assert profile["packs"] == ["defaultspack"]
     assert profile["node_overrides"] == {}
     assert len(profile["graph_ports"]) > 0
+    start_port = next(port for port in profile["graph_ports"] if port["port_key"] == "agent.start")
+    assert start_port["source_node_ref"] == "rumi.start"
+    assert start_port["source_port"]["standards"] == ["rumi.flow.start"]
 
 
 def test_create_profile_auto_detects_graph(tmp_path: Path):
@@ -286,6 +289,7 @@ def test_list_profiles_returns_catalog_with_packs_and_graphs(tmp_path: Path):
     assert pack["pack_id"] == "defaultspack"
     assert len(pack["graphs"]) > 0
     assert len(pack["nodes"]) > 0
+    assert any(node["node_id"] == "rumi.start" for node in pack["nodes"])
 
 
 def test_add_pack_to_profile(tmp_path: Path):
