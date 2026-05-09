@@ -41,6 +41,9 @@ export type FilePreview = {
   filename: string;
   size: string;
   content?: string;
+  url?: string;
+  path?: string;
+  downloadName?: string;
 };
 
 export type ImagePreview = {
@@ -48,6 +51,7 @@ export type ImagePreview = {
   url: string;
   alt: string;
   prompt?: string;
+  path?: string;
 };
 
 export type ToolPreviewData = WebPreview | CodePreview | FilePreview | ImagePreview;
@@ -505,8 +509,25 @@ function FilePreviewContent({ data }: { data: FilePreview }) {
           <FileText size={12} className="text-zinc-500" />
           <span className="text-[11px] font-mono text-zinc-300">{data.filename}</span>
         </div>
-        <span className="text-[10px] text-zinc-600">{data.size}</span>
+        <div className="flex items-center gap-2">
+          {data.url && (
+            <a
+              href={data.url}
+              download={data.downloadName ?? data.filename}
+              className="inline-flex items-center gap-1 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1 text-[10px] text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+            >
+              <ExternalLink size={11} />
+              開く
+            </a>
+          )}
+          <span className="text-[10px] text-zinc-600">{data.size}</span>
+        </div>
       </div>
+      {data.path && (
+        <div className="border-b border-zinc-800/60 bg-zinc-950/60 px-3 py-2 font-mono text-[10px] text-zinc-600">
+          {data.path}
+        </div>
+      )}
       {looksLikeJson && (
         <div className="border-b border-zinc-800/60 bg-zinc-950/60 px-3 py-2 text-[10px] text-zinc-500">
           JSON の詳細です。必要なときだけ内容を確認してください。

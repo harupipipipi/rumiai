@@ -135,6 +135,32 @@ test("marks nested tool errors as failed activity", () => {
   assert.equal(groups[0].items[0].status, "failed");
 });
 
+test("attaches tool artifact files to the matching activity item", () => {
+  const path = "/tmp/rumi/workspace/tools/computer/click-1.png";
+  const groups = buildToolActivityGroups([
+    {
+      tool_name: "computer_use",
+      tool_call_id: "call_1",
+      arguments: { action: "click", x: 12, y: 34 },
+      result: {
+        status: "ok",
+        data: {
+          widget: {
+            path,
+            model_image_path: "/tmp/rumi/workspace/tools/computer/click-1-model.jpg",
+          },
+        },
+      },
+    },
+  ], [], { conversationId: "conv_1" });
+
+  const artifact = groups[0].items[0].artifacts?.[0];
+  assert.equal(groups[0].items[0].toolCallId, "call_1");
+  assert.equal(artifact?.kind, "image");
+  assert.equal(artifact?.name, "click-1-model.jpg");
+  assert.match(artifact?.url ?? "", /\/api\/chat\/conversations\/conv_1\/artifact-file/);
+});
+
 test("classifies common tool families", () => {
   assert.equal(toolFolderFor("browser_computer").id, "browser");
   assert.equal(toolFolderFor("todo").id, "planning/todo");

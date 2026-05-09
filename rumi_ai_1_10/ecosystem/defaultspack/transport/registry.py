@@ -38,6 +38,7 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("POST", "/api/chat/conversations/{id}/auto-trim", block_module="blocks.chat.auto_trim", path_inject={"id": "conversation_id"}),
     HttpRouteSpec("GET", "/api/chat/conversations/{id}/run-results/{run_id}/browser-screenshots", block_module="blocks.chat.browser_screenshots", path_inject={"id": "conversation_id", "run_id": "run_id"}),
     HttpRouteSpec("GET", "/v1/conversations/{id}/run-results/{run_id}/browser-screenshots", block_module="blocks.chat.browser_screenshots", path_inject={"id": "conversation_id", "run_id": "run_id"}),
+    HttpRouteSpec("GET", "/api/chat/conversations/{id}/artifact-file", block_module="blocks.chat.artifact_file", path_inject={"id": "conversation_id"}),
     HttpRouteSpec("GET", "/api/integrations/secrets", block_module="blocks.integrations.secrets"),
     HttpRouteSpec("POST", "/api/integrations/secrets", block_module="blocks.integrations.secrets"),
     HttpRouteSpec("POST", "/api/integrations/slack/events", block_module="blocks.integrations.slack"),

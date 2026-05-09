@@ -190,7 +190,7 @@ function WidgetCard({ widget }: { widget: Record<string, unknown> }) {
   );
 }
 
-function BrowserScreenshotPreview({ screenshot }: { screenshot: BrowserScreenshot }) {
+function BrowserScreenshotPreview({ screenshot, compact = false }: { screenshot: BrowserScreenshot; compact?: boolean }) {
   const marker = screenshot.click_marker ?? screenshot.marker;
   const dragMarker = screenshot.drag_marker;
   const imageWidth = Number(screenshot.image_size?.width ?? 0);
@@ -217,7 +217,7 @@ function BrowserScreenshotPreview({ screenshot }: { screenshot: BrowserScreensho
         : "スクリーンショット";
 
   return (
-    <figure className="w-[min(48rem,100%)] max-w-full overflow-hidden rounded-lg border border-zinc-800 bg-black/30">
+    <figure className={cn("max-w-full overflow-hidden rounded-lg border border-zinc-800 bg-black/30", compact ? "w-[min(34rem,100%)]" : "w-[min(48rem,100%)]")}>
       <a
         href={screenshot.data_url}
         target="_blank"
@@ -228,7 +228,7 @@ function BrowserScreenshotPreview({ screenshot }: { screenshot: BrowserScreensho
           src={screenshot.data_url}
           alt={screenshot.action === "computer.drag" ? "Dragged screen" : screenshot.action === "computer.click" ? "Clicked screen" : "Screen capture"}
           className="block h-auto w-full object-contain"
-          style={{ maxHeight: "min(360px, 45vh)" }}
+          style={{ maxHeight: compact ? "min(220px, 30vh)" : "min(360px, 45vh)" }}
         />
         {canPlaceDrag && (
           <svg
@@ -394,7 +394,28 @@ function ToolResultDetail({ detail }: { detail: string }) {
 }
 
 function ToolActivityTray({ message }: { message: ChatMessagesRendererProps["messages"][number] }) {
-  const groups = buildToolActivityGroups(message.toolLogs ?? [], message.events ?? []);
+  const [screenshots, setScreenshots] = useState<BrowserScreenshot[]>([]);
+  const canFetchStoredScreenshots = Boolean(message.conversationId) && hasBrowserToolLog(message) && !message.id.startsWith("optimistic-");
+
+  useEffect(() => {
+    let cancelled = false;
+    setScreenshots([]);
+    if (!message.conversationId || !canFetchStoredScreenshots) return () => {
+      cancelled = true;
+    };
+    void api.getBrowserScreenshots(message.conversationId, message.id)
+      .then((result) => {
+        if (!cancelled) setScreenshots(result.screenshots ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setScreenshots([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [message.conversationId, message.id, canFetchStoredScreenshots]);
+
+  const groups = buildToolActivityGroups(message.toolLogs ?? [], message.events ?? [], { conversationId: message.conversationId });
   if (groups.length === 0) return null;
   const items = groups.flatMap((group) => group.items);
   const total = items.length;
@@ -439,6 +460,27 @@ function ToolActivityTray({ message }: { message: ChatMessagesRendererProps["mes
               <div className="mt-2 flex min-w-0 items-start gap-2 rounded-md border border-zinc-800/70 bg-black/20 px-3 py-2 text-zinc-300">
                 <span className="shrink-0 text-[10px] font-medium text-zinc-600">結果</span>
                 <ToolResultDetail detail={item.detail} />
+              </div>
+            )}
+            {screenshots
+              .filter((screenshot) => !item.toolCallId || screenshot.tool_call_id === item.toolCallId)
+              .map((screenshot) => (
+                <div key={screenshot.id} className="mt-3">
+                  <BrowserScreenshotPreview screenshot={screenshot} compact />
+                </div>
+              ))}
+            {item.artifacts && item.artifacts.filter((artifact) => artifact.kind !== "image").length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {item.artifacts.filter((artifact) => artifact.kind !== "image").map((artifact) => (
+                  <a
+                    key={artifact.path}
+                    href={artifact.url}
+                    download={artifact.name}
+                    className="rounded-md border border-zinc-800 bg-zinc-950/70 px-2 py-1 font-mono text-[10px] text-zinc-500 hover:border-zinc-700 hover:text-zinc-200"
+                  >
+                    {artifact.name}
+                  </a>
+                ))}
               </div>
             )}
           </div>
@@ -542,7 +584,7 @@ export function ChatMessagesRenderer({
                       )}
                     >
                       {showActivityInMessages && message.role === "agent" && <ToolActivityTray message={message} />}
-                      {message.role === "agent" && <BrowserScreenshotStrip message={message} />}
+                      {message.role === "agent" && !showActivityInMessages && <BrowserScreenshotStrip message={message} />}
 
                       {message.role === "agent" && message.metadata?.thinkingTranscript && (
                         <details className="mb-3 rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2 text-xs text-zinc-400">

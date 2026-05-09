@@ -145,6 +145,10 @@ export type ToolLogEntry = {
   [key: string]: unknown;
 };
 
+export function conversationArtifactFileUrl(conversationId: string, path: string): string {
+  return `/api/chat/conversations/${encodeURIComponent(conversationId)}/artifact-file?path=${encodeURIComponent(path)}`;
+}
+
 export type ModelProfile = {
   profile_id: string;
   display_name: string;

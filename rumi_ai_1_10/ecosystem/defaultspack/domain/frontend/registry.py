@@ -5,6 +5,7 @@ import json
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from domain.ai_client.client import AIClient
 from domain.ai_client.api_key_store import provider_key_status, set_provider_api_key
@@ -775,10 +776,10 @@ class FrontendRegistry:
                 )
         for index, log in enumerate(message.get("tool_logs") or []):
             if isinstance(log, dict):
-                previews.append(self._preview_from_tool_log(message, log, index))
+                previews.extend(self._preview_from_tool_log(message, log, index))
         return previews
 
-    def _preview_from_tool_log(self, message: dict[str, Any], log: dict[str, Any], index: int) -> dict[str, Any]:
+    def _preview_from_tool_log(self, message: dict[str, Any], log: dict[str, Any], index: int) -> list[dict[str, Any]]:
         timestamp = int(message.get("created_at", 0)) - 200 - index
         tool_name = str(log.get("tool_name") or "tool")
         arguments = log.get("arguments") if isinstance(log.get("arguments"), dict) else {}
@@ -794,7 +795,7 @@ class FrontendRegistry:
             lines.append(f"input: {input_text}")
         if result_text:
             lines.append(f"result: {result_text}")
-        return {
+        previews = [{
             "id": f"tool-log-{message.get('id')}-{index}",
             "toolStepId": tool_name,
             "timestamp": timestamp,
@@ -804,7 +805,72 @@ class FrontendRegistry:
                 "size": status,
                 "content": "\n".join(lines),
             },
-        }
+        }]
+        conversation_id = str(message.get("conversation_id") or "")
+        for artifact_index, path in enumerate(self._artifact_paths_from_value(result)):
+            name = Path(path).name or "artifact"
+            url = "/api/chat/conversations/{}/artifact-file?path={}".format(
+                quote(conversation_id, safe=""),
+                quote(path, safe=""),
+            )
+            if self._is_image_path(path):
+                previews.append(
+                    {
+                        "id": f"tool-log-artifact-{message.get('id')}-{index}-{artifact_index}",
+                        "toolStepId": tool_name,
+                        "timestamp": timestamp + artifact_index + 0.1,
+                        "data": {
+                            "type": "image",
+                            "url": url,
+                            "alt": name,
+                            "path": path,
+                        },
+                    }
+                )
+            else:
+                previews.append(
+                    {
+                        "id": f"tool-log-artifact-{message.get('id')}-{index}-{artifact_index}",
+                        "toolStepId": tool_name,
+                        "timestamp": timestamp + artifact_index + 0.1,
+                        "data": {
+                            "type": "file",
+                            "filename": name,
+                            "size": "tool artifact",
+                            "path": path,
+                            "url": url,
+                            "downloadName": name,
+                            "content": f"artifact: {path}",
+                        },
+                    }
+                )
+        return previews
+
+    def _artifact_paths_from_value(self, value: Any, seen: set[str] | None = None) -> list[str]:
+        seen = seen or set()
+        paths: list[str] = []
+        if isinstance(value, dict):
+            preferred = ""
+            for key in ("model_image_path", "screenshot_path", "path"):
+                item = value.get(key)
+                if isinstance(item, str) and item.strip():
+                    preferred = item.strip()
+                    break
+            if preferred and preferred not in seen:
+                seen.add(preferred)
+                paths.append(preferred)
+            for key, item in value.items():
+                if key in {"path", "screenshot_path", "model_image_path", "data_url", "dataUrl"}:
+                    continue
+                paths.extend(self._artifact_paths_from_value(item, seen))
+        elif isinstance(value, list):
+            for item in value:
+                paths.extend(self._artifact_paths_from_value(item, seen))
+        return paths
+
+    @staticmethod
+    def _is_image_path(path: str) -> bool:
+        return Path(path).suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
 
     def _preview_text(self, value: Any, limit: int) -> str:
         if value is None:

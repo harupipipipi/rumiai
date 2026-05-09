@@ -4,7 +4,7 @@ import { MessageSquare } from "lucide-react";
 import type { ChatItem } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { api, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { api, conversationArtifactFileUrl, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
 import { deriveConversationTitle, formatRelativeTime, messageToText } from "./lib/chat";
 import { cn } from "./lib/cn";
 import { canExecuteComposerEndpointAction, isSafeLocalEndpoint } from "./lib/composerWidgets";
@@ -219,8 +219,44 @@ function compactPreviewValue(value: unknown): string {
   return String(value);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function basename(path: string): string {
+  const normalized = path.replace(/\\/g, "/");
+  return normalized.split("/").filter(Boolean).pop() || "artifact";
+}
+
+function isImagePath(path: string): boolean {
+  return /\.(png|jpe?g|gif|webp|svg)$/i.test(path);
+}
+
+function collectArtifactPaths(value: unknown, paths: string[] = [], seen = new Set<string>()): string[] {
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectArtifactPaths(item, paths, seen));
+    return paths;
+  }
+  if (!isRecord(value)) return paths;
+
+  const preferredPath = stringValue(value.model_image_path) || stringValue(value.screenshot_path) || stringValue(value.path);
+  if (preferredPath && !seen.has(preferredPath)) {
+    seen.add(preferredPath);
+    paths.push(preferredPath);
+  }
+  Object.entries(value).forEach(([key, entry]) => {
+    if (key === "path" || key === "screenshot_path" || key === "model_image_path" || key === "data_url" || key === "dataUrl") return;
+    collectArtifactPaths(entry, paths, seen);
+  });
+  return paths;
+}
+
 function toolPreviewsFromMessages(messages: ChatMessage[]): ToolPreviewItem[] {
-  return messages.flatMap((message) => (message.tool_logs ?? []).map((log, index) => {
+  return messages.flatMap((message) => (message.tool_logs ?? []).flatMap((log, index) => {
     const toolName = String(log.tool_name ?? "tool");
     const result = log.result as Record<string, unknown> | undefined;
     const status = String(result?.status ?? "completed");
@@ -232,7 +268,7 @@ function toolPreviewsFromMessages(messages: ChatMessage[]): ToolPreviewItem[] {
       args ? `input:\n${args}` : "",
       output ? `result:\n${output}` : "",
     ].filter(Boolean).join("\n\n");
-    return {
+    const logPreview: ToolPreviewItem = {
       id: `message-tool-${message.id}-${index}`,
       toolStepId: toolName,
       timestamp: typeof log.timestamp === "number" ? log.timestamp : message.created_at,
@@ -243,6 +279,32 @@ function toolPreviewsFromMessages(messages: ChatMessage[]): ToolPreviewItem[] {
         content,
       },
     };
+    const artifactPreviews: ToolPreviewItem[] = collectArtifactPaths(log.result).map((path, artifactIndex) => {
+      const name = basename(path);
+      const url = conversationArtifactFileUrl(message.conversation_id, path);
+      return {
+        id: `message-tool-artifact-${message.id}-${index}-${artifactIndex}`,
+        toolStepId: toolName,
+        timestamp: (typeof log.timestamp === "number" ? log.timestamp : message.created_at) + artifactIndex + 0.1,
+        data: isImagePath(path)
+          ? {
+              type: "image" as const,
+              url,
+              alt: name,
+              path,
+            }
+          : {
+              type: "file" as const,
+              filename: name,
+              size: "tool artifact",
+              path,
+              url,
+              downloadName: name,
+              content: `artifact: ${path}`,
+            },
+      };
+    });
+    return [logPreview, ...artifactPreviews];
   })).sort((a, b) => b.timestamp - a.timestamp);
 }
 
@@ -770,7 +832,7 @@ export default function App() {
     return [
       ...previews,
       ...messageToolPreviews.filter((preview) => !seen.has(preview.id)),
-    ];
+    ].sort((a, b) => b.timestamp - a.timestamp);
   }, [messageToolPreviews, previews]);
   const canShowCanvas = hasCanvasItems(canvasPreviews, canvasMemo);
   const effectiveShowPreview = showPreview && canShowCanvas;

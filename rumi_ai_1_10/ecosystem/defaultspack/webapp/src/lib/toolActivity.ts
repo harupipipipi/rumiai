@@ -1,10 +1,11 @@
-import type { ChatActivityEvent, ToolLogEntry } from "./api";
+import { conversationArtifactFileUrl, type ChatActivityEvent, type ToolLogEntry } from "./api";
 
 export type ToolActivityStatus = "running" | "completed" | "failed";
 
 export type ToolActivityItem = {
   id: string;
   toolName: string;
+  toolCallId?: string;
   folder: string;
   folderLabel: string;
   input: string;
@@ -12,12 +13,20 @@ export type ToolActivityItem = {
   detail: string;
   status: ToolActivityStatus;
   timestamp?: number | string;
+  artifacts?: ToolActivityArtifact[];
 };
 
 export type ToolActivityGroup = {
   id: string;
   label: string;
   items: ToolActivityItem[];
+};
+
+export type ToolActivityArtifact = {
+  name: string;
+  path: string;
+  url?: string;
+  kind: "image" | "file";
 };
 
 const FOLDER_RULES: Array<[RegExp, string, string]> = [
@@ -119,6 +128,49 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object";
 }
 
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function basename(path: string): string {
+  const normalized = path.replace(/\\/g, "/");
+  return normalized.split("/").filter(Boolean).pop() || "artifact";
+}
+
+function isImagePath(path: string): boolean {
+  return /\.(png|jpe?g|gif|webp|svg)$/i.test(path);
+}
+
+function collectArtifacts(value: unknown, conversationId?: string, artifacts: ToolActivityArtifact[] = [], seen = new Set<string>()): ToolActivityArtifact[] {
+  if (!isRecord(value)) {
+    if (Array.isArray(value)) {
+      for (const item of value) collectArtifacts(item, conversationId, artifacts, seen);
+    }
+    return artifacts;
+  }
+
+  const preferredPath = stringValue(value.model_image_path) || stringValue(value.screenshot_path) || stringValue(value.path);
+  if (preferredPath) {
+    const key = preferredPath;
+    if (!seen.has(key)) {
+      seen.add(key);
+      const kind = isImagePath(preferredPath) ? "image" : "file";
+      artifacts.push({
+        name: basename(preferredPath),
+        path: preferredPath,
+        kind,
+        url: conversationId ? conversationArtifactFileUrl(conversationId, preferredPath) : undefined,
+      });
+    }
+  }
+
+  for (const [key, item] of Object.entries(value)) {
+    if (key === "path" || key === "screenshot_path" || key === "model_image_path" || key === "data_url" || key === "dataUrl") continue;
+    if (isRecord(item) || Array.isArray(item)) collectArtifacts(item, conversationId, artifacts, seen);
+  }
+  return artifacts;
+}
+
 function statusForLog(log: ToolLogEntry): ToolActivityStatus {
   const result = log.result;
   if (!isRecord(result)) return "completed";
@@ -186,6 +238,7 @@ function statusForEvent(event: ChatActivityEvent): ToolActivityStatus {
 export function buildToolActivityGroups(
   toolLogs: ToolLogEntry[] = [],
   events: ChatActivityEvent[] = [],
+  options: { conversationId?: string } = {},
 ): ToolActivityGroup[] {
   const fromLogs = toolLogs
     .filter((log) => typeof log.tool_name === "string" && log.tool_name.trim())
@@ -198,6 +251,7 @@ export function buildToolActivityGroups(
       return {
         id: `log-${index}-${toolName}`,
         toolName,
+        toolCallId: typeof log.tool_call_id === "string" ? log.tool_call_id : undefined,
         folder: folder.id,
         folderLabel: folder.label,
         input: argumentSummary,
@@ -205,6 +259,7 @@ export function buildToolActivityGroups(
         detail: resultSummary,
         status: statusForLog(log),
         timestamp: log.timestamp,
+        artifacts: collectArtifacts(log.result, options.conversationId),
       };
     });
 
@@ -235,6 +290,7 @@ export function buildToolActivityGroups(
       return {
         id: `event-${index}-${toolName}`,
         toolName,
+        toolCallId: typeof event.tool_call_id === "string" ? event.tool_call_id : undefined,
         folder: folder.id,
         folderLabel: folder.label,
         input: argumentSummary,
