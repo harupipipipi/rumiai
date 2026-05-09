@@ -3,11 +3,11 @@
   "category": "tool",
   "version": "1",
   "display_name": "Computer Use",
-  "description": "Capture the screen and run approved desktop actions on macOS or Windows for any app. Use context/apps/windows/select_app/select_window focus=false to understand and choose an app/window, click only to mark a target with the virtual AI cursor, and use type with text to enter words such as hello. Chromium browser background DOM is only an optional route when a Chromium-family app such as Google Chrome or Vivaldi is explicit; computer_use itself is not browser-specific.",
+  "description": "Capture the visible screen and run approved desktop actions on macOS or Windows for any app. Use context/apps/windows, show_app to bring Vivaldi/Chrome/etc. to the main screen, and select_window before screenshots or actions. Hidden-window/background control is disabled.",
   "enabled": true,
   "config": {
     "name": "computer_use",
-    "summary": "全アプリ向けのコンピューター操作。まず action=context/apps/windows で開いているアプリとウィンドウを確認し、select_app/select_window focus=false で対象を選びます。文字入力は action=type と text を優先してください。Chromium系ブラウザのDOM背景入力は app=Google Chrome や app=Vivaldi が明示された時だけの任意ルートで、通常の操作はVivaldi/VS Code/Finder/LINEなど全アプリが対象です。",
+    "summary": "全アプリ向けの可視画面コンピューター操作。まず action=context/apps/windows で開いているアプリとウィンドウを確認し、必要なら show_app で Vivaldi/Chrome/VS Code/Finder/LINE などをメイン画面に表示します。文字入力は action=type と text を優先してください。隠れたウィンドウやDOMバックグラウンド操作は使いません。",
     "tags": ["computer", "desktop", "screenshot", "approval"],
     "schema": {
       "parameters": {
@@ -15,8 +15,8 @@
         "properties": {
           "action": {
             "type": "string",
-            "enum": ["context", "apps", "screenshot", "move", "click", "select_app", "select_window", "windows", "type", "key", "scroll"],
-            "description": "Use context/apps/windows to inspect open apps, select_app/select_window with app/title and focus=false to target one app, click to place the virtual AI cursor/marker, type to enter text, key for shortcuts or single keys, and screenshot to inspect.",
+            "enum": ["context", "apps", "screenshot", "move", "click", "select_app", "show_app", "select_window", "windows", "type", "key", "scroll"],
+            "description": "Use context/apps/windows to inspect open apps, show_app with app/name to bring an app to the main visible screen, select_window with app/title to target a visible window, click to place the virtual AI cursor/marker, type to enter text, key for shortcuts or single keys, and screenshot to inspect.",
             "default": "screenshot"
           },
           "x": {"type": "integer"},
@@ -41,13 +41,8 @@
           "include_installed": {"type": "boolean"},
           "include_installed_apps": {"type": "boolean"},
           "limit": {"type": "integer"},
-          "background": {"type": "boolean", "description": "For Chromium-family browsers such as Google Chrome or Vivaldi: request DOM/Apple Events background text/key entry when foreground focus is not allowed."},
           "method": {"type": "string"},
-          "driver": {"type": "string", "description": "Optional driver hint such as auto, chromium_background_dom, chrome_background_dom, foreground_input, or physical."},
-          "allow_foreground_fallback": {"type": "boolean", "description": "Allow the tool to focus the target app and use foreground keyboard input if a background route is blocked."},
-          "foreground_fallback": {"type": "boolean", "description": "Alias for allow_foreground_fallback."},
-          "allow_user_input_overlap": {"type": "boolean", "description": "Set true only when the user says overlapping with their input is acceptable."},
-          "input_overlap_ok": {"type": "boolean", "description": "Alias for allow_user_input_overlap."},
+          "driver": {"type": "string", "description": "Optional driver hint such as foreground_input or physical."},
           "dry_run": {"type": "boolean"},
           "approval_token": {"type": "string"},
           "payload": {"type": "object"}

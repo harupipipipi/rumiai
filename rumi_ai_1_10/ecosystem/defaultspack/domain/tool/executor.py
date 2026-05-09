@@ -722,6 +722,11 @@ def _browser_computer_action_payload(tool_name, arguments):
             "list_apps": "computer.apps",
             "select_app": "computer.select_app",
             "app": "computer.select_app",
+            "show_app": "computer.show_app",
+            "focus_app": "computer.show_app",
+            "activate_app": "computer.show_app",
+            "main_app": "computer.show_app",
+            "show": "computer.show_app",
         }
         action = action_map.get(raw_action, raw_action)
         for key in (
@@ -754,14 +759,9 @@ def _browser_computer_action_payload(tool_name, arguments):
             "limit",
             "include_installed",
             "include_installed_apps",
-            "background",
             "mode",
             "method",
             "driver",
-            "allow_foreground_fallback",
-            "foreground_fallback",
-            "allow_user_input_overlap",
-            "input_overlap_ok",
         ):
             if key in arguments:
                 raw_payload[key] = arguments.get(key)
@@ -782,6 +782,11 @@ def _browser_computer_action_payload(tool_name, arguments):
             "list_apps": "computer.apps",
             "select_app": "computer.select_app",
             "app": "computer.select_app",
+            "show_app": "computer.show_app",
+            "focus_app": "computer.show_app",
+            "activate_app": "computer.show_app",
+            "main_app": "computer.show_app",
+            "show": "computer.show_app",
         }
         action = action_map.get(raw_action, raw_action)
         for key in (
@@ -814,14 +819,9 @@ def _browser_computer_action_payload(tool_name, arguments):
             "limit",
             "include_installed",
             "include_installed_apps",
-            "background",
             "mode",
             "method",
             "driver",
-            "allow_foreground_fallback",
-            "foreground_fallback",
-            "allow_user_input_overlap",
-            "input_overlap_ok",
         ):
             if key in arguments:
                 raw_payload[key] = arguments.get(key)
@@ -843,19 +843,7 @@ def _computer_use_payload_with_context_defaults(action, payload, context):
             payload.setdefault("app", target_app.strip())
         if isinstance(target_title, str) and target_title.strip():
             payload.setdefault("title", target_title.strip())
-    if context.get("computer_use_allow_foreground_fallback") is True:
-        payload.setdefault("allow_foreground_fallback", True)
-        payload.setdefault("allow_user_input_overlap", True)
-    if context.get("computer_use_background_preferred") is True and action in {"computer.type", "computer.key"}:
-        payload.setdefault("background", True)
-        payload.setdefault("driver", "auto")
-    if context.get("computer_use_background_required") is True:
-        payload.setdefault("allow_foreground_fallback", False)
-    if (
-        context.get("user_requested_computer_use") is True
-        and action == "computer.click"
-        and context.get("computer_use_background_required") is not True
-    ):
+    if context.get("user_requested_computer_use") is True and action == "computer.click":
         payload.setdefault("physical", True)
     return payload
 

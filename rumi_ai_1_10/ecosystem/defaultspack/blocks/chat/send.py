@@ -40,17 +40,6 @@ _COMPUTER_USE_REQUEST_RE = re.compile(
     r"(google\s*chrome|chrome|chatgpt|vivaldi|vivladi|line|ブラウザ|browser).{0,80}(操作|送信|入力|クリック|開いて|開く)",
     re.IGNORECASE,
 )
-_COMPUTER_USE_BACKGROUND_RE = re.compile(
-    r"バックグラウンド|裏で|画面.{0,12}切り替えない|画面.{0,12}変えない|邪魔しない|"
-    r"既存.{0,16}(google\s*chrome|chrome|ブラウザ)|メイン画面|foreground\s*なし|without\s+foreground",
-    re.IGNORECASE,
-)
-_COMPUTER_USE_FOREGROUND_FALLBACK_RE = re.compile(
-    r"かぶってもいい|被ってもいい|重なってもいい|邪魔してもいい|"
-    r"前面操作.{0,12}(許可|ok|OK|いい)|フォアグラウンド.{0,12}(許可|ok|OK|いい)|"
-    r"無理な場合.{0,24}(ok|OK|いい)|foreground\s*fallback|allow\s*foreground|overlap\s*ok|fallback",
-    re.IGNORECASE,
-)
 _COMPUTER_USE_CHROME_TARGET_RE = re.compile(r"google\s*chrome|chrome|グーグル\s*クローム|クローム", re.IGNORECASE)
 _COMPUTER_USE_LINE_TARGET_RE = re.compile(r"(?<![A-Za-z])line(?![A-Za-z])|ライン", re.IGNORECASE)
 _COMPUTER_USE_CHATGPT_TARGET_RE = re.compile(r"chat\s*gpt|chatgpt", re.IGNORECASE)
@@ -221,13 +210,7 @@ def _with_inferred_tools(input_data, inferred_tool_ids):
 
 def _computer_use_preferences_from_text(user_text):
     text = user_text if isinstance(user_text, str) else ""
-    background_preferred = bool(_COMPUTER_USE_BACKGROUND_RE.search(text))
-    allow_foreground = bool(_COMPUTER_USE_FOREGROUND_FALLBACK_RE.search(text))
-    preferences = {
-        "computer_use_background_preferred": background_preferred,
-        "computer_use_allow_foreground_fallback": allow_foreground,
-        "computer_use_background_required": background_preferred and not allow_foreground,
-    }
+    preferences = {}
     if _COMPUTER_USE_CHROME_TARGET_RE.search(text):
         preferences["computer_use_target_app"] = "Google Chrome"
     if _COMPUTER_USE_LINE_TARGET_RE.search(text):
@@ -386,10 +369,8 @@ def _tool_result_recovery_kind(result):
     if kind:
         return kind
     reason = _tool_result_reason(result).lower()
-    if "allow javascript from apple events" in reason or "chrome background" in reason:
-        return "chrome_setting"
-    if "browser background" in reason or "chromium background" in reason:
-        return "browser_background_setting"
+    if "visible window" in reason or "background computer-use is disabled" in reason:
+        return "visible_window_required"
     return ""
 
 
@@ -409,48 +390,18 @@ def _message_content_text(content):
     return "\n".join(parts)
 
 
-def _chrome_setting_block_message(tool_name, result, recovery):
-    setting = str(recovery.get("setting") or "Allow JavaScript from Apple Events").strip()
-    path = str(recovery.get("path") or "View > Developer > Allow JavaScript from Apple Events").strip()
-    reason = _tool_result_reason(result)
-    detail = " reason: {}".format(reason) if reason else ""
-    return (
-        "明示的に指定されたGoogle ChromeのDOMバックグラウンド操作を試しましたが、Chrome側の設定で止まりました。"
-        f"{detail} {tool_name} はここで再試行せず停止しました。"
-        f" Chrome の {path} で {setting} を有効にするか、前面操作を許可しない限り、"
-        "Chrome DOM背景入力は使えません。通常のcomputer_use自体は他のアプリでも利用できます。"
-    )
-
-
-def _browser_background_setting_block_message(tool_name, result, recovery):
-    setting = str(recovery.get("setting") or "Allow JavaScript from Apple Events").strip()
-    path = str(recovery.get("path") or "View > Developer > Allow JavaScript from Apple Events").strip()
-    reason = _tool_result_reason(result)
-    detail = " reason: {}".format(reason) if reason else ""
-    return (
-        "明示的に指定されたブラウザのDOMバックグラウンド操作を試しましたが、ブラウザ側の設定で止まりました。"
-        f"{detail} {tool_name} はここで再試行せず停止しました。"
-        f" 対象ブラウザの {path} で {setting} を有効にするか、前面操作を許可しない限り、"
-        "そのブラウザへのDOM背景入力は使えません。通常のcomputer_use自体は他のアプリでも利用できます。"
-    )
-
-
 def _tool_blocked_response(tool_name, result):
     recovery = _find_tool_recovery(result)
     kind = str(recovery.get("kind") or "").strip()
-    if not kind and _tool_result_recovery_kind(result) == "chrome_setting":
-        kind = "chrome_setting"
-        recovery = {
-            "kind": "chrome_setting",
-            "setting": "Allow JavaScript from Apple Events",
-            "path": "View > Developer > Allow JavaScript from Apple Events",
-        }
-    if kind == "chrome_setting":
-        message = _chrome_setting_block_message(tool_name, result, recovery)
-    elif kind == "browser_background_setting":
-        message = _browser_background_setting_block_message(tool_name, result, recovery)
+    if not kind:
+        kind = _tool_result_recovery_kind(result)
+    reason = _tool_result_reason(result)
+    if kind in {"visible_window_required", "focus_required"}:
+        message = (
+            f"{tool_name} は現在表示されている画面だけを操作する設定のため停止しました。"
+            + (f" reason: {reason}" if reason else "")
+        )
     else:
-        reason = _tool_result_reason(result)
         message = (
             f"{tool_name} が回復不能な tool ブロックを返したため停止しました。"
             + (f" reason: {reason}" if reason else "")
@@ -703,12 +654,10 @@ def _tool_visibility_message(tools):
     if tool_names.intersection({"browser_computer", "browser_use", "computer_use"}):
         guidance = (
             " Computer-use harness rules: inspect app state with context before screenshots; "
-            "computer_use is for all desktop apps, so use apps/windows plus select_app/select_window focus=false to target Vivaldi, VS Code, Finder, LINE, Chrome, or any other visible app; "
+            "computer_use is for all desktop apps, so use apps/windows plus select_app/select_window to target Vivaldi, VS Code, Finder, LINE, Chrome, or any other visible app/window; "
+            "only operate the currently visible screen; hidden tabs, background DOM, and Apple Events JavaScript control are unavailable; "
             "prefer one type call for words like hello and key only for shortcuts/return; "
-            "click/move without physical=true only moves the virtual AI cursor and does not move the user's mouse; "
-            "chromium background DOM is an optional route when a Chromium-family browser app such as Google Chrome or Vivaldi is explicit, not computer-use as a whole; "
-            "for text/key in generic apps, use the selected app/window and add allow_foreground_fallback=true only when the user allows overlap; "
-            "if an actual background text/key entry returns recovery.kind=chrome_setting or browser_background_setting without foreground_fallback, stop instead of retrying."
+            "click/move without physical=true only moves the virtual AI cursor and does not move the user's mouse."
         )
     return {
         "role": "system",
@@ -900,18 +849,19 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
                 tool_call_id,
                 model=model,
             )
-            if _tool_result_recovery_kind(result) == "chrome_setting":
+            recovery_kind = _tool_result_recovery_kind(result)
+            if recovery_kind in {"visible_window_required", "focus_required"}:
                 blocked_response = _tool_blocked_response(tool_name, result)
                 _append_event(
                     events,
                     context,
                     _event(
                         "status",
-                        "Chrome設定ブロックのため tool 実行を停止しました",
+                        "可視画面外の tool 実行要求のため停止しました",
                         phase="tool_blocked",
                         tool_name=tool_name,
                         tool_call_id=tool_call_id,
-                        recovery_kind="chrome_setting",
+                        recovery_kind=recovery_kind,
                     )
                 )
                 break

@@ -20,6 +20,7 @@ def run(context, args):
         "browser.open_url",
         "computer.move",
         "computer.click",
+        "computer.show_app",
         "computer.type",
         "computer.key",
         "computer.scroll",
@@ -57,18 +58,9 @@ def _payload_with_context_defaults(action, payload, context):
             payload.setdefault("app", target_app.strip())
         if isinstance(target_title, str) and target_title.strip():
             payload.setdefault("title", target_title.strip())
-    if context.get("computer_use_allow_foreground_fallback") is True:
-        payload.setdefault("allow_foreground_fallback", True)
-        payload.setdefault("allow_user_input_overlap", True)
-    if context.get("computer_use_background_preferred") is True and action in {"computer.type", "computer.key"}:
-        payload.setdefault("background", True)
-        payload.setdefault("driver", "auto")
-    if context.get("computer_use_background_required") is True:
-        payload.setdefault("allow_foreground_fallback", False)
     if (
         context.get("user_requested_computer_use") is True
         and action == "computer.click"
-        and context.get("computer_use_background_required") is not True
     ):
         payload.setdefault("physical", True)
     return payload

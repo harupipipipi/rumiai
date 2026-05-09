@@ -711,25 +711,18 @@ def test_browser_computer_click_uses_virtual_cursor_by_default(tmp_path, monkeyp
     assert result["click_marker"]["screen_y"] == 20
 
 
-def test_browser_computer_key_clears_chrome_background(tmp_path, monkeypatch):
+def test_browser_computer_key_rejects_background_requests(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
     import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
 
     controller = BrowserComputerController(artifact_root=tmp_path)
     controller._session_path = tmp_path / "shared" / "browser_sessions.json"
     monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
-
-    captured = {}
-
-    def fake_run(cmd, check=False, capture_output=False, text=False, **kwargs):
-        captured["cmd"] = cmd
-
-        class Completed:
-            stdout = "cleared\n"
-
-        return Completed()
-
-    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        browser_computer.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("background request should not run")),
+    )
 
     result = controller.run(
         "computer.key",
@@ -737,12 +730,13 @@ def test_browser_computer_key_clears_chrome_background(tmp_path, monkeypatch):
         yolo_mode=True,
     )
 
-    assert result["background"] is True
-    assert result["target_app"] == "Google Chrome"
-    assert captured["cmd"][0] == "osascript"
+    assert result["is_error"] is True
+    assert result["executed"] is False
+    assert result["recovery"]["kind"] == "visible_window_required"
+    assert "visible windows" in result["reason"]
 
 
-def test_browser_computer_click_sets_target_window_for_background_keys(tmp_path, monkeypatch):
+def test_browser_computer_click_sets_visible_target_window(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 
     controller = BrowserComputerController(artifact_root=tmp_path)
@@ -766,73 +760,42 @@ def test_browser_computer_click_sets_target_window_for_background_keys(tmp_path,
 
     state = controller._computer_state()
     assert state["target_window"]["app"] == "Google Chrome"
-    assert controller._should_type_in_chrome_background({}) is False
-    assert controller._should_type_in_chrome_background({"app": "Google Chrome", "background": True}) is True
+    assert controller._background_requested({}) is False
+    assert controller._background_requested({"app": "Google Chrome", "background": True}) is True
 
 
-def test_browser_computer_background_type_failure_does_not_fall_back_to_physical(tmp_path, monkeypatch):
+def test_browser_computer_background_type_request_is_visible_only_error(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
     import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
 
     controller = BrowserComputerController(artifact_root=tmp_path)
     controller._session_path = tmp_path / "shared" / "browser_sessions.json"
-    controller._write_computer_state(
-        {
-            "target_window": {
-                "app": "Google Chrome",
-                "title": "ChatGPT - Google Chrome",
-                "x": 20,
-                "y": 40,
-                "width": 1200,
-                "height": 800,
-                "active": False,
-            }
-        }
-    )
     monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(controller, "_darwin_type_in_chrome_background", lambda text, payload: False)
     monkeypatch.setattr(
         controller,
         "_apple_script",
-        lambda action, payload: (_ for _ in ()).throw(AssertionError("physical typing should not run")),
+        lambda action, payload: (_ for _ in ()).throw(AssertionError("foreground typing should not run")),
     )
 
     result = controller.run("computer.type", {"text": "hello", "background": True, "app": "Google Chrome"}, yolo_mode=True)
 
     assert result["is_error"] is True
     assert result["executed"] is False
-    assert result["background"] is True
-    assert "Chrome background text entry failed" in result["reason"]
+    assert result["recovery"]["kind"] == "visible_window_required"
 
 
-def test_browser_computer_background_type_can_fall_back_to_foreground_when_allowed(tmp_path, monkeypatch):
+def test_browser_computer_background_fallback_flags_do_not_enable_background(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
     import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
 
     controller = BrowserComputerController(artifact_root=tmp_path)
     controller._session_path = tmp_path / "shared" / "browser_sessions.json"
-    controller._write_sessions(
-        {
-            "chrome_target": {
-                "app": "Google Chrome",
-                "url": "https://chatgpt.com/",
-                "window_index": 2,
-                "tab_index": 5,
-            }
-        }
-    )
     monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(controller, "_darwin_type_in_chrome_background", lambda text, payload: False)
-    monkeypatch.setattr(controller, "_list_windows", lambda: [])
-    monkeypatch.setattr(controller, "_activate_chrome_target", lambda payload: True)
-
-    calls = []
-
-    def fake_run(command, **kwargs):
-        calls.append(command)
-        return subprocess.CompletedProcess(command, 0)
-
-    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        browser_computer.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("foreground fallback should not run")),
+    )
 
     result = controller.run(
         "computer.type",
@@ -845,13 +808,9 @@ def test_browser_computer_background_type_can_fall_back_to_foreground_when_allow
         yolo_mode=True,
     )
 
-    assert result["executed"] is True
-    assert result["foreground_fallback"] is True
-    assert result["background_attempted"] is True
-    assert result["driver_sequence"] == ["chrome_background_dom", "foreground_input"]
-    assert result["background_failure"]["recovery"]["kind"] == "chrome_setting"
-    assert calls[-1][:2] == ["osascript", "-e"]
-    assert "keystroke" in calls[-1][2]
+    assert result["executed"] is False
+    assert result["is_error"] is True
+    assert result["recovery"]["kind"] == "visible_window_required"
 
 
 def test_browser_computer_select_window_respects_app_filter(tmp_path):
@@ -902,7 +861,7 @@ def test_browser_computer_select_window_failure_clears_stale_target(tmp_path):
     assert "target_window" not in controller._computer_state()
 
 
-def test_browser_computer_select_window_can_store_hidden_chrome_tab_target(tmp_path):
+def test_browser_computer_select_window_requires_visible_browser_window(tmp_path):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 
     controller = BrowserComputerController(artifact_root=tmp_path)
@@ -910,23 +869,11 @@ def test_browser_computer_select_window_can_store_hidden_chrome_tab_target(tmp_p
     controller._list_windows = lambda: [
         {"app": "Codex", "title": "", "x": 0, "y": 0, "width": 1470, "height": 37, "active": True},
     ]
-    controller._chrome_tabs = lambda: [
-        {
-            "app": "Google Chrome",
-            "window_index": 2,
-            "tab_index": 5,
-            "active": True,
-            "title": "ChatGPT",
-            "url": "https://chatgpt.com/",
-        }
-    ]
 
     result = controller.run("computer.select_window", {"app": "Google Chrome", "title": "ChatGPT", "focus": False}, yolo_mode=True)
 
-    assert result["selected"] is True
-    assert result["background_target_only"] is True
-    assert result["chrome_target"]["window_index"] == 2
-    assert controller._read_sessions()["chrome_target"]["tab_index"] == 5
+    assert result["selected"] is False
+    assert "chrome_target" not in result
     assert "target_window" not in controller._computer_state()
 
 
@@ -950,7 +897,6 @@ def test_browser_computer_context_exposes_ai_cursor_and_selected_window(tmp_path
     )
     controller._active_window = lambda: {"app": "Codex", "title": "", "x": 0, "y": 0, "width": 1470, "height": 900}
     controller._list_windows = lambda: []
-    controller._chrome_tabs = lambda: []
     monkeypatch.setattr(BrowserComputerController, "_cursor_position", staticmethod(lambda: {"x": 1, "y": 2, "origin": "top_left"}))
 
     result = controller.run("computer.context", {"include_windows": False}, yolo_mode=True)
@@ -961,35 +907,18 @@ def test_browser_computer_context_exposes_ai_cursor_and_selected_window(tmp_path
     assert "windows" not in result
 
 
-def test_browser_computer_context_reports_chrome_background_blocker(tmp_path, monkeypatch):
+def test_browser_computer_context_reports_visible_only_capability(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
-    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
 
     controller = BrowserComputerController(artifact_root=tmp_path)
     controller._session_path = tmp_path / "shared" / "browser_sessions.json"
     controller._active_window = lambda: {"app": "Codex", "title": "", "x": 0, "y": 0, "width": 1470, "height": 900}
-    controller._chrome_tabs = lambda: [
-        {
-            "app": "Google Chrome",
-            "window_index": 1,
-            "tab_index": 3,
-            "title": "ChatGPT",
-            "url": "https://chatgpt.com/",
-        }
-    ]
-    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
-
-    def fake_execute(js, payload):
-        controller._last_background_error = "Executing JavaScript through AppleScript is turned off. Apple Events denied."
-        raise RuntimeError("blocked")
-
-    controller._darwin_execute_chrome_background_js = fake_execute
 
     result = controller.run("computer.context", {"include_windows": False}, yolo_mode=True)
 
-    assert result["chrome_background_control"]["available"] is False
-    assert result["chrome_background_control"]["recovery"]["kind"] == "chrome_setting"
-    assert "Allow JavaScript from Apple Events" in result["chrome_background_control"]["reason"]
+    assert "chrome_background_control" not in result
+    assert any("visible-screen only" in note for note in result["notes"])
+    assert result["browser_session"] == {"last_url": None, "last_opened_with_managed_profile": False}
 
 
 def test_browser_computer_context_clears_tiny_stale_selected_window(tmp_path):
@@ -1524,7 +1453,7 @@ def test_chat_tool_loop_marks_nested_tool_errors_in_events():
     assert streamed_completed["is_error"] is True
 
 
-def test_chat_tool_loop_stops_on_chrome_setting_recovery():
+def test_chat_tool_loop_stops_on_visible_window_required_recovery():
     import blocks.chat.send as send
 
     calls = {"ai": 0, "tool": 0}
@@ -1552,12 +1481,11 @@ def test_chat_tool_loop_stops_on_chrome_setting_recovery():
             return {
                 "status": "ok",
                 "data": {
-                    "result": "Chrome background text entry failed.",
+                    "result": "Background computer-use is disabled. Only currently visible windows can be operated.",
                     "is_error": True,
                     "recovery": {
-                        "kind": "chrome_setting",
-                        "setting": "Allow JavaScript from Apple Events",
-                        "path": "View > Developer > Allow JavaScript from Apple Events",
+                        "kind": "visible_window_required",
+                        "note": "Show or focus the target app/window, then retry without background.",
                     },
                 },
             }
@@ -1575,12 +1503,12 @@ def test_chat_tool_loop_stops_on_chrome_setting_recovery():
     assert calls == {"ai": 1, "tool": 1}
     assert response["finish_reason"] == "tool_blocked"
     assert response["metadata"]["tool_blocked"] is True
-    assert response["metadata"]["tool_blocked_kind"] == "chrome_setting"
-    assert "Allow JavaScript from Apple Events" in response["content"][0]["text"]
+    assert response["metadata"]["tool_blocked_kind"] == "visible_window_required"
+    assert "現在表示" in response["content"][0]["text"]
     assert [event["phase"] for event in emitted if event["type"] == "status"][-1] == "tool_blocked"
 
 
-def test_chat_tool_loop_does_not_stop_when_context_reports_chrome_dom_probe_failure():
+def test_chat_tool_loop_does_not_stop_when_context_reports_visible_only_notes():
     import blocks.chat.send as send
 
     calls = {"ai": 0, "tool": 0}
@@ -1616,15 +1544,7 @@ def test_chat_tool_loop_does_not_stop_when_context_reports_chrome_dom_probe_fail
                     "is_error": False,
                     "widget": {
                         "action": "computer.context",
-                        "chrome_background_control": {
-                            "available": False,
-                            "reason": "Chrome background entry failed because Chrome has disabled JavaScript from Apple Events.",
-                            "recovery": {
-                                "kind": "chrome_setting",
-                                "setting": "Allow JavaScript from Apple Events",
-                                "path": "View > Developer > Allow JavaScript from Apple Events",
-                            },
-                        },
+                        "notes": ["Computer-use is app-generic and visible-screen only."],
                     },
                 },
             }
@@ -1644,7 +1564,7 @@ def test_chat_tool_loop_does_not_stop_when_context_reports_chrome_dom_probe_fail
     assert response["content"][0]["text"] == "context noted"
 
 
-def test_chat_tool_loop_does_not_stop_after_successful_foreground_fallback():
+def test_chat_tool_loop_does_not_stop_after_successful_foreground_input():
     import blocks.chat.send as send
 
     calls = {"ai": 0, "tool": 0}
@@ -1665,7 +1585,7 @@ def test_chat_tool_loop_does_not_stop_after_successful_foreground_fallback():
                             "type": "tool_use",
                             "id": "call_type",
                             "name": "computer_use",
-                            "input": "{\"action\":\"type\",\"text\":\"hello\",\"app\":\"Google Chrome\",\"background\":true,\"allow_foreground_fallback\":true}",
+                            "input": "{\"action\":\"type\",\"text\":\"hello\",\"app\":\"Google Chrome\"}",
                         }
                     ],
                     "finish_reason": "tool_calls",
@@ -1681,13 +1601,7 @@ def test_chat_tool_loop_does_not_stop_after_successful_foreground_fallback():
                     "widget": {
                         "action": "computer.type",
                         "executed": True,
-                        "foreground_fallback": True,
-                        "background_failure": {
-                            "recovery": {
-                                "kind": "chrome_setting",
-                                "setting": "Allow JavaScript from Apple Events",
-                            }
-                        },
+                        "driver": "foreground_input",
                     },
                 },
             }
@@ -1695,7 +1609,7 @@ def test_chat_tool_loop_does_not_stop_after_successful_foreground_fallback():
 
     response = send._complete_with_tools(
         "google/gemma-4-31b-it",
-        [{"role": "user", "content": "background first, fallback ok"}],
+        [{"role": "user", "content": "visible Chromeにhello"}],
         [{"type": "function", "function": {"name": "computer_use", "parameters": {"type": "object"}}}],
         {},
         call_handler,
@@ -1707,7 +1621,7 @@ def test_chat_tool_loop_does_not_stop_after_successful_foreground_fallback():
     assert response["content"][0]["text"] == "sent with fallback"
 
 
-def test_tool_result_recovery_kind_infers_legacy_chrome_setting_error():
+def test_tool_result_recovery_kind_infers_visible_window_error():
     import blocks.chat.send as send
 
     assert (
@@ -1716,14 +1630,14 @@ def test_tool_result_recovery_kind_infers_legacy_chrome_setting_error():
                 "status": "ok",
                 "data": {
                     "result": (
-                        "Chrome background text entry failed. "
-                        "Enable Chrome's 'Allow JavaScript from Apple Events' setting."
+                        "Background computer-use is disabled. "
+                        "Only currently visible windows can be operated."
                     ),
                     "is_error": True,
                 },
             }
         )
-        == "chrome_setting"
+        == "visible_window_required"
     )
 
 
@@ -2707,11 +2621,15 @@ def test_browser_computer_chatgpt_title_does_not_imply_chrome(tmp_path):
 
     controller = BrowserComputerController(artifact_root=tmp_path)
     controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._list_windows = lambda: [
+        {"app": "Vivaldi", "title": "ChatGPT - Vivaldi", "x": 40, "y": 60, "width": 1000, "height": 800, "active": False},
+    ]
 
-    assert controller._payload_explicitly_targets_chrome({"title_contains": "ChatGPT"}) is False
-    assert controller._payload_explicitly_targets_chrome({"url_contains": "https://chatgpt.com"}) is False
-    assert controller._payload_targets_chrome({"title_contains": "ChatGPT"}) is False
-    assert controller._payload_explicitly_targets_chrome({"app": "Google Chrome", "title_contains": "ChatGPT"}) is True
+    result = controller.run("computer.select_window", {"title_contains": "ChatGPT", "focus": False}, yolo_mode=True)
+
+    assert result["selected"] is True
+    assert result["target_window"]["app"] == "Vivaldi"
+    assert "chrome_target" not in result
 
 
 def test_browser_computer_apps_lists_open_and_installed_apps(tmp_path):
@@ -2754,6 +2672,35 @@ def test_browser_computer_select_app_targets_non_browser_app_without_focus(tmp_p
     assert result["target_app"]["name"] == "Visual Studio Code"
     assert controller._computer_state()["target_app"]["name"] == "Visual Studio Code"
     assert activated == []
+
+
+def test_browser_computer_show_app_focuses_matching_visible_window(tmp_path):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    focused = []
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._list_windows = lambda: [
+        {"app": "Codex", "title": "RumiDP", "x": 0, "y": 0, "width": 1470, "height": 900, "active": True},
+        {"app": "Vivaldi", "title": "ChatGPT - Vivaldi", "x": 40, "y": 60, "width": 1000, "height": 800, "active": False},
+    ]
+    controller._focus_window = lambda window: focused.append(window)
+    controller._active_window = lambda: {
+        "app": "Vivaldi",
+        "title": "ChatGPT - Vivaldi",
+        "x": 40,
+        "y": 60,
+        "width": 1000,
+        "height": 800,
+        "active": True,
+    }
+
+    result = controller.run("computer.show_app", {"app": "Vivaldi", "title": "ChatGPT"}, yolo_mode=True)
+
+    assert result["shown"] is True
+    assert result["target_window"]["app"] == "Vivaldi"
+    assert controller._computer_state()["target_window"]["title"] == "ChatGPT - Vivaldi"
+    assert focused[0]["app"] == "Vivaldi"
 
 
 def test_browser_computer_windows_uses_full_windows_list_on_windows(tmp_path, monkeypatch):
@@ -2800,42 +2747,31 @@ def test_browser_computer_screenshot_missing_app_filter_refuses_front_desktop(tm
     assert not [command for command in calls if command and command[0] == "screencapture"]
 
 
-def test_browser_computer_screenshot_activates_hidden_chrome_tab_when_fallback_allowed(tmp_path, monkeypatch):
+def test_browser_computer_screenshot_ignores_hidden_browser_targets_even_with_fallback_flag(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
     import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
 
-    png_header = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR"
-    png_body = png_header + b"\x00\x00\x02\x80\x00\x00\x01\x90"
     calls = []
-    window_calls = {"count": 0}
 
     def fake_run(command, **kwargs):
         calls.append(command)
-        if command[0] == "screencapture":
-            Path(command[-1]).write_bytes(png_body)
         return subprocess.CompletedProcess(command, 0)
-
-    def fake_windows():
-        window_calls["count"] += 1
-        if window_calls["count"] == 1:
-            return [{"app": "Codex", "title": "RumiDP", "x": 0, "y": 0, "width": 1470, "height": 900, "active": True}]
-        return [
-            {"app": "Google Chrome", "title": "LINE Chat", "x": 40, "y": 70, "width": 1200, "height": 780, "active": True, "window_id": 333},
-        ]
 
     monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
-    monkeypatch.setattr(BrowserComputerController, "_model_screenshot_copy", lambda self, path: path)
-    monkeypatch.setattr(BrowserComputerController, "_cursor_position", staticmethod(lambda: None))
 
     controller = BrowserComputerController(artifact_root=tmp_path)
     controller._session_path = tmp_path / "shared" / "browser_sessions.json"
-    controller._list_windows = fake_windows
-    controller._chrome_tabs = lambda: [
-        {"app": "Google Chrome", "window_index": 1, "tab_index": 2, "active": True, "title": "LINE Chat", "url": "https://chat.line.biz/chat"}
+    controller._list_windows = lambda: [
+        {"app": "Codex", "title": "RumiDP", "x": 0, "y": 0, "width": 1470, "height": 900, "active": True},
     ]
-    controller._activate_chrome_target = lambda payload: True
     controller._active_window = lambda: None
+    controller._write_sessions(
+        {
+            "last_url": "https://chat.line.biz/chat",
+            "chrome_target": {"app": "Google Chrome", "window_index": 1, "tab_index": 2, "title": "LINE Chat"},
+        }
+    )
 
     result = controller.run(
         "computer.screenshot",
@@ -2843,9 +2779,10 @@ def test_browser_computer_screenshot_activates_hidden_chrome_tab_when_fallback_a
         yolo_mode=True,
     )
 
-    assert result["action"] == "computer.screenshot"
-    assert calls[0][:4] == ["screencapture", "-x", "-l", "333"]
-    assert result["target_window"]["title"] == "LINE Chat"
+    assert result["supported"] is False
+    assert "No visible window matched" in result["reason"]
+    assert "chrome_target" not in result
+    assert not [command for command in calls if command and command[0] == "screencapture"]
 
 
 def test_browser_computer_screenshot_hidden_chrome_tab_reports_fallback_needed(tmp_path, monkeypatch):
@@ -2859,16 +2796,19 @@ def test_browser_computer_screenshot_hidden_chrome_tab_reports_fallback_needed(t
     controller._list_windows = lambda: [
         {"app": "Codex", "title": "RumiDP", "x": 0, "y": 0, "width": 1470, "height": 900, "active": True},
     ]
-    controller._chrome_tabs = lambda: [
-        {"app": "Google Chrome", "window_index": 1, "tab_index": 2, "active": True, "title": "LINE Chat", "url": "https://chat.line.biz/chat"}
-    ]
+    controller._write_sessions(
+        {
+            "chrome_target": {"app": "Google Chrome", "window_index": 1, "tab_index": 2, "title": "LINE Chat"},
+            "last_url": "https://chat.line.biz/chat",
+        }
+    )
 
     result = controller.run("computer.screenshot", {"app": "Google Chrome", "title": "LINE"}, yolo_mode=True)
 
     assert result["supported"] is False
-    assert result["background_target_only"] is True
-    assert result["chrome_target"]["tab_index"] == 2
-    assert result["recovery"]["kind"] == "foreground_fallback"
+    assert "No visible window matched" in result["reason"]
+    assert "chrome_target" not in result
+    assert "recovery" not in result
 
 
 def test_browser_use_maps_cursor_move_to_browser_computer_payload():
@@ -2911,16 +2851,13 @@ def test_computer_use_payload_preserves_window_targeting_fields():
         "title": "ChatGPT",
         "focus": False,
         "physical": False,
-        "background": True,
         "method": "chrome_background",
         "driver": "auto",
-        "allow_foreground_fallback": True,
-        "allow_user_input_overlap": True,
         "modifier": "meta",
     }
 
 
-def test_computer_use_context_defaults_enable_background_then_foreground_fallback():
+def test_computer_use_context_defaults_do_not_enable_background():
     from domain.tool.executor import _computer_use_payload_with_context_defaults
 
     payload = _computer_use_payload_with_context_defaults(
@@ -2932,10 +2869,10 @@ def test_computer_use_context_defaults_enable_background_then_foreground_fallbac
         },
     )
 
-    assert payload["background"] is True
-    assert payload["driver"] == "auto"
-    assert payload["allow_foreground_fallback"] is True
-    assert payload["allow_user_input_overlap"] is True
+    assert "background" not in payload
+    assert "driver" not in payload
+    assert "allow_foreground_fallback" not in payload
+    assert "allow_user_input_overlap" not in payload
 
 
 def test_computer_use_context_defaults_add_target_and_physical_click():
@@ -2956,16 +2893,17 @@ def test_computer_use_context_defaults_add_target_and_physical_click():
     assert payload["physical"] is True
 
 
-def test_chat_text_sets_computer_use_foreground_fallback_preferences():
+def test_chat_text_does_not_set_background_preferences():
     import blocks.chat.send as send
 
     prefs = send._computer_use_preferences_from_text(
         "バックグラウンドでChrome操作。無理な場合はユーザー入力と被ってもいいのでOK。"
     )
 
-    assert prefs["computer_use_background_preferred"] is True
-    assert prefs["computer_use_allow_foreground_fallback"] is True
-    assert prefs["computer_use_background_required"] is False
+    assert "computer_use_background_preferred" not in prefs
+    assert "computer_use_allow_foreground_fallback" not in prefs
+    assert "computer_use_background_required" not in prefs
+    assert prefs["computer_use_target_app"] == "Google Chrome"
 
 
 def test_chat_text_sets_computer_use_chrome_line_target_preferences():
@@ -3016,8 +2954,8 @@ def test_browser_computer_executor_propagates_controller_errors(monkeypatch):
             "action": action,
             "executed": False,
             "is_error": True,
-            "reason": "Chrome background text entry failed.",
-            "recovery": {"kind": "chrome_setting"},
+            "reason": "Background computer-use is disabled.",
+            "recovery": {"kind": "visible_window_required"},
         }
 
     monkeypatch.setattr(BrowserComputerController, "run", fake_run)
@@ -3030,21 +2968,25 @@ def test_browser_computer_executor_propagates_controller_errors(monkeypatch):
 
     assert result["is_error"] is True
     assert "failed" in result["result"]
-    assert result["widget"]["recovery"]["kind"] == "chrome_setting"
+    assert result["widget"]["recovery"]["kind"] == "visible_window_required"
 
 
-def test_browser_open_url_uses_existing_chrome_without_stealing_focus(monkeypatch):
+def test_browser_open_url_uses_foreground_default_browser(monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
     import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
 
     calls = []
 
-    def fake_run(command, **kwargs):
+    def fake_popen(command, **kwargs):
         calls.append((command, kwargs))
-        return subprocess.CompletedProcess(command, 0, stdout="window_index=2\ttab_index=5\n")
+
+        class Process:
+            pass
+
+        return Process()
 
     monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+    monkeypatch.setattr(browser_computer.subprocess, "Popen", fake_popen)
 
     controller = BrowserComputerController()
     result = controller.run(
@@ -3056,25 +2998,27 @@ def test_browser_open_url_uses_existing_chrome_without_stealing_focus(monkeypatc
     assert result["opened"] is True
     assert result["managed_profile"] is False
     assert result["launch"]["mode"] == "default_browser"
-    assert result["chrome_target"]["window_index"] == 2
-    assert result["chrome_target"]["tab_index"] == 5
-    assert calls[0][0][:2] == ["osascript", "-e"]
-    assert "previousFrontApp" in calls[0][0][2]
-    assert "Google Chrome" in calls[0][0][2]
+    assert "chrome_target" not in result
+    assert "browser_target" not in result
+    assert calls[0][0] == ["open", "https://chatgpt.com"]
 
 
-def test_browser_open_url_can_target_existing_vivaldi_background(monkeypatch):
+def test_browser_open_url_can_target_vivaldi_foreground(monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
     import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
 
     calls = []
 
-    def fake_run(command, **kwargs):
+    def fake_popen(command, **kwargs):
         calls.append((command, kwargs))
-        return subprocess.CompletedProcess(command, 0, stdout="window_index=1\ttab_index=2\n")
+
+        class Process:
+            pass
+
+        return Process()
 
     monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+    monkeypatch.setattr(browser_computer.subprocess, "Popen", fake_popen)
 
     controller = BrowserComputerController()
     result = controller.run(
@@ -3085,27 +3029,54 @@ def test_browser_open_url_can_target_existing_vivaldi_background(monkeypatch):
 
     assert result["opened"] is True
     assert result["managed_profile"] is False
-    assert result["browser_target"]["app"] == "Vivaldi"
-    assert result["browser_target"]["window_index"] == 1
-    assert result["browser_target"]["tab_index"] == 2
+    assert result["target_app"] == "Vivaldi"
+    assert "browser_target" not in result
     assert "chrome_target" not in result
-    script = calls[0][0][2]
-    assert "previousFrontApp" in script
-    assert 'tell application "Vivaldi"' in script
-    assert "Google Chrome" not in script
+    assert calls[0][0] == ["open", "-a", "Vivaldi", "https://chatgpt.com"]
+
+
+def test_browser_open_url_app_target_bypasses_managed_profile(monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    calls = []
+
+    def fake_popen(command, **kwargs):
+        calls.append((command, kwargs))
+
+        class Process:
+            pass
+
+        return Process()
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.subprocess, "Popen", fake_popen)
+
+    controller = BrowserComputerController()
+    result = controller.run(
+        "browser.open_url",
+        {"url": "https://chatgpt.com", "app": "Vivaldi"},
+        yolo_mode=True,
+    )
+
+    assert result["opened"] is True
+    assert result["managed_profile"] is False
+    assert result["persistent"] is True
+    assert result["target_app"] == "Vivaldi"
+    assert calls[0][0] == ["open", "-a", "Vivaldi", "https://chatgpt.com"]
 
 
 def test_browser_open_url_specific_vivaldi_does_not_fall_back_to_default_browser(monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
     import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
 
-    def fake_run(command, **kwargs):
-        raise subprocess.CalledProcessError(1, command)
+    def fake_popen(command, **kwargs):
+        raise OSError("missing app")
 
     opened = []
 
     monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+    monkeypatch.setattr(browser_computer.subprocess, "Popen", fake_popen)
     monkeypatch.setattr(browser_computer.webbrowser, "open", lambda url: opened.append(url))
 
     result = BrowserComputerController().run(
@@ -3120,14 +3091,22 @@ def test_browser_open_url_specific_vivaldi_does_not_fall_back_to_default_browser
     assert opened == []
 
 
-def test_browser_open_url_unknown_specific_app_does_not_fall_back_to_chrome(monkeypatch):
+def test_browser_open_url_unknown_specific_app_uses_requested_app_only(monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
     import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
 
-    opened = []
+    calls = []
+
+    def fake_popen(command, **kwargs):
+        calls.append((command, kwargs))
+
+        class Process:
+            pass
+
+        return Process()
 
     monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(browser_computer.webbrowser, "open", lambda url: opened.append(url))
+    monkeypatch.setattr(browser_computer.subprocess, "Popen", fake_popen)
 
     result = BrowserComputerController().run(
         "browser.open_url",
@@ -3135,55 +3114,41 @@ def test_browser_open_url_unknown_specific_app_does_not_fall_back_to_chrome(monk
         yolo_mode=True,
     )
 
-    assert result["is_error"] is True
-    assert result["opened"] is False
+    assert result["opened"] is True
     assert result["target_app"] == "Safari"
-    assert opened == []
+    assert calls[0][0] == ["open", "-a", "Safari", "https://chatgpt.com"]
 
 
-def test_select_window_can_store_background_vivaldi_tab(tmp_path, monkeypatch):
+def test_select_window_requires_visible_vivaldi_window(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
     import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
 
     def fake_windows(self):
         return []
 
-    def fake_run(command, **kwargs):
-        return subprocess.CompletedProcess(
-            command,
-            0,
-            stdout="1\t2\ttrue\tChatGPT\thttps://chatgpt.com/\n",
-        )
-
     monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(BrowserComputerController, "_list_windows", fake_windows)
-    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
 
     controller = BrowserComputerController(artifact_root=tmp_path)
     controller._session_path = tmp_path / "shared" / "browser_sessions.json"
 
     result = controller.run("computer.select_window", {"app": "Vivaldi", "url_contains": "chatgpt.com", "focus": False})
 
-    assert result["selected"] is True
-    assert result["background_target_only"] is True
-    assert result["browser_target"]["app"] == "Vivaldi"
-    assert result["browser_target"]["window_index"] == 1
-    assert result["browser_target"]["tab_index"] == 2
+    assert result["selected"] is False
+    assert "browser_target" not in result
     assert "chrome_target" not in result
 
 
-def test_computer_type_can_target_background_chrome(tmp_path, monkeypatch):
+def test_computer_type_rejects_background_chrome(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
     import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
 
-    calls = []
-
-    def fake_run(command, **kwargs):
-        calls.append((command, kwargs))
-        return subprocess.CompletedProcess(command, 0, stdout="typed\n")
-
     monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        browser_computer.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("background request should not run")),
+    )
 
     controller = BrowserComputerController(artifact_root=tmp_path)
     controller._session_path = tmp_path / "shared" / "browser_sessions.json"
@@ -3191,25 +3156,21 @@ def test_computer_type_can_target_background_chrome(tmp_path, monkeypatch):
 
     result = controller.run("computer.type", {"text": "hello", "background": True, "app": "Google Chrome"}, yolo_mode=True)
 
-    assert result["executed"] is True
-    assert result["background"] is True
-    assert calls[0][0][:2] == ["osascript", "-e"]
-    assert "#prompt-textarea" in calls[0][0][2]
-    assert "chatgpt.com" in calls[0][0][2]
+    assert result["is_error"] is True
+    assert result["executed"] is False
+    assert result["recovery"]["kind"] == "visible_window_required"
 
 
-def test_computer_type_can_target_background_vivaldi(tmp_path, monkeypatch):
+def test_computer_type_rejects_background_vivaldi(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
     import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
 
-    calls = []
-
-    def fake_run(command, **kwargs):
-        calls.append((command, kwargs))
-        return subprocess.CompletedProcess(command, 0, stdout="typed\n")
-
     monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        browser_computer.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("background request should not run")),
+    )
 
     controller = BrowserComputerController(artifact_root=tmp_path)
     controller._session_path = tmp_path / "shared" / "browser_sessions.json"
@@ -3223,30 +3184,21 @@ def test_computer_type_can_target_background_vivaldi(tmp_path, monkeypatch):
 
     result = controller.run("computer.type", {"text": "hello", "background": True, "app": "Vivaldi"}, yolo_mode=True)
 
-    assert result["executed"] is True
-    assert result["background"] is True
-    assert result["target_app"] == "Vivaldi"
-    assert result["driver"] == "chromium_background_dom"
-    assert result["browser_target"]["window_index"] == 3
-    assert "chrome_target" not in result
-    script = calls[0][0][2]
-    assert 'tell application "Vivaldi"' in script
-    assert "set targetWindowIndex to 3" in script
-    assert "#prompt-textarea" in script
+    assert result["is_error"] is True
+    assert result["executed"] is False
+    assert result["recovery"]["kind"] == "visible_window_required"
 
 
-def test_computer_enter_can_submit_background_vivaldi(tmp_path, monkeypatch):
+def test_computer_enter_rejects_background_vivaldi(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
     import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
 
-    calls = []
-
-    def fake_run(command, **kwargs):
-        calls.append((command, kwargs))
-        return subprocess.CompletedProcess(command, 0, stdout="submitted\n")
-
     monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        browser_computer.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("background request should not run")),
+    )
 
     controller = BrowserComputerController(artifact_root=tmp_path)
     controller._session_path = tmp_path / "shared" / "browser_sessions.json"
@@ -3260,28 +3212,21 @@ def test_computer_enter_can_submit_background_vivaldi(tmp_path, monkeypatch):
 
     result = controller.run("computer.key", {"key": "return", "background": True, "app": "Vivaldi"}, yolo_mode=True)
 
-    assert result["executed"] is True
-    assert result["background"] is True
-    assert result["target_app"] == "Vivaldi"
-    script = calls[0][0][2]
-    assert 'tell application "Vivaldi"' in script
-    assert "send-button" in script
-    assert "submitted" in script
+    assert result["is_error"] is True
+    assert result["executed"] is False
+    assert result["recovery"]["kind"] == "visible_window_required"
 
 
-def test_background_vivaldi_reports_vivaldi_apple_events_recovery(tmp_path, monkeypatch):
+def test_background_vivaldi_reports_visible_window_recovery(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
     import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
 
-    def fake_run(command, **kwargs):
-        raise subprocess.CalledProcessError(
-            1,
-            command,
-            stderr="AppleScript を通じた JavaScript 実行は無効になっています。設定 > プライバシー > Apple Events",
-        )
-
     monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        browser_computer.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("background request should not run")),
+    )
 
     controller = BrowserComputerController(artifact_root=tmp_path)
     controller._session_path = tmp_path / "shared" / "browser_sessions.json"
@@ -3300,22 +3245,19 @@ def test_background_vivaldi_reports_vivaldi_apple_events_recovery(tmp_path, monk
     )
 
     assert result["is_error"] is True
-    assert result["recovery"]["kind"] == "browser_background_setting"
-    assert result["recovery"]["path"] == "Settings > Privacy > Apple Events"
+    assert result["recovery"]["kind"] == "visible_window_required"
 
 
-def test_computer_type_targets_last_opened_existing_chrome_tab(tmp_path, monkeypatch):
+def test_computer_type_ignores_last_opened_hidden_chrome_tab(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
     import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
 
-    calls = []
-
-    def fake_run(command, **kwargs):
-        calls.append((command, kwargs))
-        return subprocess.CompletedProcess(command, 0, stdout="typed\n")
-
     monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        browser_computer.subprocess,
+        "run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("background request should not run")),
+    )
 
     controller = BrowserComputerController(artifact_root=tmp_path)
     controller._session_path = tmp_path / "shared" / "browser_sessions.json"
@@ -3329,12 +3271,10 @@ def test_computer_type_targets_last_opened_existing_chrome_tab(tmp_path, monkeyp
 
     result = controller.run("computer.type", {"text": "hello", "background": True, "app": "Google Chrome"}, yolo_mode=True)
 
-    assert result["executed"] is True
-    assert result["chrome_target"]["window_index"] == 2
-    assert result["chrome_target"]["tab_index"] == 5
-    script = calls[0][0][2]
-    assert "set targetWindowIndex to 2" in script
-    assert "set targetTabIndex to 5" in script
+    assert result["is_error"] is True
+    assert result["executed"] is False
+    assert result["recovery"]["kind"] == "visible_window_required"
+    assert "chrome_target" not in result
 
 
 def test_macos_key_scripts_support_named_keys_and_modifiers():

@@ -9,6 +9,7 @@ from ...extensions.runtime import get_extension_registry
 from ..api_key_store import load_provider_api_keys_into_env, provider_has_api_key
 from .openai_compatible_provider import OpenAICompatibleProvider
 from .provider_catalog import OPENAI_COMPATIBLE_PROVIDER_CLASSES
+from . import google_provider as google_provider
 
 """
 providers package - provider discovery and catalog helpers.
