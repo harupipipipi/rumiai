@@ -667,6 +667,16 @@ export const api = {
     return readStreamEvents(response, handlers);
   },
 
+  stopMessage(conversationId: string) {
+    return request<{ success: boolean; conversation_id: string; cancelled: boolean }>(
+      `/api/chat/conversations/${conversationId}/stop`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    );
+  },
+
   listModelProfiles() {
     return request<{ profiles: ModelProfile[]; count: number }>("/api/ai/profiles");
   },

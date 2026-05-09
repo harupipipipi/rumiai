@@ -25,6 +25,7 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("DELETE", "/api/chat/conversations/{id}", block_module="blocks.chat.delete_conversation", path_inject={"id": "conversation_id"}),
     HttpRouteSpec("POST", "/api/chat/conversations/{id}/messages", block_module="blocks.chat.send", path_inject={"id": "conversation_id"}),
     HttpRouteSpec("POST", "/api/chat/conversations/{id}/stream", block_module="blocks.chat.stream", path_inject={"id": "conversation_id"}),
+    HttpRouteSpec("POST", "/api/chat/conversations/{id}/stop", block_module="blocks.chat.stop", path_inject={"id": "conversation_id"}),
     HttpRouteSpec("POST", "/api/chat/conversations/{id}/export", block_module="blocks.chat.export_conversation", path_inject={"id": "conversation_id"}),
     HttpRouteSpec("GET", "/api/chat/channels", block_module="blocks.chat.channel.list"),
     HttpRouteSpec("POST", "/api/chat/channels", block_module="blocks.chat.channel.create"),

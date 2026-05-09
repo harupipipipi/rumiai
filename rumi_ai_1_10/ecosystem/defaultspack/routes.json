@@ -44,6 +44,12 @@
     },
     {
       "method": "POST",
+      "path": "/api/packs/defaultspack/chat/conversations/{id}/stop",
+      "flow_id": "simple_chat",
+      "description": "Stop a running conversation response"
+    },
+    {
+      "method": "POST",
       "path": "/api/packs/defaultspack/chat/conversations/{id}/export",
       "flow_id": "simple_chat",
       "description": "Export conversation"

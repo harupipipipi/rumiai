@@ -10,6 +10,16 @@ from domain.tool_policy.internal_context import (
 )
 
 
+def _is_cancelled(context):
+    checker = context.get("is_cancelled") if isinstance(context, dict) else None
+    if callable(checker):
+        try:
+            return bool(checker())
+        except Exception:
+            return False
+    return False
+
+
 def run(input_data, context):
     """defaults.tool.invoke — ツールを実行する"""
     context = context if isinstance(context, dict) else {}
@@ -19,6 +29,8 @@ def run(input_data, context):
     tool_name = input_data.get("tool_name")
     if not tool_name:
         return error("tool_name is required", "MISSING_PARAM")
+    if _is_cancelled(context):
+        return error("Tool execution cancelled", "CANCELLED")
 
     arguments = input_data.get("arguments")
     if arguments is None:
@@ -58,9 +70,13 @@ def run(input_data, context):
     executor_context = seal_tool_context(clean_context, decision)
     executor = ToolExecutor()
     try:
+        if _is_cancelled(executor_context):
+            return error("Tool execution cancelled", "CANCELLED")
         result = executor.execute(tool_name, arguments, executor_context)
     except Exception as exc:
         return error("Tool execution failed: {}".format(exc), "EXEC_ERROR")
+    if result.get("cancelled"):
+        return error("Tool execution cancelled", "CANCELLED")
 
     return ok({
         "result": result.get("result", ""),

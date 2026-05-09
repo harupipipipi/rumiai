@@ -314,6 +314,55 @@ test("streamMessage forwards abort signal to fetch", async () => {
   assert.equal(seenSignal, controller.signal);
 });
 
+test("stopMessage calls backend stop endpoint", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestUrl = "";
+  let requestMethod = "";
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestMethod = String(init?.method ?? "");
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: { success: true, conversation_id: "c1", cancelled: true },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    const result = await api.stopMessage("c1");
+    assert.equal(requestUrl, "/api/chat/conversations/c1/stop");
+    assert.equal(requestMethod, "POST");
+    assert.equal(result.cancelled, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("browserComputer calls dedicated browser-computer endpoint", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestUrl = "";
+  let requestBody: any = null;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: { handled: true },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    const result = await api.browserComputer("computer.screenshot", { reason: "test" });
+    assert.equal(requestUrl, "/api/tools/browser-computer");
+    assert.deepEqual(requestBody, {
+      action: "computer.screenshot",
+      payload: { reason: "test" },
+    });
+    assert.deepEqual(result, { handled: true });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("coding context, branch, and workspace read helpers use existing API routes", async () => {
   const seen: Array<{ input: string; body?: unknown }> = [];
   const originalFetch = globalThis.fetch;

@@ -13,6 +13,16 @@ from .internal_context import sanitize_tool_context, seal_tool_context
 from .policy import decide_tool_policy
 
 
+def _is_cancelled(context: dict[str, Any] | None) -> bool:
+    checker = context.get("is_cancelled") if isinstance(context, dict) else None
+    if callable(checker):
+        try:
+            return bool(checker())
+        except Exception:
+            return False
+    return False
+
+
 class ToolOrchestrator:
     """Approval, policy, sandbox, ledger, and execution gateway for tools."""
 
@@ -23,6 +33,8 @@ class ToolOrchestrator:
 
     def run(self, tool_name: str, arguments: dict[str, Any] | None, context: dict[str, Any] | None) -> dict[str, Any]:
         context = sanitize_tool_context(context)
+        if _is_cancelled(context):
+            return error("Tool execution cancelled", "CANCELLED")
         tool_def = self._resolve_tool(tool_name)
         run_id = context.get("agent_run_id") or context.get("run_id")
         tool_call_id = context.get("tool_call_id")
@@ -62,6 +74,8 @@ class ToolOrchestrator:
 
         invoke_context = seal_tool_context(context, decision.to_dict())
         invoke_context["sandbox_mode"] = decision.sandbox_mode
+        if _is_cancelled(invoke_context):
+            return error("Tool execution cancelled", "CANCELLED")
         result = invoke_tool({"tool_name": tool_name, "arguments": arguments or {}}, invoke_context)
 
         if run_id:

@@ -1154,11 +1154,15 @@ export default function App() {
   };
 
   const handleStopGenerating = () => {
+    const conversationId = activeConversationId;
+    if (conversationId) {
+      void api.stopMessage(conversationId).catch(console.error);
+    }
     currentAbortControllerRef.current?.abort();
     currentAbortControllerRef.current = null;
-    if (activeConversationId) {
-      forgetPendingRequest(activeConversationId);
-      replaceChatIdInUrl(activeConversationId, false);
+    if (conversationId) {
+      forgetPendingRequest(conversationId);
+      replaceChatIdInUrl(conversationId, false);
     }
     setIsGenerating(false);
     setIsNewChatLaunching(false);

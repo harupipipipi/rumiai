@@ -85,6 +85,8 @@ class ToolExecutor:
         ツールを実行する。
         戻り値: {"result": str, "is_error": bool, "widget": dict|None}
         """
+        if _is_cancelled(context):
+            return _cancelled_tool_result(tool_name)
         tool_def = self._registry.get(tool_name)
         if tool_def is None:
             return {
@@ -568,6 +570,8 @@ class ToolExecutor:
         """
         ローカルツール実行（最小動作版: 固定レスポンスを返す）
         """
+        if _is_cancelled(context):
+            return _cancelled_tool_result(tool_name)
         if tool_name == "web_search":
             from domain.research.providers import ExternalWebProvider
 
@@ -603,6 +607,8 @@ class ToolExecutor:
 
             policy = policy_from_context(context if isinstance(context, dict) else {})
             action, payload = _browser_computer_action_payload(tool_name, arguments)
+            if _is_cancelled(context):
+                return _cancelled_tool_result(tool_name, action=action)
             user_requested = bool(isinstance(context, dict) and context.get("user_requested_computer_use"))
             user_approved_actions = {
                 "browser.open_url",
@@ -622,6 +628,8 @@ class ToolExecutor:
                 _computer_use_payload_with_context_defaults(action, payload, context),
                 yolo_mode=bool(policy.get("yolo_mode")) or (user_requested and action in user_approved_actions),
             )
+            if _is_cancelled(context):
+                return _cancelled_tool_result(tool_name, action=action)
             is_error = bool(result.get("is_error"))
             summary = "{} {} {}".format(
                 tool_name,
@@ -685,6 +693,32 @@ class ToolExecutor:
                 "is_error": False,
                 "widget": None
             }
+
+
+def _is_cancelled(context):
+    checker = context.get("is_cancelled") if isinstance(context, dict) else None
+    if callable(checker):
+        try:
+            return bool(checker())
+        except Exception:
+            return False
+    return False
+
+
+def _cancelled_tool_result(tool_name, *, action=""):
+    detail = " during {}".format(action) if action else ""
+    return {
+        "result": "Tool '{}' cancelled{}".format(tool_name, detail),
+        "is_error": True,
+        "widget": {
+            "type": tool_name,
+            "action": action or "cancelled",
+            "is_error": True,
+            "cancelled": True,
+            "reason": "Tool execution cancelled by user.",
+        },
+        "cancelled": True,
+    }
 
 
 def _safe_calculate(expression):

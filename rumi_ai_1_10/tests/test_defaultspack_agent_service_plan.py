@@ -613,6 +613,31 @@ def test_chat_stream_fallback_yields_realtime_tool_progress(monkeypatch):
     assert events[-1]["type"] == "done"
 
 
+def test_chat_stop_cancels_active_fallback_worker(monkeypatch):
+    import time
+    import blocks.chat.send as send_module
+    import blocks.chat.stream as stream_module
+    from domain.chat.cancellation import get_chat_cancellation_registry
+
+    def fake_send_run(input_data, context):
+        context["stream_event_callback"]({"type": "status", "message": "started"})
+        deadline = time.time() + 2
+        while not context["is_cancelled"]() and time.time() < deadline:
+            time.sleep(0.01)
+        assert context["is_cancelled"]() is True
+        return {"status": "error", "error": {"code": "CANCELLED", "message": "cancelled"}}
+
+    monkeypatch.setattr(send_module, "run", fake_send_run)
+
+    events = stream_module._fallback_send({"conversation_id": "c-stop"}, {})
+    assert next(events)["message"] == "started"
+    get_chat_cancellation_registry().request_cancel("c-stop")
+    remaining = list(events)
+
+    assert remaining[-1]["type"] == "error"
+    assert "cancelled" in remaining[-1]["error"]
+
+
 def test_chat_send_retries_empty_thinking_response_without_thinking(monkeypatch):
     import blocks.chat.send as send_module
 
@@ -2544,6 +2569,7 @@ def test_fallback_routes_expose_agent_service_and_coding_surfaces():
     assert ("POST", "/api/research/local-search", "blocks.research.local_search") in routes
     assert ("POST", "/api/research/web-search", "blocks.research.web_search") in routes
     assert ("POST", "/api/research/reddit-search", "blocks.research.reddit_search") in routes
+    assert ("POST", "/api/chat/conversations/{id}/stop", "blocks.chat.stop") in routes
     assert ("POST", "/api/tools/browser-computer", "blocks.tool.browser_computer") in routes
     assert ("GET", "/api/ai/profiles", "blocks.ai.profiles") in routes
     assert ("POST", "/api/ui/clipboard", "blocks.ui.clipboard") in routes
@@ -2554,6 +2580,43 @@ def test_fallback_routes_expose_agent_service_and_coding_surfaces():
     assert ("GET", "/api/agent/org/roles", "blocks.agent.org.list_roles") in routes
     assert ("GET", "/api/chat/channels", "blocks.chat.channel.list") in routes
     assert ("POST", "/api/share", "blocks.share.create") in routes
+
+
+def test_browser_computer_route_module_imports_and_delegates(monkeypatch):
+    import importlib
+
+    module = importlib.import_module("blocks.tool.browser_computer")
+    calls = []
+
+    class FakeBrowserComputerController:
+        def run(self, action, payload):
+            calls.append((action, payload))
+            return {"handled": True}
+
+    monkeypatch.setattr(module, "BrowserComputerController", FakeBrowserComputerController)
+
+    result = module.run(
+        {"action": "computer.screenshot", "payload": {"reason": "test"}},
+        {},
+    )
+
+    assert result == {"status": "ok", "data": {"handled": True}}
+    assert calls == [("computer.screenshot", {"reason": "test"})]
+
+
+def test_stdio_and_uds_chat_stop_routes_inject_conversation_id():
+    from ecosystem.defaultspack.transport import stdio, uds
+
+    for transport_module in (stdio, uds):
+        pattern, module_name, path_params = transport_module._match_route(
+            "POST",
+            "/api/chat/conversations/c-stop/stop",
+        )
+
+        assert pattern == "/api/chat/conversations/{id}/stop"
+        assert module_name == "blocks.chat.stop"
+        assert path_params == {"id": "c-stop"}
+        assert transport_module._ID_INJECT_MAP[pattern] == ("conversation_id", "id")
 
 
 def test_fallback_operations_company_routes_precede_generic_agent_status():

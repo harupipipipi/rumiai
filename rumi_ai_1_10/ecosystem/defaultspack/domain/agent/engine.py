@@ -61,6 +61,11 @@ class AgentEngine:
 
     def _persist_execution(self, execution, event_type="run_step", payload=None):
         try:
+            if self._durably_cancelled(execution.execution_id) and execution.status != "cancelled":
+                execution.status = "cancelled"
+                execution.pending_tool_call = None
+                execution.updated_at = timestamp()
+                return
             context = getattr(execution, "context", {}) or {}
             session_key = session_key_for(context, agent_id=context.get("agent_id"))
             self._run_store.save_execution(
@@ -71,6 +76,36 @@ class AgentEngine:
             self._append_transcript_event(execution, event_type, payload)
         except Exception:
             pass
+
+    def _durably_cancelled(self, execution_id):
+        try:
+            run = self._run_store.get_run(execution_id)
+            return isinstance(run, dict) and run.get("status") == "cancelled"
+        except Exception:
+            return False
+
+    def _context_cancelled(self, execution):
+        checker = (getattr(execution, "context", {}) or {}).get("is_cancelled")
+        if callable(checker):
+            try:
+                return bool(checker())
+            except Exception:
+                return False
+        return False
+
+    def _is_cancelled(self, execution):
+        return (
+            execution.status == "cancelled"
+            or self._context_cancelled(execution)
+            or self._durably_cancelled(execution.execution_id)
+        )
+
+    def _cancelled_result(self, execution):
+        execution.status = "cancelled"
+        execution.pending_tool_call = None
+        execution.updated_at = timestamp()
+        self._persist_execution(execution, "run_completed", {"status": "cancelled"})
+        return {"execution_id": execution.execution_id, "status": "cancelled", "result": execution.to_dict()}
 
     def _execution_from_store(self, execution_id):
         data = self._run_store.load_execution_dict(execution_id)
@@ -356,7 +391,11 @@ class AgentEngine:
         execution.add_step("think", {"action": "start", "task": task})
         self._persist_execution(execution, "run_started", {"task": task})
         self._inject_pending_instructions(execution)
+        if self._is_cancelled(execution):
+            return self._cancelled_result(execution)
         ai_result = self._ai_complete(execution.messages, execution.model, execution.context, execution.tools)
+        if self._is_cancelled(execution):
+            return self._cancelled_result(execution)
         parsed = self._parse_ai_response(ai_result)
         if parsed["type"] == "error":
             execution.status = "error"
@@ -412,6 +451,8 @@ class AgentEngine:
         pending = execution.pending_tool_call
         if not pending:
             return {"execution_id": execution_id, "status": "error", "result": {"error": "no pending tool call"}}
+        if self._is_cancelled(execution):
+            return self._cancelled_result(execution)
         execution.status = "running"
         execution.pending_tool_call = None
         tool_call_id = pending.get("tool_call_id") or pending.get("id") or gen_id("call_")
@@ -434,6 +475,8 @@ class AgentEngine:
             self._connected_tool_names(execution),
         )
         tool_result = self._execute_tool(pending["tool_name"], pending["tool_args"], context_for_tool)
+        if self._is_cancelled(execution):
+            return self._cancelled_result(execution)
         tool_content = ""
         if isinstance(tool_result, dict):
             tool_content = tool_result.get("data", tool_result.get("error", str(tool_result)))
@@ -458,6 +501,8 @@ class AgentEngine:
             {"tool_name": pending["tool_name"], "result": tool_content},
         )
         self._persist_execution(execution, "tool_completed", {"tool_name": pending["tool_name"]})
+        if self._is_cancelled(execution):
+            return self._cancelled_result(execution)
         if self._promote_queued_tool_call(execution):
             self._persist_execution(execution, "approval_requested", execution.pending_tool_call or {})
             return {
@@ -477,7 +522,11 @@ class AgentEngine:
                 "result": execution.to_dict(),
             }
         self._inject_pending_instructions(execution)
+        if self._is_cancelled(execution):
+            return self._cancelled_result(execution)
         ai_result = self._ai_complete(execution.messages, execution.model, context_for_tool, execution.tools)
+        if self._is_cancelled(execution):
+            return self._cancelled_result(execution)
         parsed = self._parse_ai_response(ai_result)
         if parsed["type"] == "error":
             execution.status = "error"
@@ -532,6 +581,8 @@ class AgentEngine:
             }
         if not reason:
             reason = "Rejected by user"
+        if self._is_cancelled(execution):
+            return self._cancelled_result(execution)
         execution.status = "running"
         pending = execution.pending_tool_call
         execution.pending_tool_call = None
@@ -546,7 +597,11 @@ class AgentEngine:
         execution.add_step("think", {"action": "rejection", "reason": reason})
         self._inject_pending_instructions(execution)
         context_for_ai = dict(getattr(execution, "context", {}) or {})
+        if self._is_cancelled(execution):
+            return self._cancelled_result(execution)
         ai_result = self._ai_complete(execution.messages, execution.model, context_for_ai, execution.tools)
+        if self._is_cancelled(execution):
+            return self._cancelled_result(execution)
         parsed = self._parse_ai_response(ai_result)
         if parsed["type"] == "error":
             execution.status = "error"

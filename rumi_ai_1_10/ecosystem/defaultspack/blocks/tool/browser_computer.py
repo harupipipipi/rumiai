@@ -4,7 +4,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import error, ok
-from domain.tool.browser_computer import BrowserComputerController
+from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 
 
 def run(input_data, context=None):

@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from blocks._common import error
 from domain.ai_client.client import AIClient
 from domain.chat.store import ChatStore
+from domain.chat.cancellation import get_chat_cancellation_registry
 from domain.chat.message_converter import convert_to_standard
 from domain.chat.message_builder import build_assistant_message
 from domain.prompt.manager import get_manager
@@ -155,12 +156,17 @@ def _fallback_send(input_data, context):
     done = object()
     cancel_event = threading.Event()
     result_box = {}
+    conversation_id = str(input_data.get("conversation_id") or "")
+    cancellation_registry = get_chat_cancellation_registry()
 
     def emit_event(event):
         event_queue.put(event)
 
     def is_cancelled():
-        return cancel_event.is_set()
+        return cancel_event.is_set() or cancellation_registry.is_cancelled(conversation_id)
+
+    def request_cancel():
+        cancel_event.set()
 
     def worker():
         from blocks.chat.send import run as send_run
@@ -176,6 +182,7 @@ def _fallback_send(input_data, context):
             event_queue.put(done)
 
     thread = threading.Thread(target=worker, daemon=True)
+    cancellation_registry.register(conversation_id, request_cancel)
     thread.start()
     try:
         while True:
@@ -185,6 +192,7 @@ def _fallback_send(input_data, context):
             yield event
     finally:
         cancel_event.set()
+        cancellation_registry.unregister(conversation_id, request_cancel)
 
     if "exception" in result_box:
         yield {"type": "error", "error": "AI request failed: " + str(result_box["exception"])}
