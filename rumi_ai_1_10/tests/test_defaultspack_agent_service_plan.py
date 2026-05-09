@@ -797,7 +797,7 @@ def test_browser_computer_background_type_failure_does_not_fall_back_to_physical
         lambda action, payload: (_ for _ in ()).throw(AssertionError("physical typing should not run")),
     )
 
-    result = controller.run("computer.type", {"text": "hello", "background": True}, yolo_mode=True)
+    result = controller.run("computer.type", {"text": "hello", "background": True, "app": "Google Chrome"}, yolo_mode=True)
 
     assert result["is_error"] is True
     assert result["executed"] is False
@@ -2607,6 +2607,172 @@ def test_browser_computer_screenshot_resolves_app_filter_without_prior_select(tm
     assert controller._computer_state()["target_window"]["window_id"] == 222
 
 
+def test_browser_computer_screenshot_title_contains_matches_non_chrome_window(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    png_header = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR"
+    png_body = png_header + b"\x00\x00\x02\x80\x00\x00\x01\x90"
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if command[0] == "screencapture":
+            Path(command[-1]).write_bytes(png_body)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+    monkeypatch.setattr(BrowserComputerController, "_model_screenshot_copy", lambda self, path: path)
+    monkeypatch.setattr(BrowserComputerController, "_cursor_position", staticmethod(lambda: None))
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._list_windows = lambda: [
+        {"app": "Codex", "title": "RumiDP", "x": 0, "y": 0, "width": 1470, "height": 900, "active": True, "window_id": 111},
+        {"app": "TextEdit", "title": "Project Notes", "x": 60, "y": 90, "width": 900, "height": 600, "active": False, "window_id": 444},
+    ]
+    controller._active_window = lambda: {"app": "Codex", "title": "RumiDP", "x": 0, "y": 0, "width": 1470, "height": 900}
+
+    result = controller.run("computer.screenshot", {"title_contains": "Project Notes"}, yolo_mode=True)
+
+    assert result["action"] == "computer.screenshot"
+    assert calls[0][:4] == ["screencapture", "-x", "-l", "444"]
+    assert result["target_window"]["app"] == "TextEdit"
+    assert result["target_window"]["title"] == "Project Notes"
+
+
+def test_browser_computer_select_window_title_contains_matches_non_chrome_window(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._list_windows = lambda: [
+        {"app": "Codex", "title": "RumiDP", "x": 0, "y": 0, "width": 1470, "height": 900, "active": True, "window_id": 111},
+        {"app": "TextEdit", "title": "Project Notes", "x": 60, "y": 90, "width": 900, "height": 600, "active": False, "window_id": 444},
+    ]
+
+    result = controller.run("computer.select_window", {"title_contains": "Project Notes", "focus": False}, yolo_mode=True)
+
+    assert result["selected"] is True
+    assert result["target_window"]["app"] == "TextEdit"
+    assert result["target_window"]["title"] == "Project Notes"
+    assert controller._computer_state()["target_window"]["window_id"] == 444
+
+
+def test_browser_computer_title_filter_without_chrome_app_ignores_stale_chrome_target(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._list_windows = lambda: [
+        {"app": "Codex", "title": "RumiDP", "x": 0, "y": 0, "width": 1470, "height": 900, "active": True, "window_id": 111},
+    ]
+    controller._chrome_tabs = lambda: [
+        {"app": "Google Chrome", "window_index": 1, "tab_index": 2, "active": True, "title": "Project Notes", "url": "https://example.test/notes"}
+    ]
+    controller._write_sessions(
+        {
+            "chrome_target": {"app": "Google Chrome", "window_index": 1, "tab_index": 2, "title_contains": "Project Notes"},
+            "last_url": "https://chatgpt.com/",
+        }
+    )
+
+    selected = controller.run("computer.select_window", {"title_contains": "Project Notes", "focus": False}, yolo_mode=True)
+    screenshot = controller.run("computer.screenshot", {"title_contains": "Project Notes"}, yolo_mode=True)
+
+    assert selected["selected"] is False
+    assert "chrome_target" not in selected
+    assert screenshot["supported"] is False
+    assert "No visible window matched" in screenshot["reason"]
+    assert "chrome_target" not in screenshot
+    assert not [command for command in calls if command and command[0] == "screencapture"]
+
+
+def test_browser_computer_chatgpt_title_does_not_imply_chrome(tmp_path):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+
+    assert controller._payload_explicitly_targets_chrome({"title_contains": "ChatGPT"}) is False
+    assert controller._payload_explicitly_targets_chrome({"url_contains": "https://chatgpt.com"}) is False
+    assert controller._payload_targets_chrome({"title_contains": "ChatGPT"}) is False
+    assert controller._payload_explicitly_targets_chrome({"app": "Google Chrome", "title_contains": "ChatGPT"}) is True
+
+
+def test_browser_computer_apps_lists_open_and_installed_apps(tmp_path):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._running_apps = lambda: [
+        {"name": "Vivaldi", "running": True, "active": True, "window_count": 1},
+        {"name": "Visual Studio Code", "running": True, "active": False, "window_count": 2},
+    ]
+    controller._installed_apps = lambda payload=None: [
+        {"name": "Vivaldi", "path": "/Applications/Vivaldi.app", "running": False},
+        {"name": "TextEdit", "path": "/System/Applications/TextEdit.app", "running": False},
+    ]
+
+    running = controller.run("computer.apps")
+    all_apps = controller.run("computer.apps", {"scope": "all", "include_installed": True})
+
+    assert [app["name"] for app in running["open_apps"]] == ["Vivaldi", "Visual Studio Code"]
+    assert any(app["name"] == "TextEdit" for app in all_apps["installed_apps"])
+    assert any(app["name"] == "Visual Studio Code" for app in all_apps["apps"])
+
+
+def test_browser_computer_select_app_targets_non_browser_app_without_focus(tmp_path):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    activated = []
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._running_apps = lambda: [
+        {"name": "Vivaldi", "running": True, "active": True, "window_count": 1},
+        {"name": "Visual Studio Code", "running": True, "active": False, "window_count": 2},
+    ]
+    controller._installed_apps = lambda payload=None: []
+    controller._activate_app_name = lambda app_name: activated.append(app_name) or True
+
+    result = controller.run("computer.select_app", {"app": "Studio Code", "focus": False}, yolo_mode=True)
+
+    assert result["selected"] is True
+    assert result["target_app"]["name"] == "Visual Studio Code"
+    assert controller._computer_state()["target_app"]["name"] == "Visual Studio Code"
+    assert activated == []
+
+
+def test_browser_computer_windows_uses_full_windows_list_on_windows(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Windows")
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._windows_windows = lambda: [
+        {"app": "Code", "title": "main.py - Visual Studio Code", "x": 10, "y": 20, "width": 900, "height": 700, "active": True},
+        {"app": "Vivaldi", "title": "ChatGPT - Vivaldi", "x": 40, "y": 60, "width": 1000, "height": 800, "active": False},
+    ]
+    controller._windows_active_window = lambda: {"app": "Fallback", "title": "Fallback", "x": 0, "y": 0, "width": 200, "height": 200}
+
+    result = controller.run("computer.windows")
+
+    assert [window["app"] for window in result["windows"]] == ["Code", "Vivaldi"]
+
+
 def test_browser_computer_screenshot_missing_app_filter_refuses_front_desktop(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
     import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
@@ -2914,7 +3080,7 @@ def test_computer_type_can_target_background_chrome(tmp_path, monkeypatch):
     controller._session_path = tmp_path / "shared" / "browser_sessions.json"
     controller._write_sessions({"last_opened_background": True, "last_url": "https://chatgpt.com"})
 
-    result = controller.run("computer.type", {"text": "hello", "background": True}, yolo_mode=True)
+    result = controller.run("computer.type", {"text": "hello", "background": True, "app": "Google Chrome"}, yolo_mode=True)
 
     assert result["executed"] is True
     assert result["background"] is True
@@ -2946,7 +3112,7 @@ def test_computer_type_targets_last_opened_existing_chrome_tab(tmp_path, monkeyp
         }
     )
 
-    result = controller.run("computer.type", {"text": "hello", "background": True}, yolo_mode=True)
+    result = controller.run("computer.type", {"text": "hello", "background": True, "app": "Google Chrome"}, yolo_mode=True)
 
     assert result["executed"] is True
     assert result["chrome_target"]["window_index"] == 2

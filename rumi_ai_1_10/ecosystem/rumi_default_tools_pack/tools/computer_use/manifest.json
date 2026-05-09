@@ -3,11 +3,11 @@
   "category": "tool",
   "version": "1",
   "display_name": "Computer Use",
-  "description": "Capture the screen and run approved desktop actions on macOS or Windows. Use context/windows/select_window focus=false to understand and choose an app/window, click only to mark a target with the virtual AI cursor, and use type with text to enter words such as hello. Chrome background_control only reports whether Chrome DOM entry through Apple Events is available; it is not the whole computer-use capability. For Chrome text/key entry, driver=auto or background=true can try Chrome DOM background entry first; set allow_foreground_fallback=true when the user permits overlap so the tool can focus the target and use normal keyboard input if the background route is blocked.",
+  "description": "Capture the screen and run approved desktop actions on macOS or Windows for any app. Use context/apps/windows/select_app/select_window focus=false to understand and choose an app/window, click only to mark a target with the virtual AI cursor, and use type with text to enter words such as hello. Chrome background_control is only an optional Chrome-specific DOM route when app=Google Chrome is explicit; computer_use itself is not browser-specific.",
   "enabled": true,
   "config": {
     "name": "computer_use",
-    "summary": "コンピューター操作。まず action=context で開いているアプリとAIカーソルを確認し、文字入力は action=type と text を優先してください。既存Chrome/ChatGPTには app=Google Chrome または select_window focus=false を指定できます。バックグラウンド優先なら background=true または driver=auto、ユーザー入力と被ってよい場合は allow_foreground_fallback=true を付けると、Chrome DOM背景入力がブロックされた時に前面入力へ自動切り替えします。",
+    "summary": "全アプリ向けのコンピューター操作。まず action=context/apps/windows で開いているアプリとウィンドウを確認し、select_app/select_window focus=false で対象を選びます。文字入力は action=type と text を優先してください。Chrome DOM背景入力は app=Google Chrome が明示された時だけの任意ルートで、通常の操作はVivaldi/VS Code/Finder/LINEなど全アプリが対象です。",
     "tags": ["computer", "desktop", "screenshot", "approval"],
     "schema": {
       "parameters": {
@@ -15,8 +15,8 @@
         "properties": {
           "action": {
             "type": "string",
-            "enum": ["context", "screenshot", "move", "click", "select_window", "windows", "type", "key", "scroll"],
-            "description": "Use context/windows to inspect open apps, select_window with app/title and focus=false to target one app, click to place the virtual AI cursor/marker, type to enter text, key for shortcuts or single keys, and screenshot to inspect.",
+            "enum": ["context", "apps", "screenshot", "move", "click", "select_app", "select_window", "windows", "type", "key", "scroll"],
+            "description": "Use context/apps/windows to inspect open apps, select_app/select_window with app/title and focus=false to target one app, click to place the virtual AI cursor/marker, type to enter text, key for shortcuts or single keys, and screenshot to inspect.",
             "default": "screenshot"
           },
           "x": {"type": "integer"},
@@ -27,11 +27,20 @@
           "modifiers": {"type": "array", "items": {"type": "string"}, "description": "Optional key modifiers for action=key."},
           "amount": {"type": "integer"},
           "target": {"type": "string"},
+          "scope": {"type": "string", "description": "For action=apps: running, installed, or all."},
           "app": {"type": "string"},
+          "application": {"type": "string"},
+          "name": {"type": "string"},
           "title": {"type": "string"},
+          "title_contains": {"type": "string"},
           "coordinate_space": {"type": "string"},
           "physical": {"type": "boolean"},
           "focus": {"type": "boolean"},
+          "open": {"type": "boolean", "description": "For select_app: launch an installed app if it is not already running."},
+          "launch": {"type": "boolean", "description": "Alias for open."},
+          "include_installed": {"type": "boolean"},
+          "include_installed_apps": {"type": "boolean"},
+          "limit": {"type": "integer"},
           "background": {"type": "boolean", "description": "For Chrome only: request DOM/Apple Events background text/key entry when foreground focus is not allowed."},
           "method": {"type": "string"},
           "driver": {"type": "string", "description": "Optional driver hint such as auto, chrome_background_dom, foreground_input, or physical."},

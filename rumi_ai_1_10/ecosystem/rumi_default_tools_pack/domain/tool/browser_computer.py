@@ -52,8 +52,12 @@ class BrowserComputerController:
             return self._delete_cookies(payload, dry_run=bool(payload.get("dry_run")), yolo_mode=yolo_mode)
         if action in {"computer.context", "computer.app_context", "computer.state"}:
             return self._context(payload)
+        if action in {"computer.apps", "computer.list_apps", "computer.open_apps", "computer.applications"}:
+            return self._apps(payload)
         if action in {"computer.windows", "computer.list_windows"}:
             return {"action": "computer.windows", "platform": platform.system(), "windows": self._list_windows()}
+        if action == "computer.select_app":
+            return self._select_app(payload)
         if action == "computer.select_window":
             return self._select_window(payload)
         if action == "computer.screenshot":
@@ -391,14 +395,18 @@ return "window_index=" & targetWindowIndex & tabChar & "tab_index=" & targetTabI
         system = platform.system()
         chrome_tabs = self._chrome_tabs() if system == "Darwin" else []
         selected_window = state.get("target_window") if isinstance(state.get("target_window"), dict) else None
+        selected_app = state.get("target_app") if isinstance(state.get("target_app"), dict) else None
         if selected_window and not self._is_usable_target_window(selected_window):
             self._clear_target_window()
             selected_window = None
+        running_apps = self._running_apps()
         result: dict[str, Any] = {
             "action": "computer.context",
             "platform": system,
             "active_window": self._active_window(),
             "selected_window": selected_window,
+            "selected_app": selected_app,
+            "open_apps": running_apps,
             "ai_cursor": state.get("ai_cursor") if isinstance(state.get("ai_cursor"), dict) else None,
             "cursor": self._cursor_position(),
             "browser_session": {
@@ -410,17 +418,156 @@ return "window_index=" & targetWindowIndex & tabChar & "tab_index=" & targetTabI
             "chrome_tabs": chrome_tabs,
             "chrome_background_control": self._chrome_background_control(chrome_tabs) if system == "Darwin" else None,
             "notes": [
-                "Use computer.screenshot with app/title, or computer.select_window with app/title and focus=false, before window-scoped screenshots.",
+                "Computer-use is app-generic: use computer.apps for open/installed apps, computer.windows for visible windows, then select_app or select_window with focus=false before scoped screenshots.",
                 "computer.move and computer.click use a virtual AI cursor unless physical=true is explicitly provided.",
-                "If Google Chrome tabs are listed but no Chrome window appears in windows, Chrome is open outside the visible app-window context; target it by chrome_target/url_contains for background-capable actions.",
-                "chrome_background_control only describes Chrome DOM entry through Apple Events; screenshots, windows, and the virtual AI cursor are still normal computer-use capabilities.",
-                "For text/key entry, prefer driver=auto: the harness can try Chrome DOM background entry first, then fall back to foreground input when allow_foreground_fallback=true.",
-                "Use background=true without allow_foreground_fallback only when the user forbids foreground focus; if that actual entry returns recovery.kind=chrome_setting, stop and report the blocker.",
+                "Chrome DOM background control is an optional Chrome-specific route only when the payload explicitly targets Chrome; normal screenshots, windows, typing, clicks, and app selection are not browser-specific.",
+                "For generic apps such as Vivaldi, VS Code, TextEdit, Finder, or LINE, target by app/title/window and use foreground fallback only when the user permits focus overlap.",
             ],
         }
         if payload.get("include_windows", True) is not False:
             result["windows"] = self._list_windows()
+        if payload.get("include_installed_apps") is True:
+            result["installed_apps"] = self._installed_apps(payload)
         return result
+
+    def _apps(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        payload = payload or {}
+        scope = str(payload.get("scope") or payload.get("target") or "running").strip().lower()
+        include_installed = payload.get("include_installed") is True or scope in {"all", "installed", "applications", "apps"}
+        running_apps = self._running_apps()
+        result: dict[str, Any] = {
+            "action": "computer.apps",
+            "platform": platform.system(),
+            "scope": scope,
+            "open_apps": running_apps,
+            "apps": running_apps,
+        }
+        if include_installed:
+            installed = self._installed_apps(payload)
+            result["installed_apps"] = installed
+            result["apps"] = installed if scope in {"installed", "applications"} else self._merge_apps(running_apps, installed)
+        return result
+
+    @staticmethod
+    def _merge_apps(primary: list[dict[str, Any]], secondary: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        merged: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+        for item in list(primary) + list(secondary):
+            name = str(item.get("name") or item.get("app") or "").strip().lower()
+            path = str(item.get("path") or "").strip().lower()
+            key = (name, path)
+            if not name or key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+        return merged
+
+    def _running_apps(self) -> list[dict[str, Any]]:
+        system = platform.system()
+        if system == "Darwin":
+            return self._darwin_running_apps()
+        if system == "Windows":
+            return self._windows_running_apps()
+        return []
+
+    def _installed_apps(self, payload: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        payload = payload or {}
+        try:
+            limit = max(1, min(1000, int(payload.get("limit", 300))))
+        except Exception:
+            limit = 300
+        system = platform.system()
+        if system == "Darwin":
+            return self._darwin_installed_apps(limit=limit)
+        if system == "Windows":
+            return self._windows_installed_apps(limit=limit)
+        return []
+
+    def _select_app(self, payload: dict[str, Any]) -> dict[str, Any]:
+        app_filter = str(
+            payload.get("app")
+            or payload.get("application")
+            or payload.get("name")
+            or payload.get("title")
+            or payload.get("title_contains")
+            or ""
+        ).strip()
+        running_apps = self._running_apps()
+        selected = None
+        target = str(payload.get("target") or "").strip().lower()
+        if target in {"active", "front", "front_app", "active_app"} or not app_filter:
+            selected = next((item for item in running_apps if item.get("active")), None)
+        if selected is None and app_filter:
+            selected = next((item for item in running_apps if self._app_matches_filter(item, app_filter)), None)
+        installed_match = None
+        if selected is None and (payload.get("include_installed") is not False):
+            installed = self._installed_apps(payload)
+            installed_match = next((item for item in installed if self._app_matches_filter(item, app_filter)), None)
+        else:
+            installed = []
+        if selected is None and installed_match and (payload.get("open") is True or payload.get("launch") is True):
+            launched = self._launch_app(installed_match)
+            if launched:
+                time.sleep(0.5)
+                running_apps = self._running_apps()
+                selected = next((item for item in running_apps if self._app_matches_filter(item, app_filter)), None)
+        if selected is None:
+            self._clear_target_app()
+            return {
+                "action": "computer.select_app",
+                "selected": False,
+                "platform": platform.system(),
+                "app_filter": app_filter,
+                "open_apps": running_apps,
+                **({"installed_match": installed_match} if installed_match else {}),
+                **({"installed_apps": installed} if payload.get("include_installed") is True else {}),
+            }
+        selected = self._normalize_app_record(selected)
+        state = self._computer_state()
+        state["target_app"] = selected
+        self._write_computer_state(state)
+        if payload.get("focus", True) is not False:
+            self._activate_app_name(str(selected.get("name") or selected.get("app") or ""))
+        return {
+            "action": "computer.select_app",
+            "selected": True,
+            "platform": platform.system(),
+            "target_app": selected,
+            "open_apps": running_apps,
+        }
+
+    @staticmethod
+    def _app_matches_filter(app: dict[str, Any], needle: str) -> bool:
+        value = needle.strip().lower()
+        if not value:
+            return True
+        haystacks = [
+            str(app.get("name") or ""),
+            str(app.get("app") or ""),
+            str(app.get("bundle_id") or ""),
+            str(app.get("path") or ""),
+            str(app.get("title") or ""),
+        ]
+        return any(value in item.lower() for item in haystacks)
+
+    @staticmethod
+    def _normalize_app_record(value: Any) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            return {}
+        name = str(value.get("name") or value.get("app") or value.get("process") or "").strip()
+        record: dict[str, Any] = {"name": name, "app": name}
+        for key in ("pid", "bundle_id", "path", "title", "source"):
+            if value.get(key) not in (None, ""):
+                record[key] = value.get(key)
+        for key in ("active", "running", "has_windows"):
+            if key in value:
+                record[key] = bool(value.get(key))
+        if value.get("window_count") is not None:
+            try:
+                record["window_count"] = int(value.get("window_count") or 0)
+            except Exception:
+                pass
+        return record
 
     @staticmethod
     def _image_data_url(path: Path) -> str:
@@ -733,23 +880,26 @@ return "window_index=" & targetWindowIndex & tabChar & "tab_index=" & targetTabI
         return mode in {"background", "chrome_background", "chrome_background_dom", "background_dom"}
 
     def _payload_targets_chrome(self, payload: dict[str, Any]) -> bool:
+        if self._payload_explicitly_targets_chrome(payload):
+            return True
+        selected_window = self._computer_state().get("target_window")
+        if isinstance(selected_window, dict) and "chrome" in str(selected_window.get("app") or "").lower():
+            return True
+        chrome_target = payload.get("chrome_target")
+        return isinstance(chrome_target, dict)
+
+    @staticmethod
+    def _payload_explicitly_targets_chrome(payload: dict[str, Any]) -> bool:
         app = str(payload.get("app") or payload.get("application") or "").strip().lower()
         if app:
             return "chrome" in app
         title = str(payload.get("title") or payload.get("title_contains") or "").strip().lower()
         url = str(payload.get("url") or payload.get("url_contains") or "").strip().lower()
-        if "chatgpt" in title or "chrome" in title or "chatgpt" in url or "chrome://" in url:
+        if "chrome" in title or "chrome://" in url:
             return True
         if payload.get("window_index") is not None or payload.get("tab_index") is not None:
             return True
-        selected_window = self._computer_state().get("target_window")
-        if isinstance(selected_window, dict) and "chrome" in str(selected_window.get("app") or "").lower():
-            return True
-        sessions = self._read_sessions()
-        if isinstance(sessions.get("chrome_target"), dict):
-            return True
-        last_url = str(sessions.get("last_url") or "").lower()
-        return "chatgpt.com" in last_url or "chrome" in last_url
+        return False
 
     @staticmethod
     def _allow_foreground_fallback(payload: dict[str, Any]) -> bool:
@@ -779,8 +929,9 @@ return "window_index=" & targetWindowIndex & tabChar & "tab_index=" & targetTabI
     def _focus_action_target(self, payload: dict[str, Any]) -> bool:
         if payload.get("focus") is False and not self._allow_foreground_fallback(payload):
             return False
-        app = str(payload.get("app") or payload.get("application") or "").strip().lower()
-        title = str(payload.get("title") or "").strip().lower()
+        filters = self._window_filter(payload)
+        app = filters.get("app", "").lower()
+        title = filters.get("title", "").lower()
         selected = self._capture_target(payload)
         if selected and self._window_matches_filter(selected, app=app, title=title):
             self._focus_window(selected)
@@ -791,7 +942,9 @@ return "window_index=" & targetWindowIndex & tabChar & "tab_index=" & targetTabI
                 if window and self._is_usable_target_window(window) and self._window_matches_filter(window, app=app, title=title):
                     self._focus_window(window)
                     return True
-        if platform.system() == "Darwin" and (("chrome" in app) or self._chrome_background_target(payload)):
+        if app and self._activate_app_name(filters.get("app", "")):
+            return True
+        if platform.system() == "Darwin" and self._payload_explicitly_targets_chrome(payload):
             return self._activate_chrome_target(payload)
         return False
 
@@ -1166,7 +1319,7 @@ end tell
         system = platform.system()
         target = self._capture_target(payload)
         chrome_target = None
-        if target is None and self._has_window_filter(payload) and self._payload_targets_chrome(payload):
+        if target is None and self._has_window_filter(payload) and self._payload_explicitly_targets_chrome(payload):
             chrome_target = self._select_chrome_tab(payload)
             if chrome_target and self._allow_foreground_fallback(payload):
                 if self._activate_chrome_target(payload):
@@ -1328,6 +1481,12 @@ end tell
             state.pop("target_window", None)
             self._write_computer_state(state)
 
+    def _clear_target_app(self) -> None:
+        state = self._computer_state()
+        if "target_app" in state:
+            state.pop("target_app", None)
+            self._write_computer_state(state)
+
     def _set_ai_cursor(self, payload: dict[str, Any]) -> None:
         state = self._computer_state()
         state["ai_cursor"] = {
@@ -1354,8 +1513,9 @@ end tell
     def _select_window(self, payload: dict[str, Any]) -> dict[str, Any]:
         windows = self._list_windows()
         target = str(payload.get("target") or "").strip().lower()
-        app = str(payload.get("app") or payload.get("application") or "").strip().lower()
-        title = str(payload.get("title") or "").strip().lower()
+        filters = self._window_filter(payload)
+        app = filters.get("app", "").lower()
+        title = filters.get("title", "").lower()
         has_filter = bool(app or title or isinstance(payload.get("window"), dict))
         selected = None
         if isinstance(payload.get("window"), dict):
@@ -1366,18 +1526,15 @@ end tell
             selected = next((item for item in windows if item.get("active")), None) or self._active_window()
         if selected is None:
             for item in windows:
-                item_app = str(item.get("app") or "").lower()
-                item_title = str(item.get("title") or "").lower()
-                if app and app not in item_app:
+                window = self._normalize_window_record(item)
+                if not window or not self._is_usable_target_window(window):
                     continue
-                if title and title not in item_title:
+                if not self._window_matches_filter(window, app=app, title=title):
                     continue
-                if not self._is_usable_target_window(item):
-                    continue
-                selected = item
+                selected = window
                 break
         if selected is None:
-            if app and "chrome" in app:
+            if self._payload_explicitly_targets_chrome(payload):
                 chrome_target = self._select_chrome_tab(payload)
                 if chrome_target:
                     self._clear_target_window()
@@ -1417,6 +1574,9 @@ end tell
         if system == "Darwin":
             return self._darwin_windows()
         if system == "Windows":
+            windows = self._windows_windows()
+            if windows:
+                return windows
             active = self._windows_active_window()
             return [active] if active else []
         return []
@@ -1498,7 +1658,7 @@ end tell
         except Exception:
             return []
         windows: list[dict[str, Any]] = []
-        for line in completed.stdout.splitlines():
+        for line in (completed.stdout or "").splitlines():
             parts = line.split("\t")
             if len(parts) < 7:
                 continue
@@ -1534,6 +1694,147 @@ end tell
             return (completed.stdout or "").strip()
         except Exception:
             return ""
+
+    def _darwin_running_apps(self) -> list[dict[str, Any]]:
+        script = r'''
+tell application "System Events"
+  set output to ""
+  repeat with proc in (application processes whose background only is false)
+    try
+      set procName to name of proc
+      set procPid to unix id of proc
+      set procFront to frontmost of proc
+      set winCount to count of windows of proc
+      set output to output & procName & tab & procPid & tab & procFront & tab & winCount & linefeed
+    end try
+  end repeat
+  return output
+end tell
+'''
+        try:
+            completed = subprocess.run(["osascript", "-e", script], check=True, capture_output=True, text=True)
+        except Exception:
+            return []
+        apps: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for line in (completed.stdout or "").splitlines():
+            parts = line.split("\t")
+            if len(parts) < 4:
+                continue
+            name = parts[0].strip()
+            if not name or name.lower() in seen:
+                continue
+            seen.add(name.lower())
+            try:
+                pid = int(parts[1])
+            except Exception:
+                pid = None
+            try:
+                window_count = int(parts[3])
+            except Exception:
+                window_count = 0
+            app = {
+                "name": name,
+                "app": name,
+                "running": True,
+                "active": parts[2].strip().lower() == "true",
+                "window_count": window_count,
+                "has_windows": window_count > 0,
+            }
+            if pid is not None:
+                app["pid"] = pid
+            apps.append(app)
+        return apps
+
+    @staticmethod
+    def _darwin_installed_apps(*, limit: int = 300) -> list[dict[str, Any]]:
+        roots = [
+            Path("/Applications"),
+            Path.home() / "Applications",
+            Path("/System/Applications"),
+        ]
+        apps: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for root in roots:
+            if not root.exists():
+                continue
+            try:
+                candidates = sorted(root.glob("*.app"), key=lambda path: path.name.lower())
+            except Exception:
+                continue
+            for path in candidates:
+                name = path.stem.strip()
+                key = str(path).lower()
+                if not name or key in seen:
+                    continue
+                seen.add(key)
+                apps.append({"name": name, "app": name, "path": str(path), "source": str(root), "running": False})
+                if len(apps) >= limit:
+                    return apps
+        return apps
+
+    def _activate_app_name(self, app_name: str) -> bool:
+        app_name = app_name.strip()
+        if not app_name:
+            return False
+        system = platform.system()
+        if system == "Darwin":
+            script = """
+tell application "System Events"
+  set appNeedle to %s
+  repeat with candidateProc in (application processes whose background only is false)
+    try
+      if ((name of candidateProc) contains appNeedle) then
+        set frontmost of candidateProc to true
+        return "activated"
+      end if
+    end try
+  end repeat
+end tell
+try
+  tell application appNeedle to activate
+  return "activated"
+end try
+return "not_found"
+""" % json.dumps(app_name)
+            try:
+                completed = subprocess.run(["osascript", "-e", script], check=True, capture_output=True, text=True)
+                return "activated" in (completed.stdout or "")
+            except Exception:
+                return False
+        if system == "Windows":
+            name = self._ps_single(app_name)
+            script = "\n".join(
+                [
+                    "Add-Type -AssemblyName Microsoft.VisualBasic",
+                    f"[void][Microsoft.VisualBasic.Interaction]::AppActivate('{name}')",
+                ]
+            )
+            try:
+                self._run_powershell(script)
+                return True
+            except Exception:
+                return False
+        return False
+
+    def _launch_app(self, app: dict[str, Any]) -> bool:
+        path = str(app.get("path") or "").strip()
+        name = str(app.get("name") or app.get("app") or "").strip()
+        system = platform.system()
+        try:
+            if system == "Darwin":
+                if path:
+                    subprocess.Popen(["open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    return True
+                if name:
+                    subprocess.Popen(["open", "-a", name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    return True
+            if system == "Windows" and path:
+                self._run_powershell(f"Start-Process -FilePath '{self._ps_single(path)}'")
+                return True
+        except Exception:
+            return False
+        return False
 
     def _darwin_windows_quartz(self) -> list[dict[str, Any]]:
         code = r"""
@@ -1667,6 +1968,69 @@ end tell
             return f'tell application "System Events" to scroll wheel {amount}'
         raise ValueError(action)
 
+    def _windows_running_apps(self) -> list[dict[str, Any]]:
+        script = r'''
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public class RumiActiveApp {
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+}
+'@
+$front = [RumiActiveApp]::GetForegroundWindow()
+$items = Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } | ForEach-Object {
+  [pscustomobject]@{
+    name = $_.ProcessName
+    app = $_.ProcessName
+    pid = $_.Id
+    title = $_.MainWindowTitle
+    running = $true
+    active = ($_.MainWindowHandle -eq $front)
+    window_count = 1
+    has_windows = $true
+  }
+}
+$items | ConvertTo-Json -Compress
+'''
+        try:
+            return [self._normalize_app_record(item) for item in self._json_list(self._run_powershell_capture(script))]
+        except Exception:
+            return []
+
+    def _windows_installed_apps(self, *, limit: int = 300) -> list[dict[str, Any]]:
+        script = r'''
+$ErrorActionPreference = 'SilentlyContinue'
+$limit = %d
+$roots = @(
+  "$env:ProgramData\Microsoft\Windows\Start Menu\Programs",
+  "$env:APPDATA\Microsoft\Windows\Start Menu\Programs",
+  "$env:ProgramFiles",
+  "${env:ProgramFiles(x86)}"
+) | Where-Object { $_ -and (Test-Path $_) }
+$items = @()
+foreach ($root in $roots) {
+  $items += Get-ChildItem -Path $root -Recurse -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Extension -in @('.lnk', '.exe') } |
+    Select-Object -First $limit |
+    ForEach-Object {
+      [pscustomobject]@{
+        name = $_.BaseName
+        app = $_.BaseName
+        path = $_.FullName
+        source = $root
+        running = $false
+      }
+    }
+  if ($items.Count -ge $limit) { break }
+}
+$items | Select-Object -First $limit | ConvertTo-Json -Compress
+''' % limit
+        try:
+            return [self._normalize_app_record(item) for item in self._json_list(self._run_powershell_capture(script))]
+        except Exception:
+            return []
+
     def _windows_screenshot(self, path: Path, target: dict[str, Any] | None = None) -> None:
         escaped = self._ps_single(str(path))
         bounds_script = (
@@ -1745,6 +2109,61 @@ end tell
             return
         raise ValueError(action)
 
+    def _windows_windows(self) -> list[dict[str, Any]]:
+        script = r'''
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public class RumiWindowEnum {
+  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+}
+'@
+$front = [RumiWindowEnum]::GetForegroundWindow()
+$items = New-Object System.Collections.Generic.List[object]
+$callback = [RumiWindowEnum+EnumWindowsProc]{
+  param([IntPtr]$hWnd, [IntPtr]$lParam)
+  if (-not [RumiWindowEnum]::IsWindowVisible($hWnd)) { return $true }
+  $titleBuilder = New-Object System.Text.StringBuilder 512
+  [void][RumiWindowEnum]::GetWindowText($hWnd, $titleBuilder, $titleBuilder.Capacity)
+  $title = $titleBuilder.ToString()
+  if ([string]::IsNullOrWhiteSpace($title)) { return $true }
+  $rect = New-Object RumiWindowEnum+RECT
+  if (-not [RumiWindowEnum]::GetWindowRect($hWnd, [ref]$rect)) { return $true }
+  $width = $rect.Right - $rect.Left
+  $height = $rect.Bottom - $rect.Top
+  if ($width -le 0 -or $height -le 0) { return $true }
+  [uint32]$pid = 0
+  [void][RumiWindowEnum]::GetWindowThreadProcessId($hWnd, [ref]$pid)
+  $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+  $items.Add([pscustomobject]@{
+    app = if ($proc) { $proc.ProcessName } else { "" }
+    title = $title
+    x = $rect.Left
+    y = $rect.Top
+    width = $width
+    height = $height
+    active = ($hWnd -eq $front)
+    window_id = $hWnd.ToInt64()
+  })
+  return $true
+}
+[void][RumiWindowEnum]::EnumWindows($callback, [IntPtr]::Zero)
+$items | ConvertTo-Json -Compress
+'''
+        try:
+            return [window for window in (self._normalize_window_record(item) for item in self._json_list(self._run_powershell_capture(script))) if window]
+        except Exception:
+            return []
+
     def _windows_active_window(self) -> dict[str, Any] | None:
         script = r'''
 $ErrorActionPreference = 'Stop'
@@ -1806,6 +2225,28 @@ ConvertTo-Json @{ app = ""; title = $titleBuilder.ToString(); x = $r.Left; y = $
             subprocess.run(["pwsh", "-NoProfile", "-Command", script], check=True)
 
     @staticmethod
+    def _run_powershell_capture(script: str) -> str:
+        executable = "powershell" if shutil.which("powershell") else "pwsh"
+        completed = subprocess.run(
+            [executable, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return completed.stdout or ""
+
+    @staticmethod
+    def _json_list(raw: str) -> list[Any]:
+        if not raw.strip():
+            return []
+        value = json.loads(raw)
+        if isinstance(value, list):
+            return value
+        if isinstance(value, dict):
+            return [value]
+        return []
+
+    @staticmethod
     def _capabilities() -> dict[str, bool]:
         system = platform.system()
         return {
@@ -1814,6 +2255,9 @@ ConvertTo-Json @{ app = ""; title = $titleBuilder.ToString(); x = $r.Left; y = $
             "browser_cookie_management": True,
             "browser_cache_management": True,
             "screenshot": system in {"Darwin", "Windows"},
+            "app_listing": system in {"Darwin", "Windows"},
+            "app_selection": system in {"Darwin", "Windows"},
+            "installed_app_listing": system in {"Darwin", "Windows"},
             "window_selection": system in {"Darwin", "Windows"},
             "desktop_actions": system in {"Darwin", "Windows"},
             "cursor_move": system in {"Darwin", "Windows"},

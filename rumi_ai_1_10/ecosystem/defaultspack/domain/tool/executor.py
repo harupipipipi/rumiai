@@ -716,6 +716,12 @@ def _browser_computer_action_payload(tool_name, arguments):
             "type": "computer.type",
             "key": "computer.key",
             "scroll": "computer.scroll",
+            "apps": "computer.apps",
+            "applications": "computer.apps",
+            "open_apps": "computer.apps",
+            "list_apps": "computer.apps",
+            "select_app": "computer.select_app",
+            "app": "computer.select_app",
         }
         action = action_map.get(raw_action, raw_action)
         for key in (
@@ -729,7 +735,10 @@ def _browser_computer_action_payload(tool_name, arguments):
             "modifiers",
             "amount",
             "target",
+            "scope",
             "app",
+            "application",
+            "name",
             "title",
             "title_contains",
             "window",
@@ -740,6 +749,11 @@ def _browser_computer_action_payload(tool_name, arguments):
             "coordinate_space",
             "physical",
             "focus",
+            "open",
+            "launch",
+            "limit",
+            "include_installed",
+            "include_installed_apps",
             "background",
             "mode",
             "method",
@@ -762,6 +776,12 @@ def _browser_computer_action_payload(tool_name, arguments):
             "type": "computer.type",
             "key": "computer.key",
             "scroll": "computer.scroll",
+            "apps": "computer.apps",
+            "applications": "computer.apps",
+            "open_apps": "computer.apps",
+            "list_apps": "computer.apps",
+            "select_app": "computer.select_app",
+            "app": "computer.select_app",
         }
         action = action_map.get(raw_action, raw_action)
         for key in (
@@ -775,7 +795,10 @@ def _browser_computer_action_payload(tool_name, arguments):
             "modifiers",
             "amount",
             "target",
+            "scope",
             "app",
+            "application",
+            "name",
             "title",
             "title_contains",
             "window",
@@ -786,6 +809,11 @@ def _browser_computer_action_payload(tool_name, arguments):
             "coordinate_space",
             "physical",
             "focus",
+            "open",
+            "launch",
+            "limit",
+            "include_installed",
+            "include_installed_apps",
             "background",
             "mode",
             "method",
@@ -808,7 +836,7 @@ def _computer_use_payload_with_context_defaults(action, payload, context):
     payload = dict(payload or {})
     if not isinstance(context, dict):
         return payload
-    if action.startswith("computer.") and action != "computer.windows":
+    if action.startswith("computer.") and action not in {"computer.windows", "computer.apps"}:
         target_app = context.get("computer_use_target_app")
         target_title = context.get("computer_use_target_title")
         if isinstance(target_app, str) and target_app.strip():

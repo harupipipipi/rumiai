@@ -50,7 +50,7 @@ def _payload_with_context_defaults(action, payload, context):
     payload = dict(payload or {})
     if not isinstance(context, dict):
         return payload
-    if action.startswith("computer.") and action != "computer.windows":
+    if action.startswith("computer.") and action not in {"computer.windows", "computer.apps"}:
         target_app = context.get("computer_use_target_app")
         target_title = context.get("computer_use_target_title")
         if isinstance(target_app, str) and target_app.strip():
