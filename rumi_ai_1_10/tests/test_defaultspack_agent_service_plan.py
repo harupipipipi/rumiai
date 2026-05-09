@@ -752,7 +752,7 @@ def test_computer_use_function_registry_unavailable_falls_back_to_local(monkeypa
     assert captured["context"]["conversation_id"] == "conv-test"
 
 
-def test_browser_computer_click_uses_virtual_cursor_by_default(tmp_path, monkeypatch):
+def test_browser_computer_click_can_use_virtual_cursor_for_preview(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 
     controller = BrowserComputerController(artifact_root=tmp_path)
@@ -769,7 +769,7 @@ def test_browser_computer_click_uses_virtual_cursor_by_default(tmp_path, monkeyp
         lambda payload: (_ for _ in ()).throw(AssertionError("physical click should not run")),
     )
 
-    result = controller.run("computer.click", {"x": 10, "y": 20}, yolo_mode=True)
+    result = controller.run("computer.click", {"x": 10, "y": 20, "virtual_only": True}, yolo_mode=True)
 
     assert result["executed"] is True
     assert result["virtual_cursor"] is True
@@ -2325,6 +2325,36 @@ def test_computer_use_auto_converts_latest_model_screenshot_coordinates(monkeypa
     assert state["ai_cursor"]["y"] == 459
 
 
+def test_computer_use_accepts_browser_tool_test_normalized_point(monkeypatch, tmp_path):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    state = {
+        "target_window": {"app": "Google Chrome", "title": "LINE", "x": 0, "y": 158, "width": 1470, "height": 798},
+        "last_screenshot": {
+            "image_size": {"width": 1470, "height": 798},
+            "model_image_size": {"width": 640, "height": 347},
+            "action_coordinate_system": {"x": 0, "y": 158, "width": 1470, "height": 798},
+        },
+    }
+
+    monkeypatch.setattr(controller, "_computer_state", lambda: dict(state))
+    monkeypatch.setattr(controller, "_write_computer_state", lambda value: state.update(value))
+
+    payload, marker = controller._resolve_action_point(
+        {"point": [750, 500], "coordinate_space": "normalized_1000"},
+        infer_window=False,
+    )
+
+    assert payload["x"] == 735
+    assert payload["y"] == 756
+    assert payload["coordinate_space"] == "screen"
+    assert marker["coordinate_space"] == "normalized_1000"
+    assert marker["point_order"] == "yx"
+    assert marker["screen_x"] == 735
+    assert marker["screen_y"] == 756
+
+
 def test_computer_use_drag_uses_virtual_cursor_and_converts_model_coordinates(monkeypatch, tmp_path):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 
@@ -3775,6 +3805,141 @@ def test_computer_move_defaults_to_virtual_ai_cursor(tmp_path, monkeypatch):
     assert result["virtual_cursor"] is True
     assert result["target"] == {"x": 120, "y": 240}
     assert calls == []
+
+
+def test_computer_click_defaults_to_physical_visible_action(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    clicks = []
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    monkeypatch.setattr(controller, "_darwin_click", lambda payload: clicks.append(dict(payload)))
+
+    result = controller.run(
+        "computer.click",
+        {"x": 120, "y": 240, "coordinate_space": "screen", "include_screenshot": False},
+        yolo_mode=True,
+    )
+
+    assert result["executed"] is True
+    assert "virtual_cursor" not in result
+    assert result["target"] == {"x": 120, "y": 240}
+    assert clicks == [{"x": 120, "y": 240, "coordinate_space": "screen", "include_screenshot": False}]
+
+
+def test_computer_click_can_preview_with_virtual_only(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    clicks = []
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    monkeypatch.setattr(controller, "_darwin_click", lambda payload: clicks.append(dict(payload)))
+
+    result = controller.run(
+        "computer.click",
+        {"x": 120, "y": 240, "coordinate_space": "screen", "virtual_only": True, "include_screenshot": False},
+        yolo_mode=True,
+    )
+
+    assert result["executed"] is True
+    assert result["virtual_cursor"] is True
+    assert result["target"] == {"x": 120, "y": 240}
+    assert clicks == []
+
+
+def test_computer_type_returns_post_action_screenshot_by_default(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    scripts = []
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+
+    def fake_run(command, **kwargs):
+        scripts.append(command)
+        return subprocess.CompletedProcess(command, 0)
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+    monkeypatch.setattr(controller, "_focus_action_target", lambda payload: True)
+    monkeypatch.setattr(
+        controller,
+        "_capture_action_result_screenshot",
+        lambda payload, marker, **kwargs: {"screenshot_path": str(tmp_path / "type.png"), "verification": {"kind": "post_action_screenshot"}},
+    )
+
+    result = controller.run("computer.type", {"text": "hello"}, yolo_mode=True)
+
+    assert result["executed"] is True
+    assert result["driver"] == "foreground_input"
+    assert result["screenshot_path"].endswith("type.png")
+    assert result["verification"]["kind"] == "post_action_screenshot"
+    assert scripts and scripts[0][0] == "osascript"
+
+
+def test_computer_click_uses_cliclick_on_macos(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(browser_computer.shutil, "which", lambda name: "/opt/homebrew/bin/cliclick" if name == "cliclick" else None)
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+
+    BrowserComputerController(artifact_root=tmp_path)._darwin_click({"x": 120, "y": 240})
+
+    assert calls[0][0] == ["/opt/homebrew/bin/cliclick", "c:120,240"]
+
+
+def test_computer_click_falls_back_to_swift_on_macos(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    calls = []
+
+    def fake_which(name):
+        if name == "swift":
+            return "/usr/bin/swift"
+        return None
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        if command[0] == "python3":
+            raise subprocess.CalledProcessError(1, command)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(browser_computer.shutil, "which", fake_which)
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+
+    BrowserComputerController(artifact_root=tmp_path)._darwin_click({"x": 120, "y": 240})
+
+    assert calls[0][0][0] == "python3"
+    assert calls[1][0][0] == "/usr/bin/swift"
+    assert "leftMouseDown" in calls[1][0][2]
+    assert "CGPoint(x: 120, y: 240)" in calls[1][0][2]
+
+
+def test_computer_type_applescript_preserves_non_ascii_text(tmp_path):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    script = BrowserComputerController(artifact_root=tmp_path)._apple_script(
+        "computer.type",
+        {"text": "こんにちは！"},
+    )
+
+    assert 'keystroke "こんにちは！"' in script
+    assert "\\u3053" not in script
 
 
 def test_browser_computer_manages_persistent_profiles_and_cookie_jars(tmp_path):

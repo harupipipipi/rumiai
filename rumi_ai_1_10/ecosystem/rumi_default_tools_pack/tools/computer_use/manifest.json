@@ -16,11 +16,24 @@
           "action": {
             "type": "string",
             "enum": ["context", "apps", "screenshot", "move", "click", "drag", "select_app", "show_app", "select_window", "windows", "type", "key", "scroll"],
-            "description": "Use context/apps/windows to inspect open apps, show_app with app/name to bring an app to the main visible screen, select_window with app/title to target a visible window, move/click/drag for mouse actions with the virtual AI cursor/marker by default, type to enter text, key for shortcuts or single keys, and screenshot to inspect.",
+            "description": "Use context/apps/windows to inspect open apps, show_app with app/name to bring an app to the main visible screen, select_window with app/title to target a visible window, and screenshot before actions. For image clicks, prefer point:[y,x] with coordinate_space=normalized_1000, where y and x are 0-1000 coordinates from the latest screenshot. click operates the visible UI and returns a marked post-action screenshot; type/key/scroll also return a post-action screenshot unless include_screenshot=false. Set physical=false or virtual_only=true when you only want a marker preview.",
             "default": "screenshot"
           },
           "x": {"type": "integer"},
           "y": {"type": "integer"},
+          "point": {
+            "type": "array",
+            "items": {"type": "number"},
+            "description": "Preferred image-click coordinate as [y, x] normalized from 0 to 1000 on the latest screenshot, matching browser_tool_test."
+          },
+          "point_order": {"type": "string", "description": "Use yx for point:[y,x] (default) or xy for point:[x,y]."},
+          "normalized_point": {
+            "type": "array",
+            "items": {"type": "number"},
+            "description": "Alias for point:[y,x] in normalized 0-1000 coordinates."
+          },
+          "normalized_x": {"type": "number"},
+          "normalized_y": {"type": "number"},
           "x1": {"type": "integer", "description": "Drag start x coordinate."},
           "y1": {"type": "integer", "description": "Drag start y coordinate."},
           "x2": {"type": "integer", "description": "Drag end x coordinate."},
@@ -41,8 +54,9 @@
           "name": {"type": "string"},
           "title": {"type": "string"},
           "title_contains": {"type": "string"},
-          "coordinate_space": {"type": "string"},
+          "coordinate_space": {"type": "string", "description": "screen for absolute display pixels, window/screenshot for selected-window pixels, model_image for returned model preview pixels, or normalized_1000 for browser_tool_test-style [y,x] 0-1000 coordinates."},
           "physical": {"type": "boolean"},
+          "virtual_only": {"type": "boolean", "description": "For click/drag, preview the marker and AI cursor without operating the real UI."},
           "focus": {"type": "boolean"},
           "open": {"type": "boolean", "description": "For select_app: launch an installed app if it is not already running."},
           "launch": {"type": "boolean", "description": "Alias for open."},

@@ -377,7 +377,7 @@ class BrowserComputerController:
             "action": "move",
             "screen_coordinates": True,
             "coordinate_source": "screenshot",
-            "notes": "Coordinates from the latest screenshot preview are accepted by default; use coordinate_space=screen for absolute display coordinates or coordinate_space=window for selected-window coordinates.",
+            "notes": "For image-based clicking, prefer point:[y,x] with coordinate_space=normalized_1000, where y and x are 0-1000 coordinates from the latest screenshot. Use coordinate_space=screen for absolute display coordinates, coordinate_space=window for selected-window pixels, or coordinate_space=model_image for returned preview pixels.",
         }
         self._remember_last_screenshot(result)
         return result
@@ -409,7 +409,7 @@ class BrowserComputerController:
             "notes": [
                 "Computer-use is app-generic and visible-screen only: use computer.apps for open/installed apps and computer.windows for visible windows.",
                 "Use select_app/select_window for visible targets, then screenshot/click/type/key against the currently visible UI.",
-                "computer.move and computer.click use a virtual AI cursor unless physical=true is explicitly provided.",
+                "computer.move and computer.drag use the virtual AI cursor by default. computer.click operates the visible UI by default; set physical=false or virtual_only=true for marker-only previews.",
                 "Hidden tabs and DOM/Apple Events background input are disabled; if a requested app/window is not visible, ask the user to show it or open it visibly first.",
             ],
         }
@@ -791,7 +791,12 @@ class BrowserComputerController:
             action_payload, click_marker, drag_marker = self._resolve_drag_points(payload)
         elif action in {"computer.move", "computer.click"}:
             action_payload, click_marker = self._resolve_action_point(payload, infer_window=action == "computer.click")
-        if action in {"computer.move", "computer.click", "computer.drag"} and payload.get("physical") is not True:
+        virtual_only = payload.get("virtual_only") is True or payload.get("virtual") is True
+        if action == "computer.click" and payload.get("physical") is False:
+            virtual_only = True
+        if action in {"computer.move", "computer.drag"} and payload.get("physical") is not True:
+            virtual_only = True
+        if action in {"computer.move", "computer.click", "computer.drag"} and virtual_only:
             self._set_ai_cursor(action_payload)
             result: dict[str, Any] = {"action": action, "executed": True, "platform": system, "virtual_cursor": True}
             if action == "computer.drag":
@@ -805,7 +810,7 @@ class BrowserComputerController:
                 result["target"] = {"x": int(action_payload.get("x", 0)), "y": int(action_payload.get("y", 0))}
             if click_marker:
                 result["marker"] = click_marker
-            if action in {"computer.click", "computer.drag"} and payload.get("include_screenshot", True) is not False:
+            if self._should_capture_after_action(action, payload):
                 screenshot = self._capture_action_result_screenshot(
                     action_payload,
                     click_marker,
@@ -878,7 +883,7 @@ class BrowserComputerController:
                 result["drag_marker"] = drag_marker
         if action == "computer.scroll":
             result["amount"] = int(action_payload.get("amount", 1))
-        if action in {"computer.click", "computer.drag"} and payload.get("include_screenshot", True) is not False:
+        if self._should_capture_after_action(action, payload):
             screenshot = self._capture_action_result_screenshot(
                 action_payload,
                 click_marker,
@@ -887,6 +892,12 @@ class BrowserComputerController:
             )
             result.update(screenshot)
         return result
+
+    @staticmethod
+    def _should_capture_after_action(action: str, payload: dict[str, Any]) -> bool:
+        if action == "computer.move":
+            return False
+        return payload.get("include_screenshot", True) is not False
 
     @staticmethod
     def _background_requested(payload: dict[str, Any]) -> bool:
@@ -944,7 +955,8 @@ class BrowserComputerController:
         drag_marker: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         self._artifact_root.mkdir(parents=True, exist_ok=True)
-        path = self._artifact_root / f"click-{int(time.time() * 1000)}.png"
+        action_slug = action_name.split(".")[-1].replace("_", "-") or "action"
+        path = self._artifact_root / f"{action_slug}-{int(time.time() * 1000)}.png"
         capture = self._capture_screenshot(path, payload)
         if not capture.get("supported", True):
             return {}
@@ -954,6 +966,10 @@ class BrowserComputerController:
         result["action"] = action_name
         result["screenshot_path"] = str(path)
         result["model_image_path"] = str(model_path)
+        result["verification"] = {
+            "kind": "post_action_screenshot",
+            "note": "Inspect this screenshot to verify the visible UI changed as intended.",
+        }
         data_url = self._image_data_url(model_path)
         if data_url:
             result["data_url"] = data_url
@@ -1054,8 +1070,7 @@ class BrowserComputerController:
     def _resolve_action_point(self, payload: dict[str, Any], *, infer_window: bool = False) -> tuple[dict[str, Any], dict[str, Any] | None]:
         state = self._computer_state()
         cursor = state.get("ai_cursor") if isinstance(state.get("ai_cursor"), dict) else {}
-        x = int(payload.get("x", cursor.get("x", 0)))
-        y = int(payload.get("y", cursor.get("y", 0)))
+        x, y = self._point_from_payload(payload, cursor)
         target = self._capture_target(payload)
         if target is None and infer_window:
             target = self._window_at_point(x, y)
@@ -1063,6 +1078,11 @@ class BrowserComputerController:
                 state["target_window"] = target
                 self._write_computer_state(state)
         coordinate_space = str(payload.get("coordinate_space") or payload.get("space") or "auto").strip().lower()
+        if coordinate_space in self._normalized_coordinate_spaces() or self._has_normalized_point(payload):
+            normalized_payload, normalized_marker = self._resolve_normalized_point(payload, x, y, state, target=target)
+            if normalized_payload is not None:
+                self._set_ai_cursor(normalized_payload)
+                return normalized_payload, normalized_marker
         if coordinate_space in {"model", "model_image", "preview", "screenshot_preview"} or (
             coordinate_space == "auto" and self._point_looks_like_model_coordinate(x, y, state)
         ):
@@ -1097,6 +1117,109 @@ class BrowserComputerController:
                 marker["y"] = y - int(target.get("y", 0))
                 marker["coordinate_space"] = "screenshot_image"
         self._set_ai_cursor(action_payload)
+        return action_payload, marker
+
+    @staticmethod
+    def _normalized_coordinate_spaces() -> set[str]:
+        return {
+            "normalized",
+            "normalized_1000",
+            "browser_tool_test",
+            "viewport_normalized",
+            "image_normalized",
+            "screenshot_normalized",
+        }
+
+    @staticmethod
+    def _numeric_coordinate(value: Any, default: Any = 0) -> float:
+        try:
+            return float(value)
+        except Exception:
+            try:
+                return float(default)
+            except Exception:
+                return 0.0
+
+    @classmethod
+    def _point_from_payload(cls, payload: dict[str, Any], cursor: dict[str, Any]) -> tuple[float, float]:
+        point = payload.get("point") or payload.get("coordinate") or payload.get("coordinates")
+        if isinstance(point, (list, tuple)) and len(point) >= 2:
+            order = str(payload.get("point_order") or payload.get("coordinate_order") or "yx").replace(",", "").strip().lower()
+            first = cls._numeric_coordinate(point[0])
+            second = cls._numeric_coordinate(point[1])
+            if order in {"xy", "x-y", "x_then_y"}:
+                return first, second
+            return second, first
+        if isinstance(point, dict):
+            return (
+                cls._numeric_coordinate(point.get("x"), cursor.get("x", 0)),
+                cls._numeric_coordinate(point.get("y"), cursor.get("y", 0)),
+            )
+        return (
+            cls._numeric_coordinate(payload.get("x"), cursor.get("x", 0)),
+            cls._numeric_coordinate(payload.get("y"), cursor.get("y", 0)),
+        )
+
+    @staticmethod
+    def _has_normalized_point(payload: dict[str, Any]) -> bool:
+        return any(key in payload for key in ("point", "normalized_point", "normalized_x", "normalized_y"))
+
+    def _resolve_normalized_point(
+        self,
+        payload: dict[str, Any],
+        x: float,
+        y: float,
+        state: dict[str, Any],
+        *,
+        target: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        point = payload.get("normalized_point")
+        if isinstance(point, (list, tuple)) and len(point) >= 2:
+            y = self._numeric_coordinate(point[0])
+            x = self._numeric_coordinate(point[1])
+        elif isinstance(point, dict):
+            x = self._numeric_coordinate(point.get("x"), x)
+            y = self._numeric_coordinate(point.get("y"), y)
+        if payload.get("normalized_x") is not None:
+            x = self._numeric_coordinate(payload.get("normalized_x"), x)
+        if payload.get("normalized_y") is not None:
+            y = self._numeric_coordinate(payload.get("normalized_y"), y)
+
+        last = state.get("last_screenshot") if isinstance(state, dict) else None
+        action_space = last.get("action_coordinate_system") if isinstance(last, dict) and isinstance(last.get("action_coordinate_system"), dict) else None
+        reference = target or action_space
+        if not isinstance(reference, dict):
+            image_size = last.get("image_size") if isinstance(last, dict) and isinstance(last.get("image_size"), dict) else {}
+            reference = {
+                "x": 0,
+                "y": 0,
+                "width": image_size.get("width", 0),
+                "height": image_size.get("height", 0),
+            }
+        try:
+            ref_x = int(reference.get("x", 0))
+            ref_y = int(reference.get("y", 0))
+            ref_width = int(reference.get("width", 0))
+            ref_height = int(reference.get("height", 0))
+        except Exception:
+            return None, None
+        if ref_width <= 0 or ref_height <= 0:
+            return None, None
+        screen_x = ref_x + round(x * ref_width / 1000)
+        screen_y = ref_y + round(y * ref_height / 1000)
+        action_payload = dict(payload)
+        action_payload["x"] = int(screen_x)
+        action_payload["y"] = int(screen_y)
+        action_payload["coordinate_space"] = "screen"
+        marker = {
+            "x": int(round(x)),
+            "y": int(round(y)),
+            "screen_x": int(screen_x),
+            "screen_y": int(screen_y),
+            "coordinate_space": "normalized_1000",
+            "point_order": "yx",
+            "reference": "selected_window" if target else "last_screenshot",
+        }
         return action_payload, marker
 
     @staticmethod
@@ -1687,6 +1810,11 @@ end tell
         x = int(payload.get("x", 0))
         y = int(payload.get("y", 0))
         button = str(payload.get("button") or "left").lower()
+        cliclick = shutil.which("cliclick")
+        if cliclick:
+            prefix = "rc" if button in {"right", "secondary"} else "c"
+            subprocess.run([cliclick, f"{prefix}:{x},{y}"], check=True)
+            return
         button_index = 1 if button in {"right", "secondary"} else 0
         down_event = "kCGEventRightMouseDown" if button_index == 1 else "kCGEventLeftMouseDown"
         up_event = "kCGEventRightMouseUp" if button_index == 1 else "kCGEventLeftMouseUp"
@@ -1701,6 +1829,24 @@ end tell
         try:
             subprocess.run(["python3", "-c", code], check=True)
         except Exception:
+            swift = shutil.which("swift")
+            if swift:
+                mouse_button = "right" if button_index == 1 else "left"
+                mouse_down = "rightMouseDown" if button_index == 1 else "leftMouseDown"
+                mouse_up = "rightMouseUp" if button_index == 1 else "leftMouseUp"
+                swift_code = (
+                    "import CoreGraphics\n"
+                    f"let point = CGPoint(x: {x}, y: {y})\n"
+                    f"let down = CGEvent(mouseEventSource: nil, mouseType: .{mouse_down}, mouseCursorPosition: point, mouseButton: .{mouse_button})\n"
+                    f"let up = CGEvent(mouseEventSource: nil, mouseType: .{mouse_up}, mouseCursorPosition: point, mouseButton: .{mouse_button})\n"
+                    "down?.post(tap: .cghidEventTap)\n"
+                    "up?.post(tap: .cghidEventTap)\n"
+                )
+                try:
+                    subprocess.run([swift, "-e", swift_code], check=True)
+                    return
+                except Exception:
+                    pass
             script = self._apple_script("computer.click", payload)
             subprocess.run(["osascript", "-e", script], check=True)
 
@@ -1742,7 +1888,7 @@ end tell
             y = int(payload.get("y", 0))
             return f'tell application "System Events" to click at {{{x}, {y}}}'
         if action == "computer.type":
-            text = json.dumps(str(payload.get("text", "")))
+            text = json.dumps(str(payload.get("text", "")), ensure_ascii=False)
             return f'tell application "System Events" to keystroke {text}'
         if action == "computer.key":
             key = payload.get("key", "return")
@@ -1772,7 +1918,7 @@ end tell
             }
             if normalized in key_codes:
                 return f'tell application "System Events" to key code {key_codes[normalized]}{using}'
-            return f'tell application "System Events" to keystroke {json.dumps(str(key))}{using}'
+            return f'tell application "System Events" to keystroke {json.dumps(str(key), ensure_ascii=False)}{using}'
         if action == "computer.scroll":
             amount = int(payload.get("amount", 1))
             return f'tell application "System Events" to scroll wheel {amount}'

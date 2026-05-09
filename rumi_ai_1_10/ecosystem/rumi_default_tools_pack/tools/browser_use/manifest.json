@@ -21,6 +21,19 @@
           "url": {"type": "string"},
           "x": {"type": "integer"},
           "y": {"type": "integer"},
+          "point": {
+            "type": "array",
+            "items": {"type": "number"},
+            "description": "Preferred image-click coordinate as [y, x] normalized from 0 to 1000 on the latest screenshot."
+          },
+          "point_order": {"type": "string", "description": "Use yx for point:[y,x] (default) or xy for point:[x,y]."},
+          "normalized_point": {
+            "type": "array",
+            "items": {"type": "number"},
+            "description": "Alias for point:[y,x] in normalized 0-1000 coordinates."
+          },
+          "normalized_x": {"type": "number"},
+          "normalized_y": {"type": "number"},
           "x1": {"type": "integer"},
           "y1": {"type": "integer"},
           "x2": {"type": "integer"},
@@ -39,8 +52,9 @@
           "name": {"type": "string"},
           "title": {"type": "string"},
           "title_contains": {"type": "string"},
-          "coordinate_space": {"type": "string"},
+          "coordinate_space": {"type": "string", "description": "screen, window/screenshot, model_image, or normalized_1000 for [y,x] 0-1000 coordinates from the latest screenshot."},
           "physical": {"type": "boolean"},
+          "virtual_only": {"type": "boolean", "description": "For click/drag, preview the marker and AI cursor without operating the real UI."},
           "focus": {"type": "boolean"},
           "method": {"type": "string"},
           "driver": {"type": "string"},
