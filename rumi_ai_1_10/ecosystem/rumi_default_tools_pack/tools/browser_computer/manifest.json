@@ -3,11 +3,11 @@
   "category": "tool",
   "version": "1",
   "display_name": "Browser / Computer",
-  "description": "Open browser URLs when requested, inspect sessions, inspect open apps/windows, and run approved desktop actions for any app. Use computer.apps/windows/select_app/select_window focus=false before scoped screenshots or actions. Chrome DOM background control is only an optional Chrome-specific route when app=Google Chrome is explicit; computer-use is not browser-specific.",
+  "description": "Open browser URLs when requested, inspect sessions, inspect open apps/windows, and run approved desktop actions for any app. Use computer.apps/windows/select_app/select_window focus=false before scoped screenshots or actions. Chromium browser background DOM is only an optional route when a Chromium-family app such as Google Chrome or Vivaldi is explicit; computer-use is not browser-specific.",
   "enabled": true,
   "config": {
     "name": "browser_computer",
-    "summary": "Approved browser and all-app computer actions. Use computer.context/apps/windows before screenshots/clicks, computer.select_app/select_window with focus=false when targeting an app/window in the background, and computer.type for text input. Chrome DOM background entry is only a Chrome-specific optional path when Chrome is explicit.",
+    "summary": "Approved browser and all-app computer actions. Use computer.context/apps/windows before screenshots/clicks, computer.select_app/select_window with focus=false when targeting an app/window in the background, and computer.type for text input. Chromium browser DOM background entry is only an optional path when a Chromium-family browser such as Chrome or Vivaldi is explicit.",
     "tags": ["browser", "computer", "approval"],
     "schema": {
       "parameters": {

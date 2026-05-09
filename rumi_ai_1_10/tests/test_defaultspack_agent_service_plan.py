@@ -3063,6 +3063,115 @@ def test_browser_open_url_uses_existing_chrome_without_stealing_focus(monkeypatc
     assert "Google Chrome" in calls[0][0][2]
 
 
+def test_browser_open_url_can_target_existing_vivaldi_background(monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="window_index=1\ttab_index=2\n")
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+
+    controller = BrowserComputerController()
+    result = controller.run(
+        "browser.open_url",
+        {"url": "https://chatgpt.com", "persistent": False, "app": "Vivaldi"},
+        yolo_mode=True,
+    )
+
+    assert result["opened"] is True
+    assert result["managed_profile"] is False
+    assert result["browser_target"]["app"] == "Vivaldi"
+    assert result["browser_target"]["window_index"] == 1
+    assert result["browser_target"]["tab_index"] == 2
+    assert "chrome_target" not in result
+    script = calls[0][0][2]
+    assert "previousFrontApp" in script
+    assert 'tell application "Vivaldi"' in script
+    assert "Google Chrome" not in script
+
+
+def test_browser_open_url_specific_vivaldi_does_not_fall_back_to_default_browser(monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    def fake_run(command, **kwargs):
+        raise subprocess.CalledProcessError(1, command)
+
+    opened = []
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+    monkeypatch.setattr(browser_computer.webbrowser, "open", lambda url: opened.append(url))
+
+    result = BrowserComputerController().run(
+        "browser.open_url",
+        {"url": "https://chatgpt.com", "persistent": False, "app": "Vivaldi"},
+        yolo_mode=True,
+    )
+
+    assert result["is_error"] is True
+    assert result["opened"] is False
+    assert result["target_app"] == "Vivaldi"
+    assert opened == []
+
+
+def test_browser_open_url_unknown_specific_app_does_not_fall_back_to_chrome(monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    opened = []
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.webbrowser, "open", lambda url: opened.append(url))
+
+    result = BrowserComputerController().run(
+        "browser.open_url",
+        {"url": "https://chatgpt.com", "persistent": False, "app": "Safari"},
+        yolo_mode=True,
+    )
+
+    assert result["is_error"] is True
+    assert result["opened"] is False
+    assert result["target_app"] == "Safari"
+    assert opened == []
+
+
+def test_select_window_can_store_background_vivaldi_tab(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    def fake_windows(self):
+        return []
+
+    def fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout="1\t2\ttrue\tChatGPT\thttps://chatgpt.com/\n",
+        )
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(BrowserComputerController, "_list_windows", fake_windows)
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+
+    result = controller.run("computer.select_window", {"app": "Vivaldi", "url_contains": "chatgpt.com", "focus": False})
+
+    assert result["selected"] is True
+    assert result["background_target_only"] is True
+    assert result["browser_target"]["app"] == "Vivaldi"
+    assert result["browser_target"]["window_index"] == 1
+    assert result["browser_target"]["tab_index"] == 2
+    assert "chrome_target" not in result
+
+
 def test_computer_type_can_target_background_chrome(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
     import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
@@ -3087,6 +3196,112 @@ def test_computer_type_can_target_background_chrome(tmp_path, monkeypatch):
     assert calls[0][0][:2] == ["osascript", "-e"]
     assert "#prompt-textarea" in calls[0][0][2]
     assert "chatgpt.com" in calls[0][0][2]
+
+
+def test_computer_type_can_target_background_vivaldi(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="typed\n")
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._write_sessions(
+        {
+            "last_opened_background": True,
+            "last_url": "https://chatgpt.com/",
+            "browser_target": {"app": "Vivaldi", "url": "https://chatgpt.com/", "window_index": 3, "tab_index": 4},
+        }
+    )
+
+    result = controller.run("computer.type", {"text": "hello", "background": True, "app": "Vivaldi"}, yolo_mode=True)
+
+    assert result["executed"] is True
+    assert result["background"] is True
+    assert result["target_app"] == "Vivaldi"
+    assert result["driver"] == "chromium_background_dom"
+    assert result["browser_target"]["window_index"] == 3
+    assert "chrome_target" not in result
+    script = calls[0][0][2]
+    assert 'tell application "Vivaldi"' in script
+    assert "set targetWindowIndex to 3" in script
+    assert "#prompt-textarea" in script
+
+
+def test_computer_enter_can_submit_background_vivaldi(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="submitted\n")
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._write_sessions(
+        {
+            "last_opened_background": True,
+            "last_url": "https://chatgpt.com/",
+            "browser_target": {"app": "Vivaldi", "url": "https://chatgpt.com/", "window_index": 3, "tab_index": 4},
+        }
+    )
+
+    result = controller.run("computer.key", {"key": "return", "background": True, "app": "Vivaldi"}, yolo_mode=True)
+
+    assert result["executed"] is True
+    assert result["background"] is True
+    assert result["target_app"] == "Vivaldi"
+    script = calls[0][0][2]
+    assert 'tell application "Vivaldi"' in script
+    assert "send-button" in script
+    assert "submitted" in script
+
+
+def test_background_vivaldi_reports_vivaldi_apple_events_recovery(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    def fake_run(command, **kwargs):
+        raise subprocess.CalledProcessError(
+            1,
+            command,
+            stderr="AppleScript を通じた JavaScript 実行は無効になっています。設定 > プライバシー > Apple Events",
+        )
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._write_sessions(
+        {
+            "last_opened_background": True,
+            "last_url": "https://chatgpt.com/",
+            "browser_target": {"app": "Vivaldi", "url": "https://chatgpt.com/", "window_index": 3, "tab_index": 4},
+        }
+    )
+
+    result = controller.run(
+        "computer.type",
+        {"text": "hello", "background": True, "app": "Vivaldi", "allow_foreground_fallback": False},
+        yolo_mode=True,
+    )
+
+    assert result["is_error"] is True
+    assert result["recovery"]["kind"] == "browser_background_setting"
+    assert result["recovery"]["path"] == "Settings > Privacy > Apple Events"
 
 
 def test_computer_type_targets_last_opened_existing_chrome_tab(tmp_path, monkeypatch):
@@ -3120,6 +3335,17 @@ def test_computer_type_targets_last_opened_existing_chrome_tab(tmp_path, monkeyp
     script = calls[0][0][2]
     assert "set targetWindowIndex to 2" in script
     assert "set targetTabIndex to 5" in script
+
+
+def test_macos_key_scripts_support_named_keys_and_modifiers():
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController()
+
+    assert controller._apple_script("computer.key", {"key": "return"}) == 'tell application "System Events" to key code 36'
+    assert controller._apple_script("computer.key", {"key": "l", "modifier": "meta"}) == (
+        'tell application "System Events" to keystroke "l" using {command down}'
+    )
 
 
 def test_computer_move_uses_cliclick_on_macos(tmp_path, monkeypatch):

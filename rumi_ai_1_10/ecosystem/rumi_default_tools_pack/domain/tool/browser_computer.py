@@ -18,6 +18,16 @@ from typing import Any
 class BrowserComputerController:
     """Generic browser/computer action controller with approval gates."""
 
+    _CHROMIUM_BROWSER_NAMES = (
+        "Google Chrome",
+        "Vivaldi",
+        "Chromium",
+        "Microsoft Edge",
+        "Brave Browser",
+        "Opera",
+        "Arc",
+    )
+
     def __init__(self, artifact_root: Path | None = None) -> None:
         pack_root = Path(__file__).resolve().parents[2]
         self._artifact_root = artifact_root or pack_root / "user_data" / "artifacts" / "computer"
@@ -93,14 +103,49 @@ class BrowserComputerController:
             subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             opened_with_managed_profile = True
         else:
-            chrome_target = self._open_in_existing_browser(url)
+            requested_browser = self._raw_browser_app_from_payload(payload)
+            explicit_browser = self._browser_app_from_payload(payload)
+            if requested_browser and not explicit_browser:
+                return {
+                    "action": "browser.open_url",
+                    "url": url,
+                    "opened": False,
+                    "is_error": True,
+                    "profile_id": profile_id,
+                    "persistent": persistent,
+                    "target_app": requested_browser,
+                    "reason": f"{requested_browser} is not supported by the background browser URL route.",
+                    "recovery": {
+                        "kind": "foreground_fallback",
+                        "note": "Use a normal computer-use foreground route only when the user permits switching to the requested app.",
+                    },
+                }
+            target_browser = explicit_browser or "Google Chrome"
+            browser_target = self._open_in_existing_browser(url, app_name=target_browser)
+            if explicit_browser and not browser_target:
+                return {
+                    "action": "browser.open_url",
+                    "url": url,
+                    "opened": False,
+                    "is_error": True,
+                    "profile_id": profile_id,
+                    "persistent": persistent,
+                    "target_app": target_browser,
+                    "reason": f"{target_browser} background open failed; refusing to open the default browser because a specific app was requested.",
+                    "recovery": {
+                        "kind": "foreground_fallback",
+                        "note": "Allow foreground fallback only when the user permits switching to the requested app.",
+                    },
+                }
         sessions = self._read_sessions()
         sessions["last_url"] = url
         sessions["active_profile_id"] = profile_id
         sessions["last_opened_with_managed_profile"] = opened_with_managed_profile
         sessions["last_opened_background"] = not opened_with_managed_profile
-        if not opened_with_managed_profile and chrome_target:
-            sessions["chrome_target"] = chrome_target
+        if not opened_with_managed_profile and browser_target:
+            sessions["browser_target"] = browser_target
+            if str(browser_target.get("app") or "").lower() == "google chrome":
+                sessions["chrome_target"] = browser_target
         sessions["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self._write_sessions(sessions)
         return {
@@ -111,18 +156,25 @@ class BrowserComputerController:
             "persistent": persistent,
             "managed_profile": opened_with_managed_profile,
             "launch": launch_plan,
-            **({"chrome_target": chrome_target} if not opened_with_managed_profile and chrome_target else {}),
+            **({"browser_target": browser_target} if not opened_with_managed_profile and browser_target else {}),
+            **(
+                {"chrome_target": browser_target}
+                if not opened_with_managed_profile
+                and browser_target
+                and str(browser_target.get("app") or "").lower() == "google chrome"
+                else {}
+            ),
         }
 
     @staticmethod
-    def _open_in_existing_browser(url: str) -> dict[str, Any] | None:
+    def _open_in_existing_browser(url: str, *, app_name: str = "Google Chrome") -> dict[str, Any] | None:
         if platform.system() == "Darwin":
             try:
                 script = """
 tell application "System Events"
   set previousFrontApp to name of first application process whose frontmost is true
 end tell
-tell application "Google Chrome"
+tell application %s
   set tabChar to ASCII character 9
   if (count of windows) is 0 then
     make new window
@@ -137,9 +189,9 @@ try
   tell application "System Events" to set frontmost of first application process whose name is previousFrontApp to true
 end try
 return "window_index=" & targetWindowIndex & tabChar & "tab_index=" & targetTabIndex
-""" % json.dumps(url)
+""" % (json.dumps(app_name), json.dumps(url))
                 completed = subprocess.run(["osascript", "-e", script], check=True, capture_output=True, text=True)
-                target = {"app": "Google Chrome", "url": url}
+                target = {"app": app_name, "url": url}
                 for part in (completed.stdout or "").strip().split("\t"):
                     key, _, value = part.partition("=")
                     if key in {"window_index", "tab_index"}:
@@ -150,8 +202,10 @@ return "window_index=" & targetWindowIndex & tabChar & "tab_index=" & targetTabI
                 return target
             except Exception:
                 pass
-        webbrowser.open(url)
-        return {"url": url}
+        if app_name == "Google Chrome":
+            webbrowser.open(url)
+            return {"app": app_name, "url": url}
+        return None
 
     def _create_profile(self, payload: dict[str, Any]) -> dict[str, Any]:
         profile_id = self._profile_id(payload.get("profile_id") or payload.get("name") or f"profile-{int(time.time())}")
@@ -757,76 +811,94 @@ return "window_index=" & targetWindowIndex & tabChar & "tab_index=" & targetTabI
                 screenshot = self._capture_action_result_screenshot(action_payload, click_marker)
                 result.update(screenshot)
             return result
-        background_chrome = system == "Darwin" and self._should_type_in_chrome_background(action_payload)
+        background_browser_app = self._background_browser_app(action_payload) if system == "Darwin" else ""
+        background_browser = bool(background_browser_app and self._should_type_in_browser_background(action_payload))
+        background_driver = "chrome_background_dom" if background_browser_app == "Google Chrome" else "chromium_background_dom"
         background_failure: dict[str, Any] | None = None
-        if action == "computer.type" and background_chrome:
-            chrome_target = self._chrome_background_target(action_payload)
-            if self._darwin_type_in_chrome_background(str(action_payload.get("text") or ""), action_payload):
+        if action == "computer.type" and background_browser:
+            browser_target = self._browser_background_target(action_payload, background_browser_app)
+            typed = (
+                self._darwin_type_in_chrome_background(str(action_payload.get("text") or ""), action_payload)
+                if background_browser_app == "Google Chrome"
+                else self._darwin_type_in_chromium_background(
+                    str(action_payload.get("text") or ""), action_payload, background_browser_app
+                )
+            )
+            if typed:
                 return {
                     "action": action,
                     "executed": True,
                     "platform": system,
                     "background": True,
-                    "driver": "chrome_background_dom",
-                    "driver_sequence": ["chrome_background_dom"],
-                    "target_app": "Google Chrome",
-                    "chrome_target": chrome_target,
+                    "driver": background_driver,
+                    "driver_sequence": [background_driver],
+                    "target_app": background_browser_app,
+                    "browser_target": browser_target,
+                    **({"chrome_target": browser_target} if background_browser_app == "Google Chrome" else {}),
                 }
-            reason = self._chrome_background_failure_reason("Chrome background text entry failed.")
+            fallback = "Chrome background text entry failed." if background_browser_app == "Google Chrome" else f"{background_browser_app} background text entry failed."
+            reason = self._browser_background_failure_reason(background_browser_app, fallback)
             background_failure = {
                 "action": action,
                 "executed": False,
                 "is_error": True,
                 "platform": system,
                 "background": True,
-                "target_app": "Google Chrome",
-                "chrome_target": chrome_target,
+                "target_app": background_browser_app,
+                "browser_target": browser_target,
                 "reason": reason,
-                "recovery": {
-                    "kind": "chrome_setting",
-                    "setting": "Allow JavaScript from Apple Events",
-                    "path": "View > Developer > Allow JavaScript from Apple Events",
-                    "note": "Without this Chrome setting, background DOM entry into an existing user Chrome tab is blocked by Chrome.",
-                },
+                "recovery": self._browser_background_recovery(background_browser_app, action="text entry"),
             }
+            if background_browser_app == "Google Chrome":
+                background_failure["chrome_target"] = browser_target
+                background_failure["recovery"]["kind"] = "chrome_setting"
             if not self._allow_foreground_fallback(action_payload):
                 return background_failure
             action_payload["background"] = False
-        if action == "computer.key" and background_chrome:
+        if action == "computer.key" and background_browser:
             key = str(action_payload.get("key") or "").strip().lower()
             modifiers = action_payload.get("modifiers")
             if not isinstance(modifiers, list):
                 modifier = action_payload.get("modifier")
                 modifiers = [modifier] if modifier else []
-            chrome_target = self._chrome_background_target(action_payload)
-            if self._darwin_key_in_chrome_background(key, modifiers, action_payload):
+            browser_target = self._browser_background_target(action_payload, background_browser_app)
+            keyed = (
+                self._darwin_key_in_chrome_background(key, modifiers, action_payload)
+                if background_browser_app == "Google Chrome"
+                else self._darwin_key_in_chromium_background(key, modifiers, action_payload, background_browser_app)
+            )
+            if keyed:
                 return {
                     "action": action,
                     "executed": True,
                     "platform": system,
                     "background": True,
-                    "driver": "chrome_background_dom",
-                    "driver_sequence": ["chrome_background_dom"],
-                    "target_app": "Google Chrome",
-                    "chrome_target": chrome_target,
+                    "driver": background_driver,
+                    "driver_sequence": [background_driver],
+                    "target_app": background_browser_app,
+                    "browser_target": browser_target,
+                    **({"chrome_target": browser_target} if background_browser_app == "Google Chrome" else {}),
                 }
-            reason = self._chrome_background_failure_reason("Chrome background key entry failed or unsupported.")
+            fallback = (
+                "Chrome background key entry failed or unsupported."
+                if background_browser_app == "Google Chrome"
+                else f"{background_browser_app} background key entry failed or unsupported."
+            )
+            reason = self._browser_background_failure_reason(background_browser_app, fallback)
             background_failure = {
                 "action": action,
                 "executed": False,
                 "is_error": True,
                 "platform": system,
                 "background": True,
-                "target_app": "Google Chrome",
-                "chrome_target": chrome_target,
+                "target_app": background_browser_app,
+                "browser_target": browser_target,
                 "reason": reason,
-                "recovery": {
-                    "kind": "chrome_setting",
-                    "setting": "Allow JavaScript from Apple Events",
-                    "path": "View > Developer > Allow JavaScript from Apple Events",
-                    "note": "Without this Chrome setting, background key entry into an existing user Chrome tab is blocked by Chrome.",
-                },
+                "recovery": self._browser_background_recovery(background_browser_app, action="key entry"),
             }
+            if background_browser_app == "Google Chrome":
+                background_failure["chrome_target"] = browser_target
+                background_failure["recovery"]["kind"] = "chrome_setting"
             if not self._allow_foreground_fallback(action_payload):
                 return background_failure
             action_payload["background"] = False
@@ -863,21 +935,91 @@ return "window_index=" & targetWindowIndex & tabChar & "tab_index=" & targetTabI
         if background_failure:
             result["background_attempted"] = True
             result["foreground_fallback"] = True
-            result["driver_sequence"] = ["chrome_background_dom", "foreground_input"]
+            result["driver_sequence"] = [background_driver, "foreground_input"]
             result["background_failure"] = {
                 "reason": background_failure.get("reason"),
                 "recovery": background_failure.get("recovery"),
-                "chrome_target": background_failure.get("chrome_target"),
+                "browser_target": background_failure.get("browser_target"),
+                **({"chrome_target": background_failure.get("chrome_target")} if background_failure.get("chrome_target") else {}),
             }
         return result
 
-    def _should_type_in_chrome_background(self, payload: dict[str, Any]) -> bool:
-        if not self._payload_targets_chrome(payload):
+    def _should_type_in_browser_background(self, payload: dict[str, Any]) -> bool:
+        if not self._background_browser_app(payload):
             return False
         if payload.get("background") is True:
             return True
         mode = str(payload.get("mode") or payload.get("method") or "").strip().lower()
-        return mode in {"background", "chrome_background", "chrome_background_dom", "background_dom"}
+        return mode in {"background", "browser_background", "chromium_background", "chrome_background", "chrome_background_dom", "background_dom"}
+
+    def _should_type_in_chrome_background(self, payload: dict[str, Any]) -> bool:
+        return self._background_browser_app(payload) == "Google Chrome" and self._should_type_in_browser_background(payload)
+
+    def _background_browser_app(self, payload: dict[str, Any]) -> str:
+        explicit = self._browser_app_from_payload(payload)
+        if explicit:
+            return explicit
+        state = self._computer_state()
+        selected_window = state.get("target_window")
+        if isinstance(selected_window, dict):
+            app = self._canonical_chromium_app_name(str(selected_window.get("app") or ""))
+            if app:
+                return app
+        selected_app = state.get("target_app")
+        if isinstance(selected_app, dict):
+            app = self._canonical_chromium_app_name(str(selected_app.get("name") or selected_app.get("app") or ""))
+            if app:
+                return app
+        sessions = self._read_sessions()
+        for key in ("browser_target", "chrome_target"):
+            target = payload.get(key)
+            if not isinstance(target, dict):
+                target = sessions.get(key)
+            if isinstance(target, dict):
+                app = self._canonical_chromium_app_name(str(target.get("app") or ""))
+                if app:
+                    return app
+        return ""
+
+    def _browser_app_from_payload(self, payload: dict[str, Any]) -> str:
+        return self._canonical_chromium_app_name(self._raw_browser_app_from_payload(payload))
+
+    @staticmethod
+    def _raw_browser_app_from_payload(payload: dict[str, Any]) -> str:
+        return str(
+            payload.get("app")
+            or payload.get("application")
+            or payload.get("browser")
+            or payload.get("browser_app")
+            or ""
+        ).strip()
+
+    @classmethod
+    def _canonical_chromium_app_name(cls, value: str) -> str:
+        needle = value.strip().lower()
+        if not needle:
+            return ""
+        aliases = {
+            "chrome": "Google Chrome",
+            "google chrome": "Google Chrome",
+            "vivaldi": "Vivaldi",
+            "vivladi": "Vivaldi",
+            "chromium": "Chromium",
+            "edge": "Microsoft Edge",
+            "microsoft edge": "Microsoft Edge",
+            "brave": "Brave Browser",
+            "brave browser": "Brave Browser",
+            "opera": "Opera",
+            "arc": "Arc",
+        }
+        if needle in aliases:
+            return aliases[needle]
+        for name in cls._CHROMIUM_BROWSER_NAMES:
+            lowered = name.lower()
+            if needle == lowered or needle in lowered or lowered in needle:
+                return name
+        return ""
+
 
     def _payload_targets_chrome(self, payload: dict[str, Any]) -> bool:
         if self._payload_explicitly_targets_chrome(payload):
@@ -959,19 +1101,39 @@ return "window_index=" & targetWindowIndex & tabChar & "tab_index=" & targetTabI
         return True
 
     def _chrome_background_target(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._browser_background_target(payload, "Google Chrome")
+
+    def _browser_background_target(self, payload: dict[str, Any], app_name: str) -> dict[str, Any]:
         sessions = self._read_sessions()
-        target: dict[str, Any] = {}
-        session_target = sessions.get("chrome_target")
-        if isinstance(session_target, dict):
+        app_name = self._canonical_chromium_app_name(app_name) or app_name
+        target: dict[str, Any] = {"app": app_name}
+        for key in ("browser_target", "chrome_target"):
+            session_target = sessions.get(key)
+            if not isinstance(session_target, dict):
+                continue
+            target_app = self._canonical_chromium_app_name(str(session_target.get("app") or ""))
+            if target_app and target_app != app_name:
+                continue
             target.update(session_target)
+            break
+        for key in ("browser_target", "chrome_target"):
+            payload_target = payload.get(key)
+            if not isinstance(payload_target, dict):
+                continue
+            target_app = self._canonical_chromium_app_name(str(payload_target.get("app") or ""))
+            if target_app and target_app != app_name:
+                continue
+            target.update(payload_target)
+            break
+        target["app"] = app_name
         for key in ("window_index", "tab_index", "url_contains", "title_contains"):
             if payload.get(key) is not None:
                 target[key] = payload.get(key)
         selected_window = self._computer_state().get("target_window")
         if isinstance(selected_window, dict):
-            app = str(selected_window.get("app") or "").lower()
+            app = self._canonical_chromium_app_name(str(selected_window.get("app") or ""))
             title = str(selected_window.get("title") or "").strip()
-            if "chrome" in app and title:
+            if app == app_name and title:
                 target.setdefault("title_contains", title)
                 target["selected_window"] = selected_window
         last_url = str(sessions.get("last_url") or "")
@@ -983,10 +1145,14 @@ return "window_index=" & targetWindowIndex & tabChar & "tab_index=" & targetTabI
 
     @staticmethod
     def _chrome_tabs() -> list[dict[str, Any]]:
+        return BrowserComputerController._browser_tabs("Google Chrome")
+
+    @staticmethod
+    def _browser_tabs(app_name: str) -> list[dict[str, Any]]:
         if platform.system() != "Darwin":
             return []
         script = r'''
-tell application "Google Chrome"
+tell application %s
   set tabChar to ASCII character 9
   set output to ""
   repeat with wi from 1 to count of windows
@@ -1005,7 +1171,7 @@ tell application "Google Chrome"
   end repeat
   return output
 end tell
-'''
+''' % json.dumps(app_name)
         try:
             completed = subprocess.run(["osascript", "-e", script], check=True, capture_output=True, text=True)
         except Exception:
@@ -1022,7 +1188,7 @@ end tell
                 continue
             tabs.append(
                 {
-                    "app": "Google Chrome",
+                    "app": app_name,
                     "window_index": window_index,
                     "tab_index": tab_index,
                     "active": parts[2].strip().lower() == "true",
@@ -1033,9 +1199,14 @@ end tell
         return tabs
 
     def _select_chrome_tab(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        return self._select_chromium_tab(payload, "Google Chrome", tabs=self._chrome_tabs())
+
+    def _select_chromium_tab(
+        self, payload: dict[str, Any], app_name: str, *, tabs: list[dict[str, Any]] | None = None
+    ) -> dict[str, Any] | None:
         title = str(payload.get("title") or "").strip().lower()
         url_contains = str(payload.get("url_contains") or payload.get("url") or "").strip().lower()
-        tabs = self._chrome_tabs()
+        tabs = tabs if tabs is not None else self._browser_tabs(app_name)
         selected = None
         for tab in tabs:
             tab_title = str(tab.get("title") or "").lower()
@@ -1050,8 +1221,8 @@ end tell
             selected = next((tab for tab in tabs if tab.get("active")), None) or (tabs[0] if tabs else None)
         if selected is None:
             return None
-        chrome_target = {
-            "app": "Google Chrome",
+        browser_target = {
+            "app": app_name,
             "window_index": selected.get("window_index"),
             "tab_index": selected.get("tab_index"),
             "title_contains": selected.get("title"),
@@ -1059,16 +1230,21 @@ end tell
             "url_contains": "chatgpt.com" if "chatgpt.com" in str(selected.get("url") or "").lower() else selected.get("url"),
         }
         sessions = self._read_sessions()
-        sessions["chrome_target"] = chrome_target
+        sessions["browser_target"] = browser_target
+        if app_name == "Google Chrome":
+            sessions["chrome_target"] = browser_target
         sessions["last_opened_background"] = True
         if selected.get("url"):
             sessions["last_url"] = selected.get("url")
         sessions["updated_at"] = self._now_iso()
         self._write_sessions(sessions)
-        return chrome_target
+        return browser_target
 
     def _darwin_execute_chrome_background_js(self, js: str, payload: dict[str, Any]) -> str:
-        target = self._chrome_background_target(payload)
+        return self._darwin_execute_chromium_background_js("Google Chrome", js, payload)
+
+    def _darwin_execute_chromium_background_js(self, app_name: str, js: str, payload: dict[str, Any]) -> str:
+        target = self._browser_background_target(payload, app_name)
         try:
             window_index = int(target.get("window_index") or 0)
         except Exception:
@@ -1080,7 +1256,7 @@ end tell
         title_contains = str(target.get("title_contains") or "")
         url_contains = str(target.get("url_contains") or "")
         script = """
-tell application "Google Chrome"
+tell application %s
   if (count of windows) is 0 then return "no_window"
   set jsCode to %s
   set targetWindowIndex to %d
@@ -1114,7 +1290,14 @@ tell application "Google Chrome"
   end if
   return execute active tab of window 1 javascript jsCode
 end tell
-""" % (json.dumps(js), window_index, tab_index, json.dumps(title_contains), json.dumps(url_contains))
+""" % (
+            json.dumps(app_name),
+            json.dumps(js),
+            window_index,
+            tab_index,
+            json.dumps(title_contains),
+            json.dumps(url_contains),
+        )
         try:
             completed = subprocess.run(
                 ["osascript", "-e", script],
@@ -1186,18 +1369,39 @@ end tell
             return False
 
     def _chrome_background_failure_reason(self, fallback: str) -> str:
+        return self._browser_background_failure_reason("Google Chrome", fallback)
+
+    def _browser_background_failure_reason(self, app_name: str, fallback: str) -> str:
         detail = str(getattr(self, "_last_background_error", "") or "").strip()
+        recovery = self._browser_background_recovery(app_name)
         if "JavaScript" in detail and ("AppleScript" in detail or "Apple Events" in detail):
             return (
-                "Chrome background entry failed because Chrome has disabled JavaScript from Apple Events. "
-                "Enable View > Developer > Allow JavaScript from Apple Events for true background control of the existing Chrome tab."
+                f"{app_name} background entry failed because {app_name} has disabled JavaScript from Apple Events. "
+                f"Enable {recovery['path']} for true background control of the existing {app_name} tab."
             )
         if detail:
             return f"{fallback} {detail}"
         return (
-            f"{fallback} Enable Chrome's 'Allow JavaScript from Apple Events' setting "
+            f"{fallback} Enable {app_name}'s '{recovery['setting']}' setting "
             "or use an explicitly approved foreground fallback."
         )
+
+    @staticmethod
+    def _browser_background_recovery(app_name: str, *, action: str = "entry") -> dict[str, str]:
+        if app_name == "Google Chrome":
+            return {
+                "kind": "chrome_setting",
+                "setting": "Allow JavaScript from Apple Events",
+                "path": "View > Developer > Allow JavaScript from Apple Events",
+                "note": f"Without this Chrome setting, background DOM {action} into an existing Google Chrome tab is blocked by Chrome.",
+            }
+        path = "Settings > Privacy > Apple Events" if app_name == "Vivaldi" else "View > Developer > Allow JavaScript from Apple Events"
+        return {
+            "kind": "browser_background_setting",
+            "setting": "Allow JavaScript from Apple Events",
+            "path": path,
+            "note": f"Without this browser setting, background DOM {action} into an existing {app_name} tab is blocked by the app.",
+        }
 
     def _chrome_background_control(self, chrome_tabs: list[dict[str, Any]]) -> dict[str, Any]:
         if not chrome_tabs:
@@ -1226,11 +1430,16 @@ end tell
         return {"available": True, "target": payload}
 
     def _darwin_type_in_chrome_background(self, text: str, payload: dict[str, Any]) -> bool:
+        return self._darwin_type_in_chromium_background(text, payload, "Google Chrome")
+
+    def _darwin_type_in_chromium_background(self, text: str, payload: dict[str, Any], app_name: str) -> bool:
         if not text:
             return True
         js = r"""
 (function() {
   const text = %s;
+  const nativeTextAreaValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+  const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
   const candidates = [
     document.querySelector('#prompt-textarea'),
     document.querySelector('[data-testid="composer-root"] textarea'),
@@ -1244,9 +1453,19 @@ end tell
   if (!el) return 'composer_not_found';
   el.focus();
   if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
-    el.value = text;
+    const setter = el.tagName === 'TEXTAREA' ? nativeTextAreaValueSetter : nativeInputValueSetter;
+    if (setter) setter.call(el, text);
+    else el.value = text;
   } else {
-    el.textContent = text;
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    document.execCommand('insertText', false, text);
+    if ((el.textContent || '').trim() !== text.trim()) {
+      el.textContent = text;
+    }
   }
   el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
   el.dispatchEvent(new Event('change', { bubbles: true }));
@@ -1255,15 +1474,67 @@ end tell
 """ % json.dumps(text)
         try:
             self._last_background_error = ""
-            return "typed" in self._darwin_execute_chrome_background_js(js, payload)
+            return "typed" in self._darwin_execute_chromium_background_js(app_name, js, payload)
         except Exception:
             return False
 
     def _darwin_key_in_chrome_background(self, key: str, modifiers: list[Any], payload: dict[str, Any]) -> bool:
+        return self._darwin_key_in_chromium_background(key, modifiers, payload, "Google Chrome")
+
+    def _darwin_key_in_chromium_background(self, key: str, modifiers: list[Any], payload: dict[str, Any], app_name: str) -> bool:
         normalized_modifiers = {str(item).strip().lower() for item in modifiers}
         command_down = bool(normalized_modifiers.intersection({"command", "cmd", "meta", "super"}))
         if command_down and key == "a":
             return True
+        if key in {"enter", "return"}:
+            js = r"""
+(function() {
+  const candidates = [
+    document.querySelector('#prompt-textarea'),
+    document.querySelector('[data-testid="composer-root"] textarea'),
+    document.querySelector('textarea'),
+    document.querySelector('[contenteditable="true"]')
+  ].filter(Boolean);
+  const el = candidates.find((node) => {
+    const rect = node.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }) || candidates[0];
+  if (!el) return 'composer_not_found';
+  el.focus();
+  const root = el.closest('form') || document.querySelector('[data-testid="composer-root"]') || document;
+  const buttons = [
+    root.querySelector('[data-testid="send-button"]'),
+    root.querySelector('button[type="submit"]'),
+    root.querySelector('button[aria-label*="Send" i]'),
+    root.querySelector('button[aria-label*="送信"]'),
+    document.querySelector('[data-testid="send-button"]')
+  ].filter(Boolean);
+  const button = buttons.find((node) => {
+    const rect = node.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && !node.disabled && node.getAttribute('aria-disabled') !== 'true';
+  });
+  if (button) {
+    button.click();
+    return 'submitted';
+  }
+  for (const type of ['keydown', 'keypress', 'keyup']) {
+    el.dispatchEvent(new KeyboardEvent(type, {
+      key: 'Enter',
+      code: 'Enter',
+      keyCode: 13,
+      which: 13,
+      bubbles: true,
+      cancelable: true
+    }));
+  }
+  return 'submitted';
+})();
+"""
+            try:
+                self._last_background_error = ""
+                return "submitted" in self._darwin_execute_chromium_background_js(app_name, js, payload)
+            except Exception:
+                return False
         if key not in {"backspace", "delete", "del"}:
             return False
         js = r"""
@@ -1292,7 +1563,7 @@ end tell
 """
         try:
             self._last_background_error = ""
-            return "cleared" in self._darwin_execute_chrome_background_js(js, payload)
+            return "cleared" in self._darwin_execute_chromium_background_js(app_name, js, payload)
         except Exception:
             return False
 
@@ -1534,19 +1805,26 @@ end tell
                 selected = window
                 break
         if selected is None:
-            if self._payload_explicitly_targets_chrome(payload):
-                chrome_target = self._select_chrome_tab(payload)
-                if chrome_target:
+            browser_app = self._browser_app_from_payload(payload)
+            if browser_app:
+                browser_target = (
+                    self._select_chrome_tab(payload)
+                    if browser_app == "Google Chrome"
+                    else self._select_chromium_tab(payload, browser_app)
+                )
+                if browser_target:
                     self._clear_target_window()
                     return {
                         "action": "computer.select_window",
                         "selected": True,
                         "target_window": None,
-                        "chrome_target": chrome_target,
+                        "browser_target": browser_target,
+                        **({"chrome_target": browser_target} if browser_app == "Google Chrome" else {}),
                         "windows": windows,
-                        "chrome_tabs": self._chrome_tabs(),
+                        "browser_tabs": self._browser_tabs(browser_app),
+                        **({"chrome_tabs": self._chrome_tabs()} if browser_app == "Google Chrome" else {}),
                         "background_target_only": True,
-                        "reason": "Google Chrome is open, but no visible window was available in the current app-window context. Stored a Chrome tab target for background-capable actions.",
+                        "reason": f"{browser_app} is open, but no visible window was available in the current app-window context. Stored a browser tab target for background-capable actions.",
                     }
             if has_filter:
                 self._clear_target_window()
@@ -1960,13 +2238,54 @@ end tell
             return f'tell application "System Events" to keystroke {text}'
         if action == "computer.key":
             key = payload.get("key", "return")
+            modifiers = payload.get("modifiers")
+            if not isinstance(modifiers, list):
+                modifier = payload.get("modifier")
+                modifiers = [modifier] if modifier else []
+            using = self._apple_script_modifiers(modifiers)
             if isinstance(key, int):
-                return f'tell application "System Events" to key code {key}'
-            return f'tell application "System Events" to keystroke {json.dumps(str(key))}'
+                return f'tell application "System Events" to key code {key}{using}'
+            normalized = str(key).strip().lower()
+            key_codes = {
+                "return": 36,
+                "enter": 36,
+                "tab": 48,
+                "escape": 53,
+                "esc": 53,
+                "backspace": 51,
+                "delete": 51,
+                "del": 51,
+                "forward_delete": 117,
+                "up": 126,
+                "down": 125,
+                "left": 123,
+                "right": 124,
+                "space": 49,
+            }
+            if normalized in key_codes:
+                return f'tell application "System Events" to key code {key_codes[normalized]}{using}'
+            return f'tell application "System Events" to keystroke {json.dumps(str(key))}{using}'
         if action == "computer.scroll":
             amount = int(payload.get("amount", 1))
             return f'tell application "System Events" to scroll wheel {amount}'
         raise ValueError(action)
+
+    @staticmethod
+    def _apple_script_modifiers(modifiers: list[Any]) -> str:
+        names: list[str] = []
+        for item in modifiers:
+            normalized = str(item or "").strip().lower()
+            if normalized in {"command", "cmd", "meta", "super"}:
+                names.append("command down")
+            elif normalized in {"shift"}:
+                names.append("shift down")
+            elif normalized in {"option", "alt"}:
+                names.append("option down")
+            elif normalized in {"control", "ctrl"}:
+                names.append("control down")
+        if not names:
+            return ""
+        return " using {" + ", ".join(dict.fromkeys(names)) + "}"
 
     def _windows_running_apps(self) -> list[dict[str, Any]]:
         script = r'''
@@ -2265,6 +2584,7 @@ ConvertTo-Json @{ app = ""; title = $titleBuilder.ToString(); x = $r.Left; y = $
             "driver_auto_switch": system in {"Darwin", "Windows"},
             "foreground_input_fallback": system in {"Darwin", "Windows"},
             "chrome_background_dom": system == "Darwin",
+            "chromium_background_dom": system == "Darwin",
         }
 
     def _read_sessions(self) -> dict[str, Any]:

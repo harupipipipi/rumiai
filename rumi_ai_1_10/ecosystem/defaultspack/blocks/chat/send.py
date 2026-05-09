@@ -388,6 +388,8 @@ def _tool_result_recovery_kind(result):
     reason = _tool_result_reason(result).lower()
     if "allow javascript from apple events" in reason or "chrome background" in reason:
         return "chrome_setting"
+    if "browser background" in reason or "chromium background" in reason:
+        return "browser_background_setting"
     return ""
 
 
@@ -420,6 +422,19 @@ def _chrome_setting_block_message(tool_name, result, recovery):
     )
 
 
+def _browser_background_setting_block_message(tool_name, result, recovery):
+    setting = str(recovery.get("setting") or "Allow JavaScript from Apple Events").strip()
+    path = str(recovery.get("path") or "View > Developer > Allow JavaScript from Apple Events").strip()
+    reason = _tool_result_reason(result)
+    detail = " reason: {}".format(reason) if reason else ""
+    return (
+        "明示的に指定されたブラウザのDOMバックグラウンド操作を試しましたが、ブラウザ側の設定で止まりました。"
+        f"{detail} {tool_name} はここで再試行せず停止しました。"
+        f" 対象ブラウザの {path} で {setting} を有効にするか、前面操作を許可しない限り、"
+        "そのブラウザへのDOM背景入力は使えません。通常のcomputer_use自体は他のアプリでも利用できます。"
+    )
+
+
 def _tool_blocked_response(tool_name, result):
     recovery = _find_tool_recovery(result)
     kind = str(recovery.get("kind") or "").strip()
@@ -432,6 +447,8 @@ def _tool_blocked_response(tool_name, result):
         }
     if kind == "chrome_setting":
         message = _chrome_setting_block_message(tool_name, result, recovery)
+    elif kind == "browser_background_setting":
+        message = _browser_background_setting_block_message(tool_name, result, recovery)
     else:
         reason = _tool_result_reason(result)
         message = (
@@ -689,9 +706,9 @@ def _tool_visibility_message(tools):
             "computer_use is for all desktop apps, so use apps/windows plus select_app/select_window focus=false to target Vivaldi, VS Code, Finder, LINE, Chrome, or any other visible app; "
             "prefer one type call for words like hello and key only for shortcuts/return; "
             "click/move without physical=true only moves the virtual AI cursor and does not move the user's mouse; "
-            "chrome_background_control is only an optional Chrome DOM route when app='Google Chrome' is explicit, not computer-use as a whole; "
+            "chromium background DOM is an optional route when a Chromium-family browser app such as Google Chrome or Vivaldi is explicit, not computer-use as a whole; "
             "for text/key in generic apps, use the selected app/window and add allow_foreground_fallback=true only when the user allows overlap; "
-            "if an actual background text/key entry returns recovery.kind=chrome_setting without foreground_fallback, stop instead of retrying."
+            "if an actual background text/key entry returns recovery.kind=chrome_setting or browser_background_setting without foreground_fallback, stop instead of retrying."
         )
     return {
         "role": "system",

@@ -3,11 +3,11 @@
   "category": "tool",
   "version": "1",
   "display_name": "Computer Use",
-  "description": "Capture the screen and run approved desktop actions on macOS or Windows for any app. Use context/apps/windows/select_app/select_window focus=false to understand and choose an app/window, click only to mark a target with the virtual AI cursor, and use type with text to enter words such as hello. Chrome background_control is only an optional Chrome-specific DOM route when app=Google Chrome is explicit; computer_use itself is not browser-specific.",
+  "description": "Capture the screen and run approved desktop actions on macOS or Windows for any app. Use context/apps/windows/select_app/select_window focus=false to understand and choose an app/window, click only to mark a target with the virtual AI cursor, and use type with text to enter words such as hello. Chromium browser background DOM is only an optional route when a Chromium-family app such as Google Chrome or Vivaldi is explicit; computer_use itself is not browser-specific.",
   "enabled": true,
   "config": {
     "name": "computer_use",
-    "summary": "全アプリ向けのコンピューター操作。まず action=context/apps/windows で開いているアプリとウィンドウを確認し、select_app/select_window focus=false で対象を選びます。文字入力は action=type と text を優先してください。Chrome DOM背景入力は app=Google Chrome が明示された時だけの任意ルートで、通常の操作はVivaldi/VS Code/Finder/LINEなど全アプリが対象です。",
+    "summary": "全アプリ向けのコンピューター操作。まず action=context/apps/windows で開いているアプリとウィンドウを確認し、select_app/select_window focus=false で対象を選びます。文字入力は action=type と text を優先してください。Chromium系ブラウザのDOM背景入力は app=Google Chrome や app=Vivaldi が明示された時だけの任意ルートで、通常の操作はVivaldi/VS Code/Finder/LINEなど全アプリが対象です。",
     "tags": ["computer", "desktop", "screenshot", "approval"],
     "schema": {
       "parameters": {
@@ -41,9 +41,9 @@
           "include_installed": {"type": "boolean"},
           "include_installed_apps": {"type": "boolean"},
           "limit": {"type": "integer"},
-          "background": {"type": "boolean", "description": "For Chrome only: request DOM/Apple Events background text/key entry when foreground focus is not allowed."},
+          "background": {"type": "boolean", "description": "For Chromium-family browsers such as Google Chrome or Vivaldi: request DOM/Apple Events background text/key entry when foreground focus is not allowed."},
           "method": {"type": "string"},
-          "driver": {"type": "string", "description": "Optional driver hint such as auto, chrome_background_dom, foreground_input, or physical."},
+          "driver": {"type": "string", "description": "Optional driver hint such as auto, chromium_background_dom, chrome_background_dom, foreground_input, or physical."},
           "allow_foreground_fallback": {"type": "boolean", "description": "Allow the tool to focus the target app and use foreground keyboard input if a background route is blocked."},
           "foreground_fallback": {"type": "boolean", "description": "Alias for allow_foreground_fallback."},
           "allow_user_input_overlap": {"type": "boolean", "description": "Set true only when the user says overlapping with their input is acceptable."},
