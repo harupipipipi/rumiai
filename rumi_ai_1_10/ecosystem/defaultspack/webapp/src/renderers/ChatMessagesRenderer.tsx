@@ -192,27 +192,65 @@ function WidgetCard({ widget }: { widget: Record<string, unknown> }) {
 
 function BrowserScreenshotPreview({ screenshot }: { screenshot: BrowserScreenshot }) {
   const marker = screenshot.click_marker ?? screenshot.marker;
+  const dragMarker = screenshot.drag_marker;
   const imageWidth = Number(screenshot.image_size?.width ?? 0);
   const imageHeight = Number(screenshot.image_size?.height ?? 0);
   const markerX = Number(marker?.x ?? NaN);
   const markerY = Number(marker?.y ?? NaN);
+  const dragFromX = Number(dragMarker?.from?.x ?? NaN);
+  const dragFromY = Number(dragMarker?.from?.y ?? NaN);
+  const dragToX = Number(dragMarker?.to?.x ?? NaN);
+  const dragToY = Number(dragMarker?.to?.y ?? NaN);
   const canPlaceMarker = Number.isFinite(markerX) && Number.isFinite(markerY) && imageWidth > 0 && imageHeight > 0;
+  const canPlaceDrag =
+    Number.isFinite(dragFromX) &&
+    Number.isFinite(dragFromY) &&
+    Number.isFinite(dragToX) &&
+    Number.isFinite(dragToY) &&
+    imageWidth > 0 &&
+    imageHeight > 0;
+  const screenshotLabel =
+    screenshot.action === "computer.drag"
+      ? "ドラッグ位置つきスクリーンショット"
+      : screenshot.action === "computer.click"
+        ? "クリック位置つきスクリーンショット"
+        : "スクリーンショット";
 
   return (
-    <figure className="w-fit max-w-full overflow-hidden rounded-lg border border-zinc-800 bg-black/30">
+    <figure className="w-[min(48rem,100%)] max-w-full overflow-hidden rounded-lg border border-zinc-800 bg-black/30">
       <a
         href={screenshot.data_url}
         target="_blank"
         rel="noreferrer"
-        className="relative inline-block max-w-full cursor-zoom-in align-top"
+        className="relative block max-w-full cursor-zoom-in align-top"
       >
         <img
           src={screenshot.data_url}
-          alt={screenshot.action === "computer.click" ? "Clicked screen" : "Screen capture"}
-          className="block h-auto max-h-44 object-contain"
-          style={{ maxWidth: "min(100%, 24rem)" }}
+          alt={screenshot.action === "computer.drag" ? "Dragged screen" : screenshot.action === "computer.click" ? "Clicked screen" : "Screen capture"}
+          className="block h-auto w-full object-contain"
+          style={{ maxHeight: "min(360px, 45vh)" }}
         />
-        {canPlaceMarker && (
+        {canPlaceDrag && (
+          <svg
+            className="pointer-events-none absolute inset-0 h-full w-full"
+            viewBox={`0 0 ${imageWidth} ${imageHeight}`}
+            preserveAspectRatio="none"
+            aria-hidden="true"
+          >
+            <line
+              x1={dragFromX}
+              y1={dragFromY}
+              x2={dragToX}
+              y2={dragToY}
+              stroke="rgba(248, 113, 113, 0.95)"
+              strokeWidth={Math.max(3, imageWidth / 180)}
+              strokeLinecap="round"
+            />
+            <circle cx={dragFromX} cy={dragFromY} r={Math.max(6, imageWidth / 120)} fill="rgba(251, 191, 36, 0.85)" />
+            <circle cx={dragToX} cy={dragToY} r={Math.max(7, imageWidth / 110)} fill="rgba(248, 113, 113, 0.9)" />
+          </svg>
+        )}
+        {canPlaceMarker && !canPlaceDrag && (
           <span
             className="pointer-events-none absolute h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-red-300 bg-red-500/25 shadow-[0_0_0_4px_rgba(239,68,68,0.22)]"
             style={{ left: `${(markerX / imageWidth) * 100}%`, top: `${(markerY / imageHeight) * 100}%` }}
@@ -223,26 +261,51 @@ function BrowserScreenshotPreview({ screenshot }: { screenshot: BrowserScreensho
       </a>
       <figcaption className="flex items-center gap-2 border-t border-zinc-800 px-3 py-2 text-[11px] text-zinc-500">
         <ImageIcon size={12} />
-        <span>{screenshot.action === "computer.click" ? "クリック位置つきスクリーンショット" : "スクリーンショット"}</span>
+        <span>{screenshotLabel}</span>
       </figcaption>
     </figure>
   );
+}
+
+function isBrowserToolName(toolName: unknown): boolean {
+  return toolName === "browser_computer" || toolName === "browser_use" || toolName === "computer_use";
+}
+
+function hasBrowserToolLog(message: ChatMessagesRendererProps["messages"][number]): boolean {
+  return (message.toolLogs ?? []).some((log) => isBrowserToolName(log.tool_name));
+}
+
+function hasBrowserToolEvent(message: ChatMessagesRendererProps["messages"][number]): boolean {
+  return (message.events ?? []).some((event) => isBrowserToolName(event.tool_name));
+}
+
+function hasRunningBrowserToolEvent(message: ChatMessagesRendererProps["messages"][number]): boolean {
+  return (message.events ?? []).some((event) => (
+    isBrowserToolName(event.tool_name)
+    && (
+      event.type === "tool_call" ||
+      event.type === "tool_call_started" ||
+      event.phase === "tool_call" ||
+      event.phase === "tool_call_started"
+    )
+  ));
 }
 
 function BrowserScreenshotStrip({ message }: { message: ChatMessagesRendererProps["messages"][number] }) {
   const [screenshots, setScreenshots] = useState<BrowserScreenshot[]>([]);
   const [omittedCount, setOmittedCount] = useState(0);
   const [failed, setFailed] = useState(false);
-  const hasBrowserTool = (message.toolLogs ?? []).some((log) => (
-    log.tool_name === "browser_computer" || log.tool_name === "browser_use" || log.tool_name === "computer_use"
-  ));
+  const hasBrowserLog = hasBrowserToolLog(message);
+  const hasBrowserActivity = hasBrowserLog || hasBrowserToolEvent(message);
+  const hasRunningBrowserActivity = hasRunningBrowserToolEvent(message);
+  const canFetchStoredScreenshots = hasBrowserLog && !message.id.startsWith("optimistic-");
 
   useEffect(() => {
     let cancelled = false;
     setScreenshots([]);
     setOmittedCount(0);
     setFailed(false);
-    if (!message.conversationId || !hasBrowserTool) return () => {
+    if (!message.conversationId || !canFetchStoredScreenshots) return () => {
       cancelled = true;
     };
     void api.getBrowserScreenshots(message.conversationId, message.id)
@@ -258,9 +321,20 @@ function BrowserScreenshotStrip({ message }: { message: ChatMessagesRendererProp
     return () => {
       cancelled = true;
     };
-  }, [message.conversationId, message.id, hasBrowserTool]);
+  }, [message.conversationId, message.id, canFetchStoredScreenshots]);
 
-  if (!hasBrowserTool || screenshots.length === 0) {
+  if (!hasBrowserActivity) return null;
+
+  if (!canFetchStoredScreenshots && hasRunningBrowserActivity) {
+    return (
+      <div className="mb-3 flex w-fit items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-[11px] text-zinc-400">
+        <Loader2 size={12} className="animate-spin text-blue-300" />
+        <span>画面操作を実行中</span>
+      </div>
+    );
+  }
+
+  if (screenshots.length === 0) {
     return failed ? (
       <div className="mb-3 rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-[11px] text-zinc-500">
         スクリーンショットを読み込めませんでした。
@@ -269,7 +343,7 @@ function BrowserScreenshotStrip({ message }: { message: ChatMessagesRendererProp
   }
 
   return (
-    <div className="mb-4 grid gap-2">
+    <div className="mb-4 grid gap-3">
       {omittedCount > 0 && (
         <div className="w-fit rounded-md border border-zinc-800 bg-zinc-950/70 px-2.5 py-1.5 text-[11px] text-zinc-500">
           古いスクリーンショット {omittedCount} 件を省略しています。
@@ -391,7 +465,7 @@ function PendingToolTray({ toolNames }: { toolNames: string[] }) {
     <div className="mt-2 ml-5 w-[min(820px,calc(100vw-64px))] rounded-xl border border-zinc-800 bg-zinc-950/70 px-4 py-3">
       <div className="mb-2 flex items-center gap-2 text-[11px] font-medium text-zinc-400">
         <Loader2 size={12} className="animate-spin text-blue-300" />
-        <span>接続中の tool</span>
+        <span>実行中の tool</span>
       </div>
       <div className="space-y-2">
         {[...groups.entries()].map(([id, group]) => (

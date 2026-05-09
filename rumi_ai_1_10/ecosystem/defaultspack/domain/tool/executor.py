@@ -216,14 +216,19 @@ class ToolExecutor:
             return None
         if bool(getattr(response, "success", False)):
             return None
-        if getattr(response, "error_type", "") != "pack_not_approved":
+        if getattr(response, "error_type", "") not in {
+            "pack_not_approved",
+            "function_not_found",
+            "function_registry_unavailable",
+        }:
             return None
         qualified_name = str(request.get("qualified_name") or "")
         pack_id, _, function_id = qualified_name.partition(":")
         if pack_id not in {"defaultspack", "rumi_default_tools_pack"} or not function_id:
             return None
-        if pack_id == "rumi_default_tools_pack" and function_id == "browser_computer":
-            return ToolExecutor()._execute_local("browser_computer", request.get("args") or {}, context)
+        local_tool = ToolExecutor._first_party_local_tool_for_function(pack_id, function_id)
+        if local_tool:
+            return ToolExecutor()._execute_local(local_tool, request.get("args") or {}, context)
         try:
             from core_runtime.pack_function_runtime import invoke_pack_function
 
@@ -236,6 +241,31 @@ class ToolExecutor:
         except Exception:
             return None
         return ToolExecutor._tool_response_from_pack_function_output(output)
+
+    @staticmethod
+    def _first_party_local_tool_for_function(pack_id, function_id):
+        if pack_id == "rumi_default_tools_pack":
+            return {
+                "browser_computer": "browser_computer",
+                "browser_use": "browser_use",
+                "computer_use": "computer_use",
+                "calculator": "calculator",
+                "file_reader": "file_reader",
+                "reddit_search": "reddit_search",
+                "subagent": "subagent",
+                "todo": "todo",
+                "web_search": "web_search",
+            }.get(function_id)
+        if pack_id == "defaultspack":
+            return {
+                "tool_calculator": "calculator",
+                "tool_web_search": "web_search",
+                "tool_reddit_search": "reddit_search",
+                "tool_file_reader": "file_reader",
+                "tool_todo": "todo",
+                "tool_subagent": "subagent",
+            }.get(function_id)
+        return None
 
     @staticmethod
     def _tool_response_from_pack_function_output(output):
@@ -578,6 +608,7 @@ class ToolExecutor:
                 "browser.open_url",
                 "computer.move",
                 "computer.click",
+                "computer.drag",
                 "computer.type",
                 "computer.key",
                 "computer.scroll",
@@ -708,11 +739,16 @@ def _browser_computer_action_payload(tool_name, arguments):
             "session": "browser.session",
             "open_url": "browser.open_url",
             "open": "browser.open_url",
+            "context": "computer.context",
+            "app_context": "computer.context",
+            "state": "computer.context",
             "screenshot": "computer.screenshot",
             "move": "computer.move",
             "cursor_move": "computer.move",
             "mouse_move": "computer.move",
             "click": "computer.click",
+            "drag": "computer.drag",
+            "mouse_drag": "computer.drag",
             "type": "computer.type",
             "key": "computer.key",
             "scroll": "computer.scroll",
@@ -727,6 +763,10 @@ def _browser_computer_action_payload(tool_name, arguments):
             "activate_app": "computer.show_app",
             "main_app": "computer.show_app",
             "show": "computer.show_app",
+            "select_window": "computer.select_window",
+            "window": "computer.select_window",
+            "windows": "computer.windows",
+            "list_windows": "computer.windows",
         }
         action = action_map.get(raw_action, raw_action)
         for key in (
@@ -734,6 +774,14 @@ def _browser_computer_action_payload(tool_name, arguments):
             "url_contains",
             "x",
             "y",
+            "x1",
+            "y1",
+            "x2",
+            "y2",
+            "from_x",
+            "from_y",
+            "to_x",
+            "to_y",
             "text",
             "key",
             "modifier",
@@ -768,11 +816,16 @@ def _browser_computer_action_payload(tool_name, arguments):
     else:
         action_map = {
             "": "computer.screenshot",
+            "context": "computer.context",
+            "app_context": "computer.context",
+            "state": "computer.context",
             "screenshot": "computer.screenshot",
             "move": "computer.move",
             "cursor_move": "computer.move",
             "mouse_move": "computer.move",
             "click": "computer.click",
+            "drag": "computer.drag",
+            "mouse_drag": "computer.drag",
             "type": "computer.type",
             "key": "computer.key",
             "scroll": "computer.scroll",
@@ -787,6 +840,10 @@ def _browser_computer_action_payload(tool_name, arguments):
             "activate_app": "computer.show_app",
             "main_app": "computer.show_app",
             "show": "computer.show_app",
+            "select_window": "computer.select_window",
+            "window": "computer.select_window",
+            "windows": "computer.windows",
+            "list_windows": "computer.windows",
         }
         action = action_map.get(raw_action, raw_action)
         for key in (
@@ -794,6 +851,14 @@ def _browser_computer_action_payload(tool_name, arguments):
             "url_contains",
             "x",
             "y",
+            "x1",
+            "y1",
+            "x2",
+            "y2",
+            "from_x",
+            "from_y",
+            "to_x",
+            "to_y",
             "text",
             "key",
             "modifier",
@@ -836,15 +901,27 @@ def _computer_use_payload_with_context_defaults(action, payload, context):
     payload = dict(payload or {})
     if not isinstance(context, dict):
         return payload
+    target_app = context.get("computer_use_target_app")
+    target_title = context.get("computer_use_target_title")
+    if action == "browser.open_url":
+        if isinstance(target_app, str) and target_app.strip() and not any(
+            payload.get(key) for key in ("app", "application", "browser", "browser_app")
+        ):
+            payload["app"] = target_app.strip()
+        return payload
     if action.startswith("computer.") and action not in {"computer.windows", "computer.apps"}:
-        target_app = context.get("computer_use_target_app")
-        target_title = context.get("computer_use_target_title")
         if isinstance(target_app, str) and target_app.strip():
-            payload.setdefault("app", target_app.strip())
-        if isinstance(target_title, str) and target_title.strip():
+            if action in {"computer.select_app", "computer.show_app"}:
+                if not any(payload.get(key) for key in ("app", "application", "name")):
+                    payload["app"] = target_app.strip()
+            else:
+                payload.setdefault("app", target_app.strip())
+        if (
+            isinstance(target_title, str)
+            and target_title.strip()
+            and action not in {"computer.select_app", "computer.show_app"}
+        ):
             payload.setdefault("title", target_title.strip())
-    if context.get("user_requested_computer_use") is True and action == "computer.click":
-        payload.setdefault("physical", True)
     return payload
 
 

@@ -77,11 +77,19 @@ export function summarizeToolArguments(toolName: string, args?: Record<string, u
   if (lowerName.includes("subagent") || lowerName.includes("agent")) {
     return pickString(args, ["task", "title", "prompt"]);
   }
-  if (lowerName.includes("browser")) {
-    return pickString(args, ["url", "action"]);
-  }
-  if (lowerName.includes("computer")) {
-    return pickString(args, ["action", "text", "key"]);
+  if (lowerName.includes("browser") || lowerName.includes("computer")) {
+    const action = pickString(args, ["action"]);
+    const target = pickString(args, ["url", "app", "application", "browser", "name", "title"]);
+    const text = pickString(args, ["text", "key"]);
+    const x = pickString(args, ["x"]);
+    const y = pickString(args, ["y"]);
+    const x1 = pickString(args, ["x1", "from_x"]);
+    const y1 = pickString(args, ["y1", "from_y"]);
+    const x2 = pickString(args, ["x2", "to_x"]);
+    const y2 = pickString(args, ["y2", "to_y"]);
+    const coords = x && y ? `(${x}, ${y})` : "";
+    const dragCoords = x1 && y1 && x2 && y2 ? `(${x1}, ${y1}) -> (${x2}, ${y2})` : "";
+    return [action, target, text, dragCoords || coords].filter(Boolean).join(" ");
   }
   if (lowerName.includes("terminal") || lowerName.includes("exec") || lowerName.includes("shell")) {
     return pickString(args, ["command", "cmd"]);
@@ -135,6 +143,46 @@ function eventKey(event: ChatActivityEvent): string {
   return `${event.tool_name ?? "tool"}:${JSON.stringify(args)}`;
 }
 
+function isToolActivityEvent(event: ChatActivityEvent): boolean {
+  return (
+    event.type === "tool_call" ||
+    event.type === "tool_call_started" ||
+    event.type === "tool_call_completed" ||
+    event.type === "tool_result" ||
+    event.type === "approval_requested" ||
+    event.phase === "tool_call" ||
+    event.phase === "tool_call_started" ||
+    event.phase === "tool_call_completed" ||
+    event.phase === "tool_result" ||
+    event.phase === "approval_requested"
+  );
+}
+
+function eventRank(event: ChatActivityEvent): number {
+  if (
+    event.type === "tool_call_completed" ||
+    event.type === "tool_result" ||
+    event.phase === "tool_call_completed" ||
+    event.phase === "tool_result"
+  ) {
+    return 2;
+  }
+  if (event.type === "approval_requested" || event.phase === "approval_requested") return 1;
+  return 0;
+}
+
+function statusForEvent(event: ChatActivityEvent): ToolActivityStatus {
+  if (
+    event.type === "tool_call_completed" ||
+    event.type === "tool_result" ||
+    event.phase === "tool_call_completed" ||
+    event.phase === "tool_result"
+  ) {
+    return event.is_error === true ? "failed" : "completed";
+  }
+  return "running";
+}
+
 export function buildToolActivityGroups(
   toolLogs: ToolLogEntry[] = [],
   events: ChatActivityEvent[] = [],
@@ -166,19 +214,24 @@ export function buildToolActivityGroups(
       return id || `${log.tool_name ?? "tool"}:${JSON.stringify(log.arguments ?? {})}`;
     }),
   );
-  const runningEvents = events
-    .filter((event) => (
-      event.type === "tool_call" ||
-      event.type === "tool_call_started" ||
-      event.phase === "tool_call" ||
-      event.phase === "tool_call_started"
-    ) && typeof event.tool_name === "string")
-    .filter((event) => !logKeys.has(eventKey(event)))
+  const eventsByKey = new Map<string, ChatActivityEvent>();
+  for (const event of events) {
+    if (!isToolActivityEvent(event) || typeof event.tool_name !== "string") continue;
+    const key = eventKey(event);
+    if (logKeys.has(key)) continue;
+    const existing = eventsByKey.get(key);
+    if (!existing || eventRank(event) >= eventRank(existing)) {
+      eventsByKey.set(key, event);
+    }
+  }
+  const eventItems = [...eventsByKey.values()]
     .map((event, index): ToolActivityItem => {
       const toolName = String(event.tool_name);
       const args = event.arguments && typeof event.arguments === "object" ? event.arguments as Record<string, unknown> : {};
       const folder = toolFolderFor(toolName);
       const argumentSummary = summarizeToolArguments(toolName, args);
+      const status = statusForEvent(event);
+      const defaultDetail = status === "running" ? "使用中" : status === "failed" ? "失敗" : "完了";
       return {
         id: `event-${index}-${toolName}`,
         toolName,
@@ -186,14 +239,14 @@ export function buildToolActivityGroups(
         folderLabel: folder.label,
         input: argumentSummary,
         title: argumentSummary ? `${folder.label} / ${toolName}: ${argumentSummary}` : `${folder.label} / ${toolName}`,
-        detail: String(event.message ?? "使用中"),
-        status: "running",
+        detail: String(event.message ?? defaultDetail),
+        status,
         timestamp: event.timestamp,
       };
     });
 
   const byFolder = new Map<string, ToolActivityGroup>();
-  for (const item of [...fromLogs, ...runningEvents]) {
+  for (const item of [...fromLogs, ...eventItems]) {
     const existing = byFolder.get(item.folder);
     if (existing) {
       existing.items.push(item);

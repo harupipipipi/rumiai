@@ -689,12 +689,54 @@ def test_browser_computer_pack_not_approved_falls_back_to_local(monkeypatch):
     assert captured["context"]["user_requested_computer_use"] is True
 
 
+def test_computer_use_function_registry_unavailable_falls_back_to_local(monkeypatch):
+    from domain.tool.executor import ToolExecutor
+
+    captured = {}
+
+    def fake_execute_local(self, tool_name, arguments, context):
+        captured["tool_name"] = tool_name
+        captured["arguments"] = arguments
+        captured["context"] = context
+        return {
+            "result": "computer_use computer.context completed",
+            "is_error": False,
+            "widget": {"type": "computer_use", "action": "computer.context"},
+        }
+
+    class FakeResponse:
+        success = False
+        error_type = "function_registry_unavailable"
+
+    monkeypatch.setattr(ToolExecutor, "_execute_local", fake_execute_local)
+
+    result = ToolExecutor._fallback_function_call_if_first_party_unapproved(
+        {"name": "computer_use"},
+        {
+            "type": "function.call",
+            "qualified_name": "rumi_default_tools_pack:computer_use",
+            "args": {"action": "context"},
+        },
+        {"conversation_id": "conv-test"},
+        FakeResponse(),
+    )
+
+    assert result["is_error"] is False
+    assert captured["tool_name"] == "computer_use"
+    assert captured["arguments"]["action"] == "context"
+    assert captured["context"]["conversation_id"] == "conv-test"
+
+
 def test_browser_computer_click_uses_virtual_cursor_by_default(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 
     controller = BrowserComputerController(artifact_root=tmp_path)
     controller._session_path = tmp_path / "shared" / "browser_sessions.json"
-    monkeypatch.setattr(controller, "_capture_action_result_screenshot", lambda payload, marker: {"click_marker": marker})
+    monkeypatch.setattr(
+        controller,
+        "_capture_action_result_screenshot",
+        lambda payload, marker, **kwargs: {"click_marker": marker},
+    )
     monkeypatch.setattr(controller, "_window_at_point", lambda x, y: None)
     monkeypatch.setattr(
         controller,
@@ -741,7 +783,7 @@ def test_browser_computer_click_sets_visible_target_window(tmp_path, monkeypatch
 
     controller = BrowserComputerController(artifact_root=tmp_path)
     controller._session_path = tmp_path / "shared" / "browser_sessions.json"
-    monkeypatch.setattr(controller, "_capture_action_result_screenshot", lambda payload, marker: {})
+    monkeypatch.setattr(controller, "_capture_action_result_screenshot", lambda payload, marker, **kwargs: {})
     monkeypatch.setattr(
         controller,
         "_window_at_point",
@@ -1453,6 +1495,62 @@ def test_chat_tool_loop_marks_nested_tool_errors_in_events():
     assert streamed_completed["is_error"] is True
 
 
+def test_chat_tool_loop_preserves_tool_logs_when_ai_fails_after_tool_use():
+    import blocks.chat.send as send
+
+    calls = {"ai": 0}
+    emitted = []
+
+    def call_handler(name, payload):
+        if name == "defaults.ai.complete":
+            calls["ai"] += 1
+            if calls["ai"] == 1:
+                return {
+                    "status": "ok",
+                    "data": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "call_1",
+                                "name": "computer_use",
+                                "input": "{\"action\":\"screenshot\"}",
+                            }
+                        ],
+                        "finish_reason": "tool_calls",
+                    },
+                }
+            return {
+                "status": "error",
+                "error": {"message": "Google API error 500: Internal error encountered."},
+            }
+        if name == "defaults.tool.invoke":
+            return {
+                "status": "ok",
+                "data": {
+                    "result": "computer_use computer.screenshot completed",
+                    "path": "/tmp/shot.png",
+                    "mime_type": "image/png",
+                },
+            }
+        raise AssertionError(name)
+
+    response = send._complete_with_tools(
+        "google/gemma-4-31b-it",
+        [{"role": "user", "content": "look at the screen"}],
+        [{"type": "function", "function": {"name": "computer_use", "parameters": {"type": "object"}}}],
+        {"stream_event_callback": emitted.append},
+        call_handler,
+        {"max_tool_calls": 3},
+    )
+
+    assert response["finish_reason"] == "ai_error_after_tool_use"
+    assert response["metadata"]["ai_error_after_tool_use"] is True
+    assert response["metadata"]["transient_ai_error"] is True
+    assert len(response["tool_logs"]) == 1
+    assert response["tool_logs"][0]["tool_name"] == "computer_use"
+    assert [event["phase"] for event in emitted if event["type"] == "status"][-1] == "ai_error_after_tool_use"
+
+
 def test_chat_tool_loop_stops_on_visible_window_required_recovery():
     import blocks.chat.send as send
 
@@ -1844,6 +1942,36 @@ def test_browser_screenshot_tool_result_adds_image_for_vision_models():
     assert messages[1]["content"][1]["image_url"]["url"] == "data:image/png;base64,aGVsbG8="
 
 
+def test_computer_context_tool_result_includes_widget_details_for_model():
+    import blocks.chat.send as send
+
+    messages = []
+    send._append_tool_result_message(
+        messages,
+        "computer_use",
+        {
+            "status": "ok",
+            "data": {
+                "result": "computer_use computer.context completed",
+                "is_error": False,
+                "widget": {
+                    "action": "computer.context",
+                    "active_window": {"app": "Codex", "title": "Codex"},
+                    "selected_app": {"name": "Vivaldi", "window_count": 1},
+                    "open_apps": [{"name": "Vivaldi"}, {"name": "Google Chrome"}],
+                },
+            },
+        },
+        "call_context",
+        model="google/gemma-4-31b-it",
+    )
+
+    assert messages[0]["role"] == "tool"
+    assert "computer.context" in messages[0]["content"]
+    assert "Vivaldi" in messages[0]["content"]
+    assert "open_apps" in messages[0]["content"]
+
+
 def test_browser_screenshot_tool_result_respects_provider_attachment_opt_out(monkeypatch):
     import blocks.chat.send as send
 
@@ -2085,6 +2213,135 @@ def test_browser_screenshots_endpoint_is_conversation_and_owner_scoped(tmp_path,
     ChatStore._instance = None
 
 
+def test_browser_screenshots_endpoint_omits_model_preview_duplicates(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from blocks.chat.browser_screenshots import run
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    workspace = store.conversation_workspace_dir(conversation["id"]) / "tools"
+    workspace.mkdir(parents=True, exist_ok=True)
+    screenshot_path = workspace / "screen.png"
+    model_path = workspace / "screen-model.jpg"
+    screenshot_path.write_bytes(b"image-bytes")
+    model_path.write_bytes(b"model-image-bytes")
+    assistant = store.add_message(
+        conversation["id"],
+        {
+            "role": "assistant",
+            "content": [{"type": "text", "text": "done"}],
+            "tool_logs": [
+                {
+                    "tool_name": "computer_use",
+                    "tool_call_id": "call_1",
+                    "result": {
+                        "data": {
+                            "path": str(screenshot_path),
+                            "model_image_path": str(model_path),
+                            "action": "computer.screenshot",
+                            "target_window": {"x": 80, "y": 40, "width": 1320, "height": 838},
+                            "model_image_size": {"width": 640, "height": 406},
+                            "image_size": {"width": 2640, "height": 1676},
+                            "click_marker": {"x": 600, "y": 400, "screen_x": 680, "screen_y": 440},
+                            "drag_marker": {
+                                "from": {"screen_x": 410, "screen_y": 249},
+                                "to": {"screen_x": 680, "screen_y": 440},
+                            },
+                        }
+                    },
+                }
+            ],
+        },
+    )
+
+    result = run({"conversation_id": conversation["id"], "run_id": assistant["id"]}, {})
+
+    assert result["status"] == "ok"
+    assert len(result["data"]["screenshots"]) == 1
+    screenshot = result["data"]["screenshots"][0]
+    assert screenshot["data_url"].startswith("data:image/jpeg;base64,")
+    assert screenshot["image_size"] == {"width": 640, "height": 406}
+    assert screenshot["click_marker"]["coordinate_space"] == "model_image"
+    assert screenshot["click_marker"]["x"] == 291
+    assert screenshot["click_marker"]["y"] == 194
+    assert screenshot["drag_marker"]["from"]["coordinate_space"] == "model_image"
+    assert screenshot["drag_marker"]["from"]["x"] == 160
+    assert screenshot["drag_marker"]["from"]["y"] == 101
+    assert screenshot["drag_marker"]["to"]["x"] == 291
+    assert screenshot["drag_marker"]["to"]["y"] == 194
+    ChatStore._instance = None
+
+
+def test_computer_use_auto_converts_latest_model_screenshot_coordinates(monkeypatch, tmp_path):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    state = {
+        "target_window": {"app": "Notion", "title": "Page", "x": 80, "y": 40, "width": 1320, "height": 838},
+        "last_screenshot": {
+            "model_image_size": {"width": 640, "height": 406},
+            "action_coordinate_system": {"x": 80, "y": 40, "width": 1320, "height": 838},
+        },
+    }
+
+    monkeypatch.setattr(controller, "_computer_state", lambda: dict(state))
+    monkeypatch.setattr(controller, "_write_computer_state", lambda value: state.update(value))
+
+    payload, marker = controller._resolve_action_point({"x": 320, "y": 203}, infer_window=False)
+
+    assert payload["x"] == 740
+    assert payload["y"] == 459
+    assert marker == {"x": 320, "y": 203, "screen_x": 740, "screen_y": 459, "coordinate_space": "model_image"}
+    assert state["ai_cursor"]["x"] == 740
+    assert state["ai_cursor"]["y"] == 459
+
+
+def test_computer_use_drag_uses_virtual_cursor_and_converts_model_coordinates(monkeypatch, tmp_path):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    state = {
+        "target_window": {"app": "Notion", "title": "Page", "x": 80, "y": 40, "width": 1320, "height": 838},
+        "last_screenshot": {
+            "model_image_size": {"width": 640, "height": 406},
+            "action_coordinate_system": {"x": 80, "y": 40, "width": 1320, "height": 838},
+        },
+    }
+
+    monkeypatch.setattr(controller, "_computer_state", lambda: dict(state))
+    monkeypatch.setattr(controller, "_write_computer_state", lambda value: state.update(value))
+
+    result = controller.run(
+        "computer.drag",
+        {"x1": 100, "y1": 50, "x2": 320, "y2": 203, "include_screenshot": False},
+        yolo_mode=True,
+    )
+
+    assert result["executed"] is True
+    assert result["virtual_cursor"] is True
+    assert result["target"] == {"from": {"x": 286, "y": 143}, "to": {"x": 740, "y": 459}}
+    assert result["drag_marker"]["from"] == {
+        "x": 100,
+        "y": 50,
+        "screen_x": 286,
+        "screen_y": 143,
+        "coordinate_space": "model_image",
+    }
+    assert result["drag_marker"]["to"] == {
+        "x": 320,
+        "y": 203,
+        "screen_x": 740,
+        "screen_y": 459,
+        "coordinate_space": "model_image",
+    }
+    assert state["ai_cursor"]["x"] == 740
+    assert state["ai_cursor"]["y"] == 459
+
+
 def test_chat_store_splits_loaded_inline_thoughts(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
 
@@ -2245,6 +2502,28 @@ def test_sensitive_routes_do_not_use_wildcard_cors():
     assert _is_sensitive_http_path("/v1/conversations/c1/run-results/r1/browser-screenshots") is True
     assert _is_sensitive_http_path("/api/chat/conversations/c1/run-results/r1/browser-screenshots") is False
     assert _is_sensitive_http_path("/api/coding/files/read") is False
+
+
+def test_http_signal_wait_continues_after_non_interrupt_signal(monkeypatch):
+    from ecosystem.defaultspack.transport import http as http_module
+
+    calls = []
+
+    def fake_pause():
+        calls.append(1)
+        if len(calls) >= 3:
+            raise KeyboardInterrupt()
+
+    monkeypatch.setattr(http_module.signal, "pause", fake_pause)
+
+    try:
+        http_module._wait_for_signal()
+    except KeyboardInterrupt:
+        pass
+    else:
+        raise AssertionError("_wait_for_signal should propagate KeyboardInterrupt")
+
+    assert len(calls) == 3
 
 
 def test_fallback_routes_expose_agent_service_and_coding_surfaces():
@@ -2857,6 +3136,19 @@ def test_computer_use_payload_preserves_window_targeting_fields():
     }
 
 
+def test_computer_use_local_action_map_supports_context_and_windows():
+    from domain.tool.executor import _browser_computer_action_payload
+
+    assert _browser_computer_action_payload("computer_use", {"action": "context"})[0] == "computer.context"
+    assert _browser_computer_action_payload("computer_use", {"action": "windows"})[0] == "computer.windows"
+    assert _browser_computer_action_payload("computer_use", {"action": "select_window"})[0] == "computer.select_window"
+    assert _browser_computer_action_payload("computer_use", {"action": "drag"})[0] == "computer.drag"
+    assert _browser_computer_action_payload("browser_use", {"action": "context"})[0] == "computer.context"
+    assert _browser_computer_action_payload("browser_use", {"action": "windows"})[0] == "computer.windows"
+    assert _browser_computer_action_payload("browser_use", {"action": "select_window"})[0] == "computer.select_window"
+    assert _browser_computer_action_payload("browser_use", {"action": "drag"})[0] == "computer.drag"
+
+
 def test_computer_use_context_defaults_do_not_enable_background():
     from domain.tool.executor import _computer_use_payload_with_context_defaults
 
@@ -2875,7 +3167,7 @@ def test_computer_use_context_defaults_do_not_enable_background():
     assert "allow_user_input_overlap" not in payload
 
 
-def test_computer_use_context_defaults_add_target_and_physical_click():
+def test_computer_use_context_defaults_add_target_without_forcing_physical_click():
     from domain.tool.executor import _computer_use_payload_with_context_defaults
 
     payload = _computer_use_payload_with_context_defaults(
@@ -2890,7 +3182,43 @@ def test_computer_use_context_defaults_add_target_and_physical_click():
 
     assert payload["app"] == "Google Chrome"
     assert payload["title"] == "LINE"
-    assert payload["physical"] is True
+    assert "physical" not in payload
+
+    explicit = _computer_use_payload_with_context_defaults(
+        "computer.click",
+        {"x": 20, "y": 30, "physical": True},
+        {"user_requested_computer_use": True},
+    )
+
+    assert explicit["physical"] is True
+
+
+def test_computer_use_context_defaults_do_not_override_explicit_show_app_target():
+    from domain.tool.executor import _computer_use_payload_with_context_defaults
+
+    payload = _computer_use_payload_with_context_defaults(
+        "computer.show_app",
+        {"name": "Vivaldi"},
+        {
+            "computer_use_target_app": "Google Chrome",
+            "computer_use_target_title": "ChatGPT",
+        },
+    )
+
+    assert payload == {"name": "Vivaldi"}
+
+
+def test_browser_open_url_uses_inferred_target_app():
+    from domain.tool.executor import _computer_use_payload_with_context_defaults
+
+    payload = _computer_use_payload_with_context_defaults(
+        "browser.open_url",
+        {"url": "https://chatgpt.com/"},
+        {"computer_use_target_app": "Vivaldi", "computer_use_target_title": "ChatGPT"},
+    )
+
+    assert payload["app"] == "Vivaldi"
+    assert "title" not in payload
 
 
 def test_chat_text_does_not_set_background_preferences():
@@ -2904,6 +3232,17 @@ def test_chat_text_does_not_set_background_preferences():
     assert "computer_use_allow_foreground_fallback" not in prefs
     assert "computer_use_background_required" not in prefs
     assert prefs["computer_use_target_app"] == "Google Chrome"
+
+
+def test_chat_text_prefers_vivaldi_and_ignores_negated_chrome():
+    import blocks.chat.send as send
+
+    prefs = send._computer_use_preferences_from_text(
+        "VivaldiでChatGPTを開いてhello。Google Chromeは使わないでください。"
+    )
+
+    assert prefs["computer_use_target_app"] == "Vivaldi"
+    assert prefs["computer_use_target_title"] == "ChatGPT"
 
 
 def test_chat_text_sets_computer_use_chrome_line_target_preferences():
@@ -2943,6 +3282,46 @@ def test_user_requested_computer_use_preapproves_interactive_actions(monkeypatch
         "payload": {"url": "https://chatgpt.com", "persistent": False},
         "yolo_mode": True,
     }
+
+
+def test_user_requested_computer_use_preapproves_drag(monkeypatch):
+    from domain.tool.executor import ToolExecutor
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    captured = {}
+
+    def fake_run(self, action, payload=None, *, yolo_mode=False):
+        captured["action"] = action
+        captured["payload"] = payload
+        captured["yolo_mode"] = yolo_mode
+        return {"action": action, "executed": True}
+
+    monkeypatch.setattr(BrowserComputerController, "run", fake_run)
+
+    result = ToolExecutor().execute(
+        "computer_use",
+        {"action": "drag", "x1": 10, "y1": 20, "x2": 30, "y2": 40},
+        {"user_requested_computer_use": True},
+    )
+
+    assert result["is_error"] is False
+    assert captured == {
+        "action": "computer.drag",
+        "payload": {"x1": 10, "y1": 20, "x2": 30, "y2": 40},
+        "yolo_mode": True,
+    }
+
+
+def test_browser_computer_function_defaults_do_not_force_physical_click():
+    from ecosystem.rumi_default_tools_pack.functions.browser_computer.main import _payload_with_context_defaults
+
+    payload = _payload_with_context_defaults(
+        "computer.click",
+        {"x": 10, "y": 20},
+        {"user_requested_computer_use": True},
+    )
+
+    assert payload == {"x": 10, "y": 20}
 
 
 def test_browser_computer_executor_propagates_controller_errors(monkeypatch):

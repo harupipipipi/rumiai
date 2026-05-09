@@ -15,12 +15,20 @@
         "properties": {
           "action": {
             "type": "string",
-            "enum": ["session", "open_url", "context", "apps", "select_app", "show_app", "screenshot", "move", "click", "select_window", "windows", "type", "key", "scroll"],
+            "enum": ["session", "open_url", "context", "apps", "select_app", "show_app", "screenshot", "move", "click", "drag", "select_window", "windows", "type", "key", "scroll"],
             "default": "session"
           },
           "url": {"type": "string"},
           "x": {"type": "integer"},
           "y": {"type": "integer"},
+          "x1": {"type": "integer"},
+          "y1": {"type": "integer"},
+          "x2": {"type": "integer"},
+          "y2": {"type": "integer"},
+          "from_x": {"type": "integer"},
+          "from_y": {"type": "integer"},
+          "to_x": {"type": "integer"},
+          "to_y": {"type": "integer"},
           "text": {"type": "string"},
           "key": {"type": "string"},
           "amount": {"type": "integer"},

@@ -64,7 +64,7 @@ class BrowserComputerController:
             return self._select_window(payload)
         if action == "computer.screenshot":
             return self._screenshot(payload=payload, dry_run=bool(payload.get("dry_run")), yolo_mode=yolo_mode)
-        if action in {"computer.move", "computer.click", "computer.type", "computer.key", "computer.scroll"}:
+        if action in {"computer.move", "computer.click", "computer.drag", "computer.type", "computer.key", "computer.scroll"}:
             return self._desktop_action(action, payload, yolo_mode=yolo_mode)
         raise ValueError(f"Unsupported browser/computer action: {action}")
 
@@ -377,8 +377,9 @@ class BrowserComputerController:
             "action": "move",
             "screen_coordinates": True,
             "coordinate_source": "screenshot",
-            "notes": "Call move with action_coordinate_system coordinates. If a point is estimated on model_image_size, multiply by model_to_action_scale before calling move.",
+            "notes": "Coordinates from the latest screenshot preview are accepted by default; use coordinate_space=screen for absolute display coordinates or coordinate_space=window for selected-window coordinates.",
         }
+        self._remember_last_screenshot(result)
         return result
 
     def _context(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -513,9 +514,18 @@ class BrowserComputerController:
         selected = self._normalize_app_record(selected)
         state = self._computer_state()
         state["target_app"] = selected
+        if payload.get("focus", True) is not False:
+            active_window = self._active_window_for_app(str(selected.get("name") or selected.get("app") or ""))
+            if active_window is not None:
+                state["target_window"] = active_window
         self._write_computer_state(state)
         if payload.get("focus", True) is not False:
             self._activate_app_name(str(selected.get("name") or selected.get("app") or ""))
+            active_window = self._active_window_for_app(str(selected.get("name") or selected.get("app") or ""))
+            if active_window is not None:
+                state = self._computer_state()
+                state["target_window"] = active_window
+                self._write_computer_state(state)
         return {
             "action": "computer.select_app",
             "selected": True,
@@ -546,16 +556,24 @@ class BrowserComputerController:
             }
         result = self._select_app(action_payload)
         shown = bool(result.get("selected"))
+        active_window = None
         if shown:
             time.sleep(0.2)
+            target_app = result.get("target_app") if isinstance(result.get("target_app"), dict) else {}
+            active_window = self._active_window_for_app(str(target_app.get("name") or target_app.get("app") or ""))
+            if active_window is not None:
+                state = self._computer_state()
+                state["target_window"] = active_window
+                self._write_computer_state(state)
         return {
             "action": "computer.show_app",
             "shown": shown,
             "platform": platform.system(),
             **({"target_app": result.get("target_app")} if result.get("target_app") else {}),
+            **({"target_window": active_window} if active_window else {}),
             **({"open_apps": result.get("open_apps")} if result.get("open_apps") else {}),
             **({"installed_match": result.get("installed_match")} if result.get("installed_match") else {}),
-            "active_window": self._active_window() if shown else None,
+            "active_window": active_window or (self._active_window() if shown else None),
             **({"reason": "No running or installed app matched the request."} if not shown else {}),
         }
 
@@ -768,16 +786,32 @@ class BrowserComputerController:
         system = platform.system()
         action_payload = dict(payload)
         click_marker = None
-        if action in {"computer.move", "computer.click"}:
+        drag_marker = None
+        if action == "computer.drag":
+            action_payload, click_marker, drag_marker = self._resolve_drag_points(payload)
+        elif action in {"computer.move", "computer.click"}:
             action_payload, click_marker = self._resolve_action_point(payload, infer_window=action == "computer.click")
-        if action in {"computer.move", "computer.click"} and payload.get("physical") is not True:
+        if action in {"computer.move", "computer.click", "computer.drag"} and payload.get("physical") is not True:
             self._set_ai_cursor(action_payload)
             result: dict[str, Any] = {"action": action, "executed": True, "platform": system, "virtual_cursor": True}
-            result["target"] = {"x": int(action_payload.get("x", 0)), "y": int(action_payload.get("y", 0))}
+            if action == "computer.drag":
+                result["target"] = {
+                    "from": {"x": int(action_payload.get("x1", 0)), "y": int(action_payload.get("y1", 0))},
+                    "to": {"x": int(action_payload.get("x2", 0)), "y": int(action_payload.get("y2", 0))},
+                }
+                if drag_marker:
+                    result["drag_marker"] = drag_marker
+            else:
+                result["target"] = {"x": int(action_payload.get("x", 0)), "y": int(action_payload.get("y", 0))}
             if click_marker:
                 result["marker"] = click_marker
-            if action == "computer.click" and payload.get("include_screenshot", True) is not False:
-                screenshot = self._capture_action_result_screenshot(action_payload, click_marker)
+            if action in {"computer.click", "computer.drag"} and payload.get("include_screenshot", True) is not False:
+                screenshot = self._capture_action_result_screenshot(
+                    action_payload,
+                    click_marker,
+                    action_name=action,
+                    drag_marker=drag_marker,
+                )
                 result.update(screenshot)
             return result
         if action in {"computer.type", "computer.key", "computer.scroll"} and self._background_requested(action_payload):
@@ -806,10 +840,14 @@ class BrowserComputerController:
             }
         if action in {"computer.type", "computer.key", "computer.scroll"}:
             self._focus_action_target(action_payload)
+        if action == "computer.drag" and payload.get("physical") is True:
+            self._focus_action_target(action_payload)
         if system == "Darwin" and action == "computer.move":
             self._darwin_move_cursor(action_payload)
         elif system == "Darwin" and action == "computer.click":
             self._darwin_click(action_payload)
+        elif system == "Darwin" and action == "computer.drag":
+            self._darwin_drag(action_payload)
         elif system == "Darwin":
             script = self._apple_script(action, action_payload)
             subprocess.run(["osascript", "-e", script], check=True)
@@ -829,10 +867,24 @@ class BrowserComputerController:
             result["target"] = {"x": int(action_payload.get("x", 0)), "y": int(action_payload.get("y", 0))}
             if click_marker:
                 result["marker"] = click_marker
+        if action == "computer.drag":
+            result["target"] = {
+                "from": {"x": int(action_payload.get("x1", 0)), "y": int(action_payload.get("y1", 0))},
+                "to": {"x": int(action_payload.get("x2", 0)), "y": int(action_payload.get("y2", 0))},
+            }
+            if click_marker:
+                result["marker"] = click_marker
+            if drag_marker:
+                result["drag_marker"] = drag_marker
         if action == "computer.scroll":
             result["amount"] = int(action_payload.get("amount", 1))
-        if action == "computer.click" and payload.get("include_screenshot", True) is not False:
-            screenshot = self._capture_action_result_screenshot(action_payload, click_marker)
+        if action in {"computer.click", "computer.drag"} and payload.get("include_screenshot", True) is not False:
+            screenshot = self._capture_action_result_screenshot(
+                action_payload,
+                click_marker,
+                action_name=action,
+                drag_marker=drag_marker,
+            )
             result.update(screenshot)
         return result
 
@@ -883,7 +935,14 @@ class BrowserComputerController:
             return False
         return True
 
-    def _capture_action_result_screenshot(self, payload: dict[str, Any], marker: dict[str, Any] | None) -> dict[str, Any]:
+    def _capture_action_result_screenshot(
+        self,
+        payload: dict[str, Any],
+        marker: dict[str, Any] | None,
+        *,
+        action_name: str = "computer.click",
+        drag_marker: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         self._artifact_root.mkdir(parents=True, exist_ok=True)
         path = self._artifact_root / f"click-{int(time.time() * 1000)}.png"
         capture = self._capture_screenshot(path, payload)
@@ -892,7 +951,7 @@ class BrowserComputerController:
         model_path = self._model_screenshot_copy(path)
         system = capture.get("platform", platform.system())
         result = self._screenshot_result(path, model_path, system, capture_target=capture.get("target_window"))
-        result["action"] = "computer.click"
+        result["action"] = action_name
         result["screenshot_path"] = str(path)
         result["model_image_path"] = str(model_path)
         data_url = self._image_data_url(model_path)
@@ -900,6 +959,8 @@ class BrowserComputerController:
             result["data_url"] = data_url
         if marker:
             result["click_marker"] = marker
+        if drag_marker:
+            result["drag_marker"] = drag_marker
         return result
 
     def _capture_screenshot(self, path: Path, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1002,6 +1063,13 @@ class BrowserComputerController:
                 state["target_window"] = target
                 self._write_computer_state(state)
         coordinate_space = str(payload.get("coordinate_space") or payload.get("space") or "auto").strip().lower()
+        if coordinate_space in {"model", "model_image", "preview", "screenshot_preview"} or (
+            coordinate_space == "auto" and self._point_looks_like_model_coordinate(x, y, state)
+        ):
+            model_payload, model_marker = self._resolve_model_point(payload, x, y, state)
+            if model_payload is not None:
+                self._set_ai_cursor(model_payload)
+                return model_payload, model_marker
         use_window_space = False
         if target and coordinate_space in {"auto", "window", "target", "screenshot", "image"}:
             width = int(target.get("width", 0))
@@ -1029,6 +1097,113 @@ class BrowserComputerController:
                 marker["y"] = y - int(target.get("y", 0))
                 marker["coordinate_space"] = "screenshot_image"
         self._set_ai_cursor(action_payload)
+        return action_payload, marker
+
+    @staticmethod
+    def _coordinate_from_payload(payload: dict[str, Any], keys: tuple[str, ...], default: Any = 0) -> int:
+        for key in keys:
+            if key in payload and payload.get(key) is not None:
+                try:
+                    return int(float(payload.get(key)))
+                except Exception:
+                    continue
+        try:
+            return int(float(default))
+        except Exception:
+            return 0
+
+    def _resolve_drag_points(
+        self,
+        payload: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any] | None, dict[str, Any] | None]:
+        state = self._computer_state()
+        cursor = state.get("ai_cursor") if isinstance(state.get("ai_cursor"), dict) else {}
+        start_x = self._coordinate_from_payload(payload, ("x1", "from_x", "start_x"), cursor.get("x", 0))
+        start_y = self._coordinate_from_payload(payload, ("y1", "from_y", "start_y"), cursor.get("y", 0))
+        end_x = self._coordinate_from_payload(payload, ("x2", "to_x", "end_x", "x"), start_x)
+        end_y = self._coordinate_from_payload(payload, ("y2", "to_y", "end_y", "y"), start_y)
+
+        start_payload = dict(payload)
+        start_payload["x"] = start_x
+        start_payload["y"] = start_y
+        start_action, start_marker = self._resolve_action_point(start_payload)
+
+        end_payload = dict(payload)
+        end_payload["x"] = end_x
+        end_payload["y"] = end_y
+        end_action, end_marker = self._resolve_action_point(end_payload, infer_window=True)
+
+        action_payload = dict(end_action)
+        action_payload["x1"] = int(start_action.get("x", 0))
+        action_payload["y1"] = int(start_action.get("y", 0))
+        action_payload["x2"] = int(end_action.get("x", 0))
+        action_payload["y2"] = int(end_action.get("y", 0))
+        action_payload["x"] = int(end_action.get("x", 0))
+        action_payload["y"] = int(end_action.get("y", 0))
+
+        drag_marker = None
+        if start_marker or end_marker:
+            drag_marker = {
+                "from": start_marker or {"x": start_x, "y": start_y},
+                "to": end_marker or {"x": end_x, "y": end_y},
+            }
+        return action_payload, end_marker, drag_marker
+
+    @staticmethod
+    def _point_looks_like_model_coordinate(x: int, y: int, state: dict[str, Any]) -> bool:
+        last = state.get("last_screenshot") if isinstance(state, dict) else None
+        if not isinstance(last, dict):
+            return False
+        model_size = last.get("model_image_size") if isinstance(last.get("model_image_size"), dict) else {}
+        action_space = last.get("action_coordinate_system") if isinstance(last.get("action_coordinate_system"), dict) else {}
+        try:
+            model_width = int(model_size.get("width", 0))
+            model_height = int(model_size.get("height", 0))
+            action_width = int(action_space.get("width", 0))
+            action_height = int(action_space.get("height", 0))
+        except Exception:
+            return False
+        if model_width <= 0 or model_height <= 0 or action_width <= 0 or action_height <= 0:
+            return False
+        if model_width >= action_width and model_height >= action_height:
+            return False
+        return 0 <= x <= model_width and 0 <= y <= model_height
+
+    @staticmethod
+    def _resolve_model_point(
+        payload: dict[str, Any],
+        x: int,
+        y: int,
+        state: dict[str, Any],
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        last = state.get("last_screenshot") if isinstance(state, dict) else None
+        if not isinstance(last, dict):
+            return None, None
+        model_size = last.get("model_image_size") if isinstance(last.get("model_image_size"), dict) else {}
+        action_space = last.get("action_coordinate_system") if isinstance(last.get("action_coordinate_system"), dict) else {}
+        try:
+            model_width = int(model_size.get("width", 0))
+            model_height = int(model_size.get("height", 0))
+            action_x = int(action_space.get("x", 0))
+            action_y = int(action_space.get("y", 0))
+            action_width = int(action_space.get("width", 0))
+            action_height = int(action_space.get("height", 0))
+        except Exception:
+            return None, None
+        if model_width <= 0 or model_height <= 0 or action_width <= 0 or action_height <= 0:
+            return None, None
+        screen_x = action_x + round(x * action_width / model_width)
+        screen_y = action_y + round(y * action_height / model_height)
+        action_payload = dict(payload)
+        action_payload["x"] = int(screen_x)
+        action_payload["y"] = int(screen_y)
+        marker = {
+            "x": x,
+            "y": y,
+            "screen_x": int(screen_x),
+            "screen_y": int(screen_y),
+            "coordinate_space": "model_image",
+        }
         return action_payload, marker
 
     def _computer_state(self) -> dict[str, Any]:
@@ -1062,6 +1237,18 @@ class BrowserComputerController:
             "origin": "top_left",
             "updated_at": self._now_iso(),
         }
+        self._write_computer_state(state)
+
+    def _remember_last_screenshot(self, result: dict[str, Any]) -> None:
+        state = self._computer_state()
+        remembered = {
+            "updated_at": self._now_iso(),
+            "image_size": result.get("image_size"),
+            "model_image_size": result.get("model_image_size"),
+            "action_coordinate_system": result.get("action_coordinate_system"),
+            "target_window": result.get("target_window"),
+        }
+        state["last_screenshot"] = {key: value for key, value in remembered.items() if value not in (None, "")}
         self._write_computer_state(state)
 
     def _window_at_point(self, x: int, y: int) -> dict[str, Any] | None:
@@ -1141,6 +1328,23 @@ class BrowserComputerController:
             return next((item for item in windows if item.get("active")), None)
         if system == "Windows":
             return self._windows_active_window()
+        return None
+
+    def _active_window_for_app(self, app_name: str) -> dict[str, Any] | None:
+        app_name = app_name.strip().lower()
+        if not app_name:
+            return None
+        active = self._active_window()
+        if active and app_name in str(active.get("app") or "").lower() and self._is_usable_target_window(active):
+            return self._normalize_window_record(active)
+        for item in self._list_windows():
+            window = self._normalize_window_record(item)
+            if (
+                window
+                and self._is_usable_target_window(window)
+                and app_name in str(window.get("app") or "").lower()
+            ):
+                return window
         return None
 
     @staticmethod
@@ -1500,6 +1704,38 @@ end tell
             script = self._apple_script("computer.click", payload)
             subprocess.run(["osascript", "-e", script], check=True)
 
+    def _darwin_drag(self, payload: dict[str, Any]) -> None:
+        x1 = int(payload.get("x1", payload.get("x", 0)))
+        y1 = int(payload.get("y1", payload.get("y", 0)))
+        x2 = int(payload.get("x2", payload.get("x", 0)))
+        y2 = int(payload.get("y2", payload.get("y", 0)))
+        button = str(payload.get("button") or "left").lower()
+        button_index = 1 if button in {"right", "secondary"} else 0
+        down_event = "kCGEventRightMouseDown" if button_index == 1 else "kCGEventLeftMouseDown"
+        drag_event = "kCGEventRightMouseDragged" if button_index == 1 else "kCGEventLeftMouseDragged"
+        up_event = "kCGEventRightMouseUp" if button_index == 1 else "kCGEventLeftMouseUp"
+        code = (
+            "import Quartz, time\n"
+            f"start = Quartz.CGPoint({x1}, {y1})\n"
+            f"end = Quartz.CGPoint({x2}, {y2})\n"
+            f"down = Quartz.CGEventCreateMouseEvent(None, Quartz.{down_event}, start, {button_index})\n"
+            "Quartz.CGEventPost(Quartz.kCGHIDEventTap, down)\n"
+            "time.sleep(0.05)\n"
+            "steps = 8\n"
+            "for index in range(1, steps + 1):\n"
+            "    px = start.x + (end.x - start.x) * index / steps\n"
+            "    py = start.y + (end.y - start.y) * index / steps\n"
+            f"    drag = Quartz.CGEventCreateMouseEvent(None, Quartz.{drag_event}, Quartz.CGPoint(px, py), {button_index})\n"
+            "    Quartz.CGEventPost(Quartz.kCGHIDEventTap, drag)\n"
+            "    time.sleep(0.02)\n"
+            f"up = Quartz.CGEventCreateMouseEvent(None, Quartz.{up_event}, end, {button_index})\n"
+            "Quartz.CGEventPost(Quartz.kCGHIDEventTap, up)\n"
+        )
+        try:
+            subprocess.run(["python3", "-c", code], check=True)
+        except Exception as exc:
+            raise RuntimeError("computer.drag requires PyObjC Quartz on macOS") from exc
+
     def _apple_script(self, action: str, payload: dict[str, Any]) -> str:
         if action == "computer.click":
             x = int(payload.get("x", 0))
@@ -1672,6 +1908,26 @@ $items | Select-Object -First $limit | ConvertTo-Json -Compress
                     "$original = [System.Windows.Forms.Cursor]::Position",
                     f"[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point({x}, {y})",
                     "[RumiMouse]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)",
+                    "[RumiMouse]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)",
+                    "[System.Windows.Forms.Cursor]::Position = $original" if restore_cursor else "",
+                ]
+            )
+            self._run_powershell(script)
+            return
+        if action == "computer.drag":
+            x1 = int(payload.get("x1", payload.get("x", 0)))
+            y1 = int(payload.get("y1", payload.get("y", 0)))
+            x2 = int(payload.get("x2", payload.get("x", 0)))
+            y2 = int(payload.get("y2", payload.get("y", 0)))
+            restore_cursor = payload.get("isolate_cursor", True) is not False
+            script = "\n".join(
+                prelude
+                + [
+                    "Add-Type -TypeDefinition @'\nusing System;\nusing System.Runtime.InteropServices;\npublic class RumiMouse {\n  [DllImport(\"user32.dll\")]\n  public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);\n}\n'@",
+                    "$original = [System.Windows.Forms.Cursor]::Position",
+                    f"[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point({x1}, {y1})",
+                    "[RumiMouse]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)",
+                    f"[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point({x2}, {y2})",
                     "[RumiMouse]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)",
                     "[System.Windows.Forms.Cursor]::Position = $original" if restore_cursor else "",
                 ]

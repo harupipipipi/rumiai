@@ -2,6 +2,7 @@ import sys
 import os
 import json
 import re
+import time
 from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from blocks._common import ok, error, gen_id, timestamp
@@ -35,12 +36,22 @@ _SECRET_KEY_RE = re.compile(
     re.IGNORECASE,
 )
 _PROMPT_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_TRANSIENT_AI_ERROR_RE = re.compile(
+    r"\b(429|500|502|503|504)\b|temporary|temporarily|timeout|timed out|try again|rate limit|internal error",
+    re.IGNORECASE,
+)
 _COMPUTER_USE_REQUEST_RE = re.compile(
     r"compute[\s_-]*use|compu?ter[\s_-]*use|computer\s+ツール|コンピューター操作|pc操作|"
     r"(google\s*chrome|chrome|chatgpt|vivaldi|vivladi|line|ブラウザ|browser).{0,80}(操作|送信|入力|クリック|開いて|開く)",
     re.IGNORECASE,
 )
 _COMPUTER_USE_CHROME_TARGET_RE = re.compile(r"google\s*chrome|chrome|グーグル\s*クローム|クローム", re.IGNORECASE)
+_COMPUTER_USE_CHROME_NEGATED_RE = re.compile(
+    r"(google\s*chrome|chrome|グーグル\s*クローム|クローム).{0,16}"
+    r"(使わない|使わず|禁止|not\s+use|do\s+not\s+use|don't\s+use)",
+    re.IGNORECASE,
+)
+_COMPUTER_USE_VIVALDI_TARGET_RE = re.compile(r"vivaldi|vivladi|ヴィヴァルディ|ビバルディ", re.IGNORECASE)
 _COMPUTER_USE_LINE_TARGET_RE = re.compile(r"(?<![A-Za-z])line(?![A-Za-z])|ライン", re.IGNORECASE)
 _COMPUTER_USE_CHATGPT_TARGET_RE = re.compile(r"chat\s*gpt|chatgpt", re.IGNORECASE)
 
@@ -83,6 +94,10 @@ def _has_real_provider(client, model):
     return not isinstance(provider, StubProvider)
 
 
+def _is_transient_ai_error(message):
+    return bool(_TRANSIENT_AI_ERROR_RE.search(str(message or "")))
+
+
 def _ai_direct_complete(model, messages, tools=None, params=None):
     """AIClient を直接呼び出して complete を実行する。
     APIキー未設定等で実プロバイダーがない場合は明示的エラーを返す。
@@ -91,14 +106,60 @@ def _ai_direct_complete(model, messages, tools=None, params=None):
         (response_dict, None) on success
         (None, error_message) on failure
     """
-    try:
-        client = AIClient()
-        if not _has_real_provider(client, model):
-            return None, "AI provider API key not configured"
-        response = client.complete(model, messages, tools or [], params or {})
-        return response, None
-    except RuntimeError as exc:
-        return None, "AI request failed: " + str(exc)
+    client = AIClient()
+    if not _has_real_provider(client, model):
+        return None, "AI provider API key not configured"
+    last_error = ""
+    for attempt in range(3):
+        try:
+            response = client.complete(model, messages, tools or [], params or {})
+            return response, None
+        except RuntimeError as exc:
+            last_error = str(exc)
+            if attempt < 2 and _is_transient_ai_error(last_error):
+                time.sleep(0.6 * (attempt + 1))
+                continue
+            return None, "AI request failed: " + last_error
+    return None, "AI request failed: " + last_error
+
+
+def _ai_error_after_tool_use_response(ai_error):
+    message = str(ai_error or "AI request failed")
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": (
+                    "tool 実行後に AI provider がエラーを返したため停止しました。"
+                    "ここまでの tool ログとスクリーンショットは保存済みです。"
+                    " reason: "
+                    + message
+                ),
+            }
+        ],
+        "finish_reason": "ai_error_after_tool_use",
+        "usage": {},
+        "metadata": {
+            "ai_error_after_tool_use": True,
+            "ai_error": message,
+            "transient_ai_error": _is_transient_ai_error(message),
+        },
+    }
+
+
+def _stop_after_tool_ai_error(events, context, ai_error):
+    _append_event(
+        events,
+        context,
+        _event(
+            "status",
+            "tool 実行後の AI provider エラーで停止しました",
+            phase="ai_error_after_tool_use",
+            ai_error=str(ai_error or "AI request failed"),
+            transient_ai_error=_is_transient_ai_error(ai_error),
+        ),
+    )
+    return _ai_error_after_tool_use_response(ai_error)
 
 
 def _event(event_type, message, **extra):
@@ -211,7 +272,9 @@ def _with_inferred_tools(input_data, inferred_tool_ids):
 def _computer_use_preferences_from_text(user_text):
     text = user_text if isinstance(user_text, str) else ""
     preferences = {}
-    if _COMPUTER_USE_CHROME_TARGET_RE.search(text):
+    if _COMPUTER_USE_VIVALDI_TARGET_RE.search(text):
+        preferences["computer_use_target_app"] = "Vivaldi"
+    elif _COMPUTER_USE_CHROME_TARGET_RE.search(text) and not _COMPUTER_USE_CHROME_NEGATED_RE.search(text):
         preferences["computer_use_target_app"] = "Google Chrome"
     if _COMPUTER_USE_LINE_TARGET_RE.search(text):
         preferences["computer_use_target_title"] = "LINE"
@@ -575,16 +638,26 @@ def _browser_screenshot_guidance(result):
     return " ".join(parts)
 
 
-def _append_tool_result_message(messages, tool_name, result, tool_call_id="", *, model=""):
-    result_text = ""
+def _tool_result_message_text(tool_name, result):
     if isinstance(result, dict):
         data = result.get("data", result)
         if isinstance(data, dict):
-            result_text = str(data.get("result", data.get("summary", json.dumps(data, ensure_ascii=False))))
+            if tool_name in {"browser_computer", "browser_use", "computer_use"}:
+                result_text = json.dumps(_compact_tool_log_value(data), ensure_ascii=False)
+            else:
+                result_text = str(data.get("result", data.get("summary", json.dumps(data, ensure_ascii=False))))
         else:
             result_text = str(data)
     else:
         result_text = str(result)
+    max_chars = 12000
+    if len(result_text) > max_chars:
+        return result_text[:max_chars] + "\n[tool result truncated]"
+    return result_text
+
+
+def _append_tool_result_message(messages, tool_name, result, tool_call_id="", *, model=""):
+    result_text = _tool_result_message_text(tool_name, result)
     messages.append(
         {
             "role": "tool",
@@ -711,12 +784,19 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
             response = call_handler("defaults.ai.complete", ai_params)
             if isinstance(response, dict) and response.get("status") == "error":
                 err = response.get("error", {})
-                raise RuntimeError(str(err.get("message") or "AI request failed"))
+                ai_error = str(err.get("message") or "AI request failed")
+                if tool_logs:
+                    response = _stop_after_tool_ai_error(events, context, ai_error)
+                    break
+                raise RuntimeError(ai_error)
             if isinstance(response, dict) and response.get("status") == "ok":
                 response = response.get("data", {})
         else:
             response, ai_error = _ai_direct_complete(model, working_messages, tools, params)
             if ai_error is not None:
+                if tool_logs:
+                    response = _stop_after_tool_ai_error(events, context, ai_error)
+                    break
                 raise RuntimeError(ai_error)
         _raise_if_cancelled(context)
 

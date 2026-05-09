@@ -750,7 +750,8 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
 def _wait_for_signal():
     """Block the main thread until interrupted (cross-platform)."""
     try:
-        signal.pause()
+        while True:
+            signal.pause()
     except AttributeError:
         # Windows does not have signal.pause(); poll instead.
         import time

@@ -36,19 +36,103 @@ def _is_allowed_image_path(path, roots):
     return None
 
 
+def _number(value):
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def _scale_marker_to_model(marker, record):
+    if not isinstance(marker, dict):
+        return marker
+    model_size = record.get("model_image_size")
+    if not isinstance(model_size, dict):
+        return marker
+    model_width = _number(model_size.get("width"))
+    model_height = _number(model_size.get("height"))
+    if not model_width or not model_height:
+        return marker
+    target = record.get("target_window") if isinstance(record.get("target_window"), dict) else None
+    action_space = record.get("action_coordinate_system") if isinstance(record.get("action_coordinate_system"), dict) else None
+    reference = target or action_space
+    ref_width = _number(reference.get("width")) if isinstance(reference, dict) else None
+    ref_height = _number(reference.get("height")) if isinstance(reference, dict) else None
+    ref_x = _number(reference.get("x")) if isinstance(reference, dict) else 0
+    ref_y = _number(reference.get("y")) if isinstance(reference, dict) else 0
+    screen_x = _number(marker.get("screen_x"))
+    screen_y = _number(marker.get("screen_y"))
+    if ref_width and ref_height and screen_x is not None and screen_y is not None:
+        scaled = dict(marker)
+        scaled["x"] = round((screen_x - (ref_x or 0)) * model_width / ref_width)
+        scaled["y"] = round((screen_y - (ref_y or 0)) * model_height / ref_height)
+        scaled["coordinate_space"] = "model_image"
+        return scaled
+    image_size = record.get("image_size")
+    image_width = _number(image_size.get("width")) if isinstance(image_size, dict) else None
+    image_height = _number(image_size.get("height")) if isinstance(image_size, dict) else None
+    marker_x = _number(marker.get("x"))
+    marker_y = _number(marker.get("y"))
+    if image_width and image_height and marker_x is not None and marker_y is not None:
+        scaled = dict(marker)
+        scaled["x"] = round(marker_x * model_width / image_width)
+        scaled["y"] = round(marker_y * model_height / image_height)
+        scaled["coordinate_space"] = "model_image"
+        return scaled
+    return marker
+
+
+def _scale_drag_marker_to_model(marker, record):
+    if not isinstance(marker, dict):
+        return marker
+    scaled = dict(marker)
+    if isinstance(scaled.get("from"), dict):
+        scaled["from"] = _scale_marker_to_model(scaled.get("from"), record)
+    if isinstance(scaled.get("to"), dict):
+        scaled["to"] = _scale_marker_to_model(scaled.get("to"), record)
+    return scaled
+
+
+def _display_record_for_image(value, inherited, key, item):
+    record = dict(inherited)
+    model_path = value.get("model_image_path") if isinstance(value, dict) else None
+    if isinstance(model_path, str) and model_path:
+        record["path"] = model_path
+        record["source_path"] = item
+        record["path_key"] = "model_image_path"
+        if isinstance(value.get("model_image_size"), dict):
+            record["image_size"] = value.get("model_image_size")
+        for marker_key in ("click_marker", "marker"):
+            if marker_key in record:
+                record[marker_key] = _scale_marker_to_model(record.get(marker_key), record)
+        if "drag_marker" in record:
+            record["drag_marker"] = _scale_drag_marker_to_model(record.get("drag_marker"), record)
+        return record
+    record["path"] = item
+    record["path_key"] = key
+    return record
+
+
 def _candidate_image_records(value, inherited=None):
     inherited = dict(inherited or {})
     if isinstance(value, dict):
         local = dict(inherited)
-        for meta_key in ("click_marker", "marker", "target", "target_window", "image_size", "action"):
+        for meta_key in (
+            "click_marker",
+            "marker",
+            "drag_marker",
+            "target",
+            "target_window",
+            "image_size",
+            "model_image_size",
+            "action_coordinate_system",
+            "action",
+        ):
             if meta_key in value:
                 local[meta_key] = value.get(meta_key)
         for key, item in value.items():
-            if key in {"path", "model_image_path", "screenshot_path"} and isinstance(item, str):
-                record = dict(local)
-                record["path"] = item
-                record["path_key"] = key
-                yield record
+            if key in {"path", "screenshot_path"} and isinstance(item, str):
+                yield _display_record_for_image(value, local, key, item)
             else:
                 yield from _candidate_image_records(item, local)
     elif isinstance(value, list):
@@ -125,7 +209,7 @@ def run(input_data, context):
                 "mime_type": mime_type,
                 "data_url": data_url,
             }
-            for meta_key in ("click_marker", "marker", "target", "target_window", "image_size", "action"):
+            for meta_key in ("click_marker", "marker", "drag_marker", "target", "target_window", "image_size", "action"):
                 if meta_key in candidate:
                     item[meta_key] = candidate.get(meta_key)
             screenshots.append(item)

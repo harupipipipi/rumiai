@@ -15,12 +15,20 @@
         "properties": {
           "action": {
             "type": "string",
-            "enum": ["context", "apps", "screenshot", "move", "click", "select_app", "show_app", "select_window", "windows", "type", "key", "scroll"],
-            "description": "Use context/apps/windows to inspect open apps, show_app with app/name to bring an app to the main visible screen, select_window with app/title to target a visible window, click to place the virtual AI cursor/marker, type to enter text, key for shortcuts or single keys, and screenshot to inspect.",
+            "enum": ["context", "apps", "screenshot", "move", "click", "drag", "select_app", "show_app", "select_window", "windows", "type", "key", "scroll"],
+            "description": "Use context/apps/windows to inspect open apps, show_app with app/name to bring an app to the main visible screen, select_window with app/title to target a visible window, move/click/drag for mouse actions with the virtual AI cursor/marker by default, type to enter text, key for shortcuts or single keys, and screenshot to inspect.",
             "default": "screenshot"
           },
           "x": {"type": "integer"},
           "y": {"type": "integer"},
+          "x1": {"type": "integer", "description": "Drag start x coordinate."},
+          "y1": {"type": "integer", "description": "Drag start y coordinate."},
+          "x2": {"type": "integer", "description": "Drag end x coordinate."},
+          "y2": {"type": "integer", "description": "Drag end y coordinate."},
+          "from_x": {"type": "integer", "description": "Alias for drag start x coordinate."},
+          "from_y": {"type": "integer", "description": "Alias for drag start y coordinate."},
+          "to_x": {"type": "integer", "description": "Alias for drag end x coordinate."},
+          "to_y": {"type": "integer", "description": "Alias for drag end y coordinate."},
           "text": {"type": "string", "description": "Text to enter when action is type. Prefer this over repeated key presses for words."},
           "key": {"type": "string", "description": "Single key or shortcut key for action=key, for example backspace, return, or a with modifier=meta."},
           "modifier": {"type": "string", "description": "Optional single key modifier such as meta, command, control, shift, or alt."},

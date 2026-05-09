@@ -47,6 +47,10 @@ export type BrowserScreenshot = {
   image_size?: { width?: number; height?: number };
   click_marker?: { x?: number; y?: number; screen_x?: number; screen_y?: number; coordinate_space?: string };
   marker?: { x?: number; y?: number; screen_x?: number; screen_y?: number; coordinate_space?: string };
+  drag_marker?: {
+    from?: { x?: number; y?: number; screen_x?: number; screen_y?: number; coordinate_space?: string };
+    to?: { x?: number; y?: number; screen_x?: number; screen_y?: number; coordinate_space?: string };
+  };
   target_window?: Record<string, unknown>;
 };
 

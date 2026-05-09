@@ -20,6 +20,7 @@ def run(context, args):
         "browser.open_url",
         "computer.move",
         "computer.click",
+        "computer.drag",
         "computer.show_app",
         "computer.type",
         "computer.key",
@@ -58,9 +59,4 @@ def _payload_with_context_defaults(action, payload, context):
             payload.setdefault("app", target_app.strip())
         if isinstance(target_title, str) and target_title.strip():
             payload.setdefault("title", target_title.strip())
-    if (
-        context.get("user_requested_computer_use") is True
-        and action == "computer.click"
-    ):
-        payload.setdefault("physical", True)
     return payload

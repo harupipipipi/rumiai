@@ -63,6 +63,32 @@ test("uses running tool_call events when a log has not arrived yet", () => {
   assert.equal(groups[0].items[0].title, "ファイル / coding_file_list: src");
 });
 
+test("updates streamed tool activity when a completion event arrives before the log", () => {
+  const groups = buildToolActivityGroups([], [
+    {
+      type: "tool_call_started",
+      phase: "tool_call_started",
+      tool_call_id: "call_1",
+      tool_name: "computer_use",
+      arguments: { action: "click", app: "Notion", x: 120, y: 340 },
+      message: "computer_use を使用中",
+    },
+    {
+      type: "tool_call_completed",
+      phase: "tool_call_completed",
+      tool_call_id: "call_1",
+      tool_name: "computer_use",
+      arguments: { action: "click", app: "Notion", x: 120, y: 340 },
+      message: "computer_use の結果を受け取りました",
+      is_error: false,
+    },
+  ]);
+
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].items[0].status, "completed");
+  assert.equal(groups[0].items[0].input, "click Notion (120, 340)");
+});
+
 test("dedupes started events when a matching completed log exists", () => {
   const groups = buildToolActivityGroups(
     [

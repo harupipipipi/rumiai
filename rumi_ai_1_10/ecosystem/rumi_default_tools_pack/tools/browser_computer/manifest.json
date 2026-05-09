@@ -15,7 +15,7 @@
         "properties": {
           "action": {
             "type": "string",
-            "enum": ["browser.open_url", "browser.session", "computer.context", "computer.apps", "computer.screenshot", "computer.move", "computer.click", "computer.select_app", "computer.show_app", "computer.select_window", "computer.windows", "computer.type", "computer.key", "computer.scroll"]
+            "enum": ["browser.open_url", "browser.session", "computer.context", "computer.apps", "computer.screenshot", "computer.move", "computer.click", "computer.drag", "computer.select_app", "computer.show_app", "computer.select_window", "computer.windows", "computer.type", "computer.key", "computer.scroll"]
           },
           "payload": {"type": "object"}
         },
