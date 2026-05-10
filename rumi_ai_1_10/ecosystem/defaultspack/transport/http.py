@@ -24,6 +24,13 @@ from domain.safety.local_guard import (
 from transport.registry import build_always_available_http_routes, build_fallback_http_routes
 
 
+_PACK_NOT_APPROVED_SAFE_GET_FALLBACK_BLOCKS = {
+    "blocks.ui.catalog",
+    "blocks.ui.settings",
+    "blocks.ui.commands",
+}
+
+
 class DefaultsHttpServer:
     def __init__(self, facade):
         self.facade = facade
@@ -165,17 +172,25 @@ class DefaultsHttpServer:
                 )
                 error_info = result.get("error", {}) if isinstance(result, dict) else {}
                 error_code = str(error_info.get("code") or "")
-                if error_code not in {
+                if error_code == "PACK_NOT_APPROVED":
+                    if self._pack_not_approved_fallback_allowed(module_name, payload):
+                        pass
+                    else:
+                        return result
+                elif error_code not in {
                     "FUNCTION_REGISTRY_UNAVAILABLE",
                     "FUNCTION_NOT_FOUND",
                     "CAPABILITY_RUNTIME_UNAVAILABLE",
                     "CAPABILITY_EXECUTION_FAILED",
-                    "PACK_NOT_APPROVED",
                 }:
                     return result
         except Exception:
             pass
         return invoke_block(module_name, payload, context)
+
+    def _pack_not_approved_fallback_allowed(self, module_name, payload):
+        actual_method = str(payload.get("_actual_method") or "").upper()
+        return actual_method == "GET" and module_name in _PACK_NOT_APPROVED_SAFE_GET_FALLBACK_BLOCKS
 
     # ---- Chat Handlers (fallback) ----
 
@@ -624,12 +639,14 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                 if path_inject and path_params:
                     for url_param, data_key in path_inject.items():
                         request_data[data_key] = path_params.get(url_param, "")
-                request_data.setdefault("_method", method)
+                request_data["_method"] = method
+                request_data["_actual_method"] = method
                 context = self.server_ref._build_context()
                 context["_facade"] = self.server_ref.facade
                 result = handler(request_data, context)
             else:
-                request_data.setdefault("_method", method)
+                request_data["_method"] = method
+                request_data["_actual_method"] = method
                 # Fallback: original handler signature (request_data, path_params)
                 result = handler(request_data, path_params)
 

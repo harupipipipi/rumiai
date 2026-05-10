@@ -450,7 +450,7 @@ type SendMessageOptions = {
 type ChatStreamError = string | { code?: string; message?: string };
 
 export type ChatToolStreamEvent = ChatActivityEvent & {
-  type: "status" | "tool_call" | "tool_call_started" | "tool_call_completed" | "tool_result" | "approval_requested";
+  type: "status" | "tool_call" | "tool_call_started" | "tool_call_completed" | "tool_result" | "browser_screenshot" | "approval_requested";
 };
 
 export type ChatStreamEvent =

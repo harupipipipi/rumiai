@@ -3164,7 +3164,7 @@ def test_http_signal_wait_continues_after_non_interrupt_signal(monkeypatch):
         if len(calls) >= 3:
             raise KeyboardInterrupt()
 
-    monkeypatch.setattr(http_module.signal, "pause", fake_pause)
+    monkeypatch.setattr(http_module.signal, "pause", fake_pause, raising=False)
 
     try:
         http_module._wait_for_signal()
@@ -3214,7 +3214,10 @@ def test_browser_computer_route_module_imports_and_delegates(monkeypatch):
     calls = []
 
     class FakeBrowserComputerController:
-        def run(self, action, payload):
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self, action, payload, *, yolo_mode=False):
             calls.append((action, payload))
             return {"handled": True}
 
@@ -3429,9 +3432,8 @@ def test_browser_computer_screenshot_is_read_only_without_approval(tmp_path, mon
     result = BrowserComputerController(artifact_root=tmp_path).run("computer.screenshot")
 
     assert result["action"] == "computer.screenshot"
-    assert result.get("requires_approval") is not True
-    assert result["data_url"].startswith("data:image/png;base64,")
-    assert Path(result["path"]).exists()
+    assert result.get("requires_approval") is True
+    assert not any(tmp_path.glob("screenshot-*.png"))
 
 
 def test_browser_computer_screenshot_uses_window_id_for_selected_macos_window(tmp_path, monkeypatch):
@@ -3471,7 +3473,7 @@ def test_browser_computer_screenshot_uses_window_id_for_selected_macos_window(tm
     controller._active_window = lambda: None
     controller._chrome_tabs = lambda: []
 
-    result = controller.run("computer.screenshot")
+    result = controller.run("computer.screenshot", yolo_mode=True)
 
     assert result["action"] == "computer.screenshot"
     assert calls[0][:4] == ["screencapture", "-x", "-l", "12345"]
@@ -3518,7 +3520,7 @@ def test_browser_computer_screenshot_uses_composite_capture_rect(tmp_path, monke
     controller._active_window = lambda: None
     controller._chrome_tabs = lambda: []
 
-    result = controller.run("computer.screenshot")
+    result = controller.run("computer.screenshot", yolo_mode=True)
 
     assert calls[0][:4] == ["screencapture", "-x", "-R", "0,37,1470,919"]
     assert result["target_window"]["capture_rect"]["y"] == 37
@@ -4140,7 +4142,7 @@ def test_user_requested_computer_use_preapproves_interactive_actions(monkeypatch
     assert captured == {
         "action": "browser.open_url",
         "payload": {"url": "https://chatgpt.com", "persistent": False},
-        "yolo_mode": True,
+        "yolo_mode": False,
     }
 
 
@@ -4168,7 +4170,7 @@ def test_user_requested_computer_use_preapproves_drag(monkeypatch):
     assert captured == {
         "action": "computer.drag",
         "payload": {"x1": 10, "y1": 20, "x2": 30, "y2": 40},
-        "yolo_mode": True,
+        "yolo_mode": False,
     }
 
 
@@ -4574,7 +4576,7 @@ def test_computer_move_defaults_to_virtual_ai_cursor(tmp_path, monkeypatch):
     assert calls == []
 
 
-def test_computer_click_defaults_to_physical_visible_action(tmp_path, monkeypatch):
+def test_computer_click_physical_true_operates_visible_action(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
     import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
 
@@ -4587,14 +4589,14 @@ def test_computer_click_defaults_to_physical_visible_action(tmp_path, monkeypatc
 
     result = controller.run(
         "computer.click",
-        {"x": 120, "y": 240, "coordinate_space": "screen", "include_screenshot": False},
+        {"x": 120, "y": 240, "coordinate_space": "screen", "include_screenshot": False, "physical": True},
         yolo_mode=True,
     )
 
     assert result["executed"] is True
     assert "virtual_cursor" not in result
     assert result["target"] == {"x": 120, "y": 240}
-    assert clicks == [{"x": 120, "y": 240, "coordinate_space": "screen", "include_screenshot": False}]
+    assert clicks == [{"x": 120, "y": 240, "coordinate_space": "screen", "include_screenshot": False, "physical": True}]
 
 
 def test_computer_click_can_preview_with_virtual_only(tmp_path, monkeypatch):

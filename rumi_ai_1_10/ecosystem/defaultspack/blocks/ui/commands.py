@@ -12,7 +12,7 @@ def run(input_data, context):
     registry = SlashCommandRegistry()
     method = (input_data or {}).get("_method", "GET").upper()
     if method == "GET":
-        return ok({"commands": registry.list_commands()})
+        return ok({"commands": registry.list_commands(), "manifest_errors": registry.manifest_errors()})
     if method == "POST":
         return registry.execute(input_data or {}, context or {})
     return error("unsupported method", "METHOD_NOT_ALLOWED")

@@ -610,15 +610,6 @@ class ToolExecutor:
             if _is_cancelled(context):
                 return _cancelled_tool_result(tool_name, action=action)
             user_requested = bool(isinstance(context, dict) and context.get("user_requested_computer_use"))
-            user_approved_actions = {
-                "browser.open_url",
-                "computer.move",
-                "computer.click",
-                "computer.drag",
-                "computer.type",
-                "computer.key",
-                "computer.scroll",
-            }
             if user_requested and action == "browser.open_url" and not any(
                 key in payload for key in ("persistent", "profile_id", "session_id")
             ):
@@ -626,7 +617,7 @@ class ToolExecutor:
             result = BrowserComputerController(artifact_root=_conversation_tool_artifact_root(context)).run(
                 action,
                 _computer_use_payload_with_context_defaults(action, payload, context),
-                yolo_mode=bool(policy.get("yolo_mode")) or (user_requested and action in user_approved_actions),
+                yolo_mode=_truthy(policy.get("yolo_mode")),
             )
             if _is_cancelled(context):
                 return _cancelled_tool_result(tool_name, action=action)
@@ -719,6 +710,12 @@ def _cancelled_tool_result(tool_name, *, action=""):
         },
         "cancelled": True,
     }
+
+
+def _truthy(value):
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
 
 
 def _safe_calculate(expression):

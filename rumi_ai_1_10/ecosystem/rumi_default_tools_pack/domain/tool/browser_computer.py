@@ -34,8 +34,9 @@ class BrowserComputerController:
 
     def run(self, action: str, payload: dict[str, Any] | None = None, *, yolo_mode: bool = False) -> dict[str, Any]:
         payload = payload or {}
+        yolo_mode = self._truthy(yolo_mode)
         if action == "browser.open_url":
-            return self._open_url(str(payload.get("url", "")), payload=payload, dry_run=bool(payload.get("dry_run")), yolo_mode=yolo_mode)
+            return self._open_url(str(payload.get("url", "")), payload=payload, dry_run=self._truthy(payload.get("dry_run")), yolo_mode=yolo_mode)
         if action == "browser.session":
             return {"action": action, "platform": platform.system(), "capabilities": self._capabilities(), "session": self._read_sessions()}
         if action == "browser.profiles.list":
@@ -45,17 +46,17 @@ class BrowserComputerController:
         if action == "browser.profile.set_active":
             return self._set_active_profile(payload)
         if action == "browser.profile.delete":
-            return self._delete_profile(payload, dry_run=bool(payload.get("dry_run")), yolo_mode=yolo_mode)
+            return self._delete_profile(payload, dry_run=self._truthy(payload.get("dry_run")), yolo_mode=yolo_mode)
         if action == "browser.profile.clear_cache":
-            return self._clear_cache(payload, dry_run=bool(payload.get("dry_run")), yolo_mode=yolo_mode)
+            return self._clear_cache(payload, dry_run=self._truthy(payload.get("dry_run")), yolo_mode=yolo_mode)
         if action == "browser.profile.clear_cookies":
-            return self._clear_cookies(payload, dry_run=bool(payload.get("dry_run")), yolo_mode=yolo_mode)
+            return self._clear_cookies(payload, dry_run=self._truthy(payload.get("dry_run")), yolo_mode=yolo_mode)
         if action == "browser.cookies.list":
             return self._list_cookies(payload)
         if action == "browser.cookies.import":
             return self._import_cookies(payload)
         if action == "browser.cookies.delete":
-            return self._delete_cookies(payload, dry_run=bool(payload.get("dry_run")), yolo_mode=yolo_mode)
+            return self._delete_cookies(payload, dry_run=self._truthy(payload.get("dry_run")), yolo_mode=yolo_mode)
         if action in {"computer.context", "computer.app_context", "computer.state"}:
             return self._context(payload)
         if action in {"computer.apps", "computer.list_apps", "computer.open_apps", "computer.applications"}:
@@ -69,7 +70,7 @@ class BrowserComputerController:
         if action == "computer.select_window":
             return self._select_window(payload)
         if action == "computer.screenshot":
-            return self._screenshot(payload=payload, dry_run=bool(payload.get("dry_run")), yolo_mode=yolo_mode)
+            return self._screenshot(payload=payload, dry_run=self._truthy(payload.get("dry_run")), yolo_mode=yolo_mode)
         if action in {"computer.move", "computer.click", "computer.drag", "computer.type", "computer.key", "computer.scroll"}:
             return self._desktop_action(action, payload, yolo_mode=yolo_mode)
         raise ValueError(f"Unsupported browser/computer action: {action}")
@@ -79,6 +80,7 @@ class BrowserComputerController:
             raise ValueError("'url' must start with http://, https://, or file://")
         profile_id = self._profile_id(payload.get("profile_id") or payload.get("session_id") or self._active_profile_id())
         persistent = payload.get("persistent", True) is not False
+        target_app = self._app_name_from_payload(payload)
         launch_plan = self._browser_launch_plan(url, profile_id, persistent=persistent)
         if dry_run:
             return {
@@ -89,14 +91,14 @@ class BrowserComputerController:
                 "dry_run": True,
                 "requires_approval": False,
                 "launch": launch_plan,
+                **({"target_app": target_app} if target_app else {}),
             }
-        approval_payload = {"url": url, "profile_id": profile_id, "persistent": persistent}
+        approval_payload = {"url": url, "profile_id": profile_id, "persistent": persistent, "target_app": target_app}
         approved = yolo_mode or self._consume_approval(payload, "browser.open_url", approval_payload)
         if not approved:
             return self._approval_required("browser.open_url", approval_payload)
         self._ensure_profile(profile_id)
         opened_with_managed_profile = False
-        target_app = self._app_name_from_payload(payload)
         if persistent and launch_plan.get("command") and not target_app:
             command = [str(part) for part in launch_plan["command"]]
             subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -145,6 +147,8 @@ class BrowserComputerController:
                 return True
             except Exception:
                 return False
+        if platform.system() == "Windows" and app_name:
+            return BrowserComputerController._windows_open_url_foreground(url, app_name)
         if app_name:
             return False
         try:
@@ -292,6 +296,9 @@ class BrowserComputerController:
                 "requires_approval": False,
                 "target_window": self._capture_target(payload),
             }
+        approval_payload = self._safe_payload(payload)
+        if not (yolo_mode or self._consume_approval(payload, "computer.screenshot", approval_payload)):
+            return self._approval_required("computer.screenshot", approval_payload)
         self._artifact_root.mkdir(parents=True, exist_ok=True)
         path = self._artifact_root / f"screenshot-{int(time.time() * 1000)}.png"
         capture = self._capture_or_reuse_screenshot(path, payload)
@@ -309,7 +316,7 @@ class BrowserComputerController:
             return result
         crop_result = self._apply_screenshot_crop(path, payload, capture)
         crop_reference = crop_result.get("crop_reference") if crop_result else None
-        action_target = crop_result.get("action_target") if crop_result else None
+        action_target = crop_result.get("action_target") if crop_result else capture.get("action_coordinate_system")
         if crop_result and isinstance(crop_result.get("path"), Path):
             path = crop_result["path"]
         model_path = self._model_screenshot_copy(path)
@@ -457,7 +464,7 @@ class BrowserComputerController:
             "notes": [
                 "Computer-use is app-generic and visible-screen only: use computer.apps for open/installed apps and computer.windows for visible windows.",
                 "Use select_app/select_window for visible targets, then screenshot/click/type/key against the currently visible UI.",
-                "computer.move and computer.drag use the virtual AI cursor by default. computer.click operates the visible UI by default; set physical=false or virtual_only=true for marker-only previews.",
+                "computer.move, computer.click, and computer.drag use the virtual AI cursor by default; set physical=true only after explicit approval to operate the visible UI.",
                 "Hidden tabs and DOM/Apple Events background input are disabled; if a requested app/window is not visible, ask the user to show it or open it visibly first.",
             ],
         }
@@ -993,6 +1000,7 @@ class BrowserComputerController:
                 script = "\n".join(
                     [
                         "Add-Type -AssemblyName System.Windows.Forms",
+                        BrowserComputerController._windows_dpi_awareness_script(),
                         "$p = [System.Windows.Forms.Cursor]::Position",
                         "ConvertTo-Json @{ x = [int]$p.X; y = [int]$p.Y; origin = 'top_left' } -Compress",
                     ]
@@ -1020,8 +1028,8 @@ class BrowserComputerController:
             height = int(capture_target.get("height", 0))
             return {
                 "origin": "top_left",
-                "unit": "display_coordinate",
-                "screen": "selected_window",
+                "unit": capture_target.get("unit") or "display_coordinate",
+                "screen": capture_target.get("screen") or "selected_window",
                 "x": x,
                 "y": y,
                 "width": width,
@@ -1083,25 +1091,26 @@ class BrowserComputerController:
         return None
 
     def _desktop_action(self, action: str, payload: dict[str, Any], *, yolo_mode: bool) -> dict[str, Any]:
-        dry_run = bool(payload.get("dry_run"))
+        dry_run = self._truthy(payload.get("dry_run"))
         if dry_run:
             return {"action": action, "dry_run": True, "requires_approval": False, "payload": payload}
-        approval_payload = self._safe_payload(payload)
-        if not (yolo_mode or self._consume_approval(payload, action, approval_payload)):
-            return self._approval_required(action, approval_payload)
         system = platform.system()
         action_payload = dict(payload)
         click_marker = None
         drag_marker = None
         if action == "computer.drag":
-            action_payload, click_marker, drag_marker = self._resolve_drag_points(payload)
+            action_payload, click_marker, drag_marker = self._resolve_drag_points(payload, remember_cursor=False)
         elif action in {"computer.move", "computer.click"}:
-            action_payload, click_marker = self._resolve_action_point(payload, infer_window=action == "computer.click")
-        virtual_only = payload.get("virtual_only") is True or payload.get("virtual") is True
-        if action == "computer.click" and payload.get("physical") is False:
-            virtual_only = True
-        if action in {"computer.move", "computer.drag"} and payload.get("physical") is not True:
-            virtual_only = True
+            action_payload, click_marker = self._resolve_action_point(payload, infer_window=action == "computer.click", remember_cursor=False)
+        virtual_only = self._pointer_action_is_virtual_only(action, payload)
+        approval_payload = self._desktop_approval_payload(action, payload, action_payload, virtual_only=virtual_only)
+        if not (yolo_mode or self._consume_approval(payload, action, approval_payload)):
+            return self._approval_required(action, approval_payload)
+        if action == "computer.drag":
+            action_payload, click_marker, drag_marker = self._resolve_drag_points(payload, remember_cursor=True)
+        elif action in {"computer.move", "computer.click"}:
+            action_payload, click_marker = self._resolve_action_point(payload, infer_window=action == "computer.click", remember_cursor=True)
+        virtual_only = self._pointer_action_is_virtual_only(action, payload)
         if action in {"computer.move", "computer.click", "computer.drag"} and virtual_only:
             self._set_ai_cursor(action_payload)
             result: dict[str, Any] = {"action": action, "executed": True, "platform": system, "virtual_cursor": True}
@@ -1207,6 +1216,42 @@ class BrowserComputerController:
             return payload.get("include_screenshot") is True
         return payload.get("include_screenshot", True) is not False
 
+    def _desktop_approval_payload(
+        self,
+        action: str,
+        payload: dict[str, Any],
+        action_payload: dict[str, Any],
+        *,
+        virtual_only: bool,
+    ) -> dict[str, Any]:
+        approval_payload = self._safe_payload(payload)
+        if action in {"computer.move", "computer.click"}:
+            approval_payload["virtual_only"] = bool(virtual_only)
+            approval_payload["resolved_coordinates"] = {
+                "x": int(action_payload.get("x", 0)),
+                "y": int(action_payload.get("y", 0)),
+            }
+        elif action == "computer.drag":
+            approval_payload["virtual_only"] = bool(virtual_only)
+            approval_payload["resolved_coordinates"] = {
+                "from": {
+                    "x": int(action_payload.get("x1", action_payload.get("x", 0))),
+                    "y": int(action_payload.get("y1", action_payload.get("y", 0))),
+                },
+                "to": {
+                    "x": int(action_payload.get("x2", action_payload.get("x", 0))),
+                    "y": int(action_payload.get("y2", action_payload.get("y", 0))),
+                },
+            }
+        return approval_payload
+
+    def _pointer_action_is_virtual_only(self, action: str, payload: dict[str, Any]) -> bool:
+        if action not in {"computer.move", "computer.click", "computer.drag"}:
+            return False
+        if self._truthy(payload.get("physical")):
+            return False
+        return True
+
     @staticmethod
     def _background_requested(payload: dict[str, Any]) -> bool:
         if payload.get("background") is True:
@@ -1270,7 +1315,7 @@ class BrowserComputerController:
             return {}
         crop_result = self._apply_screenshot_crop(path, payload, capture)
         crop_reference = crop_result.get("crop_reference") if crop_result else None
-        action_target = crop_result.get("action_target") if crop_result else None
+        action_target = crop_result.get("action_target") if crop_result else capture.get("action_coordinate_system")
         if crop_result and isinstance(crop_result.get("path"), Path):
             path = crop_result["path"]
         model_path = self._model_screenshot_copy(path)
@@ -1610,8 +1655,19 @@ class BrowserComputerController:
                 subprocess.run(["screencapture", "-x", str(path)], check=True)
             return {"platform": system, "target_window": target}
         if system == "Windows":
-            self._windows_screenshot(path, target=target)
-            return {"platform": system, "target_window": target}
+            capture_bounds = self._windows_screenshot(path, target=target)
+            action_coordinate_system = None
+            if isinstance(capture_bounds, dict):
+                action_coordinate_system = self._action_coordinate_system(
+                    system,
+                    (int(capture_bounds.get("width", 0)), int(capture_bounds.get("height", 0))),
+                    capture_target=capture_bounds,
+                )
+            return {
+                "platform": system,
+                "target_window": target,
+                "action_coordinate_system": action_coordinate_system,
+            }
         return {"platform": system, "supported": False}
 
     def _capture_target(self, payload: dict[str, Any] | None = None) -> dict[str, Any] | None:
@@ -1668,28 +1724,36 @@ class BrowserComputerController:
             return selected
         return None
 
-    def _resolve_action_point(self, payload: dict[str, Any], *, infer_window: bool = False) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    def _resolve_action_point(
+        self,
+        payload: dict[str, Any],
+        *,
+        infer_window: bool = False,
+        remember_cursor: bool = True,
+    ) -> tuple[dict[str, Any], dict[str, Any] | None]:
         state = self._computer_state()
         cursor = state.get("ai_cursor") if isinstance(state.get("ai_cursor"), dict) else {}
         x, y = self._point_from_payload(payload, cursor)
         target = self._capture_target(payload)
         if target is None and infer_window:
             target = self._window_at_point(x, y)
-            if target is not None:
+            if target is not None and remember_cursor:
                 state["target_window"] = target
                 self._write_computer_state(state)
         coordinate_space = str(payload.get("coordinate_space") or payload.get("space") or "auto").strip().lower()
         if coordinate_space in self._normalized_coordinate_spaces() or self._has_normalized_point(payload):
             normalized_payload, normalized_marker = self._resolve_normalized_point(payload, x, y, state, target=target)
             if normalized_payload is not None:
-                self._set_ai_cursor(normalized_payload)
+                if remember_cursor:
+                    self._set_ai_cursor(normalized_payload)
                 return normalized_payload, normalized_marker
         if coordinate_space in {"model", "model_image", "preview", "screenshot_preview"} or (
             coordinate_space == "auto" and self._point_looks_like_model_coordinate(x, y, state)
         ):
             model_payload, model_marker = self._resolve_model_point(payload, x, y, state)
             if model_payload is not None:
-                self._set_ai_cursor(model_payload)
+                if remember_cursor:
+                    self._set_ai_cursor(model_payload)
                 return model_payload, model_marker
         use_window_space = False
         if target and coordinate_space in {"auto", "window", "target", "screenshot", "image"}:
@@ -1717,7 +1781,8 @@ class BrowserComputerController:
                 marker["x"] = x - int(target.get("x", 0))
                 marker["y"] = y - int(target.get("y", 0))
                 marker["coordinate_space"] = "screenshot_image"
-        self._set_ai_cursor(action_payload)
+        if remember_cursor:
+            self._set_ai_cursor(action_payload)
         return action_payload, marker
 
     @staticmethod
@@ -1845,6 +1910,8 @@ class BrowserComputerController:
     def _resolve_drag_points(
         self,
         payload: dict[str, Any],
+        *,
+        remember_cursor: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any] | None, dict[str, Any] | None]:
         state = self._computer_state()
         cursor = state.get("ai_cursor") if isinstance(state.get("ai_cursor"), dict) else {}
@@ -1856,12 +1923,12 @@ class BrowserComputerController:
         start_payload = dict(payload)
         start_payload["x"] = start_x
         start_payload["y"] = start_y
-        start_action, start_marker = self._resolve_action_point(start_payload)
+        start_action, start_marker = self._resolve_action_point(start_payload, remember_cursor=remember_cursor)
 
         end_payload = dict(payload)
         end_payload["x"] = end_x
         end_payload["y"] = end_y
-        end_action, end_marker = self._resolve_action_point(end_payload, infer_window=True)
+        end_action, end_marker = self._resolve_action_point(end_payload, infer_window=True, remember_cursor=remember_cursor)
 
         action_payload = dict(end_action)
         action_payload["x1"] = int(start_action.get("x", 0))
@@ -2757,6 +2824,14 @@ $ErrorActionPreference = 'Stop'
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
+public class RumiDpi {
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+}
+'@ -ErrorAction SilentlyContinue
+[void][RumiDpi]::SetProcessDPIAware()
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
 public class RumiActiveApp {
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
 }
@@ -2814,7 +2889,48 @@ $items | Select-Object -First $limit | ConvertTo-Json -Compress
         except Exception:
             return []
 
-    def _windows_screenshot(self, path: Path, target: dict[str, Any] | None = None) -> None:
+    @staticmethod
+    def _windows_open_url_foreground(url: str, app_name: str) -> bool:
+        normalized = app_name.strip().lower()
+        candidates: list[Path] = []
+        roots = [os.environ.get("LOCALAPPDATA"), os.environ.get("PROGRAMFILES"), os.environ.get("PROGRAMFILES(X86)")]
+        for root_value in roots:
+            if not root_value:
+                continue
+            root = Path(root_value)
+            if any(name in normalized for name in ("chrome", "chromium")):
+                candidates.append(root / "Google" / "Chrome" / "Application" / "chrome.exe")
+            if "edge" in normalized:
+                candidates.append(root / "Microsoft" / "Edge" / "Application" / "msedge.exe")
+            if "firefox" in normalized:
+                candidates.append(root / "Mozilla Firefox" / "firefox.exe")
+        for name in (app_name, f"{app_name}.exe"):
+            resolved = shutil.which(name)
+            if resolved:
+                candidates.insert(0, Path(resolved))
+        executable = next((candidate for candidate in candidates if candidate.exists()), None)
+        if executable is None:
+            return False
+        try:
+            subprocess.Popen([str(executable), url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _windows_dpi_awareness_script() -> str:
+        return r'''
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public class RumiDpi {
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+}
+'@ -ErrorAction SilentlyContinue
+[void][RumiDpi]::SetProcessDPIAware()
+'''
+
+    def _windows_screenshot(self, path: Path, target: dict[str, Any] | None = None) -> dict[str, Any]:
         escaped = self._ps_single(str(path))
         bounds_script = (
             "$bounds = New-Object System.Drawing.Rectangle({}, {}, {}, {})".format(
@@ -2824,13 +2940,14 @@ $items | Select-Object -First $limit | ConvertTo-Json -Compress
                 int(target.get("height", 0)),
             )
             if target
-            else "$bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds"
+            else "$bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen"
         )
         script = "\n".join(
             [
                 "$ErrorActionPreference = 'Stop'",
                 "Add-Type -AssemblyName System.Windows.Forms",
                 "Add-Type -AssemblyName System.Drawing",
+                self._windows_dpi_awareness_script(),
                 bounds_script,
                 "$bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height",
                 "$graphics = [System.Drawing.Graphics]::FromImage($bitmap)",
@@ -2841,12 +2958,48 @@ $items | Select-Object -First $limit | ConvertTo-Json -Compress
             ]
         )
         self._run_powershell(script)
+        if target:
+            return {
+                "x": int(target.get("x", 0)),
+                "y": int(target.get("y", 0)),
+                "width": int(target.get("width", 0)),
+                "height": int(target.get("height", 0)),
+                "screen": "selected_window",
+                "unit": "display_coordinate",
+            }
+        return self._windows_virtual_screen_bounds()
+
+    def _windows_virtual_screen_bounds(self) -> dict[str, Any]:
+        script = "\n".join(
+            [
+                "$ErrorActionPreference = 'Stop'",
+                "Add-Type -AssemblyName System.Windows.Forms",
+                self._windows_dpi_awareness_script(),
+                "$bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen",
+                "ConvertTo-Json @{ x = [int]$bounds.X; y = [int]$bounds.Y; width = [int]$bounds.Width; height = [int]$bounds.Height; screen = 'virtual_screen'; unit = 'display_coordinate' } -Compress",
+            ]
+        )
+        try:
+            value = json.loads(self._run_powershell_capture(script) or "{}")
+            if isinstance(value, dict) and value.get("width") and value.get("height"):
+                return {
+                    "x": int(value.get("x", 0)),
+                    "y": int(value.get("y", 0)),
+                    "width": int(value.get("width", 0)),
+                    "height": int(value.get("height", 0)),
+                    "screen": "virtual_screen",
+                    "unit": "display_coordinate",
+                }
+        except Exception:
+            pass
+        return {"x": 0, "y": 0, "width": 0, "height": 0, "screen": "virtual_screen", "unit": "display_coordinate"}
 
     def _windows_desktop_action(self, action: str, payload: dict[str, Any]) -> None:
         prelude = [
             "$ErrorActionPreference = 'Stop'",
             "Add-Type -AssemblyName System.Windows.Forms",
             "Add-Type -AssemblyName System.Drawing",
+            self._windows_dpi_awareness_script(),
         ]
         if action == "computer.move":
             x = int(payload.get("x", 0))
@@ -2883,7 +3036,13 @@ $items | Select-Object -First $limit | ConvertTo-Json -Compress
                     "$original = [System.Windows.Forms.Cursor]::Position",
                     f"[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point({x1}, {y1})",
                     "[RumiMouse]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)",
-                    f"[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point({x2}, {y2})",
+                    "$steps = 12",
+                    "for ($index = 1; $index -le $steps; $index++) {",
+                    f"  $px = [int]({x1} + (({x2} - {x1}) * $index / $steps))",
+                    f"  $py = [int]({y1} + (({y2} - {y1}) * $index / $steps))",
+                    "  [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point($px, $py)",
+                    "  Start-Sleep -Milliseconds 15",
+                    "}",
                     "[RumiMouse]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)",
                     "[System.Windows.Forms.Cursor]::Position = $original" if restore_cursor else "",
                 ]
@@ -2891,21 +3050,35 @@ $items | Select-Object -First $limit | ConvertTo-Json -Compress
             self._run_powershell(script)
             return
         if action == "computer.type":
-            text = self._ps_single(str(payload.get("text", "")))
+            text = self._ps_single(self._windows_sendkeys_escape_text(str(payload.get("text", ""))))
             self._run_powershell("\n".join(prelude + [f"[System.Windows.Forms.SendKeys]::SendWait('{text}')"]))
             return
         if action == "computer.key":
-            key = self._windows_send_key(str(payload.get("key", "ENTER")))
+            key = self._windows_send_key(str(payload.get("key", "ENTER")), payload.get("modifiers") or payload.get("modifier"))
             self._run_powershell("\n".join(prelude + [f"[System.Windows.Forms.SendKeys]::SendWait('{key}')"]))
             return
         if action == "computer.scroll":
             amount = int(payload.get("amount", 1))
             wheel_delta = amount * 120
+            has_point = any(key in payload for key in ("x", "y", "point", "coordinate", "coordinates"))
+            point_payload = payload
+            if has_point:
+                point_payload, _marker = self._resolve_action_point(payload, remember_cursor=False)
             script = "\n".join(
                 prelude
                 + [
-                    "Add-Type -TypeDefinition @'\nusing System;\nusing System.Runtime.InteropServices;\npublic class RumiMouse {\n  [DllImport(\"user32.dll\")]\n  public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);\n}\n'@",
-                    f"[RumiMouse]::mouse_event(0x0800, 0, 0, [uint32]({wheel_delta}), [UIntPtr]::Zero)",
+                    "Add-Type -TypeDefinition @'\nusing System;\nusing System.Runtime.InteropServices;\npublic class RumiMouse {\n  [DllImport(\"user32.dll\")]\n  public static extern void mouse_event(uint flags, int dx, int dy, int data, UIntPtr extra);\n}\n'@",
+                    "$original = [System.Windows.Forms.Cursor]::Position" if has_point else "",
+                    (
+                        "[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point({}, {})".format(
+                            int(point_payload.get("x", 0)),
+                            int(point_payload.get("y", 0)),
+                        )
+                        if has_point
+                        else ""
+                    ),
+                    f"[RumiMouse]::mouse_event(0x0800, 0, 0, {wheel_delta}, [UIntPtr]::Zero)",
+                    "[System.Windows.Forms.Cursor]::Position = $original" if has_point else "",
                 ]
             )
             self._run_powershell(script)
@@ -2974,6 +3147,14 @@ Add-Type -AssemblyName System.Drawing
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
+public class RumiDpi {
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+}
+'@ -ErrorAction SilentlyContinue
+[void][RumiDpi]::SetProcessDPIAware()
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
 using System.Text;
 public class RumiWindow {
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
@@ -2998,8 +3179,19 @@ ConvertTo-Json @{ app = ""; title = $titleBuilder.ToString(); x = $r.Left; y = $
             return None
 
     @staticmethod
-    def _windows_send_key(key: str) -> str:
-        normalized = key.strip().lower()
+    def _windows_send_key(key: str, modifiers: Any = None) -> str:
+        raw = key.strip()
+        normalized = raw.lower()
+        parsed_modifiers: list[str] = []
+        if isinstance(modifiers, str):
+            parsed_modifiers.extend(part.strip().lower() for part in re.split(r"[+, ]+", modifiers) if part.strip())
+        elif isinstance(modifiers, (list, tuple)):
+            parsed_modifiers.extend(str(part).strip().lower() for part in modifiers if str(part).strip())
+        if "+" in normalized:
+            parts = [part for part in normalized.split("+") if part]
+            parsed_modifiers.extend(part for part in parts[:-1] if part)
+            normalized = parts[-1] if parts else normalized
+            raw = normalized
         key_map = {
             "enter": "{ENTER}",
             "return": "{ENTER}",
@@ -3012,12 +3204,59 @@ ConvertTo-Json @{ app = ""; title = $titleBuilder.ToString(); x = $r.Left; y = $
             "down": "{DOWN}",
             "left": "{LEFT}",
             "right": "{RIGHT}",
+            "space": " ",
+            "plus": "{+}",
         }
-        return key_map.get(normalized, key)
+        key_token = key_map.get(normalized)
+        if key_token is None:
+            key_token = raw if len(raw) == 1 else "{" + BrowserComputerController._windows_sendkeys_escape_token(raw.upper()) + "}"
+        modifier_prefix = ""
+        for modifier in parsed_modifiers:
+            if modifier in {"ctrl", "control", "cmd", "command"}:
+                modifier_prefix += "^"
+            elif modifier in {"shift"}:
+                modifier_prefix += "+"
+            elif modifier in {"alt", "option"}:
+                modifier_prefix += "%"
+        return modifier_prefix + key_token
+
+    @staticmethod
+    def _windows_sendkeys_escape_token(value: str) -> str:
+        return value.replace("{", "").replace("}", "")
+
+    @staticmethod
+    def _windows_sendkeys_escape_text(text: str) -> str:
+        pieces: list[str] = []
+        index = 0
+        while index < len(text):
+            char = text[index]
+            if char == "\r":
+                index += 1
+                continue
+            if char == "\n":
+                pieces.append("{ENTER}")
+            elif char == "\t":
+                pieces.append("{TAB}")
+            elif char == "{":
+                pieces.append("{{}")
+            elif char == "}":
+                pieces.append("{}}")
+            elif char in "+^%~()[]":
+                pieces.append("{" + char + "}")
+            else:
+                pieces.append(char)
+            index += 1
+        return "".join(pieces)
 
     @staticmethod
     def _ps_single(value: str) -> str:
         return value.replace("'", "''")
+
+    @staticmethod
+    def _truthy(value: Any) -> bool:
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+        return bool(value)
 
     @staticmethod
     def _run_powershell(script: str) -> None:

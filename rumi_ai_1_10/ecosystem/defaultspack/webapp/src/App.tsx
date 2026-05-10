@@ -536,6 +536,7 @@ function isActivityStreamEvent(event: ChatStreamEvent): event is ChatToolStreamE
     || event.type === "tool_call_started"
     || event.type === "tool_call_completed"
     || event.type === "tool_result"
+    || event.type === "browser_screenshot"
     || event.type === "approval_requested"
   );
 }
@@ -861,6 +862,30 @@ function parseSlashCommandInput(input: string, commands: ComposerCommandItem[]) 
     });
   }
   return { command, args, raw: trimmed };
+}
+
+export function parseCommandBoolean(value: unknown, fallback: boolean): boolean {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return fallback;
+    if (["false", "0", "off", "no", "n", "disable", "disabled"].includes(normalized)) return false;
+    if (["true", "1", "on", "yes", "y", "enable", "enabled"].includes(normalized)) return true;
+  }
+  return Boolean(value);
+}
+
+export function frontendCommandArgs(
+  parsedArgs: Record<string, unknown>,
+  backendArgs: unknown,
+): Record<string, unknown> {
+  return isRecord(backendArgs) ? { ...backendArgs } : parsedArgs;
+}
+
+export function keepSelectedToolsAfterSend(settingsValues: Record<string, Record<string, unknown>>): boolean {
+  return parseCommandBoolean(settingsValues.tools?.keep_selected_tools_after_send, false);
 }
 
 function commandSearchText(command: ComposerCommandItem): string {
@@ -1441,7 +1466,7 @@ export default function App() {
         return;
       }
       case "set_fast_mode": {
-        const enabled = args.enabled === undefined ? true : Boolean(args.enabled);
+        const enabled = parseCommandBoolean(args.enabled, true);
         if (!enabled) {
           handleThinkingLevelChange("medium");
           return;
@@ -1494,7 +1519,7 @@ export default function App() {
         setMode("agent");
         return;
       case "toggle_yolo":
-        setYoloMode((value) => args.enabled === undefined ? !value : Boolean(args.enabled));
+        setYoloMode((value) => parseCommandBoolean(args.enabled, !value));
         return;
       case "open_tool_picker": {
         const query = String(args.query ?? "").trim().toLowerCase();
@@ -1598,7 +1623,7 @@ export default function App() {
       }
       if (result.action || parsed.command.execution.type === "frontend") {
         const frontendAction = parsed.command.execution.type === "frontend" ? parsed.command.execution.action : undefined;
-        runFrontendCommandAction(result.action ?? frontendAction, parsed.command, parsed.args);
+        runFrontendCommandAction(result.action ?? frontendAction, parsed.command, frontendCommandArgs(parsed.args, result.args));
       }
       if (parsed.command.execution.type === "rumi_function") {
         await refreshCatalog();
@@ -1927,6 +1952,7 @@ export default function App() {
     setInput("");
     setAttachedFiles([]);
     let submittedConversationId: string | null = null;
+    const shouldKeepSelectedToolsAfterSend = keepSelectedToolsAfterSend(settingsValues);
     const selectedToolLabels = [
       ...selectedTools.map((item) => item.label || item.id),
     ];
@@ -2135,6 +2161,9 @@ export default function App() {
       });
       setAttachedFiles([]);
       setDroppedWidgets([]);
+      if (!shouldKeepSelectedToolsAfterSend) {
+        setStoredSelectedToolIds([]);
+      }
       forgetPendingRequest(conversation.id);
       replaceChatIdInUrl(conversation.id, false);
 

@@ -138,3 +138,30 @@ def test_dispatcher_runs_thinking_level_function(tmp_path, monkeypatch):
 
     assert result["status"] == "ok"
     assert result["data"]["level"] == "high"
+
+
+def test_dispatcher_routes_computer_drag_to_browser_computer_tool():
+    import domain.function_runtime.dispatcher as dispatcher
+
+    tool_executor = MagicMock()
+    tool_executor._execute_local.return_value = {"drag_marker": {"from": {"x": 1}, "to": {"x": 2}}}
+
+    with patch("domain.tool.executor.ToolExecutor", return_value=tool_executor):
+        result = dispatcher.run_defaultspack_function(
+            "computer_drag",
+            {"x1": 10, "y1": 20, "x2": 30, "y2": 40, "button": "left"},
+            {"request_id": "req-drag"},
+        )
+
+    assert result == {
+        "status": "ok",
+        "data": {"drag_marker": {"from": {"x": 1}, "to": {"x": 2}}},
+    }
+    tool_executor._execute_local.assert_called_once_with(
+        "browser_computer",
+        {
+            "action": "computer.drag",
+            "payload": {"x1": 10, "y1": 20, "x2": 30, "y2": 40, "button": "left"},
+        },
+        {"request_id": "req-drag"},
+    )

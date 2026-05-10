@@ -1,6 +1,27 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { api } from "./api";
+import { frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean } from "../App";
+
+test("frontend command args prefer backend-coerced values", () => {
+  assert.deepEqual(
+    frontendCommandArgs({ enabled: "false" }, { enabled: false }),
+    { enabled: false },
+  );
+});
+
+test("frontend boolean command parsing handles explicit false strings", () => {
+  assert.equal(parseCommandBoolean("false", true), false);
+  assert.equal(parseCommandBoolean("0", true), false);
+  assert.equal(parseCommandBoolean("off", true), false);
+  assert.equal(parseCommandBoolean(undefined, true), true);
+});
+
+test("selected tools are not kept after send unless settings opt in", () => {
+  assert.equal(keepSelectedToolsAfterSend({}), false);
+  assert.equal(keepSelectedToolsAfterSend({ tools: { keep_selected_tools_after_send: "false" } }), false);
+  assert.equal(keepSelectedToolsAfterSend({ tools: { keep_selected_tools_after_send: true } }), true);
+});
 
 test("sendMessage serializes attachments and selected tools", async () => {
   let requestBody: any = null;
@@ -247,6 +268,33 @@ test("streamMessage forwards realtime tool activity events", async () => {
   }
 
   assert.deepEqual(activityEvents, ["status", "tool_call_started", "message"]);
+});
+
+test("streamMessage forwards explicit browser screenshot events", async () => {
+  const originalFetch = globalThis.fetch;
+  const activityEvents: string[] = [];
+  globalThis.fetch = (async () => {
+    const body = [
+      'data: {"type":"browser_screenshot","tool_name":"browser_computer","tool_call_id":"call_1","data_url":"data:image/png;base64,abc"}\n\n',
+      'data: {"type":"message","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"done"}],"created_at":1,"conversation_id":"c1"}}\n\n',
+    ].join("");
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream; charset=utf-8" },
+    });
+  }) as typeof fetch;
+
+  try {
+    await api.streamMessage("c1", "hello", undefined, {
+      onEvent(event) {
+        activityEvents.push(event.type);
+      },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(activityEvents, ["browser_screenshot", "message"]);
 });
 
 test("streamMessage surfaces structured stream errors", async () => {

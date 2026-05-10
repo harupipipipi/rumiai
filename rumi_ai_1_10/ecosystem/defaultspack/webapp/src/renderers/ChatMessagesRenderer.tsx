@@ -435,6 +435,10 @@ function isBrowserToolName(toolName: unknown): boolean {
   return toolName === "browser_computer" || toolName === "browser_use" || toolName === "computer_use";
 }
 
+function isBrowserActivityEvent(event: NonNullable<ChatMessagesRendererProps["messages"][number]["events"]>[number]): boolean {
+  return isBrowserToolName(event.tool_name) || event.type === "browser_screenshot";
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
@@ -491,11 +495,12 @@ function collectBrowserScreenshots(
   return screenshots;
 }
 
-function streamedBrowserScreenshots(message: ChatMessagesRendererProps["messages"][number]): BrowserScreenshot[] {
+export function streamedBrowserScreenshots(message: ChatMessagesRendererProps["messages"][number]): BrowserScreenshot[] {
   const screenshots: BrowserScreenshot[] = [];
   const seen = new Set<string>();
   for (const event of message.events ?? []) {
-    if (!isBrowserToolName(event.tool_name)) continue;
+    if (!isBrowserActivityEvent(event)) continue;
+    collectBrowserScreenshots(event, event, screenshots, seen);
     collectBrowserScreenshots(event.result, event, screenshots, seen);
     collectBrowserScreenshots(event.artifact, event, screenshots, seen);
     collectBrowserScreenshots(event.artifacts, event, screenshots, seen);
@@ -509,7 +514,7 @@ function hasBrowserToolLog(message: ChatMessagesRendererProps["messages"][number
 }
 
 function hasBrowserToolEvent(message: ChatMessagesRendererProps["messages"][number]): boolean {
-  return (message.events ?? []).some((event) => isBrowserToolName(event.tool_name));
+  return (message.events ?? []).some((event) => isBrowserActivityEvent(event));
 }
 
 function hasRunningBrowserToolEvent(message: ChatMessagesRendererProps["messages"][number]): boolean {

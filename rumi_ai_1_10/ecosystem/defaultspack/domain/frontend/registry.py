@@ -593,6 +593,28 @@ class FrontendRegistry:
                 ],
             },
             {
+                "id": "tools",
+                "label": "Tools",
+                "description": "Tool composer defaults and selection behavior.",
+                "fields": [
+                    {
+                        "id": "default_target",
+                        "label": "Default Target",
+                        "type": "text",
+                        "default": "",
+                        "help": "Backcompat value for tool UIs that still read a shared default_target.",
+                        "advanced": True,
+                    },
+                    {
+                        "id": "keep_selected_tools_after_send",
+                        "label": "Keep Selected Tools",
+                        "type": "toggle",
+                        "default": False,
+                        "help": "Keep composer tool selections after a message is sent.",
+                    },
+                ],
+            },
+            {
                 "id": "debug",
                 "label": "Debug",
                 "description": "モデル呼び出しとcomputer use調査用のログ設定。",
@@ -1123,6 +1145,10 @@ class FrontendRegistry:
             "commands": {
                 "show_advanced_commands": False,
             },
+            "tools": {
+                "default_target": "",
+                "keep_selected_tools_after_send": False,
+            },
             "debug": {
                 "ai_request_logging": False,
             },
@@ -1310,6 +1336,21 @@ class FrontendRegistry:
 
     def _refresh_derived_settings(self, values: dict[str, Any]) -> dict[str, Any]:
         refreshed = deepcopy(values)
+        debug = refreshed.setdefault("debug", {})
+        if not isinstance(debug, dict):
+            debug = {}
+            refreshed["debug"] = debug
+        debug.setdefault("ai_request_logging", False)
+
+        tools = refreshed.setdefault("tools", {})
+        if not isinstance(tools, dict):
+            tools = {}
+            refreshed["tools"] = tools
+        tools.setdefault("keep_selected_tools_after_send", False)
+        legacy_default_target = self._legacy_default_target(refreshed)
+        if "default_target" not in tools or (not str(tools.get("default_target") or "").strip() and legacy_default_target):
+            tools["default_target"] = legacy_default_target
+
         apis = refreshed.setdefault("apis", {})
         if isinstance(apis, dict):
             apis["api_keys"] = provider_key_status(pack_root=self._pack_root)
@@ -1323,3 +1364,15 @@ class FrontendRegistry:
                 self._pack_root
             ).refresh_models_settings(models)
         return refreshed
+
+    @staticmethod
+    def _legacy_default_target(values: dict[str, Any]) -> str:
+        for container_key in ("debug", "browser", "browser_use"):
+            container = values.get(container_key)
+            if not isinstance(container, dict):
+                continue
+            value = container.get("default_target")
+            if value is not None:
+                return str(value)
+        value = values.get("default_target")
+        return str(value) if value is not None else ""

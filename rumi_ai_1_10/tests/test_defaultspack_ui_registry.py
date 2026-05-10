@@ -371,6 +371,35 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(values["sidebar"]["custom_tool_tags"], {"browser_use": ["coding"]})
         self.assertEqual(reloaded["sidebar"]["pinned_item_ids"], ["browser_use"])
 
+    def test_settings_migrates_default_target_without_losing_debug_values(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            settings_path = pack_root / "user_data" / "shared" / "frontend_settings.json"
+            settings_path.parent.mkdir(parents=True, exist_ok=True)
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "debug": {
+                            "ai_request_logging": True,
+                            "default_target": "current_browser",
+                            "custom_debug_flag": "keep-me",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+                values = FrontendRegistry(pack_root=pack_root).get_settings()["values"]
+
+        self.assertTrue(values["debug"]["ai_request_logging"])
+        self.assertEqual(values["debug"]["custom_debug_flag"], "keep-me")
+        self.assertEqual(values["tools"]["default_target"], "current_browser")
+        self.assertFalse(values["tools"]["keep_selected_tools_after_send"])
+
     def test_update_settings_stores_openrouter_key_as_secret(self):
         from core_runtime.secrets_store import SecretsStore
         from domain.frontend.registry import FrontendRegistry
@@ -538,11 +567,26 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                 "error": {"code": "PACK_NOT_APPROVED", "message": "Pack not approved: defaultspack"},
             }
             invoke_block.return_value = {"status": "ok", "data": {"catalog": "fallback"}}
-            result = server._invoke_fallback_block("blocks.ui.catalog", {}, {})
+            result = server._invoke_fallback_block("blocks.ui.catalog", {"_method": "GET", "_actual_method": "GET"}, {})
 
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["data"]["catalog"], "fallback")
         invoke_block.assert_called_once()
+
+    def test_fallback_http_does_not_use_pack_not_approved_block_fallback_for_spoofed_post(self):
+        from transport.http import DefaultsHttpServer
+
+        server = DefaultsHttpServer(facade=None)
+        with patch("domain.function_runtime.bridge.invoke_function") as invoke_function, patch("transport.http.invoke_block") as invoke_block:
+            invoke_function.return_value = {
+                "status": "error",
+                "error": {"code": "PACK_NOT_APPROVED", "message": "Pack not approved: defaultspack"},
+            }
+            result = server._invoke_fallback_block("blocks.ui.catalog", {"_method": "GET", "_actual_method": "POST"}, {})
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["error"]["code"], "PACK_NOT_APPROVED")
+        invoke_block.assert_not_called()
 
     def test_default_conversation_model_uses_stub_when_unconfigured(self):
         from domain.chat import store as chat_store
@@ -738,6 +782,121 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(result["status"], "error")
         self.assertEqual(result["error"]["code"], "INVALID_ARGUMENT")
         self.assertEqual(result["error"]["details"]["argument"], "level")
+
+    def test_slash_command_registry_validates_required_args_and_boolean_false(self):
+        from domain.frontend.command_registry import SlashCommandRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            commands_path = pack_root / "commands" / "default_commands.json"
+            commands_path.parent.mkdir(parents=True, exist_ok=True)
+            commands_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "id": "flag",
+                            "name": "flag",
+                            "modes": ["chat"],
+                            "args": [{"name": "enabled", "type": "boolean", "required": True}],
+                            "execution": {"type": "frontend", "action": "toggle_flag"},
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            registry = SlashCommandRegistry(pack_root)
+
+            off_result = registry.execute({"command": "flag", "mode": "chat", "args": {"enabled": "off"}}, {})
+            false_result = registry.execute({"command": "flag", "mode": "chat", "args": {"enabled": False}}, {})
+            missing_result = registry.execute({"command": "flag", "mode": "chat", "args": {}}, {})
+
+        self.assertEqual(off_result["status"], "ok")
+        self.assertFalse(off_result["data"]["args"]["enabled"])
+        self.assertEqual(false_result["status"], "ok")
+        self.assertFalse(false_result["data"]["args"]["enabled"])
+        self.assertEqual(missing_result["status"], "error")
+        self.assertEqual(missing_result["error"]["code"], "MISSING_ARGUMENT")
+
+    def test_slash_command_registry_rejects_user_manifest_rumi_function_and_non_allowlisted_default(self):
+        from domain.frontend.command_registry import SlashCommandRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            defaults_path = pack_root / "commands" / "default_commands.json"
+            user_path = pack_root / "user_data" / "shared" / "commands" / "user.json"
+            defaults_path.parent.mkdir(parents=True, exist_ok=True)
+            user_path.parent.mkdir(parents=True, exist_ok=True)
+            defaults_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "id": "baddefault",
+                            "name": "baddefault",
+                            "modes": ["chat"],
+                            "execution": {"type": "rumi_function", "qualified_name": "defaultspack:not_allowlisted"},
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            user_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "id": "userthink",
+                            "name": "userthink",
+                            "modes": ["chat"],
+                            "execution": {"type": "rumi_function", "qualified_name": "defaultspack:ai_set_thinking_level"},
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            registry = SlashCommandRegistry(pack_root)
+            user_result = registry.execute({"command": "userthink", "mode": "chat", "args": {"level": "low"}}, {})
+            default_result = registry.execute({"command": "baddefault", "mode": "chat", "args": {}}, {})
+
+        self.assertEqual(user_result["status"], "error")
+        self.assertEqual(user_result["error"]["code"], "INVALID_COMMAND")
+        self.assertEqual(default_result["status"], "error")
+        self.assertEqual(default_result["error"]["code"], "INVALID_COMMAND")
+
+    def test_ui_commands_get_returns_duplicate_manifest_warnings(self):
+        from blocks.ui import commands as commands_block
+        from domain.frontend.command_registry import SlashCommandRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            defaults_path = pack_root / "commands" / "default_commands.json"
+            user_path = pack_root / "user_data" / "shared" / "commands" / "user.json"
+            defaults_path.parent.mkdir(parents=True, exist_ok=True)
+            user_path.parent.mkdir(parents=True, exist_ok=True)
+            defaults_path.write_text(
+                json.dumps(
+                    [
+                        {"id": "one", "name": "one", "aliases": ["same"], "modes": ["chat"]},
+                        {"id": "two", "name": "two", "modes": ["chat"]},
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            user_path.write_text(
+                json.dumps(
+                    [
+                        {"id": "two", "name": "two", "modes": ["chat"]},
+                        {"id": "three", "name": "three", "aliases": ["one"], "modes": ["chat"]},
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.object(commands_block, "SlashCommandRegistry", lambda: SlashCommandRegistry(pack_root)):
+                result = commands_block.run({"_method": "GET"}, {})
+
+        codes = {item["code"] for item in result["data"]["manifest_errors"]}
+        self.assertEqual(result["status"], "ok")
+        self.assertIn("command_duplicate_id", codes)
+        self.assertIn("command_alias_override", codes)
 
     def test_slash_command_registry_blocks_high_risk_without_approval(self):
         from domain.frontend.command_registry import SlashCommandRegistry
