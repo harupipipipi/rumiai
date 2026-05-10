@@ -531,6 +531,7 @@ _SENSITIVE_CODING_PATHS = set(SENSITIVE_CODING_PATHS) | set(METHOD_SENSITIVE_COD
 
 _SENSITIVE_INTEGRATION_PATHS = {
     "/api/integrations/secrets",
+    "/api/external/tokens",
 }
 _SENSITIVE_CHAT_PATH_RE = re.compile(
     r"^/v1/conversations/[^/]+/run-results/[^/]+/browser-screenshots$"
