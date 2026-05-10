@@ -92,6 +92,9 @@ class SlashCommandRegistry:
                 "args": args,
             })
 
+        if execution_type == "model_command":
+            return self._execute_model_command(command, execution, args)
+
         if execution_type == "rumi_function":
             if command.get("_manifest_origin") != MANIFEST_ORIGIN_DEFAULT:
                 return error("rumi_function execution is only allowed for built-in default commands", "INVALID_COMMAND")
@@ -114,6 +117,54 @@ class SlashCommandRegistry:
             return self._execute_chat_action(command, execution, args, payload, context or {})
 
         return error("unsupported command execution type", "INVALID_COMMAND", details={"type": execution_type})
+
+    def _execute_model_command(
+        self,
+        command: dict[str, Any],
+        execution: dict[str, Any],
+        args: dict[str, Any],
+    ) -> dict[str, Any]:
+        action = str(execution.get("action") or "")
+        if action != "select_or_suggest_model":
+            return error("unsupported model command action", "INVALID_COMMAND", details={"action": action})
+
+        query = str(args.get("query") or "").strip()
+        if not query:
+            return ok({
+                "command": self._public_command(command),
+                "executed": False,
+                "action": "open_model_picker",
+                "candidates": [],
+                "args": args,
+            })
+
+        try:
+            from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
+
+            service = ModelRuntimeSettingsService(self._pack_root)
+            resolution = service.resolve_model_candidates(query)
+            exact = resolution.get("exact") if isinstance(resolution, dict) else None
+            candidates = resolution.get("candidates", []) if isinstance(resolution, dict) else []
+            if isinstance(exact, dict) and exact.get("profile_id"):
+                result = service.set_preferred_model(str(exact["profile_id"]))
+                return ok({
+                    "command": self._public_command(command),
+                    "executed": True,
+                    "result": result,
+                    "selected_model": exact,
+                    "args": args,
+                })
+            message = "No matching models found." if not candidates else "Choose a model candidate."
+            return ok({
+                "command": self._public_command(command),
+                "executed": False,
+                "action": "show_model_candidates",
+                "candidates": candidates,
+                "args": args,
+                "message": message,
+            })
+        except Exception as exc:
+            return error(str(exc), "EXECUTION_FAILED")
 
     def _execute_chat_action(
         self,

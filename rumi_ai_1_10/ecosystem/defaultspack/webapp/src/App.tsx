@@ -4,7 +4,7 @@ import { MessageSquare } from "lucide-react";
 import type { ChatItem } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { api, conversationArtifactFileUrl, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { api, conversationArtifactFileUrl, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
 import { deriveConversationTitle, formatRelativeTime, messageToText } from "./lib/chat";
 import { cn } from "./lib/cn";
 import { canExecuteComposerEndpointAction, isSafeLocalEndpoint } from "./lib/composerWidgets";
@@ -26,6 +26,12 @@ type PendingChatRequest = {
   status: string;
   toolNames: string[];
 };
+
+type ComposerCandidateMenuState = {
+  mode: "model";
+  query: string;
+  candidates: ModelCommandCandidate[];
+} | null;
 
 function useLocalStorage<T>(key: string, defaultValue: T): [T, (v: T | ((prev: T) => T)) => void] {
   const [value, setValue] = useState<T>(() => {
@@ -898,6 +904,29 @@ function commandSearchText(command: ComposerCommandItem): string {
   ].join(" ").toLowerCase();
 }
 
+function isModelCommand(command: ComposerCommandItem | undefined): boolean {
+  if (!command) return false;
+  return [command.id, command.name, ...(command.aliases ?? [])]
+    .map((value) => String(value ?? "").toLowerCase())
+    .includes("model");
+}
+
+function modelCandidateProfileId(candidate: ModelCommandCandidate): string {
+  return String(candidate.profile_id ?? candidate.qualified_model_id ?? "").trim();
+}
+
+function selectedModelProfileId(value: ComposerCommandExecuteResult["selected_model"]): string {
+  if (typeof value === "string") return value.trim();
+  if (value && typeof value === "object") return modelCandidateProfileId(value);
+  return "";
+}
+
+function modelCommandInputQuery(value: string): string | null {
+  const match = value.trim().match(/^\/models?(?:\s+([\s\S]*))?$/i);
+  if (!match) return null;
+  return String(match[1] ?? "").trim();
+}
+
 function pendingBrowserApproval(messages: ChatUiMessage[]): BrowserApproval | null {
   for (const message of [...messages].reverse()) {
     if (message.role === "user") return null;
@@ -930,6 +959,8 @@ export default function App() {
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
   const [input, setInput] = useLocalStorage("rumi-input", "");
+  const [composerCandidateMenu, setComposerCandidateMenu] = useState<ComposerCandidateMenuState>(null);
+  const [modelPickerRequestId, setModelPickerRequestId] = useState(0);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [requestedSettingsSectionId, setRequestedSettingsSectionId] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -1021,6 +1052,7 @@ export default function App() {
         enabled: command.id === "yolo" ? yoloMode : command.id === mode,
       }));
   }, [activeProfile, commandCatalog, mode, selectableModelProfiles, settingsValues.commands?.show_advanced_commands, yoloMode]);
+  const modelCommandCandidates = composerCandidateMenu?.mode === "model" ? composerCandidateMenu.candidates : [];
   const unknownBlockStrategy = String(settingsValues.chat_rendering?.unknown_block_strategy ?? "hidden");
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
   const showActivityInMessages = settingsValues.general?.show_activity_in_messages !== false;
@@ -1445,6 +1477,11 @@ export default function App() {
     switch (action) {
       case "open_model_picker": {
         const query = String(args.query ?? "").trim().toLowerCase();
+        setComposerCandidateMenu(null);
+        if (!query) {
+          setModelPickerRequestId((value) => value + 1);
+          return;
+        }
         if (query) {
           const profile = selectableModelProfiles.find((item) => commandSearchText({
             id: item.profile_id,
@@ -1594,7 +1631,7 @@ export default function App() {
     }
   };
 
-  const executeComposerCommand = async (commandId: string, rawInput = `/${commandId}`) => {
+  const executeComposerCommand = async (commandId: string, rawInput = `/${commandId}`): Promise<boolean | void> => {
     const parsed = parseSlashCommandInput(rawInput, commandCatalog) ?? {
       command: commandCatalog.find((command) => command.id === commandId || command.name === commandId),
       args: {},
@@ -1621,6 +1658,39 @@ export default function App() {
         setError(result.message ?? `/${parsed.command.name} は approval center 経由で実行してください。`);
         return;
       }
+      if (isModelCommand(parsed.command)) {
+        if (result.action === "show_model_candidates") {
+          setComposerCandidateMenu({
+            mode: "model",
+            query: String(result.args?.query ?? commandArgs.query ?? "").trim(),
+            candidates: Array.isArray(result.candidates) ? result.candidates : [],
+          });
+          if (result.message) setError(result.message);
+          return false;
+        }
+        if (result.action === "open_model_picker") {
+          setComposerCandidateMenu(null);
+          setModelPickerRequestId((value) => value + 1);
+          if (result.message) setError(result.message);
+          return true;
+        }
+        if (result.executed) {
+          const selectedProfileId = selectedModelProfileId(result.selected_model);
+          setComposerCandidateMenu(null);
+          setInput("");
+          if (result.message) setError(result.message);
+          await refreshCatalog();
+          if (activeConversationId && selectedProfileId) {
+            const conversation = await api.updateConversation(activeConversationId, { model: selectedProfileId });
+            setActiveConversation(conversation);
+            await refreshConversations(conversation.id);
+          } else if (activeConversationId) {
+            await refreshConversations(activeConversationId);
+          }
+          return true;
+        }
+      }
+
       if (result.action || parsed.command.execution.type === "frontend") {
         const frontendAction = parsed.command.execution.type === "frontend" ? parsed.command.execution.action : undefined;
         runFrontendCommandAction(result.action ?? frontendAction, parsed.command, frontendCommandArgs(parsed.args, result.args));
@@ -1635,6 +1705,23 @@ export default function App() {
 
   const handleComposerCommand = (commandId: string, rawInput?: string) => {
     void executeComposerCommand(commandId, rawInput);
+  };
+
+  const handleModelCommandCandidateSelect = (candidate: ModelCommandCandidate) => {
+    const profileId = modelCandidateProfileId(candidate);
+    if (!profileId) {
+      setError("Selected model candidate is missing a profile id.");
+      return;
+    }
+    void executeComposerCommand("model", `/model ${profileId}`);
+  };
+
+  const handleComposerInputChange = (value: string) => {
+    setInput(value);
+    const modelQuery = modelCommandInputQuery(value);
+    if (composerCandidateMenu && modelQuery !== composerCandidateMenu.query) {
+      setComposerCandidateMenu(null);
+    }
   };
 
   const handleModeChange = (newMode: AppMode) => {
@@ -1935,8 +2022,8 @@ export default function App() {
 
     const commandInput = parseSlashCommandInput(input, commandCatalog);
     if (commandInput) {
-      await executeComposerCommand(commandInput.command.id, commandInput.raw);
-      setInput("");
+      const shouldClearInput = await executeComposerCommand(commandInput.command.id, commandInput.raw);
+      if (shouldClearInput !== false) setInput("");
       return;
     }
 
@@ -2218,6 +2305,8 @@ export default function App() {
       inlineExtensions={composerExtensions}
       belowExtensions={[]}
       commands={composerCommands}
+      modelCommandCandidates={modelCommandCandidates}
+      modelPickerRequestId={modelPickerRequestId}
       yoloMode={yoloMode}
       mode={mode}
       codingContext={codingContext}
@@ -2226,10 +2315,12 @@ export default function App() {
       selectedToolIds={selectedToolIds}
       onExtensionSelect={handleComposerExtensionSelect}
       onCommandSelect={handleComposerCommand}
+      onModelCommandCandidateSelect={handleModelCommandCandidateSelect}
+      onModelCommandCandidatesClose={() => setComposerCandidateMenu(null)}
       onModelProfileSelect={handleModelProfileSelect}
       onProviderApiKeySave={handleProviderApiKeySave}
       onThinkingLevelChange={handleThinkingLevelChange}
-      onInputChange={setInput}
+      onInputChange={handleComposerInputChange}
       onSubmit={handleSubmit}
       onStopGenerating={handleStopGenerating}
       onModeChange={handleModeChange}

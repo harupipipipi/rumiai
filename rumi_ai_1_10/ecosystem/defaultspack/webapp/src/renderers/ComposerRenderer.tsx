@@ -34,7 +34,7 @@ import type {
   AppMode,
   ToolGroup,
 } from "./types";
-import type { ModelProfile } from "../lib/api";
+import type { ModelCommandCandidate, ModelProfile } from "../lib/api";
 import { fileToAttachment } from "../lib/attachments";
 import { resolveComposerWidgetDrop } from "../lib/composerWidgets";
 import { sortedToolGroups, toolGroupFor } from "../lib/toolUi";
@@ -562,6 +562,133 @@ export function insertAtMentionText(input: string, cursorPos: number, file: stri
   return { value, cursor: insertAt + file.length + 2 };
 }
 
+export type ModelCandidateMenuKeyAction =
+  | { handled: false }
+  | { handled: true; type: "move"; nextIndex: number }
+  | { handled: true; type: "select"; index: number }
+  | { handled: true; type: "close" };
+
+export function nextModelCandidateIndex(currentIndex: number, candidateCount: number, direction: 1 | -1): number {
+  if (candidateCount <= 0) return 0;
+  return (currentIndex + direction + candidateCount) % candidateCount;
+}
+
+export function modelCandidateMenuKeyAction(
+  key: string,
+  shiftKey: boolean,
+  currentIndex: number,
+  candidateCount: number,
+): ModelCandidateMenuKeyAction {
+  if (candidateCount <= 0) return { handled: false };
+  if (key === "Tab" || key === "ArrowDown" || key === "ArrowUp") {
+    const direction = key === "ArrowUp" || (key === "Tab" && shiftKey) ? -1 : 1;
+    return {
+      handled: true,
+      type: "move",
+      nextIndex: nextModelCandidateIndex(currentIndex, candidateCount, direction),
+    };
+  }
+  if (key === "Enter") {
+    return { handled: true, type: "select", index: Math.min(Math.max(currentIndex, 0), candidateCount - 1) };
+  }
+  if (key === "Escape") {
+    return { handled: true, type: "close" };
+  }
+  return { handled: false };
+}
+
+function modelCandidateTitle(candidate: ModelCommandCandidate): string {
+  return String(candidate.display_name ?? candidate.profile_id ?? "model");
+}
+
+function modelCandidateSubtitle(candidate: ModelCommandCandidate): string {
+  const explicit = String(candidate.subtitle ?? "").trim();
+  if (explicit) return explicit;
+  const provider = String(candidate.provider_display_name ?? candidate.provider_id ?? "").trim();
+  const model = String(candidate.model_id ?? candidate.qualified_model_id ?? candidate.profile_id ?? "").trim();
+  return [provider, model].filter(Boolean).join(" / ");
+}
+
+function modelCandidateApiKeyBadge(candidate: ModelCommandCandidate): string | null {
+  if (candidate.requires_api_key === true || candidate.api_key_required === true) return "API key";
+  if (candidate.api_key_configured === true || candidate.configured === true) return "key set";
+  const availability = candidate.availability ?? {};
+  if (availability.configured === true || availability.status === "configured" || availability.status === "active") return "key set";
+  return null;
+}
+
+function ModelCommandCandidatePopup({
+  candidates,
+  activeIndex,
+  onActiveIndexChange,
+  onSelect,
+  onClose,
+}: {
+  candidates: ModelCommandCandidate[];
+  activeIndex: number;
+  onActiveIndexChange: (index: number) => void;
+  onSelect: (candidate: ModelCommandCandidate) => void;
+  onClose?: () => void;
+}) {
+  if (candidates.length === 0) return null;
+
+  return (
+    <div
+      role="listbox"
+      aria-label="Model candidates"
+      className="absolute bottom-full left-4 z-40 mb-2 w-[min(460px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl max-[640px]:left-2"
+    >
+      <div className="flex items-center justify-between gap-2 border-b border-zinc-800 px-3 py-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Models</span>
+        {onClose && (
+          <button
+            type="button"
+            aria-label="close model candidates"
+            onClick={onClose}
+            className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-200"
+          >
+            <X size={13} />
+          </button>
+        )}
+      </div>
+      <div className="max-h-64 overflow-y-auto py-1">
+        {candidates.map((candidate, index) => {
+          const badge = modelCandidateApiKeyBadge(candidate);
+          return (
+            <button
+              key={candidate.profile_id}
+              type="button"
+              role="option"
+              aria-selected={index === activeIndex}
+              onMouseEnter={() => onActiveIndexChange(index)}
+              onClick={() => onSelect(candidate)}
+              className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition-colors ${
+                index === activeIndex ? "bg-zinc-800 text-zinc-100" : "hover:bg-zinc-900"
+              }`}
+            >
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-medium text-zinc-100">{modelCandidateTitle(candidate)}</span>
+                <span className="block truncate text-[11px] text-zinc-500">{modelCandidateSubtitle(candidate)}</span>
+              </span>
+              {badge && (
+                <span
+                  className={`flex-shrink-0 rounded-full border px-2 py-0.5 text-[10px] ${
+                    badge === "API key"
+                      ? "border-amber-500/30 text-amber-300"
+                      : "border-emerald-500/25 text-emerald-300"
+                  }`}
+                >
+                  {badge}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function ComposerRenderer({
   input,
   placeholder,
@@ -575,6 +702,8 @@ export function ComposerRenderer({
   inlineExtensions,
   belowExtensions,
   commands = [],
+  modelCommandCandidates = [],
+  modelPickerRequestId = 0,
   yoloMode = false,
   mode = "chat",
   codingContext = null,
@@ -583,6 +712,8 @@ export function ComposerRenderer({
   selectedToolIds = [],
   onExtensionSelect,
   onCommandSelect,
+  onModelCommandCandidateSelect,
+  onModelCommandCandidatesClose,
   onModelProfileSelect,
   onProviderApiKeySave,
   onThinkingLevelChange,
@@ -611,10 +742,12 @@ export function ComposerRenderer({
   const [atMentionQuery, setAtMentionQuery] = useState("");
   const [newBranchName, setNewBranchName] = useState("");
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
+  const [selectedModelCandidateIndex, setSelectedModelCandidateIndex] = useState(0);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const lastModelPickerRequestIdRef = useRef(modelPickerRequestId);
   const profileName = profileDisplayName(selectedProfile);
   const selectedProviderLabel = profileProviderLabel(selectedProfile);
   const levels = selectedProfile?.supports_thinking
@@ -656,6 +789,8 @@ export function ComposerRenderer({
         })
     : [];
   const showThinkingLevelChips = Boolean(thinkingMatch && thinkingCommand && levels.length > 0);
+  const hasModelCommandCandidates = modelCommandCandidates.length > 0;
+  const showCommandSuggestions = !hasModelCommandCandidates && matchedCommands.length > 0;
   const currentModeMeta = MODE_META[mode];
   const ModeIcon = currentModeMeta.icon;
   const directoryEntries = (codingContext?.entries ?? []).filter((entry) => entry.is_dir);
@@ -734,6 +869,26 @@ export function ComposerRenderer({
   }, [matchedCommands.length]);
 
   useEffect(() => {
+    setSelectedModelCandidateIndex((current) => {
+      if (modelCommandCandidates.length === 0) return 0;
+      return Math.min(current, modelCommandCandidates.length - 1);
+    });
+    if (modelCommandCandidates.length > 0) {
+      setModelDropdownOpen(false);
+      setMenuOpen(false);
+    }
+  }, [modelCommandCandidates.length]);
+
+  useEffect(() => {
+    if (modelPickerRequestId === lastModelPickerRequestIdRef.current) return;
+    lastModelPickerRequestIdRef.current = modelPickerRequestId;
+    if (modelPickerRequestId <= 0) return;
+    setMenuOpen(false);
+    setModelDropdownOpen(true);
+    window.setTimeout(() => textareaRef.current?.focus({ preventScroll: true }), 0);
+  }, [modelPickerRequestId]);
+
+  useEffect(() => {
     textareaRef.current?.focus({ preventScroll: true });
     const focusTimer = window.setTimeout(() => {
       textareaRef.current?.focus({ preventScroll: true });
@@ -751,10 +906,11 @@ export function ComposerRenderer({
 
     const command = commands.find((item) => item.id === commandId);
     const action = command?.execution.type === "frontend" ? command.execution.action : "";
-    if (action === "open_model_picker" && !rawInput.trim().includes(" ")) {
+    const rawHasArgs = rawInput.trim().includes(" ");
+    if (action === "open_model_picker" && !rawHasArgs) {
       setModelDropdownOpen(true);
       setMenuOpen(false);
-    } else if (action === "open_tool_picker" && !rawInput.trim().includes(" ")) {
+    } else if (action === "open_tool_picker" && !rawHasArgs) {
       setOpenFolder("tools");
       setMenuOpen(true);
     } else if (action === "open_command_help") {
@@ -766,8 +922,18 @@ export function ComposerRenderer({
       return;
     }
     onCommandSelect?.(commandId, rawInput);
-    onInputChange("");
+    if (!(command?.id === "model" && rawHasArgs)) {
+      onInputChange("");
+    }
   };
+
+  const chooseModelCommandCandidate = useCallback(
+    (candidate: ModelCommandCandidate | undefined) => {
+      if (!candidate) return;
+      onModelCommandCandidateSelect?.(candidate);
+    },
+    [onModelCommandCandidateSelect],
+  );
 
   const handleInputChange = useCallback(
     (value: string) => {
@@ -880,6 +1046,24 @@ export function ComposerRenderer({
         return;
       }
 
+      const modelCandidateAction = modelCandidateMenuKeyAction(
+        event.key,
+        event.shiftKey,
+        selectedModelCandidateIndex,
+        modelCommandCandidates.length,
+      );
+      if (modelCandidateAction.handled) {
+        event.preventDefault();
+        if (modelCandidateAction.type === "move") {
+          setSelectedModelCandidateIndex(modelCandidateAction.nextIndex);
+        } else if (modelCandidateAction.type === "select") {
+          chooseModelCommandCandidate(modelCommandCandidates[modelCandidateAction.index]);
+        } else if (modelCandidateAction.type === "close") {
+          onModelCommandCandidatesClose?.();
+        }
+        return;
+      }
+
       if (matchedCommands.length > 0) {
         if (event.key === "ArrowDown") {
           event.preventDefault();
@@ -903,7 +1087,15 @@ export function ComposerRenderer({
         handleSubmitWithApiKeyGuard(event);
       }
     },
-    [handleSubmitWithApiKeyGuard, matchedCommands, selectedCommandIndex],
+    [
+      chooseModelCommandCandidate,
+      handleSubmitWithApiKeyGuard,
+      matchedCommands,
+      modelCommandCandidates,
+      onModelCommandCandidatesClose,
+      selectedCommandIndex,
+      selectedModelCandidateIndex,
+    ],
   );
 
   return (
@@ -928,7 +1120,16 @@ export function ComposerRenderer({
               onSave={saveProviderApiKey}
             />
           )}
-          {matchedCommands.length > 0 && (
+          {hasModelCommandCandidates && (
+            <ModelCommandCandidatePopup
+              candidates={modelCommandCandidates}
+              activeIndex={selectedModelCandidateIndex}
+              onActiveIndexChange={setSelectedModelCandidateIndex}
+              onSelect={chooseModelCommandCandidate}
+              onClose={onModelCommandCandidatesClose}
+            />
+          )}
+          {showCommandSuggestions && (
             showThinkingLevelChips ? (
               <div className="absolute bottom-full left-4 z-30 mb-2 flex w-[min(520px,calc(100vw-32px))] flex-wrap items-center gap-2 rounded-xl border border-zinc-700/70 bg-zinc-950/95 px-3 py-2 shadow-2xl">
                 <span className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Thinking</span>

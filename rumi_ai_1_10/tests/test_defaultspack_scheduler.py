@@ -52,7 +52,7 @@ def test_scheduler_no_agent_watchdog_tick_with_explicit_allowlist(tmp_path, monk
                 "tool_policy": {"allow_shell": True},
                 "scheduler": {
                     "allow_no_agent_scripts": True,
-                    "no_agent_command_allowlist": ["printf"],
+                    "no_agent_command_allowlist": [sys.executable],
                 },
             }
         ),
@@ -66,7 +66,7 @@ def test_scheduler_no_agent_watchdog_tick_with_explicit_allowlist(tmp_path, monk
             "kind": "one_shot",
             "schedule": "now",
             "no_agent": True,
-            "script": ["printf", "scheduler-ok"],
+            "script": [sys.executable, "-c", "import sys; sys.stdout.write('scheduler-ok')"],
             "timeout_seconds": 5,
         },
         {},

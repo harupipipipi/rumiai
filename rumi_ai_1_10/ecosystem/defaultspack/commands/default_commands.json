@@ -21,7 +21,7 @@
     "risk": "low",
     "modes": ["chat", "coding", "agent"],
     "args": [{ "name": "query", "type": "string", "required": false }],
-    "execution": { "type": "frontend", "action": "open_model_picker" }
+    "execution": { "type": "model_command", "action": "select_or_suggest_model" }
   },
   {
     "id": "think",

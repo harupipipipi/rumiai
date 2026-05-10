@@ -1,6 +1,6 @@
 import type { FormEvent, MutableRefObject } from "react";
 
-import type { ChatActivityEvent, ChatContentBlock, CodingContextEntry, CodingGitStatus, ComposerWidgetAction, ModelProfile, SettingsSection, SidebarAction, SidebarItem, ToolLogEntry, UICatalog } from "../lib/api";
+import type { ChatActivityEvent, ChatContentBlock, CodingContextEntry, CodingGitStatus, ComposerWidgetAction, ModelCommandCandidate, ModelProfile, SettingsSection, SidebarAction, SidebarItem, ToolLogEntry, UICatalog } from "../lib/api";
 import type { ComposerCommandItem } from "../lib/api";
 import type { ChatItem } from "../components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "../components/ToolPreview";
@@ -100,6 +100,8 @@ export type ComposerRendererProps = {
   inlineExtensions: ComposerExtensionItem[];
   belowExtensions: ComposerExtensionItem[];
   commands?: ComposerCommandItem[];
+  modelCommandCandidates?: ModelCommandCandidate[];
+  modelPickerRequestId?: number;
   yoloMode?: boolean;
   mode?: AppMode;
   codingContext?: CodingContext | null;
@@ -108,6 +110,8 @@ export type ComposerRendererProps = {
   selectedToolIds?: string[];
   onExtensionSelect?: (item: ComposerExtensionItem) => void;
   onCommandSelect?: (commandId: string, rawInput?: string) => void;
+  onModelCommandCandidateSelect?: (candidate: ModelCommandCandidate) => void;
+  onModelCommandCandidatesClose?: () => void;
   onModelProfileSelect: (profileId: string) => void;
   onProviderApiKeySave?: (providerId: string, value: string) => Promise<void> | void;
   onThinkingLevelChange: (level: string | null) => void;

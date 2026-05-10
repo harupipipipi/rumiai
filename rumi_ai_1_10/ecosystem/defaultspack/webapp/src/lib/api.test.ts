@@ -17,6 +17,57 @@ test("frontend boolean command parsing handles explicit false strings", () => {
   assert.equal(parseCommandBoolean(undefined, true), true);
 });
 
+test("executeUiCommand preserves model candidate results", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    status: "ok",
+    data: {
+      command: {
+        id: "model",
+        name: "model",
+        label: "Model",
+        category: "model",
+        visibility: "default",
+        risk: "low",
+        execution: { type: "model_command", action: "select_or_suggest_model" },
+      },
+      action: "show_model_candidates",
+      message: "Choose a model",
+      candidates: [
+        {
+          profile_id: "openai/gpt-5.1",
+          display_name: "GPT-5.1",
+          subtitle: "OpenAI / gpt-5.1",
+          requires_api_key: true,
+        },
+      ],
+      selected_model: {
+        profile_id: "google/gemini-2.5-flash",
+        display_name: "Gemini 2.5 Flash",
+        provider_id: "google",
+        model_id: "gemini-2.5-flash",
+        api_key_configured: true,
+      },
+    },
+  }), { status: 200, headers: { "Content-Type": "application/json" } })) as typeof fetch;
+
+  try {
+    const result = await api.executeUiCommand({ command: "model", args: { query: "gpt" } });
+    assert.equal(result.action, "show_model_candidates");
+    assert.equal(result.message, "Choose a model");
+    assert.equal(result.candidates?.[0]?.profile_id, "openai/gpt-5.1");
+    assert.equal(result.candidates?.[0]?.requires_api_key, true);
+    const selectedModel = result.selected_model as { profile_id?: string; api_key_configured?: boolean } | null | undefined;
+    if (!selectedModel) {
+      assert.fail("expected selected_model to be a model candidate object");
+    }
+    assert.equal(selectedModel.profile_id, "google/gemini-2.5-flash");
+    assert.equal(selectedModel.api_key_configured, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("selected tools are not kept after send unless settings opt in", () => {
   assert.equal(keepSelectedToolsAfterSend({}), false);
   assert.equal(keepSelectedToolsAfterSend({ tools: { keep_selected_tools_after_send: "false" } }), false);

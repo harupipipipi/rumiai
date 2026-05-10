@@ -771,6 +771,102 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
             "conv-1",
         )
 
+    def test_slash_command_registry_model_command_opens_picker_without_query(self):
+        from domain.frontend.command_registry import SlashCommandRegistry
+
+        with patch("domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService") as service_cls:
+            result = SlashCommandRegistry(DEFAULTSPACK_ROOT).execute(
+                {"command": "model", "mode": "chat", "args": {}},
+                {},
+            )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertFalse(result["data"]["executed"])
+        self.assertEqual(result["data"]["action"], "open_model_picker")
+        self.assertEqual(result["data"]["candidates"], [])
+        self.assertEqual(result["data"]["args"], {})
+        service_cls.assert_not_called()
+
+    def test_slash_command_registry_model_command_sets_exact_match(self):
+        from domain.frontend.command_registry import SlashCommandRegistry
+
+        candidate = {
+            "profile_id": "stub/default",
+            "qualified_model_id": "stub/default",
+            "provider_id": "stub",
+            "model_id": "default",
+            "display_name": "Stub Default",
+            "configured": True,
+            "local": True,
+            "score": 1036,
+            "label": "Stub / Stub Default",
+        }
+        with patch("domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService") as service_cls:
+            service = service_cls.return_value
+            service.resolve_model_candidates.return_value = {
+                "query": "stub/default",
+                "exact": candidate,
+                "candidates": [candidate],
+            }
+            service.set_preferred_model.return_value = {"profile_id": "stub/default", "settings": {}}
+            result = SlashCommandRegistry(DEFAULTSPACK_ROOT).execute(
+                {"command": "model", "mode": "chat", "args": {"query": "stub/default"}},
+                {},
+            )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["data"]["executed"])
+        self.assertEqual(result["data"]["selected_model"], candidate)
+        self.assertEqual(result["data"]["result"]["profile_id"], "stub/default")
+        service.resolve_model_candidates.assert_called_once_with("stub/default")
+        service.set_preferred_model.assert_called_once_with("stub/default")
+
+    def test_slash_command_registry_model_command_shows_ambiguous_candidates(self):
+        from domain.frontend.command_registry import SlashCommandRegistry
+
+        candidates = [
+            {"profile_id": "openai/gpt-4o", "display_name": "GPT-4o", "score": 950},
+            {"profile_id": "openrouter/openai/gpt-4o", "display_name": "GPT-4o", "score": 950},
+        ]
+        with patch("domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService") as service_cls:
+            service = service_cls.return_value
+            service.resolve_model_candidates.return_value = {
+                "query": "GPT-4o",
+                "exact": None,
+                "candidates": candidates,
+            }
+            result = SlashCommandRegistry(DEFAULTSPACK_ROOT).execute(
+                {"command": "model", "mode": "chat", "args": {"query": "GPT-4o"}},
+                {},
+            )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertFalse(result["data"]["executed"])
+        self.assertEqual(result["data"]["action"], "show_model_candidates")
+        self.assertEqual(result["data"]["candidates"], candidates)
+        service.set_preferred_model.assert_not_called()
+
+    def test_slash_command_registry_model_command_handles_unknown_query(self):
+        from domain.frontend.command_registry import SlashCommandRegistry
+
+        with patch("domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService") as service_cls:
+            service = service_cls.return_value
+            service.resolve_model_candidates.return_value = {
+                "query": "missing-model",
+                "exact": None,
+                "candidates": [],
+            }
+            result = SlashCommandRegistry(DEFAULTSPACK_ROOT).execute(
+                {"command": "models", "mode": "chat", "args": {"query": "missing-model"}},
+                {},
+            )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertFalse(result["data"]["executed"])
+        self.assertEqual(result["data"]["action"], "show_model_candidates")
+        self.assertEqual(result["data"]["candidates"], [])
+        service.set_preferred_model.assert_not_called()
+
     def test_slash_command_registry_rejects_invalid_enum_args(self):
         from domain.frontend.command_registry import SlashCommandRegistry
 

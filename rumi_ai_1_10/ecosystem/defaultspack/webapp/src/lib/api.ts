@@ -173,6 +173,23 @@ export type ModelProfile = {
   local?: boolean;
 };
 
+export type ModelCommandCandidate = {
+  profile_id: string;
+  display_name: string;
+  subtitle?: string;
+  provider_id?: string;
+  provider_display_name?: string;
+  model_id?: string;
+  qualified_model_id?: string;
+  requires_api_key?: boolean;
+  api_key_required?: boolean;
+  api_key_configured?: boolean;
+  configured?: boolean;
+  availability?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
 export type Conversation = {
   id: string;
   title: string;
@@ -298,6 +315,7 @@ export type ComposerCommandArg = {
 
 export type ComposerCommandExecution =
   | { type: "frontend"; action: string }
+  | { type: "model_command"; action: string }
   | { type: "settings_patch"; section: string; field: string }
   | { type: "rumi_function"; qualified_name: string }
   | { type: "chat_action"; action: string };
@@ -326,6 +344,8 @@ export type ComposerCommandExecuteResult = {
   args?: Record<string, unknown>;
   result?: unknown;
   message?: string;
+  candidates?: ModelCommandCandidate[];
+  selected_model?: string | ModelCommandCandidate | null;
 };
 
 export type ShellRegion = {

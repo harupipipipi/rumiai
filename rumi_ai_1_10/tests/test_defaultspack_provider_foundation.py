@@ -143,7 +143,8 @@ class TestDefaultspackHttpRegistryContract(unittest.TestCase):
             / "http.py"
         )
         source = transport_path.read_text(encoding="utf-8")
-        self.assertIn('request_data.setdefault("_method", method)', source)
+        self.assertIn('request_data["_method"] = method', source)
+        self.assertIn('request_data["_actual_method"] = method', source)
 
 
 if __name__ == "__main__":
