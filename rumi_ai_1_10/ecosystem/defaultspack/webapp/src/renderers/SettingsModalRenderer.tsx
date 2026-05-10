@@ -1,6 +1,6 @@
-import { useState, type ReactElement } from "react";
+import { useEffect, useState, type ReactElement } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { X } from "lucide-react";
+import { Check, ChevronDown, MoreVertical, Pencil, Trash2, X } from "lucide-react";
 
 import { cn } from "../lib/cn";
 import type { SettingsSection } from "../lib/api";
@@ -21,6 +21,89 @@ function namedApiRows(provider: Record<string, unknown>): Array<Record<string, u
   return Array.isArray(apis) ? apis.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object") : [];
 }
 
+function registeredApiRows(providers: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  const rows: Array<Record<string, unknown>> = providers.flatMap((provider) => (
+    namedApiRows(provider).map((api) => ({
+      ...api,
+      provider_id: api.provider_id ?? provider.provider_id,
+    }))
+  ));
+  return rows.filter((api) => Boolean(api.configured));
+}
+
+function apiRowLabel(api: Record<string, unknown>): string {
+  return String(api.label ?? `${api.provider_id}:${api.api_id}:***`);
+}
+
+function MaskedApiLabel({ api }: { api: Record<string, unknown> }) {
+  const providerId = String(api.provider_id ?? "");
+  const apiId = String(api.api_id ?? "");
+  const fallback = apiRowLabel(api);
+  if (!providerId || !apiId) {
+    return <span className="truncate text-xs text-zinc-300">{fallback}</span>;
+  }
+  return (
+    <span className="inline-flex max-w-full items-center overflow-hidden font-mono text-xs leading-5 text-zinc-500">
+      <span className="truncate">{providerId}</span>
+      <span className="px-0.5 text-zinc-600">:</span>
+      <span className="truncate">{apiId}</span>
+      <span className="px-0.5 text-zinc-600">:</span>
+      <span className="tracking-normal text-zinc-500">***</span>
+    </span>
+  );
+}
+
+function CustomSelect({
+  value,
+  options,
+  onChange,
+  className,
+}: {
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  onChange: (value: string) => void;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = options.find((option) => option.value === value) ?? options[0];
+  return (
+    <div className={cn("relative", className)}>
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className="flex w-full items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-left text-sm text-zinc-200 outline-none transition-colors hover:border-zinc-700"
+      >
+        <span className="truncate">{selected?.label ?? value}</span>
+        <ChevronDown size={14} className={cn("shrink-0 text-zinc-500 transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <>
+          <button type="button" aria-label="close select" className="fixed inset-0 z-10 cursor-default" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-20 max-h-56 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-950 p-1 shadow-2xl">
+            {options.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => {
+                  onChange(option.value);
+                  setOpen(false);
+                }}
+                className={cn(
+                  "flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors",
+                  option.value === value ? "bg-zinc-800 text-zinc-100" : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200",
+                )}
+              >
+                <span className="truncate">{option.label}</span>
+                {option.value === value && <Check size={13} className="shrink-0 text-emerald-300" />}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function SettingsField({
   sectionId,
   field,
@@ -38,6 +121,10 @@ function SettingsField({
   const [apiName, setApiName] = useState("main");
   const [apiSecret, setApiSecret] = useState("");
   const [apiSaveState, setApiSaveState] = useState<"idle" | "saved">("idle");
+  const [renamingKey, setRenamingKey] = useState("");
+  const [renameDraft, setRenameDraft] = useState("");
+  const [selectedApiKey, setSelectedApiKey] = useState("");
+  const [openApiMenuKey, setOpenApiMenuKey] = useState("");
   const commonLabel = <span className="text-sm text-zinc-300">{field.label}</span>;
   const isSecretConfigured = Boolean(value);
 
@@ -48,20 +135,166 @@ function SettingsField({
       const providerOptions = providers.length
         ? providers.map((provider) => String(provider.provider_id ?? ""))
         : ["google", "openrouter", "openai", "anthropic"];
+      const uniqueProviderOptions = [...new Set(providerOptions.filter(Boolean))];
+      const registeredApis = registeredApiRows(providers);
       control = (
         <div className="space-y-4">
+          <div className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/70">
+            <div className="grid grid-cols-[36px_minmax(220px,1.4fr)_minmax(120px,0.8fr)_minmax(90px,0.6fr)_minmax(90px,0.6fr)_48px] items-center gap-3 border-b border-zinc-800 bg-zinc-900/70 px-3 py-2 text-[11px] font-medium text-zinc-500">
+              <span className="h-4 w-4 rounded border border-indigo-500/70" />
+              <span>Key</span>
+              <span>Guardrails</span>
+              <span>Expires</span>
+              <span>Last Used</span>
+              <span />
+            </div>
+            <div className="divide-y divide-zinc-800/80">
+              {registeredApis.length > 0 ? registeredApis.map((api) => {
+                const key = String(api.key ?? `${api.provider_id}:${api.api_id}`);
+                const isRenaming = renamingKey === key;
+                const isMenuOpen = openApiMenuKey === key;
+                const isSelected = selectedApiKey === key;
+                return (
+                  <div
+                    key={key}
+                    className={cn(
+                      "grid grid-cols-[36px_minmax(220px,1.4fr)_minmax(120px,0.8fr)_minmax(90px,0.6fr)_minmax(90px,0.6fr)_48px] items-center gap-3 px-3 py-3 transition-colors",
+                      isSelected ? "bg-zinc-900/85" : "bg-zinc-950/20 hover:bg-zinc-900/45",
+                    )}
+                    onClick={() => setSelectedApiKey(key)}
+                  >
+                    <span className={cn("h-4 w-4 rounded border", isSelected ? "border-indigo-400 bg-indigo-500/20" : "border-indigo-500/70")} />
+                    <div className="min-w-0">
+                      {isRenaming ? (
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            value={renameDraft}
+                            autoFocus
+                            onChange={(event) => setRenameDraft(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key !== "Enter") return;
+                              event.preventDefault();
+                              if (!renameDraft.trim()) return;
+                              onChange(sectionId, field.id, {
+                                action: "rename",
+                                provider_id: api.provider_id,
+                                api_id: api.api_id,
+                                name: renameDraft.trim(),
+                              });
+                              setRenamingKey("");
+                            }}
+                            className="min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 outline-none"
+                          />
+                          <button
+                            type="button"
+                            disabled={!renameDraft.trim()}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              if (!renameDraft.trim()) return;
+                              onChange(sectionId, field.id, {
+                                action: "rename",
+                                provider_id: api.provider_id,
+                                api_id: api.api_id,
+                                name: renameDraft.trim(),
+                              });
+                              setRenamingKey("");
+                            }}
+                            className="rounded-md border border-zinc-700 p-1 text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+                            title="Rename"
+                          >
+                            <Check size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setRenamingKey("");
+                            }}
+                            className="rounded-md border border-zinc-800 p-1 text-zinc-500 hover:text-zinc-300"
+                          >
+                            <X size={13} />
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="truncate text-sm font-medium text-zinc-200">{String(api.name ?? api.api_id ?? "")}</div>
+                          <MaskedApiLabel api={api} />
+                        </>
+                      )}
+                    </div>
+                    <span className="truncate text-sm text-zinc-500">No guardrails</span>
+                    <span className="truncate text-sm text-zinc-500">Never</span>
+                    <span className="truncate text-sm text-zinc-500">Never</span>
+                    <div className="relative flex justify-end">
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setOpenApiMenuKey(isMenuOpen ? "" : key);
+                        }}
+                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-800 text-zinc-500 transition-colors hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-200"
+                        title="Actions"
+                      >
+                        <MoreVertical size={15} />
+                      </button>
+                      {isMenuOpen && (
+                        <>
+                          <button
+                            type="button"
+                            aria-label="close api menu"
+                            className="fixed inset-0 z-10 cursor-default"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setOpenApiMenuKey("");
+                            }}
+                          />
+                          <div className="absolute right-0 top-[calc(100%+6px)] z-20 w-32 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 py-1 shadow-2xl">
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setRenamingKey(key);
+                                setRenameDraft(String(api.name ?? api.api_id ?? ""));
+                                setOpenApiMenuKey("");
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
+                            >
+                              <Pencil size={13} />
+                              Rename
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setOpenApiMenuKey("");
+                                onChange(sectionId, field.id, {
+                                  action: "delete",
+                                  provider_id: api.provider_id,
+                                  api_id: api.api_id,
+                                });
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-rose-300 hover:bg-rose-950/30"
+                            >
+                              <Trash2 size={13} />
+                              Delete
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              }) : (
+                <div className="px-3 py-5 text-xs text-zinc-600">No registered API keys yet.</div>
+              )}
+            </div>
+          </div>
           <div className="grid gap-2 md:grid-cols-[160px_1fr_1.4fr_auto]">
-            <select
+            <CustomSelect
               value={apiProvider}
-              onChange={(event) => setApiProvider(event.target.value)}
-              className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none"
-            >
-              {[...new Set(providerOptions.filter(Boolean))].map((providerId) => (
-                <option key={providerId} value={providerId}>
-                  {providerId}
-                </option>
-              ))}
-            </select>
+              onChange={setApiProvider}
+              options={uniqueProviderOptions.map((providerId) => ({ value: providerId, label: providerId }))}
+            />
             <input
               value={apiName}
               onChange={(event) => {
@@ -90,6 +323,7 @@ function SettingsField({
                 onChange(sectionId, field.id, {
                   action: "upsert",
                   provider_id: apiProvider,
+                  api_id: apiName,
                   name: apiName,
                   value: apiSecret,
                 });
@@ -107,32 +341,6 @@ function SettingsField({
             </button>
           </div>
           {apiSaveState === "saved" && <p className="text-[11px] text-emerald-400">Saved</p>}
-          <div className="grid gap-2 md:grid-cols-2">
-            {providers.map((provider) => {
-              const rows = namedApiRows(provider);
-              const configured = Boolean(provider.configured);
-              return (
-                <div key={String(provider.provider_id)} className="rounded-lg border border-zinc-800 bg-zinc-900/30 p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-sm font-medium text-zinc-200">{String(provider.provider_id)}</span>
-                    <span className={cn("text-[11px]", configured ? "text-emerald-400" : "text-zinc-600")}>
-                      {configured ? "configured" : "not set"}
-                    </span>
-                  </div>
-                  <div className="mt-2 space-y-1">
-                    {rows.length > 0 ? rows.map((api) => (
-                      <div key={String(api.key)} className="flex items-center justify-between gap-2 text-xs text-zinc-500">
-                        <span>{String(api.name ?? api.api_id)}</span>
-                        <span className="font-mono">{String(api.key ?? "")}</span>
-                      </div>
-                    )) : (
-                      <p className="text-xs text-zinc-600">No named APIs yet.</p>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
         </div>
       );
       break;
@@ -195,17 +403,11 @@ function SettingsField({
       break;
     case "select":
       control = (
-        <select
+        <CustomSelect
           value={String(value ?? field.default ?? "")}
-          onChange={(event) => onChange(sectionId, field.id, event.target.value)}
-          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none"
-        >
-          {(field.options ?? []).map((option) => (
-            <option key={String(option.value)} value={String(option.value)}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+          onChange={(nextValue) => onChange(sectionId, field.id, nextValue)}
+          options={(field.options ?? []).map((option) => ({ value: String(option.value), label: option.label }))}
+        />
       );
       break;
     case "number":
@@ -256,6 +458,7 @@ function SettingsField({
 
 export function SettingsModalRenderer({
   isOpen,
+  activeSectionId: requestedSectionId,
   catalog,
   health,
   previewsCount,
@@ -265,6 +468,12 @@ export function SettingsModalRenderer({
   onSettingChange,
 }: SettingsModalRendererProps) {
   const [activeSectionId, setActiveSectionId] = useState(settingsSections[0]?.id ?? "system");
+  useEffect(() => {
+    if (!requestedSectionId) return;
+    if (settingsSections.some((section) => section.id === requestedSectionId)) {
+      setActiveSectionId(requestedSectionId);
+    }
+  }, [requestedSectionId, settingsSections]);
   const activeSection = settingsSections.find((section) => section.id === activeSectionId) ?? settingsSections[0];
   const primaryFields = activeSection?.fields.filter((field) => !field.advanced) ?? [];
   const advancedFields = activeSection?.fields.filter((field) => field.advanced) ?? [];
@@ -305,7 +514,7 @@ export function SettingsModalRenderer({
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            className="relative w-full max-w-5xl bg-[#09090b] border border-zinc-800 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[84vh]"
+            className="relative h-[min(760px,calc(100vh-48px))] w-[min(1040px,calc(100vw-32px))] bg-[#09090b] border border-zinc-800 rounded-xl shadow-2xl overflow-hidden flex flex-col"
           >
             <div className="px-6 py-4 border-b border-zinc-800 flex justify-between items-center">
               <div>

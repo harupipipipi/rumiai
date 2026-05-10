@@ -5,6 +5,7 @@ import json
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from domain.ai_client.client import AIClient
 from domain.ai_client.api_key_store import provider_key_status, set_provider_api_key
@@ -350,6 +351,10 @@ class FrontendRegistry:
             schema = tool.get("schema", {}).get("parameters", {})
             execution_type = tool.get("execution", {}).get("type", "local")
             ui = dict(tool.get("ui", {})) if isinstance(tool.get("ui"), dict) else {}
+            risk = str(tool.get("risk") or tool.get("metadata", {}).get("risk") or "low").strip().lower()
+            tags = [str(tag) for tag in tool.get("tags", []) if str(tag)]
+            if risk == "high" and "danger" not in tags:
+                tags.append("danger")
             items.append(
                 {
                     "id": tool.get("tool_id", tool.get("name", "tool")),
@@ -357,7 +362,8 @@ class FrontendRegistry:
                     "category": "tool",
                     "description": tool.get("summary", ""),
                     "badge": "Dynamic" if execution_type == "dynamic" else None,
-                    "tags": tool.get("tags", []),
+                    "tags": tags,
+                    "risk": risk,
                     "ui": ui,
                     "origin": {"kind": "tool_registry", "path": "domain/tool/registry.py"},
                     "panel": {
@@ -572,6 +578,56 @@ class FrontendRegistry:
                     },
                 ],
             },
+            {
+                "id": "commands",
+                "label": "Commands",
+                "description": "Slash command visibility and command palette behavior.",
+                "fields": [
+                    {
+                        "id": "show_advanced_commands",
+                        "label": "Show Advanced Commands",
+                        "type": "toggle",
+                        "default": False,
+                        "help": "Advanced slash commandsを候補に含めます。hidden command は直接入力か将来の管理UI向けです。",
+                    },
+                ],
+            },
+            {
+                "id": "tools",
+                "label": "Tools",
+                "description": "Tool composer defaults and selection behavior.",
+                "fields": [
+                    {
+                        "id": "default_target",
+                        "label": "Default Target",
+                        "type": "text",
+                        "default": "",
+                        "help": "Backcompat value for tool UIs that still read a shared default_target.",
+                        "advanced": True,
+                    },
+                    {
+                        "id": "keep_selected_tools_after_send",
+                        "label": "Keep Selected Tools",
+                        "type": "toggle",
+                        "default": False,
+                        "help": "Keep composer tool selections after a message is sent.",
+                    },
+                ],
+            },
+            {
+                "id": "debug",
+                "label": "Debug",
+                "description": "モデル呼び出しとcomputer use調査用のログ設定。",
+                "fields": [
+                    {
+                        "id": "ai_request_logging",
+                        "label": "AI Request Logs",
+                        "type": "toggle",
+                        "default": False,
+                        "help": "AIに渡すmessages/tools/paramsと添付画像を会話workspace/debug/ai_requestsへ保存します。",
+                    },
+                ],
+            },
         ]
 
         sections.extend(self._config_list(ui_surfaces, "settings_sections"))
@@ -756,10 +812,10 @@ class FrontendRegistry:
                 )
         for index, log in enumerate(message.get("tool_logs") or []):
             if isinstance(log, dict):
-                previews.append(self._preview_from_tool_log(message, log, index))
+                previews.extend(self._preview_from_tool_log(message, log, index))
         return previews
 
-    def _preview_from_tool_log(self, message: dict[str, Any], log: dict[str, Any], index: int) -> dict[str, Any]:
+    def _preview_from_tool_log(self, message: dict[str, Any], log: dict[str, Any], index: int) -> list[dict[str, Any]]:
         timestamp = int(message.get("created_at", 0)) - 200 - index
         tool_name = str(log.get("tool_name") or "tool")
         arguments = log.get("arguments") if isinstance(log.get("arguments"), dict) else {}
@@ -775,7 +831,7 @@ class FrontendRegistry:
             lines.append(f"input: {input_text}")
         if result_text:
             lines.append(f"result: {result_text}")
-        return {
+        previews = [{
             "id": f"tool-log-{message.get('id')}-{index}",
             "toolStepId": tool_name,
             "timestamp": timestamp,
@@ -785,7 +841,72 @@ class FrontendRegistry:
                 "size": status,
                 "content": "\n".join(lines),
             },
-        }
+        }]
+        conversation_id = str(message.get("conversation_id") or "")
+        for artifact_index, path in enumerate(self._artifact_paths_from_value(result)):
+            name = Path(path).name or "artifact"
+            url = "/api/chat/conversations/{}/artifact-file?path={}".format(
+                quote(conversation_id, safe=""),
+                quote(path, safe=""),
+            )
+            if self._is_image_path(path):
+                previews.append(
+                    {
+                        "id": f"tool-log-artifact-{message.get('id')}-{index}-{artifact_index}",
+                        "toolStepId": tool_name,
+                        "timestamp": timestamp + artifact_index + 0.1,
+                        "data": {
+                            "type": "image",
+                            "url": url,
+                            "alt": name,
+                            "path": path,
+                        },
+                    }
+                )
+            else:
+                previews.append(
+                    {
+                        "id": f"tool-log-artifact-{message.get('id')}-{index}-{artifact_index}",
+                        "toolStepId": tool_name,
+                        "timestamp": timestamp + artifact_index + 0.1,
+                        "data": {
+                            "type": "file",
+                            "filename": name,
+                            "size": "tool artifact",
+                            "path": path,
+                            "url": url,
+                            "downloadName": name,
+                            "content": f"artifact: {path}",
+                        },
+                    }
+                )
+        return previews
+
+    def _artifact_paths_from_value(self, value: Any, seen: set[str] | None = None) -> list[str]:
+        seen = seen or set()
+        paths: list[str] = []
+        if isinstance(value, dict):
+            preferred = ""
+            for key in ("model_image_path", "screenshot_path", "path"):
+                item = value.get(key)
+                if isinstance(item, str) and item.strip():
+                    preferred = item.strip()
+                    break
+            if preferred and preferred not in seen:
+                seen.add(preferred)
+                paths.append(preferred)
+            for key, item in value.items():
+                if key in {"path", "screenshot_path", "model_image_path", "data_url", "dataUrl"}:
+                    continue
+                paths.extend(self._artifact_paths_from_value(item, seen))
+        elif isinstance(value, list):
+            for item in value:
+                paths.extend(self._artifact_paths_from_value(item, seen))
+        return paths
+
+    @staticmethod
+    def _is_image_path(path: str) -> bool:
+        return Path(path).suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
 
     def _preview_text(self, value: Any, limit: int) -> str:
         if value is None:
@@ -1021,6 +1142,21 @@ class FrontendRegistry:
             "models": {
                 **ModelRuntimeSettingsService(self._pack_root).default_model_settings(),
             },
+            "commands": {
+                "show_advanced_commands": False,
+            },
+            "tools": {
+                "default_target": "",
+                "keep_selected_tools_after_send": False,
+            },
+            "debug": {
+                "ai_request_logging": False,
+            },
+            "sidebar": {
+                "pinned_item_ids": [],
+                "starred_item_ids": [],
+                "custom_tool_tags": {},
+            },
             "apis": {
                 "api_keys": [],
                 "model_api_routes": "",
@@ -1200,6 +1336,21 @@ class FrontendRegistry:
 
     def _refresh_derived_settings(self, values: dict[str, Any]) -> dict[str, Any]:
         refreshed = deepcopy(values)
+        debug = refreshed.setdefault("debug", {})
+        if not isinstance(debug, dict):
+            debug = {}
+            refreshed["debug"] = debug
+        debug.setdefault("ai_request_logging", False)
+
+        tools = refreshed.setdefault("tools", {})
+        if not isinstance(tools, dict):
+            tools = {}
+            refreshed["tools"] = tools
+        tools.setdefault("keep_selected_tools_after_send", False)
+        legacy_default_target = self._legacy_default_target(refreshed)
+        if "default_target" not in tools or (not str(tools.get("default_target") or "").strip() and legacy_default_target):
+            tools["default_target"] = legacy_default_target
+
         apis = refreshed.setdefault("apis", {})
         if isinstance(apis, dict):
             apis["api_keys"] = provider_key_status(pack_root=self._pack_root)
@@ -1213,3 +1364,15 @@ class FrontendRegistry:
                 self._pack_root
             ).refresh_models_settings(models)
         return refreshed
+
+    @staticmethod
+    def _legacy_default_target(values: dict[str, Any]) -> str:
+        for container_key in ("debug", "browser", "browser_use"):
+            container = values.get(container_key)
+            if not isinstance(container, dict):
+                continue
+            value = container.get("default_target")
+            if value is not None:
+                return str(value)
+        value = values.get("default_target")
+        return str(value) if value is not None else ""

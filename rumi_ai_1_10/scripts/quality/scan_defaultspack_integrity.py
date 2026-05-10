@@ -28,6 +28,8 @@ def _route_specs() -> list[tuple[str, str, str]]:
 
 
 def _module_path(block_module: str) -> Path:
+    if block_module.startswith("ecosystem."):
+        return ROOT / Path(block_module.replace(".", "/") + ".py")
     return DEFAULTSPACK_ROOT / Path(block_module.replace(".", "/") + ".py")
 
 

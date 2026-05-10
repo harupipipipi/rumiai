@@ -6,5 +6,11 @@
   "model_id": "gemini-2.0-flash-lite",
   "display_name": "Gemini 2.0 Flash-Lite",
   "priority": 28,
-  "type": "chat"
+  "type": "chat",
+  "enabled": false,
+  "metadata": {
+    "deprecated": true,
+    "hidden": true,
+    "replacement": "gemini-2.5-flash-lite"
+  }
 }

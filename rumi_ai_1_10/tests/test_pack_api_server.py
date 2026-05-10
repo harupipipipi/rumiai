@@ -10,7 +10,11 @@ from __future__ import annotations
 
 import io
 import json
+import threading
+import time
+import urllib.request
 from email.message import Message
+from http.server import ThreadingHTTPServer
 from unittest.mock import MagicMock, patch, PropertyMock
 
 import pytest
@@ -62,6 +66,16 @@ def _make_headers(**fields) -> Message:
     for key, value in fields.items():
         msg[key.replace("_", "-")] = value
     return msg
+
+
+class _FlushBytesIO(io.BytesIO):
+    def __init__(self) -> None:
+        super().__init__()
+        self.flush_count = 0
+
+    def flush(self) -> None:
+        self.flush_count += 1
+        super().flush()
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +136,42 @@ class TestIsSafeId:
     ])
     def test_invalid_safe_ids(self, value) -> None:
         assert PackAPIHandler._is_safe_id(value) is False
+
+
+class TestSSEResponses:
+    def test_send_result_streams_defaultspack_sse_events_incrementally(self) -> None:
+        wfile = _FlushBytesIO()
+        handler = _make_handler(
+            headers=_make_headers(Origin="http://127.0.0.1:8765"),
+            wfile=wfile,
+            _panel_session_cookie=None,
+        )
+
+        handler._send_result(
+            {
+                "status": "ok",
+                "data": {
+                    "_sse": True,
+                    "events": [
+                        {"type": "delta", "delta": "hello"},
+                        {"type": "done"},
+                    ],
+                },
+            }
+        )
+
+        assert handler.send_response.call_args.args == (200,)
+        sent_headers = [call.args for call in handler.send_header.call_args_list]
+        assert ("Content-Type", "text/event-stream; charset=utf-8") in sent_headers
+        assert ("Cache-Control", "no-cache, no-transform") in sent_headers
+        assert ("Connection", "close") in sent_headers
+        assert ("Content-Length", str(len(wfile.getvalue()))) not in sent_headers
+        assert wfile.getvalue() == (
+            b'data: {"type": "delta", "delta": "hello"}\n\n'
+            b'data: {"type": "done"}\n\n'
+        )
+        assert wfile.flush_count == 2
+        assert handler.close_connection is True
 
 
 # ---------------------------------------------------------------------------
@@ -528,6 +578,79 @@ class TestPackAPIServer:
         server = PackAPIServer(host="127.0.0.1", port=8765)
 
         assert server.host == "192.168.1.1"
+
+    @patch("core_runtime.pack_api_server.get_hmac_key_manager")
+    def test_start_uses_threading_http_server_with_safe_settings(self, mock_get_hmac) -> None:
+        """長いリクエストで API 全体が詰まらないよう ThreadingHTTPServer を使う。"""
+        mock_get_hmac.return_value = MagicMock()
+        server = PackAPIServer(host="127.0.0.1", port=0, internal_token="token")
+
+        try:
+            server.start()
+
+            assert isinstance(server.server, ThreadingHTTPServer)
+            assert server.server.allow_reuse_address is True
+            assert server.server.daemon_threads is True
+            assert server.server.block_on_close is False
+            assert server.thread is not None
+            assert server.thread.daemon is True
+        finally:
+            server.stop()
+
+    @patch("core_runtime.pack_api_server.get_hmac_key_manager")
+    def test_long_response_does_not_block_concurrent_get(
+        self,
+        mock_get_hmac,
+        monkeypatch,
+    ) -> None:
+        """SSE 相当の長い接続中でも別 GET を処理できる。"""
+        mock_get_hmac.return_value = MagicMock()
+        slow_started = threading.Event()
+        release_slow = threading.Event()
+        slow_response = None
+
+        def do_get(handler) -> None:
+            if handler.path == "/slow":
+                handler.send_response(200)
+                handler.send_header("Content-Type", "text/event-stream")
+                handler.end_headers()
+                handler.wfile.write(b"data: start\n\n")
+                handler.wfile.flush()
+                slow_started.set()
+                release_slow.wait(timeout=2)
+                handler.wfile.write(b"data: done\n\n")
+                handler.wfile.flush()
+                return
+            if handler.path == "/fast":
+                handler.send_response(200)
+                handler.end_headers()
+                handler.wfile.write(b"ok")
+                return
+            handler.send_error(404)
+
+        monkeypatch.setattr(PackAPIHandler, "do_GET", do_get)
+        server = PackAPIServer(host="127.0.0.1", port=0, internal_token="token")
+
+        try:
+            server.start()
+            assert server.server is not None
+            host, port = server.server.server_address[:2]
+            base_url = f"http://{host}:{port}"
+
+            slow_response = urllib.request.urlopen(f"{base_url}/slow", timeout=2)
+            assert slow_response.readline() == b"data: start\n"
+            assert slow_started.wait(timeout=1)
+
+            started = time.monotonic()
+            fast_body = urllib.request.urlopen(f"{base_url}/fast", timeout=1).read()
+
+            assert fast_body == b"ok"
+            assert time.monotonic() - started < 1
+        finally:
+            release_slow.set()
+            if slow_response is not None:
+                slow_response.close()
+            server.stop()
 
 
 # ---------------------------------------------------------------------------

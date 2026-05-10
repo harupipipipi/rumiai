@@ -34,6 +34,7 @@ TOOL_FUNCTION_ACTIONS = {
     "computer_screenshot": ("browser_computer", {"action": "computer.screenshot"}),
     "computer_move": ("browser_computer", {"action": "computer.move"}),
     "computer_click": ("browser_computer", {"action": "computer.click"}),
+    "computer_drag": ("browser_computer", {"action": "computer.drag"}),
     "computer_type": ("browser_computer", {"action": "computer.type"}),
     "computer_key": ("browser_computer", {"action": "computer.key"}),
     "computer_scroll": ("browser_computer", {"action": "computer.scroll"}),

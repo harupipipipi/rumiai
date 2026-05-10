@@ -39,6 +39,7 @@ def _reset_singletons(monkeypatch, tmp_path):
         "ANTHROPIC_API_KEY",
         "ANTHROPIC_BASE_URL",
         "GOOGLE_API_KEY",
+        "GEMINI_API_KEY",
         "GOOGLE_APPLICATION_CREDENTIALS",
         "GOOGLE_BASE_URL",
         "GENSPARK_API_KEY",
@@ -71,6 +72,7 @@ def _reset_singletons(monkeypatch, tmp_path):
         "LLAMACPP_BASE_URL",
         "OPENAI_COMPATIBLE_API_KEY",
         "OPENAI_COMPATIBLE_BASE_URL",
+        "RUMI_DEFAULTSPACK_ENABLE_CLOUD_PROVIDERS",
     ):
         monkeypatch.delenv(env_name, raising=False)
     permission_policy_module._POLICY_STORE = None

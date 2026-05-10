@@ -36,6 +36,24 @@ export type ChatAttachment = {
   sourcePath?: string;
 };
 
+export type BrowserScreenshot = {
+  id: string;
+  run_id: string;
+  tool_call_id?: string | null;
+  tool_name?: string;
+  mime_type?: string;
+  data_url: string;
+  action?: string;
+  image_size?: { width?: number; height?: number };
+  click_marker?: { x?: number; y?: number; screen_x?: number; screen_y?: number; coordinate_space?: string };
+  marker?: { x?: number; y?: number; screen_x?: number; screen_y?: number; coordinate_space?: string };
+  drag_marker?: {
+    from?: { x?: number; y?: number; screen_x?: number; screen_y?: number; coordinate_space?: string };
+    to?: { x?: number; y?: number; screen_x?: number; screen_y?: number; coordinate_space?: string };
+  };
+  target_window?: Record<string, unknown>;
+};
+
 export type CodingContextEntry = {
   name: string;
   path: string;
@@ -127,6 +145,10 @@ export type ToolLogEntry = {
   [key: string]: unknown;
 };
 
+export function conversationArtifactFileUrl(conversationId: string, path: string): string {
+  return `/api/chat/conversations/${encodeURIComponent(conversationId)}/artifact-file?path=${encodeURIComponent(path)}`;
+}
+
 export type ModelProfile = {
   profile_id: string;
   display_name: string;
@@ -142,7 +164,30 @@ export type ModelProfile = {
   default_thinking_level?: string | null;
   availability?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
+  defaults?: Record<string, unknown>;
+  pricing?: Record<string, unknown>;
+  name_collision?: boolean;
+  provider_count_for_model_name?: number;
+  disambiguated_name?: string;
+  same_model_across_providers_key?: string;
   local?: boolean;
+};
+
+export type ModelCommandCandidate = {
+  profile_id: string;
+  display_name: string;
+  subtitle?: string;
+  provider_id?: string;
+  provider_display_name?: string;
+  model_id?: string;
+  qualified_model_id?: string;
+  requires_api_key?: boolean;
+  api_key_required?: boolean;
+  api_key_configured?: boolean;
+  configured?: boolean;
+  availability?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  [key: string]: unknown;
 };
 
 export type Conversation = {
@@ -233,6 +278,7 @@ export type SidebarItem = {
   description?: string;
   badge?: string | null;
   tags?: string[];
+  risk?: "low" | "medium" | "high" | string | null;
   ui?: ToolUiMetadata;
   origin?: {
     kind: string;
@@ -253,6 +299,53 @@ export type SettingsSection = {
   label: string;
   description?: string;
   fields: SidebarField[];
+};
+
+export type ComposerCommandCategory = "chat" | "model" | "mode" | "coding" | "tools" | "settings" | "debug";
+export type ComposerCommandVisibility = "default" | "advanced" | "hidden";
+export type ComposerCommandRisk = "low" | "medium" | "high";
+export type ComposerCommandMode = "chat" | "coding" | "agent";
+
+export type ComposerCommandArg = {
+  name: string;
+  type: "string" | "enum" | "boolean";
+  required?: boolean;
+  values?: string[];
+};
+
+export type ComposerCommandExecution =
+  | { type: "frontend"; action: string }
+  | { type: "model_command"; action: string }
+  | { type: "settings_patch"; section: string; field: string }
+  | { type: "rumi_function"; qualified_name: string }
+  | { type: "chat_action"; action: string };
+
+export type ComposerCommandItem = {
+  id: string;
+  name: string;
+  aliases?: string[];
+  label: string;
+  description?: string;
+  category: ComposerCommandCategory;
+  visibility: ComposerCommandVisibility;
+  modes?: ComposerCommandMode[];
+  risk: ComposerCommandRisk;
+  enabled?: boolean;
+  active?: boolean;
+  args?: ComposerCommandArg[];
+  execution: ComposerCommandExecution;
+};
+
+export type ComposerCommandExecuteResult = {
+  command: ComposerCommandItem;
+  executed?: boolean;
+  requires_approval?: boolean;
+  action?: string;
+  args?: Record<string, unknown>;
+  result?: unknown;
+  message?: string;
+  candidates?: ModelCommandCandidate[];
+  selected_model?: string | ModelCommandCandidate | null;
 };
 
 export type ShellRegion = {
@@ -374,14 +467,23 @@ type SendMessageOptions = {
   metadata?: Record<string, unknown>;
 };
 
+type ChatStreamError = string | { code?: string; message?: string };
+
+export type ChatToolStreamEvent = ChatActivityEvent & {
+  type: "status" | "tool_call" | "tool_call_started" | "tool_call_completed" | "tool_result" | "browser_screenshot" | "approval_requested";
+};
+
 export type ChatStreamEvent =
   | { type: "delta"; delta: string }
+  | { type: "thinking_delta"; delta: string }
   | { type: "message" | "done" | "user_message"; message?: ChatMessage }
-  | { type: "error"; error?: string };
+  | { type: "error"; error?: ChatStreamError }
+  | ChatToolStreamEvent;
 
 type ChatStreamHandlers = {
   onEvent?: (event: ChatStreamEvent) => void;
   onDelta?: (delta: string) => void;
+  onThinkingDelta?: (delta: string) => void;
   onMessage?: (message: ChatMessage) => void;
   onUserMessage?: (message: ChatMessage) => void;
   signal?: AbortSignal;
@@ -445,6 +547,14 @@ async function readStreamEvents(
   let buffer = "";
   let finalMessage: ChatMessage | null = null;
 
+  const streamErrorMessage = (value: ChatStreamError | undefined): string => {
+    if (typeof value === "string" && value.trim()) return value;
+    if (value && typeof value === "object" && typeof value.message === "string") {
+      return value.message;
+    }
+    return "defaultspack stream failed";
+  };
+
   const consumePacket = (packet: string) => {
     const dataLines = packet
       .split(/\r?\n/)
@@ -453,17 +563,24 @@ async function readStreamEvents(
     if (!dataLines.length) return;
     const raw = dataLines.join("\n");
     if (!raw || raw === "[DONE]") return;
-    const event = JSON.parse(raw) as ChatStreamEvent;
+    let event: ChatStreamEvent;
+    try {
+      event = JSON.parse(raw) as ChatStreamEvent;
+    } catch {
+      throw new Error("defaultspack stream returned a malformed event");
+    }
     handlers.onEvent?.(event);
     if (event.type === "delta") {
       handlers.onDelta?.(event.delta);
+    } else if (event.type === "thinking_delta") {
+      handlers.onThinkingDelta?.(event.delta);
     } else if (event.type === "user_message" && event.message) {
       handlers.onUserMessage?.(event.message);
     } else if ((event.type === "message" || event.type === "done") && event.message) {
       finalMessage = event.message;
       handlers.onMessage?.(event.message);
     } else if (event.type === "error") {
-      throw new Error(event.error || "defaultspack stream failed");
+      throw new Error(streamErrorMessage(event.error));
     }
   };
 
@@ -479,6 +596,9 @@ async function readStreamEvents(
   }
   if (buffer.trim()) {
     consumePacket(buffer);
+  }
+  if (!finalMessage) {
+    throw new Error("defaultspack stream ended before a final response arrived");
   }
   return finalMessage;
 }
@@ -567,6 +687,16 @@ export const api = {
     return readStreamEvents(response, handlers);
   },
 
+  stopMessage(conversationId: string) {
+    return request<{ success: boolean; conversation_id: string; cancelled: boolean }>(
+      `/api/chat/conversations/${conversationId}/stop`,
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+      },
+    );
+  },
+
   listModelProfiles() {
     return request<{ profiles: ModelProfile[]; count: number }>("/api/ai/profiles");
   },
@@ -585,6 +715,22 @@ export const api = {
     );
   },
 
+  uiCommands() {
+    return request<{ commands: ComposerCommandItem[] }>("/api/ui/commands");
+  },
+
+  executeUiCommand(payload: {
+    command: string;
+    args?: Record<string, unknown>;
+    conversation_id?: string | null;
+    mode?: ComposerCommandMode;
+  }) {
+    return request<ComposerCommandExecuteResult>("/api/ui/commands/execute", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
   updateUiSettings(values: Record<string, Record<string, unknown>>) {
     return request<{ values: Record<string, Record<string, unknown>> }>("/api/ui/settings", {
       method: "PUT",
@@ -592,14 +738,45 @@ export const api = {
     });
   },
 
+  writeClipboard(content: string) {
+    return request<{ written: boolean }>("/api/ui/clipboard", {
+      method: "POST",
+      body: JSON.stringify({ content }),
+    });
+  },
+
   saveProviderApiKey(providerId: string, value: string, options?: { apiId?: string; name?: string }) {
-    return request<{ provider_id: string; configured: boolean }>("/api/ai/provider-key", {
+    return request<{ provider_id: string; api_id?: string; name?: string; configured: boolean }>("/api/ai/provider-key", {
       method: "POST",
       body: JSON.stringify({
         provider_id: providerId,
         value,
         api_id: options?.apiId,
         name: options?.name,
+      }),
+    });
+  },
+
+  renameProviderApiKey(providerId: string, apiId: string, name: string) {
+    return request<{ provider_id: string; api_id?: string; name?: string; configured: boolean }>("/api/ai/provider-key", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "rename",
+        provider_id: providerId,
+        api_id: apiId,
+        name,
+        new_api_id: name,
+      }),
+    });
+  },
+
+  deleteProviderApiKey(providerId: string, apiId: string) {
+    return request<{ provider_id: string; api_id?: string; configured: boolean; cleared?: boolean }>("/api/ai/provider-key", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "delete",
+        provider_id: providerId,
+        api_id: apiId,
       }),
     });
   },
@@ -643,6 +820,12 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ action, payload: payload ?? {} }),
     });
+  },
+
+  getBrowserScreenshots(conversationId: string, runId: string) {
+    return request<{ screenshots: BrowserScreenshot[]; omitted_count?: number }>(
+      `/api/chat/conversations/${conversationId}/run-results/${runId}/browser-screenshots`,
+    );
   },
 
   listSchedules() {

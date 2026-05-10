@@ -1,6 +1,78 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { api } from "./api";
+import { frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean } from "../App";
+
+test("frontend command args prefer backend-coerced values", () => {
+  assert.deepEqual(
+    frontendCommandArgs({ enabled: "false" }, { enabled: false }),
+    { enabled: false },
+  );
+});
+
+test("frontend boolean command parsing handles explicit false strings", () => {
+  assert.equal(parseCommandBoolean("false", true), false);
+  assert.equal(parseCommandBoolean("0", true), false);
+  assert.equal(parseCommandBoolean("off", true), false);
+  assert.equal(parseCommandBoolean(undefined, true), true);
+});
+
+test("executeUiCommand preserves model candidate results", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    status: "ok",
+    data: {
+      command: {
+        id: "model",
+        name: "model",
+        label: "Model",
+        category: "model",
+        visibility: "default",
+        risk: "low",
+        execution: { type: "model_command", action: "select_or_suggest_model" },
+      },
+      action: "show_model_candidates",
+      message: "Choose a model",
+      candidates: [
+        {
+          profile_id: "openai/gpt-5.1",
+          display_name: "GPT-5.1",
+          subtitle: "OpenAI / gpt-5.1",
+          requires_api_key: true,
+        },
+      ],
+      selected_model: {
+        profile_id: "google/gemini-2.5-flash",
+        display_name: "Gemini 2.5 Flash",
+        provider_id: "google",
+        model_id: "gemini-2.5-flash",
+        api_key_configured: true,
+      },
+    },
+  }), { status: 200, headers: { "Content-Type": "application/json" } })) as typeof fetch;
+
+  try {
+    const result = await api.executeUiCommand({ command: "model", args: { query: "gpt" } });
+    assert.equal(result.action, "show_model_candidates");
+    assert.equal(result.message, "Choose a model");
+    assert.equal(result.candidates?.[0]?.profile_id, "openai/gpt-5.1");
+    assert.equal(result.candidates?.[0]?.requires_api_key, true);
+    const selectedModel = result.selected_model as { profile_id?: string; api_key_configured?: boolean } | null | undefined;
+    if (!selectedModel) {
+      assert.fail("expected selected_model to be a model candidate object");
+    }
+    assert.equal(selectedModel.profile_id, "google/gemini-2.5-flash");
+    assert.equal(selectedModel.api_key_configured, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("selected tools are not kept after send unless settings opt in", () => {
+  assert.equal(keepSelectedToolsAfterSend({}), false);
+  assert.equal(keepSelectedToolsAfterSend({ tools: { keep_selected_tools_after_send: "false" } }), false);
+  assert.equal(keepSelectedToolsAfterSend({ tools: { keep_selected_tools_after_send: true } }), true);
+});
 
 test("sendMessage serializes attachments and selected tools", async () => {
   let requestBody: any = null;
@@ -107,6 +179,56 @@ test("saveProviderApiKey serializes named API metadata", async () => {
   });
 });
 
+test("renameProviderApiKey serializes rename action", async () => {
+  let requestBody: any = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: { provider_id: "google", api_id: "main", configured: true },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.renameProviderApiKey("google", "main", "work");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(requestBody, {
+    action: "rename",
+    provider_id: "google",
+    api_id: "main",
+    name: "work",
+    new_api_id: "work",
+  });
+});
+
+test("deleteProviderApiKey serializes delete action", async () => {
+  let requestBody: any = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: { provider_id: "google", api_id: "main", configured: false },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.deleteProviderApiKey("google", "main");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(requestBody, {
+    action: "delete",
+    provider_id: "google",
+    api_id: "main",
+  });
+});
+
 test("streamMessage parses SSE deltas and final message", async () => {
   const originalFetch = globalThis.fetch;
   const events: string[] = [];
@@ -142,6 +264,128 @@ test("streamMessage parses SSE deltas and final message", async () => {
   assert.equal(finalId, "m2");
 });
 
+test("streamMessage forwards thinking deltas", async () => {
+  const originalFetch = globalThis.fetch;
+  const thinkingEvents: string[] = [];
+  globalThis.fetch = (async () => {
+    const body = [
+      'data: {"type":"thinking_delta","delta":"private "}\n\n',
+      'data: {"type":"thinking_delta","delta":"plan"}\n\n',
+      'data: {"type":"delta","delta":"done"}\n\n',
+      'data: {"type":"message","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"done"}],"created_at":1,"conversation_id":"c1"}}\n\n',
+    ].join("");
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream; charset=utf-8" },
+    });
+  }) as typeof fetch;
+
+  try {
+    await api.streamMessage("c1", "hello", undefined, {
+      onThinkingDelta(delta) {
+        thinkingEvents.push(delta);
+      },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(thinkingEvents, ["private ", "plan"]);
+});
+
+test("streamMessage forwards realtime tool activity events", async () => {
+  const originalFetch = globalThis.fetch;
+  const activityEvents: string[] = [];
+  globalThis.fetch = (async () => {
+    const body = [
+      'data: {"type":"status","message":"toolを接続しました","phase":"tools_attached"}\n\n',
+      'data: {"type":"tool_call_started","tool_name":"browser_computer","tool_call_id":"call_1","arguments":{"action":"computer.screenshot"},"message":"browser_computer を使用中"}\n\n',
+      'data: {"type":"message","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"done"}],"created_at":1,"conversation_id":"c1"}}\n\n',
+    ].join("");
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream; charset=utf-8" },
+    });
+  }) as typeof fetch;
+
+  try {
+    await api.streamMessage("c1", "hello", undefined, {
+      onEvent(event) {
+        activityEvents.push(event.type);
+      },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(activityEvents, ["status", "tool_call_started", "message"]);
+});
+
+test("streamMessage forwards explicit browser screenshot events", async () => {
+  const originalFetch = globalThis.fetch;
+  const activityEvents: string[] = [];
+  globalThis.fetch = (async () => {
+    const body = [
+      'data: {"type":"browser_screenshot","tool_name":"browser_computer","tool_call_id":"call_1","data_url":"data:image/png;base64,abc"}\n\n',
+      'data: {"type":"message","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"done"}],"created_at":1,"conversation_id":"c1"}}\n\n',
+    ].join("");
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream; charset=utf-8" },
+    });
+  }) as typeof fetch;
+
+  try {
+    await api.streamMessage("c1", "hello", undefined, {
+      onEvent(event) {
+        activityEvents.push(event.type);
+      },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(activityEvents, ["browser_screenshot", "message"]);
+});
+
+test("streamMessage surfaces structured stream errors", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    return new Response('data: {"type":"error","error":{"code":"STREAM_FAILED","message":"thinking-only stream"}}\n\n', {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream; charset=utf-8" },
+    });
+  }) as typeof fetch;
+
+  try {
+    await assert.rejects(
+      api.streamMessage("c1", "hello"),
+      /thinking-only stream/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("streamMessage rejects streams without a final message", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    return new Response('data: {"type":"delta","delta":"partial"}\n\n', {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream; charset=utf-8" },
+    });
+  }) as typeof fetch;
+
+  try {
+    await assert.rejects(
+      api.streamMessage("c1", "hello"),
+      /ended before a final response/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("streamMessage forwards abort signal to fetch", async () => {
   const originalFetch = globalThis.fetch;
   const controller = new AbortController();
@@ -167,6 +411,55 @@ test("streamMessage forwards abort signal to fetch", async () => {
   }
 
   assert.equal(seenSignal, controller.signal);
+});
+
+test("stopMessage calls backend stop endpoint", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestUrl = "";
+  let requestMethod = "";
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestMethod = String(init?.method ?? "");
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: { success: true, conversation_id: "c1", cancelled: true },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    const result = await api.stopMessage("c1");
+    assert.equal(requestUrl, "/api/chat/conversations/c1/stop");
+    assert.equal(requestMethod, "POST");
+    assert.equal(result.cancelled, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("browserComputer calls dedicated browser-computer endpoint", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestUrl = "";
+  let requestBody: any = null;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: { handled: true },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    const result = await api.browserComputer("computer.screenshot", { reason: "test" });
+    assert.equal(requestUrl, "/api/tools/browser-computer");
+    assert.deepEqual(requestBody, {
+      action: "computer.screenshot",
+      payload: { reason: "test" },
+    });
+    assert.deepEqual(result, { handled: true });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("coding context, branch, and workspace read helpers use existing API routes", async () => {

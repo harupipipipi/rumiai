@@ -61,6 +61,24 @@ class TestDefaultspackProviderCatalog(unittest.TestCase):
         self.assertTrue(google["configured"])
         self.assertTrue(google["availability"]["configured"])
 
+    def test_provider_catalog_does_not_mark_google_configured_from_application_credentials(self):
+        from ecosystem.defaultspack.backend.ai_client.provider_catalog import (
+            list_provider_catalog,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = {
+                "GOOGLE_APPLICATION_CREDENTIALS": "/tmp/service-account.json",
+                "RUMI_DEFAULTSPACK_SECRETS_DIR": str(Path(tmpdir) / "secrets"),
+            }
+            with patch.dict(os.environ, env, clear=True):
+                providers = {item["provider_id"]: item for item in list_provider_catalog()}
+
+        google = providers["google"]
+        self.assertNotIn("GOOGLE_APPLICATION_CREDENTIALS", google["env_vars"])
+        self.assertFalse(google["configured"])
+        self.assertFalse(google["availability"]["configured"])
+
     def test_provider_catalog_marks_google_configured_from_secret_store(self):
         from core_runtime.secrets_store import SecretsStore
         from ecosystem.defaultspack.backend.ai_client.provider_catalog import (
@@ -125,7 +143,8 @@ class TestDefaultspackHttpRegistryContract(unittest.TestCase):
             / "http.py"
         )
         source = transport_path.read_text(encoding="utf-8")
-        self.assertIn('request_data.setdefault("_method", method)', source)
+        self.assertIn('request_data["_method"] = method', source)
+        self.assertIn('request_data["_actual_method"] = method', source)
 
 
 if __name__ == "__main__":

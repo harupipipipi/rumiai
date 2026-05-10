@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from domain.ai_client.api_key_store import read_provider_api_key
+from domain.ai_client.api_key_store import provider_has_api_key, read_provider_api_key
 from domain.ai_client.providers import (
     _cloud_runtime_enabled,
     build_profile_catalog,
@@ -53,7 +53,8 @@ class AIClient:
             for name, instance in available.items():
                 entry = provider_catalog.get(name, {})
                 if not cloud_enabled and entry.get("kind") not in {"builtin", "local"}:
-                    continue
+                    if not provider_has_api_key(name):
+                        continue
                 self._providers[name] = instance
         except Exception:
             pass

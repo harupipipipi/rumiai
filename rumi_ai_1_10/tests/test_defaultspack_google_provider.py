@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import io
 import os
 import sys
 import tempfile
+import urllib.error
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -79,7 +81,13 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
                     },
                 }
             ],
-            {"temperature": 0.2, "thinking_level": "low"},
+            {
+                "temperature": 0.2,
+                "thinking_level": "low",
+                "tool_choice": "auto",
+                "stream_options": {"include_usage": False},
+                "extra_body": {"google": {"thinking_config": {"include_thoughts": True}}},
+            },
         )
 
         self.assertEqual(captured["path"], "/chat/completions")
@@ -87,7 +95,96 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
         self.assertEqual(captured["body"]["messages"], [{"role": "user", "content": "hello"}])
         self.assertEqual(captured["body"]["tools"][0]["function"]["name"], "lookup")
         self.assertEqual(captured["body"]["reasoning_effort"], "low")
+        self.assertEqual(captured["body"]["tool_choice"], "auto")
+        self.assertEqual(captured["body"]["stream_options"], {"include_usage": False})
+        self.assertEqual(captured["body"]["google"]["thinking_config"]["include_thoughts"], True)
         self.assertEqual(response["content"][0]["text"], "hello from gemini")
+
+    def test_google_provider_autofixes_native_base_url_to_openai_compatible_path(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        with patch.dict(
+            os.environ,
+            {
+                "GEMINI_API_KEY": "gemini-key",
+                "GOOGLE_BASE_URL": "https://generativelanguage.googleapis.com/v1beta",
+            },
+            clear=True,
+        ):
+            provider = GoogleProvider()
+
+        self.assertEqual(
+            provider.BASE_URL,
+            "https://generativelanguage.googleapis.com/v1beta/openai",
+        )
+
+    def test_google_native_request_retries_transient_backend_errors(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        calls = []
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-key"}, clear=True):
+            provider = GoogleProvider()
+
+        def fake_urlopen(request, context=None, timeout=None):
+            calls.append((request, context, timeout))
+            if len(calls) < 3:
+                raise urllib.error.HTTPError(
+                    request.full_url,
+                    500,
+                    "Internal error encountered.",
+                    {},
+                    io.BytesIO(b'{"error":{"code":500}}'),
+                )
+            return io.BytesIO(b'{"ok":true}')
+
+        with patch("domain.ai_client.providers.google_provider.urllib.request.urlopen", fake_urlopen), patch(
+            "domain.ai_client.providers.google_provider.time.sleep"
+        ) as sleep:
+            response = provider._native_request_json("gemini-test", {"contents": []})
+
+        self.assertEqual(response.read(), b'{"ok":true}')
+        self.assertEqual(len(calls), 3)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [0.5, 1.0])
+
+    def test_google_provider_streams_openai_compatible_tool_call_deltas(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        captured = {}
+
+        class FakeStream:
+            def __init__(self):
+                self._chunks = [
+                    b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"lookup","arguments":"{\\"q\\""}}]},"finish_reason":null}]}\n\n',
+                    b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\\"rumi\\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}\n\n',
+                    b"data: [DONE]\n\n",
+                ]
+
+            def read(self, _size=4096):
+                return self._chunks.pop(0) if self._chunks else b""
+
+            def close(self):
+                captured["closed"] = True
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-key"}, clear=True):
+            provider = GoogleProvider()
+
+        def fake_request_stream(path, body):
+            captured["path"] = path
+            captured["body"] = body
+            return FakeStream()
+
+        provider._request_stream = fake_request_stream
+        chunks = list(provider.stream("gemini-2.5-flash", [{"role": "user", "content": "search"}], [], {}))
+
+        self.assertEqual(captured["path"], "/chat/completions")
+        self.assertEqual(captured["body"]["stream_options"], {"include_usage": True})
+        self.assertEqual(chunks[0], {"type": "tool_call_start", "id": "call_1", "name": "lookup"})
+        self.assertEqual(chunks[1]["type"], "tool_call_delta")
+        self.assertEqual(chunks[1]["arguments_chunk"], '{"q"')
+        self.assertEqual(chunks[2]["arguments_chunk"], ':"rumi"}')
+        self.assertEqual(chunks[3], {"type": "tool_call_end", "id": "call_1", "name": "lookup"})
+        self.assertEqual(chunks[-1]["type"], "stream_end")
 
     def test_google_provider_strips_rumi_tool_metadata_before_request(self):
         from domain.ai_client.providers.google_provider import GoogleProvider
@@ -106,7 +203,7 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
 
         provider._request_json = fake_request_json
         provider.complete(
-            "gemma-4-26b-a4b-it",
+            "gemini-2.5-flash",
             [{"role": "user", "content": "calculate"}],
             [
                 {
@@ -221,6 +318,147 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
             {"reasoning_effort": "high"},
         )
 
+    def test_google_provider_uses_native_generative_api_for_gemma_4(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        captured = {}
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-key"}, clear=True):
+            provider = GoogleProvider()
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps(
+                    {
+                        "candidates": [
+                            {
+                                "content": {"parts": [{"text": "gemma answer"}]},
+                                "finishReason": "STOP",
+                            }
+                        ],
+                        "usageMetadata": {
+                            "promptTokenCount": 2,
+                            "candidatesTokenCount": 3,
+                            "totalTokenCount": 5,
+                        },
+                    }
+                ).encode("utf-8")
+
+        def fake_native_request_json(model, body, stream=False):
+            captured["model"] = model
+            captured["body"] = body
+            captured["stream"] = stream
+            return FakeResponse()
+
+        provider._native_request_json = fake_native_request_json
+        response = provider.complete(
+            "gemma-4-31b-it",
+            [{"role": "user", "content": "hello"}],
+            [{"function": {"name": "google_search"}}],
+            {"thinking_level": "high"},
+        )
+
+        self.assertEqual(captured["model"], "gemma-4-31b-it")
+        self.assertFalse(captured["stream"])
+        self.assertEqual(captured["body"]["generationConfig"]["thinkingConfig"]["thinkingLevel"], "HIGH")
+        self.assertEqual(captured["body"]["tools"], [{"googleSearch": {}}])
+        self.assertEqual(response["content"][0]["text"], "gemma answer")
+        self.assertEqual(response["usage"]["total_tokens"], 5)
+
+    def test_google_native_gemma_sends_function_declarations_and_parses_calls(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        captured = {}
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-key"}, clear=True):
+            provider = GoogleProvider()
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps(
+                    {
+                        "candidates": [
+                            {
+                                "content": {
+                                    "parts": [
+                                        {
+                                            "functionCall": {
+                                                "id": "call_browser_1",
+                                                "name": "browser_use",
+                                                "args": {"action": "screenshot"},
+                                            }
+                                        }
+                                    ]
+                                },
+                                "finishReason": "STOP",
+                            }
+                        ],
+                    }
+                ).encode("utf-8")
+
+        def fake_native_request_json(model, body, stream=False):
+            captured["body"] = body
+            return FakeResponse()
+
+        provider._native_request_json = fake_native_request_json
+        response = provider.complete(
+            "gemma-4-31b-it",
+            [
+                {"role": "user", "content": "use the browser"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "previous_call",
+                            "type": "function",
+                            "function": {"name": "browser_use", "arguments": "{\"action\":\"screenshot\"}"},
+                        }
+                    ],
+                },
+                {"role": "tool", "name": "browser_use", "tool_call_id": "previous_call", "content": "{\"result\":\"ok\"}"},
+            ],
+            [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "browser_use",
+                        "description": "Control the browser.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"action": {"type": "string"}},
+                            "required": ["action"],
+                        },
+                    },
+                }
+            ],
+            {"thinking_level": "high"},
+        )
+
+        self.assertEqual(captured["body"]["tools"][0]["functionDeclarations"][0]["name"], "browser_use")
+        self.assertEqual(
+            captured["body"]["tools"][0]["functionDeclarations"][0]["parameters"]["properties"]["action"]["type"],
+            "string",
+        )
+        self.assertEqual(captured["body"]["contents"][1]["parts"][0]["functionCall"]["id"], "previous_call")
+        self.assertEqual(captured["body"]["contents"][2]["parts"][0]["functionResponse"]["id"], "previous_call")
+        self.assertEqual(response["finish_reason"], "tool_calls")
+        self.assertEqual(response["content"][1]["type"], "tool_use")
+        self.assertEqual(response["content"][1]["id"], "call_browser_1")
+        self.assertEqual(response["content"][1]["name"], "browser_use")
+
     def test_openai_provider_translates_generic_thinking_level(self):
         from domain.ai_client.providers.openai_provider import OpenAIProvider
 
@@ -307,9 +545,11 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
     def test_named_provider_api_key_can_be_saved_and_listed(self):
         from core_runtime.secrets_store import SecretsStore
         from domain.ai_client.api_key_store import (
+            delete_provider_api_key,
             named_provider_secret_key,
             provider_has_api_key,
             provider_named_api_keys,
+            rename_provider_api_key,
             read_provider_api_key,
             set_provider_api_key,
         )
@@ -331,7 +571,36 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
                 self.assertTrue(store.has_secret(key))
                 self.assertTrue(provider_has_api_key("google"))
                 self.assertEqual(read_provider_api_key("google", "main"), "google-main-secret")
-                self.assertEqual(provider_named_api_keys("google")[0]["api_id"], "main")
+                listed = provider_named_api_keys("google")
+                self.assertEqual(listed[0]["api_id"], "main")
+                self.assertEqual(listed[0]["name"], "Main")
+                self.assertEqual(listed[0]["label"], "google:main:***")
+
+                renamed = rename_provider_api_key("google", "main", "work")
+                self.assertTrue(renamed["success"])
+                self.assertEqual(provider_named_api_keys("google")[0]["api_id"], "work")
+                self.assertEqual(read_provider_api_key("google", "work"), "google-main-secret")
+
+                deleted = delete_provider_api_key("google", "work")
+                self.assertTrue(deleted["success"])
+                self.assertFalse(provider_has_api_key("google"))
+
+    def test_named_google_key_registers_runtime_without_cloud_flag(self):
+        from domain.ai_client.api_key_store import set_provider_api_key
+        from domain.ai_client.client import AIClient
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            secrets_dir = Path(tmpdir) / "secrets"
+            env = {
+                "RUMI_DEFAULTSPACK_SECRETS_DIR": str(secrets_dir),
+                "RUMI_DEFAULTSPACK_ENABLE_CLOUD_PROVIDERS": "",
+            }
+            with patch.dict(os.environ, env, clear=True):
+                set_provider_api_key("google", "google-main-secret", api_id="main", name="Main")
+                AIClient._instance = None
+                client = AIClient()
+
+                self.assertIn("google", client._active_provider_ids())
 
     def test_google_provider_loads_profile_models_from_user_data(self):
         from domain.ai_client.providers.google_provider import GoogleProvider
@@ -366,6 +635,8 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
 
         self.assertIn("google/gemini-3-pro-preview", model_ids)
         self.assertIn("google/gemini-3-flash-preview", model_ids)
+        self.assertIn("google/gemini-2.5-flash-lite", model_ids)
+        self.assertNotIn("google/gemini-2.0-flash-lite", model_ids)
         self.assertIn("google/gemma-4-31b-it", model_ids)
         self.assertIn("google/gemma-4-26b-a4b-it", model_ids)
         self.assertIn("google/gemma-3-27b-it", model_ids)
@@ -378,7 +649,7 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
 
         self.assertNotIn("xhigh", profiles["google/gemini-2.5-pro"]["thinking_levels"])
         self.assertEqual(profiles["google/gemini-3-pro-preview"]["thinking_levels"], ["low", "high"])
-        self.assertEqual(profiles["google/gemma-4-26b-a4b-it"]["thinking_levels"], ["low", "high"])
+        self.assertEqual(profiles["google/gemma-4-26b-a4b-it"]["thinking_levels"], ["none", "high"])
 
     def test_google_catalog_marks_gemma_4_as_tool_and_vision_capable(self):
         from domain.ai_client.providers.google_provider import GoogleProvider

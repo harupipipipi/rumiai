@@ -63,6 +63,69 @@ test("uses running tool_call events when a log has not arrived yet", () => {
   assert.equal(groups[0].items[0].title, "ファイル / coding_file_list: src");
 });
 
+test("updates streamed tool activity when a completion event arrives before the log", () => {
+  const groups = buildToolActivityGroups([], [
+    {
+      type: "tool_call_started",
+      phase: "tool_call_started",
+      tool_call_id: "call_1",
+      tool_name: "computer_use",
+      arguments: { action: "click", app: "Notion", x: 120, y: 340 },
+      message: "computer_use を使用中",
+    },
+    {
+      type: "tool_call_completed",
+      phase: "tool_call_completed",
+      tool_call_id: "call_1",
+      tool_name: "computer_use",
+      arguments: { action: "click", app: "Notion", x: 120, y: 340 },
+      message: "computer_use の結果を受け取りました",
+      is_error: false,
+    },
+  ]);
+
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].items[0].status, "completed");
+  assert.equal(groups[0].items[0].input, "click Notion (120, 340)");
+});
+
+test("uses streamed completion results and artifacts before final logs arrive", () => {
+  const groups = buildToolActivityGroups([], [
+    {
+      type: "tool_call_started",
+      phase: "tool_call_started",
+      tool_call_id: "call_1",
+      tool_name: "browser_computer",
+      arguments: { action: "computer.screenshot" },
+      message: "browser_computer を使用中",
+    },
+    {
+      type: "tool_call_completed",
+      phase: "tool_call_completed",
+      tool_call_id: "call_1",
+      tool_name: "browser_computer",
+      result: {
+        status: "ok",
+        data: {
+          summary: "Captured screen",
+          widget: {
+            data_url: "data:image/png;base64,aW1hZ2U=",
+            screenshot_path: "/tmp/rumi/workspace/tools/browser/screen.png",
+          },
+        },
+      },
+      message: "browser_computer の結果を受け取りました",
+    },
+  ], { conversationId: "conv_1" });
+
+  const item = groups[0].items[0];
+  assert.equal(item.status, "completed");
+  assert.equal(item.input, "computer.screenshot");
+  assert.equal(item.detail, "Captured screen");
+  assert.equal(item.artifacts?.some((artifact) => artifact.url?.startsWith("data:image/png")), true);
+  assert.equal(item.artifacts?.some((artifact) => artifact.path.endsWith("screen.png")), true);
+});
+
 test("dedupes started events when a matching completed log exists", () => {
   const groups = buildToolActivityGroups(
     [
@@ -88,6 +151,51 @@ test("dedupes started events when a matching completed log exists", () => {
   assert.equal(groups.length, 1);
   assert.equal(groups[0].items.length, 1);
   assert.equal(groups[0].items[0].status, "completed");
+});
+
+test("marks nested tool errors as failed activity", () => {
+  const groups = buildToolActivityGroups([
+    {
+      tool_name: "computer_use",
+      arguments: { action: "type", text: "hello" },
+      result: {
+        status: "ok",
+        data: {
+          result: "computer_use computer.type failed",
+          is_error: true,
+          widget: { is_error: true },
+        },
+      },
+    },
+  ]);
+
+  assert.equal(groups[0].items[0].status, "failed");
+});
+
+test("attaches tool artifact files to the matching activity item", () => {
+  const path = "/tmp/rumi/workspace/tools/computer/click-1.png";
+  const groups = buildToolActivityGroups([
+    {
+      tool_name: "computer_use",
+      tool_call_id: "call_1",
+      arguments: { action: "click", x: 12, y: 34 },
+      result: {
+        status: "ok",
+        data: {
+          widget: {
+            path,
+            model_image_path: "/tmp/rumi/workspace/tools/computer/click-1-model.jpg",
+          },
+        },
+      },
+    },
+  ], [], { conversationId: "conv_1" });
+
+  const artifact = groups[0].items[0].artifacts?.[0];
+  assert.equal(groups[0].items[0].toolCallId, "call_1");
+  assert.equal(artifact?.kind, "image");
+  assert.equal(artifact?.name, "click-1-model.jpg");
+  assert.match(artifact?.url ?? "", /\/api\/chat\/conversations\/conv_1\/artifact-file/);
 });
 
 test("classifies common tool families", () => {

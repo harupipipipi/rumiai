@@ -39,7 +39,6 @@ MODEL_CONTEXT_LIMITS = {
     "anthropic/claude-3-haiku-20240307": 200000,
     # Google
     "google/gemini-2.0-flash": 1048576,
-    "google/gemini-2.0-flash-lite": 1048576,
     "google/gemini-1.5-pro": 2097152,
     "google/gemini-1.5-flash": 1048576,
     # Rumi (カーネル内蔵ルーティング)

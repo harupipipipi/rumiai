@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import json
 import re
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from typing import Any, Dict, List
 
 from .openai_compatible_provider import OpenAICompatibleProvider
@@ -85,16 +89,6 @@ class GoogleProvider(OpenAICompatibleProvider):
             "default_thinking_level": "medium",
         },
         {
-            "id": "google/gemini-2.0-flash-lite",
-            "model_id": "gemini-2.0-flash-lite",
-            "name": "Gemini 2.0 Flash-Lite",
-            "display_name": "Gemini 2.0 Flash-Lite",
-            "provider": "google",
-            "provider_id": "google",
-            "type": "chat",
-            "capabilities": ["chat", "tool_calls", "vision"],
-        },
-        {
             "id": "google/gemma-4-31b-it",
             "model_id": "gemma-4-31b-it",
             "name": "Gemma 4 31B IT",
@@ -104,7 +98,7 @@ class GoogleProvider(OpenAICompatibleProvider):
             "type": "chat",
             "capabilities": ["chat", "tool_calls", "vision"],
             "supports_thinking": True,
-            "thinking_levels": ["low", "high"],
+            "thinking_levels": ["none", "high"],
             "default_thinking_level": "high",
         },
         {
@@ -117,7 +111,7 @@ class GoogleProvider(OpenAICompatibleProvider):
             "type": "chat",
             "capabilities": ["chat", "tool_calls", "vision"],
             "supports_thinking": True,
-            "thinking_levels": ["low", "high"],
+            "thinking_levels": ["none", "high"],
             "default_thinking_level": "high",
         },
         {
@@ -172,6 +166,21 @@ class GoogleProvider(OpenAICompatibleProvider):
             default_base_url=self.BASE_URL,
             known_models=self.curated_models,
         )
+        self._base_url = self._normalize_google_base_url(self._base_url)
+        self.BASE_URL = self._base_url
+
+    @staticmethod
+    def _normalize_google_base_url(base_url: str) -> str:
+        value = str(base_url or "").strip().rstrip("/")
+        if not value:
+            return value
+        parsed = urllib.parse.urlparse(value)
+        if parsed.netloc != "generativelanguage.googleapis.com":
+            return value
+        path = parsed.path.rstrip("/")
+        if path in {"/v1", "/v1beta"}:
+            return urllib.parse.urlunparse(parsed._replace(path=f"{path}/openai")).rstrip("/")
+        return value
 
     @classmethod
     def _load_profile_models(cls):
@@ -219,6 +228,10 @@ class GoogleProvider(OpenAICompatibleProvider):
 
         return None
 
+    @staticmethod
+    def _use_native_generative_api(model: str) -> bool:
+        return str(model or "").strip().startswith("gemma-4")
+
     @classmethod
     def _translate_params(cls, params, model: str = ""):
         translated = dict(params or {})
@@ -227,6 +240,318 @@ class GoogleProvider(OpenAICompatibleProvider):
         if reasoning_effort and "reasoning_effort" not in translated:
             translated["reasoning_effort"] = reasoning_effort
         return translated
+
+    @staticmethod
+    def _native_thinking_config(params: Dict[str, Any]) -> Dict[str, Any] | None:
+        level = str(params.get("thinking_level") or params.get("reasoning_effort") or "").strip().lower()
+        if level == "xhigh":
+            level = "high"
+        if level == "high":
+            return {"thinkingLevel": "HIGH"}
+        return None
+
+    @staticmethod
+    def _native_text_part(value: Any) -> Dict[str, Any] | None:
+        if isinstance(value, str):
+            if value == "":
+                return None
+            return {"text": value}
+        if not isinstance(value, dict):
+            return None
+        block_type = str(value.get("type") or "").lower()
+        if block_type == "text":
+            return {"text": str(value.get("text") or "")}
+        if block_type == "image_url":
+            image_url = value.get("image_url")
+            url = image_url.get("url") if isinstance(image_url, dict) else value.get("url")
+            if isinstance(url, str) and url.startswith("data:") and ";base64," in url:
+                header, data = url.split(";base64,", 1)
+                mime_type = header.replace("data:", "", 1) or "image/png"
+                return {"inlineData": {"mimeType": mime_type, "data": data}}
+        return None
+
+    @staticmethod
+    def _json_value(value: Any) -> Any:
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return value
+        return value
+
+    @classmethod
+    def _native_function_call_part(cls, tool_call: Any) -> Dict[str, Any] | None:
+        if not isinstance(tool_call, dict):
+            return None
+        function_def = tool_call.get("function") if isinstance(tool_call.get("function"), dict) else {}
+        name = str(function_def.get("name") or tool_call.get("name") or "").strip()
+        if not name:
+            return None
+        args = cls._json_value(function_def.get("arguments", tool_call.get("arguments", {})))
+        function_call = {
+            "name": name,
+            "args": args if isinstance(args, dict) else {"value": args},
+        }
+        call_id = str(tool_call.get("id") or tool_call.get("tool_call_id") or "").strip()
+        if call_id:
+            function_call["id"] = call_id
+        return {"functionCall": function_call}
+
+    @classmethod
+    def _native_function_response_part(cls, message: Dict[str, Any]) -> Dict[str, Any] | None:
+        name = str(message.get("name") or message.get("tool_name") or "").strip()
+        if not name:
+            return None
+        content = cls._json_value(message.get("content", ""))
+        response = content if isinstance(content, dict) else {"result": content}
+        function_response = {"name": name, "response": response}
+        call_id = str(message.get("tool_call_id") or message.get("id") or "").strip()
+        if call_id:
+            function_response["id"] = call_id
+        return {"functionResponse": function_response}
+
+    @classmethod
+    def _native_build_contents(cls, messages: Any) -> tuple[List[Dict[str, Any]], Dict[str, Any] | None]:
+        contents: List[Dict[str, Any]] = []
+        system_parts: List[Dict[str, Any]] = []
+        for message in list(messages or []):
+            if not isinstance(message, dict):
+                continue
+            role = str(message.get("role") or "user").lower()
+            raw_content = message.get("content", "")
+            raw_parts = raw_content if isinstance(raw_content, list) else [raw_content]
+            parts = [] if role == "tool" else [part for part in (cls._native_text_part(item) for item in raw_parts) if part]
+            if role == "assistant":
+                parts.extend(
+                    part
+                    for part in (cls._native_function_call_part(item) for item in message.get("tool_calls", []) or [])
+                    if part
+                )
+            elif role == "tool":
+                response_part = cls._native_function_response_part(message)
+                if response_part:
+                    parts.append(response_part)
+            if not parts:
+                continue
+            if role == "system":
+                system_parts.extend(parts)
+                continue
+            native_role = "model" if role == "assistant" else "user"
+            contents.append({"role": native_role, "parts": parts})
+        system_instruction = {"parts": system_parts} if system_parts else None
+        return contents, system_instruction
+
+    @staticmethod
+    def _native_schema(value: Any) -> Dict[str, Any]:
+        if not isinstance(value, dict):
+            return {"type": "object", "properties": {}, "required": []}
+        schema = dict(value)
+        normalized: Dict[str, Any] = {}
+        for key, item in schema.items():
+            if key == "properties" and isinstance(item, dict):
+                normalized[key] = {
+                    str(prop_key): GoogleProvider._native_schema(prop_value)
+                    for prop_key, prop_value in item.items()
+                    if isinstance(prop_value, dict)
+                }
+            elif key == "items":
+                normalized[key] = GoogleProvider._native_schema(item)
+            elif key in {"type", "description", "enum", "required", "nullable", "format"}:
+                normalized[key] = item
+        if "type" not in normalized:
+            normalized["type"] = "object"
+        if normalized.get("type") == "object":
+            normalized.setdefault("properties", {})
+            normalized.setdefault("required", [])
+        return normalized
+
+    @staticmethod
+    def _native_tools(tools: Any) -> List[Dict[str, Any]]:
+        if not isinstance(tools, list):
+            return []
+        native_tools: List[Dict[str, Any]] = []
+        function_declarations: List[Dict[str, Any]] = []
+        for tool in tools:
+            function_def = tool.get("function") if isinstance(tool, dict) else None
+            name = str(function_def.get("name") if isinstance(function_def, dict) else tool.get("name") if isinstance(tool, dict) else "").strip()
+            normalized = name.lower().replace("-", "_").replace(".", "_")
+            if normalized in {"google_search", "googlesearch"}:
+                native_tools.append({"googleSearch": {}})
+                continue
+            if not isinstance(function_def, dict) or not name:
+                continue
+            declaration: Dict[str, Any] = {"name": name}
+            description = function_def.get("description")
+            if isinstance(description, str) and description:
+                declaration["description"] = description
+            declaration["parameters"] = GoogleProvider._native_schema(function_def.get("parameters"))
+            function_declarations.append(declaration)
+        if function_declarations:
+            native_tools.append({"functionDeclarations": function_declarations})
+        return native_tools
+
+    def _native_body(self, model: str, messages: Any, tools: Any, params: Dict[str, Any]) -> Dict[str, Any]:
+        contents, system_instruction = self._native_build_contents(messages)
+        body: Dict[str, Any] = {"contents": contents}
+        if system_instruction:
+            body["systemInstruction"] = system_instruction
+        generation_config: Dict[str, Any] = {}
+        thinking_config = self._native_thinking_config(params)
+        if thinking_config:
+            generation_config["thinkingConfig"] = thinking_config
+        for source, target in (("temperature", "temperature"), ("max_tokens", "maxOutputTokens"), ("top_p", "topP")):
+            if source in params:
+                generation_config[target] = params[source]
+        if generation_config:
+            body["generationConfig"] = generation_config
+        native_tools = self._native_tools(tools)
+        if native_tools:
+            body["tools"] = native_tools
+        extra_body = params.get("extra_body")
+        google_body = extra_body.get("google") if isinstance(extra_body, dict) and isinstance(extra_body.get("google"), dict) else None
+        if google_body:
+            for key, value in google_body.items():
+                if key == "thinking_config" and isinstance(value, dict):
+                    generation_config = dict(body.get("generationConfig", {}))
+                    generation_config["thinkingConfig"] = {
+                        "thinkingLevel": value.get("thinking_level") or value.get("thinkingLevel") or value.get("level") or "HIGH",
+                        **({"includeThoughts": value.get("include_thoughts")} if "include_thoughts" in value else {}),
+                    }
+                    body["generationConfig"] = generation_config
+                elif key not in {"thinking_config"}:
+                    body[key] = value
+        return body
+
+    def _native_request_json(self, model: str, body: Dict[str, Any], *, stream: bool = False):
+        self._ensure_runtime_config()
+        action = "streamGenerateContent" if stream else "generateContent"
+        quoted_model = urllib.parse.quote(str(model), safe="")
+        url = "https://generativelanguage.googleapis.com/v1beta/models/{}:{}".format(quoted_model, action)
+        if stream:
+            url += "?alt=sse"
+        data = json.dumps(body).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": self._api_key,
+        }
+        max_attempts = 4
+        for attempt in range(max_attempts):
+            req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+            try:
+                return urllib.request.urlopen(req, context=self._ssl_ctx, timeout=120)
+            except urllib.error.HTTPError as exc:
+                err_body = exc.read().decode("utf-8", errors="replace")
+                if exc.code in {500, 503} and attempt < max_attempts - 1:
+                    time.sleep(0.5 * (attempt + 1))
+                    continue
+                transient = " (temporary Google backend error; retry shortly)" if exc.code in {500, 503} else ""
+                raise RuntimeError("Google API error {}{}: {}".format(exc.code, transient, err_body))
+            except urllib.error.URLError as exc:
+                raise RuntimeError("Google API connection error: {}".format(exc.reason))
+        raise RuntimeError("Google API request failed")
+
+    @staticmethod
+    def _native_usage(raw: Dict[str, Any]) -> Dict[str, int]:
+        usage = raw.get("usageMetadata") if isinstance(raw, dict) else {}
+        if not isinstance(usage, dict):
+            usage = {}
+        input_tokens = int(usage.get("promptTokenCount") or 0)
+        output_tokens = int(usage.get("candidatesTokenCount") or 0)
+        return {
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": int(usage.get("totalTokenCount") or input_tokens + output_tokens),
+        }
+
+    @classmethod
+    def _native_extract_parts(cls, raw: Dict[str, Any]) -> tuple[str, str, str, List[Dict[str, Any]]]:
+        text_parts: List[str] = []
+        thought_parts: List[str] = []
+        tool_uses: List[Dict[str, Any]] = []
+        finish_reason = "stop"
+        candidates = raw.get("candidates") if isinstance(raw, dict) else []
+        for candidate in candidates if isinstance(candidates, list) else []:
+            if isinstance(candidate, dict) and candidate.get("finishReason"):
+                finish_reason = str(candidate.get("finishReason") or "stop").lower()
+            content = candidate.get("content") if isinstance(candidate, dict) else {}
+            parts = content.get("parts") if isinstance(content, dict) else []
+            for part in parts if isinstance(parts, list) else []:
+                if not isinstance(part, dict):
+                    continue
+                text = str(part.get("text") or "")
+                function_call = part.get("functionCall") if isinstance(part.get("functionCall"), dict) else None
+                if function_call:
+                    call_id = str(function_call.get("id") or function_call.get("name") or f"google_call_{len(tool_uses) + 1}").strip()
+                    tool_uses.append({
+                        "type": "tool_use",
+                        "id": call_id,
+                        "name": str(function_call.get("name") or ""),
+                        "input": json.dumps(function_call.get("args") or {}, ensure_ascii=False),
+                    })
+                    continue
+                if not text:
+                    continue
+                if part.get("thought") is True:
+                    thought_parts.append(text)
+                else:
+                    text_parts.append(text)
+        if tool_uses:
+            finish_reason = "tool_calls"
+        return "".join(text_parts), "".join(thought_parts), finish_reason, tool_uses
+
+    def _native_complete(self, model, messages, tools, params):
+        body = self._native_body(model, messages, tools, dict(params or {}))
+        with self._native_request_json(model, body) as resp:
+            raw = json.loads(resp.read().decode("utf-8"))
+        text, thought, finish_reason, tool_uses = self._native_extract_parts(raw)
+        content = [{"type": "text", "text": text}]
+        content.extend(tool_uses)
+        response = {
+            "content": content,
+            "finish_reason": finish_reason,
+            "usage": self._native_usage(raw),
+        }
+        if thought:
+            response["metadata"] = {
+                "thinking": {
+                    "state": "completed",
+                    "transcript": thought,
+                    "source": "google_native_thought",
+                }
+            }
+        return response
+
+    def _native_stream(self, model, messages, tools, params):
+        body = self._native_body(model, messages, tools, dict(params or {}))
+        resp = self._native_request_json(model, body, stream=True)
+        finish_reason = "stop"
+        usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+        try:
+            for payload in self._parse_sse_lines(resp):
+                try:
+                    obj = json.loads(payload)
+                except json.JSONDecodeError:
+                    continue
+                text, thought, candidate_finish, tool_uses = self._native_extract_parts(obj)
+                if thought:
+                    yield {"type": "thinking_delta", "delta": {"type": "text", "text": thought}}
+                if text:
+                    yield {"type": "content_delta", "delta": {"type": "text", "text": text}}
+                for tool_use in tool_uses:
+                    yield {"type": "tool_call_start", "id": tool_use.get("id", ""), "name": tool_use.get("name", "")}
+                    yield {
+                        "type": "tool_call_delta",
+                        "id": tool_use.get("id", ""),
+                        "name": tool_use.get("name", ""),
+                        "arguments_chunk": tool_use.get("input", "{}"),
+                    }
+                    yield {"type": "tool_call_end", "id": tool_use.get("id", ""), "name": tool_use.get("name", "")}
+                if candidate_finish:
+                    finish_reason = candidate_finish
+                usage = self._native_usage(obj) or usage
+            yield {"type": "stream_end", "finish_reason": finish_reason, "usage": usage}
+        finally:
+            resp.close()
 
     @staticmethod
     def _copy_chat_params(body, params):
@@ -239,9 +564,15 @@ class GoogleProvider(OpenAICompatibleProvider):
             "stop",
             "response_format",
             "reasoning_effort",
+            "tool_choice",
+            "parallel_tool_calls",
+            "stream_options",
         ):
             if key in params:
                 body[key] = params[key]
+        extra_body = params.get("extra_body")
+        if isinstance(extra_body, dict):
+            body.update(extra_body)
 
     @staticmethod
     def _split_inline_thoughts(text: str) -> tuple[list[str], str]:
@@ -310,6 +641,8 @@ class GoogleProvider(OpenAICompatibleProvider):
         return sanitized
 
     def complete(self, model, messages, tools, params):
+        if self._use_native_generative_api(model):
+            return self._native_complete(model, messages, tools, params)
         translated = self._translate_params(params, model)
         body = {"model": model, "messages": self.build_request(messages)}
         sanitized_tools = self._sanitize_tools(tools)
@@ -320,13 +653,18 @@ class GoogleProvider(OpenAICompatibleProvider):
         return self.parse_response(raw)
 
     def stream(self, model, messages, tools, params):
+        if self._use_native_generative_api(model):
+            yield from self._native_stream(model, messages, tools, params)
+            return
         translated = self._translate_params(params, model)
         body = {"model": model, "messages": self.build_request(messages)}
         sanitized_tools = self._sanitize_tools(tools)
         if sanitized_tools:
             body["tools"] = sanitized_tools
         self._copy_chat_params(body, translated)
+        body.setdefault("stream_options", {"include_usage": True})
         resp = self._request_stream("/chat/completions", body)
+        tool_call_state = {}
         try:
             for payload in self._parse_sse_lines(resp):
                 try:
@@ -340,8 +678,13 @@ class GoogleProvider(OpenAICompatibleProvider):
                 text = delta.get("content")
                 if text:
                     yield {"type": "content_delta", "delta": {"type": "text", "text": text}}
+                yield from self._stream_tool_call_events(delta, tool_call_state)
                 finish = choices[0].get("finish_reason")
                 if finish:
+                    for current in tool_call_state.values():
+                        if current.get("started") and not current.get("ended"):
+                            current["ended"] = True
+                            yield {"type": "tool_call_end", "id": current.get("id", ""), "name": current.get("name", "")}
                     usage_raw = obj.get("usage") or {}
                     yield {
                         "type": "stream_end",

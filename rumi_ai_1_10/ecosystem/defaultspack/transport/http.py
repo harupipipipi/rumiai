@@ -24,6 +24,13 @@ from domain.safety.local_guard import (
 from transport.registry import build_always_available_http_routes, build_fallback_http_routes
 
 
+_PACK_NOT_APPROVED_SAFE_GET_FALLBACK_BLOCKS = {
+    "blocks.ui.catalog",
+    "blocks.ui.settings",
+    "blocks.ui.commands",
+}
+
+
 class DefaultsHttpServer:
     def __init__(self, facade):
         self.facade = facade
@@ -148,6 +155,8 @@ class DefaultsHttpServer:
         for source_key, dest_key in (inject or {}).items():
             payload[dest_key] = path_params.get(source_key, "")
         context = self._build_context()
+        if module_name == "blocks.chat.stream":
+            return invoke_block(module_name, payload, context)
         try:
             from domain.function_runtime.bridge import invoke_function
             from domain.function_runtime.registry import function_id_for_block_module
@@ -163,7 +172,12 @@ class DefaultsHttpServer:
                 )
                 error_info = result.get("error", {}) if isinstance(result, dict) else {}
                 error_code = str(error_info.get("code") or "")
-                if error_code not in {
+                if error_code == "PACK_NOT_APPROVED":
+                    if self._pack_not_approved_fallback_allowed(module_name, payload):
+                        pass
+                    else:
+                        return result
+                elif error_code not in {
                     "FUNCTION_REGISTRY_UNAVAILABLE",
                     "FUNCTION_NOT_FOUND",
                     "CAPABILITY_RUNTIME_UNAVAILABLE",
@@ -173,6 +187,10 @@ class DefaultsHttpServer:
         except Exception:
             pass
         return invoke_block(module_name, payload, context)
+
+    def _pack_not_approved_fallback_allowed(self, module_name, payload):
+        actual_method = str(payload.get("_actual_method") or "").upper()
+        return actual_method == "GET" and module_name in _PACK_NOT_APPROVED_SAFE_GET_FALLBACK_BLOCKS
 
     # ---- Chat Handlers (fallback) ----
 
@@ -621,12 +639,14 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                 if path_inject and path_params:
                     for url_param, data_key in path_inject.items():
                         request_data[data_key] = path_params.get(url_param, "")
-                request_data.setdefault("_method", method)
+                request_data["_method"] = method
+                request_data["_actual_method"] = method
                 context = self.server_ref._build_context()
                 context["_facade"] = self.server_ref.facade
                 result = handler(request_data, context)
             else:
-                request_data.setdefault("_method", method)
+                request_data["_method"] = method
+                request_data["_actual_method"] = method
                 # Fallback: original handler signature (request_data, path_params)
                 result = handler(request_data, path_params)
 
@@ -637,8 +657,8 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                     int(result.get("status_code", 302)),
                     str(result.get("location") or "/chat"),
                 )
-            elif isinstance(result, dict) and result.get("_sse"):
-                self._send_sse(result.get("events", []))
+            elif self._sse_events_from_result(result) is not None:
+                self._send_sse(self._sse_events_from_result(result))
             else:
                 status_code = 200
                 if isinstance(result, dict) and result.get("status") == "error":
@@ -646,6 +666,19 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json(status_code, result)
         except Exception as exc:
             self._send_json(500, error("internal server error: " + str(exc)))
+
+    @staticmethod
+    def _sse_events_from_result(result):
+        if isinstance(result, dict) and result.get("_sse"):
+            return result.get("events", [])
+        if (
+            isinstance(result, dict)
+            and result.get("status") == "ok"
+            and isinstance(result.get("data"), dict)
+            and result["data"].get("_sse")
+        ):
+            return result["data"].get("events", [])
+        return None
 
     def _send_json(self, status_code, data):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -749,7 +782,8 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
 def _wait_for_signal():
     """Block the main thread until interrupted (cross-platform)."""
     try:
-        signal.pause()
+        while True:
+            signal.pause()
     except AttributeError:
         # Windows does not have signal.pause(); poll instead.
         import time

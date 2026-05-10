@@ -3,11 +3,11 @@
   "category": "tool",
   "version": "1",
   "display_name": "Browser / Computer",
-  "description": "Open browser URLs, inspect sessions, and run approved desktop actions.",
+  "description": "Open browser URLs when requested, inspect sessions, inspect open apps/windows, bring apps to the main visible screen, and run approved desktop actions for any app. Use computer.apps/windows/show_app/select_window before scoped screenshots or actions. For visual clicks, use the zoom ladder: full or selected-window screenshot, crop/zoom the likely region with source=latest when the target is small, then click with normalized_x/normalized_y relative to that attached crop. source=latest crops from the last full/selected-window screenshot; use source=current_crop only when intentionally cropping the current crop again. Take a fresh full/selected-window screenshot before unrelated actions so old zoom coordinates are not reused. Hidden-window/background control is disabled.",
   "enabled": true,
   "config": {
     "name": "browser_computer",
-    "summary": "Approved browser and computer actions",
+    "summary": "Approved browser and all-app visible-screen computer actions. Use computer.context/apps/windows before screenshots/clicks, computer.show_app to bring Vivaldi/Chrome/etc. to the main screen, computer.select_window for visible windows, then use full/selected-window screenshot -> source=latest crop/zoom for small targets -> coordinate_space=normalized_1000 with normalized_x/normalized_y on the attached crop. source=latest crops from the last full/selected-window screenshot; use source=current_crop only for an intentional crop-of-crop. Take a fresh screenshot before unrelated actions so a stale zoom does not trap the model. Use computer.type for text input. Hidden-window/background DOM entry is disabled.",
     "tags": ["browser", "computer", "approval"],
     "schema": {
       "parameters": {
@@ -15,9 +15,13 @@
         "properties": {
           "action": {
             "type": "string",
-            "enum": ["browser.open_url", "browser.session", "computer.screenshot", "computer.move", "computer.click", "computer.type", "computer.key", "computer.scroll"]
+            "enum": ["browser.open_url", "browser.session", "computer.context", "computer.apps", "computer.screenshot", "computer.move", "computer.click", "computer.drag", "computer.select_app", "computer.show_app", "computer.select_window", "computer.windows", "computer.type", "computer.key", "computer.scroll"],
+            "description": "Use browser.open_url/session for browser navigation and inspection. Use computer.context/apps/windows to inspect open apps, computer.show_app to bring an app to the main visible screen, computer.select_window to target a visible window, and computer.screenshot before physical actions. For small or ambiguous image targets, do not click from the full screenshot; request computer.screenshot with crop/zoom/detail first, usually payload.source=latest, then click using payload.normalized_x and payload.normalized_y relative to that attached crop. source=latest crops from the last full/selected-window screenshot; use source=current_crop only for an intentional crop-of-crop. After a zoomed/cropped view, request a fresh screenshot before unrelated actions. payload.point:[y,x] is accepted only for legacy compatibility. computer.click/move/drag default to the virtual AI cursor and marker previews; set payload.physical=true only after explicit approval to operate the visible UI."
           },
-          "payload": {"type": "object"}
+          "payload": {
+            "type": "object",
+            "description": "Action payload. For visual coordinates, prefer normalized_x and normalized_y plus coordinate_space=normalized_1000. Legacy point:[y,x] and normalized_point are accepted for compatibility only. Use source=latest plus crop, zoom, normalized_box, crop_x/crop_y/crop_width/crop_height, or detail on computer.screenshot to inspect small targets. source=latest crops from the last full/selected-window screenshot; use source=current_crop only when intentionally cropping the current crop again. Cropped/zoomed screenshots become the new attached-image coordinate reference; take a fresh screenshot before unrelated actions. Use app/name with computer.show_app, app/title/title_contains with computer.select_window, text with computer.type, and physical=true only when a click/move/drag should operate the visible UI instead of the default virtual marker preview."
+          }
         },
         "required": ["action"]
       }
@@ -36,7 +40,7 @@
       "widget_kind": "tool_toggle",
       "settings_fields": [
         {
-          "id": "target",
+          "id": "default_target",
           "label": "Default Target",
           "type": "select",
           "default": "active_context",

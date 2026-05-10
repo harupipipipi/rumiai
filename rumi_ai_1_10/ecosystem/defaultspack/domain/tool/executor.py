@@ -85,6 +85,8 @@ class ToolExecutor:
         ツールを実行する。
         戻り値: {"result": str, "is_error": bool, "widget": dict|None}
         """
+        if _is_cancelled(context):
+            return _cancelled_tool_result(tool_name)
         tool_def = self._registry.get(tool_name)
         if tool_def is None:
             return {
@@ -216,12 +218,19 @@ class ToolExecutor:
             return None
         if bool(getattr(response, "success", False)):
             return None
-        if getattr(response, "error_type", "") != "pack_not_approved":
+        if getattr(response, "error_type", "") not in {
+            "pack_not_approved",
+            "function_not_found",
+            "function_registry_unavailable",
+        }:
             return None
         qualified_name = str(request.get("qualified_name") or "")
         pack_id, _, function_id = qualified_name.partition(":")
         if pack_id not in {"defaultspack", "rumi_default_tools_pack"} or not function_id:
             return None
+        local_tool = ToolExecutor._first_party_local_tool_for_function(pack_id, function_id)
+        if local_tool:
+            return ToolExecutor()._execute_local(local_tool, request.get("args") or {}, context)
         try:
             from core_runtime.pack_function_runtime import invoke_pack_function
 
@@ -234,6 +243,31 @@ class ToolExecutor:
         except Exception:
             return None
         return ToolExecutor._tool_response_from_pack_function_output(output)
+
+    @staticmethod
+    def _first_party_local_tool_for_function(pack_id, function_id):
+        if pack_id == "rumi_default_tools_pack":
+            return {
+                "browser_computer": "browser_computer",
+                "browser_use": "browser_use",
+                "computer_use": "computer_use",
+                "calculator": "calculator",
+                "file_reader": "file_reader",
+                "reddit_search": "reddit_search",
+                "subagent": "subagent",
+                "todo": "todo",
+                "web_search": "web_search",
+            }.get(function_id)
+        if pack_id == "defaultspack":
+            return {
+                "tool_calculator": "calculator",
+                "tool_web_search": "web_search",
+                "tool_reddit_search": "reddit_search",
+                "tool_file_reader": "file_reader",
+                "tool_todo": "todo",
+                "tool_subagent": "subagent",
+            }.get(function_id)
+        return None
 
     @staticmethod
     def _tool_response_from_pack_function_output(output):
@@ -536,6 +570,8 @@ class ToolExecutor:
         """
         ローカルツール実行（最小動作版: 固定レスポンスを返す）
         """
+        if _is_cancelled(context):
+            return _cancelled_tool_result(tool_name)
         if tool_name == "web_search":
             from domain.research.providers import ExternalWebProvider
 
@@ -571,19 +607,38 @@ class ToolExecutor:
 
             policy = policy_from_context(context if isinstance(context, dict) else {})
             action, payload = _browser_computer_action_payload(tool_name, arguments)
+            if _is_cancelled(context):
+                return _cancelled_tool_result(tool_name, action=action)
+            user_requested = bool(isinstance(context, dict) and context.get("user_requested_computer_use"))
+            if user_requested and action == "browser.open_url" and not any(
+                key in payload for key in ("persistent", "profile_id", "session_id")
+            ):
+                payload["persistent"] = False
             result = BrowserComputerController(artifact_root=_conversation_tool_artifact_root(context)).run(
                 action,
-                payload,
-                yolo_mode=bool(policy.get("yolo_mode")),
+                _computer_use_payload_with_context_defaults(action, payload, context),
+                yolo_mode=_truthy(policy.get("yolo_mode")),
             )
-            summary = "{} {} completed".format(tool_name, result.get("action", "action"))
+            if _is_cancelled(context):
+                return _cancelled_tool_result(tool_name, action=action)
+            is_error = bool(result.get("is_error"))
+            summary = "{} {} {}".format(
+                tool_name,
+                result.get("action", "action"),
+                "failed" if is_error else "completed",
+            )
+            if is_error and result.get("reason"):
+                summary += ": {}".format(result.get("reason"))
             if result.get("path"):
                 summary += "; artifact: {}".format(result.get("path"))
-            return {
+            output = {
                 "result": summary,
-                "is_error": False,
-                "widget": {"type": tool_name, **result}
+                "is_error": is_error,
+                "widget": {"type": tool_name, **result},
             }
+            if isinstance(result.get("recovery"), dict):
+                output["recovery"] = result.get("recovery")
+            return output
         elif tool_name == "todo":
             from ecosystem.rumi_default_tools_pack.domain.tool.todo import TodoController
 
@@ -629,6 +684,38 @@ class ToolExecutor:
                 "is_error": False,
                 "widget": None
             }
+
+
+def _is_cancelled(context):
+    checker = context.get("is_cancelled") if isinstance(context, dict) else None
+    if callable(checker):
+        try:
+            return bool(checker())
+        except Exception:
+            return False
+    return False
+
+
+def _cancelled_tool_result(tool_name, *, action=""):
+    detail = " during {}".format(action) if action else ""
+    return {
+        "result": "Tool '{}' cancelled{}".format(tool_name, detail),
+        "is_error": True,
+        "widget": {
+            "type": tool_name,
+            "action": action or "cancelled",
+            "is_error": True,
+            "cancelled": True,
+            "reason": "Tool execution cancelled by user.",
+        },
+        "cancelled": True,
+    }
+
+
+def _truthy(value):
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
 
 
 def _safe_calculate(expression):
@@ -683,33 +770,207 @@ def _browser_computer_action_payload(tool_name, arguments):
             "session": "browser.session",
             "open_url": "browser.open_url",
             "open": "browser.open_url",
+            "context": "computer.context",
+            "app_context": "computer.context",
+            "state": "computer.context",
             "screenshot": "computer.screenshot",
             "move": "computer.move",
             "cursor_move": "computer.move",
             "mouse_move": "computer.move",
             "click": "computer.click",
+            "drag": "computer.drag",
+            "mouse_drag": "computer.drag",
             "type": "computer.type",
             "key": "computer.key",
             "scroll": "computer.scroll",
+            "apps": "computer.apps",
+            "applications": "computer.apps",
+            "open_apps": "computer.apps",
+            "list_apps": "computer.apps",
+            "select_app": "computer.select_app",
+            "app": "computer.select_app",
+            "show_app": "computer.show_app",
+            "focus_app": "computer.show_app",
+            "activate_app": "computer.show_app",
+            "main_app": "computer.show_app",
+            "show": "computer.show_app",
+            "select_window": "computer.select_window",
+            "window": "computer.select_window",
+            "windows": "computer.windows",
+            "list_windows": "computer.windows",
         }
         action = action_map.get(raw_action, raw_action)
-        for key in ("url", "x", "y", "text", "key", "amount"):
+        for key in (
+            "url",
+            "url_contains",
+            "x",
+            "y",
+            "point",
+            "points",
+            "point_order",
+            "coordinate",
+            "coordinates",
+            "normalized_point",
+            "normalized_x",
+            "normalized_y",
+            "x1",
+            "y1",
+            "x2",
+            "y2",
+            "from_x",
+            "from_y",
+            "to_x",
+            "to_y",
+            "text",
+            "key",
+            "modifier",
+            "modifiers",
+            "amount",
+            "target",
+            "scope",
+            "app",
+            "application",
+            "name",
+            "title",
+            "title_contains",
+            "window",
+            "window_index",
+            "tab_index",
+            "button",
+            "include_screenshot",
+            "coordinate_space",
+            "physical",
+            "virtual_only",
+            "crop",
+            "zoom",
+            "crop_box",
+            "zoom_box",
+            "source",
+            "detail",
+            "crop_x",
+            "crop_y",
+            "crop_width",
+            "crop_height",
+            "normalized_box",
+            "normalized_width",
+            "normalized_height",
+            "normalized_right",
+            "normalized_bottom",
+            "box_format",
+            "width_height",
+            "focus",
+            "open",
+            "launch",
+            "limit",
+            "include_installed",
+            "include_installed_apps",
+            "mode",
+            "method",
+            "driver",
+        ):
             if key in arguments:
                 raw_payload[key] = arguments.get(key)
     else:
         action_map = {
             "": "computer.screenshot",
+            "context": "computer.context",
+            "app_context": "computer.context",
+            "state": "computer.context",
             "screenshot": "computer.screenshot",
             "move": "computer.move",
             "cursor_move": "computer.move",
             "mouse_move": "computer.move",
             "click": "computer.click",
+            "drag": "computer.drag",
+            "mouse_drag": "computer.drag",
             "type": "computer.type",
             "key": "computer.key",
             "scroll": "computer.scroll",
+            "apps": "computer.apps",
+            "applications": "computer.apps",
+            "open_apps": "computer.apps",
+            "list_apps": "computer.apps",
+            "select_app": "computer.select_app",
+            "app": "computer.select_app",
+            "show_app": "computer.show_app",
+            "focus_app": "computer.show_app",
+            "activate_app": "computer.show_app",
+            "main_app": "computer.show_app",
+            "show": "computer.show_app",
+            "select_window": "computer.select_window",
+            "window": "computer.select_window",
+            "windows": "computer.windows",
+            "list_windows": "computer.windows",
         }
         action = action_map.get(raw_action, raw_action)
-        for key in ("x", "y", "text", "key", "amount"):
+        for key in (
+            "url",
+            "url_contains",
+            "x",
+            "y",
+            "point",
+            "points",
+            "point_order",
+            "coordinate",
+            "coordinates",
+            "normalized_point",
+            "normalized_x",
+            "normalized_y",
+            "x1",
+            "y1",
+            "x2",
+            "y2",
+            "from_x",
+            "from_y",
+            "to_x",
+            "to_y",
+            "text",
+            "key",
+            "modifier",
+            "modifiers",
+            "amount",
+            "target",
+            "scope",
+            "app",
+            "application",
+            "name",
+            "title",
+            "title_contains",
+            "window",
+            "window_index",
+            "tab_index",
+            "button",
+            "include_screenshot",
+            "coordinate_space",
+            "physical",
+            "virtual_only",
+            "crop",
+            "zoom",
+            "crop_box",
+            "zoom_box",
+            "source",
+            "detail",
+            "crop_x",
+            "crop_y",
+            "crop_width",
+            "crop_height",
+            "normalized_box",
+            "normalized_width",
+            "normalized_height",
+            "normalized_right",
+            "normalized_bottom",
+            "box_format",
+            "width_height",
+            "focus",
+            "open",
+            "launch",
+            "limit",
+            "include_installed",
+            "include_installed_apps",
+            "mode",
+            "method",
+            "driver",
+        ):
             if key in arguments:
                 raw_payload[key] = arguments.get(key)
     if "dry_run" in arguments:
@@ -717,6 +978,34 @@ def _browser_computer_action_payload(tool_name, arguments):
     if "approval_token" in arguments:
         raw_payload["approval_token"] = arguments.get("approval_token")
     return action, raw_payload
+
+
+def _computer_use_payload_with_context_defaults(action, payload, context):
+    payload = dict(payload or {})
+    if not isinstance(context, dict):
+        return payload
+    target_app = context.get("computer_use_target_app")
+    target_title = context.get("computer_use_target_title")
+    if action == "browser.open_url":
+        if isinstance(target_app, str) and target_app.strip() and not any(
+            payload.get(key) for key in ("app", "application", "browser", "browser_app")
+        ):
+            payload["app"] = target_app.strip()
+        return payload
+    if action.startswith("computer.") and action not in {"computer.windows", "computer.apps"}:
+        if isinstance(target_app, str) and target_app.strip():
+            if action in {"computer.select_app", "computer.show_app"}:
+                if not any(payload.get(key) for key in ("app", "application", "name")):
+                    payload["app"] = target_app.strip()
+            else:
+                payload.setdefault("app", target_app.strip())
+        if (
+            isinstance(target_title, str)
+            and target_title.strip()
+            and action not in {"computer.select_app", "computer.show_app"}
+        ):
+            payload.setdefault("title", target_title.strip())
+    return payload
 
 
 def _conversation_tool_artifact_root(context):

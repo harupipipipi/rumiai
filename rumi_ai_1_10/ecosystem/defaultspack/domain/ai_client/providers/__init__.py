@@ -9,6 +9,7 @@ from ...extensions.runtime import get_extension_registry
 from ..api_key_store import load_provider_api_keys_into_env, provider_has_api_key
 from .openai_compatible_provider import OpenAICompatibleProvider
 from .provider_catalog import OPENAI_COMPATIBLE_PROVIDER_CLASSES
+from . import google_provider as google_provider
 
 """
 providers package - provider discovery and catalog helpers.
@@ -92,7 +93,7 @@ _CURATED_PROVIDER_METADATA: Dict[str, Dict[str, Any]] = {
         "display_name": "Google",
         "kind": "cloud",
         "description": "Google Gemini and multimodal APIs.",
-        "env_vars": ["GOOGLE_API_KEY", "GEMINI_API_KEY", "GOOGLE_APPLICATION_CREDENTIALS"],
+        "env_vars": ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
         "base_url_envs": ["GOOGLE_BASE_URL"],
         "catalog_only": False,
         "supports_invoke": True,
@@ -119,6 +120,7 @@ _CURATED_PROVIDER_METADATA: Dict[str, Dict[str, Any]] = {
         "catalog_only": True,
         "supports_invoke": False,
         "default_model": "llama-3.3-70b-versatile",
+        "default_model_for": {"fast": "llama-3.3-70b-versatile"},
         "capabilities": ["chat", "tool_calls"],
     },
     "mistral": {
@@ -509,6 +511,10 @@ def _merge_provider_entry(provider_id: str, manifest: Optional[Dict[str, Any]] =
         or curated.get("default_base_url")
         or ""
     ).strip()
+    default_model_for = manifest.get("default_model_for", {})
+    if not isinstance(default_model_for, dict):
+        default_model_for = {}
+    default_model_for = {**dict(curated.get("default_model_for", {})), **default_model_for}
     adapter = str(manifest.get("adapter", "")).strip()
     entrypoint = str(manifest.get("entrypoint", "")).strip()
     return {
@@ -521,6 +527,7 @@ def _merge_provider_entry(provider_id: str, manifest: Optional[Dict[str, Any]] =
         "env_vars": env_vars,
         "base_url_envs": base_url_envs,
         "default_model": default_model,
+        "default_model_for": {str(key): str(value) for key, value in default_model_for.items()},
         "default_base_url": default_base_url,
         "catalog_only": _provider_catalog_only(provider_id, manifest, curated),
         "supports_invoke_base": _provider_supports_invoke(provider_id, manifest, curated),
@@ -595,12 +602,14 @@ def get_provider_catalog(active_provider_ids=None):
                 "env_vars": list(entry.get("env_vars", [])),
                 "base_url_envs": list(entry.get("base_url_envs", [])),
                 "default_model": entry.get("default_model", ""),
+                "default_model_for": dict(entry.get("default_model_for", {})),
                 "capabilities": list(entry.get("capabilities", [])),
                 "availability": availability,
                 "metadata": {
                     "catalog_only": bool(entry.get("catalog_only", False)),
                     "supports_invoke": bool(entry.get("supports_invoke_base") or active),
                     "default_base_url": entry.get("default_base_url", ""),
+                    "default_model_for": dict(entry.get("default_model_for", {})),
                     "adapter": entry.get("adapter", ""),
                     "entrypoint": entry.get("entrypoint", ""),
                 },
@@ -642,7 +651,7 @@ def _load_known_models_from_entry(entrypoint: str) -> List[Dict[str, Any]]:
 def _load_models_for_provider(entry: Dict[str, Any]) -> List[Dict[str, Any]]:
     provider_id = entry["provider_id"]
     models: List[Dict[str, Any]] = []
-    seen: set[str] = set()
+    seen: Dict[str, Dict[str, Any]] = {}
 
     def _append(items: Iterable[Dict[str, Any]]) -> None:
         for raw in items:
@@ -654,9 +663,14 @@ def _load_models_for_provider(entry: Dict[str, Any]) -> List[Dict[str, Any]]:
                 continue
             key = raw_id or "{}/{}".format(provider_id, model_id)
             if key in seen:
+                existing = seen[key]
+                for field, value in raw.items():
+                    if field not in existing or existing.get(field) in (None, "", [], {}):
+                        existing[field] = value
                 continue
-            seen.add(key)
-            models.append(dict(raw))
+            item = dict(raw)
+            seen[key] = item
+            models.append(item)
 
     _append(_load_model_manifests(provider_id))
     _append(_load_known_models_from_entry(str(entry.get("entrypoint", ""))))
@@ -726,6 +740,7 @@ def get_all_known_models(provider_id=None, active_provider_ids=None):
             display_name = str(raw.get("display_name") or raw.get("name") or model_id)
             defaults = dict(raw.get("defaults", {}))
             metadata = dict(raw.get("metadata", {}))
+            pricing = dict(raw.get("pricing", {})) if isinstance(raw.get("pricing"), dict) else {}
             metadata.update(
                 {
                     "provider_model_key": qualified_model_id,
@@ -733,28 +748,35 @@ def get_all_known_models(provider_id=None, active_provider_ids=None):
                     "provider_kind": provider_entry["kind"],
                     "availability_status": provider_entry["availability"].get("status"),
                     "defaults": defaults,
+                    "pricing": pricing,
                 }
             )
-            models.append(
-                {
-                    "id": qualified_model_id,
-                    "qualified_model_id": qualified_model_id,
-                    "provider": model_provider_id,
-                    "provider_id": model_provider_id,
-                    "provider_display_name": provider_entry["display_name"],
-                    "model_id": model_id,
-                    "model_name": model_id,
-                    "name": display_name,
-                    "display_name": display_name,
-                    "type": str(raw.get("type", "chat")),
-                    "context_window": int(raw.get("context_window", 0) or 0),
-                    "capabilities": list(raw.get("capabilities", [])),
-                    "availability": dict(provider_entry["availability"]),
-                    "supports_invoke": bool(provider_entry["availability"].get("supports_invoke", False)),
-                    "defaults": defaults,
-                    "metadata": metadata,
-                }
-            )
+            item = {
+                "id": qualified_model_id,
+                "qualified_model_id": qualified_model_id,
+                "provider": model_provider_id,
+                "provider_id": model_provider_id,
+                "provider_display_name": provider_entry["display_name"],
+                "model_id": model_id,
+                "model_name": model_id,
+                "name": display_name,
+                "display_name": display_name,
+                "type": str(raw.get("type", "chat")),
+                "context_window": int(raw.get("context_window", 0) or 0),
+                "capabilities": list(raw.get("capabilities", [])),
+                "availability": dict(provider_entry["availability"]),
+                "supports_invoke": bool(provider_entry["availability"].get("supports_invoke", False)),
+                "defaults": defaults,
+                "pricing": pricing,
+                "metadata": metadata,
+            }
+            if "supports_thinking" in raw:
+                item["supports_thinking"] = bool(raw.get("supports_thinking"))
+            if isinstance(raw.get("thinking_levels"), list):
+                item["thinking_levels"] = list(raw.get("thinking_levels", []))
+            if "default_thinking_level" in raw:
+                item["default_thinking_level"] = raw.get("default_thinking_level")
+            models.append(item)
 
     deduped: Dict[str, Dict[str, Any]] = {}
     for model in models:
@@ -786,26 +808,34 @@ def build_profile_catalog(active_provider_ids=None, custom_profiles=None):
                 "resolved_model_key": model["qualified_model_id"],
             }
         )
-        profiles.append(
-            {
-                "id": model["qualified_model_id"],
-                "profile_id": model["qualified_model_id"],
-                "name": model["display_name"],
-                "display_name": model["display_name"],
-                "provider": model["provider_id"],
-                "provider_id": model["provider_id"],
-                "provider_display_name": model["provider_display_name"],
-                "model": model["model_id"],
-                "model_id": model["model_id"],
-                "model_name": model["model_name"],
-                "qualified_model_id": model["qualified_model_id"],
-                "availability": dict(model["availability"]),
-                "name_collision": model["name_collision"],
-                "provider_count_for_model_name": model["provider_count_for_model_name"],
-                "disambiguated_name": model["disambiguated_name"],
-                "metadata": metadata,
-            }
-        )
+        profile = {
+            "id": model["qualified_model_id"],
+            "profile_id": model["qualified_model_id"],
+            "name": model["display_name"],
+            "display_name": model["display_name"],
+            "provider": model["provider_id"],
+            "provider_id": model["provider_id"],
+            "provider_display_name": model["provider_display_name"],
+            "model": model["model_id"],
+            "model_id": model["model_id"],
+            "model_name": model["model_name"],
+            "qualified_model_id": model["qualified_model_id"],
+            "availability": dict(model["availability"]),
+            "name_collision": model["name_collision"],
+            "provider_count_for_model_name": model["provider_count_for_model_name"],
+            "disambiguated_name": model["disambiguated_name"],
+            "type": model.get("type", "chat"),
+            "defaults": dict(model.get("defaults", {})) if isinstance(model.get("defaults"), dict) else {},
+            "pricing": dict(model.get("pricing", {})) if isinstance(model.get("pricing"), dict) else {},
+            "metadata": metadata,
+        }
+        if "supports_thinking" in model:
+            profile["supports_thinking"] = bool(model.get("supports_thinking"))
+        if isinstance(model.get("thinking_levels"), list):
+            profile["thinking_levels"] = list(model.get("thinking_levels", []))
+        if "default_thinking_level" in model:
+            profile["default_thinking_level"] = model.get("default_thinking_level")
+        profiles.append(profile)
 
     for profile_name, raw_profile in (custom_profiles or {}).items():
         if not isinstance(raw_profile, dict):

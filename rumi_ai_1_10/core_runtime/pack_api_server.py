@@ -20,7 +20,7 @@ import collections
 from pathlib import Path
 from typing import Any, Optional
 from http import cookies
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, unquote
 
 from .hmac_key_manager import get_hmac_key_manager, HMACKeyManager
@@ -141,6 +141,15 @@ _rate_limiter = _RateLimiter(
     max_requests=int(os.environ.get("RUMI_API_RATE_LIMIT", "120")),
     window_seconds=float(os.environ.get("RUMI_API_RATE_WINDOW", "60")),
 )
+
+
+class _PackThreadingHTTPServer(ThreadingHTTPServer):
+    """Thread-per-request server so long SSE streams do not block control APIs."""
+
+    allow_reuse_address = True
+    daemon_threads = True
+    block_on_close = False
+    request_queue_size = int(os.environ.get("RUMI_API_REQUEST_QUEUE_SIZE", "128"))
 
 
 # _SAFE_ERROR_MSG: moved to api._helpers
@@ -470,7 +479,10 @@ class PackAPIHandler(
 
                 result = handler(*args)
 
-            if response_mode == "raw":
+            sse_events = self._sse_events_from_result(result)
+            if sse_events is not None:
+                self._send_sse(sse_events)
+            elif response_mode == "raw":
                 self._send_response(APIResponse(True, data=result))
             else:
                 self._send_result(result)
@@ -502,6 +514,49 @@ class PackAPIHandler(
         self.end_headers()
         self.wfile.write(data)
 
+    def _send_sse(self, events) -> None:
+        response_headers: list[tuple[str, str]] = []
+        if self._panel_session_cookie:
+            response_headers.append(("Set-Cookie", self._panel_session_cookie))
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/event-stream; charset=utf-8')
+        self.send_header('Cache-Control', 'no-cache, no-transform')
+        self.send_header('Connection', 'close')
+        origin = self._get_cors_origin(self.headers.get('Origin', ''))
+        if origin:
+            self.send_header('Access-Control-Allow-Origin', origin)
+            self.send_header('Vary', 'Origin')
+        for header_name, header_value in response_headers:
+            self.send_header(header_name, header_value)
+        self.end_headers()
+        try:
+            for event in events:
+                if isinstance(event, bytes):
+                    payload = event
+                else:
+                    payload = (
+                        "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
+                    ).encode('utf-8')
+                self.wfile.write(payload)
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        finally:
+            self.close_connection = True
+
+    @staticmethod
+    def _sse_events_from_result(result):
+        if isinstance(result, dict) and result.get("_sse"):
+            return result.get("events", [])
+        if (
+            isinstance(result, dict)
+            and result.get("status") == "ok"
+            and isinstance(result.get("data"), dict)
+            and result["data"].get("_sse")
+        ):
+            return result["data"].get("events", [])
+        return None
+
     def _discard_request_body(self) -> None:
         """Consume unread request bytes before returning an early response."""
         try:
@@ -525,6 +580,10 @@ class PackAPIHandler(
         handler が ``status_code`` キーを返した場合、その値を HTTP ステータスに使用する。
         ``status_code`` が無い場合は *error_status* をデフォルトとする。
         """
+        sse_events = self._sse_events_from_result(result)
+        if sse_events is not None:
+            self._send_sse(sse_events)
+            return
         if isinstance(result, dict) and "error" in result:
             status = result.get("status_code", error_status)
             self._send_response(
@@ -1878,7 +1937,7 @@ class PackAPIServer:
             logger.warning("Token rotation: set RUMI_HMAC_ROTATE=true and restart")
         
         self.internal_token = internal_token
-        self.server: Optional[HTTPServer] = None
+        self.server: Optional[_PackThreadingHTTPServer] = None
         self.thread: Optional[threading.Thread] = None
         self._routes_load_lock = threading.Lock()
     
@@ -1938,14 +1997,16 @@ class PackAPIServer:
         except Exception as e:
             logger.warning("Failed to set up deferred route loading: %s", e)
         
-        self.server = HTTPServer((self.host, self.port), PackAPIHandler)
+        self.server = _PackThreadingHTTPServer((self.host, self.port), PackAPIHandler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         logger.info("Pack API server started on http://%s:%s", self.host, self.port)
     
     def stop(self) -> None:
         if self.server:
-            self.server.shutdown()
+            server = self.server
+            server.shutdown()
+            server.server_close()
             self.server = None
         if self.thread:
             self.thread.join(timeout=THREAD_JOIN_TIMEOUT_SECONDS)

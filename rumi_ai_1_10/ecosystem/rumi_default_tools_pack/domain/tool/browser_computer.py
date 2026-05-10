@@ -8,11 +8,17 @@ import secrets
 import shutil
 import struct
 import subprocess
+import sys
 import time
 import webbrowser
+import zlib
 import base64
 from pathlib import Path
 from typing import Any
+
+
+def _current_python_snippet_command(code: str) -> list[str]:
+    return [sys.executable, "-c", code]
 
 
 class BrowserComputerController:
@@ -28,8 +34,9 @@ class BrowserComputerController:
 
     def run(self, action: str, payload: dict[str, Any] | None = None, *, yolo_mode: bool = False) -> dict[str, Any]:
         payload = payload or {}
+        yolo_mode = self._truthy(yolo_mode)
         if action == "browser.open_url":
-            return self._open_url(str(payload.get("url", "")), payload=payload, dry_run=bool(payload.get("dry_run")), yolo_mode=yolo_mode)
+            return self._open_url(str(payload.get("url", "")), payload=payload, dry_run=self._truthy(payload.get("dry_run")), yolo_mode=yolo_mode)
         if action == "browser.session":
             return {"action": action, "platform": platform.system(), "capabilities": self._capabilities(), "session": self._read_sessions()}
         if action == "browser.profiles.list":
@@ -39,20 +46,32 @@ class BrowserComputerController:
         if action == "browser.profile.set_active":
             return self._set_active_profile(payload)
         if action == "browser.profile.delete":
-            return self._delete_profile(payload, dry_run=bool(payload.get("dry_run")), yolo_mode=yolo_mode)
+            return self._delete_profile(payload, dry_run=self._truthy(payload.get("dry_run")), yolo_mode=yolo_mode)
         if action == "browser.profile.clear_cache":
-            return self._clear_cache(payload, dry_run=bool(payload.get("dry_run")), yolo_mode=yolo_mode)
+            return self._clear_cache(payload, dry_run=self._truthy(payload.get("dry_run")), yolo_mode=yolo_mode)
         if action == "browser.profile.clear_cookies":
-            return self._clear_cookies(payload, dry_run=bool(payload.get("dry_run")), yolo_mode=yolo_mode)
+            return self._clear_cookies(payload, dry_run=self._truthy(payload.get("dry_run")), yolo_mode=yolo_mode)
         if action == "browser.cookies.list":
             return self._list_cookies(payload)
         if action == "browser.cookies.import":
             return self._import_cookies(payload)
         if action == "browser.cookies.delete":
-            return self._delete_cookies(payload, dry_run=bool(payload.get("dry_run")), yolo_mode=yolo_mode)
+            return self._delete_cookies(payload, dry_run=self._truthy(payload.get("dry_run")), yolo_mode=yolo_mode)
+        if action in {"computer.context", "computer.app_context", "computer.state"}:
+            return self._context(payload)
+        if action in {"computer.apps", "computer.list_apps", "computer.open_apps", "computer.applications"}:
+            return self._apps(payload)
+        if action in {"computer.windows", "computer.list_windows"}:
+            return {"action": "computer.windows", "platform": platform.system(), "windows": self._list_windows()}
+        if action == "computer.select_app":
+            return self._select_app(payload)
+        if action in {"computer.show_app", "computer.focus_app", "computer.activate_app"}:
+            return self._show_app(payload)
+        if action == "computer.select_window":
+            return self._select_window(payload)
         if action == "computer.screenshot":
-            return self._screenshot(payload=payload, dry_run=bool(payload.get("dry_run")), yolo_mode=yolo_mode)
-        if action in {"computer.move", "computer.click", "computer.type", "computer.key", "computer.scroll"}:
+            return self._screenshot(payload=payload, dry_run=self._truthy(payload.get("dry_run")), yolo_mode=yolo_mode)
+        if action in {"computer.move", "computer.click", "computer.drag", "computer.type", "computer.key", "computer.scroll"}:
             return self._desktop_action(action, payload, yolo_mode=yolo_mode)
         raise ValueError(f"Unsupported browser/computer action: {action}")
 
@@ -61,6 +80,7 @@ class BrowserComputerController:
             raise ValueError("'url' must start with http://, https://, or file://")
         profile_id = self._profile_id(payload.get("profile_id") or payload.get("session_id") or self._active_profile_id())
         persistent = payload.get("persistent", True) is not False
+        target_app = self._app_name_from_payload(payload)
         launch_plan = self._browser_launch_plan(url, profile_id, persistent=persistent)
         if dry_run:
             return {
@@ -71,23 +91,37 @@ class BrowserComputerController:
                 "dry_run": True,
                 "requires_approval": False,
                 "launch": launch_plan,
+                **({"target_app": target_app} if target_app else {}),
             }
-        approval_payload = {"url": url, "profile_id": profile_id, "persistent": persistent}
+        approval_payload = {"url": url, "profile_id": profile_id, "persistent": persistent, "target_app": target_app}
         approved = yolo_mode or self._consume_approval(payload, "browser.open_url", approval_payload)
         if not approved:
             return self._approval_required("browser.open_url", approval_payload)
         self._ensure_profile(profile_id)
         opened_with_managed_profile = False
-        if persistent and launch_plan.get("command"):
+        if persistent and launch_plan.get("command") and not target_app:
             command = [str(part) for part in launch_plan["command"]]
             subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             opened_with_managed_profile = True
         else:
-            webbrowser.open(url)
+            opened = self._open_url_foreground(url, app_name=target_app)
+            if not opened:
+                return {
+                    "action": "browser.open_url",
+                    "url": url,
+                    "opened": False,
+                    "is_error": True,
+                    "profile_id": profile_id,
+                    "persistent": persistent,
+                    **({"target_app": target_app} if target_app else {}),
+                    "reason": "Opening the requested URL failed.",
+                }
         sessions = self._read_sessions()
         sessions["last_url"] = url
         sessions["active_profile_id"] = profile_id
         sessions["last_opened_with_managed_profile"] = opened_with_managed_profile
+        for stale_key in ("last_opened_background", "browser_target", "chrome_target"):
+            sessions.pop(stale_key, None)
         sessions["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self._write_sessions(sessions)
         return {
@@ -98,7 +132,29 @@ class BrowserComputerController:
             "persistent": persistent,
             "managed_profile": opened_with_managed_profile,
             "launch": launch_plan,
+            **({"target_app": target_app} if target_app else {}),
         }
+
+    @staticmethod
+    def _open_url_foreground(url: str, *, app_name: str = "") -> bool:
+        if platform.system() == "Darwin":
+            try:
+                command = ["open"]
+                if app_name:
+                    command.extend(["-a", app_name])
+                command.append(url)
+                subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return True
+            except Exception:
+                return False
+        if platform.system() == "Windows" and app_name:
+            return BrowserComputerController._windows_open_url_foreground(url, app_name)
+        if app_name:
+            return False
+        try:
+            return bool(webbrowser.open(url))
+        except Exception:
+            return False
 
     def _create_profile(self, payload: dict[str, Any]) -> dict[str, Any]:
         profile_id = self._profile_id(payload.get("profile_id") or payload.get("name") or f"profile-{int(time.time())}")
@@ -234,41 +290,74 @@ class BrowserComputerController:
 
     def _screenshot(self, *, payload: dict[str, Any], dry_run: bool, yolo_mode: bool) -> dict[str, Any]:
         if dry_run:
-            return {"action": "computer.screenshot", "dry_run": True, "requires_approval": False}
-        approved = yolo_mode or self._consume_approval(payload, "computer.screenshot", {})
-        if not approved:
-            return self._approval_required("computer.screenshot", {})
+            return {
+                "action": "computer.screenshot",
+                "dry_run": True,
+                "requires_approval": False,
+                "target_window": self._capture_target(payload),
+            }
+        approval_payload = self._safe_payload(payload)
+        if not (yolo_mode or self._consume_approval(payload, "computer.screenshot", approval_payload)):
+            return self._approval_required("computer.screenshot", approval_payload)
         self._artifact_root.mkdir(parents=True, exist_ok=True)
         path = self._artifact_root / f"screenshot-{int(time.time() * 1000)}.png"
-        system = platform.system()
-        if system == "Darwin":
-            subprocess.run(["screencapture", "-x", str(path)], check=True)
-        elif system == "Windows":
-            self._windows_screenshot(path)
-        else:
-            return {
+        capture = self._capture_or_reuse_screenshot(path, payload)
+        system = capture.get("platform", platform.system())
+        if not capture.get("supported", True):
+            result = {
                 "action": "computer.screenshot",
                 "supported": False,
                 "platform": system,
-                "reason": "Screenshots are supported on macOS and Windows.",
+                "reason": capture.get("reason") or "Screenshots are supported on macOS and Windows.",
             }
+            for key in ("target_filter", "recovery"):
+                if capture.get(key) is not None:
+                    result[key] = capture.get(key)
+            return result
+        crop_result = self._apply_screenshot_crop(path, payload, capture)
+        crop_reference = crop_result.get("crop_reference") if crop_result else None
+        action_target = crop_result.get("action_target") if crop_result else capture.get("action_coordinate_system")
+        if crop_result and isinstance(crop_result.get("path"), Path):
+            path = crop_result["path"]
         model_path = self._model_screenshot_copy(path)
-        data_url = ""
-        try:
-            mime_type = "image/jpeg" if model_path.suffix.lower() in {".jpg", ".jpeg"} else "image/png"
-            data_url = "data:{};base64,".format(mime_type) + base64.b64encode(model_path.read_bytes()).decode("ascii")
-        except Exception:
-            data_url = ""
-        result = self._screenshot_result(path, model_path, system)
+        data_url = self._image_data_url(model_path)
+        result = self._screenshot_result(
+            path,
+            model_path,
+            system,
+            capture_target=capture.get("target_window"),
+            action_target=action_target,
+            crop_reference=crop_reference,
+        )
         if data_url:
             result["data_url"] = data_url
+            result["model_image"] = data_url
             result["model_image_path"] = str(model_path)
         return result
 
-    def _screenshot_result(self, path: Path, model_path: Path, system: str) -> dict[str, Any]:
-        result: dict[str, Any] = {"action": "computer.screenshot", "path": str(path), "mime_type": "image/png", "platform": system}
+    def _screenshot_result(
+        self,
+        path: Path,
+        model_path: Path,
+        system: str,
+        *,
+        capture_target: dict[str, Any] | None = None,
+        action_target: dict[str, Any] | None = None,
+        crop_reference: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "action": "computer.screenshot",
+            "path": str(path),
+            "model_image_path": str(model_path),
+            "mime_type": "image/png",
+            "platform": system,
+        }
         image_size = self._image_size(path)
         model_image_size = self._image_size(model_path)
+        if capture_target:
+            result["target_window"] = capture_target
+        if crop_reference:
+            result["crop_reference"] = crop_reference
         if image_size:
             width, height = image_size
             result["image_size"] = {"width": width, "height": height}
@@ -279,7 +368,10 @@ class BrowserComputerController:
                 "x_range": [0, max(width - 1, 0)],
                 "y_range": [0, max(height - 1, 0)],
             }
-        action_coordinate_system = self._action_coordinate_system(system, image_size)
+        try:
+            action_coordinate_system = self._action_coordinate_system(system, image_size, capture_target=action_target or capture_target)
+        except TypeError:
+            action_coordinate_system = self._action_coordinate_system(system, image_size)
         if action_coordinate_system:
             result["action_coordinate_system"] = action_coordinate_system
         if model_image_size:
@@ -298,6 +390,7 @@ class BrowserComputerController:
                     "x": action_width / model_image_size[0],
                     "y": action_height / model_image_size[1],
                 }
+                result["model_to_action_scale_legacy"] = True
         if action_coordinate_system and image_size and image_size[0] and image_size[1]:
             action_width = action_coordinate_system.get("width")
             action_height = action_coordinate_system.get("height")
@@ -309,21 +402,283 @@ class BrowserComputerController:
         cursor = self._cursor_position()
         if cursor:
             result["cursor"] = cursor
+        context = self._context({"include_windows": False})
+        if context.get("ai_cursor"):
+            result["ai_cursor"] = context.get("ai_cursor")
+        if context.get("active_window"):
+            result["active_window"] = context.get("active_window")
+        if context.get("selected_window"):
+            result["selected_window"] = context.get("selected_window")
+        result["coordinate_contract"] = self._coordinate_contract(crop_reference=crop_reference)
         result["cursor_move_contract"] = {
             "tool": "browser_use",
             "action": "move",
             "screen_coordinates": True,
-            "coordinate_source": "screenshot",
-            "notes": "Call move with action_coordinate_system coordinates. If a point is estimated on model_image_size, multiply by model_to_action_scale before calling move.",
+            "coordinate_source": "attached_image",
+            "notes": "For image-based clicking, prefer normalized_x and normalized_y with coordinate_space=normalized_1000. Values are clamped to 0-1000 relative to the attached image; the harness converts them to action pixels. point:[y,x] and normalized_point remain legacy-compatible for normalized_1000 only.",
         }
+        self._remember_last_screenshot(result)
         return result
 
+    @staticmethod
+    def _coordinate_contract(*, crop_reference: dict[str, Any] | None = None) -> dict[str, Any]:
+        contract: dict[str, Any] = {
+            "primary": "normalized_1000",
+            "coordinate_space": "normalized_1000",
+            "input_fields": ["normalized_x", "normalized_y"],
+            "range": {"normalized_x": [0, 1000], "normalized_y": [0, 1000]},
+            "origin": "top_left",
+            "reference": "attached_image",
+            "conversion": "The harness clamps normalized_x/normalized_y to 0..1000 and maps them to action pixels using width-1 and height-1.",
+            "legacy_accepted": ["point:[y,x] with coordinate_space=normalized_1000", "normalized_point:[y,x]"],
+            "legacy_scale_metadata": "model_to_action_scale may be present for old callers; models should not use it for coordinates.",
+        }
+        if crop_reference:
+            contract["crop_reference"] = "normalized coordinates apply to the cropped/zoomed attached image, not the uncropped source."
+        return contract
+
+    def _context(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        payload = payload or {}
+        state = self._computer_state()
+        sessions = self._read_sessions()
+        system = platform.system()
+        selected_window = state.get("target_window") if isinstance(state.get("target_window"), dict) else None
+        selected_app = state.get("target_app") if isinstance(state.get("target_app"), dict) else None
+        if selected_window and not self._is_usable_target_window(selected_window):
+            self._clear_target_window()
+            selected_window = None
+        running_apps = self._running_apps()
+        result: dict[str, Any] = {
+            "action": "computer.context",
+            "platform": system,
+            "active_window": self._active_window(),
+            "selected_window": selected_window,
+            "selected_app": selected_app,
+            "open_apps": running_apps,
+            "ai_cursor": state.get("ai_cursor") if isinstance(state.get("ai_cursor"), dict) else None,
+            "cursor": self._cursor_position(),
+            "browser_session": {
+                "last_url": sessions.get("last_url"),
+                "last_opened_with_managed_profile": bool(sessions.get("last_opened_with_managed_profile")),
+            },
+            "notes": [
+                "Computer-use is app-generic and visible-screen only: use computer.apps for open/installed apps and computer.windows for visible windows.",
+                "Use select_app/select_window for visible targets, then screenshot/click/type/key against the currently visible UI.",
+                "computer.move, computer.click, and computer.drag use the virtual AI cursor by default; set physical=true only after explicit approval to operate the visible UI.",
+                "Hidden tabs and DOM/Apple Events background input are disabled; if a requested app/window is not visible, ask the user to show it or open it visibly first.",
+            ],
+        }
+        if payload.get("include_windows", True) is not False:
+            result["windows"] = self._list_windows()
+        if payload.get("include_installed_apps") is True:
+            result["installed_apps"] = self._installed_apps(payload)
+        return result
+
+    def _apps(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        payload = payload or {}
+        scope = str(payload.get("scope") or payload.get("target") or "running").strip().lower()
+        include_installed = payload.get("include_installed") is True or scope in {"all", "installed", "applications", "apps"}
+        running_apps = self._running_apps()
+        result: dict[str, Any] = {
+            "action": "computer.apps",
+            "platform": platform.system(),
+            "scope": scope,
+            "open_apps": running_apps,
+            "apps": running_apps,
+        }
+        if include_installed:
+            installed = self._installed_apps(payload)
+            result["installed_apps"] = installed
+            result["apps"] = installed if scope in {"installed", "applications"} else self._merge_apps(running_apps, installed)
+        return result
+
+    @staticmethod
+    def _merge_apps(primary: list[dict[str, Any]], secondary: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        merged: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+        for item in list(primary) + list(secondary):
+            name = str(item.get("name") or item.get("app") or "").strip().lower()
+            path = str(item.get("path") or "").strip().lower()
+            key = (name, path)
+            if not name or key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+        return merged
+
+    def _running_apps(self) -> list[dict[str, Any]]:
+        system = platform.system()
+        if system == "Darwin":
+            return self._darwin_running_apps()
+        if system == "Windows":
+            return self._windows_running_apps()
+        return []
+
+    def _installed_apps(self, payload: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        payload = payload or {}
+        try:
+            limit = max(1, min(1000, int(payload.get("limit", 300))))
+        except Exception:
+            limit = 300
+        system = platform.system()
+        if system == "Darwin":
+            return self._darwin_installed_apps(limit=limit)
+        if system == "Windows":
+            return self._windows_installed_apps(limit=limit)
+        return []
+
+    def _select_app(self, payload: dict[str, Any]) -> dict[str, Any]:
+        app_filter = str(
+            payload.get("app")
+            or payload.get("application")
+            or payload.get("name")
+            or payload.get("title")
+            or payload.get("title_contains")
+            or ""
+        ).strip()
+        running_apps = self._running_apps()
+        selected = None
+        target = str(payload.get("target") or "").strip().lower()
+        if target in {"active", "front", "front_app", "active_app"} or not app_filter:
+            selected = next((item for item in running_apps if item.get("active")), None)
+        if selected is None and app_filter:
+            selected = next((item for item in running_apps if self._app_matches_filter(item, app_filter)), None)
+        installed_match = None
+        if selected is None and (payload.get("include_installed") is not False):
+            installed = self._installed_apps(payload)
+            installed_match = next((item for item in installed if self._app_matches_filter(item, app_filter)), None)
+        else:
+            installed = []
+        if selected is None and installed_match and (payload.get("open") is True or payload.get("launch") is True):
+            launched = self._launch_app(installed_match)
+            if launched:
+                time.sleep(0.5)
+                running_apps = self._running_apps()
+                selected = next((item for item in running_apps if self._app_matches_filter(item, app_filter)), None)
+        if selected is None:
+            self._clear_target_app()
+            return {
+                "action": "computer.select_app",
+                "selected": False,
+                "platform": platform.system(),
+                "app_filter": app_filter,
+                "open_apps": running_apps,
+                **({"installed_match": installed_match} if installed_match else {}),
+                **({"installed_apps": installed} if payload.get("include_installed") is True else {}),
+            }
+        selected = self._normalize_app_record(selected)
+        state = self._computer_state()
+        state["target_app"] = selected
+        if payload.get("focus", True) is not False:
+            active_window = self._active_window_for_app(str(selected.get("name") or selected.get("app") or ""))
+            if active_window is not None:
+                state["target_window"] = active_window
+        self._write_computer_state(state)
+        if payload.get("focus", True) is not False:
+            self._activate_app_name(str(selected.get("name") or selected.get("app") or ""))
+            active_window = self._active_window_for_app(str(selected.get("name") or selected.get("app") or ""))
+            if active_window is not None:
+                state = self._computer_state()
+                state["target_window"] = active_window
+                self._write_computer_state(state)
+        return {
+            "action": "computer.select_app",
+            "selected": True,
+            "platform": platform.system(),
+            "target_app": selected,
+            "open_apps": running_apps,
+        }
+
+    def _show_app(self, payload: dict[str, Any]) -> dict[str, Any]:
+        action_payload = dict(payload or {})
+        action_payload["focus"] = True
+        if action_payload.get("open") is not False and action_payload.get("launch") is not False:
+            action_payload.setdefault("open", True)
+        selected_window = self._matching_window(action_payload) if self._has_window_filter(action_payload) else None
+        if selected_window is not None:
+            state = self._computer_state()
+            state["target_window"] = selected_window
+            state["target_app"] = {"name": selected_window.get("app"), "app": selected_window.get("app"), "running": True}
+            self._write_computer_state(state)
+            self._focus_window(selected_window)
+            time.sleep(0.2)
+            return {
+                "action": "computer.show_app",
+                "shown": True,
+                "platform": platform.system(),
+                "target_window": selected_window,
+                "active_window": self._active_window(),
+            }
+        result = self._select_app(action_payload)
+        shown = bool(result.get("selected"))
+        active_window = None
+        if shown:
+            time.sleep(0.2)
+            target_app = result.get("target_app") if isinstance(result.get("target_app"), dict) else {}
+            active_window = self._active_window_for_app(str(target_app.get("name") or target_app.get("app") or ""))
+            if active_window is not None:
+                state = self._computer_state()
+                state["target_window"] = active_window
+                self._write_computer_state(state)
+        return {
+            "action": "computer.show_app",
+            "shown": shown,
+            "platform": platform.system(),
+            **({"target_app": result.get("target_app")} if result.get("target_app") else {}),
+            **({"target_window": active_window} if active_window else {}),
+            **({"open_apps": result.get("open_apps")} if result.get("open_apps") else {}),
+            **({"installed_match": result.get("installed_match")} if result.get("installed_match") else {}),
+            "active_window": active_window or (self._active_window() if shown else None),
+            **({"reason": "No running or installed app matched the request."} if not shown else {}),
+        }
+
+    @staticmethod
+    def _app_matches_filter(app: dict[str, Any], needle: str) -> bool:
+        value = needle.strip().lower()
+        if not value:
+            return True
+        haystacks = [
+            str(app.get("name") or ""),
+            str(app.get("app") or ""),
+            str(app.get("bundle_id") or ""),
+            str(app.get("path") or ""),
+            str(app.get("title") or ""),
+        ]
+        return any(value in item.lower() for item in haystacks)
+
+    @staticmethod
+    def _normalize_app_record(value: Any) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            return {}
+        name = str(value.get("name") or value.get("app") or value.get("process") or "").strip()
+        record: dict[str, Any] = {"name": name, "app": name}
+        for key in ("pid", "bundle_id", "path", "title", "source"):
+            if value.get(key) not in (None, ""):
+                record[key] = value.get(key)
+        for key in ("active", "running", "has_windows"):
+            if key in value:
+                record[key] = bool(value.get(key))
+        if value.get("window_count") is not None:
+            try:
+                record["window_count"] = int(value.get("window_count") or 0)
+            except Exception:
+                pass
+        return record
+
+    @staticmethod
+    def _image_data_url(path: Path) -> str:
+        try:
+            mime_type = "image/jpeg" if path.suffix.lower() in {".jpg", ".jpeg"} else "image/png"
+            return "data:{};base64,".format(mime_type) + base64.b64encode(path.read_bytes()).decode("ascii")
+        except Exception:
+            return ""
+
     def _model_screenshot_copy(self, path: Path) -> Path:
-        preview_path = path.with_name(path.stem + "-model.jpg")
+        preview_path = path.with_name(path.stem + "-model.png")
         if platform.system() == "Darwin":
             try:
                 subprocess.run(
-                    ["sips", "-Z", "640", "-s", "format", "jpeg", str(path), "--out", str(preview_path)],
+                    ["sips", "-Z", "640", "-s", "format", "png", str(path), "--out", str(preview_path)],
                     check=True,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
@@ -332,6 +687,12 @@ class BrowserComputerController:
                     return preview_path
             except Exception:
                 pass
+        try:
+            shutil.copyfile(path, preview_path)
+            if preview_path.exists() and preview_path.stat().st_size > 0:
+                return preview_path
+        except Exception:
+            pass
         return path
 
     @staticmethod
@@ -368,6 +729,258 @@ class BrowserComputerController:
                 index += length
         return None
 
+    def _marker_preview_image(
+        self,
+        model_path: Path,
+        screenshot_result: dict[str, Any],
+        *,
+        marker: dict[str, Any] | None = None,
+        drag_marker: dict[str, Any] | None = None,
+    ) -> Path | None:
+        points: list[tuple[int, int]] = []
+        for item in self._marker_items(marker, drag_marker):
+            point = self._marker_to_model_point(item, screenshot_result)
+            if point is not None:
+                points.append(point)
+        if not points:
+            return None
+        marked_path = model_path.with_name(model_path.stem + "-marked.png")
+        if self._annotate_png_with_markers(model_path, marked_path, points):
+            return marked_path
+        return None
+
+    @staticmethod
+    def _marker_items(marker: dict[str, Any] | None, drag_marker: dict[str, Any] | None) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        if isinstance(marker, dict):
+            items.append(marker)
+        if isinstance(drag_marker, dict):
+            for key in ("from", "to"):
+                value = drag_marker.get(key)
+                if isinstance(value, dict):
+                    items.append(value)
+        return items
+
+    def _marker_to_model_point(self, marker: dict[str, Any], result: dict[str, Any]) -> tuple[int, int] | None:
+        model_size = result.get("model_image_size") if isinstance(result.get("model_image_size"), dict) else {}
+        try:
+            model_width = int(model_size.get("width", 0))
+            model_height = int(model_size.get("height", 0))
+        except Exception:
+            return None
+        if model_width <= 0 or model_height <= 0:
+            return None
+        space = str(marker.get("coordinate_space") or "").strip().lower()
+        if space in self._normalized_coordinate_spaces():
+            x = self._normalized_to_pixel(marker.get("normalized_x", marker.get("x", 0)), model_width)
+            y = self._normalized_to_pixel(marker.get("normalized_y", marker.get("y", 0)), model_height)
+            return x, y
+        if space in {"model", "model_image", "preview", "screenshot_preview"}:
+            return self._clamped_model_point(marker.get("x", 0), marker.get("y", 0), model_width, model_height)
+        image_size = result.get("image_size") if isinstance(result.get("image_size"), dict) else {}
+        if space in {"screenshot", "screenshot_image", "image", "window", "target"}:
+            try:
+                image_width = int(image_size.get("width", 0))
+                image_height = int(image_size.get("height", 0))
+            except Exception:
+                return None
+            if image_width <= 0 or image_height <= 0:
+                return None
+            x = round(self._numeric_coordinate(marker.get("x", 0)) * max(model_width - 1, 0) / max(image_width - 1, 1))
+            y = round(self._numeric_coordinate(marker.get("y", 0)) * max(model_height - 1, 0) / max(image_height - 1, 1))
+            return self._clamped_model_point(x, y, model_width, model_height)
+        action_space = result.get("action_coordinate_system") if isinstance(result.get("action_coordinate_system"), dict) else {}
+        try:
+            action_x = int(action_space.get("x", 0))
+            action_y = int(action_space.get("y", 0))
+            action_width = int(action_space.get("width", 0))
+            action_height = int(action_space.get("height", 0))
+        except Exception:
+            return None
+        if action_width <= 0 or action_height <= 0:
+            return None
+        screen_x = self._numeric_coordinate(marker.get("screen_x", marker.get("x", 0)))
+        screen_y = self._numeric_coordinate(marker.get("screen_y", marker.get("y", 0)))
+        x = round((screen_x - action_x) * max(model_width - 1, 0) / max(action_width - 1, 1))
+        y = round((screen_y - action_y) * max(model_height - 1, 0) / max(action_height - 1, 1))
+        return self._clamped_model_point(x, y, model_width, model_height)
+
+    @staticmethod
+    def _clamped_model_point(x: Any, y: Any, width: int, height: int) -> tuple[int, int]:
+        try:
+            px = int(round(float(x)))
+            py = int(round(float(y)))
+        except Exception:
+            px = 0
+            py = 0
+        return max(0, min(px, width - 1)), max(0, min(py, height - 1))
+
+    def _annotate_png_with_markers(self, source_path: Path, output_path: Path, points: list[tuple[int, int]]) -> bool:
+        image = self._read_png_rgba(source_path)
+        if image is None:
+            return False
+        width, height, pixels = image
+        for x, y in points:
+            self._draw_marker(pixels, width, height, x, y)
+        return self._write_png_rgba(output_path, width, height, pixels)
+
+    @staticmethod
+    def _draw_marker(pixels: bytearray, width: int, height: int, x: int, y: int) -> None:
+        radius = max(8, min(width, height) // 40)
+        thickness = max(2, radius // 5)
+
+        def set_pixel(px: int, py: int, color: tuple[int, int, int, int]) -> None:
+            if 0 <= px < width and 0 <= py < height:
+                index = (py * width + px) * 4
+                pixels[index : index + 4] = bytes(color)
+
+        red = (255, 0, 0, 255)
+        for offset in range(-radius, radius + 1):
+            for thick in range(-thickness, thickness + 1):
+                set_pixel(x + offset, y + thick, red)
+                set_pixel(x + thick, y + offset, red)
+        inner = max(radius - thickness, 1)
+        outer = radius + thickness
+        inner_sq = inner * inner
+        outer_sq = outer * outer
+        for py in range(y - outer, y + outer + 1):
+            for px in range(x - outer, x + outer + 1):
+                distance_sq = (px - x) * (px - x) + (py - y) * (py - y)
+                if inner_sq <= distance_sq <= outer_sq:
+                    set_pixel(px, py, red)
+
+    @staticmethod
+    def _read_png_rgba(path: Path) -> tuple[int, int, bytearray] | None:
+        try:
+            data = path.read_bytes()
+        except Exception:
+            return None
+        if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+            return None
+        offset = 8
+        width = height = bit_depth = color_type = interlace = 0
+        idat = bytearray()
+        while offset + 8 <= len(data):
+            length = int.from_bytes(data[offset : offset + 4], "big")
+            chunk_type = data[offset + 4 : offset + 8]
+            chunk_data = data[offset + 8 : offset + 8 + length]
+            offset += 12 + length
+            if chunk_type == b"IHDR":
+                if len(chunk_data) < 13:
+                    return None
+                width, height = struct.unpack(">II", chunk_data[:8])
+                bit_depth = chunk_data[8]
+                color_type = chunk_data[9]
+                interlace = chunk_data[12]
+            elif chunk_type == b"IDAT":
+                idat.extend(chunk_data)
+            elif chunk_type == b"IEND":
+                break
+        if width <= 0 or height <= 0 or bit_depth != 8 or color_type not in {2, 6} or interlace != 0:
+            return None
+        channels = 4 if color_type == 6 else 3
+        stride = width * channels
+        try:
+            raw = zlib.decompress(bytes(idat))
+        except Exception:
+            return None
+        rows: list[bytearray] = []
+        cursor = 0
+        previous = bytearray(stride)
+        for _ in range(height):
+            if cursor >= len(raw):
+                return None
+            filter_type = raw[cursor]
+            cursor += 1
+            scanline = bytearray(raw[cursor : cursor + stride])
+            cursor += stride
+            if len(scanline) != stride:
+                return None
+            BrowserComputerController._unfilter_png_scanline(scanline, previous, filter_type, channels)
+            rows.append(scanline)
+            previous = scanline
+        pixels = bytearray(width * height * 4)
+        for row_index, row in enumerate(rows):
+            for column in range(width):
+                src = column * channels
+                dest = (row_index * width + column) * 4
+                pixels[dest] = row[src]
+                pixels[dest + 1] = row[src + 1]
+                pixels[dest + 2] = row[src + 2]
+                pixels[dest + 3] = row[src + 3] if channels == 4 else 255
+        return int(width), int(height), pixels
+
+    @staticmethod
+    def _unfilter_png_scanline(scanline: bytearray, previous: bytearray, filter_type: int, bpp: int) -> None:
+        if filter_type == 0:
+            return
+        for index in range(len(scanline)):
+            left = scanline[index - bpp] if index >= bpp else 0
+            up = previous[index] if index < len(previous) else 0
+            up_left = previous[index - bpp] if index >= bpp and index - bpp < len(previous) else 0
+            if filter_type == 1:
+                predictor = left
+            elif filter_type == 2:
+                predictor = up
+            elif filter_type == 3:
+                predictor = (left + up) // 2
+            elif filter_type == 4:
+                predictor = BrowserComputerController._png_paeth(left, up, up_left)
+            else:
+                predictor = 0
+            scanline[index] = (scanline[index] + predictor) & 0xFF
+
+    @staticmethod
+    def _png_paeth(left: int, up: int, up_left: int) -> int:
+        estimate = left + up - up_left
+        pa = abs(estimate - left)
+        pb = abs(estimate - up)
+        pc = abs(estimate - up_left)
+        if pa <= pb and pa <= pc:
+            return left
+        if pb <= pc:
+            return up
+        return up_left
+
+    @staticmethod
+    def _write_png_rgba(path: Path, width: int, height: int, pixels: bytearray) -> bool:
+        def chunk(chunk_type: bytes, chunk_data: bytes) -> bytes:
+            return (
+                len(chunk_data).to_bytes(4, "big")
+                + chunk_type
+                + chunk_data
+                + zlib.crc32(chunk_type + chunk_data).to_bytes(4, "big")
+            )
+
+        try:
+            rows = bytearray()
+            stride = width * 4
+            for row in range(height):
+                rows.append(0)
+                start = row * stride
+                rows.extend(pixels[start : start + stride])
+            ihdr = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+            path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + chunk(b"IDAT", zlib.compress(bytes(rows))) + chunk(b"IEND", b""))
+            return True
+        except Exception:
+            return False
+
+    def _crop_png(self, source_path: Path, output_path: Path, box: tuple[int, int, int, int]) -> bool:
+        image = self._read_png_rgba(source_path)
+        if image is None:
+            return False
+        width, _height, pixels = image
+        left, top, right, bottom = box
+        crop_width = right - left + 1
+        crop_height = bottom - top + 1
+        cropped = bytearray(crop_width * crop_height * 4)
+        for row in range(crop_height):
+            src_start = ((top + row) * width + left) * 4
+            src_end = src_start + crop_width * 4
+            dest_start = row * crop_width * 4
+            cropped[dest_start : dest_start + crop_width * 4] = pixels[src_start:src_end]
+        return self._write_png_rgba(output_path, crop_width, crop_height, cropped)
+
     @staticmethod
     def _cursor_position() -> dict[str, Any] | None:
         system = platform.system()
@@ -379,7 +992,7 @@ class BrowserComputerController:
                     "loc = Quartz.CGEventGetLocation(event)\n"
                     "print(json.dumps({'x': int(round(loc.x)), 'y': int(round(loc.y)), 'origin': 'top_left'}))"
                 )
-                completed = subprocess.run(["python3", "-c", code], check=True, capture_output=True, text=True)
+                completed = subprocess.run(_current_python_snippet_command(code), check=True, capture_output=True, text=True)
                 value = json.loads(completed.stdout or "{}")
                 if "x" in value and "y" in value:
                     return value
@@ -387,6 +1000,7 @@ class BrowserComputerController:
                 script = "\n".join(
                     [
                         "Add-Type -AssemblyName System.Windows.Forms",
+                        BrowserComputerController._windows_dpi_awareness_script(),
                         "$p = [System.Windows.Forms.Cursor]::Position",
                         "ConvertTo-Json @{ x = [int]$p.X; y = [int]$p.Y; origin = 'top_left' } -Compress",
                     ]
@@ -401,7 +1015,28 @@ class BrowserComputerController:
         return None
 
     @staticmethod
-    def _action_coordinate_system(system: str, image_size: tuple[int, int] | None) -> dict[str, Any] | None:
+    def _action_coordinate_system(
+        system: str,
+        image_size: tuple[int, int] | None,
+        *,
+        capture_target: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        if capture_target and capture_target.get("width") and capture_target.get("height"):
+            x = int(capture_target.get("x", 0))
+            y = int(capture_target.get("y", 0))
+            width = int(capture_target.get("width", 0))
+            height = int(capture_target.get("height", 0))
+            return {
+                "origin": "top_left",
+                "unit": capture_target.get("unit") or "display_coordinate",
+                "screen": capture_target.get("screen") or "selected_window",
+                "x": x,
+                "y": y,
+                "width": width,
+                "height": height,
+                "x_range": [x, x + max(width - 1, 0)],
+                "y_range": [y, y + max(height - 1, 0)],
+            }
         if system == "Darwin":
             try:
                 code = (
@@ -421,7 +1056,7 @@ class BrowserComputerController:
                     "payload['y_range'] = [payload['y'], payload['y'] + max(payload['height'] - 1, 0)]\n"
                     "print(json.dumps(payload))"
                 )
-                completed = subprocess.run(["python3", "-c", code], check=True, capture_output=True, text=True)
+                completed = subprocess.run(_current_python_snippet_command(code), check=True, capture_output=True, text=True)
                 value = json.loads(completed.stdout or "{}")
                 if value.get("width") and value.get("height"):
                     return value
@@ -456,20 +1091,90 @@ class BrowserComputerController:
         return None
 
     def _desktop_action(self, action: str, payload: dict[str, Any], *, yolo_mode: bool) -> dict[str, Any]:
-        dry_run = bool(payload.get("dry_run"))
+        dry_run = self._truthy(payload.get("dry_run"))
         if dry_run:
             return {"action": action, "dry_run": True, "requires_approval": False, "payload": payload}
-        approval_payload = self._safe_payload(payload)
+        system = platform.system()
+        action_payload = dict(payload)
+        click_marker = None
+        drag_marker = None
+        if action == "computer.drag":
+            action_payload, click_marker, drag_marker = self._resolve_drag_points(payload, remember_cursor=False)
+        elif action in {"computer.move", "computer.click"}:
+            action_payload, click_marker = self._resolve_action_point(payload, infer_window=action == "computer.click", remember_cursor=False)
+        virtual_only = self._pointer_action_is_virtual_only(action, payload)
+        approval_payload = self._desktop_approval_payload(action, payload, action_payload, virtual_only=virtual_only)
         if not (yolo_mode or self._consume_approval(payload, action, approval_payload)):
             return self._approval_required(action, approval_payload)
-        system = platform.system()
+        if action == "computer.drag":
+            action_payload, click_marker, drag_marker = self._resolve_drag_points(payload, remember_cursor=True)
+        elif action in {"computer.move", "computer.click"}:
+            action_payload, click_marker = self._resolve_action_point(payload, infer_window=action == "computer.click", remember_cursor=True)
+        virtual_only = self._pointer_action_is_virtual_only(action, payload)
+        if action in {"computer.move", "computer.click", "computer.drag"} and virtual_only:
+            self._set_ai_cursor(action_payload)
+            result: dict[str, Any] = {"action": action, "executed": True, "platform": system, "virtual_cursor": True}
+            if action == "computer.drag":
+                result["target"] = {
+                    "from": {"x": int(action_payload.get("x1", 0)), "y": int(action_payload.get("y1", 0))},
+                    "to": {"x": int(action_payload.get("x2", 0)), "y": int(action_payload.get("y2", 0))},
+                }
+                if drag_marker:
+                    result["drag_marker"] = drag_marker
+            else:
+                result["target"] = {"x": int(action_payload.get("x", 0)), "y": int(action_payload.get("y", 0))}
+            if click_marker:
+                result["marker"] = click_marker
+            if self._should_capture_after_action(action, payload):
+                screenshot = self._capture_action_result_screenshot(
+                    action_payload,
+                    click_marker,
+                    action_name=action,
+                    drag_marker=drag_marker,
+                )
+                result.update(screenshot)
+            return result
+        if action in {"computer.type", "computer.key", "computer.scroll"} and self._background_requested(action_payload):
+            return {
+                "action": action,
+                "executed": False,
+                "is_error": True,
+                "platform": system,
+                "reason": "Background computer-use is disabled. Only currently visible windows can be operated.",
+                "recovery": {
+                    "kind": "visible_window_required",
+                    "note": "Show or focus the target app/window, then retry without background/method=background.",
+                },
+            }
+        if action in {"computer.type", "computer.key", "computer.scroll"} and action_payload.get("focus") is False:
+            return {
+                "action": action,
+                "executed": False,
+                "is_error": True,
+                "platform": system,
+                "reason": "Foreground input requires focus because background input is disabled.",
+                "recovery": {
+                    "kind": "focus_required",
+                    "note": "Use a visible selected window with focus=true or omit focus=false.",
+                },
+            }
+        if action in {"computer.type", "computer.key", "computer.scroll"}:
+            self._focus_action_target(action_payload)
+        if action == "computer.drag" and payload.get("physical") is True:
+            self._focus_action_target(action_payload)
         if system == "Darwin" and action == "computer.move":
-            self._darwin_move_cursor(payload)
+            self._darwin_move_cursor(action_payload)
+        elif system == "Darwin" and action == "computer.click":
+            self._darwin_click(action_payload)
+        elif system == "Darwin" and action == "computer.drag":
+            self._darwin_drag(action_payload)
+        elif system == "Darwin" and action == "computer.type":
+            self._darwin_type(action_payload)
         elif system == "Darwin":
-            script = self._apple_script(action, payload)
+            script = self._apple_script(action, action_payload)
             subprocess.run(["osascript", "-e", script], check=True)
         elif system == "Windows":
-            self._windows_desktop_action(action, payload)
+            self._windows_desktop_action(action, action_payload)
         else:
             return {
                 "action": action,
@@ -478,11 +1183,1448 @@ class BrowserComputerController:
                 "reason": "Desktop actions are supported on macOS and Windows.",
             }
         result: dict[str, Any] = {"action": action, "executed": True, "platform": system}
+        if action in {"computer.type", "computer.key", "computer.scroll"}:
+            result["driver"] = "foreground_input"
         if action in {"computer.move", "computer.click"}:
-            result["target"] = {"x": int(payload.get("x", 0)), "y": int(payload.get("y", 0))}
+            result["target"] = {"x": int(action_payload.get("x", 0)), "y": int(action_payload.get("y", 0))}
+            if click_marker:
+                result["marker"] = click_marker
+        if action == "computer.drag":
+            result["target"] = {
+                "from": {"x": int(action_payload.get("x1", 0)), "y": int(action_payload.get("y1", 0))},
+                "to": {"x": int(action_payload.get("x2", 0)), "y": int(action_payload.get("y2", 0))},
+            }
+            if click_marker:
+                result["marker"] = click_marker
+            if drag_marker:
+                result["drag_marker"] = drag_marker
         if action == "computer.scroll":
-            result["amount"] = int(payload.get("amount", 1))
+            result["amount"] = int(action_payload.get("amount", 1))
+        if self._should_capture_after_action(action, payload):
+            screenshot = self._capture_action_result_screenshot(
+                action_payload,
+                click_marker,
+                action_name=action,
+                drag_marker=drag_marker,
+            )
+            result.update(screenshot)
         return result
+
+    @staticmethod
+    def _should_capture_after_action(action: str, payload: dict[str, Any]) -> bool:
+        if action == "computer.move":
+            return payload.get("include_screenshot") is True
+        return payload.get("include_screenshot", True) is not False
+
+    def _desktop_approval_payload(
+        self,
+        action: str,
+        payload: dict[str, Any],
+        action_payload: dict[str, Any],
+        *,
+        virtual_only: bool,
+    ) -> dict[str, Any]:
+        approval_payload = self._safe_payload(payload)
+        if action in {"computer.move", "computer.click"}:
+            approval_payload["virtual_only"] = bool(virtual_only)
+            approval_payload["resolved_coordinates"] = {
+                "x": int(action_payload.get("x", 0)),
+                "y": int(action_payload.get("y", 0)),
+            }
+        elif action == "computer.drag":
+            approval_payload["virtual_only"] = bool(virtual_only)
+            approval_payload["resolved_coordinates"] = {
+                "from": {
+                    "x": int(action_payload.get("x1", action_payload.get("x", 0))),
+                    "y": int(action_payload.get("y1", action_payload.get("y", 0))),
+                },
+                "to": {
+                    "x": int(action_payload.get("x2", action_payload.get("x", 0))),
+                    "y": int(action_payload.get("y2", action_payload.get("y", 0))),
+                },
+            }
+        return approval_payload
+
+    def _pointer_action_is_virtual_only(self, action: str, payload: dict[str, Any]) -> bool:
+        if action not in {"computer.move", "computer.click", "computer.drag"}:
+            return False
+        if self._truthy(payload.get("physical")):
+            return False
+        return True
+
+    @staticmethod
+    def _background_requested(payload: dict[str, Any]) -> bool:
+        if payload.get("background") is True:
+            return True
+        mode = str(payload.get("mode") or payload.get("method") or payload.get("driver") or "").strip().lower()
+        return mode in {"background", "browser_background", "chromium_background", "chrome_background", "chrome_background_dom", "background_dom"}
+
+    @staticmethod
+    def _app_name_from_payload(payload: dict[str, Any]) -> str:
+        return str(
+            payload.get("app")
+            or payload.get("application")
+            or payload.get("browser")
+            or payload.get("browser_app")
+            or ""
+        ).strip()
+
+    def _focus_action_target(self, payload: dict[str, Any]) -> bool:
+        if payload.get("focus") is False:
+            return False
+        filters = self._window_filter(payload)
+        app = filters.get("app", "").lower()
+        title = filters.get("title", "").lower()
+        selected = self._capture_target(payload)
+        if selected and self._window_matches_filter(selected, app=app, title=title):
+            self._focus_window(selected)
+            return True
+        if app or title:
+            for item in self._list_windows():
+                window = self._normalize_window_record(item)
+                if window and self._is_usable_target_window(window) and self._window_matches_filter(window, app=app, title=title):
+                    self._focus_window(window)
+                    return True
+        if app and self._activate_app_name(filters.get("app", "")):
+            return True
+        return False
+
+    @staticmethod
+    def _window_matches_filter(window: dict[str, Any], *, app: str = "", title: str = "") -> bool:
+        item_app = str(window.get("app") or "").lower()
+        item_title = str(window.get("title") or "").lower()
+        if app and app not in item_app:
+            return False
+        if title and title not in item_title:
+            return False
+        return True
+
+    def _capture_action_result_screenshot(
+        self,
+        payload: dict[str, Any],
+        marker: dict[str, Any] | None,
+        *,
+        action_name: str = "computer.click",
+        drag_marker: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        self._artifact_root.mkdir(parents=True, exist_ok=True)
+        action_slug = action_name.split(".")[-1].replace("_", "-") or "action"
+        path = self._artifact_root / f"{action_slug}-{int(time.time() * 1000)}.png"
+        capture = self._capture_screenshot(path, payload)
+        if not capture.get("supported", True):
+            return {}
+        crop_result = self._apply_screenshot_crop(path, payload, capture)
+        crop_reference = crop_result.get("crop_reference") if crop_result else None
+        action_target = crop_result.get("action_target") if crop_result else capture.get("action_coordinate_system")
+        if crop_result and isinstance(crop_result.get("path"), Path):
+            path = crop_result["path"]
+        model_path = self._model_screenshot_copy(path)
+        system = capture.get("platform", platform.system())
+        result = self._screenshot_result(
+            path,
+            model_path,
+            system,
+            capture_target=capture.get("target_window"),
+            action_target=action_target,
+            crop_reference=crop_reference,
+        )
+        marked_model_path = self._marker_preview_image(model_path, result, marker=marker, drag_marker=drag_marker)
+        if marked_model_path:
+            result["unmarked_model_image_path"] = str(model_path)
+            model_path = marked_model_path
+        result["action"] = action_name
+        result["screenshot_path"] = str(path)
+        result["model_image_path"] = str(model_path)
+        result["verification"] = {
+            "kind": "post_action_screenshot",
+            "note": "Inspect this screenshot to verify the visible UI changed as intended.",
+        }
+        data_url = self._image_data_url(model_path)
+        if data_url:
+            result["data_url"] = data_url
+            result["model_image"] = data_url
+        if marker:
+            result["click_marker"] = marker
+        if drag_marker:
+            result["drag_marker"] = drag_marker
+        self._remember_last_screenshot(result)
+        return result
+
+    def _capture_or_reuse_screenshot(self, path: Path, payload: dict[str, Any]) -> dict[str, Any]:
+        crop_payload = self._crop_payload(payload)
+        source = crop_payload.get("source") if isinstance(crop_payload, dict) else None
+        source_name = str(source or payload.get("source") or "").strip().lower()
+        use_latest = source_name in {
+            "latest",
+            "last",
+            "last_screenshot",
+            "latest_screenshot",
+            "current",
+            "current_crop",
+            "latest_crop",
+            "last_crop",
+            "attached",
+            "attached_image",
+        }
+        if use_latest:
+            state = self._computer_state()
+            last, source_role = self._screenshot_reuse_source(state, source_name, crop_payload=bool(crop_payload))
+            source_path = Path(str(last.get("path") or ""))
+            if source_path.exists():
+                if not crop_payload:
+                    try:
+                        shutil.copyfile(source_path, path)
+                    except Exception:
+                        path = source_path
+                return {
+                    "platform": platform.system(),
+                    "target_window": last.get("target_window") if isinstance(last.get("target_window"), dict) else None,
+                    "source_path": source_path,
+                    "source_role": source_role,
+                    "source_is_crop": isinstance(last.get("crop_reference"), dict),
+                    "source_image_size": last.get("image_size") if isinstance(last.get("image_size"), dict) else None,
+                    "source_action_coordinate_system": (
+                        last.get("action_coordinate_system")
+                        if isinstance(last.get("action_coordinate_system"), dict)
+                        else None
+                    ),
+                }
+        return self._capture_screenshot(path, payload)
+
+    @staticmethod
+    def _screenshot_reuse_source(
+        state: dict[str, Any],
+        source_name: str,
+        *,
+        crop_payload: bool,
+    ) -> tuple[dict[str, Any], str]:
+        current_crop_sources = {"current", "current_crop", "latest_crop", "last_crop", "attached", "attached_image"}
+        if crop_payload and source_name not in current_crop_sources:
+            full = state.get("last_full_screenshot") if isinstance(state.get("last_full_screenshot"), dict) else {}
+            if full.get("path"):
+                return full, "last_full_screenshot"
+        last = state.get("last_screenshot") if isinstance(state.get("last_screenshot"), dict) else {}
+        return last, "last_screenshot"
+
+    def _apply_screenshot_crop(self, path: Path, payload: dict[str, Any], capture: dict[str, Any]) -> dict[str, Any] | None:
+        crop_payload = self._crop_payload(payload)
+        if not crop_payload:
+            return None
+        source_path = capture.get("source_path") if isinstance(capture.get("source_path"), Path) else path
+        if not source_path.exists():
+            return None
+        source_size = self._image_size(source_path)
+        if not source_size:
+            return None
+        box = self._crop_box(crop_payload, source_size)
+        if not box:
+            return None
+        crop_path = path.with_name(path.stem + "-crop.png")
+        if not self._crop_png(source_path, crop_path, box):
+            return None
+        source_action = capture.get("source_action_coordinate_system")
+        if not isinstance(source_action, dict):
+            source_action = self._action_coordinate_system(platform.system(), source_size, capture_target=capture.get("target_window"))
+        action_target = self._crop_action_target(box, source_size, source_action)
+        left, top, right, bottom = box
+        crop_reference = {
+            "source": "latest_screenshot" if capture.get("source_path") else "captured_screenshot",
+            "source_path": str(source_path),
+            "source_image_size": {"width": source_size[0], "height": source_size[1]},
+            "box": {"x": left, "y": top, "width": right - left + 1, "height": bottom - top + 1},
+            "coordinate_space": "screenshot_image",
+            "source_role": capture.get("source_role") or ("latest_screenshot" if capture.get("source_path") else "captured_screenshot"),
+            "source_is_crop": bool(capture.get("source_is_crop")),
+            "source_action_coordinate_system": source_action,
+            "action_box": action_target,
+        }
+        return {"path": crop_path, "crop_reference": crop_reference, "action_target": action_target}
+
+    @staticmethod
+    def _crop_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
+        for key in ("crop", "zoom", "crop_box", "zoom_box"):
+            value = payload.get(key)
+            if isinstance(value, dict):
+                crop = BrowserComputerController._normalized_crop_payload(dict(value))
+                for inherited_key in ("source", "coordinate_space", "space"):
+                    if inherited_key in payload and inherited_key not in crop:
+                        crop[inherited_key] = payload.get(inherited_key)
+                return crop
+            if isinstance(value, (list, tuple)) and len(value) >= 4:
+                return {"box": list(value), "coordinate_space": payload.get("coordinate_space") or payload.get("space")}
+        zoom = payload.get("zoom")
+        if isinstance(zoom, (int, float, str)) and str(zoom).strip():
+            return {
+                "zoom_factor": zoom,
+                "x": payload.get("normalized_x", payload.get("x", 500)),
+                "y": payload.get("normalized_y", payload.get("y", 500)),
+                "coordinate_space": payload.get("coordinate_space") or payload.get("space") or "normalized_1000",
+                "source": payload.get("source"),
+            }
+        if any(key in payload for key in ("crop_x", "crop_y", "crop_width", "crop_height")):
+            return BrowserComputerController._normalized_crop_payload({
+                "x": payload.get("crop_x"),
+                "y": payload.get("crop_y"),
+                "width": payload.get("crop_width"),
+                "height": payload.get("crop_height"),
+                "coordinate_space": payload.get("coordinate_space") or payload.get("space"),
+                "source": payload.get("source"),
+            })
+        return None
+
+    @staticmethod
+    def _normalized_crop_payload(crop: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(crop)
+        aliases = {
+            "crop_x": "x",
+            "crop_y": "y",
+            "crop_width": "width",
+            "crop_height": "height",
+        }
+        for alias, target in aliases.items():
+            if target not in normalized and alias in normalized:
+                normalized[target] = normalized.get(alias)
+        return normalized
+
+    def _crop_box(self, crop: dict[str, Any], image_size: tuple[int, int]) -> tuple[int, int, int, int] | None:
+        width, height = image_size
+        if width <= 0 or height <= 0:
+            return None
+        space = str(crop.get("coordinate_space") or crop.get("space") or "").strip().lower()
+        normalized = space in self._normalized_coordinate_spaces() or any(
+            key in crop for key in ("normalized_x", "normalized_y", "normalized_width", "normalized_height", "normalized_box")
+        )
+        if crop.get("zoom_factor") is not None:
+            factor = max(1.0, self._numeric_coordinate(crop.get("zoom_factor"), 1))
+            if factor <= 1.0:
+                return None
+            center_x_value = crop.get("normalized_x") if normalized and crop.get("normalized_x") is not None else crop.get("x", 500 if normalized else width / 2)
+            center_y_value = crop.get("normalized_y") if normalized and crop.get("normalized_y") is not None else crop.get("y", 500 if normalized else height / 2)
+            center_x = self._normalized_to_pixel(center_x_value, width) if normalized else int(round(self._numeric_coordinate(center_x_value, width / 2)))
+            center_y = self._normalized_to_pixel(center_y_value, height) if normalized else int(round(self._numeric_coordinate(center_y_value, height / 2)))
+            crop_width = max(2, int(round(width / factor)))
+            crop_height = max(2, int(round(height / factor)))
+            left = center_x - crop_width // 2
+            top = center_y - crop_height // 2
+            right = left + crop_width - 1
+            bottom = top + crop_height - 1
+            if left < 0:
+                right -= left
+                left = 0
+            if top < 0:
+                bottom -= top
+                top = 0
+            if right >= width:
+                shift = right - width + 1
+                left = max(0, left - shift)
+                right = width - 1
+            if bottom >= height:
+                shift = bottom - height + 1
+                top = max(0, top - shift)
+                bottom = height - 1
+            return left, top, right, bottom
+        width_height_box = False
+        box = crop.get("normalized_box") if normalized and crop.get("normalized_box") is not None else crop.get("box")
+        if isinstance(box, (list, tuple)) and len(box) >= 4:
+            left, top, right_or_width, bottom_or_height = [self._numeric_coordinate(item) for item in box[:4]]
+            if crop.get("box_format") in {"xywh", "x_y_width_height"} or crop.get("width_height") is True:
+                right = left + right_or_width
+                bottom = top + bottom_or_height
+                width_height_box = True
+            else:
+                right = right_or_width
+                bottom = bottom_or_height
+        else:
+            left = self._numeric_coordinate(crop.get("normalized_x") if normalized else crop.get("x", crop.get("left", 0)))
+            top = self._numeric_coordinate(crop.get("normalized_y") if normalized else crop.get("y", crop.get("top", 0)))
+            crop_width = crop.get("normalized_width") if normalized else crop.get("width")
+            crop_height = crop.get("normalized_height") if normalized else crop.get("height")
+            if crop_width is not None and crop_height is not None:
+                right = left + self._numeric_coordinate(crop_width)
+                bottom = top + self._numeric_coordinate(crop_height)
+            else:
+                right = self._numeric_coordinate(crop.get("normalized_right") if normalized else crop.get("right"), left)
+                bottom = self._numeric_coordinate(crop.get("normalized_bottom") if normalized else crop.get("bottom"), top)
+        if normalized:
+            left = self._normalized_to_pixel(left, width)
+            top = self._normalized_to_pixel(top, height)
+            right = self._normalized_to_pixel(right, width)
+            bottom = self._normalized_to_pixel(bottom, height)
+        else:
+            left = int(round(left))
+            top = int(round(top))
+            right = int(round(right - 1 if width_height_box or crop.get("width") is not None or crop.get("height") is not None else right))
+            bottom = int(round(bottom - 1 if width_height_box or crop.get("width") is not None or crop.get("height") is not None else bottom))
+        left = max(0, min(int(left), width - 1))
+        right = max(0, min(int(right), width - 1))
+        top = max(0, min(int(top), height - 1))
+        bottom = max(0, min(int(bottom), height - 1))
+        if right < left:
+            left, right = right, left
+        if bottom < top:
+            top, bottom = bottom, top
+        if right <= left or bottom <= top:
+            return None
+        return left, top, right, bottom
+
+    @classmethod
+    def _normalized_to_pixel(cls, value: Any, size: int) -> int:
+        normalized = max(0.0, min(1000.0, cls._numeric_coordinate(value)))
+        return int(round(normalized * max(size - 1, 0) / 1000.0))
+
+    def _crop_action_target(
+        self,
+        box: tuple[int, int, int, int],
+        source_size: tuple[int, int],
+        source_action: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        left, top, right, bottom = box
+        fallback = {"origin": "top_left", "unit": "px", "screen": "cropped", "x": 0, "y": 0, "width": right - left + 1, "height": bottom - top + 1}
+        if not isinstance(source_action, dict):
+            return fallback
+        try:
+            source_width = max(int(source_size[0]), 1)
+            source_height = max(int(source_size[1]), 1)
+            action_x = int(source_action.get("x", 0))
+            action_y = int(source_action.get("y", 0))
+            action_width = int(source_action.get("width", 0))
+            action_height = int(source_action.get("height", 0))
+        except Exception:
+            return fallback
+        if action_width <= 0 or action_height <= 0:
+            return fallback
+        crop_x = action_x + round(left * max(action_width - 1, 0) / max(source_width - 1, 1))
+        crop_y = action_y + round(top * max(action_height - 1, 0) / max(source_height - 1, 1))
+        crop_right = action_x + round(right * max(action_width - 1, 0) / max(source_width - 1, 1))
+        crop_bottom = action_y + round(bottom * max(action_height - 1, 0) / max(source_height - 1, 1))
+        target = dict(source_action)
+        target.update(
+            {
+                "x": int(crop_x),
+                "y": int(crop_y),
+                "width": max(int(crop_right - crop_x + 1), 1),
+                "height": max(int(crop_bottom - crop_y + 1), 1),
+                "screen": "crop_of_" + str(source_action.get("screen") or "screenshot"),
+            }
+        )
+        target["x_range"] = [target["x"], target["x"] + max(target["width"] - 1, 0)]
+        target["y_range"] = [target["y"], target["y"] + max(target["height"] - 1, 0)]
+        return target
+
+    def _capture_screenshot(self, path: Path, payload: dict[str, Any]) -> dict[str, Any]:
+        system = platform.system()
+        target = self._capture_target(payload)
+        explicit_desktop = str(payload.get("target") or payload.get("capture_target") or "").strip().lower() in {
+            "primary_display",
+            "all_displays",
+            "screen",
+            "display",
+            "desktop",
+        }
+        if target is None and self._has_window_filter(payload) and not explicit_desktop:
+            return {
+                "platform": system,
+                "supported": False,
+                "reason": "No visible window matched the requested app/title; refusing to capture the front desktop because it would mislead the model.",
+                "target_filter": self._window_filter(payload),
+            }
+        if system == "Darwin":
+            if target:
+                capture_rect = self._normalize_rect(target.get("capture_rect"))
+                if capture_rect:
+                    rect = "{},{},{},{}".format(
+                        int(capture_rect.get("x", 0)),
+                        int(capture_rect.get("y", 0)),
+                        int(capture_rect.get("width", 0)),
+                        int(capture_rect.get("height", 0)),
+                    )
+                    subprocess.run(["screencapture", "-x", "-R", rect, str(path)], check=True)
+                else:
+                    window_id = target.get("window_id")
+                    if window_id:
+                        subprocess.run(["screencapture", "-x", "-l", str(int(window_id)), str(path)], check=True)
+                    else:
+                        rect = "{},{},{},{}".format(
+                            int(target.get("x", 0)),
+                            int(target.get("y", 0)),
+                            int(target.get("width", 0)),
+                            int(target.get("height", 0)),
+                        )
+                        subprocess.run(["screencapture", "-x", "-R", rect, str(path)], check=True)
+            else:
+                subprocess.run(["screencapture", "-x", str(path)], check=True)
+            return {"platform": system, "target_window": target}
+        if system == "Windows":
+            capture_bounds = self._windows_screenshot(path, target=target)
+            action_coordinate_system = None
+            if isinstance(capture_bounds, dict):
+                action_coordinate_system = self._action_coordinate_system(
+                    system,
+                    (int(capture_bounds.get("width", 0)), int(capture_bounds.get("height", 0))),
+                    capture_target=capture_bounds,
+                )
+            return {
+                "platform": system,
+                "target_window": target,
+                "action_coordinate_system": action_coordinate_system,
+            }
+        return {"platform": system, "supported": False}
+
+    def _capture_target(self, payload: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        payload = payload or {}
+        target = str(payload.get("target") or payload.get("capture_target") or "").strip().lower()
+        if target in {"primary_display", "all_displays", "screen", "display", "desktop"}:
+            return None
+        if target in {"active_window", "front_window"}:
+            return self._active_window()
+        if isinstance(payload.get("window"), dict):
+            selected = self._normalize_window_record(payload.get("window"))
+            return selected if self._is_usable_target_window(selected) else None
+        if self._has_window_filter(payload):
+            selected = self._matching_window(payload)
+            if selected is not None:
+                state = self._computer_state()
+                state["target_window"] = selected
+                self._write_computer_state(state)
+                return selected
+            return None
+        selected = self._computer_state().get("target_window")
+        if target in {"selected_window", "window", "app"} or (not target and isinstance(selected, dict)):
+            selected = self._normalize_window_record(selected)
+            if self._is_usable_target_window(selected):
+                return selected
+            self._clear_target_window()
+        return None
+
+    @staticmethod
+    def _window_filter(payload: dict[str, Any] | None = None) -> dict[str, str]:
+        payload = payload or {}
+        app = str(payload.get("app") or payload.get("application") or "").strip()
+        title = str(payload.get("title") or payload.get("title_contains") or "").strip()
+        return {"app": app, "title": title}
+
+    def _has_window_filter(self, payload: dict[str, Any] | None = None) -> bool:
+        filters = self._window_filter(payload)
+        return bool(filters.get("app") or filters.get("title"))
+
+    def _matching_window(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        filters = self._window_filter(payload)
+        app = filters.get("app", "").lower()
+        title = filters.get("title", "").lower()
+        candidates: list[dict[str, Any]] = []
+        for item in self._list_windows():
+            window = self._normalize_window_record(item)
+            if window and self._is_usable_target_window(window) and self._window_matches_filter(window, app=app, title=title):
+                candidates.append(window)
+        selected_candidate = self._best_window_candidate(candidates, app=app, title=title)
+        if selected_candidate:
+            return selected_candidate
+        selected = self._normalize_window_record(self._computer_state().get("target_window"))
+        if selected and self._is_usable_target_window(selected) and self._window_matches_filter(selected, app=app, title=title):
+            return selected
+        return None
+
+    def _resolve_action_point(
+        self,
+        payload: dict[str, Any],
+        *,
+        infer_window: bool = False,
+        remember_cursor: bool = True,
+    ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        state = self._computer_state()
+        cursor = state.get("ai_cursor") if isinstance(state.get("ai_cursor"), dict) else {}
+        x, y = self._point_from_payload(payload, cursor)
+        target = self._capture_target(payload)
+        if target is None and infer_window:
+            target = self._window_at_point(x, y)
+            if target is not None and remember_cursor:
+                state["target_window"] = target
+                self._write_computer_state(state)
+        coordinate_space = str(payload.get("coordinate_space") or payload.get("space") or "auto").strip().lower()
+        if coordinate_space in self._normalized_coordinate_spaces() or self._has_normalized_point(payload):
+            normalized_payload, normalized_marker = self._resolve_normalized_point(payload, x, y, state, target=target)
+            if normalized_payload is not None:
+                if remember_cursor:
+                    self._set_ai_cursor(normalized_payload)
+                return normalized_payload, normalized_marker
+        if coordinate_space in {"model", "model_image", "preview", "screenshot_preview"} or (
+            coordinate_space == "auto" and self._point_looks_like_model_coordinate(x, y, state)
+        ):
+            model_payload, model_marker = self._resolve_model_point(payload, x, y, state)
+            if model_payload is not None:
+                if remember_cursor:
+                    self._set_ai_cursor(model_payload)
+                return model_payload, model_marker
+        use_window_space = False
+        if target and coordinate_space in {"auto", "window", "target", "screenshot", "image"}:
+            width = int(target.get("width", 0))
+            height = int(target.get("height", 0))
+            use_window_space = 0 <= x <= max(width, 0) and 0 <= y <= max(height, 0)
+        action_payload = dict(payload)
+        if target and use_window_space:
+            screen_x = int(target.get("x", 0)) + x
+            screen_y = int(target.get("y", 0)) + y
+            action_payload["x"] = screen_x
+            action_payload["y"] = screen_y
+            marker = {
+                "x": x,
+                "y": y,
+                "screen_x": screen_x,
+                "screen_y": screen_y,
+                "coordinate_space": "screenshot_image",
+            }
+        else:
+            action_payload["x"] = x
+            action_payload["y"] = y
+            marker = {"x": x, "y": y, "screen_x": x, "screen_y": y, "coordinate_space": "screen"}
+            if target:
+                marker["x"] = x - int(target.get("x", 0))
+                marker["y"] = y - int(target.get("y", 0))
+                marker["coordinate_space"] = "screenshot_image"
+        if remember_cursor:
+            self._set_ai_cursor(action_payload)
+        return action_payload, marker
+
+    @staticmethod
+    def _normalized_coordinate_spaces() -> set[str]:
+        return {
+            "normalized",
+            "normalized_1000",
+            "browser_tool_test",
+            "viewport_normalized",
+            "image_normalized",
+            "screenshot_normalized",
+        }
+
+    @staticmethod
+    def _numeric_coordinate(value: Any, default: Any = 0) -> float:
+        try:
+            return float(value)
+        except Exception:
+            try:
+                return float(default)
+            except Exception:
+                return 0.0
+
+    @classmethod
+    def _point_from_payload(cls, payload: dict[str, Any], cursor: dict[str, Any]) -> tuple[float, float]:
+        point = payload.get("point") or payload.get("coordinate") or payload.get("coordinates")
+        if isinstance(point, (list, tuple)) and len(point) >= 2:
+            order = str(payload.get("point_order") or payload.get("coordinate_order") or "yx").replace(",", "").strip().lower()
+            first = cls._numeric_coordinate(point[0])
+            second = cls._numeric_coordinate(point[1])
+            if order in {"xy", "x-y", "x_then_y"}:
+                return first, second
+            return second, first
+        if isinstance(point, dict):
+            return (
+                cls._numeric_coordinate(point.get("x"), cursor.get("x", 0)),
+                cls._numeric_coordinate(point.get("y"), cursor.get("y", 0)),
+            )
+        return (
+            cls._numeric_coordinate(payload.get("x"), cursor.get("x", 0)),
+            cls._numeric_coordinate(payload.get("y"), cursor.get("y", 0)),
+        )
+
+    @staticmethod
+    def _has_normalized_point(payload: dict[str, Any]) -> bool:
+        return any(key in payload for key in ("normalized_point", "normalized_x", "normalized_y"))
+
+    def _resolve_normalized_point(
+        self,
+        payload: dict[str, Any],
+        x: float,
+        y: float,
+        state: dict[str, Any],
+        *,
+        target: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        point = payload.get("normalized_point")
+        if isinstance(point, (list, tuple)) and len(point) >= 2:
+            y = self._numeric_coordinate(point[0])
+            x = self._numeric_coordinate(point[1])
+        elif isinstance(point, dict):
+            x = self._numeric_coordinate(point.get("x"), x)
+            y = self._numeric_coordinate(point.get("y"), y)
+        if payload.get("normalized_x") is not None:
+            x = self._numeric_coordinate(payload.get("normalized_x"), x)
+        if payload.get("normalized_y") is not None:
+            y = self._numeric_coordinate(payload.get("normalized_y"), y)
+        x = max(0.0, min(1000.0, self._numeric_coordinate(x)))
+        y = max(0.0, min(1000.0, self._numeric_coordinate(y)))
+
+        last = state.get("last_screenshot") if isinstance(state, dict) else None
+        action_space = last.get("action_coordinate_system") if isinstance(last, dict) and isinstance(last.get("action_coordinate_system"), dict) else None
+        reference = action_space or target
+        reference_name = "last_screenshot" if action_space else "selected_window"
+        if not isinstance(reference, dict):
+            image_size = last.get("image_size") if isinstance(last, dict) and isinstance(last.get("image_size"), dict) else {}
+            reference = {
+                "x": 0,
+                "y": 0,
+                "width": image_size.get("width", 0),
+                "height": image_size.get("height", 0),
+            }
+            reference_name = "last_screenshot"
+        try:
+            ref_x = int(reference.get("x", 0))
+            ref_y = int(reference.get("y", 0))
+            ref_width = int(reference.get("width", 0))
+            ref_height = int(reference.get("height", 0))
+        except Exception:
+            return None, None
+        if ref_width <= 0 or ref_height <= 0:
+            return None, None
+        screen_x = ref_x + round(x * max(ref_width - 1, 0) / 1000)
+        screen_y = ref_y + round(y * max(ref_height - 1, 0) / 1000)
+        action_payload = dict(payload)
+        action_payload["x"] = int(screen_x)
+        action_payload["y"] = int(screen_y)
+        action_payload["coordinate_space"] = "screen"
+        marker = {
+            "x": int(round(x)),
+            "y": int(round(y)),
+            "normalized_x": int(round(x)),
+            "normalized_y": int(round(y)),
+            "screen_x": int(screen_x),
+            "screen_y": int(screen_y),
+            "coordinate_space": "normalized_1000",
+            "point_order": "yx",
+            "reference": reference_name,
+        }
+        return action_payload, marker
+
+    @staticmethod
+    def _coordinate_from_payload(payload: dict[str, Any], keys: tuple[str, ...], default: Any = 0) -> int:
+        for key in keys:
+            if key in payload and payload.get(key) is not None:
+                try:
+                    return int(float(payload.get(key)))
+                except Exception:
+                    continue
+        try:
+            return int(float(default))
+        except Exception:
+            return 0
+
+    def _resolve_drag_points(
+        self,
+        payload: dict[str, Any],
+        *,
+        remember_cursor: bool = True,
+    ) -> tuple[dict[str, Any], dict[str, Any] | None, dict[str, Any] | None]:
+        state = self._computer_state()
+        cursor = state.get("ai_cursor") if isinstance(state.get("ai_cursor"), dict) else {}
+        start_x = self._coordinate_from_payload(payload, ("x1", "from_x", "start_x"), cursor.get("x", 0))
+        start_y = self._coordinate_from_payload(payload, ("y1", "from_y", "start_y"), cursor.get("y", 0))
+        end_x = self._coordinate_from_payload(payload, ("x2", "to_x", "end_x", "x"), start_x)
+        end_y = self._coordinate_from_payload(payload, ("y2", "to_y", "end_y", "y"), start_y)
+
+        start_payload = dict(payload)
+        start_payload["x"] = start_x
+        start_payload["y"] = start_y
+        start_action, start_marker = self._resolve_action_point(start_payload, remember_cursor=remember_cursor)
+
+        end_payload = dict(payload)
+        end_payload["x"] = end_x
+        end_payload["y"] = end_y
+        end_action, end_marker = self._resolve_action_point(end_payload, infer_window=True, remember_cursor=remember_cursor)
+
+        action_payload = dict(end_action)
+        action_payload["x1"] = int(start_action.get("x", 0))
+        action_payload["y1"] = int(start_action.get("y", 0))
+        action_payload["x2"] = int(end_action.get("x", 0))
+        action_payload["y2"] = int(end_action.get("y", 0))
+        action_payload["x"] = int(end_action.get("x", 0))
+        action_payload["y"] = int(end_action.get("y", 0))
+
+        drag_marker = None
+        if start_marker or end_marker:
+            drag_marker = {
+                "from": start_marker or {"x": start_x, "y": start_y},
+                "to": end_marker or {"x": end_x, "y": end_y},
+            }
+        return action_payload, end_marker, drag_marker
+
+    @staticmethod
+    def _point_looks_like_model_coordinate(x: int, y: int, state: dict[str, Any]) -> bool:
+        last = state.get("last_screenshot") if isinstance(state, dict) else None
+        if not isinstance(last, dict):
+            return False
+        model_size = last.get("model_image_size") if isinstance(last.get("model_image_size"), dict) else {}
+        action_space = last.get("action_coordinate_system") if isinstance(last.get("action_coordinate_system"), dict) else {}
+        try:
+            model_width = int(model_size.get("width", 0))
+            model_height = int(model_size.get("height", 0))
+            action_width = int(action_space.get("width", 0))
+            action_height = int(action_space.get("height", 0))
+        except Exception:
+            return False
+        if model_width <= 0 or model_height <= 0 or action_width <= 0 or action_height <= 0:
+            return False
+        if model_width >= action_width and model_height >= action_height:
+            return False
+        return 0 <= x <= model_width and 0 <= y <= model_height
+
+    @staticmethod
+    def _resolve_model_point(
+        payload: dict[str, Any],
+        x: int,
+        y: int,
+        state: dict[str, Any],
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        last = state.get("last_screenshot") if isinstance(state, dict) else None
+        if not isinstance(last, dict):
+            return None, None
+        model_size = last.get("model_image_size") if isinstance(last.get("model_image_size"), dict) else {}
+        action_space = last.get("action_coordinate_system") if isinstance(last.get("action_coordinate_system"), dict) else {}
+        try:
+            model_width = int(model_size.get("width", 0))
+            model_height = int(model_size.get("height", 0))
+            action_x = int(action_space.get("x", 0))
+            action_y = int(action_space.get("y", 0))
+            action_width = int(action_space.get("width", 0))
+            action_height = int(action_space.get("height", 0))
+        except Exception:
+            return None, None
+        if model_width <= 0 or model_height <= 0 or action_width <= 0 or action_height <= 0:
+            return None, None
+        screen_x = action_x + round(x * max(action_width - 1, 0) / max(model_width - 1, 1))
+        screen_y = action_y + round(y * max(action_height - 1, 0) / max(model_height - 1, 1))
+        action_payload = dict(payload)
+        action_payload["x"] = int(screen_x)
+        action_payload["y"] = int(screen_y)
+        marker = {
+            "x": x,
+            "y": y,
+            "screen_x": int(screen_x),
+            "screen_y": int(screen_y),
+            "coordinate_space": "model_image",
+        }
+        return action_payload, marker
+
+    def _computer_state(self) -> dict[str, Any]:
+        sessions = self._read_sessions()
+        state = sessions.get("computer") if isinstance(sessions.get("computer"), dict) else {}
+        return dict(state)
+
+    def _write_computer_state(self, state: dict[str, Any]) -> None:
+        sessions = self._read_sessions()
+        sessions["computer"] = state
+        sessions["updated_at"] = self._now_iso()
+        self._write_sessions(sessions)
+
+    def _clear_target_window(self) -> None:
+        state = self._computer_state()
+        if "target_window" in state:
+            state.pop("target_window", None)
+            self._write_computer_state(state)
+
+    def _clear_target_app(self) -> None:
+        state = self._computer_state()
+        if "target_app" in state:
+            state.pop("target_app", None)
+            self._write_computer_state(state)
+
+    def _set_ai_cursor(self, payload: dict[str, Any]) -> None:
+        state = self._computer_state()
+        state["ai_cursor"] = {
+            "x": int(payload.get("x", 0)),
+            "y": int(payload.get("y", 0)),
+            "origin": "top_left",
+            "updated_at": self._now_iso(),
+        }
+        self._write_computer_state(state)
+
+    def _remember_last_screenshot(self, result: dict[str, Any]) -> None:
+        state = self._computer_state()
+        remembered = {
+            "updated_at": self._now_iso(),
+            "path": result.get("path"),
+            "model_image_path": result.get("model_image_path"),
+            "image_size": result.get("image_size"),
+            "model_image_size": result.get("model_image_size"),
+            "action_coordinate_system": result.get("action_coordinate_system"),
+            "target_window": result.get("target_window"),
+            "crop_reference": result.get("crop_reference"),
+        }
+        state["last_screenshot"] = {key: value for key, value in remembered.items() if value not in (None, "")}
+        if not isinstance(result.get("crop_reference"), dict):
+            state["last_full_screenshot"] = state["last_screenshot"]
+        else:
+            full_reference = self._full_screenshot_reference_from_crop(result)
+            if full_reference:
+                state["last_full_screenshot"] = full_reference
+        self._write_computer_state(state)
+
+    def _full_screenshot_reference_from_crop(self, result: dict[str, Any]) -> dict[str, Any] | None:
+        crop_reference = result.get("crop_reference") if isinstance(result.get("crop_reference"), dict) else {}
+        if crop_reference.get("source_is_crop"):
+            return None
+        source_path = str(crop_reference.get("source_path") or "").strip()
+        if not source_path:
+            return None
+        source_size = crop_reference.get("source_image_size") if isinstance(crop_reference.get("source_image_size"), dict) else {}
+        source_action = crop_reference.get("source_action_coordinate_system")
+        remembered = {
+            "updated_at": self._now_iso(),
+            "path": source_path,
+            "image_size": source_size,
+            "action_coordinate_system": source_action if isinstance(source_action, dict) else None,
+            "target_window": result.get("target_window"),
+        }
+        return {key: value for key, value in remembered.items() if value not in (None, "", {})}
+
+    def _window_at_point(self, x: int, y: int) -> dict[str, Any] | None:
+        for item in self._list_windows():
+            window = self._normalize_window_record(item)
+            if window is None:
+                continue
+            left = int(window.get("x", 0))
+            top = int(window.get("y", 0))
+            right = left + int(window.get("width", 0))
+            bottom = top + int(window.get("height", 0))
+            if left <= x <= right and top <= y <= bottom:
+                return window
+        return None
+
+    def _select_window(self, payload: dict[str, Any]) -> dict[str, Any]:
+        windows = self._list_windows()
+        target = str(payload.get("target") or "").strip().lower()
+        filters = self._window_filter(payload)
+        app = filters.get("app", "").lower()
+        title = filters.get("title", "").lower()
+        has_filter = bool(app or title or isinstance(payload.get("window"), dict))
+        selected = None
+        if isinstance(payload.get("window"), dict):
+            selected = self._normalize_window_record(payload.get("window"))
+        if selected is None and target in {"selected", "selected_window", "window", "app"}:
+            selected = self._computer_state().get("target_window")
+        if selected is None and (target in {"active", "active_window", "front", "front_window"} or (not target and not has_filter)):
+            selected = next((item for item in windows if item.get("active")), None) or self._active_window()
+        if selected is None:
+            candidates: list[dict[str, Any]] = []
+            for item in windows:
+                window = self._normalize_window_record(item)
+                if not window or not self._is_usable_target_window(window):
+                    continue
+                if not self._window_matches_filter(window, app=app, title=title):
+                    continue
+                candidates.append(window)
+            selected = self._best_window_candidate(candidates, app=app, title=title)
+        if selected is None:
+            if has_filter:
+                self._clear_target_window()
+            return {"action": "computer.select_window", "selected": False, "windows": windows}
+        selected = self._normalize_window_record(selected)
+        if selected is None or not self._is_usable_target_window(selected):
+            if has_filter:
+                self._clear_target_window()
+            return {"action": "computer.select_window", "selected": False, "windows": windows}
+        state = self._computer_state()
+        state["target_window"] = selected
+        self._write_computer_state(state)
+        if payload.get("focus", True) is not False:
+            self._focus_window(selected)
+        return {
+            "action": "computer.select_window",
+            "selected": True,
+            "target_window": selected,
+            "windows": windows,
+            "coordinate_space": "screenshot_image",
+        }
+
+    def _list_windows(self) -> list[dict[str, Any]]:
+        system = platform.system()
+        if system == "Darwin":
+            return self._darwin_windows()
+        if system == "Windows":
+            windows = self._windows_windows()
+            if windows:
+                return windows
+            active = self._windows_active_window()
+            return [active] if active else []
+        return []
+
+    def _active_window(self) -> dict[str, Any] | None:
+        system = platform.system()
+        if system == "Darwin":
+            windows = self._darwin_windows()
+            return next((item for item in windows if item.get("active")), None)
+        if system == "Windows":
+            return self._windows_active_window()
+        return None
+
+    def _active_window_for_app(self, app_name: str) -> dict[str, Any] | None:
+        app_name = app_name.strip().lower()
+        if not app_name:
+            return None
+        active = self._active_window()
+        if active and app_name in str(active.get("app") or "").lower() and self._is_usable_target_window(active):
+            return self._normalize_window_record(active)
+        for item in self._list_windows():
+            window = self._normalize_window_record(item)
+            if (
+                window
+                and self._is_usable_target_window(window)
+                and app_name in str(window.get("app") or "").lower()
+            ):
+                return window
+        return None
+
+    @staticmethod
+    def _normalize_window_record(value: Any) -> dict[str, Any] | None:
+        if not isinstance(value, dict):
+            return None
+        try:
+            x = int(float(value.get("x", 0)))
+            y = int(float(value.get("y", 0)))
+            width = int(float(value.get("width", 0)))
+            height = int(float(value.get("height", 0)))
+        except Exception:
+            return None
+        if width <= 0 or height <= 0:
+            return None
+        normalized = {
+            "app": str(value.get("app") or value.get("process") or ""),
+            "title": str(value.get("title") or value.get("name") or ""),
+            "x": x,
+            "y": y,
+            "width": width,
+            "height": height,
+            "active": bool(value.get("active")),
+        }
+        window_id = value.get("window_id") or value.get("id")
+        try:
+            if window_id is not None:
+                normalized["window_id"] = int(window_id)
+        except Exception:
+            pass
+        for rect_key in ("capture_rect", "content_rect"):
+            rect = BrowserComputerController._normalize_rect(value.get(rect_key))
+            if rect:
+                normalized[rect_key] = rect
+        frame_ids = value.get("frame_window_ids")
+        if isinstance(frame_ids, list):
+            ids: list[int] = []
+            for item in frame_ids:
+                try:
+                    ids.append(int(item))
+                except Exception:
+                    continue
+            if ids:
+                normalized["frame_window_ids"] = ids
+        capture_method = str(value.get("capture_method") or "").strip()
+        if capture_method:
+            normalized["capture_method"] = capture_method
+        return normalized
+
+    @staticmethod
+    def _is_usable_target_window(value: Any) -> bool:
+        if not isinstance(value, dict):
+            return False
+        try:
+            width = int(float(value.get("width", 0)))
+            height = int(float(value.get("height", 0)))
+        except Exception:
+            return False
+        return width >= 200 and height >= 120
+
+    @classmethod
+    def _best_window_candidate(
+        cls,
+        candidates: list[dict[str, Any]],
+        *,
+        app: str = "",
+        title: str = "",
+    ) -> dict[str, Any] | None:
+        if not candidates:
+            return None
+
+        def area_of_rect(value: Any) -> int:
+            rect = cls._normalize_rect(value)
+            if not rect:
+                return 0
+            return int(rect.get("width", 0)) * int(rect.get("height", 0))
+
+        def score(index_and_window: tuple[int, dict[str, Any]]) -> tuple[int, int, int, int, int, int]:
+            index, window = index_and_window
+            width = int(window.get("width", 0))
+            height = int(window.get("height", 0))
+            area = width * height
+            capture_area = area_of_rect(window.get("capture_rect")) or area
+            content_area = area_of_rect(window.get("content_rect")) or area
+            title_text = str(window.get("title") or "").lower()
+            title_bonus = 0
+            if title:
+                title_bonus = 2 if title_text == title else 1
+            active_bonus = 1 if window.get("active") else 0
+            # Quartz often reports Chrome extension popovers before the real page window.
+            # When the caller only specifies an app, the full page/window is the safer target.
+            return (title_bonus, capture_area, content_area, area, active_bonus, -index)
+
+        return max(enumerate(candidates), key=score)[1]
+
+    @staticmethod
+    def _normalize_rect(value: Any) -> dict[str, int] | None:
+        if not isinstance(value, dict):
+            return None
+        try:
+            x = int(round(float(value.get("x", value.get("X", 0)) or 0)))
+            y = int(round(float(value.get("y", value.get("Y", 0)) or 0)))
+            width = int(round(float(value.get("width", value.get("Width", 0)) or 0)))
+            height = int(round(float(value.get("height", value.get("Height", 0)) or 0)))
+        except Exception:
+            return None
+        if width <= 0 or height <= 0:
+            return None
+        return {"x": x, "y": y, "width": width, "height": height}
+
+    def _darwin_windows(self) -> list[dict[str, Any]]:
+        quartz_windows = self._darwin_windows_quartz()
+        if quartz_windows:
+            return quartz_windows
+        script = r'''
+tell application "System Events"
+  set output to ""
+  repeat with proc in (application processes whose background only is false)
+    set procName to name of proc
+    set procFront to frontmost of proc
+    repeat with win in windows of proc
+      try
+        set winName to name of win
+        set winPos to position of win
+        set winSize to size of win
+        set output to output & procName & tab & winName & tab & (item 1 of winPos) & tab & (item 2 of winPos) & tab & (item 1 of winSize) & tab & (item 2 of winSize) & tab & procFront & linefeed
+      end try
+    end repeat
+  end repeat
+  return output
+end tell
+'''
+        try:
+            completed = subprocess.run(["osascript", "-e", script], check=True, capture_output=True, text=True)
+        except Exception:
+            return []
+        windows: list[dict[str, Any]] = []
+        for line in (completed.stdout or "").splitlines():
+            parts = line.split("\t")
+            if len(parts) < 7:
+                continue
+            try:
+                window = {
+                    "app": parts[0],
+                    "title": parts[1],
+                    "x": int(float(parts[2])),
+                    "y": int(float(parts[3])),
+                    "width": int(float(parts[4])),
+                    "height": int(float(parts[5])),
+                    "active": parts[6].strip().lower() == "true",
+                }
+            except Exception:
+                continue
+            if window["width"] > 0 and window["height"] > 0:
+                windows.append(window)
+        return windows
+
+    @staticmethod
+    def _frontmost_app_name() -> str:
+        try:
+            completed = subprocess.run(
+                [
+                    "osascript",
+                    "-e",
+                    'tell application "System Events" to get name of first application process whose frontmost is true',
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            return (completed.stdout or "").strip()
+        except Exception:
+            return ""
+
+    def _darwin_running_apps(self) -> list[dict[str, Any]]:
+        script = r'''
+tell application "System Events"
+  set output to ""
+  repeat with proc in (application processes whose background only is false)
+    try
+      set procName to name of proc
+      set procPid to unix id of proc
+      set procFront to frontmost of proc
+      set winCount to count of windows of proc
+      set output to output & procName & tab & procPid & tab & procFront & tab & winCount & linefeed
+    end try
+  end repeat
+  return output
+end tell
+'''
+        try:
+            completed = subprocess.run(["osascript", "-e", script], check=True, capture_output=True, text=True)
+        except Exception:
+            return []
+        apps: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for line in (completed.stdout or "").splitlines():
+            parts = line.split("\t")
+            if len(parts) < 4:
+                continue
+            name = parts[0].strip()
+            if not name or name.lower() in seen:
+                continue
+            seen.add(name.lower())
+            try:
+                pid = int(parts[1])
+            except Exception:
+                pid = None
+            try:
+                window_count = int(parts[3])
+            except Exception:
+                window_count = 0
+            app = {
+                "name": name,
+                "app": name,
+                "running": True,
+                "active": parts[2].strip().lower() == "true",
+                "window_count": window_count,
+                "has_windows": window_count > 0,
+            }
+            if pid is not None:
+                app["pid"] = pid
+            apps.append(app)
+        return apps
+
+    @staticmethod
+    def _darwin_installed_apps(*, limit: int = 300) -> list[dict[str, Any]]:
+        roots = [
+            Path("/Applications"),
+            Path.home() / "Applications",
+            Path("/System/Applications"),
+        ]
+        apps: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for root in roots:
+            if not root.exists():
+                continue
+            try:
+                candidates = sorted(root.glob("*.app"), key=lambda path: path.name.lower())
+            except Exception:
+                continue
+            for path in candidates:
+                name = path.stem.strip()
+                key = str(path).lower()
+                if not name or key in seen:
+                    continue
+                seen.add(key)
+                apps.append({"name": name, "app": name, "path": str(path), "source": str(root), "running": False})
+                if len(apps) >= limit:
+                    return apps
+        return apps
+
+    def _activate_app_name(self, app_name: str) -> bool:
+        app_name = app_name.strip()
+        if not app_name:
+            return False
+        system = platform.system()
+        if system == "Darwin":
+            script = """
+tell application "System Events"
+  set appNeedle to %s
+  repeat with candidateProc in (application processes whose background only is false)
+    try
+      if ((name of candidateProc) contains appNeedle) then
+        set frontmost of candidateProc to true
+        return "activated"
+      end if
+    end try
+  end repeat
+end tell
+try
+  tell application appNeedle to activate
+  return "activated"
+end try
+return "not_found"
+""" % json.dumps(app_name)
+            try:
+                completed = subprocess.run(["osascript", "-e", script], check=True, capture_output=True, text=True)
+                return "activated" in (completed.stdout or "")
+            except Exception:
+                return False
+        if system == "Windows":
+            name = self._ps_single(app_name)
+            script = "\n".join(
+                [
+                    "Add-Type -AssemblyName Microsoft.VisualBasic",
+                    f"[void][Microsoft.VisualBasic.Interaction]::AppActivate('{name}')",
+                ]
+            )
+            try:
+                self._run_powershell(script)
+                return True
+            except Exception:
+                return False
+        return False
+
+    def _launch_app(self, app: dict[str, Any]) -> bool:
+        path = str(app.get("path") or "").strip()
+        name = str(app.get("name") or app.get("app") or "").strip()
+        system = platform.system()
+        try:
+            if system == "Darwin":
+                if path:
+                    subprocess.Popen(["open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    return True
+                if name:
+                    subprocess.Popen(["open", "-a", name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    return True
+            if system == "Windows" and path:
+                self._run_powershell(f"Start-Process -FilePath '{self._ps_single(path)}'")
+                return True
+        except Exception:
+            return False
+        return False
+
+    def _darwin_windows_quartz(self) -> list[dict[str, Any]]:
+        code = r"""
+import json
+import Quartz
+
+options = Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements
+items = Quartz.CGWindowListCopyWindowInfo(options, Quartz.kCGNullWindowID) or []
+raw = []
+for item in items:
+    if int(item.get("kCGWindowLayer", 0) or 0) != 0:
+        continue
+    bounds = item.get("kCGWindowBounds") or {}
+    width = int(round(float(bounds.get("Width", 0) or 0)))
+    height = int(round(float(bounds.get("Height", 0) or 0)))
+    if width <= 0 or height <= 0:
+        continue
+    raw.append({
+        "app": str(item.get("kCGWindowOwnerName") or ""),
+        "title": str(item.get("kCGWindowName") or ""),
+        "x": int(round(float(bounds.get("X", 0) or 0))),
+        "y": int(round(float(bounds.get("Y", 0) or 0))),
+        "width": width,
+        "height": height,
+        "window_id": int(item.get("kCGWindowNumber", 0) or 0),
+    })
+
+def overlap(a1, a2, b1, b2):
+    return max(0, min(a2, b2) - max(a1, b1))
+
+def union_rect(rects):
+    left = min(rect["x"] for rect in rects)
+    top = min(rect["y"] for rect in rects)
+    right = max(rect["x"] + rect["width"] for rect in rects)
+    bottom = max(rect["y"] + rect["height"] for rect in rects)
+    return {"x": left, "y": top, "width": right - left, "height": bottom - top}
+
+used_ids = set()
+windows = []
+for item in raw:
+    if not str(item.get("title") or ""):
+        continue
+    item_left = item["x"]
+    item_right = item["x"] + item["width"]
+    item_top = item["y"]
+    peers = [item]
+    for peer in raw:
+        if peer is item:
+            continue
+        if peer.get("app") != item.get("app"):
+            continue
+        if str(peer.get("title") or ""):
+            continue
+        if peer.get("width", 0) < item["width"] * 0.6:
+            continue
+        peer_left = peer["x"]
+        peer_right = peer["x"] + peer["width"]
+        horizontal = overlap(item_left, item_right, peer_left, peer_right)
+        if horizontal < min(item["width"], peer["width"]) * 0.75:
+            continue
+        peer_top = peer["y"]
+        peer_bottom = peer["y"] + peer["height"]
+        near_content_top = peer_top <= item_top + 80 and peer_bottom >= item_top - 180
+        if not near_content_top:
+            continue
+        peers.append(peer)
+    if len(peers) > 1:
+        rect = union_rect(peers)
+        composite = dict(item)
+        composite.update(rect)
+        composite["content_rect"] = {
+            "x": item["x"],
+            "y": item["y"],
+            "width": item["width"],
+            "height": item["height"],
+        }
+        composite["capture_rect"] = rect
+        composite["capture_method"] = "rect"
+        composite["frame_window_ids"] = [
+            int(peer.get("window_id", 0) or 0)
+            for peer in peers
+            if peer.get("window_id")
+        ]
+        windows.append(composite)
+        used_ids.update(composite["frame_window_ids"])
+    else:
+        windows.append(item)
+        if item.get("window_id"):
+            used_ids.add(int(item["window_id"]))
+
+for item in raw:
+    if item.get("window_id") and int(item["window_id"]) in used_ids:
+        continue
+    windows.append(item)
+print(json.dumps(windows))
+"""
+        try:
+            completed = subprocess.run(_current_python_snippet_command(code), check=True, capture_output=True, text=True)
+            windows = json.loads(completed.stdout or "[]")
+        except Exception:
+            return []
+        frontmost = self._frontmost_app_name().lower()
+        normalized = []
+        for item in windows:
+            window = self._normalize_window_record(item)
+            if window is None:
+                continue
+            window["active"] = bool(frontmost and str(window.get("app") or "").lower() == frontmost)
+            normalized.append(window)
+        return normalized
+
+    def _focus_window(self, window: dict[str, Any]) -> None:
+        raw_app = str(window.get("app") or "")
+        raw_title = str(window.get("title") or "")
+        app = raw_app.replace('"', '\\"')
+        if not app:
+            return
+        if platform.system() == "Darwin":
+            script = """
+tell application "System Events"
+  set appName to %s
+  set titleNeedle to %s
+  tell application process appName
+    set frontmost to true
+    if titleNeedle is not "" then
+      repeat with candidateWindow in windows
+        try
+          if (name of candidateWindow) contains titleNeedle then
+            perform action "AXRaise" of candidateWindow
+            exit repeat
+          end if
+        end try
+      end repeat
+    end if
+  end tell
+end tell
+""" % (json.dumps(raw_app), json.dumps(raw_title))
+            try:
+                subprocess.run(["osascript", "-e", script], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
 
     def _darwin_move_cursor(self, payload: dict[str, Any]) -> None:
         x = int(payload.get("x", 0))
@@ -497,9 +2639,125 @@ class BrowserComputerController:
             "Quartz.CGAssociateMouseAndMouseCursorPosition(True)\n"
         )
         try:
-            subprocess.run(["python3", "-c", code], check=True)
+            subprocess.run(_current_python_snippet_command(code), check=True)
         except Exception as exc:
             raise RuntimeError("computer.move requires cliclick or PyObjC Quartz on macOS") from exc
+
+    def _darwin_click(self, payload: dict[str, Any]) -> None:
+        x = int(payload.get("x", 0))
+        y = int(payload.get("y", 0))
+        button = str(payload.get("button") or "left").lower()
+        cliclick = shutil.which("cliclick")
+        if cliclick:
+            prefix = "rc" if button in {"right", "secondary"} else "c"
+            subprocess.run([cliclick, f"{prefix}:{x},{y}"], check=True)
+            return
+        button_index = 1 if button in {"right", "secondary"} else 0
+        down_event = "kCGEventRightMouseDown" if button_index == 1 else "kCGEventLeftMouseDown"
+        up_event = "kCGEventRightMouseUp" if button_index == 1 else "kCGEventLeftMouseUp"
+        code = (
+            "import Quartz\n"
+            f"point = Quartz.CGPoint({x}, {y})\n"
+            f"down = Quartz.CGEventCreateMouseEvent(None, Quartz.{down_event}, point, {button_index})\n"
+            f"up = Quartz.CGEventCreateMouseEvent(None, Quartz.{up_event}, point, {button_index})\n"
+            "Quartz.CGEventPost(Quartz.kCGHIDEventTap, down)\n"
+            "Quartz.CGEventPost(Quartz.kCGHIDEventTap, up)\n"
+        )
+        try:
+            subprocess.run(_current_python_snippet_command(code), check=True)
+        except Exception:
+            swift = shutil.which("swift")
+            if swift:
+                mouse_button = "right" if button_index == 1 else "left"
+                mouse_down = "rightMouseDown" if button_index == 1 else "leftMouseDown"
+                mouse_up = "rightMouseUp" if button_index == 1 else "leftMouseUp"
+                swift_code = (
+                    "import CoreGraphics\n"
+                    f"let point = CGPoint(x: {x}, y: {y})\n"
+                    f"let down = CGEvent(mouseEventSource: nil, mouseType: .{mouse_down}, mouseCursorPosition: point, mouseButton: .{mouse_button})\n"
+                    f"let up = CGEvent(mouseEventSource: nil, mouseType: .{mouse_up}, mouseCursorPosition: point, mouseButton: .{mouse_button})\n"
+                    "down?.post(tap: .cghidEventTap)\n"
+                    "up?.post(tap: .cghidEventTap)\n"
+                )
+                try:
+                    subprocess.run([swift, "-e", swift_code], check=True)
+                    return
+                except Exception:
+                    pass
+            script = self._apple_script("computer.click", payload)
+            subprocess.run(["osascript", "-e", script], check=True)
+
+    def _darwin_drag(self, payload: dict[str, Any]) -> None:
+        x1 = int(payload.get("x1", payload.get("x", 0)))
+        y1 = int(payload.get("y1", payload.get("y", 0)))
+        x2 = int(payload.get("x2", payload.get("x", 0)))
+        y2 = int(payload.get("y2", payload.get("y", 0)))
+        button = str(payload.get("button") or "left").lower()
+        button_index = 1 if button in {"right", "secondary"} else 0
+        down_event = "kCGEventRightMouseDown" if button_index == 1 else "kCGEventLeftMouseDown"
+        drag_event = "kCGEventRightMouseDragged" if button_index == 1 else "kCGEventLeftMouseDragged"
+        up_event = "kCGEventRightMouseUp" if button_index == 1 else "kCGEventLeftMouseUp"
+        code = (
+            "import Quartz, time\n"
+            f"start = Quartz.CGPoint({x1}, {y1})\n"
+            f"end = Quartz.CGPoint({x2}, {y2})\n"
+            f"down = Quartz.CGEventCreateMouseEvent(None, Quartz.{down_event}, start, {button_index})\n"
+            "Quartz.CGEventPost(Quartz.kCGHIDEventTap, down)\n"
+            "time.sleep(0.05)\n"
+            "steps = 8\n"
+            "for index in range(1, steps + 1):\n"
+            "    px = start.x + (end.x - start.x) * index / steps\n"
+            "    py = start.y + (end.y - start.y) * index / steps\n"
+            f"    drag = Quartz.CGEventCreateMouseEvent(None, Quartz.{drag_event}, Quartz.CGPoint(px, py), {button_index})\n"
+            "    Quartz.CGEventPost(Quartz.kCGHIDEventTap, drag)\n"
+            "    time.sleep(0.02)\n"
+            f"up = Quartz.CGEventCreateMouseEvent(None, Quartz.{up_event}, end, {button_index})\n"
+            "Quartz.CGEventPost(Quartz.kCGHIDEventTap, up)\n"
+        )
+        try:
+            subprocess.run(_current_python_snippet_command(code), check=True)
+        except Exception as exc:
+            raise RuntimeError("computer.drag requires PyObjC Quartz on macOS") from exc
+
+    def _darwin_type(self, payload: dict[str, Any]) -> None:
+        text = str(payload.get("text", ""))
+        if text.isascii():
+            command = ["osascript", "-e", self._apple_script("computer.type", payload)]
+        else:
+            command = ["osascript", "-e", self._darwin_clipboard_paste_script(), "--", text]
+        subprocess.run(command, check=True)
+
+    @staticmethod
+    def _darwin_clipboard_paste_script() -> str:
+        return """
+on run argv
+set rumiPasteText to item 1 of argv
+set rumiOriginalClipboard to missing value
+set rumiHadClipboard to false
+try
+  set rumiOriginalClipboard to the clipboard
+  set rumiHadClipboard to true
+end try
+try
+  set the clipboard to rumiPasteText
+  delay 0.05
+  tell application "System Events" to keystroke "v" using {command down}
+  delay 0.05
+on error pasteErrorMessage number pasteErrorNumber
+  if rumiHadClipboard then
+    set the clipboard to rumiOriginalClipboard
+  else
+    set the clipboard to ""
+  end if
+  error pasteErrorMessage number pasteErrorNumber
+end try
+if rumiHadClipboard then
+  set the clipboard to rumiOriginalClipboard
+else
+  set the clipboard to ""
+end if
+end run
+"""
 
     def _apple_script(self, action: str, payload: dict[str, Any]) -> str:
         if action == "computer.click":
@@ -507,26 +2765,191 @@ class BrowserComputerController:
             y = int(payload.get("y", 0))
             return f'tell application "System Events" to click at {{{x}, {y}}}'
         if action == "computer.type":
-            text = json.dumps(str(payload.get("text", "")))
+            text = json.dumps(str(payload.get("text", "")), ensure_ascii=False)
             return f'tell application "System Events" to keystroke {text}'
         if action == "computer.key":
             key = payload.get("key", "return")
+            modifiers = payload.get("modifiers")
+            if not isinstance(modifiers, list):
+                modifier = payload.get("modifier")
+                modifiers = [modifier] if modifier else []
+            using = self._apple_script_modifiers(modifiers)
             if isinstance(key, int):
-                return f'tell application "System Events" to key code {key}'
-            return f'tell application "System Events" to keystroke {json.dumps(str(key))}'
+                return f'tell application "System Events" to key code {key}{using}'
+            normalized = str(key).strip().lower()
+            key_codes = {
+                "return": 36,
+                "enter": 36,
+                "tab": 48,
+                "escape": 53,
+                "esc": 53,
+                "backspace": 51,
+                "delete": 51,
+                "del": 51,
+                "forward_delete": 117,
+                "up": 126,
+                "down": 125,
+                "left": 123,
+                "right": 124,
+                "space": 49,
+            }
+            if normalized in key_codes:
+                return f'tell application "System Events" to key code {key_codes[normalized]}{using}'
+            return f'tell application "System Events" to keystroke {json.dumps(str(key), ensure_ascii=False)}{using}'
         if action == "computer.scroll":
             amount = int(payload.get("amount", 1))
             return f'tell application "System Events" to scroll wheel {amount}'
         raise ValueError(action)
 
-    def _windows_screenshot(self, path: Path) -> None:
+    @staticmethod
+    def _apple_script_modifiers(modifiers: list[Any]) -> str:
+        names: list[str] = []
+        for item in modifiers:
+            normalized = str(item or "").strip().lower()
+            if normalized in {"command", "cmd", "meta", "super"}:
+                names.append("command down")
+            elif normalized in {"shift"}:
+                names.append("shift down")
+            elif normalized in {"option", "alt"}:
+                names.append("option down")
+            elif normalized in {"control", "ctrl"}:
+                names.append("control down")
+        if not names:
+            return ""
+        return " using {" + ", ".join(dict.fromkeys(names)) + "}"
+
+    def _windows_running_apps(self) -> list[dict[str, Any]]:
+        script = r'''
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public class RumiDpi {
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+}
+'@ -ErrorAction SilentlyContinue
+[void][RumiDpi]::SetProcessDPIAware()
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public class RumiActiveApp {
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+}
+'@
+$front = [RumiActiveApp]::GetForegroundWindow()
+$items = Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } | ForEach-Object {
+  [pscustomobject]@{
+    name = $_.ProcessName
+    app = $_.ProcessName
+    pid = $_.Id
+    title = $_.MainWindowTitle
+    running = $true
+    active = ($_.MainWindowHandle -eq $front)
+    window_count = 1
+    has_windows = $true
+  }
+}
+$items | ConvertTo-Json -Compress
+'''
+        try:
+            return [self._normalize_app_record(item) for item in self._json_list(self._run_powershell_capture(script))]
+        except Exception:
+            return []
+
+    def _windows_installed_apps(self, *, limit: int = 300) -> list[dict[str, Any]]:
+        script = r'''
+$ErrorActionPreference = 'SilentlyContinue'
+$limit = %d
+$roots = @(
+  "$env:ProgramData\Microsoft\Windows\Start Menu\Programs",
+  "$env:APPDATA\Microsoft\Windows\Start Menu\Programs",
+  "$env:ProgramFiles",
+  "${env:ProgramFiles(x86)}"
+) | Where-Object { $_ -and (Test-Path $_) }
+$items = @()
+foreach ($root in $roots) {
+  $items += Get-ChildItem -Path $root -Recurse -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Extension -in @('.lnk', '.exe') } |
+    Select-Object -First $limit |
+    ForEach-Object {
+      [pscustomobject]@{
+        name = $_.BaseName
+        app = $_.BaseName
+        path = $_.FullName
+        source = $root
+        running = $false
+      }
+    }
+  if ($items.Count -ge $limit) { break }
+}
+$items | Select-Object -First $limit | ConvertTo-Json -Compress
+''' % limit
+        try:
+            return [self._normalize_app_record(item) for item in self._json_list(self._run_powershell_capture(script))]
+        except Exception:
+            return []
+
+    @staticmethod
+    def _windows_open_url_foreground(url: str, app_name: str) -> bool:
+        normalized = app_name.strip().lower()
+        candidates: list[tuple[Path, bool]] = []
+        roots = [os.environ.get("LOCALAPPDATA"), os.environ.get("PROGRAMFILES"), os.environ.get("PROGRAMFILES(X86)")]
+        for root_value in roots:
+            if not root_value:
+                continue
+            root = Path(root_value)
+            if any(name in normalized for name in ("chrome", "chromium")):
+                candidates.append((root / "Google" / "Chrome" / "Application" / "chrome.exe", False))
+            if "edge" in normalized:
+                candidates.append((root / "Microsoft" / "Edge" / "Application" / "msedge.exe", False))
+            if "firefox" in normalized:
+                candidates.append((root / "Mozilla Firefox" / "firefox.exe", False))
+        for name in (app_name, f"{app_name}.exe"):
+            resolved = shutil.which(name)
+            if resolved:
+                candidates.insert(0, (Path(resolved), True))
+        for executable, resolved_from_path in candidates:
+            if not resolved_from_path and not executable.exists():
+                continue
+            try:
+                subprocess.Popen([str(executable), url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return True
+            except Exception:
+                continue
+        return False
+
+    @staticmethod
+    def _windows_dpi_awareness_script() -> str:
+        return r'''
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public class RumiDpi {
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+}
+'@ -ErrorAction SilentlyContinue
+[void][RumiDpi]::SetProcessDPIAware()
+'''
+
+    def _windows_screenshot(self, path: Path, target: dict[str, Any] | None = None) -> dict[str, Any]:
         escaped = self._ps_single(str(path))
+        bounds_script = (
+            "$bounds = New-Object System.Drawing.Rectangle({}, {}, {}, {})".format(
+                int(target.get("x", 0)),
+                int(target.get("y", 0)),
+                int(target.get("width", 0)),
+                int(target.get("height", 0)),
+            )
+            if target
+            else "$bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen"
+        )
         script = "\n".join(
             [
                 "$ErrorActionPreference = 'Stop'",
                 "Add-Type -AssemblyName System.Windows.Forms",
                 "Add-Type -AssemblyName System.Drawing",
-                "$bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds",
+                self._windows_dpi_awareness_script(),
+                bounds_script,
                 "$bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height",
                 "$graphics = [System.Drawing.Graphics]::FromImage($bitmap)",
                 "$graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)",
@@ -536,12 +2959,48 @@ class BrowserComputerController:
             ]
         )
         self._run_powershell(script)
+        if target:
+            return {
+                "x": int(target.get("x", 0)),
+                "y": int(target.get("y", 0)),
+                "width": int(target.get("width", 0)),
+                "height": int(target.get("height", 0)),
+                "screen": "selected_window",
+                "unit": "display_coordinate",
+            }
+        return self._windows_virtual_screen_bounds()
+
+    def _windows_virtual_screen_bounds(self) -> dict[str, Any]:
+        script = "\n".join(
+            [
+                "$ErrorActionPreference = 'Stop'",
+                "Add-Type -AssemblyName System.Windows.Forms",
+                self._windows_dpi_awareness_script(),
+                "$bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen",
+                "ConvertTo-Json @{ x = [int]$bounds.X; y = [int]$bounds.Y; width = [int]$bounds.Width; height = [int]$bounds.Height; screen = 'virtual_screen'; unit = 'display_coordinate' } -Compress",
+            ]
+        )
+        try:
+            value = json.loads(self._run_powershell_capture(script) or "{}")
+            if isinstance(value, dict) and value.get("width") and value.get("height"):
+                return {
+                    "x": int(value.get("x", 0)),
+                    "y": int(value.get("y", 0)),
+                    "width": int(value.get("width", 0)),
+                    "height": int(value.get("height", 0)),
+                    "screen": "virtual_screen",
+                    "unit": "display_coordinate",
+                }
+        except Exception:
+            pass
+        return {"x": 0, "y": 0, "width": 0, "height": 0, "screen": "virtual_screen", "unit": "display_coordinate"}
 
     def _windows_desktop_action(self, action: str, payload: dict[str, Any]) -> None:
         prelude = [
             "$ErrorActionPreference = 'Stop'",
             "Add-Type -AssemblyName System.Windows.Forms",
             "Add-Type -AssemblyName System.Drawing",
+            self._windows_dpi_awareness_script(),
         ]
         if action == "computer.move":
             x = int(payload.get("x", 0))
@@ -551,42 +3010,189 @@ class BrowserComputerController:
         if action == "computer.click":
             x = int(payload.get("x", 0))
             y = int(payload.get("y", 0))
+            restore_cursor = payload.get("isolate_cursor", True) is not False
             script = "\n".join(
                 prelude
                 + [
                     "Add-Type -TypeDefinition @'\nusing System;\nusing System.Runtime.InteropServices;\npublic class RumiMouse {\n  [DllImport(\"user32.dll\")]\n  public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);\n}\n'@",
+                    "$original = [System.Windows.Forms.Cursor]::Position",
                     f"[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point({x}, {y})",
                     "[RumiMouse]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)",
                     "[RumiMouse]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)",
+                    "[System.Windows.Forms.Cursor]::Position = $original" if restore_cursor else "",
+                ]
+            )
+            self._run_powershell(script)
+            return
+        if action == "computer.drag":
+            x1 = int(payload.get("x1", payload.get("x", 0)))
+            y1 = int(payload.get("y1", payload.get("y", 0)))
+            x2 = int(payload.get("x2", payload.get("x", 0)))
+            y2 = int(payload.get("y2", payload.get("y", 0)))
+            restore_cursor = payload.get("isolate_cursor", True) is not False
+            script = "\n".join(
+                prelude
+                + [
+                    "Add-Type -TypeDefinition @'\nusing System;\nusing System.Runtime.InteropServices;\npublic class RumiMouse {\n  [DllImport(\"user32.dll\")]\n  public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);\n}\n'@",
+                    "$original = [System.Windows.Forms.Cursor]::Position",
+                    f"[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point({x1}, {y1})",
+                    "[RumiMouse]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)",
+                    "$steps = 12",
+                    "for ($index = 1; $index -le $steps; $index++) {",
+                    f"  $px = [int]({x1} + (({x2} - {x1}) * $index / $steps))",
+                    f"  $py = [int]({y1} + (({y2} - {y1}) * $index / $steps))",
+                    "  [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point($px, $py)",
+                    "  Start-Sleep -Milliseconds 15",
+                    "}",
+                    "[RumiMouse]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)",
+                    "[System.Windows.Forms.Cursor]::Position = $original" if restore_cursor else "",
                 ]
             )
             self._run_powershell(script)
             return
         if action == "computer.type":
-            text = self._ps_single(str(payload.get("text", "")))
+            text = self._ps_single(self._windows_sendkeys_escape_text(str(payload.get("text", ""))))
             self._run_powershell("\n".join(prelude + [f"[System.Windows.Forms.SendKeys]::SendWait('{text}')"]))
             return
         if action == "computer.key":
-            key = self._windows_send_key(str(payload.get("key", "ENTER")))
+            key = self._windows_send_key(str(payload.get("key", "ENTER")), payload.get("modifiers") or payload.get("modifier"))
             self._run_powershell("\n".join(prelude + [f"[System.Windows.Forms.SendKeys]::SendWait('{key}')"]))
             return
         if action == "computer.scroll":
             amount = int(payload.get("amount", 1))
             wheel_delta = amount * 120
+            has_point = any(key in payload for key in ("x", "y", "point", "coordinate", "coordinates"))
+            point_payload = payload
+            if has_point:
+                point_payload, _marker = self._resolve_action_point(payload, remember_cursor=False)
             script = "\n".join(
                 prelude
                 + [
-                    "Add-Type -TypeDefinition @'\nusing System;\nusing System.Runtime.InteropServices;\npublic class RumiMouse {\n  [DllImport(\"user32.dll\")]\n  public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);\n}\n'@",
-                    f"[RumiMouse]::mouse_event(0x0800, 0, 0, [uint32]({wheel_delta}), [UIntPtr]::Zero)",
+                    "Add-Type -TypeDefinition @'\nusing System;\nusing System.Runtime.InteropServices;\npublic class RumiMouse {\n  [DllImport(\"user32.dll\")]\n  public static extern void mouse_event(uint flags, int dx, int dy, int data, UIntPtr extra);\n}\n'@",
+                    "$original = [System.Windows.Forms.Cursor]::Position" if has_point else "",
+                    (
+                        "[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point({}, {})".format(
+                            int(point_payload.get("x", 0)),
+                            int(point_payload.get("y", 0)),
+                        )
+                        if has_point
+                        else ""
+                    ),
+                    f"[RumiMouse]::mouse_event(0x0800, 0, 0, {wheel_delta}, [UIntPtr]::Zero)",
+                    "[System.Windows.Forms.Cursor]::Position = $original" if has_point else "",
                 ]
             )
             self._run_powershell(script)
             return
         raise ValueError(action)
 
+    def _windows_windows(self) -> list[dict[str, Any]]:
+        script = r'''
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public class RumiWindowEnum {
+  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+}
+'@
+$front = [RumiWindowEnum]::GetForegroundWindow()
+$items = New-Object System.Collections.Generic.List[object]
+$callback = [RumiWindowEnum+EnumWindowsProc]{
+  param([IntPtr]$hWnd, [IntPtr]$lParam)
+  if (-not [RumiWindowEnum]::IsWindowVisible($hWnd)) { return $true }
+  $titleBuilder = New-Object System.Text.StringBuilder 512
+  [void][RumiWindowEnum]::GetWindowText($hWnd, $titleBuilder, $titleBuilder.Capacity)
+  $title = $titleBuilder.ToString()
+  if ([string]::IsNullOrWhiteSpace($title)) { return $true }
+  $rect = New-Object RumiWindowEnum+RECT
+  if (-not [RumiWindowEnum]::GetWindowRect($hWnd, [ref]$rect)) { return $true }
+  $width = $rect.Right - $rect.Left
+  $height = $rect.Bottom - $rect.Top
+  if ($width -le 0 -or $height -le 0) { return $true }
+  [uint32]$pid = 0
+  [void][RumiWindowEnum]::GetWindowThreadProcessId($hWnd, [ref]$pid)
+  $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+  $items.Add([pscustomobject]@{
+    app = if ($proc) { $proc.ProcessName } else { "" }
+    title = $title
+    x = $rect.Left
+    y = $rect.Top
+    width = $width
+    height = $height
+    active = ($hWnd -eq $front)
+    window_id = $hWnd.ToInt64()
+  })
+  return $true
+}
+[void][RumiWindowEnum]::EnumWindows($callback, [IntPtr]::Zero)
+$items | ConvertTo-Json -Compress
+'''
+        try:
+            return [window for window in (self._normalize_window_record(item) for item in self._json_list(self._run_powershell_capture(script))) if window]
+        except Exception:
+            return []
+
+    def _windows_active_window(self) -> dict[str, Any] | None:
+        script = r'''
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Drawing
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public class RumiDpi {
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+}
+'@ -ErrorAction SilentlyContinue
+[void][RumiDpi]::SetProcessDPIAware()
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public class RumiWindow {
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+  [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+}
+'@
+$h = [RumiWindow]::GetForegroundWindow()
+$r = New-Object RumiWindow+RECT
+[void][RumiWindow]::GetWindowRect($h, [ref]$r)
+$titleBuilder = New-Object System.Text.StringBuilder 512
+[void][RumiWindow]::GetWindowText($h, $titleBuilder, $titleBuilder.Capacity)
+ConvertTo-Json @{ app = ""; title = $titleBuilder.ToString(); x = $r.Left; y = $r.Top; width = ($r.Right - $r.Left); height = ($r.Bottom - $r.Top); active = $true } -Compress
+'''
+        try:
+            executable = "powershell" if shutil.which("powershell") else "pwsh"
+            completed = subprocess.run([executable, "-NoProfile", "-Command", script], check=True, capture_output=True, text=True)
+            value = json.loads(completed.stdout or "{}")
+            return self._normalize_window_record(value)
+        except Exception:
+            return None
+
     @staticmethod
-    def _windows_send_key(key: str) -> str:
-        normalized = key.strip().lower()
+    def _windows_send_key(key: str, modifiers: Any = None) -> str:
+        raw = key.strip()
+        normalized = raw.lower()
+        parsed_modifiers: list[str] = []
+        if isinstance(modifiers, str):
+            parsed_modifiers.extend(part.strip().lower() for part in re.split(r"[+, ]+", modifiers) if part.strip())
+        elif isinstance(modifiers, (list, tuple)):
+            parsed_modifiers.extend(str(part).strip().lower() for part in modifiers if str(part).strip())
+        if "+" in normalized:
+            parts = [part for part in normalized.split("+") if part]
+            parsed_modifiers.extend(part for part in parts[:-1] if part)
+            normalized = parts[-1] if parts else normalized
+            raw = normalized
         key_map = {
             "enter": "{ENTER}",
             "return": "{ENTER}",
@@ -599,12 +3205,59 @@ class BrowserComputerController:
             "down": "{DOWN}",
             "left": "{LEFT}",
             "right": "{RIGHT}",
+            "space": " ",
+            "plus": "{+}",
         }
-        return key_map.get(normalized, key)
+        key_token = key_map.get(normalized)
+        if key_token is None:
+            key_token = raw if len(raw) == 1 else "{" + BrowserComputerController._windows_sendkeys_escape_token(raw.upper()) + "}"
+        modifier_prefix = ""
+        for modifier in parsed_modifiers:
+            if modifier in {"ctrl", "control", "cmd", "command"}:
+                modifier_prefix += "^"
+            elif modifier in {"shift"}:
+                modifier_prefix += "+"
+            elif modifier in {"alt", "option"}:
+                modifier_prefix += "%"
+        return modifier_prefix + key_token
+
+    @staticmethod
+    def _windows_sendkeys_escape_token(value: str) -> str:
+        return value.replace("{", "").replace("}", "")
+
+    @staticmethod
+    def _windows_sendkeys_escape_text(text: str) -> str:
+        pieces: list[str] = []
+        index = 0
+        while index < len(text):
+            char = text[index]
+            if char == "\r":
+                index += 1
+                continue
+            if char == "\n":
+                pieces.append("{ENTER}")
+            elif char == "\t":
+                pieces.append("{TAB}")
+            elif char == "{":
+                pieces.append("{{}")
+            elif char == "}":
+                pieces.append("{}}")
+            elif char in "+^%~()[]":
+                pieces.append("{" + char + "}")
+            else:
+                pieces.append(char)
+            index += 1
+        return "".join(pieces)
 
     @staticmethod
     def _ps_single(value: str) -> str:
         return value.replace("'", "''")
+
+    @staticmethod
+    def _truthy(value: Any) -> bool:
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+        return bool(value)
 
     @staticmethod
     def _run_powershell(script: str) -> None:
@@ -615,6 +3268,28 @@ class BrowserComputerController:
             subprocess.run(["pwsh", "-NoProfile", "-Command", script], check=True)
 
     @staticmethod
+    def _run_powershell_capture(script: str) -> str:
+        executable = "powershell" if shutil.which("powershell") else "pwsh"
+        completed = subprocess.run(
+            [executable, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return completed.stdout or ""
+
+    @staticmethod
+    def _json_list(raw: str) -> list[Any]:
+        if not raw.strip():
+            return []
+        value = json.loads(raw)
+        if isinstance(value, list):
+            return value
+        if isinstance(value, dict):
+            return [value]
+        return []
+
+    @staticmethod
     def _capabilities() -> dict[str, bool]:
         system = platform.system()
         return {
@@ -623,8 +3298,15 @@ class BrowserComputerController:
             "browser_cookie_management": True,
             "browser_cache_management": True,
             "screenshot": system in {"Darwin", "Windows"},
+            "app_listing": system in {"Darwin", "Windows"},
+            "app_selection": system in {"Darwin", "Windows"},
+            "installed_app_listing": system in {"Darwin", "Windows"},
+            "window_selection": system in {"Darwin", "Windows"},
             "desktop_actions": system in {"Darwin", "Windows"},
             "cursor_move": system in {"Darwin", "Windows"},
+            "virtual_ai_cursor": True,
+            "driver_auto_switch": system in {"Darwin", "Windows"},
+            "visible_window_only": True,
         }
 
     def _read_sessions(self) -> dict[str, Any]:

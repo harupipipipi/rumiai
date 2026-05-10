@@ -12,6 +12,27 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService  # noqa: E402
 
 
+def _profile(
+    profile_id: str,
+    *,
+    display_name: str,
+    provider_id: str,
+    model_id: str,
+    availability: dict | None = None,
+    profile_type: str = "chat",
+):
+    return {
+        "profile_id": profile_id,
+        "qualified_model_id": profile_id,
+        "provider_id": provider_id,
+        "provider_display_name": provider_id.title(),
+        "model_id": model_id,
+        "display_name": display_name,
+        "availability": availability or {},
+        "type": profile_type,
+    }
+
+
 def test_model_runtime_settings_preferred_model_and_thinking_level(tmp_path):
     service = ModelRuntimeSettingsService(tmp_path)
 
@@ -43,3 +64,126 @@ def test_thinking_level_validation_and_provider_normalization(tmp_path):
 
     assert normalized["provider_params"]["reasoning_effort"] == "high"
     assert normalized["level"] == "high"
+
+
+def test_resolve_model_candidates_exact_and_ambiguous_matches(tmp_path, monkeypatch):
+    service = ModelRuntimeSettingsService(tmp_path)
+    profiles = [
+        _profile(
+            "openai/gpt-4o",
+            display_name="GPT-4o",
+            provider_id="openai",
+            model_id="gpt-4o",
+        ),
+        _profile(
+            "openrouter/openai/gpt-4o",
+            display_name="GPT-4o",
+            provider_id="openrouter",
+            model_id="openai/gpt-4o",
+        ),
+        _profile(
+            "google/gemini-2.5-flash",
+            display_name="Gemini 2.5 Flash",
+            provider_id="google",
+            model_id="gemini-2.5-flash",
+            availability={"configured": True, "status": "configured"},
+        ),
+    ]
+    monkeypatch.setattr(service, "_list_profile_catalog", lambda: profiles)
+
+    exact = service.resolve_model_candidates("openai/gpt-4o")
+    assert exact["exact"]["profile_id"] == "openai/gpt-4o"
+    assert exact["candidates"][0]["profile_id"] == "openai/gpt-4o"
+
+    ambiguous = service.resolve_model_candidates("GPT-4o")
+    assert ambiguous["exact"] is None
+    assert {candidate["profile_id"] for candidate in ambiguous["candidates"]} == {
+        "openai/gpt-4o",
+        "openrouter/openai/gpt-4o",
+    }
+
+    missing = service.resolve_model_candidates("does-not-exist")
+    assert missing == {"query": "does-not-exist", "exact": None, "candidates": []}
+
+
+def test_resolve_model_candidates_ranking_uses_match_and_runtime_tie_breaks(tmp_path, monkeypatch):
+    service = ModelRuntimeSettingsService(tmp_path)
+    service.update_settings({"favorite_profiles": ["favorite/alpha-favorite"]})
+    profiles = [
+        _profile(
+            "plain/alpha-plain",
+            display_name="Alpha Plain",
+            provider_id="plain",
+            model_id="alpha-plain",
+        ),
+        _profile(
+            "favorite/alpha-favorite",
+            display_name="Alpha Favorite",
+            provider_id="favorite",
+            model_id="alpha-favorite",
+        ),
+        _profile(
+            "ollama/alpha-local",
+            display_name="Alpha Local",
+            provider_id="ollama",
+            model_id="alpha-local",
+            availability={"local": True},
+        ),
+        _profile(
+            "configured/alpha-configured",
+            display_name="Alpha Configured",
+            provider_id="configured",
+            model_id="alpha-configured",
+            availability={"configured": True, "status": "configured"},
+        ),
+        _profile(
+            "configured/not-alpha",
+            display_name="Not Alpha",
+            provider_id="configured",
+            model_id="not-alpha",
+            availability={"configured": True, "status": "configured"},
+        ),
+    ]
+    monkeypatch.setattr(service, "_list_profile_catalog", lambda: profiles)
+
+    result = service.resolve_model_candidates("Alpha", limit=4)
+
+    assert result["exact"] is None
+    assert [candidate["profile_id"] for candidate in result["candidates"]] == [
+        "configured/alpha-configured",
+        "ollama/alpha-local",
+        "favorite/alpha-favorite",
+        "plain/alpha-plain",
+    ]
+    assert result["candidates"][0]["configured"] is True
+    assert result["candidates"][1]["local"] is True
+    assert result["candidates"][2]["favorite"] is True
+
+
+def test_resolve_model_candidates_limits_model_command_to_chat_profiles(tmp_path, monkeypatch):
+    service = ModelRuntimeSettingsService(tmp_path)
+    profiles = [
+        _profile(
+            "openai/text-embedding-3-small",
+            display_name="Text Embedding 3 Small",
+            provider_id="openai",
+            model_id="text-embedding-3-small",
+            profile_type="embedding",
+        ),
+        _profile(
+            "openai/gpt-4o",
+            display_name="GPT-4o",
+            provider_id="openai",
+            model_id="gpt-4o",
+            availability={"configured": False, "status": "unconfigured"},
+        ),
+    ]
+    monkeypatch.setattr(service, "_list_profile_catalog", lambda: profiles)
+
+    embedding = service.resolve_model_candidates("text-embedding-3-small")
+    chat = service.resolve_model_candidates("openai/gpt-4o")
+
+    assert embedding["candidates"] == []
+    assert chat["exact"]["profile_id"] == "openai/gpt-4o"
+    assert chat["exact"]["requires_api_key"] is True
+    assert chat["exact"]["availability"]["status"] == "unconfigured"

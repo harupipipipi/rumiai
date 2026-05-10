@@ -1,11 +1,15 @@
 import type { FormEvent, MutableRefObject } from "react";
 
-import type { ChatActivityEvent, ChatContentBlock, CodingContextEntry, CodingGitStatus, ComposerWidgetAction, ModelProfile, SettingsSection, SidebarAction, SidebarItem, ToolLogEntry, UICatalog } from "../lib/api";
+import type { ChatActivityEvent, ChatContentBlock, CodingContextEntry, CodingGitStatus, ComposerWidgetAction, ModelCommandCandidate, ModelProfile, SettingsSection, SidebarAction, SidebarItem, ToolLogEntry, UICatalog } from "../lib/api";
+import type { ComposerCommandItem } from "../lib/api";
 import type { ChatItem } from "../components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "../components/ToolPreview";
 
+export type { ComposerCommandItem } from "../lib/api";
+
 export type ChatUiMessage = {
   id: string;
+  conversationId?: string;
   role: "user" | "agent";
   content: ChatContentBlock[];
   rawText: string;
@@ -15,6 +19,7 @@ export type ChatUiMessage = {
     toolUsed?: string;
     modelName?: string;
     thinkingLabel?: string;
+    thinkingTranscript?: string;
     attachedToolCount?: number;
   };
   events?: ChatActivityEvent[];
@@ -29,13 +34,6 @@ export type ComposerExtensionItem = {
   tags?: string[];
   disabled?: boolean;
   ui?: SidebarItem["ui"];
-};
-
-export type ComposerCommandItem = {
-  id: string;
-  label: string;
-  description?: string;
-  enabled?: boolean;
 };
 
 export type ContextUsageInfo = {
@@ -102,6 +100,8 @@ export type ComposerRendererProps = {
   inlineExtensions: ComposerExtensionItem[];
   belowExtensions: ComposerExtensionItem[];
   commands?: ComposerCommandItem[];
+  modelCommandCandidates?: ModelCommandCandidate[];
+  modelPickerRequestId?: number;
   yoloMode?: boolean;
   mode?: AppMode;
   codingContext?: CodingContext | null;
@@ -109,7 +109,9 @@ export type ComposerRendererProps = {
   droppedWidgets?: DroppedWidget[];
   selectedToolIds?: string[];
   onExtensionSelect?: (item: ComposerExtensionItem) => void;
-  onCommandSelect?: (commandId: string) => void;
+  onCommandSelect?: (commandId: string, rawInput?: string) => void;
+  onModelCommandCandidateSelect?: (candidate: ModelCommandCandidate) => void;
+  onModelCommandCandidatesClose?: () => void;
   onModelProfileSelect: (profileId: string) => void;
   onProviderApiKeySave?: (providerId: string, value: string) => Promise<void> | void;
   onThinkingLevelChange: (level: string | null) => void;
@@ -148,11 +150,13 @@ export type RightSidebarRendererProps = {
   onSettingChange: SettingChangeHandler;
   onOpenSettings: () => void;
   onToolToggle?: (item: SidebarItem) => void;
+  onToolBatchSet?: (toolIds: string[], enabled: boolean) => void;
   onPanelAction?: (item: SidebarItem, action: SidebarAction) => void;
 };
 
 export type SettingsModalRendererProps = {
   isOpen: boolean;
+  activeSectionId?: string | null;
   catalog: UICatalog | null;
   health: { status: string; pack: string; ts: string } | null;
   previewsCount: number;

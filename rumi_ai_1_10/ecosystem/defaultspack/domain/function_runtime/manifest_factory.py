@@ -203,6 +203,7 @@ TOOL_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
         ("computer_screenshot", "Capture a computer screenshot.", ("tool", "computer"), "high"),
         ("computer_move", "Move the computer cursor.", ("tool", "computer"), "high"),
         ("computer_click", "Click with the computer controller.", ("tool", "computer"), "high"),
+        ("computer_drag", "Drag with the computer controller.", ("tool", "computer"), "high"),
         ("computer_type", "Type with the computer controller.", ("tool", "computer"), "high"),
         ("computer_key", "Send a key with the computer controller.", ("tool", "computer"), "high"),
         ("computer_scroll", "Scroll with the computer controller.", ("tool", "computer"), "high"),

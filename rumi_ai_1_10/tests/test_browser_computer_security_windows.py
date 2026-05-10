@@ -1,0 +1,212 @@
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "ecosystem" / "defaultspack"))
+
+
+def _controller(tmp_path):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._approval_path = tmp_path / "shared" / "browser_computer_approvals.json"
+    return controller
+
+
+def test_screenshot_requires_approval_before_capture_reuse_or_crop(tmp_path, monkeypatch):
+    controller = _controller(tmp_path)
+
+    monkeypatch.setattr(
+        controller,
+        "_capture_or_reuse_screenshot",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("capture/reuse must wait for approval")),
+    )
+    monkeypatch.setattr(
+        controller,
+        "_apply_screenshot_crop",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("crop must wait for approval")),
+    )
+
+    result = controller.run(
+        "computer.screenshot",
+        {"source": "latest", "crop": {"x": 1, "y": 2, "width": 3, "height": 4}},
+    )
+
+    assert result["requires_approval"] is True
+    assert result["action"] == "computer.screenshot"
+    assert result["payload"]["source"] == "latest"
+    assert result["payload"]["crop"]["width"] == 3
+
+
+def test_yolo_string_false_does_not_bypass_screenshot_approval(tmp_path, monkeypatch):
+    controller = _controller(tmp_path)
+    monkeypatch.setattr(
+        controller,
+        "_capture_or_reuse_screenshot",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("string false is not yolo")),
+    )
+
+    result = controller.run("computer.screenshot", {}, yolo_mode="false")
+
+    assert result["requires_approval"] is True
+
+
+def test_user_requested_computer_use_does_not_bypass_local_executor_approval(tmp_path, monkeypatch):
+    from domain.tool import executor as executor_module
+
+    ToolExecutor = executor_module.ToolExecutor
+    monkeypatch.setattr(executor_module, "policy_from_context", lambda context: context.get("profile_policy", {}))
+
+    monkeypatch.setattr(
+        "ecosystem.rumi_default_tools_pack.domain.tool.browser_computer.BrowserComputerController._capture_action_result_screenshot",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("click must not execute before approval")),
+    )
+    monkeypatch.setattr(
+        "ecosystem.rumi_default_tools_pack.domain.tool.browser_computer.BrowserComputerController._window_at_point",
+        lambda self, x, y: None,
+    )
+
+    executor = ToolExecutor.__new__(ToolExecutor)
+    result = executor._execute_local(
+        "browser_computer",
+        {"action": "computer.click", "payload": {"x": 10, "y": 20, "coordinate_space": "screen"}},
+        {
+            "user_requested_computer_use": True,
+            "conversation_workspace_dir": str(tmp_path),
+            "profile_policy": {"yolo_mode": "false"},
+        },
+    )
+
+    assert result["is_error"] is False
+    assert result["widget"]["requires_approval"] is True
+    assert result["widget"]["payload"]["virtual_only"] is True
+    assert result["widget"]["payload"]["resolved_coordinates"] == {"x": 10, "y": 20}
+
+
+def test_open_url_approval_payload_includes_target_app(tmp_path):
+    controller = _controller(tmp_path)
+
+    result = controller.run(
+        "browser.open_url",
+        {"url": "https://example.test", "app": "Microsoft Edge", "persistent": False},
+    )
+
+    assert result["requires_approval"] is True
+    assert result["payload"]["target_app"] == "Microsoft Edge"
+
+
+def test_open_url_function_context_target_app_reaches_approval_payload(tmp_path):
+    from ecosystem.rumi_default_tools_pack.functions.browser_computer import main
+
+    result = main.run(
+        {"conversation_workspace_dir": str(tmp_path), "computer_use_target_app": "Microsoft Edge"},
+        {"action": "browser.open_url", "payload": {"url": "https://example.test", "persistent": False}},
+    )
+
+    assert result["widget"]["requires_approval"] is True
+    assert result["widget"]["payload"]["target_app"] == "Microsoft Edge"
+
+
+def test_pointer_actions_default_virtual_and_include_resolved_coordinates(tmp_path, monkeypatch):
+    controller = _controller(tmp_path)
+    monkeypatch.setattr(controller, "_window_at_point", lambda x, y: None)
+
+    click = controller.run("computer.click", {"x": 10, "y": 20})
+    drag = controller.run("computer.drag", {"x1": 1, "y1": 2, "x2": 30, "y2": 40})
+
+    assert click["requires_approval"] is True
+    assert click["payload"]["virtual_only"] is True
+    assert click["payload"]["resolved_coordinates"] == {"x": 10, "y": 20}
+    assert drag["requires_approval"] is True
+    assert drag["payload"]["virtual_only"] is True
+    assert drag["payload"]["resolved_coordinates"] == {
+        "from": {"x": 1, "y": 2},
+        "to": {"x": 30, "y": 40},
+    }
+
+
+def test_default_click_uses_virtual_cursor_until_physical_true(tmp_path, monkeypatch):
+    controller = _controller(tmp_path)
+    monkeypatch.setattr(controller, "_capture_action_result_screenshot", lambda *args, **kwargs: {})
+    monkeypatch.setattr(controller, "_window_at_point", lambda x, y: None)
+    monkeypatch.setattr(
+        controller,
+        "_windows_desktop_action",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("default click should stay virtual")),
+    )
+
+    result = controller.run("computer.click", {"x": 10, "y": 20}, yolo_mode=True)
+
+    assert result["executed"] is True
+    assert result["virtual_cursor"] is True
+
+
+def test_windows_open_url_can_target_specific_browser(monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool import browser_computer
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    calls = []
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(browser_computer.shutil, "which", lambda name: r"C:\Browsers\msedge.exe" if name == "Microsoft Edge" else None)
+    monkeypatch.setattr(
+        browser_computer.subprocess,
+        "Popen",
+        lambda command, **kwargs: calls.append(command) or subprocess.CompletedProcess(command, 0),
+    )
+
+    assert BrowserComputerController._open_url_foreground("https://example.test", app_name="Microsoft Edge") is True
+    assert calls[0][0].lower().endswith("msedge.exe")
+    assert calls[0][1] == "https://example.test"
+
+
+def test_windows_virtual_screen_coordinates_are_reported_for_desktop_capture(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool import browser_computer
+
+    controller = _controller(tmp_path)
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        controller,
+        "_windows_screenshot",
+        lambda path, target=None: {
+            "x": -1920,
+            "y": 0,
+            "width": 3840,
+            "height": 1080,
+            "screen": "virtual_screen",
+            "unit": "display_coordinate",
+        },
+    )
+
+    result = controller._capture_screenshot(tmp_path / "shot.png", {"target": "desktop"})
+
+    assert result["action_coordinate_system"]["screen"] == "virtual_screen"
+    assert result["action_coordinate_system"]["x_range"] == [-1920, 1919]
+
+
+def test_windows_sendkeys_escapes_literals_and_supports_modifiers():
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    assert BrowserComputerController._windows_sendkeys_escape_text("a+b{c}\n") == "a{+}b{{}c{}}{ENTER}"
+    assert BrowserComputerController._windows_send_key("p", ["ctrl", "shift"]) == "^+p"
+    assert BrowserComputerController._windows_send_key("ctrl+escape") == "^{ESC}"
+
+
+def test_windows_drag_steps_and_scrolls_at_point(tmp_path, monkeypatch):
+    controller = _controller(tmp_path)
+    scripts = []
+    monkeypatch.setattr(controller, "_run_powershell", scripts.append)
+    monkeypatch.setattr(controller, "_resolve_action_point", lambda payload, **kwargs: ({"x": 45, "y": 55}, None))
+
+    controller._windows_desktop_action("computer.drag", {"x1": 1, "y1": 2, "x2": 30, "y2": 40})
+    controller._windows_desktop_action("computer.scroll", {"x": 10, "y": 20, "amount": -2})
+
+    assert "$steps = 12" in scripts[0]
+    assert "Start-Sleep -Milliseconds 15" in scripts[0]
+    assert "New-Object System.Drawing.Point(45, 55)" in scripts[1]
+    assert "mouse_event(0x0800, 0, 0, -240" in scripts[1]

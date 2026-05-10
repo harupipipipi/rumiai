@@ -4,7 +4,7 @@ import { MessageSquare } from "lucide-react";
 import type { ChatItem } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { api, type ChatContentBlock, type ChatMessage, type ComposerWidgetAction, type Conversation, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { api, conversationArtifactFileUrl, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
 import { deriveConversationTitle, formatRelativeTime, messageToText } from "./lib/chat";
 import { cn } from "./lib/cn";
 import { canExecuteComposerEndpointAction, isSafeLocalEndpoint } from "./lib/composerWidgets";
@@ -26,6 +26,12 @@ type PendingChatRequest = {
   status: string;
   toolNames: string[];
 };
+
+type ComposerCandidateMenuState = {
+  mode: "model";
+  query: string;
+  candidates: ModelCommandCandidate[];
+} | null;
 
 function useLocalStorage<T>(key: string, defaultValue: T): [T, (v: T | ((prev: T) => T)) => void] {
   const [value, setValue] = useState<T>(() => {
@@ -115,9 +121,11 @@ function normalizeBlocks(message: ChatMessage): ChatContentBlock[] {
 function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatUiMessage {
   const isUser = message.role === "user";
   const metadata = message.metadata ?? {};
+  const thinking = metadata.thinking as Record<string, unknown> | undefined;
   const attachedToolCount = Number(metadata.attached_tool_count ?? 0);
   return {
     id: message.id,
+    conversationId: message.conversation_id,
     role: isUser ? "user" : "agent",
     content: normalizeBlocks(message),
     rawText: messageToText(message),
@@ -129,7 +137,8 @@ function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatU
       : {
           executionTime: formatRelativeTime(message.created_at),
           modelName: profile?.display_name ?? String(message.model ?? ""),
-          thinkingLabel: String((metadata.thinking as Record<string, unknown> | undefined)?.state ?? ""),
+          thinkingLabel: String(thinking?.state ?? ""),
+          thinkingTranscript: String(thinking?.transcript ?? ""),
           attachedToolCount,
         },
   };
@@ -216,8 +225,106 @@ function compactPreviewValue(value: unknown): string {
   return String(value);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function basename(path: string): string {
+  const normalized = path.replace(/\\/g, "/");
+  return normalized.split("/").filter(Boolean).pop() || "artifact";
+}
+
+function isImagePath(path: string): boolean {
+  return /\.(png|jpe?g|gif|webp|svg)$/i.test(path);
+}
+
+function isImageDataUrl(value: string): boolean {
+  return /^data:image\/[a-z0-9.+-]+;base64,/i.test(value);
+}
+
+function dataUrlName(value: string): string {
+  const match = value.match(/^data:image\/([a-z0-9.+-]+);/i);
+  const extension = match?.[1]?.replace("jpeg", "jpg").split("+")[0] || "png";
+  return `screenshot.${extension}`;
+}
+
+function collectArtifactPaths(value: unknown, paths: string[] = [], seen = new Set<string>()): string[] {
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectArtifactPaths(item, paths, seen));
+    return paths;
+  }
+  if (!isRecord(value)) return paths;
+
+  const preferredPath = stringValue(value.model_image_path) || stringValue(value.screenshot_path) || stringValue(value.path);
+  if (preferredPath && !seen.has(preferredPath)) {
+    seen.add(preferredPath);
+    paths.push(preferredPath);
+  }
+  Object.entries(value).forEach(([key, entry]) => {
+    if (key === "path" || key === "screenshot_path" || key === "model_image_path" || key === "data_url" || key === "dataUrl") return;
+    collectArtifactPaths(entry, paths, seen);
+  });
+  return paths;
+}
+
+function collectInlineImageUrls(value: unknown, urls: string[] = [], seen = new Set<string>()): string[] {
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectInlineImageUrls(item, urls, seen));
+    return urls;
+  }
+  if (!isRecord(value)) return urls;
+
+  const dataUrl = stringValue(value.data_url) || stringValue(value.dataUrl);
+  if (dataUrl && isImageDataUrl(dataUrl) && !seen.has(dataUrl)) {
+    seen.add(dataUrl);
+    urls.push(dataUrl);
+  }
+  Object.entries(value).forEach(([key, entry]) => {
+    if (key === "data_url" || key === "dataUrl") return;
+    collectInlineImageUrls(entry, urls, seen);
+  });
+  return urls;
+}
+
+function streamActivityEventKey(event: ChatActivityEvent): string {
+  const callId = typeof event.tool_call_id === "string" ? event.tool_call_id.trim() : "";
+  if (callId) return `call:${callId}`;
+  const toolName = typeof event.tool_name === "string" ? event.tool_name.trim() : "";
+  const args = event.arguments && typeof event.arguments === "object" ? event.arguments : {};
+  if (toolName) return `tool:${toolName}:${JSON.stringify(args)}`;
+  return `event:${event.type}:${event.phase ?? ""}:${event.message ?? ""}`;
+}
+
+function mergeStreamActivityEvent(base: ChatActivityEvent, update: ChatActivityEvent): ChatActivityEvent {
+  const merged: ChatActivityEvent = { ...base, ...update };
+  for (const key of ["arguments", "result", "artifact", "artifacts", "output", "message", "timestamp"]) {
+    if (merged[key] === undefined && base[key] !== undefined) {
+      merged[key] = base[key];
+    }
+  }
+  return merged;
+}
+
+function upsertStreamActivityEvent(events: ChatActivityEvent[], nextEvent: ChatActivityEvent): ChatActivityEvent[] {
+  const key = streamActivityEventKey(nextEvent);
+  const index = events.findIndex((event) => streamActivityEventKey(event) === key);
+  if (index === -1) return [...events, nextEvent];
+  return events.map((event, eventIndex) => (
+    eventIndex === index ? mergeStreamActivityEvent(event, nextEvent) : event
+  ));
+}
+
+function resultValuesForToolEvent(event: ChatActivityEvent): unknown[] {
+  return [event.result, event.artifact, event.artifacts, event.output].filter((value) => value !== undefined);
+}
+
 function toolPreviewsFromMessages(messages: ChatMessage[]): ToolPreviewItem[] {
-  return messages.flatMap((message) => (message.tool_logs ?? []).map((log, index) => {
+  return messages.flatMap((message) => {
+    const logPreviews = (message.tool_logs ?? []).flatMap((log, index) => {
     const toolName = String(log.tool_name ?? "tool");
     const result = log.result as Record<string, unknown> | undefined;
     const status = String(result?.status ?? "completed");
@@ -229,7 +336,7 @@ function toolPreviewsFromMessages(messages: ChatMessage[]): ToolPreviewItem[] {
       args ? `input:\n${args}` : "",
       output ? `result:\n${output}` : "",
     ].filter(Boolean).join("\n\n");
-    return {
+    const logPreview: ToolPreviewItem = {
       id: `message-tool-${message.id}-${index}`,
       toolStepId: toolName,
       timestamp: typeof log.timestamp === "number" ? log.timestamp : message.created_at,
@@ -240,7 +347,113 @@ function toolPreviewsFromMessages(messages: ChatMessage[]): ToolPreviewItem[] {
         content,
       },
     };
-  })).sort((a, b) => b.timestamp - a.timestamp);
+    const artifactPreviews: ToolPreviewItem[] = collectArtifactPaths(log.result).map((path, artifactIndex) => {
+      const name = basename(path);
+      const url = conversationArtifactFileUrl(message.conversation_id, path);
+      return {
+        id: `message-tool-artifact-${message.id}-${index}-${artifactIndex}`,
+        toolStepId: toolName,
+        timestamp: (typeof log.timestamp === "number" ? log.timestamp : message.created_at) + artifactIndex + 0.1,
+        data: isImagePath(path)
+          ? {
+              type: "image" as const,
+              url,
+              alt: name,
+              path,
+            }
+          : {
+              type: "file" as const,
+              filename: name,
+              size: "tool artifact",
+              path,
+              url,
+              downloadName: name,
+              content: `artifact: ${path}`,
+            },
+      };
+    });
+    return [logPreview, ...artifactPreviews];
+    });
+
+    const logKeys = new Set((message.tool_logs ?? []).map((log) => {
+      const callId = typeof log.tool_call_id === "string" ? log.tool_call_id.trim() : "";
+      if (callId) return `call:${callId}`;
+      return `tool:${log.tool_name ?? "tool"}:${JSON.stringify(log.arguments ?? {})}`;
+    }));
+    const eventMap = new Map<string, ChatActivityEvent>();
+    for (const event of message.events ?? []) {
+      if (typeof event.tool_name !== "string" || !event.tool_name.trim()) continue;
+      const key = streamActivityEventKey(event);
+      if (logKeys.has(key)) continue;
+      const existing = eventMap.get(key);
+      eventMap.set(key, existing ? mergeStreamActivityEvent(existing, event) : event);
+    }
+    const eventPreviews = [...eventMap.values()].flatMap((event, index) => {
+      const values = resultValuesForToolEvent(event);
+      if (values.length === 0) return [];
+      const toolName = String(event.tool_name ?? "tool");
+      const timestamp = typeof event.timestamp === "number" ? event.timestamp : message.created_at + index + 0.01;
+      const status = event.is_error === true ? "failed" : event.type === "tool_call_completed" || event.type === "tool_result" ? "completed" : "running";
+      const args = compactPreviewValue(event.arguments);
+      const output = compactPreviewValue(event.result ?? event.output ?? event.artifact ?? event.artifacts ?? "");
+      const content = [
+        `tool: ${toolName}`,
+        `status: ${status}`,
+        args ? `input:\n${args}` : "",
+        output ? `result:\n${output}` : "",
+      ].filter(Boolean).join("\n\n");
+      const eventPreview: ToolPreviewItem = {
+        id: `message-tool-event-${message.id}-${streamActivityEventKey(event)}`,
+        toolStepId: String(event.tool_call_id ?? toolName),
+        timestamp,
+        data: {
+          type: "file" as const,
+          filename: `${toolName}.tool`,
+          size: status,
+          content,
+        },
+      };
+      const fileArtifacts = values.flatMap((value) => collectArtifactPaths(value));
+      const pathPreviews: ToolPreviewItem[] = fileArtifacts.map((path, artifactIndex) => {
+        const name = basename(path);
+        const url = conversationArtifactFileUrl(message.conversation_id, path);
+        return {
+          id: `message-tool-event-artifact-${message.id}-${streamActivityEventKey(event)}-${artifactIndex}`,
+          toolStepId: String(event.tool_call_id ?? toolName),
+          timestamp: timestamp + artifactIndex + 0.1,
+          data: isImagePath(path)
+            ? {
+                type: "image" as const,
+                url,
+                alt: name,
+                path,
+              }
+            : {
+                type: "file" as const,
+                filename: name,
+                size: "tool artifact",
+                path,
+                url,
+                downloadName: name,
+                content: `artifact: ${path}`,
+              },
+        };
+      });
+      const inlinePreviews: ToolPreviewItem[] = values.flatMap((value) => collectInlineImageUrls(value)).map((url, imageIndex) => ({
+        id: `message-tool-event-inline-${message.id}-${streamActivityEventKey(event)}-${imageIndex}`,
+        toolStepId: String(event.tool_call_id ?? toolName),
+        timestamp: timestamp + fileArtifacts.length + imageIndex + 0.1,
+        data: {
+          type: "image" as const,
+          url,
+          alt: dataUrlName(url),
+        },
+      }));
+      return [eventPreview, ...pathPreviews, ...inlinePreviews];
+    });
+
+    return [...logPreviews, ...eventPreviews];
+  }).sort((a, b) => b.timestamp - a.timestamp);
 }
 
 function CanvasPeek({
@@ -319,6 +532,18 @@ function isAbortError(errorValue: unknown): boolean {
     && typeof errorValue === "object"
     && "name" in errorValue
     && String((errorValue as { name?: unknown }).name) === "AbortError",
+  );
+}
+
+function isActivityStreamEvent(event: ChatStreamEvent): event is ChatToolStreamEvent {
+  return (
+    event.type === "status"
+    || event.type === "tool_call"
+    || event.type === "tool_call_started"
+    || event.type === "tool_call_completed"
+    || event.type === "tool_result"
+    || event.type === "browser_screenshot"
+    || event.type === "approval_requested"
   );
 }
 
@@ -452,6 +677,109 @@ function favoriteModelProfiles(rawFavorites: unknown, profiles: ModelProfile[], 
   return fallback ? [fallback] : [];
 }
 
+function profileIdentity(profile: ModelProfile | null | undefined): string {
+  if (!profile) return "";
+  return profile.profile_id || profile.qualified_model_id || `${profile.provider_id ?? ""}/${profile.model_id ?? ""}`;
+}
+
+function profileDefaults(profile: ModelProfile | null | undefined): Record<string, unknown> {
+  if (!profile) return {};
+  const metadataDefaults = profile.metadata?.defaults;
+  if (metadataDefaults && typeof metadataDefaults === "object" && !Array.isArray(metadataDefaults)) {
+    return { ...(metadataDefaults as Record<string, unknown>), ...(profile.defaults ?? {}) };
+  }
+  return profile.defaults ?? {};
+}
+
+function profilePriceTier(profile: ModelProfile | null | undefined): string {
+  if (!profile) return "";
+  const defaults = profileDefaults(profile);
+  const pricing = profile.pricing ?? (profile.metadata?.pricing as Record<string, unknown> | undefined) ?? {};
+  const explicit = String(
+    pricing.tier
+    ?? pricing.price_tier
+    ?? defaults.price
+    ?? defaults.price_tier
+    ?? "",
+  ).toLowerCase();
+  if (explicit) return explicit;
+  const modelId = String(profile.model_id ?? profile.profile_id ?? "").toLowerCase();
+  if (defaults.large || defaults.heavy) return "high";
+  if (defaults.fast || /(?:mini|nano|lite|flash|free|small|cheap)/.test(modelId)) return "low";
+  return "";
+}
+
+function profileSupportsFast(profile: ModelProfile | null | undefined): boolean {
+  if (!profile) return false;
+  const defaults = profileDefaults(profile);
+  const tags = Array.isArray(profile.metadata?.tags) ? profile.metadata?.tags : [];
+  const traits = Array.isArray(profile.metadata?.traits) ? profile.metadata?.traits : [];
+  return Boolean(defaults.fast || tags.includes("fast") || traits.includes("fast_response"));
+}
+
+function profileSupportsThinking(profile: ModelProfile | null | undefined): boolean {
+  return Boolean(profile?.supports_thinking && profile.thinking_levels?.length);
+}
+
+function bestConfiguredCandidate(candidates: ModelProfile[]): ModelProfile | null {
+  if (candidates.length === 0) return null;
+  return [...candidates].sort((a, b) => {
+    const configured = Number(isConfiguredProfile(b)) - Number(isConfiguredProfile(a));
+    if (configured) return configured;
+    const local = Number(Boolean(b.local)) - Number(Boolean(a.local));
+    if (local) return local;
+    return (a.display_name || a.profile_id).localeCompare(b.display_name || b.profile_id);
+  })[0] ?? null;
+}
+
+function fastCandidateForProfile(activeProfile: ModelProfile | null, profiles: ModelProfile[]): ModelProfile | null {
+  if (!activeProfile) return null;
+  if (profileSupportsFast(activeProfile)) return activeProfile;
+  const providerId = String(activeProfile.provider_id ?? "");
+  const providerDefaults = activeProfile.metadata?.default_model_for;
+  const fastModel = providerDefaults && typeof providerDefaults === "object"
+    ? String((providerDefaults as Record<string, unknown>).fast ?? "")
+    : "";
+  if (providerId && fastModel) {
+    const providerFast = profiles.find((profile) => (
+      profile.provider_id === providerId
+      && (profile.model_id === fastModel || profile.qualified_model_id === `${providerId}/${fastModel}`)
+      && profileSupportsFast(profile)
+    ));
+    if (providerFast) return providerFast;
+  }
+  const sameModelKey = String(activeProfile.same_model_across_providers_key ?? activeProfile.model_id ?? "").toLowerCase();
+  const sameModelFast = profiles.filter((profile) => (
+    profileIdentity(profile) !== profileIdentity(activeProfile)
+    && profileSupportsFast(profile)
+    && String(profile.same_model_across_providers_key ?? profile.model_id ?? "").toLowerCase() === sameModelKey
+  ));
+  if (sameModelFast.length) return bestConfiguredCandidate(sameModelFast);
+  const providerFast = profiles.filter((profile) => (
+    profile.provider_id === providerId
+    && profileSupportsFast(profile)
+    && String(profile.type ?? "chat").toLowerCase() === "chat"
+  ));
+  return bestConfiguredCandidate(providerFast);
+}
+
+function priceCandidateForProfile(activeProfile: ModelProfile | null, profiles: ModelProfile[], tier: string): ModelProfile | null {
+  const normalizedTier = tier === "high" ? "high" : "low";
+  if (!activeProfile) return null;
+  if (profilePriceTier(activeProfile) === normalizedTier || profileDefaults(activeProfile)[`price_${normalizedTier}`]) {
+    return activeProfile;
+  }
+  const sameModelKey = String(activeProfile.same_model_across_providers_key ?? activeProfile.model_id ?? "").toLowerCase();
+  if (!sameModelKey) return null;
+  const sameModelCandidates = profiles.filter((profile) => (
+    profileIdentity(profile) !== profileIdentity(activeProfile)
+    && String(profile.same_model_across_providers_key ?? profile.model_id ?? "").toLowerCase() === sameModelKey
+    && (profilePriceTier(profile) === normalizedTier || Boolean(profileDefaults(profile)[`price_${normalizedTier}`]))
+  ));
+  if (sameModelCandidates.length) return bestConfiguredCandidate(sameModelCandidates);
+  return null;
+}
+
 function contextUsageFor(conversation: Conversation | null, profile: ModelProfile | null): ContextUsageInfo {
   const usedTokens = (conversation?.messages ?? []).reduce((total, message) => {
     const usage = message.usage ?? {};
@@ -511,8 +839,98 @@ function replaceChatIdInUrl(conversationId: string | null, pending?: boolean) {
   }
 }
 
+function parseSlashCommandInput(input: string, commands: ComposerCommandItem[]) {
+  const trimmed = input.trim();
+  if (!trimmed.startsWith("/") || trimmed.startsWith("//")) return null;
+  const match = trimmed.match(/^\/(\S+)(?:\s+([\s\S]*))?$/);
+  if (!match) return null;
+  const name = match[1].toLowerCase();
+  const command = commands.find((item) => {
+    const names = [item.id, item.name, ...(item.aliases ?? [])].map((value) => value.toLowerCase());
+    return names.includes(name);
+  });
+  if (!command) return null;
+
+  const rest = (match[2] ?? "").trim();
+  const args: Record<string, unknown> = {};
+  const specs = command.args ?? [];
+  if (specs.length === 1 && rest) {
+    args[specs[0].name] = rest;
+  } else if (specs.length > 1 && rest) {
+    const tokens = rest.split(/\s+/);
+    specs.forEach((spec, index) => {
+      if (index === specs.length - 1) {
+        const remainder = tokens.slice(index).join(" ");
+        if (remainder) args[spec.name] = remainder;
+      } else if (tokens[index]) {
+        args[spec.name] = tokens[index];
+      }
+    });
+  }
+  return { command, args, raw: trimmed };
+}
+
+export function parseCommandBoolean(value: unknown, fallback: boolean): boolean {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return fallback;
+    if (["false", "0", "off", "no", "n", "disable", "disabled"].includes(normalized)) return false;
+    if (["true", "1", "on", "yes", "y", "enable", "enabled"].includes(normalized)) return true;
+  }
+  return Boolean(value);
+}
+
+export function frontendCommandArgs(
+  parsedArgs: Record<string, unknown>,
+  backendArgs: unknown,
+): Record<string, unknown> {
+  return isRecord(backendArgs) ? { ...backendArgs } : parsedArgs;
+}
+
+export function keepSelectedToolsAfterSend(settingsValues: Record<string, Record<string, unknown>>): boolean {
+  return parseCommandBoolean(settingsValues.tools?.keep_selected_tools_after_send, false);
+}
+
+function commandSearchText(command: ComposerCommandItem): string {
+  return [
+    command.id,
+    command.name,
+    ...(command.aliases ?? []),
+    command.label,
+    command.description ?? "",
+  ].join(" ").toLowerCase();
+}
+
+function isModelCommand(command: ComposerCommandItem | undefined): boolean {
+  if (!command) return false;
+  return [command.id, command.name, ...(command.aliases ?? [])]
+    .map((value) => String(value ?? "").toLowerCase())
+    .includes("model");
+}
+
+function modelCandidateProfileId(candidate: ModelCommandCandidate): string {
+  return String(candidate.profile_id ?? candidate.qualified_model_id ?? "").trim();
+}
+
+function selectedModelProfileId(value: ComposerCommandExecuteResult["selected_model"]): string {
+  if (typeof value === "string") return value.trim();
+  if (value && typeof value === "object") return modelCandidateProfileId(value);
+  return "";
+}
+
+function modelCommandInputQuery(value: string): string | null {
+  const match = value.trim().match(/^\/models?(?:\s+([\s\S]*))?$/i);
+  if (!match) return null;
+  return String(match[1] ?? "").trim();
+}
+
 function pendingBrowserApproval(messages: ChatUiMessage[]): BrowserApproval | null {
   for (const message of [...messages].reverse()) {
+    if (message.role === "user") return null;
+    if (message.role !== "agent") continue;
     for (const log of [...(message.toolLogs ?? [])].reverse()) {
       if (log.tool_name !== "browser_computer") continue;
       const result = log.result as Record<string, unknown> | undefined;
@@ -536,11 +954,15 @@ export default function App() {
   const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
   const [settingsSections, setSettingsSections] = useState<SettingsSection[]>([]);
   const [settingsValues, setSettingsValues] = useState<Record<string, Record<string, unknown>>>({});
+  const [commandCatalog, setCommandCatalog] = useState<ComposerCommandItem[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
   const [input, setInput] = useLocalStorage("rumi-input", "");
+  const [composerCandidateMenu, setComposerCandidateMenu] = useState<ComposerCandidateMenuState>(null);
+  const [modelPickerRequestId, setModelPickerRequestId] = useState(0);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [requestedSettingsSectionId, setRequestedSettingsSectionId] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -562,7 +984,7 @@ export default function App() {
   const [codingDirectory, setCodingDirectory] = useState(".");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [droppedWidgets, setDroppedWidgets] = useState<DroppedWidget[]>([]);
-  const [selectedTools, setSelectedTools] = useState<ComposerExtensionItem[]>([]);
+  const [storedSelectedToolIds, setStoredSelectedToolIds] = useLocalStorage<string[]>("rumi-selected-tool-ids", []);
   const pendingStorageKey = "rumi-pending-chat-requests";
   const [pendingRequests, setPendingRequests] = useLocalStorage<Record<string, PendingChatRequest>>(pendingStorageKey, {});
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -582,13 +1004,16 @@ export default function App() {
   const favoriteProfiles = favoriteModelProfiles(settingsValues.models?.favorite_profiles, selectableModelProfiles, preferredModel);
   const thinkingLevels = (settingsValues.models?.thinking_level_by_profile ?? {}) as Record<string, unknown>;
   const selectedThinkingLevel = String(
-    settingsValues.models?.thinking_level
-    ?? thinkingLevels[profileKey(activeProfile, preferredModel)]
+    thinkingLevels[profileKey(activeProfile, preferredModel)]
+    ?? settingsValues.models?.thinking_level
     ?? activeProfile?.default_thinking_level
     ?? "medium",
   );
   const contextUsage = contextUsageFor(activeConversation, activeProfile);
   const composerExtensions = composerExtensionItems(sidebarItems);
+  const selectedTools = useMemo(() => storedSelectedToolIds
+    .map((toolId) => composerExtensions.find((tool) => tool.id === toolId))
+    .filter((tool): tool is ComposerExtensionItem => Boolean(tool)), [composerExtensions, storedSelectedToolIds]);
   const selectedToolIds = useMemo(() => selectedTools.map((tool) => tool.id), [selectedTools]);
   const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
   const pendingRequest = activeConversationId ? pendingRequests[activeConversationId] : null;
@@ -605,28 +1030,34 @@ export default function App() {
     return [
       ...previews,
       ...messageToolPreviews.filter((preview) => !seen.has(preview.id)),
-    ];
+    ].sort((a, b) => b.timestamp - a.timestamp);
   }, [messageToolPreviews, previews]);
   const canShowCanvas = hasCanvasItems(canvasPreviews, canvasMemo);
   const effectiveShowPreview = showPreview && canShowCanvas;
-  const composerCommands = [
-    {
-      id: "yolo",
-      label: "yolo",
-      description: "このチャットの tool 承認を自動化",
-      enabled: yoloMode,
-    },
-    {
-      id: "coding",
-      label: "coding",
-      description: "コーディングモードに切替",
-      enabled: mode === "coding",
-    },
-  ];
+  const composerCommands = useMemo(() => {
+    const showAdvanced = settingsValues.commands?.show_advanced_commands === true;
+    const fastCandidate = fastCandidateForProfile(activeProfile, selectableModelProfiles);
+    const priceLowCandidate = priceCandidateForProfile(activeProfile, selectableModelProfiles, "low");
+    const priceHighCandidate = priceCandidateForProfile(activeProfile, selectableModelProfiles, "high");
+    return commandCatalog
+      .filter((command) => command.visibility !== "hidden")
+      .filter((command) => showAdvanced || command.visibility === "default")
+      .filter((command) => !command.modes?.length || command.modes.includes(mode as ComposerCommandMode))
+      .filter((command) => command.id !== "fast" || Boolean(fastCandidate))
+      .filter((command) => command.id !== "price" || Boolean(priceLowCandidate || priceHighCandidate))
+      .filter((command) => command.id !== "think" || profileSupportsThinking(activeProfile))
+      .map((command) => ({
+        ...command,
+        active: command.id === "yolo" ? yoloMode : command.id === mode,
+        enabled: command.id === "yolo" ? yoloMode : command.id === mode,
+      }));
+  }, [activeProfile, commandCatalog, mode, selectableModelProfiles, settingsValues.commands?.show_advanced_commands, yoloMode]);
+  const modelCommandCandidates = composerCandidateMenu?.mode === "model" ? composerCandidateMenu.candidates : [];
   const unknownBlockStrategy = String(settingsValues.chat_rendering?.unknown_block_strategy ?? "hidden");
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
   const showActivityInMessages = settingsValues.general?.show_activity_in_messages !== false;
   const showRegion = (regionId: string) => !catalog?.shell || hasShellRegion(catalog, regionId);
+  const isActivityPreviewVisible = showRegion("activity_preview") && effectiveShowPreview;
   const operationsProfileAvailable = hasOperationsProfile(catalog);
 
   const updatePendingRequests = (updater: (current: Record<string, PendingChatRequest>) => Record<string, PendingChatRequest>) => {
@@ -703,12 +1134,39 @@ export default function App() {
   }
 
   async function refreshCatalog() {
-    const [nextCatalog, nextSettings, profilesResult] = await Promise.all([api.uiCatalog(), api.uiSettings(), api.listModelProfiles()]);
-    setCatalog(nextCatalog);
-    setModelProfiles(profilesResult.profiles);
-    setSettingsSections(nextSettings.sections);
-    setSettingsValues(nextSettings.values);
-    const defaultMode = nextSettings.values.preview?.default_mode;
+    const [catalogResult, settingsResult, profilesResult, commandsResult] = await Promise.allSettled([
+      api.uiCatalog(),
+      api.uiSettings(),
+      api.listModelProfiles(),
+      api.uiCommands(),
+    ]);
+    const nextCatalog = catalogResult.status === "fulfilled" ? catalogResult.value : null;
+    const nextSettings = settingsResult.status === "fulfilled" ? settingsResult.value : null;
+    if (nextCatalog) {
+      setCatalog(nextCatalog);
+    } else {
+      if (catalogResult.status === "rejected") console.error(catalogResult.reason);
+      setCatalog(null);
+    }
+    if (profilesResult.status === "fulfilled") {
+      setModelProfiles(profilesResult.value.profiles);
+    } else {
+      console.error(profilesResult.reason);
+      setModelProfiles([]);
+    }
+    if (nextSettings) {
+      setSettingsSections(nextSettings.sections);
+      setSettingsValues(nextSettings.values);
+    } else {
+      if (settingsResult.status === "rejected") console.error(settingsResult.reason);
+    }
+    if (commandsResult.status === "fulfilled") {
+      setCommandCatalog(commandsResult.value.commands);
+    } else {
+      console.error(commandsResult.reason);
+      setCommandCatalog([]);
+    }
+    const defaultMode = nextSettings?.values.preview?.default_mode;
     if (defaultMode === "auto" || defaultMode === "manual") {
       setPreviewMode(defaultMode);
     }
@@ -857,7 +1315,13 @@ export default function App() {
           setIsGenerating(false);
           void refreshConversations(conversation.id);
         }
-      }).catch(console.error);
+      }).catch((pollError) => {
+        console.error(pollError);
+        forgetPendingRequest(activeConversationId);
+        replaceChatIdInUrl(activeConversationId, false);
+        setIsGenerating(false);
+        setError(pollError instanceof Error ? pollError.message : "stream 状態の確認に失敗しました。");
+      });
     }, 1500);
     return () => window.clearInterval(interval);
   }, [activeConversationId, isConversationPending]);
@@ -890,11 +1354,15 @@ export default function App() {
   };
 
   const handleStopGenerating = () => {
+    const conversationId = activeConversationId;
+    if (conversationId) {
+      void api.stopMessage(conversationId).catch(console.error);
+    }
     currentAbortControllerRef.current?.abort();
     currentAbortControllerRef.current = null;
-    if (activeConversationId) {
-      forgetPendingRequest(activeConversationId);
-      replaceChatIdInUrl(activeConversationId, false);
+    if (conversationId) {
+      forgetPendingRequest(conversationId);
+      replaceChatIdInUrl(conversationId, false);
     }
     setIsGenerating(false);
     setIsNewChatLaunching(false);
@@ -919,9 +1387,19 @@ export default function App() {
       if (field?.type === "api_keys") {
         const payload = value && typeof value === "object" ? value as Record<string, unknown> : {};
         const providerId = String(payload.provider_id ?? "").trim();
-        const name = String(payload.name ?? payload.api_id ?? "").trim();
+        const apiId = String(payload.api_id ?? payload.name ?? "").trim();
+        const name = String(payload.name ?? apiId).trim();
         const secret = String(payload.value ?? "");
-        if (providerId && name && secret.trim()) {
+        const action = String(payload.action ?? "upsert").trim();
+        if (action === "delete" && providerId && apiId) {
+          void api.deleteProviderApiKey(providerId, apiId)
+            .then(() => refreshCatalog())
+            .catch(console.error);
+        } else if (action === "rename" && providerId && apiId && name) {
+          void api.renameProviderApiKey(providerId, apiId, name)
+            .then(() => refreshCatalog())
+            .catch(console.error);
+        } else if (providerId && name && secret.trim()) {
           void api.saveProviderApiKey(providerId, secret, { apiId: name, name })
             .then(() => refreshCatalog())
             .catch(console.error);
@@ -983,19 +1461,266 @@ export default function App() {
   };
 
   const toggleSelectedTool = (item: ComposerExtensionItem) => {
-    setSelectedTools((current) => {
-      if (current.some((selected) => selected.id === item.id)) {
-        return current.filter((selected) => selected.id !== item.id);
+    setStoredSelectedToolIds((current) => {
+      if (current.includes(item.id)) {
+        return current.filter((selectedId) => selectedId !== item.id);
       }
-      return [...current, item];
+      return [...current, item.id];
     });
   };
 
-  const handleComposerCommand = (commandId: string) => {
-    if (commandId === "yolo") {
-      setYoloMode((value) => !value);
-    } else if (commandId === "coding") {
-      setMode((value) => (value === "coding" ? "chat" : "coding"));
+  const runFrontendCommandAction = (
+    action: string | undefined,
+    command: ComposerCommandItem,
+    args: Record<string, unknown>,
+  ) => {
+    switch (action) {
+      case "open_model_picker": {
+        const query = String(args.query ?? "").trim().toLowerCase();
+        setComposerCandidateMenu(null);
+        if (!query) {
+          setModelPickerRequestId((value) => value + 1);
+          return;
+        }
+        if (query) {
+          const profile = selectableModelProfiles.find((item) => commandSearchText({
+            id: item.profile_id,
+            name: item.profile_id,
+            aliases: [item.qualified_model_id ?? "", `${item.provider_id ?? ""}/${item.model_id ?? ""}`],
+            label: item.display_name,
+            description: item.provider_display_name,
+            category: "model",
+            visibility: "default",
+            risk: "low",
+            execution: { type: "frontend", action: "open_model_picker" },
+          }).includes(query));
+          if (profile) {
+            handleModelProfileSelect(profile.profile_id);
+          } else {
+            setError(`"${query}" に一致する model が見つかりません。`);
+          }
+        }
+        return;
+      }
+      case "set_fast_mode": {
+        const enabled = parseCommandBoolean(args.enabled, true);
+        if (!enabled) {
+          handleThinkingLevelChange("medium");
+          return;
+        }
+        const candidate = fastCandidateForProfile(activeProfile, selectableModelProfiles);
+        if (!candidate) {
+          setError("このモデルには fast 対応モデル/プロバイダーがありません。");
+          return;
+        }
+        if (profileIdentity(candidate) !== profileIdentity(activeProfile)) {
+          handleModelProfileSelect(candidate.profile_id);
+        }
+        if (candidate.supports_thinking) {
+          const levels = candidate.thinking_levels?.length ? candidate.thinking_levels : ["low", "medium", "high"];
+          if (levels.includes("low")) handleThinkingLevelChange("low");
+        }
+        return;
+      }
+      case "set_price_mode": {
+        const tier = String(args.tier ?? "low").trim().toLowerCase() === "high" ? "high" : "low";
+        const candidate = priceCandidateForProfile(activeProfile, selectableModelProfiles, tier);
+        if (!candidate) {
+          setError(`このモデルには price=${tier} の候補がありません。`);
+          return;
+        }
+        if (profileIdentity(candidate) !== profileIdentity(activeProfile)) {
+          handleModelProfileSelect(candidate.profile_id);
+        }
+        return;
+      }
+      case "new_conversation":
+        handleNewTask();
+        return;
+      case "clear_composer_state":
+        setInput("");
+        setAttachedFiles([]);
+        setDroppedWidgets([]);
+        if (activeConversationId) {
+          forgetPendingRequest(activeConversationId);
+          replaceChatIdInUrl(activeConversationId, false);
+        }
+        return;
+      case "set_mode_coding":
+        setMode("coding");
+        return;
+      case "set_mode_chat":
+        setMode("chat");
+        return;
+      case "set_mode_agent":
+        setMode("agent");
+        return;
+      case "toggle_yolo":
+        setYoloMode((value) => parseCommandBoolean(args.enabled, !value));
+        return;
+      case "open_tool_picker": {
+        const query = String(args.query ?? "").trim().toLowerCase();
+        if (query) {
+          const item = composerExtensions.find((candidate) => (
+            `${candidate.id} ${candidate.label} ${candidate.description ?? ""}`.toLowerCase().includes(query)
+          ));
+          if (item) {
+            handleComposerExtensionSelect(item);
+          } else {
+            setError(`"${query}" に一致する tool が見つかりません。`);
+          }
+        }
+        return;
+      }
+      case "show_status":
+        setError(
+          `status: mode=${mode}, model=${activeProfile?.display_name ?? preferredModel}, thinking=${selectedThinkingLevel}, yolo=${yoloMode ? "on" : "off"}, tools=${selectedTools.length}`,
+        );
+        return;
+      case "open_settings":
+      case "open_permissions":
+      case "open_theme_settings":
+      case "open_keymap_settings":
+        if (action === "open_settings" && args.section) {
+          const requested = String(args.section).trim().toLowerCase();
+          const matchedSection = settingsSections.find((section) => (
+            section.id.toLowerCase() === requested
+            || section.label.toLowerCase() === requested
+          ));
+          setRequestedSettingsSectionId(matchedSection?.id ?? requested);
+        } else if (action === "open_permissions") {
+          setRequestedSettingsSectionId("permissions");
+        } else if (action === "open_theme_settings") {
+          setRequestedSettingsSectionId("theme");
+        } else if (action === "open_keymap_settings") {
+          setRequestedSettingsSectionId("keymap");
+        }
+        setIsSettingsOpen(true);
+        return;
+      case "open_command_help":
+        setError(composerCommands.map((item) => `/${item.name}: ${item.description ?? item.label}`).join("\n"));
+        return;
+      case "open_diff_preview":
+        setMode("coding");
+        setInput("Preview the current git diff.");
+        return;
+      case "start_review":
+        setMode("coding");
+        setInput("Review the current diff and call out bugs, risks, and missing tests.");
+        return;
+      case "open_branch_picker":
+        setMode("coding");
+        if (args.name) setInput(`Create or switch to branch ${String(args.name)}.`);
+        return;
+      case "prepare_test_run":
+        setMode("coding");
+        setInput(args.target ? `Run tests for ${String(args.target)}.` : "Run the recommended tests.");
+        return;
+      case "prepare_lint_run":
+        setMode("coding");
+        setInput("Run lint and formatting checks.");
+        return;
+      case "open_file_search":
+        setMode("coding");
+        if (args.query) setInput(`Find workspace files matching ${String(args.query)}.`);
+        return;
+      default:
+        if (command.risk === "high") {
+          setError(`/${command.name} は high risk command のため approval center 経由で実行してください。`);
+        }
+    }
+  };
+
+  const executeComposerCommand = async (commandId: string, rawInput = `/${commandId}`): Promise<boolean | void> => {
+    const parsed = parseSlashCommandInput(rawInput, commandCatalog) ?? {
+      command: commandCatalog.find((command) => command.id === commandId || command.name === commandId),
+      args: {},
+      raw: rawInput,
+    };
+    if (!parsed.command) {
+      setError(`/${commandId} は未登録の command です。`);
+      return;
+    }
+    try {
+      setError(null);
+      const commandArgs = { ...parsed.args };
+      if (parsed.command.id === "think" && commandArgs.level && activeProfile) {
+        commandArgs.scope = "profile";
+        commandArgs.profile_id = profileKey(activeProfile, preferredModel);
+      }
+      const result = await api.executeUiCommand({
+        command: parsed.command.name ?? parsed.command.id,
+        args: commandArgs,
+        conversation_id: activeConversationId,
+        mode: mode as ComposerCommandMode,
+      });
+      if (result.requires_approval) {
+        setError(result.message ?? `/${parsed.command.name} は approval center 経由で実行してください。`);
+        return;
+      }
+      if (isModelCommand(parsed.command)) {
+        if (result.action === "show_model_candidates") {
+          setComposerCandidateMenu({
+            mode: "model",
+            query: String(result.args?.query ?? commandArgs.query ?? "").trim(),
+            candidates: Array.isArray(result.candidates) ? result.candidates : [],
+          });
+          if (result.message) setError(result.message);
+          return false;
+        }
+        if (result.action === "open_model_picker") {
+          setComposerCandidateMenu(null);
+          setModelPickerRequestId((value) => value + 1);
+          if (result.message) setError(result.message);
+          return true;
+        }
+        if (result.executed) {
+          const selectedProfileId = selectedModelProfileId(result.selected_model);
+          setComposerCandidateMenu(null);
+          setInput("");
+          if (result.message) setError(result.message);
+          await refreshCatalog();
+          if (activeConversationId && selectedProfileId) {
+            const conversation = await api.updateConversation(activeConversationId, { model: selectedProfileId });
+            setActiveConversation(conversation);
+            await refreshConversations(conversation.id);
+          } else if (activeConversationId) {
+            await refreshConversations(activeConversationId);
+          }
+          return true;
+        }
+      }
+
+      if (result.action || parsed.command.execution.type === "frontend") {
+        const frontendAction = parsed.command.execution.type === "frontend" ? parsed.command.execution.action : undefined;
+        runFrontendCommandAction(result.action ?? frontendAction, parsed.command, frontendCommandArgs(parsed.args, result.args));
+      }
+      if (parsed.command.execution.type === "rumi_function") {
+        await refreshCatalog();
+      }
+    } catch (commandError) {
+      setError(commandError instanceof Error ? commandError.message : "command execution に失敗しました。");
+    }
+  };
+
+  const handleComposerCommand = (commandId: string, rawInput?: string) => {
+    void executeComposerCommand(commandId, rawInput);
+  };
+
+  const handleModelCommandCandidateSelect = (candidate: ModelCommandCandidate) => {
+    const profileId = modelCandidateProfileId(candidate);
+    if (!profileId) {
+      setError("Selected model candidate is missing a profile id.");
+      return;
+    }
+    void executeComposerCommand("model", `/model ${profileId}`);
+  };
+
+  const handleComposerInputChange = (value: string) => {
+    setInput(value);
+    const modelQuery = modelCommandInputQuery(value);
+    if (composerCandidateMenu && modelQuery !== composerCandidateMenu.query) {
+      setComposerCandidateMenu(null);
     }
   };
 
@@ -1046,7 +1771,7 @@ export default function App() {
       const toolId = widget.sourceItemId || widget.id;
       const item = composerExtensions.find((candidate) => candidate.id === toolId);
       if (item) {
-        setSelectedTools((current) => current.some((selected) => selected.id === item.id) ? current : [...current, item]);
+        setStoredSelectedToolIds((current) => current.includes(item.id) ? current : [...current, item.id]);
       }
     }
   };
@@ -1062,6 +1787,17 @@ export default function App() {
       }
     }
     setDroppedWidgets((prev) => prev.map((w) => (w.id === widgetId ? { ...w, enabled: !w.enabled } : w)));
+  };
+
+  const handleToolBatchSet = (toolIds: string[], enabled: boolean) => {
+    const validIds = new Set(composerExtensions.map((tool) => tool.id));
+    const requestedIds = [...new Set(toolIds.filter((toolId) => validIds.has(toolId)))];
+    if (requestedIds.length === 0) return;
+    setStoredSelectedToolIds((current) => {
+      if (enabled) return [...new Set([...current, ...requestedIds])];
+      const requestedIdSet = new Set(requestedIds);
+      return current.filter((toolId) => !requestedIdSet.has(toolId));
+    });
   };
 
   const handleComposerEndpointAction = async (widget: DroppedWidget, action: Extract<ComposerWidgetAction, { type: "call_endpoint" }>) => {
@@ -1284,7 +2020,15 @@ export default function App() {
     event.preventDefault();
     if ((!input.trim() && attachedFiles.length === 0) || isGenerating) return;
 
-    const userText = input.trim() || "添付ファイルを確認してください。";
+    const commandInput = parseSlashCommandInput(input, commandCatalog);
+    if (commandInput) {
+      const shouldClearInput = await executeComposerCommand(commandInput.command.id, commandInput.raw);
+      if (shouldClearInput !== false) setInput("");
+      return;
+    }
+
+    const trimmedInput = input.trim();
+    const userText = (trimmedInput.startsWith("//") ? trimmedInput.slice(1) : trimmedInput) || "添付ファイルを確認してください。";
     const submittedAttachments = attachedFiles;
     const wasNewConversation = isNewConversation;
     setIsGenerating(true);
@@ -1295,6 +2039,7 @@ export default function App() {
     setInput("");
     setAttachedFiles([]);
     let submittedConversationId: string | null = null;
+    const shouldKeepSelectedToolsAfterSend = keepSelectedToolsAfterSend(settingsValues);
     const selectedToolLabels = [
       ...selectedTools.map((item) => item.label || item.id),
     ];
@@ -1370,6 +2115,76 @@ export default function App() {
           };
         });
       };
+      const updateStreamingThinking = (delta: string) => {
+        setActiveConversation((current) => {
+          if (!current || current.id !== conversation.id) return current;
+          const existing = current.messages.find((message) => message.id === assistantDraft.id);
+          const nextThinking = (message: ChatMessage) => {
+            const metadata = { ...(message.metadata ?? {}) };
+            const thinking = metadata.thinking as Record<string, unknown> | undefined;
+            metadata.thinking = {
+              ...(thinking ?? {}),
+              state: "streaming",
+              transcript: `${String(thinking?.transcript ?? "")}${delta}`,
+            };
+            return { ...message, metadata };
+          };
+          if (!existing) {
+            return {
+              ...current,
+              messages: [...current.messages, nextThinking(assistantDraft)],
+            };
+          }
+          return {
+            ...current,
+            messages: current.messages.map((message) => message.id === assistantDraft.id ? nextThinking(message) : message),
+          };
+        });
+      };
+      const updateStreamingActivity = (streamEvent: ChatStreamEvent) => {
+        if (!isActivityStreamEvent(streamEvent)) return;
+        const activityEvent: ChatActivityEvent = { ...streamEvent };
+        setActiveConversation((current) => {
+          if (!current || current.id !== conversation.id) return current;
+          const existing = current.messages.find((message) => message.id === assistantDraft.id);
+          const appendEvent = (message: ChatMessage): ChatMessage => ({
+            ...message,
+            events: upsertStreamActivityEvent(message.events ?? [], activityEvent),
+          });
+          if (!existing) {
+            return {
+              ...current,
+              messages: [...current.messages, appendEvent(assistantDraft)],
+            };
+          }
+          return {
+            ...current,
+            messages: current.messages.map((message) => message.id === assistantDraft.id ? appendEvent(message) : message),
+          };
+        });
+
+        const status = typeof activityEvent.message === "string" && activityEvent.message.trim()
+          ? activityEvent.message.trim()
+          : pendingRequests[conversation.id]?.status ?? `${activeProfile?.display_name ?? preferredModel} が思考中`;
+        const toolName = typeof activityEvent.tool_name === "string" ? activityEvent.tool_name.trim() : "";
+        updatePendingRequests((current) => {
+          const existing = current[conversation.id] ?? {
+            conversationId: conversation.id,
+            startedAt: Date.now(),
+            status,
+            toolNames: selectedToolLabels,
+          };
+          const toolNames = toolName ? [...new Set([...existing.toolNames, toolName])] : existing.toolNames;
+          return {
+            ...current,
+            [conversation.id]: {
+              ...existing,
+              status,
+              toolNames,
+            },
+          };
+        });
+      };
       const replaceStreamingAssistant = (message: ChatMessage) => {
         setActiveConversation((current) => {
           if (!current || current.id !== conversation.id) return current;
@@ -1409,7 +2224,7 @@ export default function App() {
           ...(selectedToolIds.length ? { selected_tools: selectedToolIds } : {}),
         },
         attachments: submittedAttachments,
-        tools: selectedToolIds,
+        tools: selectedToolIds.length ? selectedToolIds : undefined,
         metadata: {
           mode: isOperationsMode ? "operations_company" : "chat",
           ...(isOperationsMode ? {
@@ -1425,13 +2240,17 @@ export default function App() {
             .map(({ id, type, label, widgetKind, sourceItemId }) => ({ id, type, label, widgetKind, sourceItemId })),
         },
       }, {
+        onEvent: updateStreamingActivity,
         onDelta: updateStreamingAssistant,
+        onThinkingDelta: updateStreamingThinking,
         onMessage: replaceStreamingAssistant,
         signal: abortController.signal,
       });
       setAttachedFiles([]);
-      setSelectedTools([]);
       setDroppedWidgets([]);
+      if (!shouldKeepSelectedToolsAfterSend) {
+        setStoredSelectedToolIds([]);
+      }
       forgetPendingRequest(conversation.id);
       replaceChatIdInUrl(conversation.id, false);
 
@@ -1453,6 +2272,8 @@ export default function App() {
       }
       if (submittedConversationId && !isUnloadingRef.current && document.visibilityState !== "hidden") {
         forgetPendingRequest(submittedConversationId);
+        replaceChatIdInUrl(submittedConversationId, false);
+        await refreshConversations(submittedConversationId).catch(console.error);
       }
       setInput(userText);
       setAttachedFiles(submittedAttachments);
@@ -1484,6 +2305,8 @@ export default function App() {
       inlineExtensions={composerExtensions}
       belowExtensions={[]}
       commands={composerCommands}
+      modelCommandCandidates={modelCommandCandidates}
+      modelPickerRequestId={modelPickerRequestId}
       yoloMode={yoloMode}
       mode={mode}
       codingContext={codingContext}
@@ -1492,10 +2315,12 @@ export default function App() {
       selectedToolIds={selectedToolIds}
       onExtensionSelect={handleComposerExtensionSelect}
       onCommandSelect={handleComposerCommand}
+      onModelCommandCandidateSelect={handleModelCommandCandidateSelect}
+      onModelCommandCandidatesClose={() => setComposerCandidateMenu(null)}
       onModelProfileSelect={handleModelProfileSelect}
       onProviderApiKeySave={handleProviderApiKeySave}
       onThinkingLevelChange={handleThinkingLevelChange}
-      onInputChange={setInput}
+      onInputChange={handleComposerInputChange}
       onSubmit={handleSubmit}
       onStopGenerating={handleStopGenerating}
       onModeChange={handleModeChange}
@@ -1546,8 +2371,8 @@ export default function App() {
           </div>
         )}
 
-        <main className="flex-1 flex min-w-0 bg-[#09090b] relative">
-          <div className={cn("flex-1 flex flex-col min-w-0", effectiveShowPreview && "border-r border-zinc-800/40")}>
+        <main className={cn("rumi-workspace-main flex-1 flex min-w-0 bg-[#09090b] relative", isActivityPreviewVisible && "has-activity-preview")}>
+          <div className={cn("rumi-chat-pane flex-1 flex flex-col min-w-0", isActivityPreviewVisible && "border-r border-zinc-800/40")}>
             {showRegion("chat_header") && (
               <Renderers.chatHeader
                 title={activeChatTitle}
@@ -1625,17 +2450,19 @@ export default function App() {
             )}
           </div>
 
-          {showRegion("activity_preview") && effectiveShowPreview && (
-            <Renderers.toolPreviewPanel
-              previews={canvasPreviews}
-              showPreview={effectiveShowPreview}
-              onClose={() => setShowPreview(false)}
-              previewMode={previewMode}
-              onModeChange={setPreviewMode}
-              activePreviewId={activePreviewId}
-              memo={canvasMemo}
-              onMemoChange={setCanvasMemo}
-            />
+          {isActivityPreviewVisible && (
+            <aside className="rumi-activity-preview-pane" aria-label="Activity preview">
+              <Renderers.toolPreviewPanel
+                previews={canvasPreviews}
+                showPreview={effectiveShowPreview}
+                onClose={() => setShowPreview(false)}
+                previewMode={previewMode}
+                onModeChange={setPreviewMode}
+                activePreviewId={activePreviewId}
+                memo={canvasMemo}
+                onMemoChange={setCanvasMemo}
+              />
+            </aside>
           )}
         </main>
 
@@ -1656,6 +2483,7 @@ export default function App() {
               tags: item.tags ?? [],
               ui: item.ui,
             })}
+            onToolBatchSet={handleToolBatchSet}
             onPanelAction={handlePanelAction}
           />
         )}
@@ -1664,6 +2492,7 @@ export default function App() {
       {showRegion("settings_modal") && (
         <Renderers.settingsModal
           isOpen={isSettingsOpen}
+          activeSectionId={requestedSettingsSectionId}
           catalog={catalog}
           health={health}
           previewsCount={canvasPreviews.length}

@@ -1,5 +1,9 @@
 """Media処理ドメインロジック"""
+
 import os
+import shutil
+import subprocess
+import sys
 
 
 def read_image(path):
@@ -74,7 +78,7 @@ def read_clipboard():
 
 
 def write_clipboard(content):
-    """クリップボードに書き込む（スタブ実装）。
+    """クリップボードに書き込む。
 
     Args:
         content: 書き込む内容
@@ -82,7 +86,23 @@ def write_clipboard(content):
     Returns:
         bool: 成功した場合 True
     """
-    return True
+    text = str(content)
+    if sys.platform == "darwin":
+        subprocess.run(["pbcopy"], input=text, text=True, check=True)
+        return True
+    if os.name == "nt":
+        subprocess.run(["clip"], input=text, text=True, check=True)
+        return True
+    for command in ("wl-copy", "xclip", "xsel"):
+        if shutil.which(command):
+            args = [command]
+            if command == "xclip":
+                args.extend(["-selection", "clipboard"])
+            elif command == "xsel":
+                args.extend(["--clipboard", "--input"])
+            subprocess.run(args, input=text, text=True, check=True)
+            return True
+    raise RuntimeError("system clipboard writer is not available")
 
 
 def take_screenshot():

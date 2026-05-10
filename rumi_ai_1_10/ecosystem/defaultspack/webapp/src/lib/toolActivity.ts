@@ -1,10 +1,11 @@
-import type { ChatActivityEvent, ToolLogEntry } from "./api";
+import { conversationArtifactFileUrl, type ChatActivityEvent, type ToolLogEntry } from "./api";
 
 export type ToolActivityStatus = "running" | "completed" | "failed";
 
 export type ToolActivityItem = {
   id: string;
   toolName: string;
+  toolCallId?: string;
   folder: string;
   folderLabel: string;
   input: string;
@@ -12,12 +13,20 @@ export type ToolActivityItem = {
   detail: string;
   status: ToolActivityStatus;
   timestamp?: number | string;
+  artifacts?: ToolActivityArtifact[];
 };
 
 export type ToolActivityGroup = {
   id: string;
   label: string;
   items: ToolActivityItem[];
+};
+
+export type ToolActivityArtifact = {
+  name: string;
+  path: string;
+  url?: string;
+  kind: "image" | "file";
 };
 
 const FOLDER_RULES: Array<[RegExp, string, string]> = [
@@ -77,11 +86,19 @@ export function summarizeToolArguments(toolName: string, args?: Record<string, u
   if (lowerName.includes("subagent") || lowerName.includes("agent")) {
     return pickString(args, ["task", "title", "prompt"]);
   }
-  if (lowerName.includes("browser")) {
-    return pickString(args, ["url", "action"]);
-  }
-  if (lowerName.includes("computer")) {
-    return pickString(args, ["action", "text", "key"]);
+  if (lowerName.includes("browser") || lowerName.includes("computer")) {
+    const action = pickString(args, ["action"]);
+    const target = pickString(args, ["url", "app", "application", "browser", "name", "title"]);
+    const text = pickString(args, ["text", "key"]);
+    const x = pickString(args, ["x"]);
+    const y = pickString(args, ["y"]);
+    const x1 = pickString(args, ["x1", "from_x"]);
+    const y1 = pickString(args, ["y1", "from_y"]);
+    const x2 = pickString(args, ["x2", "to_x"]);
+    const y2 = pickString(args, ["y2", "to_y"]);
+    const coords = x && y ? `(${x}, ${y})` : "";
+    const dragCoords = x1 && y1 && x2 && y2 ? `(${x1}, ${y1}) -> (${x2}, ${y2})` : "";
+    return [action, target, text, dragCoords || coords].filter(Boolean).join(" ");
   }
   if (lowerName.includes("terminal") || lowerName.includes("exec") || lowerName.includes("shell")) {
     return pickString(args, ["command", "cmd"]);
@@ -107,9 +124,88 @@ function summarizeToolResult(toolName: string, result: unknown): string {
   return compact(data, 120);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object";
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function basename(path: string): string {
+  const normalized = path.replace(/\\/g, "/");
+  return normalized.split("/").filter(Boolean).pop() || "artifact";
+}
+
+function isImagePath(path: string): boolean {
+  return /\.(png|jpe?g|gif|webp|svg)$/i.test(path);
+}
+
+function isImageDataUrl(value: string): boolean {
+  return /^data:image\/[a-z0-9.+-]+;base64,/i.test(value);
+}
+
+function dataUrlName(value: string): string {
+  const match = value.match(/^data:image\/([a-z0-9.+-]+);/i);
+  const extension = match?.[1]?.replace("jpeg", "jpg").split("+")[0] || "png";
+  return `screenshot.${extension}`;
+}
+
+function collectArtifacts(value: unknown, conversationId?: string, artifacts: ToolActivityArtifact[] = [], seen = new Set<string>()): ToolActivityArtifact[] {
+  if (!isRecord(value)) {
+    if (Array.isArray(value)) {
+      for (const item of value) collectArtifacts(item, conversationId, artifacts, seen);
+    }
+    return artifacts;
+  }
+
+  const inlineUrl = stringValue(value.data_url) || stringValue(value.dataUrl);
+  if (inlineUrl && isImageDataUrl(inlineUrl)) {
+    const key = `inline:${inlineUrl.length}:${inlineUrl.slice(0, 96)}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      artifacts.push({
+        name: pickString(value, ["name", "filename", "title"]) || dataUrlName(inlineUrl),
+        path: key,
+        kind: "image",
+        url: inlineUrl,
+      });
+    }
+  }
+
+  const preferredPath = stringValue(value.model_image_path) || stringValue(value.screenshot_path) || stringValue(value.path);
+  if (preferredPath) {
+    const key = preferredPath;
+    if (!seen.has(key)) {
+      seen.add(key);
+      const kind = isImagePath(preferredPath) ? "image" : "file";
+      artifacts.push({
+        name: basename(preferredPath),
+        path: preferredPath,
+        kind,
+        url: conversationId ? conversationArtifactFileUrl(conversationId, preferredPath) : undefined,
+      });
+    }
+  }
+
+  for (const [key, item] of Object.entries(value)) {
+    if (key === "path" || key === "screenshot_path" || key === "model_image_path" || key === "data_url" || key === "dataUrl") continue;
+    if (isRecord(item) || Array.isArray(item)) collectArtifacts(item, conversationId, artifacts, seen);
+  }
+  return artifacts;
+}
+
 function statusForLog(log: ToolLogEntry): ToolActivityStatus {
   const result = log.result;
-  if (result && typeof result === "object" && (result as Record<string, unknown>).status === "error") {
+  if (!isRecord(result)) return "completed";
+  const data = isRecord(result.data) ? result.data : result;
+  const widget = isRecord(data.widget) ? data.widget : {};
+  if (
+    result.status === "error" ||
+    data.status === "error" ||
+    data.is_error === true ||
+    widget.is_error === true
+  ) {
     return "failed";
   }
   return "completed";
@@ -123,9 +219,76 @@ function eventKey(event: ChatActivityEvent): string {
   return `${event.tool_name ?? "tool"}:${JSON.stringify(args)}`;
 }
 
+function isToolActivityEvent(event: ChatActivityEvent): boolean {
+  return (
+    event.type === "tool_call" ||
+    event.type === "tool_call_started" ||
+    event.type === "tool_call_completed" ||
+    event.type === "tool_result" ||
+    event.type === "approval_requested" ||
+    event.phase === "tool_call" ||
+    event.phase === "tool_call_started" ||
+    event.phase === "tool_call_completed" ||
+    event.phase === "tool_result" ||
+    event.phase === "approval_requested"
+  );
+}
+
+function eventRank(event: ChatActivityEvent): number {
+  if (
+    event.type === "tool_call_completed" ||
+    event.type === "tool_result" ||
+    event.phase === "tool_call_completed" ||
+    event.phase === "tool_result"
+  ) {
+    return 2;
+  }
+  if (event.type === "approval_requested" || event.phase === "approval_requested") return 1;
+  return 0;
+}
+
+function statusForEvent(event: ChatActivityEvent): ToolActivityStatus {
+  if (
+    event.type === "tool_call_completed" ||
+    event.type === "tool_result" ||
+    event.phase === "tool_call_completed" ||
+    event.phase === "tool_result"
+  ) {
+    const result = event.result;
+    if (event.is_error === true || (isRecord(result) && statusForLog({ result }) === "failed")) return "failed";
+    return "completed";
+  }
+  return "running";
+}
+
+function mergeActivityEvents(base: ChatActivityEvent, update: ChatActivityEvent): ChatActivityEvent {
+  const merged: ChatActivityEvent = { ...base, ...update };
+  for (const key of ["arguments", "result", "artifact", "artifacts", "output", "message", "timestamp"]) {
+    if (merged[key] === undefined && base[key] !== undefined) {
+      merged[key] = base[key];
+    }
+  }
+  return merged;
+}
+
+function resultValueForEvent(event: ChatActivityEvent): unknown {
+  return event.result ?? event.output ?? event.artifact ?? event.artifacts;
+}
+
+function collectEventArtifacts(event: ChatActivityEvent, conversationId?: string): ToolActivityArtifact[] {
+  const artifacts: ToolActivityArtifact[] = [];
+  const seen = new Set<string>();
+  collectArtifacts(event.result, conversationId, artifacts, seen);
+  collectArtifacts(event.artifact, conversationId, artifacts, seen);
+  collectArtifacts(event.artifacts, conversationId, artifacts, seen);
+  collectArtifacts(event.output, conversationId, artifacts, seen);
+  return artifacts;
+}
+
 export function buildToolActivityGroups(
   toolLogs: ToolLogEntry[] = [],
   events: ChatActivityEvent[] = [],
+  options: { conversationId?: string } = {},
 ): ToolActivityGroup[] {
   const fromLogs = toolLogs
     .filter((log) => typeof log.tool_name === "string" && log.tool_name.trim())
@@ -138,6 +301,7 @@ export function buildToolActivityGroups(
       return {
         id: `log-${index}-${toolName}`,
         toolName,
+        toolCallId: typeof log.tool_call_id === "string" ? log.tool_call_id : undefined,
         folder: folder.id,
         folderLabel: folder.label,
         input: argumentSummary,
@@ -145,6 +309,7 @@ export function buildToolActivityGroups(
         detail: resultSummary,
         status: statusForLog(log),
         timestamp: log.timestamp,
+        artifacts: collectArtifacts(log.result, options.conversationId),
       };
     });
 
@@ -154,34 +319,44 @@ export function buildToolActivityGroups(
       return id || `${log.tool_name ?? "tool"}:${JSON.stringify(log.arguments ?? {})}`;
     }),
   );
-  const runningEvents = events
-    .filter((event) => (
-      event.type === "tool_call" ||
-      event.type === "tool_call_started" ||
-      event.phase === "tool_call" ||
-      event.phase === "tool_call_started"
-    ) && typeof event.tool_name === "string")
-    .filter((event) => !logKeys.has(eventKey(event)))
+  const eventsByKey = new Map<string, ChatActivityEvent>();
+  for (const event of events) {
+    if (!isToolActivityEvent(event) || typeof event.tool_name !== "string") continue;
+    const key = eventKey(event);
+    if (logKeys.has(key)) continue;
+    const existing = eventsByKey.get(key);
+    if (!existing || eventRank(event) >= eventRank(existing)) {
+      eventsByKey.set(key, existing ? mergeActivityEvents(existing, event) : event);
+    } else {
+      eventsByKey.set(key, mergeActivityEvents(event, existing));
+    }
+  }
+  const eventItems = [...eventsByKey.values()]
     .map((event, index): ToolActivityItem => {
       const toolName = String(event.tool_name);
       const args = event.arguments && typeof event.arguments === "object" ? event.arguments as Record<string, unknown> : {};
       const folder = toolFolderFor(toolName);
       const argumentSummary = summarizeToolArguments(toolName, args);
+      const status = statusForEvent(event);
+      const defaultDetail = status === "running" ? "使用中" : status === "failed" ? "失敗" : "完了";
+      const resultSummary = summarizeToolResult(toolName, resultValueForEvent(event));
       return {
         id: `event-${index}-${toolName}`,
         toolName,
+        toolCallId: typeof event.tool_call_id === "string" ? event.tool_call_id : undefined,
         folder: folder.id,
         folderLabel: folder.label,
         input: argumentSummary,
         title: argumentSummary ? `${folder.label} / ${toolName}: ${argumentSummary}` : `${folder.label} / ${toolName}`,
-        detail: String(event.message ?? "使用中"),
-        status: "running",
+        detail: resultSummary || String(event.message ?? defaultDetail),
+        status,
         timestamp: event.timestamp,
+        artifacts: collectEventArtifacts(event, options.conversationId),
       };
     });
 
   const byFolder = new Map<string, ToolActivityGroup>();
-  for (const item of [...fromLogs, ...runningEvents]) {
+  for (const item of [...fromLogs, ...eventItems]) {
     const existing = byFolder.get(item.folder);
     if (existing) {
       existing.items.push(item);

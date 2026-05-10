@@ -39,6 +39,10 @@ def _with_legacy_provider_fields(provider: Dict[str, Any]) -> Dict[str, Any]:
     capabilities = set(item.get("capabilities", []))
     kind = str(item.get("kind") or "")
     metadata = dict(item.get("metadata", {}))
+    default_model_for = item.get("default_model_for")
+    if isinstance(default_model_for, dict):
+        item["default_model_for"] = {str(key): str(value) for key, value in default_model_for.items()}
+        metadata["default_model_for"] = dict(item["default_model_for"])
     item.setdefault("category", kind)
     item["configured"] = bool(availability.get("configured"))
     item["configured_envs"] = configured_envs
@@ -72,9 +76,11 @@ def _supports_thinking(model: Dict[str, Any]) -> bool:
     model_id = str(model.get("model_id") or model.get("id") or "").lower()
     if model_type not in {"chat", "reasoning"}:
         return False
+    if model.get("supports_thinking") is not None:
+        return bool(model.get("supports_thinking"))
     if bool(model.get("supports_thinking")):
         return True
-    return any(token in model_id for token in ("gpt-5", "claude", "gemini", "gemma", "deepseek"))
+    return any(token in model_id for token in ("gpt-5", "claude", "gemini", "deepseek"))
 
 
 def _with_legacy_model_fields(model: Dict[str, Any]) -> Dict[str, Any]:
@@ -82,6 +88,8 @@ def _with_legacy_model_fields(model: Dict[str, Any]) -> Dict[str, Any]:
     canonical = _canonical_model_id(item)
     max_context = _model_context(item)
     supports_thinking = _supports_thinking(item)
+    defaults = dict(item.get("defaults", {})) if isinstance(item.get("defaults"), dict) else {}
+    pricing = dict(item.get("pricing", {})) if isinstance(item.get("pricing"), dict) else {}
     thinking_levels = item.get("thinking_levels")
     if not isinstance(thinking_levels, list):
         thinking_levels = ["low", "medium", "high", "xhigh"] if supports_thinking else []
@@ -92,12 +100,16 @@ def _with_legacy_model_fields(model: Dict[str, Any]) -> Dict[str, Any]:
     item["supports_thinking"] = supports_thinking
     item["thinking_levels"] = thinking_levels
     item["default_thinking_level"] = item.get("default_thinking_level", "medium" if supports_thinking else None)
+    item["defaults"] = defaults
+    item["pricing"] = pricing
     metadata = dict(item.get("metadata", {}))
     metadata.update(
         {
             "max_context": max_context,
             "supports_thinking": supports_thinking,
             "thinking_levels": thinking_levels,
+            "defaults": defaults,
+            "pricing": pricing,
         }
     )
     item["metadata"] = metadata
@@ -115,6 +127,8 @@ def _with_legacy_profile_fields(profile: Dict[str, Any]) -> Dict[str, Any]:
         "thinking_levels": item.get("thinking_levels"),
         "default_thinking_level": item.get("default_thinking_level"),
         "metadata": item.get("metadata", {}),
+        "defaults": item.get("defaults", {}),
+        "pricing": item.get("pricing", {}),
     }
     enriched = _with_legacy_model_fields(model_like)
     item["max_context"] = enriched["max_context"]
@@ -122,6 +136,8 @@ def _with_legacy_profile_fields(profile: Dict[str, Any]) -> Dict[str, Any]:
     item["supports_thinking"] = enriched["supports_thinking"]
     item["thinking_levels"] = enriched["thinking_levels"]
     item["default_thinking_level"] = enriched["default_thinking_level"]
+    item["defaults"] = enriched.get("defaults", {})
+    item["pricing"] = enriched.get("pricing", {})
     item["same_model_across_providers_key"] = str(
         item.get("same_model_across_providers_key")
         or item.get("canonical_model_id")

@@ -38,10 +38,9 @@ ANTHROPIC_BASE_URL=https://api.anthropic.com  # カスタムエンドポイン�
 ```bash
 GOOGLE_API_KEY=AIza...
 # または:
-GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+GEMINI_API_KEY=AIza...
 # オプション:
-GOOGLE_PROJECT_ID=my-project
-GOOGLE_REGION=us-central1
+GOOGLE_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
 ```
 
 ### OpenRouter

@@ -1,7 +1,9 @@
 import sys
 import os
+import base64
 import json
 import re
+import time
 from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from blocks._common import ok, error, gen_id, timestamp
@@ -35,6 +37,24 @@ _SECRET_KEY_RE = re.compile(
     re.IGNORECASE,
 )
 _PROMPT_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_TRANSIENT_AI_ERROR_RE = re.compile(
+    r"\b(429|500|502|503|504)\b|temporary|temporarily|timeout|timed out|try again|rate limit|internal error",
+    re.IGNORECASE,
+)
+_COMPUTER_USE_REQUEST_RE = re.compile(
+    r"compute[\s_-]*use|compu?ter[\s_-]*use|computer\s+ツール|コンピューター操作|pc操作|"
+    r"(google\s*chrome|chrome|chatgpt|vivaldi|vivladi|line|ブラウザ|browser).{0,80}(操作|送信|入力|クリック|開いて|開く)",
+    re.IGNORECASE,
+)
+_COMPUTER_USE_CHROME_TARGET_RE = re.compile(r"google\s*chrome|chrome|グーグル\s*クローム|クローム", re.IGNORECASE)
+_COMPUTER_USE_CHROME_NEGATED_RE = re.compile(
+    r"(google\s*chrome|chrome|グーグル\s*クローム|クローム).{0,16}"
+    r"(使わない|使わず|禁止|not\s+use|do\s+not\s+use|don't\s+use)",
+    re.IGNORECASE,
+)
+_COMPUTER_USE_VIVALDI_TARGET_RE = re.compile(r"vivaldi|vivladi|ヴィヴァルディ|ビバルディ", re.IGNORECASE)
+_COMPUTER_USE_LINE_TARGET_RE = re.compile(r"(?<![A-Za-z])line(?![A-Za-z])|ライン", re.IGNORECASE)
+_COMPUTER_USE_CHATGPT_TARGET_RE = re.compile(r"chat\s*gpt|chatgpt", re.IGNORECASE)
 
 
 def _stub_response():
@@ -75,6 +95,10 @@ def _has_real_provider(client, model):
     return not isinstance(provider, StubProvider)
 
 
+def _is_transient_ai_error(message):
+    return bool(_TRANSIENT_AI_ERROR_RE.search(str(message or "")))
+
+
 def _ai_direct_complete(model, messages, tools=None, params=None):
     """AIClient を直接呼び出して complete を実行する。
     APIキー未設定等で実プロバイダーがない場合は明示的エラーを返す。
@@ -83,14 +107,60 @@ def _ai_direct_complete(model, messages, tools=None, params=None):
         (response_dict, None) on success
         (None, error_message) on failure
     """
-    try:
-        client = AIClient()
-        if not _has_real_provider(client, model):
-            return None, "AI provider API key not configured"
-        response = client.complete(model, messages, tools or [], params or {})
-        return response, None
-    except RuntimeError as exc:
-        return None, "AI request failed: " + str(exc)
+    client = AIClient()
+    if not _has_real_provider(client, model):
+        return None, "AI provider API key not configured"
+    last_error = ""
+    for attempt in range(3):
+        try:
+            response = client.complete(model, messages, tools or [], params or {})
+            return response, None
+        except RuntimeError as exc:
+            last_error = str(exc)
+            if attempt < 2 and _is_transient_ai_error(last_error):
+                time.sleep(0.6 * (attempt + 1))
+                continue
+            return None, "AI request failed: " + last_error
+    return None, "AI request failed: " + last_error
+
+
+def _ai_error_after_tool_use_response(ai_error):
+    message = str(ai_error or "AI request failed")
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": (
+                    "tool 実行後に AI provider がエラーを返したため停止しました。"
+                    "ここまでの tool ログとスクリーンショットは保存済みです。"
+                    " reason: "
+                    + message
+                ),
+            }
+        ],
+        "finish_reason": "ai_error_after_tool_use",
+        "usage": {},
+        "metadata": {
+            "ai_error_after_tool_use": True,
+            "ai_error": message,
+            "transient_ai_error": _is_transient_ai_error(message),
+        },
+    }
+
+
+def _stop_after_tool_ai_error(events, context, ai_error):
+    _append_event(
+        events,
+        context,
+        _event(
+            "status",
+            "tool 実行後の AI provider エラーで停止しました",
+            phase="ai_error_after_tool_use",
+            ai_error=str(ai_error or "AI request failed"),
+            transient_ai_error=_is_transient_ai_error(ai_error),
+        ),
+    )
+    return _ai_error_after_tool_use_response(ai_error)
 
 
 def _event(event_type, message, **extra):
@@ -101,6 +171,125 @@ def _event(event_type, message, **extra):
     }
     payload.update(_redact_sensitive_value(extra))
     return payload
+
+
+class _ChatCancelled(Exception):
+    pass
+
+
+def _is_cancelled(context):
+    checker = (context or {}).get("is_cancelled") if isinstance(context, dict) else None
+    if callable(checker):
+        try:
+            return bool(checker())
+        except Exception:
+            return False
+    return False
+
+
+def _raise_if_cancelled(context):
+    if _is_cancelled(context):
+        raise _ChatCancelled()
+
+
+def _append_event(events, context, event):
+    events.append(event)
+    persist_callback = (context or {}).get("stream_event_persist_callback") if isinstance(context, dict) else None
+    if callable(persist_callback):
+        try:
+            persist_callback(list(events), event)
+        except Exception:
+            pass
+    callback = (context or {}).get("stream_event_callback") if isinstance(context, dict) else None
+    if callable(callback):
+        try:
+            callback(event)
+        except Exception:
+            pass
+
+
+def _is_stream_fallback_context(context):
+    if not isinstance(context, dict):
+        return False
+    return callable(context.get("stream_event_callback")) and callable(context.get("is_cancelled"))
+
+
+def _assistant_raw_text(content):
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts = []
+    for block in content:
+        if isinstance(block, str):
+            parts.append(block)
+        elif isinstance(block, dict) and block.get("type") == "text":
+            parts.append(str(block.get("text") or ""))
+    return " ".join(parts)
+
+
+def _create_stream_assistant_draft(store, conversation_id, user_msg, model, params):
+    seq = user_msg.get("sequence_number", 1) + 1
+    return store.add_message(
+        conversation_id,
+        {
+            "role": "assistant",
+            "parent_id": user_msg["id"],
+            "sequence_number": seq,
+            "content": [],
+            "raw_text": "",
+            "finish_reason": "streaming",
+            "usage": {},
+            "widget": None,
+            "metadata": {
+                "model": model,
+                "streaming": True,
+                "draft": True,
+                "thinking": {"state": "running"},
+                "thinking_level": (params or {}).get("thinking_level"),
+            },
+            "events": [],
+            "tool_logs": [],
+            "model": model,
+        },
+    )
+
+
+def _stream_draft_event_persister(store, conversation_id, draft_id, model, params):
+    def persist(events, _event):
+        draft = store.get_message(conversation_id, draft_id)
+        metadata = dict((draft or {}).get("metadata") or {})
+        metadata.update(
+            {
+                "model": model,
+                "streaming": True,
+                "draft": True,
+                "thinking": {"state": "running"},
+                "thinking_level": (params or {}).get("thinking_level"),
+            }
+        )
+        store.update_message(
+            conversation_id,
+            draft_id,
+            {
+                "events": events,
+                "metadata": metadata,
+                "finish_reason": "streaming",
+            },
+        )
+
+    return persist
+
+
+def _final_assistant_updates(assistant_msg_dict):
+    updates = dict(assistant_msg_dict)
+    content = updates.get("content", [])
+    updates["raw_text"] = _assistant_raw_text(content)
+    metadata = dict(updates.get("metadata") or {})
+    metadata.pop("streaming", None)
+    metadata.pop("draft", None)
+    updates["metadata"] = metadata
+    return updates
 
 
 def _redact_sensitive_value(value, *, parent_key=""):
@@ -147,6 +336,53 @@ def _resolve_selected_tools(raw_tools):
     return resolved, unknown
 
 
+def _infer_requested_tools_from_message(user_text):
+    if not isinstance(user_text, str) or not _COMPUTER_USE_REQUEST_RE.search(user_text):
+        return []
+    return ["computer_use", "browser_computer"]
+
+
+def _with_inferred_tools(input_data, inferred_tool_ids):
+    if not inferred_tool_ids:
+        return input_data
+    raw_tools = input_data.get("tools")
+    existing_tools = list(raw_tools) if isinstance(raw_tools, list) else []
+    merged = []
+    seen = set()
+    for item in existing_tools + list(inferred_tool_ids):
+        key = item if isinstance(item, str) else id(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(item)
+    updated = dict(input_data)
+    updated["tools"] = merged
+    return updated
+
+
+def _computer_use_preferences_from_text(user_text):
+    text = user_text if isinstance(user_text, str) else ""
+    preferences = {}
+    if _COMPUTER_USE_VIVALDI_TARGET_RE.search(text):
+        preferences["computer_use_target_app"] = "Vivaldi"
+    elif _COMPUTER_USE_CHROME_TARGET_RE.search(text) and not _COMPUTER_USE_CHROME_NEGATED_RE.search(text):
+        preferences["computer_use_target_app"] = "Google Chrome"
+    if _COMPUTER_USE_LINE_TARGET_RE.search(text):
+        preferences["computer_use_target_title"] = "LINE"
+    elif _COMPUTER_USE_CHATGPT_TARGET_RE.search(text):
+        preferences["computer_use_target_title"] = "ChatGPT"
+    return preferences
+
+
+def _apply_computer_use_context_preferences(context, user_text):
+    updated = dict(context or {})
+    preferences = _computer_use_preferences_from_text(user_text)
+    for key, value in preferences.items():
+        if value not in (None, "", False):
+            updated[key] = value
+    return updated
+
+
 def _available_tools(context, input_data):
     raw_tools = input_data.get("tools")
     try:
@@ -171,6 +407,170 @@ def _tool_use_blocks(response):
         for block in blocks
         if isinstance(block, dict) and block.get("type") in {"tool_use", "tool_call"}
     ]
+
+
+def _response_text(response):
+    blocks = response.get("content", []) if isinstance(response, dict) else []
+    if isinstance(blocks, str):
+        return blocks
+    if not isinstance(blocks, list):
+        return ""
+    parts = []
+    for block in blocks:
+        if isinstance(block, str):
+            parts.append(block)
+        elif isinstance(block, dict) and block.get("type") == "text":
+            parts.append(str(block.get("text") or ""))
+    return "".join(parts)
+
+
+def _params_without_thinking(params):
+    retry_params = dict(params or {})
+    for key in ("thinking", "thinking_level", "reasoning_effort"):
+        retry_params.pop(key, None)
+    return retry_params
+
+
+def _empty_response_message(finish_reason):
+    reason = str(finish_reason or "unknown").strip() or "unknown"
+    return (
+        "モデルから本文のない応答が返りました。"
+        "もう一度送信するか、thinkingを「なし」にして試してください。"
+        f" (finish_reason: {reason})"
+    )
+
+
+def _tool_limit_message(limit, tool_uses):
+    names = []
+    for block in tool_uses:
+        name = str(block.get("name") or block.get("tool_name") or "").strip()
+        if name:
+            names.append(name)
+    suffix = " pending_tools=" + ", ".join(names) if names else ""
+    return (
+        "tool call の上限に達したため停止しました。"
+        "同じ依頼を続ける場合は、もう一度送信してください。"
+        f" (max_tool_calls: {limit}{suffix})"
+    )
+
+
+def _tool_result_data(result):
+    if not isinstance(result, dict):
+        return {}
+    data = result.get("data", result)
+    return data if isinstance(data, dict) else {}
+
+
+def _tool_result_reason(result):
+    if not isinstance(result, dict):
+        return ""
+    data = _tool_result_data(result)
+    for source in (data, result):
+        if not isinstance(source, dict):
+            continue
+        for key in ("reason", "message", "result", "summary"):
+            value = source.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        error_value = source.get("error")
+        if isinstance(error_value, dict):
+            message = error_value.get("message") or error_value.get("reason")
+            if isinstance(message, str) and message.strip():
+                return message.strip()
+        elif isinstance(error_value, str) and error_value.strip():
+            return error_value.strip()
+    return ""
+
+
+def _tool_result_is_error(result):
+    if not isinstance(result, dict):
+        return False
+    if result.get("status") == "error":
+        return True
+    data = _tool_result_data(result)
+    if data.get("status") == "error" or data.get("is_error") is True:
+        return True
+    widget = data.get("widget") if isinstance(data.get("widget"), dict) else {}
+    return widget.get("is_error") is True
+
+
+def _find_tool_recovery(value):
+    if isinstance(value, dict):
+        recovery = value.get("recovery")
+        if isinstance(recovery, dict):
+            return recovery
+        widget = value.get("widget")
+        if isinstance(widget, dict):
+            recovery = widget.get("recovery")
+            if isinstance(recovery, dict):
+                return recovery
+        data = value.get("data")
+        if isinstance(data, dict):
+            recovery = _find_tool_recovery(data)
+            if recovery:
+                return recovery
+        error_value = value.get("error")
+        if isinstance(error_value, dict):
+            recovery = _find_tool_recovery(error_value)
+            if recovery:
+                return recovery
+    return {}
+
+
+def _tool_result_recovery_kind(result):
+    recovery = _find_tool_recovery(result)
+    kind = str(recovery.get("kind") or "").strip()
+    if kind:
+        return kind
+    reason = _tool_result_reason(result).lower()
+    if "visible window" in reason or "background computer-use is disabled" in reason:
+        return "visible_window_required"
+    return ""
+
+
+def _message_content_text(content):
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts = []
+    for block in content:
+        if isinstance(block, str):
+            parts.append(block)
+        elif isinstance(block, dict):
+            text = block.get("text")
+            if isinstance(text, str):
+                parts.append(text)
+    return "\n".join(parts)
+
+
+def _tool_blocked_response(tool_name, result):
+    recovery = _find_tool_recovery(result)
+    kind = str(recovery.get("kind") or "").strip()
+    if not kind:
+        kind = _tool_result_recovery_kind(result)
+    reason = _tool_result_reason(result)
+    if kind in {"visible_window_required", "focus_required"}:
+        message = (
+            f"{tool_name} は現在表示されている画面だけを操作する設定のため停止しました。"
+            + (f" reason: {reason}" if reason else "")
+        )
+    else:
+        message = (
+            f"{tool_name} が回復不能な tool ブロックを返したため停止しました。"
+            + (f" reason: {reason}" if reason else "")
+        )
+    return {
+        "content": [{"type": "text", "text": message}],
+        "finish_reason": "tool_blocked",
+        "usage": {},
+        "metadata": {
+            "tool_blocked": True,
+            "tool_blocked_tool": tool_name,
+            "tool_blocked_kind": kind,
+            "tool_blocked_recovery": recovery,
+        },
+    }
 
 
 def _tool_arguments(block):
@@ -288,57 +688,74 @@ def _browser_screenshot_data_url(result):
 
 def _browser_screenshot_guidance(result):
     if not isinstance(result, dict):
-        return "Browser screenshot captured by browser_computer. Use this image to continue the task."
+        return (
+            "Browser/computer screenshot attached for the vision model. "
+            "For point actions, pass only normalized_x and normalized_y values from 0 to 1000 relative to the attached image. "
+            "Do not return screen pixels or action coordinates, and do not do scale conversion. "
+            "The harness converts normalized attached-image coordinates to action/screen coordinates."
+        )
     data = result.get("data", result)
     if not isinstance(data, dict):
-        return "Browser screenshot captured by browser_computer. Use this image to continue the task."
+        return (
+            "Browser/computer screenshot attached for the vision model. "
+            "For point actions, pass only normalized_x and normalized_y values from 0 to 1000 relative to the attached image. "
+            "Do not return screen pixels or action coordinates, and do not do scale conversion. "
+            "The harness converts normalized attached-image coordinates to action/screen coordinates."
+        )
     widget = data.get("widget") if isinstance(data.get("widget"), dict) else {}
-    source = widget if widget.get("coordinate_system") else data
-    image_size = source.get("image_size") if isinstance(source.get("image_size"), dict) else {}
-    action_coordinate_system = source.get("action_coordinate_system") if isinstance(source.get("action_coordinate_system"), dict) else {}
+    source = widget if (widget.get("coordinate_system") or widget.get("model_image_size")) else data
     model_image_size = source.get("model_image_size") if isinstance(source.get("model_image_size"), dict) else {}
-    scale = source.get("model_to_action_scale") if isinstance(source.get("model_to_action_scale"), dict) else {}
-    cursor = source.get("cursor") if isinstance(source.get("cursor"), dict) else {}
-    parts = ["Browser screenshot captured by browser_computer. Use this image to continue the task."]
-    if image_size.get("width") and image_size.get("height"):
+    parts = ["Browser/computer screenshot attached for the vision model."]
+    if model_image_size.get("width") and model_image_size.get("height"):
         parts.append(
-            "The attached screenshot image is top-left pixel space: width={} height={}.".format(
-                image_size.get("width"),
-                image_size.get("height"),
+            "The attached model image size (model_image_size) is width={} height={}.".format(
+                model_image_size.get("width"),
+                model_image_size.get("height"),
             )
         )
-    if action_coordinate_system.get("width") and action_coordinate_system.get("height"):
+    else:
+        parts.append("Use the attached image itself as the coordinate reference.")
+    if isinstance(source.get("crop_reference"), dict) or isinstance(data.get("crop_reference"), dict):
         parts.append(
-            "Mouse actions use top-left action coordinates: width={} height={} x_range={} y_range={}.".format(
-                action_coordinate_system.get("width"),
-                action_coordinate_system.get("height"),
-                action_coordinate_system.get("x_range"),
-                action_coordinate_system.get("y_range"),
-            )
+            "This is a cropped or zoomed screenshot; normalized coordinates are relative only to this attached crop, not the previous full screenshot."
         )
-    if model_image_size.get("width") and model_image_size.get("height") and scale.get("x") and scale.get("y"):
-        parts.append(
-            "If you estimate a point on the attached image, convert it to action coordinates with scale x={:.4f}, y={:.4f} before moving.".format(
-                float(scale.get("x")),
-                float(scale.get("y")),
-            )
-        )
-    if cursor.get("x") is not None and cursor.get("y") is not None:
-        parts.append("Current cursor is near x={} y={}.".format(cursor.get("x"), cursor.get("y")))
-    parts.append("To reposition without clicking, call browser_use with action=move and integer x/y action coordinates.")
+    parts.append(
+        "For point actions, pass only normalized_x and normalized_y values from 0 to 1000 relative to the attached image."
+    )
+    parts.append(
+        "Do not return screen pixels, image_size pixels, or action coordinates; do not use image_size, "
+        "action_coordinate_system, or model_to_action_scale; and do not do scale conversion."
+    )
+    parts.append("The harness converts normalized attached-image coordinates to action/screen coordinates.")
+    parts.append(
+        "If the target is small or ambiguous, call screenshot with crop/zoom first. "
+        "source=latest crops from the last full or selected-window screenshot so you do not get trapped inside a previous crop; "
+        "use source=current_crop only when you intentionally want to crop the current attached crop again. "
+        "After a zoomed/cropped view, request a fresh screenshot before unrelated actions."
+    )
     return " ".join(parts)
 
 
-def _append_tool_result_message(messages, tool_name, result, tool_call_id="", *, model=""):
-    result_text = ""
+def _tool_result_message_text(tool_name, result):
     if isinstance(result, dict):
         data = result.get("data", result)
         if isinstance(data, dict):
-            result_text = str(data.get("result", data.get("summary", json.dumps(data, ensure_ascii=False))))
+            if tool_name in {"browser_computer", "browser_use", "computer_use"}:
+                result_text = json.dumps(_compact_tool_log_value(data), ensure_ascii=False)
+            else:
+                result_text = str(data.get("result", data.get("summary", json.dumps(data, ensure_ascii=False))))
         else:
             result_text = str(data)
     else:
         result_text = str(result)
+    max_chars = 12000
+    if len(result_text) > max_chars:
+        return result_text[:max_chars] + "\n[tool result truncated]"
+    return result_text
+
+
+def _append_tool_result_message(messages, tool_name, result, tool_call_id="", *, model=""):
+    result_text = _tool_result_message_text(tool_name, result)
     messages.append(
         {
             "role": "tool",
@@ -387,6 +804,242 @@ def _compact_tool_log_value(value):
     return value
 
 
+def _truthy(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on", "debug", "enabled"}
+    return False
+
+
+def _frontend_debug_settings_enabled():
+    try:
+        settings_path = Path(__file__).resolve().parents[2] / "user_data" / "shared" / "frontend_settings.json"
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    debug = settings.get("debug") if isinstance(settings, dict) else {}
+    if not isinstance(debug, dict):
+        return False
+    return _truthy(debug.get("ai_request_logging") or debug.get("enabled"))
+
+
+def _ai_debug_enabled(input_data=None, params=None, context=None):
+    if _truthy(os.environ.get("RUMI_DEFAULTSPACK_AI_DEBUG")):
+        return True
+    for source in (context, params, input_data):
+        if not isinstance(source, dict):
+            continue
+        for key in ("ai_debug_enabled", "ai_debug", "debug_mode", "debug", "log_ai_requests"):
+            if key in source and _truthy(source.get(key)):
+                return True
+    return _frontend_debug_settings_enabled()
+
+
+def _ai_debug_log_dir(context):
+    workspace = (context or {}).get("conversation_workspace_dir") if isinstance(context, dict) else None
+    if isinstance(workspace, str) and workspace.strip():
+        return Path(workspace) / "debug" / "ai_requests"
+    return Path(__file__).resolve().parents[2] / "user_data" / "shared" / "chat" / "debug" / "ai_requests"
+
+
+def _debug_image_suffix(mime_type):
+    subtype = str(mime_type or "").split("/", 1)[-1].split(";", 1)[0].lower()
+    if subtype in {"jpeg", "jpg"}:
+        return ".jpg"
+    if subtype in {"png", "gif", "webp"}:
+        return "." + subtype
+    return ".img"
+
+
+def _save_debug_data_image(data_url, debug_dir, request_key, images):
+    header, separator, encoded = str(data_url or "").partition(",")
+    if not separator:
+        return "[invalid image data_url]"
+    mime_type = header[5:].split(";", 1)[0] if header.startswith("data:") else "image/png"
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except Exception:
+        return "[invalid image data_url]"
+    index = len(images) + 1
+    path = debug_dir / "{}-image-{}{}".format(request_key, index, _debug_image_suffix(mime_type))
+    try:
+        path.write_bytes(raw)
+    except OSError:
+        return "[failed to save image data_url]"
+    record = {
+        "path": str(path),
+        "mime_type": mime_type,
+        "bytes": len(raw),
+    }
+    images.append(record)
+    return {
+        "url": "[image data saved as artifact]",
+        "debug_image_path": str(path),
+        "mime_type": mime_type,
+        "bytes": len(raw),
+    }
+
+
+def _debug_sanitize_ai_payload(value, debug_dir, request_key, images, *, parent_key=""):
+    if isinstance(value, dict):
+        sanitized = {}
+        for key, item in value.items():
+            key_text = str(key)
+            if _SECRET_KEY_RE.search(key_text):
+                sanitized[key] = "[redacted]"
+            else:
+                sanitized[key] = _debug_sanitize_ai_payload(
+                    item,
+                    debug_dir,
+                    request_key,
+                    images,
+                    parent_key=key_text,
+                )
+        return sanitized
+    if isinstance(value, list):
+        return [
+            _debug_sanitize_ai_payload(item, debug_dir, request_key, images, parent_key=parent_key)
+            for item in value
+        ]
+    if isinstance(value, str):
+        if parent_key and _SECRET_KEY_RE.search(parent_key):
+            return "[redacted]"
+        if value.startswith(_DATA_IMAGE_PREFIX):
+            return _save_debug_data_image(value, debug_dir, request_key, images)
+    return value
+
+
+def _write_debug_json(path, payload):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp_path.replace(path)
+
+
+def _log_ai_debug_request(context, *, model, messages, tools, params, step_index, reason=""):
+    if not _ai_debug_enabled(params=params, context=context):
+        return None
+    debug_dir = _ai_debug_log_dir(context)
+    debug_dir.mkdir(parents=True, exist_ok=True)
+    step_label = str(step_index)
+    request_key = "ai-{}-step-{}".format(int(time.time() * 1000), re.sub(r"[^A-Za-z0-9_.-]+", "_", step_label))
+    images = []
+    payload = {
+        "schema_version": 1,
+        "kind": "ai_request_debug_log",
+        "created_at": timestamp(),
+        "model": model,
+        "step_index": step_index,
+        "reason": reason,
+        "messages": _debug_sanitize_ai_payload(messages, debug_dir, request_key, images),
+        "tools": _debug_sanitize_ai_payload(tools, debug_dir, request_key, images),
+        "params": _debug_sanitize_ai_payload(params, debug_dir, request_key, images),
+        "images": images,
+    }
+    path = debug_dir / "{}.json".format(request_key)
+    try:
+        _write_debug_json(path, payload)
+    except OSError:
+        return None
+    return str(path)
+
+
+def _append_ai_debug_response(path, response):
+    if not path:
+        return
+    try:
+        debug_path = Path(path)
+        payload = json.loads(debug_path.read_text(encoding="utf-8"))
+        images = payload.get("response_images")
+        if not isinstance(images, list):
+            images = []
+        payload["response_logged_at"] = timestamp()
+        payload["response"] = _debug_sanitize_ai_payload(
+            response,
+            debug_path.parent,
+            debug_path.stem + "-response",
+            images,
+        )
+        if images:
+            payload["response_images"] = images
+        _write_debug_json(debug_path, payload)
+    except Exception:
+        pass
+
+
+def _truncate_text(value, limit=480):
+    text = str(value or "").strip()
+    if len(text) > limit:
+        return text[: max(0, limit - 3)] + "..."
+    return text
+
+
+def _tool_result_summary(tool_name, result):
+    reason = _tool_result_reason(result)
+    if reason:
+        return _truncate_text(reason)
+    data = _tool_result_data(result)
+    for key in ("results", "items", "files", "screenshots"):
+        value = data.get(key)
+        if isinstance(value, list):
+            return "{} returned {} {}".format(tool_name, len(value), key)
+    if _tool_result_is_error(result):
+        return "{} failed".format(tool_name)
+    return "{} completed".format(tool_name)
+
+
+def _artifact_kind_for_path(path):
+    suffix = Path(str(path or "")).suffix.lower()
+    return "image" if suffix in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"} else "file"
+
+
+def _tool_result_artifacts(value, artifacts=None, seen=None):
+    artifacts = artifacts if isinstance(artifacts, list) else []
+    seen = seen if isinstance(seen, set) else set()
+    if isinstance(value, dict):
+        preferred_path = ""
+        for key in ("model_image_path", "screenshot_path", "path"):
+            item = value.get(key)
+            if isinstance(item, str) and item.strip():
+                preferred_path = item.strip()
+                break
+        if preferred_path and preferred_path not in seen:
+            seen.add(preferred_path)
+            artifacts.append(
+                {
+                    "name": Path(preferred_path).name or "artifact",
+                    "path": preferred_path,
+                    "kind": _artifact_kind_for_path(preferred_path),
+                }
+            )
+        for key, item in value.items():
+            if key in {"path", "screenshot_path", "model_image_path", "data_url", "dataUrl"}:
+                continue
+            _tool_result_artifacts(item, artifacts, seen)
+    elif isinstance(value, list):
+        for item in value:
+            _tool_result_artifacts(item, artifacts, seen)
+    return artifacts
+
+
+def _bounded_compact_tool_result(result, summary, artifacts, limit=6000):
+    compact = _compact_tool_log_value(result)
+    try:
+        encoded = json.dumps(compact, ensure_ascii=False)
+    except Exception:
+        encoded = str(compact)
+    if len(encoded) <= limit:
+        return compact
+    return {
+        "summary": summary,
+        "artifacts": artifacts,
+        "truncated": True,
+    }
+
+
 def _tool_visibility_message(tools):
     names = []
     for tool in tools or []:
@@ -403,21 +1056,37 @@ def _tool_visibility_message(tools):
         names.append(label)
     if not names:
         return None
+    guidance = ""
+    tool_names = {tool_name_from_definition(tool) for tool in tools or []}
+    if tool_names.intersection({"browser_computer", "browser_use", "computer_use"}):
+        guidance = (
+            " Computer-use harness rules: inspect app state with context before screenshots; "
+            "computer_use is for all desktop apps, so use apps/windows plus select_app/select_window to target Vivaldi, VS Code, Finder, LINE, Chrome, or any other visible app/window; "
+            "only operate the currently visible screen; hidden tabs, background DOM, and Apple Events JavaScript control are unavailable; "
+            "for visual clicks, use a zoom ladder: first take a full or selected-window screenshot, then when the target is small or ambiguous call screenshot again with crop/zoom around the likely region; source=latest crops from that last full/selected-window screenshot, while source=current_crop is only for intentionally cropping the current crop again; click only using normalized_x/normalized_y relative to the attached image; "
+            "after a zoomed/cropped inspection, take a fresh full or selected-window screenshot before unrelated actions so stale crop coordinates are not reused; "
+            "prefer one type call for words like hello and key only for shortcuts/return; "
+            "click/move without physical=true only moves the virtual AI cursor and does not move the user's mouse."
+        )
     return {
         "role": "system",
         "content": (
             "Available tools are connected for this turn. "
             "Use them when they are relevant, and do not claim that no tools are available. "
-            "Connected tools: " + "; ".join(names)
+            "Connected tools: " + "; ".join(names) + guidance
         ),
     }
 
 
 def _complete_with_tools(model, messages, tools, context, call_handler, params):
-    events = [_event("status", "{} が考えています".format(model), phase="thinking", model=model)]
+    events = []
+    _append_event(events, context, _event("status", "{} が考えています".format(model), phase="thinking", model=model))
     tool_logs = []
+    debug_logs = []
     if tools:
-        events.append(
+        _append_event(
+            events,
+            context,
             _event(
                 "status",
                 "{} 個の tool を接続しました".format(len(tools)),
@@ -436,40 +1105,162 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
     if limit is None:
         limit = int(params.get("max_tool_calls", 4) or 4)
     connected_names = connected_tool_names(tools, context.get("runtime_profile") if isinstance(context, dict) else None)
+    if limit == 4 and connected_names.intersection({"browser_computer", "browser_use", "computer_use"}):
+        limit = 12
 
+    blocked_response = None
     for step_index in range(max(1, limit + 1)):
+        _raise_if_cancelled(context)
         ai_params = {
             "model": model,
             "messages": working_messages,
             "tools": tools,
             "params": params,
         }
+        debug_request_path = _log_ai_debug_request(
+            context,
+            model=model,
+            messages=working_messages,
+            tools=tools,
+            params=params,
+            step_index=step_index + 1,
+        )
+        if debug_request_path:
+            debug_logs.append(debug_request_path)
+            _append_event(
+                events,
+                context,
+                _event(
+                    "status",
+                    "AI debug log を保存しました",
+                    phase="ai_debug",
+                    debug_log_path=debug_request_path,
+                    step_index=step_index + 1,
+                ),
+            )
         if call_handler is not None:
             response = call_handler("defaults.ai.complete", ai_params)
             if isinstance(response, dict) and response.get("status") == "error":
                 err = response.get("error", {})
-                raise RuntimeError(str(err.get("message") or "AI request failed"))
+                ai_error = str(err.get("message") or "AI request failed")
+                _append_ai_debug_response(debug_request_path, {"status": "error", "error": err})
+                if tool_logs:
+                    response = _stop_after_tool_ai_error(events, context, ai_error)
+                    break
+                raise RuntimeError(ai_error)
             if isinstance(response, dict) and response.get("status") == "ok":
                 response = response.get("data", {})
         else:
             response, ai_error = _ai_direct_complete(model, working_messages, tools, params)
             if ai_error is not None:
+                _append_ai_debug_response(debug_request_path, {"status": "error", "error": ai_error})
+                if tool_logs:
+                    response = _stop_after_tool_ai_error(events, context, ai_error)
+                    break
                 raise RuntimeError(ai_error)
+        _append_ai_debug_response(debug_request_path, response)
+        _raise_if_cancelled(context)
 
         if not isinstance(response, dict):
             response = _stub_response()
         tool_uses = _tool_use_blocks(response)
-        if not tool_uses or step_index >= limit:
+        if not tool_uses and not _response_text(response).strip():
+            retry_params = _params_without_thinking(params)
+            if retry_params != params:
+                retry_response = None
+                retry_debug_path = _log_ai_debug_request(
+                    context,
+                    model=model,
+                    messages=working_messages,
+                    tools=tools,
+                    params=retry_params,
+                    step_index="{}-retry-no-thinking".format(step_index + 1),
+                    reason="empty_response_retry_without_thinking",
+                )
+                if retry_debug_path:
+                    debug_logs.append(retry_debug_path)
+                    _append_event(
+                        events,
+                        context,
+                        _event(
+                            "status",
+                            "AI debug log を保存しました",
+                            phase="ai_debug",
+                            debug_log_path=retry_debug_path,
+                            step_index="{}-retry-no-thinking".format(step_index + 1),
+                        ),
+                    )
+                if call_handler is not None:
+                    retry_payload = {
+                        "model": model,
+                        "messages": working_messages,
+                        "tools": tools,
+                        "params": retry_params,
+                    }
+                    retry_response = call_handler("defaults.ai.complete", retry_payload)
+                    if isinstance(retry_response, dict) and retry_response.get("status") == "ok":
+                        retry_response = retry_response.get("data", {})
+                else:
+                    retry_response, ai_error = _ai_direct_complete(
+                        model,
+                        working_messages,
+                        tools,
+                        retry_params,
+                    )
+                    if ai_error is not None:
+                        _append_ai_debug_response(retry_debug_path, {"status": "error", "error": ai_error})
+                        retry_response = None
+                _append_ai_debug_response(retry_debug_path, retry_response)
+                if isinstance(retry_response, dict) and (
+                    _response_text(retry_response).strip() or _tool_use_blocks(retry_response)
+                ):
+                    retry_metadata = dict(retry_response.get("metadata") or {})
+                    retry_metadata["recovered_from_empty_response"] = True
+                    retry_response["metadata"] = retry_metadata
+                    response = retry_response
+                    tool_uses = _tool_use_blocks(response)
+        if tool_uses and step_index >= limit:
+            response = {
+                "content": [{"type": "text", "text": _tool_limit_message(limit, tool_uses)}],
+                "finish_reason": "tool_call_limit",
+                "usage": response.get("usage", {}) if isinstance(response, dict) else {},
+                "metadata": {
+                    "max_tool_calls_reached": True,
+                    "pending_tool_uses": [
+                        {
+                            "name": str(block.get("name") or block.get("tool_name") or ""),
+                            "id": str(block.get("id") or block.get("tool_call_id") or ""),
+                        }
+                        for block in tool_uses
+                    ],
+                },
+            }
+            _append_event(
+                events,
+                context,
+                _event(
+                    "status",
+                    "tool call の上限に達したため停止しました",
+                    phase="tool_call_limit",
+                    tool_count=len(tool_logs),
+                    max_tool_calls=limit,
+                )
+            )
+            break
+        if not tool_uses:
             break
 
         _append_assistant_tool_use_message(working_messages, tool_uses)
         for block in tool_uses:
+            _raise_if_cancelled(context)
             tool_name = str(block.get("name") or block.get("tool_name") or "")
             if not tool_name:
                 continue
             tool_call_id = str(block.get("id") or block.get("tool_call_id") or gen_id())
             arguments = _tool_arguments(block)
-            events.append(
+            _append_event(
+                events,
+                context,
                 _event(
                     "tool_call_started",
                     "{} を使用中".format(tool_name),
@@ -483,13 +1274,18 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
             if call_handler is not None:
                 result = call_handler(
                     "defaults.tool.invoke",
-                    {"tool_name": tool_name, "arguments": arguments},
+                    {
+                        "tool_name": tool_name,
+                        "arguments": arguments,
+                        "context": invoke_context,
+                    },
                 )
             else:
                 from domain.tool.executor import ToolExecutor
 
                 executed = ToolExecutor().execute(tool_name, arguments, invoke_context)
                 result = {"status": "ok", "data": executed}
+            _raise_if_cancelled(context)
             log = {
                 "tool_name": tool_name,
                 "tool_call_id": tool_call_id,
@@ -498,14 +1294,24 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
                 "timestamp": timestamp(),
             }
             tool_logs.append(log)
-            events.append(
+            result_summary = _tool_result_summary(tool_name, result)
+            artifacts = _tool_result_artifacts(result)
+            _append_event(
+                events,
+                context,
                 _event(
                     "tool_call_completed",
-                    "{} の結果を受け取りました".format(tool_name),
+                    result_summary or "{} の結果を受け取りました".format(tool_name),
                     phase="tool_call_completed",
                     tool_name=tool_name,
                     tool_call_id=tool_call_id,
-                    is_error=isinstance(result, dict) and result.get("status") == "error",
+                    is_error=_tool_result_is_error(result),
+                    recovery_kind=_tool_result_recovery_kind(result),
+                    result_summary=result_summary,
+                    summary=result_summary,
+                    result=_bounded_compact_tool_result(result, result_summary, artifacts),
+                    artifacts=artifacts,
+                    artifact_paths=[artifact.get("path") for artifact in artifacts if artifact.get("path")],
                 )
             )
             _append_tool_result_message(
@@ -515,8 +1321,35 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
                 tool_call_id,
                 model=model,
             )
+            recovery_kind = _tool_result_recovery_kind(result)
+            if recovery_kind in {"visible_window_required", "focus_required"}:
+                blocked_response = _tool_blocked_response(tool_name, result)
+                _append_event(
+                    events,
+                    context,
+                    _event(
+                        "status",
+                        "可視画面外の tool 実行要求のため停止しました",
+                        phase="tool_blocked",
+                        tool_name=tool_name,
+                        tool_call_id=tool_call_id,
+                        recovery_kind=recovery_kind,
+                    )
+                )
+                break
+        if blocked_response is not None:
+            response = blocked_response
+            break
 
     response = response or _stub_response()
+    if not _tool_use_blocks(response) and not _response_text(response).strip():
+        content = response.get("content")
+        if not isinstance(content, list):
+            content = []
+        response["content"] = [{"type": "text", "text": _empty_response_message(response.get("finish_reason"))}]
+        metadata = dict(response.get("metadata") or {})
+        metadata["empty_ai_response"] = True
+        response["metadata"] = metadata
     existing_events = response.get("events", [])
     response["events"] = events + (existing_events if isinstance(existing_events, list) else [])
     response["tool_logs"] = tool_logs
@@ -530,6 +1363,11 @@ def _complete_with_tools(model, messages, tools, context, call_handler, params):
             "thinking_level": params.get("thinking_level"),
         }
     )
+    if debug_logs:
+        metadata["ai_debug"] = {
+            "enabled": True,
+            "request_logs": debug_logs,
+        }
     response["metadata"] = metadata
     return response
 
@@ -673,6 +1511,8 @@ def run(input_data, context):
 
     # --- 9b: ナレッジ / メモリ自動検索 & コンテキスト変数実動化 ---
     user_text = extract_user_text(content)
+    inferred_tool_ids = _infer_requested_tools_from_message(user_text)
+    input_data = _with_inferred_tools(input_data, inferred_tool_ids)
     try:
         enrich_info = enrich_messages(
             standard_messages, system_prompt, conversation_id, user_text, manager,
@@ -704,6 +1544,11 @@ def run(input_data, context):
             conversation_id=conversation_id,
         )["level"]
     request_context = dict(context or {})
+    if _ai_debug_enabled(input_data=input_data, params=params, context=request_context):
+        request_context["ai_debug_enabled"] = True
+    if inferred_tool_ids:
+        request_context["user_requested_computer_use"] = True
+        request_context = _apply_computer_use_context_preferences(request_context, user_text)
     request_context["conversation_id"] = conversation_id
     request_context["conversation_workspace_dir"] = str(store.conversation_workspace_dir(conversation_id))
     request_context["model"] = model
@@ -714,6 +1559,24 @@ def run(input_data, context):
             **(request_context.get("profile_policy") if isinstance(request_context.get("profile_policy"), dict) else {}),
             **tool_policy,
         }
+    stream_assistant_draft = None
+    if _is_stream_fallback_context(request_context):
+        stream_assistant_draft = _create_stream_assistant_draft(
+            store,
+            conversation_id,
+            user_msg,
+            model,
+            params,
+        )
+        if stream_assistant_draft is None:
+            return error("Failed to add assistant draft", "INTERNAL_ERROR")
+        request_context["stream_event_persist_callback"] = _stream_draft_event_persister(
+            store,
+            conversation_id,
+            stream_assistant_draft["id"],
+            model,
+            params,
+        )
     raw_tools, provider_tools, tool_context = _available_tools(request_context, input_data)
     tools_called = [tool_name_from_definition(tool) for tool in raw_tools if tool_name_from_definition(tool)]
     try:
@@ -725,6 +1588,8 @@ def run(input_data, context):
             call_handler,
             params,
         )
+    except _ChatCancelled:
+        return error("Chat request cancelled", "CANCELLED")
     except RuntimeError as exc:
         return error(str(exc), "AI_ERROR")
     except Exception as exc:
@@ -759,7 +1624,14 @@ def run(input_data, context):
         response=response,
         model=model,
     )
-    assistant_msg = store.add_message(conversation_id, assistant_msg_dict)
+    if stream_assistant_draft is not None:
+        assistant_msg = store.update_message(
+            conversation_id,
+            stream_assistant_draft["id"],
+            _final_assistant_updates(assistant_msg_dict),
+        )
+    else:
+        assistant_msg = store.add_message(conversation_id, assistant_msg_dict)
     if assistant_msg is None:
         return error("Failed to add assistant message", "INTERNAL_ERROR")
     return ok(assistant_msg)

@@ -1,7 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { filterAtMentionFiles, insertAtMentionText, profileNeedsApiKey, resolveComposerWidgetDrop } from "./ComposerRenderer";
+import {
+  filterAtMentionFiles,
+  insertAtMentionText,
+  modelCandidateMenuKeyAction,
+  nextModelCandidateIndex,
+  profileNeedsApiKey,
+  resolveComposerWidgetDrop,
+} from "./ComposerRenderer";
 import { COMPOSER_BUTTON_DROP, COMPOSER_PANEL_DROP, COMPOSER_SELECTOR_DROP, COMPOSER_TOGGLE_DROP } from "../lib/toolUi";
 
 test("composer file mention filters string context files", () => {
@@ -18,6 +25,48 @@ test("composer file mention insertion keeps @ text for workspace attachment flow
     value: "please @README.md  now",
     cursor: 18,
   });
+});
+
+test("model candidate menu keyboard helpers cycle and select", () => {
+  assert.equal(nextModelCandidateIndex(0, 3, 1), 1);
+  assert.equal(nextModelCandidateIndex(2, 3, 1), 0);
+  assert.equal(nextModelCandidateIndex(0, 3, -1), 2);
+  assert.equal(nextModelCandidateIndex(2, 3, -1), 1);
+  assert.equal(nextModelCandidateIndex(0, 0, 1), 0);
+
+  assert.deepEqual(modelCandidateMenuKeyAction("Tab", false, 0, 3), {
+    handled: true,
+    type: "move",
+    nextIndex: 1,
+  });
+  assert.deepEqual(modelCandidateMenuKeyAction("Tab", true, 0, 3), {
+    handled: true,
+    type: "move",
+    nextIndex: 2,
+  });
+  assert.deepEqual(modelCandidateMenuKeyAction("ArrowDown", false, 1, 3), {
+    handled: true,
+    type: "move",
+    nextIndex: 2,
+  });
+  assert.deepEqual(modelCandidateMenuKeyAction("ArrowUp", false, 1, 3), {
+    handled: true,
+    type: "move",
+    nextIndex: 0,
+  });
+  assert.deepEqual(modelCandidateMenuKeyAction("Enter", false, 9, 3), {
+    handled: true,
+    type: "select",
+    index: 2,
+  });
+  assert.deepEqual(modelCandidateMenuKeyAction("Escape", false, 1, 3), {
+    handled: true,
+    type: "close",
+  });
+  assert.deepEqual(modelCandidateMenuKeyAction("Home", false, 1, 3), { handled: false });
+  assert.deepEqual(modelCandidateMenuKeyAction("Tab", false, 0, 0), { handled: false });
+  assert.deepEqual(modelCandidateMenuKeyAction("Enter", false, 0, 0), { handled: false });
+  assert.deepEqual(modelCandidateMenuKeyAction("Escape", false, 0, 0), { handled: false });
 });
 
 test("composer model drop selects the model instead of creating a widget chip", () => {

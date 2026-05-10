@@ -108,7 +108,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(provider_item["ui"]["composer_action"]["target_item_id"], "provider-catalog")
         browser_use_item = next(item for item in catalog["sidebar"]["items"] if item["id"] == "browser_use")
         browser_use_field_ids = {field["id"] for field in browser_use_item["panel"]["fields"]}
-        self.assertEqual(browser_use_field_ids, {"target", "mode", "safety", "quality"})
+        self.assertEqual(browser_use_field_ids, {"default_target", "mode", "safety", "quality"})
         self.assertNotIn("url", browser_use_field_ids)
         self.assertNotIn("x", browser_use_field_ids)
         self.assertIn("Runtime arguments: action, url", " ".join(browser_use_item["panel"]["notes"]))
@@ -347,6 +347,59 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertTrue(reloaded["preview"]["auto_open"])
         self.assertEqual(reloaded["preview"]["max_items"], 5)
 
+    def test_update_settings_persists_sidebar_user_data(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            with patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+                registry = FrontendRegistry(pack_root=pack_root)
+                values = registry.update_settings(
+                    {
+                        "sidebar": {
+                            "pinned_item_ids": ["browser_use"],
+                            "starred_item_ids": ["web_search"],
+                            "custom_tool_tags": {"browser_use": ["coding"]},
+                        }
+                    }
+                )
+                reloaded = registry.get_settings()["values"]
+
+        self.assertEqual(values["sidebar"]["pinned_item_ids"], ["browser_use"])
+        self.assertEqual(values["sidebar"]["starred_item_ids"], ["web_search"])
+        self.assertEqual(values["sidebar"]["custom_tool_tags"], {"browser_use": ["coding"]})
+        self.assertEqual(reloaded["sidebar"]["pinned_item_ids"], ["browser_use"])
+
+    def test_settings_migrates_default_target_without_losing_debug_values(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            settings_path = pack_root / "user_data" / "shared" / "frontend_settings.json"
+            settings_path.parent.mkdir(parents=True, exist_ok=True)
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "debug": {
+                            "ai_request_logging": True,
+                            "default_target": "current_browser",
+                            "custom_debug_flag": "keep-me",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+                values = FrontendRegistry(pack_root=pack_root).get_settings()["values"]
+
+        self.assertTrue(values["debug"]["ai_request_logging"])
+        self.assertEqual(values["debug"]["custom_debug_flag"], "keep-me")
+        self.assertEqual(values["tools"]["default_target"], "current_browser")
+        self.assertFalse(values["tools"]["keep_selected_tools_after_send"])
+
     def test_update_settings_stores_openrouter_key_as_secret(self):
         from core_runtime.secrets_store import SecretsStore
         from domain.frontend.registry import FrontendRegistry
@@ -504,6 +557,37 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(result["block_module"], "blocks.tool.list")
         self.assertEqual(result["request_data"]["_method"], "GET")
 
+    def test_fallback_http_uses_block_when_function_bridge_rejects_unapproved_pack(self):
+        from transport.http import DefaultsHttpServer
+
+        server = DefaultsHttpServer(facade=None)
+        with patch("domain.function_runtime.bridge.invoke_function") as invoke_function, patch("transport.http.invoke_block") as invoke_block:
+            invoke_function.return_value = {
+                "status": "error",
+                "error": {"code": "PACK_NOT_APPROVED", "message": "Pack not approved: defaultspack"},
+            }
+            invoke_block.return_value = {"status": "ok", "data": {"catalog": "fallback"}}
+            result = server._invoke_fallback_block("blocks.ui.catalog", {"_method": "GET", "_actual_method": "GET"}, {})
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["data"]["catalog"], "fallback")
+        invoke_block.assert_called_once()
+
+    def test_fallback_http_does_not_use_pack_not_approved_block_fallback_for_spoofed_post(self):
+        from transport.http import DefaultsHttpServer
+
+        server = DefaultsHttpServer(facade=None)
+        with patch("domain.function_runtime.bridge.invoke_function") as invoke_function, patch("transport.http.invoke_block") as invoke_block:
+            invoke_function.return_value = {
+                "status": "error",
+                "error": {"code": "PACK_NOT_APPROVED", "message": "Pack not approved: defaultspack"},
+            }
+            result = server._invoke_fallback_block("blocks.ui.catalog", {"_method": "GET", "_actual_method": "POST"}, {})
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["error"]["code"], "PACK_NOT_APPROVED")
+        invoke_block.assert_not_called()
+
     def test_default_conversation_model_uses_stub_when_unconfigured(self):
         from domain.chat import store as chat_store
 
@@ -645,9 +729,282 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(result["status"], "ok")
         self.assertIn("/api/ui/catalog", registered_patterns)
         self.assertIn("/api/ui/settings", registered_patterns)
+        self.assertIn("/api/ui/commands", registered_patterns)
+        self.assertIn("/api/ui/commands/execute", registered_patterns)
         self.assertIn("/api/ui/conversations/{id}/preview", registered_patterns)
         self.assertTrue(any("api/ui/catalog" in pattern for pattern in fallback_patterns))
+        self.assertTrue(any("api/ui/commands" in pattern for pattern in fallback_patterns))
         self.assertTrue(any("api/ui/conversations" in pattern for pattern in fallback_patterns))
+
+    def test_slash_command_registry_lists_defaults_and_executes_thinking(self):
+        from domain.frontend.command_registry import SlashCommandRegistry
+
+        registry = SlashCommandRegistry(DEFAULTSPACK_ROOT)
+        commands = registry.list_commands()
+        ids = {command["id"] for command in commands}
+
+        self.assertIn("model", ids)
+        self.assertIn("think", ids)
+        self.assertIn("compact", ids)
+        self.assertIn("commit", ids)
+        self.assertEqual(next(command for command in commands if command["id"] == "commit")["risk"], "high")
+
+        with patch("domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService") as service_cls:
+            service = service_cls.return_value
+            service.set_thinking_level.return_value = {"level": "high", "scope": "profile"}
+            result = registry.execute(
+                {
+                    "command": "thinking",
+                    "mode": "chat",
+                    "args": {"level": "high", "scope": "profile", "profile_id": "google/gemma-4-31b-it"},
+                    "conversation_id": "conv-1",
+                },
+                {},
+            )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["data"]["executed"])
+        service.set_thinking_level.assert_called_once_with(
+            "high",
+            "profile",
+            "google/gemma-4-31b-it",
+            "conv-1",
+        )
+
+    def test_slash_command_registry_model_command_opens_picker_without_query(self):
+        from domain.frontend.command_registry import SlashCommandRegistry
+
+        with patch("domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService") as service_cls:
+            result = SlashCommandRegistry(DEFAULTSPACK_ROOT).execute(
+                {"command": "model", "mode": "chat", "args": {}},
+                {},
+            )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertFalse(result["data"]["executed"])
+        self.assertEqual(result["data"]["action"], "open_model_picker")
+        self.assertEqual(result["data"]["candidates"], [])
+        self.assertEqual(result["data"]["args"], {})
+        service_cls.assert_not_called()
+
+    def test_slash_command_registry_model_command_sets_exact_match(self):
+        from domain.frontend.command_registry import SlashCommandRegistry
+
+        candidate = {
+            "profile_id": "stub/default",
+            "qualified_model_id": "stub/default",
+            "provider_id": "stub",
+            "model_id": "default",
+            "display_name": "Stub Default",
+            "configured": True,
+            "local": True,
+            "score": 1036,
+            "label": "Stub / Stub Default",
+        }
+        with patch("domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService") as service_cls:
+            service = service_cls.return_value
+            service.resolve_model_candidates.return_value = {
+                "query": "stub/default",
+                "exact": candidate,
+                "candidates": [candidate],
+            }
+            service.set_preferred_model.return_value = {"profile_id": "stub/default", "settings": {}}
+            result = SlashCommandRegistry(DEFAULTSPACK_ROOT).execute(
+                {"command": "model", "mode": "chat", "args": {"query": "stub/default"}},
+                {},
+            )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["data"]["executed"])
+        self.assertEqual(result["data"]["selected_model"], candidate)
+        self.assertEqual(result["data"]["result"]["profile_id"], "stub/default")
+        service.resolve_model_candidates.assert_called_once_with("stub/default")
+        service.set_preferred_model.assert_called_once_with("stub/default")
+
+    def test_slash_command_registry_model_command_shows_ambiguous_candidates(self):
+        from domain.frontend.command_registry import SlashCommandRegistry
+
+        candidates = [
+            {"profile_id": "openai/gpt-4o", "display_name": "GPT-4o", "score": 950},
+            {"profile_id": "openrouter/openai/gpt-4o", "display_name": "GPT-4o", "score": 950},
+        ]
+        with patch("domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService") as service_cls:
+            service = service_cls.return_value
+            service.resolve_model_candidates.return_value = {
+                "query": "GPT-4o",
+                "exact": None,
+                "candidates": candidates,
+            }
+            result = SlashCommandRegistry(DEFAULTSPACK_ROOT).execute(
+                {"command": "model", "mode": "chat", "args": {"query": "GPT-4o"}},
+                {},
+            )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertFalse(result["data"]["executed"])
+        self.assertEqual(result["data"]["action"], "show_model_candidates")
+        self.assertEqual(result["data"]["candidates"], candidates)
+        service.set_preferred_model.assert_not_called()
+
+    def test_slash_command_registry_model_command_handles_unknown_query(self):
+        from domain.frontend.command_registry import SlashCommandRegistry
+
+        with patch("domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService") as service_cls:
+            service = service_cls.return_value
+            service.resolve_model_candidates.return_value = {
+                "query": "missing-model",
+                "exact": None,
+                "candidates": [],
+            }
+            result = SlashCommandRegistry(DEFAULTSPACK_ROOT).execute(
+                {"command": "models", "mode": "chat", "args": {"query": "missing-model"}},
+                {},
+            )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertFalse(result["data"]["executed"])
+        self.assertEqual(result["data"]["action"], "show_model_candidates")
+        self.assertEqual(result["data"]["candidates"], [])
+        service.set_preferred_model.assert_not_called()
+
+    def test_slash_command_registry_rejects_invalid_enum_args(self):
+        from domain.frontend.command_registry import SlashCommandRegistry
+
+        result = SlashCommandRegistry(DEFAULTSPACK_ROOT).execute(
+            {"command": "think", "mode": "chat", "args": {"level": "warp"}},
+            {},
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["error"]["code"], "INVALID_ARGUMENT")
+        self.assertEqual(result["error"]["details"]["argument"], "level")
+
+    def test_slash_command_registry_validates_required_args_and_boolean_false(self):
+        from domain.frontend.command_registry import SlashCommandRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            commands_path = pack_root / "commands" / "default_commands.json"
+            commands_path.parent.mkdir(parents=True, exist_ok=True)
+            commands_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "id": "flag",
+                            "name": "flag",
+                            "modes": ["chat"],
+                            "args": [{"name": "enabled", "type": "boolean", "required": True}],
+                            "execution": {"type": "frontend", "action": "toggle_flag"},
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            registry = SlashCommandRegistry(pack_root)
+
+            off_result = registry.execute({"command": "flag", "mode": "chat", "args": {"enabled": "off"}}, {})
+            false_result = registry.execute({"command": "flag", "mode": "chat", "args": {"enabled": False}}, {})
+            missing_result = registry.execute({"command": "flag", "mode": "chat", "args": {}}, {})
+
+        self.assertEqual(off_result["status"], "ok")
+        self.assertFalse(off_result["data"]["args"]["enabled"])
+        self.assertEqual(false_result["status"], "ok")
+        self.assertFalse(false_result["data"]["args"]["enabled"])
+        self.assertEqual(missing_result["status"], "error")
+        self.assertEqual(missing_result["error"]["code"], "MISSING_ARGUMENT")
+
+    def test_slash_command_registry_rejects_user_manifest_rumi_function_and_non_allowlisted_default(self):
+        from domain.frontend.command_registry import SlashCommandRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            defaults_path = pack_root / "commands" / "default_commands.json"
+            user_path = pack_root / "user_data" / "shared" / "commands" / "user.json"
+            defaults_path.parent.mkdir(parents=True, exist_ok=True)
+            user_path.parent.mkdir(parents=True, exist_ok=True)
+            defaults_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "id": "baddefault",
+                            "name": "baddefault",
+                            "modes": ["chat"],
+                            "execution": {"type": "rumi_function", "qualified_name": "defaultspack:not_allowlisted"},
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            user_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "id": "userthink",
+                            "name": "userthink",
+                            "modes": ["chat"],
+                            "execution": {"type": "rumi_function", "qualified_name": "defaultspack:ai_set_thinking_level"},
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            registry = SlashCommandRegistry(pack_root)
+            user_result = registry.execute({"command": "userthink", "mode": "chat", "args": {"level": "low"}}, {})
+            default_result = registry.execute({"command": "baddefault", "mode": "chat", "args": {}}, {})
+
+        self.assertEqual(user_result["status"], "error")
+        self.assertEqual(user_result["error"]["code"], "INVALID_COMMAND")
+        self.assertEqual(default_result["status"], "error")
+        self.assertEqual(default_result["error"]["code"], "INVALID_COMMAND")
+
+    def test_ui_commands_get_returns_duplicate_manifest_warnings(self):
+        from blocks.ui import commands as commands_block
+        from domain.frontend.command_registry import SlashCommandRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            defaults_path = pack_root / "commands" / "default_commands.json"
+            user_path = pack_root / "user_data" / "shared" / "commands" / "user.json"
+            defaults_path.parent.mkdir(parents=True, exist_ok=True)
+            user_path.parent.mkdir(parents=True, exist_ok=True)
+            defaults_path.write_text(
+                json.dumps(
+                    [
+                        {"id": "one", "name": "one", "aliases": ["same"], "modes": ["chat"]},
+                        {"id": "two", "name": "two", "modes": ["chat"]},
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            user_path.write_text(
+                json.dumps(
+                    [
+                        {"id": "two", "name": "two", "modes": ["chat"]},
+                        {"id": "three", "name": "three", "aliases": ["one"], "modes": ["chat"]},
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with patch.object(commands_block, "SlashCommandRegistry", lambda: SlashCommandRegistry(pack_root)):
+                result = commands_block.run({"_method": "GET"}, {})
+
+        codes = {item["code"] for item in result["data"]["manifest_errors"]}
+        self.assertEqual(result["status"], "ok")
+        self.assertIn("command_duplicate_id", codes)
+        self.assertIn("command_alias_override", codes)
+
+    def test_slash_command_registry_blocks_high_risk_without_approval(self):
+        from domain.frontend.command_registry import SlashCommandRegistry
+
+        result = SlashCommandRegistry(DEFAULTSPACK_ROOT).execute(
+            {"command": "commit", "mode": "coding", "args": {"message": "test"}},
+            {},
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertFalse(result["data"]["executed"])
+        self.assertTrue(result["data"]["requires_approval"])
 
     def test_static_asset_serving_is_binary_and_assets_scoped(self):
         from transport.http import DefaultsHttpServer

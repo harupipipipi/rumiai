@@ -164,6 +164,52 @@ body {
   animation: rumi-message-enter 280ms cubic-bezier(0.2, 0.82, 0.2, 1) both;
 }
 
+.rumi-message-row,
+.rumi-message-bubble,
+.rumi-message-content {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  cursor: text;
+}
+
+.rumi-message-row .markdown-body,
+.rumi-message-row .markdown-body *,
+.rumi-message-row p,
+.rumi-message-row li,
+.rumi-message-row pre,
+.rumi-message-row code {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+.rumi-message-row ::selection,
+.rumi-composer-textarea::selection {
+  background: rgba(37, 99, 235, 0.78);
+  color: #ffffff;
+}
+
+.rumi-message-row ::-moz-selection,
+.rumi-composer-textarea::-moz-selection {
+  background: rgba(37, 99, 235, 0.78);
+  color: #ffffff;
+}
+
+.rumi-message-actions,
+.rumi-message-actions * {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.rumi-composer-textarea {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  cursor: text;
+}
+
+.rumi-copy-icon-pop {
+  animation: rumi-copy-icon-pop 720ms cubic-bezier(0.2, 0.82, 0.2, 1) both;
+}
+
 .rumi-tool-activity summary::-webkit-details-marker {
   display: none;
 }
@@ -180,6 +226,51 @@ body {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.025),
     0 8px 24px rgba(0, 0, 0, 0.14);
+}
+
+.rumi-workspace-main {
+  --rumi-activity-preview-width: clamp(220px, 34%, 380px);
+}
+
+.rumi-workspace-main.has-activity-preview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, var(--rumi-activity-preview-width));
+  overflow: hidden;
+}
+
+.rumi-chat-pane {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.rumi-workspace-main.has-activity-preview .rumi-chat-pane {
+  width: 100%;
+  overflow: hidden;
+}
+
+.rumi-activity-preview-pane {
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.rumi-activity-preview-pane > * {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.rumi-image-preview-backdrop {
+  animation: rumi-preview-backdrop-enter 180ms ease-out both;
+}
+
+.rumi-image-preview-shell {
+  animation: rumi-preview-shell-enter 260ms cubic-bezier(0.2, 0.82, 0.2, 1) both;
+}
+
+.rumi-image-preview-media {
+  animation: rumi-preview-media-enter 320ms 50ms cubic-bezier(0.2, 0.82, 0.2, 1) both;
 }
 
 .rumi-history-rail {
@@ -268,6 +359,54 @@ body {
   }
 }
 
+@keyframes rumi-copy-icon-pop {
+  0% {
+    opacity: 0.4;
+    transform: translateY(1px) scale(0.75) rotate(-10deg);
+  }
+  38% {
+    opacity: 1;
+    transform: translateY(-1px) scale(1.24) rotate(0deg);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1) rotate(0deg);
+  }
+}
+
+@keyframes rumi-preview-backdrop-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes rumi-preview-shell-enter {
+  from {
+    opacity: 0;
+    filter: blur(8px);
+    transform: translateY(12px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes rumi-preview-media-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.992);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 @media (max-width: 720px) {
   .rumi-greeting {
     white-space: normal;
@@ -276,6 +415,22 @@ body {
   .rumi-composer-shell,
   .rumi-composer-shell-new {
     width: calc(100vw - 24px);
+  }
+}
+
+@media (max-width: 1180px) {
+  .rumi-workspace-main {
+    --rumi-activity-preview-width: clamp(180px, 32%, 300px);
+  }
+}
+
+@media (max-width: 900px) {
+  .rumi-workspace-main.has-activity-preview {
+    display: flex;
+  }
+
+  .rumi-activity-preview-pane {
+    display: none;
   }
 }
 
@@ -296,7 +451,10 @@ body {
   .rumi-greeting,
   .rumi-composer-new,
   .rumi-message-row,
-  .rumi-history-rail {
+  .rumi-history-rail,
+  .rumi-image-preview-backdrop,
+  .rumi-image-preview-shell,
+  .rumi-image-preview-media {
     animation: none;
   }
 

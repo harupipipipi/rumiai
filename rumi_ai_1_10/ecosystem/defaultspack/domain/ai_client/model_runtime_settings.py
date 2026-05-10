@@ -48,6 +48,59 @@ class ModelRuntimeSettingsService:
         settings = self.update_settings({"preferred_model": profile})
         return {"profile_id": settings["preferred_model"], "settings": settings}
 
+    def resolve_model_candidates(self, query: str, limit: int = 8) -> dict[str, Any]:
+        cleaned_query = str(query or "").strip()
+        try:
+            max_items = max(0, int(limit))
+        except (TypeError, ValueError):
+            max_items = 8
+        if not cleaned_query:
+            return {"query": cleaned_query, "exact": None, "candidates": []}
+
+        settings = self.get_settings()
+        favorites = {
+            str(item or "").strip()
+            for item in settings.get("favorite_profiles", [])
+            if str(item or "").strip()
+        }
+        scored: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for profile in self._list_profile_catalog():
+            if not self._is_chat_profile(profile):
+                continue
+            candidate = self._candidate_from_profile(profile, favorites)
+            candidate_key = str(candidate.get("profile_id") or candidate.get("qualified_model_id") or "").strip()
+            if not candidate_key or candidate_key in seen:
+                continue
+            match_kind, base_score = self._candidate_match(candidate, cleaned_query)
+            if base_score <= 0:
+                continue
+            candidate["score"] = self._candidate_score(candidate, base_score)
+            candidate["_match_kind"] = match_kind
+            seen.add(candidate_key)
+            scored.append(candidate)
+
+        scored.sort(
+            key=lambda item: (
+                -int(item.get("score") or 0),
+                str(item.get("label") or item.get("display_name") or item.get("profile_id") or "").casefold(),
+                str(item.get("profile_id") or "").casefold(),
+            )
+        )
+        exact_id_candidates = [item for item in scored if item.get("_match_kind") == "exact_id"]
+        exact_field_candidates = [item for item in scored if item.get("_match_kind") == "exact_field"]
+        if len(exact_id_candidates) == 1:
+            exact = self._public_candidate(exact_id_candidates[0])
+        elif len(exact_id_candidates) == 0 and len(exact_field_candidates) == 1:
+            exact = self._public_candidate(exact_field_candidates[0])
+        else:
+            exact = None
+        return {
+            "query": cleaned_query,
+            "exact": exact,
+            "candidates": [self._public_candidate(item) for item in scored[:max_items]],
+        }
+
     def get_thinking_level(
         self,
         scope: str = "global",
@@ -256,6 +309,191 @@ class ModelRuntimeSettingsService:
     def _normalize_level(self, value: Any) -> str:
         level = str(value or "").strip()
         return level if level in VALID_THINKING_LEVELS else DEFAULT_THINKING_LEVEL
+
+    def _list_profile_catalog(self) -> list[dict[str, Any]]:
+        try:
+            from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_profile_catalog
+        except ModuleNotFoundError:
+            try:
+                from backend.ai_client.provider_catalog import list_profile_catalog
+            except ModuleNotFoundError:
+                list_profile_catalog = None
+
+        if list_profile_catalog is not None:
+            try:
+                profiles = list_profile_catalog()
+                if isinstance(profiles, list) and profiles:
+                    return [profile for profile in profiles if isinstance(profile, dict)]
+            except Exception:
+                pass
+        return [self._fallback_stub_profile()]
+
+    @staticmethod
+    def _fallback_stub_profile() -> dict[str, Any]:
+        return {
+            "id": DEFAULT_MODEL,
+            "profile_id": DEFAULT_MODEL,
+            "qualified_model_id": DEFAULT_MODEL,
+            "provider_id": "stub",
+            "provider": "stub",
+            "provider_display_name": "Stub",
+            "model_id": "default",
+            "model": "default",
+            "display_name": "Stub Default",
+            "name": "Stub Default",
+            "availability": {
+                "active": True,
+                "configured": True,
+                "local": True,
+                "status": "configured",
+            },
+        }
+
+    @staticmethod
+    def _is_chat_profile(profile: dict[str, Any]) -> bool:
+        model_type = str(profile.get("type") or "chat").strip().lower()
+        return not model_type or model_type == "chat"
+
+    def _candidate_from_profile(self, profile: dict[str, Any], favorites: set[str]) -> dict[str, Any]:
+        profile_id = str(profile.get("profile_id") or profile.get("id") or profile.get("qualified_model_id") or "").strip()
+        qualified_model_id = str(profile.get("qualified_model_id") or profile_id).strip()
+        provider_id = str(profile.get("provider_id") or profile.get("provider") or "").strip()
+        model_id = str(profile.get("model_id") or profile.get("model") or "").strip()
+        if not provider_id and qualified_model_id and "/" in qualified_model_id:
+            provider_id, model_id_from_qualified = qualified_model_id.split("/", 1)
+            model_id = model_id or model_id_from_qualified
+        if not model_id and qualified_model_id and "/" in qualified_model_id:
+            _provider_id, model_id = qualified_model_id.split("/", 1)
+        if not qualified_model_id and provider_id and model_id:
+            qualified_model_id = f"{provider_id}/{model_id}"
+        if not profile_id:
+            profile_id = qualified_model_id
+
+        availability = profile.get("availability") if isinstance(profile.get("availability"), dict) else {}
+        provider_display_name = str(
+            profile.get("provider_display_name")
+            or profile.get("provider_name")
+            or provider_id
+            or ""
+        ).strip()
+        display_name = str(
+            profile.get("display_name")
+            or profile.get("name")
+            or profile.get("disambiguated_name")
+            or model_id
+            or profile_id
+        ).strip()
+        label = f"{provider_display_name} / {display_name}" if provider_display_name else display_name
+        local = bool(
+            profile.get("local")
+            or availability.get("local")
+            or availability.get("offline")
+            or provider_id in {"stub", "ollama", "lmstudio", "vllm"}
+        )
+        configured = bool(
+            profile.get("configured")
+            or availability.get("configured")
+            or availability.get("active")
+            or str(availability.get("status", "")).lower() in {"configured", "active"}
+            or provider_id == "stub"
+        )
+        requires_api_key = bool(provider_id and provider_id not in {"stub", "rumi"} and not local and not configured)
+        favorite = any(
+            item in favorites
+            for item in {
+                profile_id,
+                qualified_model_id,
+                model_id,
+                f"{provider_id}/{model_id}" if provider_id and model_id else "",
+            }
+            if item
+        )
+
+        return {
+            "profile_id": profile_id,
+            "qualified_model_id": qualified_model_id,
+            "provider_id": provider_id,
+            "model_id": model_id,
+            "display_name": display_name,
+            "provider_display_name": provider_display_name,
+            "configured": configured,
+            "local": local,
+            "requires_api_key": requires_api_key,
+            "api_key_required": requires_api_key,
+            "api_key_configured": configured,
+            "availability": deepcopy(availability),
+            "type": str(profile.get("type") or "chat"),
+            "favorite": favorite,
+            "label": label,
+            "disambiguated_name": str(profile.get("disambiguated_name") or "").strip(),
+            "score": 0,
+        }
+
+    def _candidate_match(self, candidate: dict[str, Any], query: str) -> tuple[str, int]:
+        normalized_query = self._normalize_search_key(query)
+        if not normalized_query:
+            return "", 0
+
+        provider_id = str(candidate.get("provider_id") or "").strip()
+        model_id = str(candidate.get("model_id") or "").strip()
+        provider_display_name = str(candidate.get("provider_display_name") or "").strip()
+        provider_model_id = f"{provider_id}/{model_id}" if provider_id and model_id else ""
+        provider_display_model_id = f"{provider_display_name}/{model_id}" if provider_display_name and model_id else ""
+
+        exact_id_fields = {
+            str(candidate.get("profile_id") or ""),
+            str(candidate.get("qualified_model_id") or ""),
+        }
+        exact_fields = {
+            str(candidate.get("display_name") or ""),
+            str(candidate.get("model_id") or ""),
+            provider_model_id,
+            provider_display_model_id,
+            str(candidate.get("label") or ""),
+            str(candidate.get("disambiguated_name") or ""),
+        }
+        search_fields = exact_id_fields | exact_fields | {
+            provider_id,
+            provider_display_name,
+        }
+        normalized_exact_ids = {self._normalize_search_key(item) for item in exact_id_fields if item}
+        normalized_exact_fields = {self._normalize_search_key(item) for item in exact_fields if item}
+        normalized_search_fields = {
+            self._normalize_search_key(item)
+            for item in search_fields
+            if item and self._normalize_search_key(item)
+        }
+
+        if normalized_query in normalized_exact_ids:
+            return "exact_id", 1000
+        if normalized_query in normalized_exact_fields:
+            return "exact_field", 950
+        if any(item.startswith(normalized_query) for item in normalized_search_fields):
+            return "prefix", 700
+        if any(normalized_query in item for item in normalized_search_fields):
+            return "substring", 500
+        return "", 0
+
+    @staticmethod
+    def _candidate_score(candidate: dict[str, Any], base_score: int) -> int:
+        return (
+            base_score
+            + (24 if candidate.get("configured") else 0)
+            + (12 if candidate.get("local") else 0)
+            + (6 if candidate.get("favorite") else 0)
+        )
+
+    @staticmethod
+    def _normalize_search_key(value: Any) -> str:
+        return " ".join(str(value or "").strip().casefold().split())
+
+    @staticmethod
+    def _public_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: deepcopy(value)
+            for key, value in candidate.items()
+            if not str(key).startswith("_")
+        }
 
     def _deep_merge(self, base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
         result = deepcopy(base)
