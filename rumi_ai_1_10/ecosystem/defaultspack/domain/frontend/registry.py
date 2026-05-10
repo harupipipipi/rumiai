@@ -14,7 +14,10 @@ from domain.capability.catalog import CapabilityCatalog
 from domain.chat.store import ChatStore
 from domain.dev.inspector import Inspector
 from domain.extensions.runtime import get_extension_registry
+from domain.external.input_profile_registry import InputProfileRegistry
+from domain.external.token_store import external_token_status, set_external_token
 from domain.tool.registry import ToolRegistry
+from domain.webhook.endpoint_store import WebhookEndpointStore
 
 
 class FrontendRegistry:
@@ -593,6 +596,50 @@ class FrontendRegistry:
                 ],
             },
             {
+                "id": "external_inputs",
+                "label": "External Inputs",
+                "description": "Webhook endpoints, profiles, policies, response planning, and provider tokens.",
+                "fields": [
+                    {
+                        "id": "external_tokens",
+                        "label": "External Tokens",
+                        "type": "external_tokens",
+                        "default": [],
+                        "help": "Named external tokens are masked and use the same secret-store pattern as API keys.",
+                    },
+                    {
+                        "id": "endpoint_summary",
+                        "label": "Webhook Endpoints",
+                        "type": "readonly",
+                        "default": "No endpoints",
+                    },
+                    {
+                        "id": "input_profile_summary",
+                        "label": "Input Profiles",
+                        "type": "readonly",
+                        "default": "No profiles",
+                    },
+                    {
+                        "id": "policy_summary",
+                        "label": "Audience Policies",
+                        "type": "readonly",
+                        "default": "Default allow/deny policies are evaluated server-side.",
+                    },
+                    {
+                        "id": "response_summary",
+                        "label": "Response Profiles",
+                        "type": "readonly",
+                        "default": "Provider capabilities drive response planning.",
+                    },
+                    {
+                        "id": "public_url_summary",
+                        "label": "Temporary Public URLs",
+                        "type": "readonly",
+                        "default": "Providers: static, cloudflare_quick_tunnel",
+                    },
+                ],
+            },
+            {
                 "id": "tools",
                 "label": "Tools",
                 "description": "Tool composer defaults and selection behavior.",
@@ -1161,6 +1208,14 @@ class FrontendRegistry:
                 "api_keys": [],
                 "model_api_routes": "",
             },
+            "external_inputs": {
+                "external_tokens": [],
+                "endpoint_summary": "",
+                "input_profile_summary": "",
+                "policy_summary": "Default allow/deny policies are evaluated server-side.",
+                "response_summary": "Provider capabilities drive response planning.",
+                "public_url_summary": "Providers: static, cloudflare_quick_tunnel",
+            },
         }
 
     def _model_options(self) -> list[dict[str, str]]:
@@ -1327,6 +1382,23 @@ class FrontendRegistry:
                         name=name,
                     )
             apis["api_keys"] = []
+        external_inputs = sanitized.get("external_inputs")
+        if isinstance(external_inputs, dict):
+            token_patch = external_inputs.pop("external_tokens", None)
+            if isinstance(token_patch, dict) and token_patch.get("action") == "upsert":
+                provider_id = str(token_patch.get("provider_id") or "").strip()
+                token_id = str(token_patch.get("token_id") or token_patch.get("name") or "").strip()
+                value = str(token_patch.get("value") or "")
+                if provider_id and token_id and value.strip():
+                    set_external_token(
+                        provider_id,
+                        value,
+                        pack_root=self._pack_root,
+                        token_id=token_id,
+                        name=str(token_patch.get("name") or token_id),
+                        kind=str(token_patch.get("kind") or "token"),
+                    )
+            external_inputs["external_tokens"] = []
         models = sanitized.get("models")
         if isinstance(models, dict):
             sanitized["models"] = ModelRuntimeSettingsService(
@@ -1358,6 +1430,17 @@ class FrontendRegistry:
             if isinstance(routes, list):
                 routes = "\n".join(str(item).strip() for item in routes if str(item).strip())
             apis["model_api_routes"] = str(routes or "").strip() + ("\n" if str(routes or "").strip() else "")
+        external_inputs = refreshed.setdefault("external_inputs", {})
+        if isinstance(external_inputs, dict):
+            external_inputs["external_tokens"] = external_token_status(pack_root=self._pack_root)
+            endpoints = WebhookEndpointStore().list_endpoints()
+            profiles = InputProfileRegistry(self._pack_root).list_profiles()
+            enabled_count = sum(1 for endpoint in endpoints if endpoint.get("enabled"))
+            external_inputs["endpoint_summary"] = f"{len(endpoints)} endpoints ({enabled_count} enabled)"
+            external_inputs["input_profile_summary"] = ", ".join(profile.id for profile in profiles) or "No profiles"
+            external_inputs.setdefault("policy_summary", "Default allow/deny policies are evaluated server-side.")
+            external_inputs.setdefault("response_summary", "Provider capabilities drive response planning.")
+            external_inputs.setdefault("public_url_summary", "Providers: static, cloudflare_quick_tunnel")
         models = refreshed.setdefault("models", {})
         if isinstance(models, dict):
             refreshed["models"] = ModelRuntimeSettingsService(

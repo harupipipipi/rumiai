@@ -220,7 +220,7 @@ export type SidebarFieldOption = {
 export type SidebarField = {
   id: string;
   label: string;
-  type: "text" | "textarea" | "number" | "toggle" | "select" | "readonly" | "secret" | "api_keys";
+  type: "text" | "textarea" | "number" | "toggle" | "select" | "readonly" | "secret" | "api_keys" | "external_tokens";
   default?: unknown;
   required?: boolean;
   help?: string;
@@ -777,6 +777,43 @@ export const api = {
         action: "delete",
         provider_id: providerId,
         api_id: apiId,
+      }),
+    });
+  },
+
+  saveExternalToken(providerId: string, value: string, options?: { tokenId?: string; name?: string; kind?: string }) {
+    return request<{ provider_id: string; token_id?: string; name?: string; kind?: string; configured: boolean }>("/api/external/tokens", {
+      method: "POST",
+      body: JSON.stringify({
+        provider_id: providerId,
+        token_id: options?.tokenId,
+        name: options?.name,
+        kind: options?.kind,
+        value,
+      }),
+    });
+  },
+
+  renameExternalToken(providerId: string, tokenId: string, name: string) {
+    return request<{ provider_id: string; token_id?: string; name?: string; configured: boolean }>("/api/external/tokens", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "rename",
+        provider_id: providerId,
+        token_id: tokenId,
+        name,
+        new_token_id: name,
+      }),
+    });
+  },
+
+  deleteExternalToken(providerId: string, tokenId: string) {
+    return request<{ provider_id: string; token_id?: string; configured: boolean; cleared?: boolean }>("/api/external/tokens", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "delete",
+        provider_id: providerId,
+        token_id: tokenId,
       }),
     });
   },

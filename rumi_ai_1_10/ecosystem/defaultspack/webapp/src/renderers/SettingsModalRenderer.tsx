@@ -35,6 +35,35 @@ function apiRowLabel(api: Record<string, unknown>): string {
   return String(api.label ?? `${api.provider_id}:${api.api_id}:***`);
 }
 
+function externalTokenProviderRows(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object") : [];
+}
+
+function namedTokenRows(provider: Record<string, unknown>): Array<Record<string, unknown>> {
+  const tokens = provider.tokens;
+  return Array.isArray(tokens) ? tokens.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object") : [];
+}
+
+function registeredExternalTokenRows(providers: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  const rows: Array<Record<string, unknown>> = providers.flatMap((provider) => (
+    namedTokenRows(provider).map((token) => ({
+      ...token,
+      provider_id: token.provider_id ?? provider.provider_id,
+    }))
+  ));
+  return rows.filter((token) => Boolean(token.configured));
+}
+
+function requiredExternalTokenRows(providers: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  return providers.flatMap((provider) => {
+    const required = provider.required_tokens;
+    if (!Array.isArray(required)) return [];
+    return required
+      .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+      .map((item) => ({ ...item, provider_id: provider.provider_id }));
+  });
+}
+
 function MaskedApiLabel({ api }: { api: Record<string, unknown> }) {
   const providerId = String(api.provider_id ?? "");
   const apiId = String(api.api_id ?? "");
@@ -47,6 +76,24 @@ function MaskedApiLabel({ api }: { api: Record<string, unknown> }) {
       <span className="truncate">{providerId}</span>
       <span className="px-0.5 text-zinc-600">:</span>
       <span className="truncate">{apiId}</span>
+      <span className="px-0.5 text-zinc-600">:</span>
+      <span className="tracking-normal text-zinc-500">***</span>
+    </span>
+  );
+}
+
+function MaskedExternalTokenLabel({ token }: { token: Record<string, unknown> }) {
+  const providerId = String(token.provider_id ?? "");
+  const tokenId = String(token.token_id ?? "");
+  const fallback = String(token.label ?? `${providerId}:${tokenId}:***`);
+  if (!providerId || !tokenId) {
+    return <span className="truncate text-xs text-zinc-300">{fallback}</span>;
+  }
+  return (
+    <span className="inline-flex max-w-full items-center overflow-hidden font-mono text-xs leading-5 text-zinc-500">
+      <span className="truncate">{providerId}</span>
+      <span className="px-0.5 text-zinc-600">:</span>
+      <span className="truncate">{tokenId}</span>
       <span className="px-0.5 text-zinc-600">:</span>
       <span className="tracking-normal text-zinc-500">***</span>
     </span>
@@ -121,10 +168,17 @@ function SettingsField({
   const [apiName, setApiName] = useState("main");
   const [apiSecret, setApiSecret] = useState("");
   const [apiSaveState, setApiSaveState] = useState<"idle" | "saved">("idle");
+  const [tokenProvider, setTokenProvider] = useState("line");
+  const [tokenName, setTokenName] = useState("main");
+  const [tokenKind, setTokenKind] = useState("channel_access_token");
+  const [tokenSecret, setTokenSecret] = useState("");
+  const [tokenSaveState, setTokenSaveState] = useState<"idle" | "saved">("idle");
   const [renamingKey, setRenamingKey] = useState("");
   const [renameDraft, setRenameDraft] = useState("");
   const [selectedApiKey, setSelectedApiKey] = useState("");
   const [openApiMenuKey, setOpenApiMenuKey] = useState("");
+  const [selectedTokenKey, setSelectedTokenKey] = useState("");
+  const [openTokenMenuKey, setOpenTokenMenuKey] = useState("");
   const commonLabel = <span className="text-sm text-zinc-300">{field.label}</span>;
   const isSecretConfigured = Boolean(value);
 
@@ -345,6 +399,246 @@ function SettingsField({
       );
       break;
     }
+    case "external_tokens": {
+      const providers = externalTokenProviderRows(value);
+      const providerOptions = providers.length
+        ? providers.map((provider) => String(provider.provider_id ?? ""))
+        : ["line", "discord", "generic", "slack"];
+      const uniqueProviderOptions = [...new Set(providerOptions.filter(Boolean))];
+      const registeredTokens = registeredExternalTokenRows(providers);
+      const requiredTokens = requiredExternalTokenRows(providers);
+      control = (
+        <div className="space-y-4">
+          <div className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/70">
+            <div className="grid grid-cols-[36px_minmax(220px,1.4fr)_minmax(130px,0.8fr)_minmax(120px,0.8fr)_48px] items-center gap-3 border-b border-zinc-800 bg-zinc-900/70 px-3 py-2 text-[11px] font-medium text-zinc-500">
+              <span className="h-4 w-4 rounded border border-cyan-500/70" />
+              <span>Token</span>
+              <span>Kind</span>
+              <span>Endpoints</span>
+              <span />
+            </div>
+            <div className="divide-y divide-zinc-800/80">
+              {registeredTokens.length > 0 ? registeredTokens.map((token) => {
+                const key = String(token.key ?? `${token.provider_id}:${token.token_id}`);
+                const isRenaming = renamingKey === key;
+                const isMenuOpen = openTokenMenuKey === key;
+                const isSelected = selectedTokenKey === key;
+                const endpointIds = Array.isArray(token.endpoint_ids) ? token.endpoint_ids.map(String).join(", ") : "";
+                return (
+                  <div
+                    key={key}
+                    className={cn(
+                      "grid grid-cols-[36px_minmax(220px,1.4fr)_minmax(130px,0.8fr)_minmax(120px,0.8fr)_48px] items-center gap-3 px-3 py-3 transition-colors",
+                      isSelected ? "bg-zinc-900/85" : "bg-zinc-950/20 hover:bg-zinc-900/45",
+                    )}
+                    onClick={() => setSelectedTokenKey(key)}
+                  >
+                    <span className={cn("h-4 w-4 rounded border", isSelected ? "border-cyan-400 bg-cyan-500/20" : "border-cyan-500/70")} />
+                    <div className="min-w-0">
+                      {isRenaming ? (
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            value={renameDraft}
+                            autoFocus
+                            onChange={(event) => setRenameDraft(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key !== "Enter") return;
+                              event.preventDefault();
+                              if (!renameDraft.trim()) return;
+                              onChange(sectionId, field.id, {
+                                action: "rename",
+                                provider_id: token.provider_id,
+                                token_id: token.token_id,
+                                name: renameDraft.trim(),
+                              });
+                              setRenamingKey("");
+                            }}
+                            className="min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 outline-none"
+                          />
+                          <button
+                            type="button"
+                            disabled={!renameDraft.trim()}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              if (!renameDraft.trim()) return;
+                              onChange(sectionId, field.id, {
+                                action: "rename",
+                                provider_id: token.provider_id,
+                                token_id: token.token_id,
+                                name: renameDraft.trim(),
+                              });
+                              setRenamingKey("");
+                            }}
+                            className="rounded-md border border-zinc-700 p-1 text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+                            title="Rename"
+                          >
+                            <Check size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setRenamingKey("");
+                            }}
+                            className="rounded-md border border-zinc-800 p-1 text-zinc-500 hover:text-zinc-300"
+                          >
+                            <X size={13} />
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="truncate text-sm font-medium text-zinc-200">{String(token.name ?? token.token_id ?? "")}</div>
+                          <MaskedExternalTokenLabel token={token} />
+                        </>
+                      )}
+                    </div>
+                    <span className="truncate text-sm text-zinc-500">{String(token.kind ?? "token")}</span>
+                    <span className="truncate text-sm text-zinc-500">{endpointIds || "None"}</span>
+                    <div className="relative flex justify-end">
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setOpenTokenMenuKey(isMenuOpen ? "" : key);
+                        }}
+                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-800 text-zinc-500 transition-colors hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-200"
+                        title="Actions"
+                      >
+                        <MoreVertical size={15} />
+                      </button>
+                      {isMenuOpen && (
+                        <>
+                          <button
+                            type="button"
+                            aria-label="close token menu"
+                            className="fixed inset-0 z-10 cursor-default"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setOpenTokenMenuKey("");
+                            }}
+                          />
+                          <div className="absolute right-0 top-[calc(100%+6px)] z-20 w-32 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 py-1 shadow-2xl">
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setRenamingKey(key);
+                                setRenameDraft(String(token.name ?? token.token_id ?? ""));
+                                setOpenTokenMenuKey("");
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
+                            >
+                              <Pencil size={13} />
+                              Rename
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setOpenTokenMenuKey("");
+                                onChange(sectionId, field.id, {
+                                  action: "delete",
+                                  provider_id: token.provider_id,
+                                  token_id: token.token_id,
+                                });
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-rose-300 hover:bg-rose-950/30"
+                            >
+                              <Trash2 size={13} />
+                              Delete
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              }) : (
+                <div className="px-3 py-5 text-xs text-zinc-600">No registered external tokens yet.</div>
+              )}
+            </div>
+          </div>
+          {requiredTokens.length > 0 && (
+            <div className="flex flex-wrap gap-2 text-[11px]">
+              {requiredTokens.map((token) => (
+                <span
+                  key={`${String(token.provider_id)}:${String(token.kind)}`}
+                  className={cn(
+                    "rounded-md border px-2 py-1",
+                    token.configured ? "border-emerald-800 bg-emerald-950/25 text-emerald-300" : "border-zinc-800 bg-zinc-950 text-zinc-500",
+                  )}
+                >
+                  {String(token.provider_id)} / {String(token.kind)}: {token.configured ? "configured" : "missing"}
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="grid gap-2 md:grid-cols-[150px_1fr_1fr_1.4fr_auto]">
+            <CustomSelect
+              value={tokenProvider}
+              onChange={setTokenProvider}
+              options={uniqueProviderOptions.map((providerId) => ({ value: providerId, label: providerId }))}
+            />
+            <input
+              value={tokenName}
+              onChange={(event) => {
+                setTokenName(event.target.value);
+                setTokenSaveState("idle");
+              }}
+              placeholder="token name"
+              className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none"
+            />
+            <input
+              value={tokenKind}
+              onChange={(event) => {
+                setTokenKind(event.target.value);
+                setTokenSaveState("idle");
+              }}
+              placeholder="token kind"
+              className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none"
+            />
+            <input
+              type="password"
+              autoComplete="off"
+              value={tokenSecret}
+              onChange={(event) => {
+                setTokenSecret(event.target.value);
+                setTokenSaveState("idle");
+              }}
+              placeholder={`${tokenProvider} token`}
+              className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 outline-none"
+            />
+            <button
+              type="button"
+              disabled={!tokenProvider.trim() || !tokenName.trim() || !tokenSecret.trim()}
+              onClick={() => {
+                if (!tokenProvider.trim() || !tokenName.trim() || !tokenSecret.trim()) return;
+                onChange(sectionId, field.id, {
+                  action: "upsert",
+                  provider_id: tokenProvider,
+                  token_id: tokenName,
+                  name: tokenName,
+                  kind: tokenKind,
+                  value: tokenSecret,
+                });
+                setTokenSecret("");
+                setTokenSaveState("saved");
+              }}
+              className={cn(
+                "rounded-lg border px-3 py-2 text-xs transition-colors",
+                tokenProvider.trim() && tokenName.trim() && tokenSecret.trim()
+                  ? "bg-zinc-100 text-zinc-950 border-zinc-100"
+                  : "bg-zinc-900 text-zinc-600 border-zinc-800 cursor-not-allowed",
+              )}
+            >
+              Save Token
+            </button>
+          </div>
+          {tokenSaveState === "saved" && <p className="text-[11px] text-emerald-400">Saved</p>}
+        </div>
+      );
+      break;
+    }
     case "secret":
       control = (
         <div className="flex flex-wrap items-center gap-2 min-w-0">
@@ -483,7 +777,7 @@ export function SettingsModalRenderer({
       key={`${activeSection?.id}.${field.id}`}
       className={cn(
         "rounded-lg border border-zinc-800 bg-zinc-950/50 p-4",
-        field.type === "textarea" || field.type === "secret" || field.type === "api_keys" ? "lg:col-span-2" : "",
+        field.type === "textarea" || field.type === "secret" || field.type === "api_keys" || field.type === "external_tokens" ? "lg:col-span-2" : "",
       )}
     >
       <SettingsField

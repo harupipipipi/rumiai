@@ -1381,7 +1381,7 @@ export default function App() {
         ...current,
         [sectionId]: {
           ...(current[sectionId] ?? {}),
-          [fieldId]: field?.type === "secret" || field?.type === "api_keys" ? "" : value,
+          [fieldId]: field?.type === "secret" || field?.type === "api_keys" || field?.type === "external_tokens" ? "" : value,
         },
       };
       if (field?.type === "api_keys") {
@@ -1401,6 +1401,27 @@ export default function App() {
             .catch(console.error);
         } else if (providerId && name && secret.trim()) {
           void api.saveProviderApiKey(providerId, secret, { apiId: name, name })
+            .then(() => refreshCatalog())
+            .catch(console.error);
+        }
+      } else if (field?.type === "external_tokens") {
+        const payload = value && typeof value === "object" ? value as Record<string, unknown> : {};
+        const providerId = String(payload.provider_id ?? "").trim();
+        const tokenId = String(payload.token_id ?? payload.name ?? "").trim();
+        const name = String(payload.name ?? tokenId).trim();
+        const kind = String(payload.kind ?? "token").trim();
+        const secret = String(payload.value ?? "");
+        const action = String(payload.action ?? "upsert").trim();
+        if (action === "delete" && providerId && tokenId) {
+          void api.deleteExternalToken(providerId, tokenId)
+            .then(() => refreshCatalog())
+            .catch(console.error);
+        } else if (action === "rename" && providerId && tokenId && name) {
+          void api.renameExternalToken(providerId, tokenId, name)
+            .then(() => refreshCatalog())
+            .catch(console.error);
+        } else if (providerId && name && secret.trim()) {
+          void api.saveExternalToken(providerId, secret, { tokenId: name, name, kind })
             .then(() => refreshCatalog())
             .catch(console.error);
         }
