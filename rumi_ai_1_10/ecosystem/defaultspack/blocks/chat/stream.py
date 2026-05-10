@@ -210,9 +210,27 @@ def _fallback_send(input_data, context):
 
 def _stream_response(input_data, context):
     store = ChatStore()
-    conversation_id = input_data.get("conversation_id")
+    conversation_id = str(input_data.get("conversation_id") or "")
     conv = store.get_conversation(conversation_id)
     message = input_data.get("message") if isinstance(input_data.get("message"), dict) else {}
+    cancellation_registry = get_chat_cancellation_registry()
+    cancel_event = threading.Event()
+    chunks = None
+
+    def is_cancelled():
+        return cancel_event.is_set() or cancellation_registry.is_cancelled(conversation_id)
+
+    def request_cancel():
+        cancel_event.set()
+        close = getattr(chunks, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                pass
+
+    def emit_cancelled():
+        yield {"type": "error", "error": "cancelled"}
 
     role = message.get("role", "user")
     raw_content = message.get("content", [])
@@ -249,137 +267,171 @@ def _stream_response(input_data, context):
         yield {"type": "error", "error": "Failed to add user message"}
         return
     yield {"type": "user_message", "message": user_msg}
+    cancellation_registry.register(conversation_id, request_cancel)
 
-    chain = store.get_message_chain(conversation_id, user_msg["id"])
-    standard_messages = convert_to_standard(chain)
-    model = conv.get("model", "stub/default")
-
-    manager = get_manager()
-    system_prompt = _conversation_system_prompt(conv, manager)
-    user_text = extract_user_text(content)
-    inferred_tool_ids = _infer_requested_tools_from_message(user_text)
-    input_data = _with_inferred_tools(input_data, inferred_tool_ids)
-    if inferred_tool_ids:
-        context = dict(context or {})
-        context["user_requested_computer_use"] = True
-        context = _apply_computer_use_context_preferences(context, user_text)
     try:
-        enrich_messages(standard_messages, system_prompt, conversation_id, user_text, manager)
-    except Exception:
-        if system_prompt:
+        if is_cancelled():
+            yield from emit_cancelled()
+            return
+
+        chain = store.get_message_chain(conversation_id, user_msg["id"])
+        standard_messages = convert_to_standard(chain)
+        model = (conv or {}).get("model", "stub/default")
+
+        manager = get_manager()
+        system_prompt = _conversation_system_prompt(conv, manager)
+        user_text = extract_user_text(content)
+        inferred_tool_ids = _infer_requested_tools_from_message(user_text)
+        input_data = _with_inferred_tools(input_data, inferred_tool_ids)
+        if inferred_tool_ids:
+            context = dict(context or {})
+            context["user_requested_computer_use"] = True
+            context = _apply_computer_use_context_preferences(context, user_text)
+        try:
+            enrich_messages(standard_messages, system_prompt, conversation_id, user_text, manager)
+        except Exception:
+            if system_prompt:
+                standard_messages.insert(0, {"role": "system", "content": system_prompt})
+        if system_prompt and (
+            not standard_messages or standard_messages[0].get("role") != "system"
+        ):
             standard_messages.insert(0, {"role": "system", "content": system_prompt})
-    if system_prompt and (
-        not standard_messages or standard_messages[0].get("role") != "system"
-    ):
-        standard_messages.insert(0, {"role": "system", "content": system_prompt})
 
-    params = dict(input_data.get("params") or {})
-    client = AIClient()
-    thought_filter = _InlineThoughtFilter()
-    text_parts = []
-    provider_thinking_parts = []
-    finish_reason = "stop"
-    usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
-    try:
-        chunks = client.stream(model, standard_messages, tools=[], params=params)
-        for chunk in chunks:
-            chunk_type = chunk.get("type", "") if isinstance(chunk, dict) else ""
-            if chunk_type == "content_delta":
-                delta = chunk.get("delta", {})
-                text = delta.get("text", "")
-                if text:
-                    visible_text = thought_filter.push(text)
-                    thinking_text = thought_filter.pending_thinking_delta()
-                    if thinking_text:
-                        yield {"type": "thinking_delta", "delta": thinking_text}
-                    if visible_text:
-                        text_parts.append(visible_text)
-                        yield {"type": "delta", "delta": visible_text}
-            elif chunk_type in {"thinking_delta", "reasoning_delta"}:
-                delta = chunk.get("delta", {}) if isinstance(chunk.get("delta"), dict) else {}
-                text = delta.get("text") or chunk.get("text") or chunk.get("thinking") or chunk.get("reasoning") or ""
-                if text:
-                    provider_thinking_parts.append(str(text))
-                    yield {"type": "thinking_delta", "delta": str(text)}
-            elif chunk_type == "stream_end":
-                finish_reason = chunk.get("finish_reason", "stop")
-                usage = chunk.get("usage", usage)
-    except Exception as exc:
-        yield {"type": "error", "error": "AI request failed: " + str(exc)}
-        return
+        params = dict(input_data.get("params") or {})
+        client = AIClient()
+        thought_filter = _InlineThoughtFilter()
+        text_parts = []
+        provider_thinking_parts = []
+        finish_reason = "stop"
+        usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+        try:
+            chunks = client.stream(model, standard_messages, tools=[], params=params)
+            if is_cancelled():
+                yield from emit_cancelled()
+                return
+            if isinstance(chunks, dict) and chunks.get("status") == "error":
+                err = chunks.get("error", {})
+                message_text = err.get("message") if isinstance(err, dict) else err
+                yield {"type": "error", "error": message_text or "AI request failed"}
+                return
+            for chunk in chunks:
+                if is_cancelled():
+                    yield from emit_cancelled()
+                    return
+                chunk_type = chunk.get("type", "") if isinstance(chunk, dict) else ""
+                if chunk_type == "content_delta":
+                    delta = chunk.get("delta", {})
+                    text = delta.get("text", "")
+                    if text:
+                        visible_text = thought_filter.push(text)
+                        thinking_text = thought_filter.pending_thinking_delta()
+                        if thinking_text:
+                            yield {"type": "thinking_delta", "delta": thinking_text}
+                        if visible_text:
+                            text_parts.append(visible_text)
+                            yield {"type": "delta", "delta": visible_text}
+                elif chunk_type in {"thinking_delta", "reasoning_delta"}:
+                    delta = chunk.get("delta", {}) if isinstance(chunk.get("delta"), dict) else {}
+                    text = delta.get("text") or chunk.get("text") or chunk.get("thinking") or chunk.get("reasoning") or ""
+                    if text:
+                        provider_thinking_parts.append(str(text))
+                        yield {"type": "thinking_delta", "delta": str(text)}
+                elif chunk_type == "stream_end":
+                    finish_reason = chunk.get("finish_reason", "stop")
+                    usage = chunk.get("usage", usage)
+        except Exception as exc:
+            if is_cancelled():
+                yield from emit_cancelled()
+                return
+            yield {"type": "error", "error": "AI request failed: " + str(exc)}
+            return
 
-    trailing_text = thought_filter.finish()
-    thinking_text = thought_filter.pending_thinking_delta()
-    if thinking_text:
-        yield {"type": "thinking_delta", "delta": thinking_text}
-    if trailing_text:
-        text_parts.append(trailing_text)
-        yield {"type": "delta", "delta": trailing_text}
+        if is_cancelled():
+            yield from emit_cancelled()
+            return
 
-    transcript = "\n".join(
-        part for part in ["".join(provider_thinking_parts).strip(), thought_filter.transcript()]
-        if part
-    ).strip()
-    fallback_response = None
-    if not "".join(text_parts).strip():
-        fallback_response = _fallback_complete_without_thinking(
-            client,
-            model,
-            standard_messages,
-            params,
-            transcript,
+        trailing_text = thought_filter.finish()
+        thinking_text = thought_filter.pending_thinking_delta()
+        if thinking_text:
+            yield {"type": "thinking_delta", "delta": thinking_text}
+        if trailing_text:
+            text_parts.append(trailing_text)
+            yield {"type": "delta", "delta": trailing_text}
+
+        transcript = "\n".join(
+            part for part in ["".join(provider_thinking_parts).strip(), thought_filter.transcript()]
+            if part
+        ).strip()
+        fallback_response = None
+        if not "".join(text_parts).strip():
+            if is_cancelled():
+                yield from emit_cancelled()
+                return
+            fallback_response = _fallback_complete_without_thinking(
+                client,
+                model,
+                standard_messages,
+                params,
+                transcript,
+            )
+            fallback_text = _text_from_content_blocks(
+                fallback_response.get("content") if isinstance(fallback_response, dict) else None
+            )
+            if fallback_text:
+                yield {"type": "delta", "delta": fallback_text}
+
+        if fallback_response is not None:
+            response = fallback_response
+        else:
+            response_text = "".join(text_parts)
+            recovered_empty = False
+            if not response_text.strip():
+                response_text = _empty_stream_message(finish_reason)
+                recovered_empty = True
+            response = {
+                "content": [{"type": "text", "text": response_text}],
+                "finish_reason": finish_reason,
+                "usage": usage,
+                "metadata": {
+                    "model": model,
+                    "attached_tool_count": 0,
+                    "attached_tools": [],
+                    "thinking": {"state": "completed"},
+                    "thinking_level": params.get("thinking_level"),
+                },
+            }
+            if recovered_empty:
+                response["metadata"]["empty_stream_response"] = True
+        if transcript:
+            response["metadata"]["thinking"] = {
+                "state": "completed",
+                "transcript": transcript,
+                "source": "inline_thought_stream",
+            }
+
+        if is_cancelled():
+            yield from emit_cancelled()
+            return
+
+        seq = user_msg.get("sequence_number", 1) + 1
+        assistant_msg = store.add_message(
+            conversation_id,
+            build_assistant_message(
+                conversation_id=conversation_id,
+                parent_id=user_msg["id"],
+                sequence_number=seq,
+                response=response,
+                model=model,
+            ),
         )
-        fallback_text = _text_from_content_blocks(
-            fallback_response.get("content") if isinstance(fallback_response, dict) else None
-        )
-        if fallback_text:
-            yield {"type": "delta", "delta": fallback_text}
-
-    if fallback_response is not None:
-        response = fallback_response
-    else:
-        response_text = "".join(text_parts)
-        recovered_empty = False
-        if not response_text.strip():
-            response_text = _empty_stream_message(finish_reason)
-            recovered_empty = True
-        response = {
-            "content": [{"type": "text", "text": response_text}],
-            "finish_reason": finish_reason,
-            "usage": usage,
-            "metadata": {
-                "model": model,
-                "attached_tool_count": 0,
-                "attached_tools": [],
-                "thinking": {"state": "completed"},
-                "thinking_level": params.get("thinking_level"),
-            },
-        }
-        if recovered_empty:
-            response["metadata"]["empty_stream_response"] = True
-    if transcript:
-        response["metadata"]["thinking"] = {
-            "state": "completed",
-            "transcript": transcript,
-            "source": "inline_thought_stream",
-        }
-
-    seq = user_msg.get("sequence_number", 1) + 1
-    assistant_msg = store.add_message(
-        conversation_id,
-        build_assistant_message(
-            conversation_id=conversation_id,
-            parent_id=user_msg["id"],
-            sequence_number=seq,
-            response=response,
-            model=model,
-        ),
-    )
-    if assistant_msg is None:
-        yield {"type": "error", "error": "Failed to add assistant message"}
-        return
-    yield {"type": "message", "message": assistant_msg}
-    yield {"type": "done", "message": assistant_msg}
+        if assistant_msg is None:
+            yield {"type": "error", "error": "Failed to add assistant message"}
+            return
+        yield {"type": "message", "message": assistant_msg}
+        yield {"type": "done", "message": assistant_msg}
+    finally:
+        cancel_event.set()
+        cancellation_registry.unregister(conversation_id, request_cancel)
 
 
 def run(input_data, context):

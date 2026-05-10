@@ -14,10 +14,16 @@ class ChatCancellationRegistry:
         conversation_id = str(conversation_id or "").strip()
         if not conversation_id:
             return
+        should_notify = False
         with self._lock:
-            self._cancelled.discard(conversation_id)
+            should_notify = conversation_id in self._cancelled
             if callback is not None:
                 self._callbacks.setdefault(conversation_id, []).append(callback)
+        if should_notify and callback is not None:
+            try:
+                callback()
+            except Exception:
+                pass
 
     def unregister(self, conversation_id: str, callback: Callable[[], None] | None = None) -> None:
         conversation_id = str(conversation_id or "").strip()

@@ -1,4 +1,4 @@
-import { AlertTriangle, Check, CheckCircle2, ChevronDown, Clock, Copy, Image as ImageIcon, Loader2 } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, ChevronDown, Clock, Copy, ExternalLink, Image as ImageIcon, Loader2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
@@ -7,7 +7,126 @@ import { buildToolActivityGroups, toolFolderFor, type ToolActivityItem } from ".
 import { api, type BrowserScreenshot, type ChatContentBlock } from "../lib/api";
 import type { ChatMessagesRendererProps } from "./types";
 
-function MessageBlock({ block, unknownStrategy }: { block: ChatContentBlock; unknownStrategy: string }) {
+type ImagePreviewDetail = {
+  label: string;
+  value: string;
+};
+
+type ImagePreviewRequest = {
+  src: string;
+  title: string;
+  alt: string;
+  subtitle?: string;
+  href?: string;
+  details?: ImagePreviewDetail[];
+};
+
+function shortDetail(value: unknown, limit = 420): string {
+  let text = "";
+  if (typeof value === "string") {
+    text = value;
+  } else if (typeof value === "number" || typeof value === "boolean") {
+    text = String(value);
+  } else if (value !== null && value !== undefined) {
+    try {
+      text = JSON.stringify(value);
+    } catch {
+      text = String(value);
+    }
+  }
+  const compact = text.replace(/\s+/g, " ").trim();
+  return compact.length > limit ? `${compact.slice(0, limit - 3)}...` : compact;
+}
+
+function imageSizeLabel(size: BrowserScreenshot["image_size"]): string {
+  const width = Number(size?.width ?? 0);
+  const height = Number(size?.height ?? 0);
+  return width > 0 && height > 0 ? `${width} x ${height}` : "";
+}
+
+function BrowserImagePreviewDialog({
+  image,
+  onClose,
+}: {
+  image: ImagePreviewRequest | null;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    if (!image) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [image, onClose]);
+
+  if (!image) return null;
+
+  return (
+    <div className="rumi-image-preview-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/72 px-4 py-5 backdrop-blur-md" role="dialog" aria-modal="true" aria-label={image.title}>
+      <button type="button" className="absolute inset-0 cursor-default" aria-label="画像プレビューを閉じる" onClick={onClose} />
+      <section className="rumi-image-preview-shell relative flex h-[min(88vh,980px)] w-[min(94vw,1180px)] flex-col overflow-hidden rounded-xl border border-zinc-800 bg-[#0b0b0d] shadow-[0_28px_90px_rgba(0,0,0,0.55)]">
+        <header className="flex min-h-12 items-center justify-between gap-3 border-b border-zinc-800 bg-zinc-950/95 px-3 py-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <ImageIcon size={15} className="shrink-0 text-zinc-500" />
+            <div className="min-w-0">
+              <div className="truncate text-[12px] font-medium text-zinc-200">{image.title}</div>
+              {image.subtitle && <div className="truncate text-[10px] text-zinc-600">{image.subtitle}</div>}
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {image.href && (
+              <a
+                href={image.href}
+                target="_blank"
+                rel="noreferrer"
+                aria-label="元画像を開く"
+                title="元画像を開く"
+                className="flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-200 focus-visible:bg-zinc-900 focus-visible:text-zinc-200 focus-visible:outline-none"
+              >
+                <ExternalLink size={15} />
+              </a>
+            )}
+            <button
+              type="button"
+              aria-label="閉じる"
+              title="閉じる"
+              className="flex h-8 w-8 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-900 hover:text-zinc-200 focus-visible:bg-zinc-900 focus-visible:text-zinc-200 focus-visible:outline-none"
+              onClick={onClose}
+            >
+              <X size={16} />
+            </button>
+          </div>
+        </header>
+        <div className="min-h-0 flex-1 overflow-auto bg-black">
+          <div className="rumi-image-preview-media flex min-h-full items-center justify-center p-4">
+            <img src={image.src} alt={image.alt} className="max-h-full max-w-full rounded-lg border border-zinc-800/80 object-contain shadow-[0_18px_70px_rgba(0,0,0,0.45)]" />
+          </div>
+        </div>
+        {image.details && image.details.length > 0 && (
+          <dl className="grid max-h-36 shrink-0 grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1.5 overflow-auto border-t border-zinc-800 bg-zinc-950/95 px-3 py-2 font-mono text-[10px] leading-5">
+            {image.details.map((detail) => (
+              <div key={`${detail.label}-${detail.value}`} className="contents">
+                <dt className="text-zinc-600">{detail.label}</dt>
+                <dd className="min-w-0 break-words text-zinc-400">{detail.value}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function MessageBlock({
+  block,
+  unknownStrategy,
+  onOpenImagePreview,
+}: {
+  block: ChatContentBlock;
+  unknownStrategy: string;
+  onOpenImagePreview?: (image: ImagePreviewRequest) => void;
+}) {
   const blockType = String(block.type ?? "text");
 
   if (blockType === "text" || blockType === "markdown") {
@@ -35,7 +154,24 @@ function MessageBlock({ block, unknownStrategy }: { block: ChatContentBlock; unk
           <ImageIcon size={12} />
           <span>{String(block.alt ?? "image")}</span>
         </div>
-        {url ? <img src={url} alt={String(block.alt ?? "image")} className="max-h-72 rounded-lg border border-zinc-800" /> : null}
+        {url ? (
+          <button
+            type="button"
+            className="block max-w-full cursor-zoom-in rounded-lg border border-zinc-800 bg-black/30 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
+            onClick={() => onOpenImagePreview?.({
+              src: url,
+              href: url,
+              title: String(block.alt ?? "image"),
+              alt: String(block.alt ?? "image"),
+              details: [
+                { label: "type", value: blockType },
+                { label: "source", value: shortDetail(url, 180) },
+              ],
+            })}
+          >
+            <img src={url} alt={String(block.alt ?? "image")} className="max-h-72 rounded-lg" />
+          </button>
+        ) : null}
       </div>
     );
   }
@@ -190,7 +326,28 @@ function WidgetCard({ widget }: { widget: Record<string, unknown> }) {
   );
 }
 
-function BrowserScreenshotPreview({ screenshot, compact = false }: { screenshot: BrowserScreenshot; compact?: boolean }) {
+function screenshotPreviewDetails(screenshot: BrowserScreenshot): ImagePreviewDetail[] {
+  const details: ImagePreviewDetail[] = [];
+  const size = imageSizeLabel(screenshot.image_size);
+  if (screenshot.action) details.push({ label: "action", value: screenshot.action });
+  if (size) details.push({ label: "image", value: size });
+  if (screenshot.tool_name) details.push({ label: "tool", value: screenshot.tool_name });
+  if (screenshot.tool_call_id) details.push({ label: "tool_call", value: screenshot.tool_call_id });
+  if (screenshot.click_marker || screenshot.marker) details.push({ label: "marker", value: shortDetail(screenshot.click_marker ?? screenshot.marker) });
+  if (screenshot.drag_marker) details.push({ label: "drag", value: shortDetail(screenshot.drag_marker) });
+  if (screenshot.target_window) details.push({ label: "target", value: shortDetail(screenshot.target_window) });
+  return details;
+}
+
+function BrowserScreenshotPreview({
+  screenshot,
+  compact = false,
+  onOpenImagePreview,
+}: {
+  screenshot: BrowserScreenshot;
+  compact?: boolean;
+  onOpenImagePreview?: (image: ImagePreviewRequest) => void;
+}) {
   const marker = screenshot.click_marker ?? screenshot.marker;
   const dragMarker = screenshot.drag_marker;
   const imageWidth = Number(screenshot.image_size?.width ?? 0);
@@ -215,14 +372,21 @@ function BrowserScreenshotPreview({ screenshot, compact = false }: { screenshot:
       : screenshot.action === "computer.click"
         ? "クリック位置つきスクリーンショット"
         : "スクリーンショット";
+  const openPreview = () => onOpenImagePreview?.({
+    src: screenshot.data_url,
+    href: screenshot.data_url,
+    title: screenshotLabel,
+    alt: screenshot.action === "computer.drag" ? "Dragged screen" : screenshot.action === "computer.click" ? "Clicked screen" : "Screen capture",
+    subtitle: screenshot.action,
+    details: screenshotPreviewDetails(screenshot),
+  });
 
   return (
     <figure className={cn("max-w-full overflow-hidden rounded-lg border border-zinc-800 bg-black/30", compact ? "w-[min(34rem,100%)]" : "w-[min(48rem,100%)]")}>
-      <a
-        href={screenshot.data_url}
-        target="_blank"
-        rel="noreferrer"
-        className="relative block max-w-full cursor-zoom-in align-top"
+      <button
+        type="button"
+        className="relative block max-w-full cursor-zoom-in align-top focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
+        onClick={openPreview}
       >
         <img
           src={screenshot.data_url}
@@ -258,7 +422,7 @@ function BrowserScreenshotPreview({ screenshot, compact = false }: { screenshot:
             <span className="absolute left-1/2 top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-red-200" />
           </span>
         )}
-      </a>
+      </button>
       <figcaption className="flex items-center gap-2 border-t border-zinc-800 px-3 py-2 text-[11px] text-zinc-500">
         <ImageIcon size={12} />
         <span>{screenshotLabel}</span>
@@ -269,6 +433,75 @@ function BrowserScreenshotPreview({ screenshot, compact = false }: { screenshot:
 
 function isBrowserToolName(toolName: unknown): boolean {
   return toolName === "browser_computer" || toolName === "browser_use" || toolName === "computer_use";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function isImageDataUrl(value: string): boolean {
+  return /^data:image\/[a-z0-9.+-]+;base64,/i.test(value);
+}
+
+function browserActionForEvent(event: NonNullable<ChatMessagesRendererProps["messages"][number]["events"]>[number]): string | undefined {
+  if (typeof event.action === "string") return event.action;
+  const args = isRecord(event.arguments) ? event.arguments : {};
+  return typeof args.action === "string" ? args.action : undefined;
+}
+
+function collectBrowserScreenshots(
+  value: unknown,
+  event: NonNullable<ChatMessagesRendererProps["messages"][number]["events"]>[number],
+  screenshots: BrowserScreenshot[],
+  seen: Set<string>,
+): BrowserScreenshot[] {
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectBrowserScreenshots(item, event, screenshots, seen));
+    return screenshots;
+  }
+  if (!isRecord(value)) return screenshots;
+
+  const dataUrl = stringValue(value.data_url) || stringValue(value.dataUrl);
+  if (dataUrl && isImageDataUrl(dataUrl) && !seen.has(dataUrl)) {
+    seen.add(dataUrl);
+    screenshots.push({
+      id: `stream-${String(event.tool_call_id ?? event.timestamp ?? screenshots.length)}-${screenshots.length}`,
+      run_id: "stream",
+      tool_call_id: typeof event.tool_call_id === "string" ? event.tool_call_id : null,
+      tool_name: typeof event.tool_name === "string" ? event.tool_name : undefined,
+      mime_type: stringValue(value.mime_type) || "image/png",
+      data_url: dataUrl,
+      action: stringValue(value.action) || browserActionForEvent(event),
+      image_size: isRecord(value.image_size) ? value.image_size : undefined,
+      click_marker: isRecord(value.click_marker) ? value.click_marker : undefined,
+      marker: isRecord(value.marker) ? value.marker : undefined,
+      drag_marker: isRecord(value.drag_marker) ? value.drag_marker : undefined,
+      target_window: isRecord(value.target_window) ? value.target_window : undefined,
+    });
+  }
+
+  for (const [key, item] of Object.entries(value)) {
+    if (key === "data_url" || key === "dataUrl") continue;
+    if (isRecord(item) || Array.isArray(item)) collectBrowserScreenshots(item, event, screenshots, seen);
+  }
+  return screenshots;
+}
+
+function streamedBrowserScreenshots(message: ChatMessagesRendererProps["messages"][number]): BrowserScreenshot[] {
+  const screenshots: BrowserScreenshot[] = [];
+  const seen = new Set<string>();
+  for (const event of message.events ?? []) {
+    if (!isBrowserToolName(event.tool_name)) continue;
+    collectBrowserScreenshots(event.result, event, screenshots, seen);
+    collectBrowserScreenshots(event.artifact, event, screenshots, seen);
+    collectBrowserScreenshots(event.artifacts, event, screenshots, seen);
+    collectBrowserScreenshots(event.output, event, screenshots, seen);
+  }
+  return screenshots;
 }
 
 function hasBrowserToolLog(message: ChatMessagesRendererProps["messages"][number]): boolean {
@@ -291,10 +524,17 @@ function hasRunningBrowserToolEvent(message: ChatMessagesRendererProps["messages
   ));
 }
 
-function BrowserScreenshotStrip({ message }: { message: ChatMessagesRendererProps["messages"][number] }) {
+function BrowserScreenshotStrip({
+  message,
+  onOpenImagePreview,
+}: {
+  message: ChatMessagesRendererProps["messages"][number];
+  onOpenImagePreview?: (image: ImagePreviewRequest) => void;
+}) {
   const [screenshots, setScreenshots] = useState<BrowserScreenshot[]>([]);
   const [omittedCount, setOmittedCount] = useState(0);
   const [failed, setFailed] = useState(false);
+  const liveScreenshots = streamedBrowserScreenshots(message);
   const hasBrowserLog = hasBrowserToolLog(message);
   const hasBrowserActivity = hasBrowserLog || hasBrowserToolEvent(message);
   const hasRunningBrowserActivity = hasRunningBrowserToolEvent(message);
@@ -325,6 +565,16 @@ function BrowserScreenshotStrip({ message }: { message: ChatMessagesRendererProp
 
   if (!hasBrowserActivity) return null;
 
+  if (liveScreenshots.length > 0 && !canFetchStoredScreenshots) {
+    return (
+      <div className="mb-4 grid gap-3">
+        {liveScreenshots.map((screenshot) => (
+          <BrowserScreenshotPreview key={screenshot.id} screenshot={screenshot} onOpenImagePreview={onOpenImagePreview} />
+        ))}
+      </div>
+    );
+  }
+
   if (!canFetchStoredScreenshots && hasRunningBrowserActivity) {
     return (
       <div className="mb-3 flex w-fit items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-[11px] text-zinc-400">
@@ -350,7 +600,7 @@ function BrowserScreenshotStrip({ message }: { message: ChatMessagesRendererProp
         </div>
       )}
       {screenshots.map((screenshot) => (
-        <BrowserScreenshotPreview key={screenshot.id} screenshot={screenshot} />
+        <BrowserScreenshotPreview key={screenshot.id} screenshot={screenshot} onOpenImagePreview={onOpenImagePreview} />
       ))}
     </div>
   );
@@ -393,8 +643,15 @@ function ToolResultDetail({ detail }: { detail: string }) {
   return <span className="min-w-0 break-words text-[12px] leading-relaxed">{detail}</span>;
 }
 
-function ToolActivityTray({ message }: { message: ChatMessagesRendererProps["messages"][number] }) {
+function ToolActivityTray({
+  message,
+  onOpenImagePreview,
+}: {
+  message: ChatMessagesRendererProps["messages"][number];
+  onOpenImagePreview?: (image: ImagePreviewRequest) => void;
+}) {
   const [screenshots, setScreenshots] = useState<BrowserScreenshot[]>([]);
+  const liveScreenshots = streamedBrowserScreenshots(message);
   const canFetchStoredScreenshots = Boolean(message.conversationId) && hasBrowserToolLog(message) && !message.id.startsWith("optimistic-");
 
   useEffect(() => {
@@ -419,6 +676,7 @@ function ToolActivityTray({ message }: { message: ChatMessagesRendererProps["mes
   if (groups.length === 0) return null;
   const items = groups.flatMap((group) => group.items);
   const total = items.length;
+  const visibleScreenshots = canFetchStoredScreenshots ? screenshots : liveScreenshots;
 
   return (
     <details className="rumi-tool-activity mb-4 w-full rounded-xl border border-zinc-800/90 bg-zinc-950/70 px-4 py-3 text-zinc-300 shadow-[0_16px_44px_rgba(0,0,0,0.22)]" open>
@@ -462,13 +720,40 @@ function ToolActivityTray({ message }: { message: ChatMessagesRendererProps["mes
                 <ToolResultDetail detail={item.detail} />
               </div>
             )}
-            {screenshots
+            {visibleScreenshots
               .filter((screenshot) => !item.toolCallId || screenshot.tool_call_id === item.toolCallId)
               .map((screenshot) => (
                 <div key={screenshot.id} className="mt-3">
-                  <BrowserScreenshotPreview screenshot={screenshot} compact />
+                  <BrowserScreenshotPreview screenshot={screenshot} compact onOpenImagePreview={onOpenImagePreview} />
                 </div>
               ))}
+            {!visibleScreenshots.some((screenshot) => !item.toolCallId || screenshot.tool_call_id === item.toolCallId) && item.artifacts?.filter((artifact) => artifact.kind === "image" && artifact.url).map((artifact) => (
+              <div key={artifact.path} className="mt-3">
+                <figure className="max-w-full overflow-hidden rounded-lg border border-zinc-800 bg-black/30">
+                  <button
+                    type="button"
+                    className="block w-full cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500"
+                    onClick={() => onOpenImagePreview?.({
+                      src: String(artifact.url ?? ""),
+                      href: String(artifact.url ?? ""),
+                      title: artifact.name,
+                      alt: artifact.name,
+                      subtitle: item.toolName,
+                      details: [
+                        { label: "tool", value: item.toolName },
+                        { label: "path", value: artifact.path },
+                      ],
+                    })}
+                  >
+                    <img src={artifact.url} alt={artifact.name} className="block h-auto w-full object-contain" style={{ maxHeight: "min(220px, 30vh)" }} />
+                  </button>
+                  <figcaption className="flex items-center gap-2 border-t border-zinc-800 px-3 py-2 text-[11px] text-zinc-500">
+                    <ImageIcon size={12} />
+                    <span className="truncate">{artifact.name}</span>
+                  </figcaption>
+                </figure>
+              </div>
+            ))}
             {item.artifacts && item.artifacts.filter((artifact) => artifact.kind !== "image").length > 0 && (
               <div className="mt-2 flex flex-wrap gap-2">
                 {item.artifacts.filter((artifact) => artifact.kind !== "image").map((artifact) => (
@@ -544,6 +829,8 @@ export function ChatMessagesRenderer({
   showActivityInMessages,
   showWidgets,
 }: ChatMessagesRendererProps) {
+  const [imagePreview, setImagePreview] = useState<ImagePreviewRequest | null>(null);
+
   return (
     <>
       {error && <div className="mx-4 mt-4 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-200">{error}</div>}
@@ -583,8 +870,8 @@ export function ChatMessagesRenderer({
                           : "w-full text-zinc-200 bg-transparent",
                       )}
                     >
-                      {showActivityInMessages && message.role === "agent" && <ToolActivityTray message={message} />}
-                      {message.role === "agent" && !showActivityInMessages && <BrowserScreenshotStrip message={message} />}
+                      {showActivityInMessages && message.role === "agent" && <ToolActivityTray message={message} onOpenImagePreview={setImagePreview} />}
+                      {message.role === "agent" && !showActivityInMessages && <BrowserScreenshotStrip message={message} onOpenImagePreview={setImagePreview} />}
 
                       {message.role === "agent" && message.metadata?.thinkingTranscript && (
                         <details className="mb-3 rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2 text-xs text-zinc-400">
@@ -600,7 +887,7 @@ export function ChatMessagesRenderer({
                       <div className="rumi-message-content markdown-body select-text leading-relaxed break-words space-y-4">
                         {message.content.length > 0 && (messageVisibleText(message) || message.content.some((block) => String(block.type ?? "text") !== "text"))
                           ? message.content.map((block, index) => (
-                              <MessageBlock key={`${message.id}-${index}`} block={block} unknownStrategy={unknownBlockStrategy} />
+                              <MessageBlock key={`${message.id}-${index}`} block={block} unknownStrategy={unknownBlockStrategy} onOpenImagePreview={setImagePreview} />
                             ))
                           : message.role === "agent" && !messageVisibleText(message) && !hasToolActivity
                             ? (
@@ -640,6 +927,7 @@ export function ChatMessagesRenderer({
           </div>
         </div>
       )}
+      <BrowserImagePreviewDialog image={imagePreview} onClose={() => setImagePreview(null)} />
     </>
   );
 }

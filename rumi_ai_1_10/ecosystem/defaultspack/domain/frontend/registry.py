@@ -592,6 +592,20 @@ class FrontendRegistry:
                     },
                 ],
             },
+            {
+                "id": "debug",
+                "label": "Debug",
+                "description": "モデル呼び出しとcomputer use調査用のログ設定。",
+                "fields": [
+                    {
+                        "id": "ai_request_logging",
+                        "label": "AI Request Logs",
+                        "type": "toggle",
+                        "default": False,
+                        "help": "AIに渡すmessages/tools/paramsと添付画像を会話workspace/debug/ai_requestsへ保存します。",
+                    },
+                ],
+            },
         ]
 
         sections.extend(self._config_list(ui_surfaces, "settings_sections"))
@@ -1108,6 +1122,9 @@ class FrontendRegistry:
             },
             "commands": {
                 "show_advanced_commands": False,
+            },
+            "debug": {
+                "ai_request_logging": False,
             },
             "sidebar": {
                 "pinned_item_ids": [],

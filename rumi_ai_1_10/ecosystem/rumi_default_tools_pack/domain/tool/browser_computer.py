@@ -8,11 +8,17 @@ import secrets
 import shutil
 import struct
 import subprocess
+import sys
 import time
 import webbrowser
+import zlib
 import base64
 from pathlib import Path
 from typing import Any
+
+
+def _current_python_snippet_command(code: str) -> list[str]:
+    return [sys.executable, "-c", code]
 
 
 class BrowserComputerController:
@@ -288,7 +294,7 @@ class BrowserComputerController:
             }
         self._artifact_root.mkdir(parents=True, exist_ok=True)
         path = self._artifact_root / f"screenshot-{int(time.time() * 1000)}.png"
-        capture = self._capture_screenshot(path, payload)
+        capture = self._capture_or_reuse_screenshot(path, payload)
         system = capture.get("platform", platform.system())
         if not capture.get("supported", True):
             result = {
@@ -301,11 +307,24 @@ class BrowserComputerController:
                 if capture.get(key) is not None:
                     result[key] = capture.get(key)
             return result
+        crop_result = self._apply_screenshot_crop(path, payload, capture)
+        crop_reference = crop_result.get("crop_reference") if crop_result else None
+        action_target = crop_result.get("action_target") if crop_result else None
+        if crop_result and isinstance(crop_result.get("path"), Path):
+            path = crop_result["path"]
         model_path = self._model_screenshot_copy(path)
         data_url = self._image_data_url(model_path)
-        result = self._screenshot_result(path, model_path, system, capture_target=capture.get("target_window"))
+        result = self._screenshot_result(
+            path,
+            model_path,
+            system,
+            capture_target=capture.get("target_window"),
+            action_target=action_target,
+            crop_reference=crop_reference,
+        )
         if data_url:
             result["data_url"] = data_url
+            result["model_image"] = data_url
             result["model_image_path"] = str(model_path)
         return result
 
@@ -316,12 +335,22 @@ class BrowserComputerController:
         system: str,
         *,
         capture_target: dict[str, Any] | None = None,
+        action_target: dict[str, Any] | None = None,
+        crop_reference: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        result: dict[str, Any] = {"action": "computer.screenshot", "path": str(path), "mime_type": "image/png", "platform": system}
+        result: dict[str, Any] = {
+            "action": "computer.screenshot",
+            "path": str(path),
+            "model_image_path": str(model_path),
+            "mime_type": "image/png",
+            "platform": system,
+        }
         image_size = self._image_size(path)
         model_image_size = self._image_size(model_path)
         if capture_target:
             result["target_window"] = capture_target
+        if crop_reference:
+            result["crop_reference"] = crop_reference
         if image_size:
             width, height = image_size
             result["image_size"] = {"width": width, "height": height}
@@ -333,7 +362,7 @@ class BrowserComputerController:
                 "y_range": [0, max(height - 1, 0)],
             }
         try:
-            action_coordinate_system = self._action_coordinate_system(system, image_size, capture_target=capture_target)
+            action_coordinate_system = self._action_coordinate_system(system, image_size, capture_target=action_target or capture_target)
         except TypeError:
             action_coordinate_system = self._action_coordinate_system(system, image_size)
         if action_coordinate_system:
@@ -354,6 +383,7 @@ class BrowserComputerController:
                     "x": action_width / model_image_size[0],
                     "y": action_height / model_image_size[1],
                 }
+                result["model_to_action_scale_legacy"] = True
         if action_coordinate_system and image_size and image_size[0] and image_size[1]:
             action_width = action_coordinate_system.get("width")
             action_height = action_coordinate_system.get("height")
@@ -372,15 +402,33 @@ class BrowserComputerController:
             result["active_window"] = context.get("active_window")
         if context.get("selected_window"):
             result["selected_window"] = context.get("selected_window")
+        result["coordinate_contract"] = self._coordinate_contract(crop_reference=crop_reference)
         result["cursor_move_contract"] = {
             "tool": "browser_use",
             "action": "move",
             "screen_coordinates": True,
-            "coordinate_source": "screenshot",
-            "notes": "For image-based clicking, prefer point:[y,x] with coordinate_space=normalized_1000, where y and x are 0-1000 coordinates from the latest screenshot. Use coordinate_space=screen for absolute display coordinates, coordinate_space=window for selected-window pixels, or coordinate_space=model_image for returned preview pixels.",
+            "coordinate_source": "attached_image",
+            "notes": "For image-based clicking, prefer normalized_x and normalized_y with coordinate_space=normalized_1000. Values are clamped to 0-1000 relative to the attached image; the harness converts them to action pixels. point:[y,x] and normalized_point remain legacy-compatible for normalized_1000 only.",
         }
         self._remember_last_screenshot(result)
         return result
+
+    @staticmethod
+    def _coordinate_contract(*, crop_reference: dict[str, Any] | None = None) -> dict[str, Any]:
+        contract: dict[str, Any] = {
+            "primary": "normalized_1000",
+            "coordinate_space": "normalized_1000",
+            "input_fields": ["normalized_x", "normalized_y"],
+            "range": {"normalized_x": [0, 1000], "normalized_y": [0, 1000]},
+            "origin": "top_left",
+            "reference": "attached_image",
+            "conversion": "The harness clamps normalized_x/normalized_y to 0..1000 and maps them to action pixels using width-1 and height-1.",
+            "legacy_accepted": ["point:[y,x] with coordinate_space=normalized_1000", "normalized_point:[y,x]"],
+            "legacy_scale_metadata": "model_to_action_scale may be present for old callers; models should not use it for coordinates.",
+        }
+        if crop_reference:
+            contract["crop_reference"] = "normalized coordinates apply to the cropped/zoomed attached image, not the uncropped source."
+        return contract
 
     def _context(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = payload or {}
@@ -619,11 +667,11 @@ class BrowserComputerController:
             return ""
 
     def _model_screenshot_copy(self, path: Path) -> Path:
-        preview_path = path.with_name(path.stem + "-model.jpg")
+        preview_path = path.with_name(path.stem + "-model.png")
         if platform.system() == "Darwin":
             try:
                 subprocess.run(
-                    ["sips", "-Z", "640", "-s", "format", "jpeg", str(path), "--out", str(preview_path)],
+                    ["sips", "-Z", "640", "-s", "format", "png", str(path), "--out", str(preview_path)],
                     check=True,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
@@ -632,6 +680,12 @@ class BrowserComputerController:
                     return preview_path
             except Exception:
                 pass
+        try:
+            shutil.copyfile(path, preview_path)
+            if preview_path.exists() and preview_path.stat().st_size > 0:
+                return preview_path
+        except Exception:
+            pass
         return path
 
     @staticmethod
@@ -668,6 +722,258 @@ class BrowserComputerController:
                 index += length
         return None
 
+    def _marker_preview_image(
+        self,
+        model_path: Path,
+        screenshot_result: dict[str, Any],
+        *,
+        marker: dict[str, Any] | None = None,
+        drag_marker: dict[str, Any] | None = None,
+    ) -> Path | None:
+        points: list[tuple[int, int]] = []
+        for item in self._marker_items(marker, drag_marker):
+            point = self._marker_to_model_point(item, screenshot_result)
+            if point is not None:
+                points.append(point)
+        if not points:
+            return None
+        marked_path = model_path.with_name(model_path.stem + "-marked.png")
+        if self._annotate_png_with_markers(model_path, marked_path, points):
+            return marked_path
+        return None
+
+    @staticmethod
+    def _marker_items(marker: dict[str, Any] | None, drag_marker: dict[str, Any] | None) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        if isinstance(marker, dict):
+            items.append(marker)
+        if isinstance(drag_marker, dict):
+            for key in ("from", "to"):
+                value = drag_marker.get(key)
+                if isinstance(value, dict):
+                    items.append(value)
+        return items
+
+    def _marker_to_model_point(self, marker: dict[str, Any], result: dict[str, Any]) -> tuple[int, int] | None:
+        model_size = result.get("model_image_size") if isinstance(result.get("model_image_size"), dict) else {}
+        try:
+            model_width = int(model_size.get("width", 0))
+            model_height = int(model_size.get("height", 0))
+        except Exception:
+            return None
+        if model_width <= 0 or model_height <= 0:
+            return None
+        space = str(marker.get("coordinate_space") or "").strip().lower()
+        if space in self._normalized_coordinate_spaces():
+            x = self._normalized_to_pixel(marker.get("normalized_x", marker.get("x", 0)), model_width)
+            y = self._normalized_to_pixel(marker.get("normalized_y", marker.get("y", 0)), model_height)
+            return x, y
+        if space in {"model", "model_image", "preview", "screenshot_preview"}:
+            return self._clamped_model_point(marker.get("x", 0), marker.get("y", 0), model_width, model_height)
+        image_size = result.get("image_size") if isinstance(result.get("image_size"), dict) else {}
+        if space in {"screenshot", "screenshot_image", "image", "window", "target"}:
+            try:
+                image_width = int(image_size.get("width", 0))
+                image_height = int(image_size.get("height", 0))
+            except Exception:
+                return None
+            if image_width <= 0 or image_height <= 0:
+                return None
+            x = round(self._numeric_coordinate(marker.get("x", 0)) * max(model_width - 1, 0) / max(image_width - 1, 1))
+            y = round(self._numeric_coordinate(marker.get("y", 0)) * max(model_height - 1, 0) / max(image_height - 1, 1))
+            return self._clamped_model_point(x, y, model_width, model_height)
+        action_space = result.get("action_coordinate_system") if isinstance(result.get("action_coordinate_system"), dict) else {}
+        try:
+            action_x = int(action_space.get("x", 0))
+            action_y = int(action_space.get("y", 0))
+            action_width = int(action_space.get("width", 0))
+            action_height = int(action_space.get("height", 0))
+        except Exception:
+            return None
+        if action_width <= 0 or action_height <= 0:
+            return None
+        screen_x = self._numeric_coordinate(marker.get("screen_x", marker.get("x", 0)))
+        screen_y = self._numeric_coordinate(marker.get("screen_y", marker.get("y", 0)))
+        x = round((screen_x - action_x) * max(model_width - 1, 0) / max(action_width - 1, 1))
+        y = round((screen_y - action_y) * max(model_height - 1, 0) / max(action_height - 1, 1))
+        return self._clamped_model_point(x, y, model_width, model_height)
+
+    @staticmethod
+    def _clamped_model_point(x: Any, y: Any, width: int, height: int) -> tuple[int, int]:
+        try:
+            px = int(round(float(x)))
+            py = int(round(float(y)))
+        except Exception:
+            px = 0
+            py = 0
+        return max(0, min(px, width - 1)), max(0, min(py, height - 1))
+
+    def _annotate_png_with_markers(self, source_path: Path, output_path: Path, points: list[tuple[int, int]]) -> bool:
+        image = self._read_png_rgba(source_path)
+        if image is None:
+            return False
+        width, height, pixels = image
+        for x, y in points:
+            self._draw_marker(pixels, width, height, x, y)
+        return self._write_png_rgba(output_path, width, height, pixels)
+
+    @staticmethod
+    def _draw_marker(pixels: bytearray, width: int, height: int, x: int, y: int) -> None:
+        radius = max(8, min(width, height) // 40)
+        thickness = max(2, radius // 5)
+
+        def set_pixel(px: int, py: int, color: tuple[int, int, int, int]) -> None:
+            if 0 <= px < width and 0 <= py < height:
+                index = (py * width + px) * 4
+                pixels[index : index + 4] = bytes(color)
+
+        red = (255, 0, 0, 255)
+        for offset in range(-radius, radius + 1):
+            for thick in range(-thickness, thickness + 1):
+                set_pixel(x + offset, y + thick, red)
+                set_pixel(x + thick, y + offset, red)
+        inner = max(radius - thickness, 1)
+        outer = radius + thickness
+        inner_sq = inner * inner
+        outer_sq = outer * outer
+        for py in range(y - outer, y + outer + 1):
+            for px in range(x - outer, x + outer + 1):
+                distance_sq = (px - x) * (px - x) + (py - y) * (py - y)
+                if inner_sq <= distance_sq <= outer_sq:
+                    set_pixel(px, py, red)
+
+    @staticmethod
+    def _read_png_rgba(path: Path) -> tuple[int, int, bytearray] | None:
+        try:
+            data = path.read_bytes()
+        except Exception:
+            return None
+        if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+            return None
+        offset = 8
+        width = height = bit_depth = color_type = interlace = 0
+        idat = bytearray()
+        while offset + 8 <= len(data):
+            length = int.from_bytes(data[offset : offset + 4], "big")
+            chunk_type = data[offset + 4 : offset + 8]
+            chunk_data = data[offset + 8 : offset + 8 + length]
+            offset += 12 + length
+            if chunk_type == b"IHDR":
+                if len(chunk_data) < 13:
+                    return None
+                width, height = struct.unpack(">II", chunk_data[:8])
+                bit_depth = chunk_data[8]
+                color_type = chunk_data[9]
+                interlace = chunk_data[12]
+            elif chunk_type == b"IDAT":
+                idat.extend(chunk_data)
+            elif chunk_type == b"IEND":
+                break
+        if width <= 0 or height <= 0 or bit_depth != 8 or color_type not in {2, 6} or interlace != 0:
+            return None
+        channels = 4 if color_type == 6 else 3
+        stride = width * channels
+        try:
+            raw = zlib.decompress(bytes(idat))
+        except Exception:
+            return None
+        rows: list[bytearray] = []
+        cursor = 0
+        previous = bytearray(stride)
+        for _ in range(height):
+            if cursor >= len(raw):
+                return None
+            filter_type = raw[cursor]
+            cursor += 1
+            scanline = bytearray(raw[cursor : cursor + stride])
+            cursor += stride
+            if len(scanline) != stride:
+                return None
+            BrowserComputerController._unfilter_png_scanline(scanline, previous, filter_type, channels)
+            rows.append(scanline)
+            previous = scanline
+        pixels = bytearray(width * height * 4)
+        for row_index, row in enumerate(rows):
+            for column in range(width):
+                src = column * channels
+                dest = (row_index * width + column) * 4
+                pixels[dest] = row[src]
+                pixels[dest + 1] = row[src + 1]
+                pixels[dest + 2] = row[src + 2]
+                pixels[dest + 3] = row[src + 3] if channels == 4 else 255
+        return int(width), int(height), pixels
+
+    @staticmethod
+    def _unfilter_png_scanline(scanline: bytearray, previous: bytearray, filter_type: int, bpp: int) -> None:
+        if filter_type == 0:
+            return
+        for index in range(len(scanline)):
+            left = scanline[index - bpp] if index >= bpp else 0
+            up = previous[index] if index < len(previous) else 0
+            up_left = previous[index - bpp] if index >= bpp and index - bpp < len(previous) else 0
+            if filter_type == 1:
+                predictor = left
+            elif filter_type == 2:
+                predictor = up
+            elif filter_type == 3:
+                predictor = (left + up) // 2
+            elif filter_type == 4:
+                predictor = BrowserComputerController._png_paeth(left, up, up_left)
+            else:
+                predictor = 0
+            scanline[index] = (scanline[index] + predictor) & 0xFF
+
+    @staticmethod
+    def _png_paeth(left: int, up: int, up_left: int) -> int:
+        estimate = left + up - up_left
+        pa = abs(estimate - left)
+        pb = abs(estimate - up)
+        pc = abs(estimate - up_left)
+        if pa <= pb and pa <= pc:
+            return left
+        if pb <= pc:
+            return up
+        return up_left
+
+    @staticmethod
+    def _write_png_rgba(path: Path, width: int, height: int, pixels: bytearray) -> bool:
+        def chunk(chunk_type: bytes, chunk_data: bytes) -> bytes:
+            return (
+                len(chunk_data).to_bytes(4, "big")
+                + chunk_type
+                + chunk_data
+                + zlib.crc32(chunk_type + chunk_data).to_bytes(4, "big")
+            )
+
+        try:
+            rows = bytearray()
+            stride = width * 4
+            for row in range(height):
+                rows.append(0)
+                start = row * stride
+                rows.extend(pixels[start : start + stride])
+            ihdr = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+            path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + chunk(b"IDAT", zlib.compress(bytes(rows))) + chunk(b"IEND", b""))
+            return True
+        except Exception:
+            return False
+
+    def _crop_png(self, source_path: Path, output_path: Path, box: tuple[int, int, int, int]) -> bool:
+        image = self._read_png_rgba(source_path)
+        if image is None:
+            return False
+        width, _height, pixels = image
+        left, top, right, bottom = box
+        crop_width = right - left + 1
+        crop_height = bottom - top + 1
+        cropped = bytearray(crop_width * crop_height * 4)
+        for row in range(crop_height):
+            src_start = ((top + row) * width + left) * 4
+            src_end = src_start + crop_width * 4
+            dest_start = row * crop_width * 4
+            cropped[dest_start : dest_start + crop_width * 4] = pixels[src_start:src_end]
+        return self._write_png_rgba(output_path, crop_width, crop_height, cropped)
+
     @staticmethod
     def _cursor_position() -> dict[str, Any] | None:
         system = platform.system()
@@ -679,7 +985,7 @@ class BrowserComputerController:
                     "loc = Quartz.CGEventGetLocation(event)\n"
                     "print(json.dumps({'x': int(round(loc.x)), 'y': int(round(loc.y)), 'origin': 'top_left'}))"
                 )
-                completed = subprocess.run(["python3", "-c", code], check=True, capture_output=True, text=True)
+                completed = subprocess.run(_current_python_snippet_command(code), check=True, capture_output=True, text=True)
                 value = json.loads(completed.stdout or "{}")
                 if "x" in value and "y" in value:
                     return value
@@ -742,7 +1048,7 @@ class BrowserComputerController:
                     "payload['y_range'] = [payload['y'], payload['y'] + max(payload['height'] - 1, 0)]\n"
                     "print(json.dumps(payload))"
                 )
-                completed = subprocess.run(["python3", "-c", code], check=True, capture_output=True, text=True)
+                completed = subprocess.run(_current_python_snippet_command(code), check=True, capture_output=True, text=True)
                 value = json.loads(completed.stdout or "{}")
                 if value.get("width") and value.get("height"):
                     return value
@@ -853,6 +1159,8 @@ class BrowserComputerController:
             self._darwin_click(action_payload)
         elif system == "Darwin" and action == "computer.drag":
             self._darwin_drag(action_payload)
+        elif system == "Darwin" and action == "computer.type":
+            self._darwin_type(action_payload)
         elif system == "Darwin":
             script = self._apple_script(action, action_payload)
             subprocess.run(["osascript", "-e", script], check=True)
@@ -896,7 +1204,7 @@ class BrowserComputerController:
     @staticmethod
     def _should_capture_after_action(action: str, payload: dict[str, Any]) -> bool:
         if action == "computer.move":
-            return False
+            return payload.get("include_screenshot") is True
         return payload.get("include_screenshot", True) is not False
 
     @staticmethod
@@ -960,9 +1268,25 @@ class BrowserComputerController:
         capture = self._capture_screenshot(path, payload)
         if not capture.get("supported", True):
             return {}
+        crop_result = self._apply_screenshot_crop(path, payload, capture)
+        crop_reference = crop_result.get("crop_reference") if crop_result else None
+        action_target = crop_result.get("action_target") if crop_result else None
+        if crop_result and isinstance(crop_result.get("path"), Path):
+            path = crop_result["path"]
         model_path = self._model_screenshot_copy(path)
         system = capture.get("platform", platform.system())
-        result = self._screenshot_result(path, model_path, system, capture_target=capture.get("target_window"))
+        result = self._screenshot_result(
+            path,
+            model_path,
+            system,
+            capture_target=capture.get("target_window"),
+            action_target=action_target,
+            crop_reference=crop_reference,
+        )
+        marked_model_path = self._marker_preview_image(model_path, result, marker=marker, drag_marker=drag_marker)
+        if marked_model_path:
+            result["unmarked_model_image_path"] = str(model_path)
+            model_path = marked_model_path
         result["action"] = action_name
         result["screenshot_path"] = str(path)
         result["model_image_path"] = str(model_path)
@@ -973,11 +1297,274 @@ class BrowserComputerController:
         data_url = self._image_data_url(model_path)
         if data_url:
             result["data_url"] = data_url
+            result["model_image"] = data_url
         if marker:
             result["click_marker"] = marker
         if drag_marker:
             result["drag_marker"] = drag_marker
+        self._remember_last_screenshot(result)
         return result
+
+    def _capture_or_reuse_screenshot(self, path: Path, payload: dict[str, Any]) -> dict[str, Any]:
+        crop_payload = self._crop_payload(payload)
+        source = crop_payload.get("source") if isinstance(crop_payload, dict) else None
+        source_name = str(source or payload.get("source") or "").strip().lower()
+        use_latest = source_name in {
+            "latest",
+            "last",
+            "last_screenshot",
+            "latest_screenshot",
+            "current",
+            "current_crop",
+            "latest_crop",
+            "last_crop",
+            "attached",
+            "attached_image",
+        }
+        if use_latest:
+            state = self._computer_state()
+            last, source_role = self._screenshot_reuse_source(state, source_name, crop_payload=bool(crop_payload))
+            source_path = Path(str(last.get("path") or ""))
+            if source_path.exists():
+                if not crop_payload:
+                    try:
+                        shutil.copyfile(source_path, path)
+                    except Exception:
+                        path = source_path
+                return {
+                    "platform": platform.system(),
+                    "target_window": last.get("target_window") if isinstance(last.get("target_window"), dict) else None,
+                    "source_path": source_path,
+                    "source_role": source_role,
+                    "source_is_crop": isinstance(last.get("crop_reference"), dict),
+                    "source_image_size": last.get("image_size") if isinstance(last.get("image_size"), dict) else None,
+                    "source_action_coordinate_system": (
+                        last.get("action_coordinate_system")
+                        if isinstance(last.get("action_coordinate_system"), dict)
+                        else None
+                    ),
+                }
+        return self._capture_screenshot(path, payload)
+
+    @staticmethod
+    def _screenshot_reuse_source(
+        state: dict[str, Any],
+        source_name: str,
+        *,
+        crop_payload: bool,
+    ) -> tuple[dict[str, Any], str]:
+        current_crop_sources = {"current", "current_crop", "latest_crop", "last_crop", "attached", "attached_image"}
+        if crop_payload and source_name not in current_crop_sources:
+            full = state.get("last_full_screenshot") if isinstance(state.get("last_full_screenshot"), dict) else {}
+            if full.get("path"):
+                return full, "last_full_screenshot"
+        last = state.get("last_screenshot") if isinstance(state.get("last_screenshot"), dict) else {}
+        return last, "last_screenshot"
+
+    def _apply_screenshot_crop(self, path: Path, payload: dict[str, Any], capture: dict[str, Any]) -> dict[str, Any] | None:
+        crop_payload = self._crop_payload(payload)
+        if not crop_payload:
+            return None
+        source_path = capture.get("source_path") if isinstance(capture.get("source_path"), Path) else path
+        if not source_path.exists():
+            return None
+        source_size = self._image_size(source_path)
+        if not source_size:
+            return None
+        box = self._crop_box(crop_payload, source_size)
+        if not box:
+            return None
+        crop_path = path.with_name(path.stem + "-crop.png")
+        if not self._crop_png(source_path, crop_path, box):
+            return None
+        source_action = capture.get("source_action_coordinate_system")
+        if not isinstance(source_action, dict):
+            source_action = self._action_coordinate_system(platform.system(), source_size, capture_target=capture.get("target_window"))
+        action_target = self._crop_action_target(box, source_size, source_action)
+        left, top, right, bottom = box
+        crop_reference = {
+            "source": "latest_screenshot" if capture.get("source_path") else "captured_screenshot",
+            "source_path": str(source_path),
+            "source_image_size": {"width": source_size[0], "height": source_size[1]},
+            "box": {"x": left, "y": top, "width": right - left + 1, "height": bottom - top + 1},
+            "coordinate_space": "screenshot_image",
+            "source_role": capture.get("source_role") or ("latest_screenshot" if capture.get("source_path") else "captured_screenshot"),
+            "source_is_crop": bool(capture.get("source_is_crop")),
+            "source_action_coordinate_system": source_action,
+            "action_box": action_target,
+        }
+        return {"path": crop_path, "crop_reference": crop_reference, "action_target": action_target}
+
+    @staticmethod
+    def _crop_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
+        for key in ("crop", "zoom", "crop_box", "zoom_box"):
+            value = payload.get(key)
+            if isinstance(value, dict):
+                crop = BrowserComputerController._normalized_crop_payload(dict(value))
+                for inherited_key in ("source", "coordinate_space", "space"):
+                    if inherited_key in payload and inherited_key not in crop:
+                        crop[inherited_key] = payload.get(inherited_key)
+                return crop
+            if isinstance(value, (list, tuple)) and len(value) >= 4:
+                return {"box": list(value), "coordinate_space": payload.get("coordinate_space") or payload.get("space")}
+        zoom = payload.get("zoom")
+        if isinstance(zoom, (int, float, str)) and str(zoom).strip():
+            return {
+                "zoom_factor": zoom,
+                "x": payload.get("normalized_x", payload.get("x", 500)),
+                "y": payload.get("normalized_y", payload.get("y", 500)),
+                "coordinate_space": payload.get("coordinate_space") or payload.get("space") or "normalized_1000",
+                "source": payload.get("source"),
+            }
+        if any(key in payload for key in ("crop_x", "crop_y", "crop_width", "crop_height")):
+            return BrowserComputerController._normalized_crop_payload({
+                "x": payload.get("crop_x"),
+                "y": payload.get("crop_y"),
+                "width": payload.get("crop_width"),
+                "height": payload.get("crop_height"),
+                "coordinate_space": payload.get("coordinate_space") or payload.get("space"),
+                "source": payload.get("source"),
+            })
+        return None
+
+    @staticmethod
+    def _normalized_crop_payload(crop: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(crop)
+        aliases = {
+            "crop_x": "x",
+            "crop_y": "y",
+            "crop_width": "width",
+            "crop_height": "height",
+        }
+        for alias, target in aliases.items():
+            if target not in normalized and alias in normalized:
+                normalized[target] = normalized.get(alias)
+        return normalized
+
+    def _crop_box(self, crop: dict[str, Any], image_size: tuple[int, int]) -> tuple[int, int, int, int] | None:
+        width, height = image_size
+        if width <= 0 or height <= 0:
+            return None
+        space = str(crop.get("coordinate_space") or crop.get("space") or "").strip().lower()
+        normalized = space in self._normalized_coordinate_spaces() or any(
+            key in crop for key in ("normalized_x", "normalized_y", "normalized_width", "normalized_height", "normalized_box")
+        )
+        if crop.get("zoom_factor") is not None:
+            factor = max(1.0, self._numeric_coordinate(crop.get("zoom_factor"), 1))
+            if factor <= 1.0:
+                return None
+            center_x_value = crop.get("normalized_x") if normalized and crop.get("normalized_x") is not None else crop.get("x", 500 if normalized else width / 2)
+            center_y_value = crop.get("normalized_y") if normalized and crop.get("normalized_y") is not None else crop.get("y", 500 if normalized else height / 2)
+            center_x = self._normalized_to_pixel(center_x_value, width) if normalized else int(round(self._numeric_coordinate(center_x_value, width / 2)))
+            center_y = self._normalized_to_pixel(center_y_value, height) if normalized else int(round(self._numeric_coordinate(center_y_value, height / 2)))
+            crop_width = max(2, int(round(width / factor)))
+            crop_height = max(2, int(round(height / factor)))
+            left = center_x - crop_width // 2
+            top = center_y - crop_height // 2
+            right = left + crop_width - 1
+            bottom = top + crop_height - 1
+            if left < 0:
+                right -= left
+                left = 0
+            if top < 0:
+                bottom -= top
+                top = 0
+            if right >= width:
+                shift = right - width + 1
+                left = max(0, left - shift)
+                right = width - 1
+            if bottom >= height:
+                shift = bottom - height + 1
+                top = max(0, top - shift)
+                bottom = height - 1
+            return left, top, right, bottom
+        width_height_box = False
+        box = crop.get("normalized_box") if normalized and crop.get("normalized_box") is not None else crop.get("box")
+        if isinstance(box, (list, tuple)) and len(box) >= 4:
+            left, top, right_or_width, bottom_or_height = [self._numeric_coordinate(item) for item in box[:4]]
+            if crop.get("box_format") in {"xywh", "x_y_width_height"} or crop.get("width_height") is True:
+                right = left + right_or_width
+                bottom = top + bottom_or_height
+                width_height_box = True
+            else:
+                right = right_or_width
+                bottom = bottom_or_height
+        else:
+            left = self._numeric_coordinate(crop.get("normalized_x") if normalized else crop.get("x", crop.get("left", 0)))
+            top = self._numeric_coordinate(crop.get("normalized_y") if normalized else crop.get("y", crop.get("top", 0)))
+            crop_width = crop.get("normalized_width") if normalized else crop.get("width")
+            crop_height = crop.get("normalized_height") if normalized else crop.get("height")
+            if crop_width is not None and crop_height is not None:
+                right = left + self._numeric_coordinate(crop_width)
+                bottom = top + self._numeric_coordinate(crop_height)
+            else:
+                right = self._numeric_coordinate(crop.get("normalized_right") if normalized else crop.get("right"), left)
+                bottom = self._numeric_coordinate(crop.get("normalized_bottom") if normalized else crop.get("bottom"), top)
+        if normalized:
+            left = self._normalized_to_pixel(left, width)
+            top = self._normalized_to_pixel(top, height)
+            right = self._normalized_to_pixel(right, width)
+            bottom = self._normalized_to_pixel(bottom, height)
+        else:
+            left = int(round(left))
+            top = int(round(top))
+            right = int(round(right - 1 if width_height_box or crop.get("width") is not None or crop.get("height") is not None else right))
+            bottom = int(round(bottom - 1 if width_height_box or crop.get("width") is not None or crop.get("height") is not None else bottom))
+        left = max(0, min(int(left), width - 1))
+        right = max(0, min(int(right), width - 1))
+        top = max(0, min(int(top), height - 1))
+        bottom = max(0, min(int(bottom), height - 1))
+        if right < left:
+            left, right = right, left
+        if bottom < top:
+            top, bottom = bottom, top
+        if right <= left or bottom <= top:
+            return None
+        return left, top, right, bottom
+
+    @classmethod
+    def _normalized_to_pixel(cls, value: Any, size: int) -> int:
+        normalized = max(0.0, min(1000.0, cls._numeric_coordinate(value)))
+        return int(round(normalized * max(size - 1, 0) / 1000.0))
+
+    def _crop_action_target(
+        self,
+        box: tuple[int, int, int, int],
+        source_size: tuple[int, int],
+        source_action: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        left, top, right, bottom = box
+        fallback = {"origin": "top_left", "unit": "px", "screen": "cropped", "x": 0, "y": 0, "width": right - left + 1, "height": bottom - top + 1}
+        if not isinstance(source_action, dict):
+            return fallback
+        try:
+            source_width = max(int(source_size[0]), 1)
+            source_height = max(int(source_size[1]), 1)
+            action_x = int(source_action.get("x", 0))
+            action_y = int(source_action.get("y", 0))
+            action_width = int(source_action.get("width", 0))
+            action_height = int(source_action.get("height", 0))
+        except Exception:
+            return fallback
+        if action_width <= 0 or action_height <= 0:
+            return fallback
+        crop_x = action_x + round(left * max(action_width - 1, 0) / max(source_width - 1, 1))
+        crop_y = action_y + round(top * max(action_height - 1, 0) / max(source_height - 1, 1))
+        crop_right = action_x + round(right * max(action_width - 1, 0) / max(source_width - 1, 1))
+        crop_bottom = action_y + round(bottom * max(action_height - 1, 0) / max(source_height - 1, 1))
+        target = dict(source_action)
+        target.update(
+            {
+                "x": int(crop_x),
+                "y": int(crop_y),
+                "width": max(int(crop_right - crop_x + 1), 1),
+                "height": max(int(crop_bottom - crop_y + 1), 1),
+                "screen": "crop_of_" + str(source_action.get("screen") or "screenshot"),
+            }
+        )
+        target["x_range"] = [target["x"], target["x"] + max(target["width"] - 1, 0)]
+        target["y_range"] = [target["y"], target["y"] + max(target["height"] - 1, 0)]
+        return target
 
     def _capture_screenshot(self, path: Path, payload: dict[str, Any]) -> dict[str, Any]:
         system = platform.system()
@@ -998,17 +1585,27 @@ class BrowserComputerController:
             }
         if system == "Darwin":
             if target:
-                window_id = target.get("window_id")
-                if window_id:
-                    subprocess.run(["screencapture", "-x", "-l", str(int(window_id)), str(path)], check=True)
-                else:
+                capture_rect = self._normalize_rect(target.get("capture_rect"))
+                if capture_rect:
                     rect = "{},{},{},{}".format(
-                        int(target.get("x", 0)),
-                        int(target.get("y", 0)),
-                        int(target.get("width", 0)),
-                        int(target.get("height", 0)),
+                        int(capture_rect.get("x", 0)),
+                        int(capture_rect.get("y", 0)),
+                        int(capture_rect.get("width", 0)),
+                        int(capture_rect.get("height", 0)),
                     )
                     subprocess.run(["screencapture", "-x", "-R", rect, str(path)], check=True)
+                else:
+                    window_id = target.get("window_id")
+                    if window_id:
+                        subprocess.run(["screencapture", "-x", "-l", str(int(window_id)), str(path)], check=True)
+                    else:
+                        rect = "{},{},{},{}".format(
+                            int(target.get("x", 0)),
+                            int(target.get("y", 0)),
+                            int(target.get("width", 0)),
+                            int(target.get("height", 0)),
+                        )
+                        subprocess.run(["screencapture", "-x", "-R", rect, str(path)], check=True)
             else:
                 subprocess.run(["screencapture", "-x", str(path)], check=True)
             return {"platform": system, "target_window": target}
@@ -1058,13 +1655,17 @@ class BrowserComputerController:
         filters = self._window_filter(payload)
         app = filters.get("app", "").lower()
         title = filters.get("title", "").lower()
-        selected = self._normalize_window_record(self._computer_state().get("target_window"))
-        if selected and self._is_usable_target_window(selected) and self._window_matches_filter(selected, app=app, title=title):
-            return selected
+        candidates: list[dict[str, Any]] = []
         for item in self._list_windows():
             window = self._normalize_window_record(item)
             if window and self._is_usable_target_window(window) and self._window_matches_filter(window, app=app, title=title):
-                return window
+                candidates.append(window)
+        selected_candidate = self._best_window_candidate(candidates, app=app, title=title)
+        if selected_candidate:
+            return selected_candidate
+        selected = self._normalize_window_record(self._computer_state().get("target_window"))
+        if selected and self._is_usable_target_window(selected) and self._window_matches_filter(selected, app=app, title=title):
+            return selected
         return None
 
     def _resolve_action_point(self, payload: dict[str, Any], *, infer_window: bool = False) -> tuple[dict[str, Any], dict[str, Any] | None]:
@@ -1162,7 +1763,7 @@ class BrowserComputerController:
 
     @staticmethod
     def _has_normalized_point(payload: dict[str, Any]) -> bool:
-        return any(key in payload for key in ("point", "normalized_point", "normalized_x", "normalized_y"))
+        return any(key in payload for key in ("normalized_point", "normalized_x", "normalized_y"))
 
     def _resolve_normalized_point(
         self,
@@ -1184,10 +1785,13 @@ class BrowserComputerController:
             x = self._numeric_coordinate(payload.get("normalized_x"), x)
         if payload.get("normalized_y") is not None:
             y = self._numeric_coordinate(payload.get("normalized_y"), y)
+        x = max(0.0, min(1000.0, self._numeric_coordinate(x)))
+        y = max(0.0, min(1000.0, self._numeric_coordinate(y)))
 
         last = state.get("last_screenshot") if isinstance(state, dict) else None
         action_space = last.get("action_coordinate_system") if isinstance(last, dict) and isinstance(last.get("action_coordinate_system"), dict) else None
-        reference = target or action_space
+        reference = action_space or target
+        reference_name = "last_screenshot" if action_space else "selected_window"
         if not isinstance(reference, dict):
             image_size = last.get("image_size") if isinstance(last, dict) and isinstance(last.get("image_size"), dict) else {}
             reference = {
@@ -1196,6 +1800,7 @@ class BrowserComputerController:
                 "width": image_size.get("width", 0),
                 "height": image_size.get("height", 0),
             }
+            reference_name = "last_screenshot"
         try:
             ref_x = int(reference.get("x", 0))
             ref_y = int(reference.get("y", 0))
@@ -1205,8 +1810,8 @@ class BrowserComputerController:
             return None, None
         if ref_width <= 0 or ref_height <= 0:
             return None, None
-        screen_x = ref_x + round(x * ref_width / 1000)
-        screen_y = ref_y + round(y * ref_height / 1000)
+        screen_x = ref_x + round(x * max(ref_width - 1, 0) / 1000)
+        screen_y = ref_y + round(y * max(ref_height - 1, 0) / 1000)
         action_payload = dict(payload)
         action_payload["x"] = int(screen_x)
         action_payload["y"] = int(screen_y)
@@ -1214,11 +1819,13 @@ class BrowserComputerController:
         marker = {
             "x": int(round(x)),
             "y": int(round(y)),
+            "normalized_x": int(round(x)),
+            "normalized_y": int(round(y)),
             "screen_x": int(screen_x),
             "screen_y": int(screen_y),
             "coordinate_space": "normalized_1000",
             "point_order": "yx",
-            "reference": "selected_window" if target else "last_screenshot",
+            "reference": reference_name,
         }
         return action_payload, marker
 
@@ -1315,8 +1922,8 @@ class BrowserComputerController:
             return None, None
         if model_width <= 0 or model_height <= 0 or action_width <= 0 or action_height <= 0:
             return None, None
-        screen_x = action_x + round(x * action_width / model_width)
-        screen_y = action_y + round(y * action_height / model_height)
+        screen_x = action_x + round(x * max(action_width - 1, 0) / max(model_width - 1, 1))
+        screen_y = action_y + round(y * max(action_height - 1, 0) / max(model_height - 1, 1))
         action_payload = dict(payload)
         action_payload["x"] = int(screen_x)
         action_payload["y"] = int(screen_y)
@@ -1366,13 +1973,40 @@ class BrowserComputerController:
         state = self._computer_state()
         remembered = {
             "updated_at": self._now_iso(),
+            "path": result.get("path"),
+            "model_image_path": result.get("model_image_path"),
             "image_size": result.get("image_size"),
             "model_image_size": result.get("model_image_size"),
             "action_coordinate_system": result.get("action_coordinate_system"),
             "target_window": result.get("target_window"),
+            "crop_reference": result.get("crop_reference"),
         }
         state["last_screenshot"] = {key: value for key, value in remembered.items() if value not in (None, "")}
+        if not isinstance(result.get("crop_reference"), dict):
+            state["last_full_screenshot"] = state["last_screenshot"]
+        else:
+            full_reference = self._full_screenshot_reference_from_crop(result)
+            if full_reference:
+                state["last_full_screenshot"] = full_reference
         self._write_computer_state(state)
+
+    def _full_screenshot_reference_from_crop(self, result: dict[str, Any]) -> dict[str, Any] | None:
+        crop_reference = result.get("crop_reference") if isinstance(result.get("crop_reference"), dict) else {}
+        if crop_reference.get("source_is_crop"):
+            return None
+        source_path = str(crop_reference.get("source_path") or "").strip()
+        if not source_path:
+            return None
+        source_size = crop_reference.get("source_image_size") if isinstance(crop_reference.get("source_image_size"), dict) else {}
+        source_action = crop_reference.get("source_action_coordinate_system")
+        remembered = {
+            "updated_at": self._now_iso(),
+            "path": source_path,
+            "image_size": source_size,
+            "action_coordinate_system": source_action if isinstance(source_action, dict) else None,
+            "target_window": result.get("target_window"),
+        }
+        return {key: value for key, value in remembered.items() if value not in (None, "", {})}
 
     def _window_at_point(self, x: int, y: int) -> dict[str, Any] | None:
         for item in self._list_windows():
@@ -1402,14 +2036,15 @@ class BrowserComputerController:
         if selected is None and (target in {"active", "active_window", "front", "front_window"} or (not target and not has_filter)):
             selected = next((item for item in windows if item.get("active")), None) or self._active_window()
         if selected is None:
+            candidates: list[dict[str, Any]] = []
             for item in windows:
                 window = self._normalize_window_record(item)
                 if not window or not self._is_usable_target_window(window):
                     continue
                 if not self._window_matches_filter(window, app=app, title=title):
                     continue
-                selected = window
-                break
+                candidates.append(window)
+            selected = self._best_window_candidate(candidates, app=app, title=title)
         if selected is None:
             if has_filter:
                 self._clear_target_window()
@@ -1498,6 +2133,23 @@ class BrowserComputerController:
                 normalized["window_id"] = int(window_id)
         except Exception:
             pass
+        for rect_key in ("capture_rect", "content_rect"):
+            rect = BrowserComputerController._normalize_rect(value.get(rect_key))
+            if rect:
+                normalized[rect_key] = rect
+        frame_ids = value.get("frame_window_ids")
+        if isinstance(frame_ids, list):
+            ids: list[int] = []
+            for item in frame_ids:
+                try:
+                    ids.append(int(item))
+                except Exception:
+                    continue
+            if ids:
+                normalized["frame_window_ids"] = ids
+        capture_method = str(value.get("capture_method") or "").strip()
+        if capture_method:
+            normalized["capture_method"] = capture_method
         return normalized
 
     @staticmethod
@@ -1510,6 +2162,56 @@ class BrowserComputerController:
         except Exception:
             return False
         return width >= 200 and height >= 120
+
+    @classmethod
+    def _best_window_candidate(
+        cls,
+        candidates: list[dict[str, Any]],
+        *,
+        app: str = "",
+        title: str = "",
+    ) -> dict[str, Any] | None:
+        if not candidates:
+            return None
+
+        def area_of_rect(value: Any) -> int:
+            rect = cls._normalize_rect(value)
+            if not rect:
+                return 0
+            return int(rect.get("width", 0)) * int(rect.get("height", 0))
+
+        def score(index_and_window: tuple[int, dict[str, Any]]) -> tuple[int, int, int, int, int, int]:
+            index, window = index_and_window
+            width = int(window.get("width", 0))
+            height = int(window.get("height", 0))
+            area = width * height
+            capture_area = area_of_rect(window.get("capture_rect")) or area
+            content_area = area_of_rect(window.get("content_rect")) or area
+            title_text = str(window.get("title") or "").lower()
+            title_bonus = 0
+            if title:
+                title_bonus = 2 if title_text == title else 1
+            active_bonus = 1 if window.get("active") else 0
+            # Quartz often reports Chrome extension popovers before the real page window.
+            # When the caller only specifies an app, the full page/window is the safer target.
+            return (title_bonus, capture_area, content_area, area, active_bonus, -index)
+
+        return max(enumerate(candidates), key=score)[1]
+
+    @staticmethod
+    def _normalize_rect(value: Any) -> dict[str, int] | None:
+        if not isinstance(value, dict):
+            return None
+        try:
+            x = int(round(float(value.get("x", value.get("X", 0)) or 0)))
+            y = int(round(float(value.get("y", value.get("Y", 0)) or 0)))
+            width = int(round(float(value.get("width", value.get("Width", 0)) or 0)))
+            height = int(round(float(value.get("height", value.get("Height", 0)) or 0)))
+        except Exception:
+            return None
+        if width <= 0 or height <= 0:
+            return None
+        return {"x": x, "y": y, "width": width, "height": height}
 
     def _darwin_windows(self) -> list[dict[str, Any]]:
         quartz_windows = self._darwin_windows_quartz()
@@ -1723,7 +2425,7 @@ import Quartz
 
 options = Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements
 items = Quartz.CGWindowListCopyWindowInfo(options, Quartz.kCGNullWindowID) or []
-windows = []
+raw = []
 for item in items:
     if int(item.get("kCGWindowLayer", 0) or 0) != 0:
         continue
@@ -1732,7 +2434,7 @@ for item in items:
     height = int(round(float(bounds.get("Height", 0) or 0)))
     if width <= 0 or height <= 0:
         continue
-    windows.append({
+    raw.append({
         "app": str(item.get("kCGWindowOwnerName") or ""),
         "title": str(item.get("kCGWindowName") or ""),
         "x": int(round(float(bounds.get("X", 0) or 0))),
@@ -1741,10 +2443,78 @@ for item in items:
         "height": height,
         "window_id": int(item.get("kCGWindowNumber", 0) or 0),
     })
+
+def overlap(a1, a2, b1, b2):
+    return max(0, min(a2, b2) - max(a1, b1))
+
+def union_rect(rects):
+    left = min(rect["x"] for rect in rects)
+    top = min(rect["y"] for rect in rects)
+    right = max(rect["x"] + rect["width"] for rect in rects)
+    bottom = max(rect["y"] + rect["height"] for rect in rects)
+    return {"x": left, "y": top, "width": right - left, "height": bottom - top}
+
+used_ids = set()
+windows = []
+for item in raw:
+    if not str(item.get("title") or ""):
+        continue
+    item_left = item["x"]
+    item_right = item["x"] + item["width"]
+    item_top = item["y"]
+    peers = [item]
+    for peer in raw:
+        if peer is item:
+            continue
+        if peer.get("app") != item.get("app"):
+            continue
+        if str(peer.get("title") or ""):
+            continue
+        if peer.get("width", 0) < item["width"] * 0.6:
+            continue
+        peer_left = peer["x"]
+        peer_right = peer["x"] + peer["width"]
+        horizontal = overlap(item_left, item_right, peer_left, peer_right)
+        if horizontal < min(item["width"], peer["width"]) * 0.75:
+            continue
+        peer_top = peer["y"]
+        peer_bottom = peer["y"] + peer["height"]
+        near_content_top = peer_top <= item_top + 80 and peer_bottom >= item_top - 180
+        if not near_content_top:
+            continue
+        peers.append(peer)
+    if len(peers) > 1:
+        rect = union_rect(peers)
+        composite = dict(item)
+        composite.update(rect)
+        composite["content_rect"] = {
+            "x": item["x"],
+            "y": item["y"],
+            "width": item["width"],
+            "height": item["height"],
+        }
+        composite["capture_rect"] = rect
+        composite["capture_method"] = "rect"
+        composite["frame_window_ids"] = [
+            int(peer.get("window_id", 0) or 0)
+            for peer in peers
+            if peer.get("window_id")
+        ]
+        windows.append(composite)
+        used_ids.update(composite["frame_window_ids"])
+    else:
+        windows.append(item)
+        if item.get("window_id"):
+            used_ids.add(int(item["window_id"]))
+
+for item in raw:
+    if item.get("window_id") and int(item["window_id"]) in used_ids:
+        continue
+    windows.append(item)
 print(json.dumps(windows))
 """
         try:
-            completed = subprocess.run(["python3", "-c", code], check=True, capture_output=True, text=True)
+            completed = subprocess.run(_current_python_snippet_command(code), check=True, capture_output=True, text=True)
             windows = json.loads(completed.stdout or "[]")
         except Exception:
             return []
@@ -1802,7 +2572,7 @@ end tell
             "Quartz.CGAssociateMouseAndMouseCursorPosition(True)\n"
         )
         try:
-            subprocess.run(["python3", "-c", code], check=True)
+            subprocess.run(_current_python_snippet_command(code), check=True)
         except Exception as exc:
             raise RuntimeError("computer.move requires cliclick or PyObjC Quartz on macOS") from exc
 
@@ -1827,7 +2597,7 @@ end tell
             "Quartz.CGEventPost(Quartz.kCGHIDEventTap, up)\n"
         )
         try:
-            subprocess.run(["python3", "-c", code], check=True)
+            subprocess.run(_current_python_snippet_command(code), check=True)
         except Exception:
             swift = shutil.which("swift")
             if swift:
@@ -1878,9 +2648,49 @@ end tell
             "Quartz.CGEventPost(Quartz.kCGHIDEventTap, up)\n"
         )
         try:
-            subprocess.run(["python3", "-c", code], check=True)
+            subprocess.run(_current_python_snippet_command(code), check=True)
         except Exception as exc:
             raise RuntimeError("computer.drag requires PyObjC Quartz on macOS") from exc
+
+    def _darwin_type(self, payload: dict[str, Any]) -> None:
+        text = str(payload.get("text", ""))
+        if text.isascii():
+            command = ["osascript", "-e", self._apple_script("computer.type", payload)]
+        else:
+            command = ["osascript", "-e", self._darwin_clipboard_paste_script(), "--", text]
+        subprocess.run(command, check=True)
+
+    @staticmethod
+    def _darwin_clipboard_paste_script() -> str:
+        return """
+on run argv
+set rumiPasteText to item 1 of argv
+set rumiOriginalClipboard to missing value
+set rumiHadClipboard to false
+try
+  set rumiOriginalClipboard to the clipboard
+  set rumiHadClipboard to true
+end try
+try
+  set the clipboard to rumiPasteText
+  delay 0.05
+  tell application "System Events" to keystroke "v" using {command down}
+  delay 0.05
+on error pasteErrorMessage number pasteErrorNumber
+  if rumiHadClipboard then
+    set the clipboard to rumiOriginalClipboard
+  else
+    set the clipboard to ""
+  end if
+  error pasteErrorMessage number pasteErrorNumber
+end try
+if rumiHadClipboard then
+  set the clipboard to rumiOriginalClipboard
+else
+  set the clipboard to ""
+end if
+end run
+"""
 
     def _apple_script(self, action: str, payload: dict[str, Any]) -> str:
         if action == "computer.click":

@@ -148,6 +148,8 @@ class DefaultsHttpServer:
         for source_key, dest_key in (inject or {}).items():
             payload[dest_key] = path_params.get(source_key, "")
         context = self._build_context()
+        if module_name == "blocks.chat.stream":
+            return invoke_block(module_name, payload, context)
         try:
             from domain.function_runtime.bridge import invoke_function
             from domain.function_runtime.registry import function_id_for_block_module
@@ -638,8 +640,8 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                     int(result.get("status_code", 302)),
                     str(result.get("location") or "/chat"),
                 )
-            elif isinstance(result, dict) and result.get("_sse"):
-                self._send_sse(result.get("events", []))
+            elif self._sse_events_from_result(result) is not None:
+                self._send_sse(self._sse_events_from_result(result))
             else:
                 status_code = 200
                 if isinstance(result, dict) and result.get("status") == "error":
@@ -647,6 +649,19 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json(status_code, result)
         except Exception as exc:
             self._send_json(500, error("internal server error: " + str(exc)))
+
+    @staticmethod
+    def _sse_events_from_result(result):
+        if isinstance(result, dict) and result.get("_sse"):
+            return result.get("events", [])
+        if (
+            isinstance(result, dict)
+            and result.get("status") == "ok"
+            and isinstance(result.get("data"), dict)
+            and result["data"].get("_sse")
+        ):
+            return result["data"].get("events", [])
+        return None
 
     def _send_json(self, status_code, data):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")

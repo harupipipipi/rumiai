@@ -64,8 +64,8 @@ def _scale_marker_to_model(marker, record):
     screen_y = _number(marker.get("screen_y"))
     if ref_width and ref_height and screen_x is not None and screen_y is not None:
         scaled = dict(marker)
-        scaled["x"] = round((screen_x - (ref_x or 0)) * model_width / ref_width)
-        scaled["y"] = round((screen_y - (ref_y or 0)) * model_height / ref_height)
+        scaled["x"] = round((screen_x - (ref_x or 0)) * max(model_width - 1, 0) / max(ref_width - 1, 1))
+        scaled["y"] = round((screen_y - (ref_y or 0)) * max(model_height - 1, 0) / max(ref_height - 1, 1))
         scaled["coordinate_space"] = "model_image"
         return scaled
     image_size = record.get("image_size")
@@ -75,8 +75,8 @@ def _scale_marker_to_model(marker, record):
     marker_y = _number(marker.get("y"))
     if image_width and image_height and marker_x is not None and marker_y is not None:
         scaled = dict(marker)
-        scaled["x"] = round(marker_x * model_width / image_width)
-        scaled["y"] = round(marker_y * model_height / image_height)
+        scaled["x"] = round(marker_x * max(model_width - 1, 0) / max(image_width - 1, 1))
+        scaled["y"] = round(marker_y * max(model_height - 1, 0) / max(image_height - 1, 1))
         scaled["coordinate_space"] = "model_image"
         return scaled
     return marker

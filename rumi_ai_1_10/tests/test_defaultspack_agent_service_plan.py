@@ -372,6 +372,68 @@ def test_chat_stream_uses_provider_stream_and_persists_message(tmp_path, monkeyp
     ChatStore._instance = None
 
 
+def test_chat_stream_direct_path_honors_conversation_cancel(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from domain.chat.cancellation import get_chat_cancellation_registry
+    import blocks.chat.stream as stream_module
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="google/gemma-4-31b-it")
+
+    class FakeAIClient:
+        def supports_stream(self, model):
+            return True
+
+        def stream(self, model, messages, tools, params):
+            yield {"type": "content_delta", "delta": {"type": "text", "text": "hello"}}
+            get_chat_cancellation_registry().request_cancel(conversation["id"])
+            yield {"type": "content_delta", "delta": {"type": "text", "text": " late"}}
+
+    monkeypatch.setattr(stream_module, "AIClient", FakeAIClient)
+
+    result = stream_module.run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "hello stream"},
+            "tools": [],
+        },
+        {},
+    )
+
+    events = list(result["events"])
+
+    assert [event["type"] for event in events] == ["user_message", "delta", "error"]
+    assert events[-1]["error"] == "cancelled"
+    persisted = json.loads(storage_path.read_text(encoding="utf-8"))
+    messages = persisted["conversations"][conversation["id"]]["messages"]
+    assert [message["role"] for message in messages] == ["user"]
+    assert get_chat_cancellation_registry().is_cancelled(conversation["id"]) is False
+    ChatStore._instance = None
+
+
+def test_chat_cancellation_register_keeps_pending_stop_request():
+    from domain.chat.cancellation import ChatCancellationRegistry
+
+    registry = ChatCancellationRegistry()
+    called = []
+
+    def callback():
+        called.append(True)
+
+    assert registry.request_cancel("c-prestop") is True
+    registry.register("c-prestop", callback)
+
+    assert called == [True]
+    assert registry.is_cancelled("c-prestop") is True
+
+    registry.unregister("c-prestop", callback)
+    assert registry.is_cancelled("c-prestop") is False
+
+
 def test_inline_thought_stream_filter_separates_thinking():
     from blocks.chat.stream import _InlineThoughtFilter
 
@@ -611,6 +673,114 @@ def test_chat_stream_fallback_yields_realtime_tool_progress(monkeypatch):
     assert events[0]["tool_name"] == "browser_computer"
     assert events[-2]["type"] == "message"
     assert events[-1]["type"] == "done"
+
+
+def test_chat_stream_fallback_persists_tool_events_to_assistant_draft(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from blocks.chat.send import run
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    calls = {"ai": 0}
+    observed = {}
+    streamed = []
+
+    def call_handler(name, payload):
+        if name == "defaults.ai.complete":
+            calls["ai"] += 1
+            if calls["ai"] == 1:
+                return {
+                    "status": "ok",
+                    "data": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": "call_1",
+                                "name": "calculator",
+                                "input": "{\"expression\":\"2+2\"}",
+                            }
+                        ],
+                        "finish_reason": "tool_calls",
+                    },
+                }
+            return {
+                "status": "ok",
+                "data": {
+                    "content": [{"type": "text", "text": "tool done"}],
+                    "finish_reason": "stop",
+                },
+            }
+        if name == "defaults.tool.invoke":
+            return {"status": "ok", "data": {"result": "4"}}
+        raise AssertionError(name)
+
+    def stream_event_callback(event):
+        streamed.append(event)
+        if event.get("type") != "tool_call_started" or "draft_id" in observed:
+            return
+        persisted = json.loads(storage_path.read_text(encoding="utf-8"))
+        messages = persisted["conversations"][conversation["id"]]["messages"]
+        observed["roles_at_start"] = [message["role"] for message in messages]
+        observed["draft_id"] = messages[-1]["id"]
+        observed["draft_finish_reason"] = messages[-1]["finish_reason"]
+        observed["draft_event_types"] = [draft_event["type"] for draft_event in messages[-1]["events"]]
+        observed["draft_tool_name"] = messages[-1]["events"][-1]["tool_name"]
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    result = run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "use a tool"},
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "calculator",
+                        "parameters": {"type": "object", "properties": {}, "required": []},
+                    },
+                }
+            ],
+            "params": {"max_tool_calls": 3},
+        },
+        {
+            "call_handler": call_handler,
+            "stream_event_callback": stream_event_callback,
+            "is_cancelled": lambda: False,
+        },
+    )
+
+    assert result["status"] == "ok"
+    assert observed["roles_at_start"] == ["user", "assistant"]
+    assert observed["draft_finish_reason"] == "streaming"
+    assert observed["draft_event_types"] == ["status", "status", "tool_call_started"]
+    assert observed["draft_tool_name"] == "calculator"
+    assert result["data"]["id"] == observed["draft_id"]
+    assert result["data"]["raw_text"] == "tool done"
+    assert result["data"]["finish_reason"] == "stop"
+    assert "streaming" not in result["data"]["metadata"]
+    assert "draft" not in result["data"]["metadata"]
+    assert [event["type"] for event in streamed] == [
+        "status",
+        "status",
+        "tool_call_started",
+        "tool_call_completed",
+    ]
+
+    persisted = json.loads(storage_path.read_text(encoding="utf-8"))
+    messages = persisted["conversations"][conversation["id"]]["messages"]
+    assert [message["role"] for message in messages] == ["user", "assistant"]
+    assert messages[-1]["id"] == observed["draft_id"]
+    assert messages[-1]["raw_text"] == "tool done"
+    assert [event["type"] for event in messages[-1]["events"]] == [
+        "status",
+        "status",
+        "tool_call_started",
+        "tool_call_completed",
+    ]
+    ChatStore._instance = None
 
 
 def test_chat_stop_cancels_active_fallback_worker(monkeypatch):
@@ -897,6 +1067,43 @@ def test_browser_computer_select_window_respects_app_filter(tmp_path):
     assert result["selected"] is True
     assert result["target_window"]["app"] == "Google Chrome"
     assert controller._computer_state()["target_window"]["title"] == "ChatGPT - Google Chrome"
+
+
+def test_browser_computer_select_window_prefers_main_browser_window_over_popup(tmp_path):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._list_windows = lambda: [
+        {
+            "app": "Google Chrome",
+            "title": "このページを翻訳しますか？",
+            "x": 0,
+            "y": 37,
+            "width": 1470,
+            "height": 206,
+            "active": True,
+            "capture_rect": {"x": 0, "y": 37, "width": 1470, "height": 206},
+            "content_rect": {"x": 769, "y": 118, "width": 282, "height": 125},
+        },
+        {
+            "app": "Google Chrome",
+            "title": "Gemma Mouse Precision Test",
+            "x": 0,
+            "y": 37,
+            "width": 1470,
+            "height": 919,
+            "active": True,
+            "capture_rect": {"x": 0, "y": 37, "width": 1470, "height": 919},
+            "content_rect": {"x": 0, "y": 158, "width": 1470, "height": 798},
+        },
+    ]
+
+    result = controller.run("computer.select_window", {"app": "Google Chrome", "focus": False}, yolo_mode=True)
+
+    assert result["selected"] is True
+    assert result["target_window"]["title"] == "Gemma Mouse Precision Test"
+    assert result["target_window"]["capture_rect"]["height"] == 919
 
 
 def test_browser_computer_select_window_failure_clears_stale_target(tmp_path):
@@ -1466,6 +1673,69 @@ def test_chat_tool_loop_emits_realtime_tool_events():
     assert emitted[2]["tool_name"] == "calculator"
 
 
+def test_chat_tool_loop_debug_mode_logs_ai_prompt_and_images(tmp_path):
+    import base64
+    import blocks.chat.send as send
+
+    raw_png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/azX2qkAAAAASUVORK5CYII="
+    )
+    data_url = "data:image/png;base64," + base64.b64encode(raw_png).decode("ascii")
+
+    def call_handler(name, payload):
+        if name == "defaults.ai.complete":
+            return {
+                "status": "ok",
+                "data": {
+                    "content": [{"type": "text", "text": "done"}],
+                    "finish_reason": "stop",
+                },
+            }
+        raise AssertionError(name)
+
+    response = send._complete_with_tools(
+        "google/gemma-4-31b-it",
+        [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "inspect this"},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            }
+        ],
+        [],
+        {"conversation_workspace_dir": str(tmp_path), "ai_debug_enabled": True, "stream_event_callback": lambda _event: None},
+        call_handler,
+        {"max_tool_calls": 1},
+    )
+
+    debug = response["metadata"]["ai_debug"]
+    log_path = Path(debug["request_logs"][0])
+    payload = json.loads(log_path.read_text(encoding="utf-8"))
+    saved = payload["messages"][0]["content"][1]["image_url"]["url"]
+    image_path = Path(saved["debug_image_path"])
+
+    assert log_path.parent == tmp_path / "debug" / "ai_requests"
+    assert payload["messages"][0]["content"][0]["text"] == "inspect this"
+    assert saved["url"] == "[image data saved as artifact]"
+    assert image_path.read_bytes() == raw_png
+    assert payload["images"][0]["path"] == str(image_path)
+    assert payload["response"]["content"][0]["text"] == "done"
+    assert any(event["phase"] == "ai_debug" for event in response["events"])
+
+
+def test_frontend_registry_exposes_ai_request_debug_setting(tmp_path):
+    from domain.frontend.registry import FrontendRegistry
+
+    settings = FrontendRegistry(tmp_path).get_settings()
+    debug_sections = [section for section in settings["sections"] if section.get("id") == "debug"]
+
+    assert debug_sections
+    assert settings["values"]["debug"]["ai_request_logging"] is False
+    assert any(field.get("id") == "ai_request_logging" for field in debug_sections[0]["fields"])
+
+
 def test_chat_tool_loop_marks_nested_tool_errors_in_events():
     import blocks.chat.send as send
 
@@ -1960,10 +2230,13 @@ def test_browser_screenshot_tool_result_adds_image_for_vision_models():
 
     assert messages[0]["role"] == "tool"
     assert messages[1]["role"] == "user"
-    assert "action=move" in messages[1]["content"][0]["text"]
-    assert "width=1440 height=900" in messages[1]["content"][0]["text"]
-    assert "width=720 height=450" in messages[1]["content"][0]["text"]
-    assert "scale x=1.1250, y=1.1250" in messages[1]["content"][0]["text"]
+    guidance = messages[1]["content"][0]["text"]
+    assert "model_image_size" in guidance
+    assert "width=640 height=400" in guidance
+    assert "normalized_x and normalized_y" in guidance
+    assert "Do not return screen pixels" in guidance
+    assert "do not do scale conversion" in guidance
+    assert "scale x=1.1250" not in guidance
     assert messages[1]["content"][1]["image_url"]["url"] == "data:image/png;base64,aGVsbG8="
 
 
@@ -2104,9 +2377,242 @@ def test_browser_computer_screenshot_result_includes_coordinate_metadata(tmp_pat
     assert result["action_coordinate_system"]["width"] == 720
     assert result["model_to_screen_scale"] == {"x": 2.25, "y": 2.25}
     assert result["model_to_action_scale"] == {"x": 1.125, "y": 1.125}
+    assert result["model_to_action_scale_legacy"] is True
     assert result["screenshot_to_action_scale"] == {"x": 0.5, "y": 0.5}
+    assert result["coordinate_contract"]["primary"] == "normalized_1000"
+    assert result["coordinate_contract"]["input_fields"] == ["normalized_x", "normalized_y"]
     assert result["cursor"] == {"x": 12, "y": 34, "origin": "top_left"}
     assert result["cursor_move_contract"]["action"] == "move"
+
+
+def test_browser_computer_model_copy_uses_png(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    source = tmp_path / "screen.png"
+    assert controller._write_png_rgba(source, 2, 2, bytearray([255, 255, 255, 255] * 4))
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Linux")
+
+    model_path = controller._model_screenshot_copy(source)
+
+    assert model_path.name == "screen-model.png"
+    assert model_path.read_bytes().startswith(b"\x89PNG")
+    assert controller._image_data_url(model_path).startswith("data:image/png;base64,")
+
+
+def test_browser_computer_marker_preview_draws_red_marker_on_png(tmp_path):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    source = tmp_path / "screen-model.png"
+    assert controller._write_png_rgba(source, 32, 32, bytearray([255, 255, 255, 255] * 32 * 32))
+
+    marked = controller._marker_preview_image(
+        source,
+        {
+            "model_image_size": {"width": 32, "height": 32},
+            "image_size": {"width": 32, "height": 32},
+            "action_coordinate_system": {"x": 0, "y": 0, "width": 32, "height": 32},
+        },
+        marker={"normalized_x": 500, "normalized_y": 500, "coordinate_space": "normalized_1000"},
+    )
+
+    assert marked is not None
+    image = controller._read_png_rgba(marked)
+    assert image is not None
+    _width, _height, pixels = image
+    center = (16 * 32 + 16) * 4
+    assert pixels[center : center + 4] == bytearray([255, 0, 0, 255])
+
+
+def test_browser_computer_zoom_crop_can_reuse_latest_screenshot(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    source = tmp_path / "latest.png"
+    assert controller._write_png_rgba(source, 100, 50, bytearray([255, 255, 255, 255] * 100 * 50))
+    controller._write_computer_state(
+        {
+            "last_screenshot": {
+                "path": str(source),
+                "image_size": {"width": 100, "height": 50},
+                "action_coordinate_system": {"x": 10, "y": 20, "width": 100, "height": 50},
+            }
+        }
+    )
+    monkeypatch.setattr(BrowserComputerController, "_cursor_position", staticmethod(lambda: None))
+
+    path = tmp_path / "zoom.png"
+    payload = {"source": "latest", "zoom": 2, "normalized_x": 500, "normalized_y": 500}
+    capture = controller._capture_or_reuse_screenshot(path, payload)
+    crop = controller._apply_screenshot_crop(path, payload, capture)
+
+    assert crop is not None
+    assert controller._image_size(crop["path"]) == (50, 25)
+    assert crop["crop_reference"]["source"] == "latest_screenshot"
+    assert crop["action_target"]["width"] == 50
+    assert crop["action_target"]["height"] == 25
+
+    model_path = controller._model_screenshot_copy(crop["path"])
+    result = controller._screenshot_result(
+        crop["path"],
+        model_path,
+        "Darwin",
+        action_target=crop["action_target"],
+        crop_reference=crop["crop_reference"],
+    )
+    assert result["coordinate_contract"]["crop_reference"]
+
+    normal = dict(result)
+    normal.pop("crop_reference", None)
+    controller._remember_last_screenshot(normal)
+    assert "crop_reference" not in controller._computer_state()["last_screenshot"]
+
+
+def test_browser_computer_latest_crop_reuses_last_full_screenshot(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    source = tmp_path / "latest.png"
+    pixels = bytearray()
+    for y in range(80):
+        for x in range(120):
+            pixels.extend([x % 256, y % 256, 0, 255])
+    assert controller._write_png_rgba(source, 120, 80, pixels)
+    controller._write_computer_state(
+        {
+            "last_screenshot": {
+                "path": str(source),
+                "image_size": {"width": 120, "height": 80},
+                "action_coordinate_system": {"x": 10, "y": 20, "width": 120, "height": 80},
+            }
+        }
+    )
+    monkeypatch.setattr(BrowserComputerController, "_cursor_position", staticmethod(lambda: None))
+
+    first_path = tmp_path / "first.png"
+    first_payload = {"source": "latest", "crop_x": 10, "crop_y": 10, "crop_width": 20, "crop_height": 20}
+    first_capture = controller._capture_or_reuse_screenshot(first_path, first_payload)
+    first_crop = controller._apply_screenshot_crop(first_path, first_payload, first_capture)
+    assert first_crop is not None
+    first_model = controller._model_screenshot_copy(first_crop["path"])
+    first_result = controller._screenshot_result(
+        first_crop["path"],
+        first_model,
+        "Darwin",
+        action_target=first_crop["action_target"],
+        crop_reference=first_crop["crop_reference"],
+    )
+    assert first_result["path"].endswith("first-crop.png")
+    assert controller._computer_state()["last_screenshot"]["path"].endswith("first-crop.png")
+    assert controller._computer_state()["last_full_screenshot"]["path"] == str(source)
+
+    second_path = tmp_path / "second.png"
+    second_payload = {"source": "latest", "crop_x": 40, "crop_y": 10, "crop_width": 20, "crop_height": 20}
+    second_capture = controller._capture_or_reuse_screenshot(second_path, second_payload)
+    second_crop = controller._apply_screenshot_crop(second_path, second_payload, second_capture)
+
+    assert second_crop is not None
+    assert second_crop["crop_reference"]["source_path"] == str(source)
+    assert second_crop["crop_reference"]["source_role"] == "last_full_screenshot"
+    assert second_crop["crop_reference"]["source_is_crop"] is False
+    assert controller._image_size(second_crop["path"]) == (20, 20)
+    image = controller._read_png_rgba(second_crop["path"])
+    assert image is not None
+    _width, _height, second_pixels = image
+    assert second_pixels[:4] == bytearray([40, 10, 0, 255])
+
+
+def test_browser_computer_current_crop_allows_explicit_crop_of_crop(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    source = tmp_path / "latest.png"
+    pixels = bytearray()
+    for y in range(80):
+        for x in range(120):
+            pixels.extend([x % 256, y % 256, 0, 255])
+    assert controller._write_png_rgba(source, 120, 80, pixels)
+    controller._write_computer_state(
+        {
+            "last_screenshot": {
+                "path": str(source),
+                "image_size": {"width": 120, "height": 80},
+                "action_coordinate_system": {"x": 10, "y": 20, "width": 120, "height": 80},
+            }
+        }
+    )
+    monkeypatch.setattr(BrowserComputerController, "_cursor_position", staticmethod(lambda: None))
+
+    first_path = tmp_path / "first.png"
+    first_payload = {"source": "latest", "crop_x": 10, "crop_y": 10, "crop_width": 40, "crop_height": 30}
+    first_capture = controller._capture_or_reuse_screenshot(first_path, first_payload)
+    first_crop = controller._apply_screenshot_crop(first_path, first_payload, first_capture)
+    assert first_crop is not None
+    first_result = controller._screenshot_result(
+        first_crop["path"],
+        controller._model_screenshot_copy(first_crop["path"]),
+        "Darwin",
+        action_target=first_crop["action_target"],
+        crop_reference=first_crop["crop_reference"],
+    )
+    assert first_result["path"].endswith("first-crop.png")
+
+    second_path = tmp_path / "second.png"
+    second_payload = {"source": "current_crop", "crop_x": 5, "crop_y": 4, "crop_width": 10, "crop_height": 8}
+    second_capture = controller._capture_or_reuse_screenshot(second_path, second_payload)
+    second_crop = controller._apply_screenshot_crop(second_path, second_payload, second_capture)
+
+    assert second_crop is not None
+    assert second_crop["crop_reference"]["source_path"] == first_result["path"]
+    assert second_crop["crop_reference"]["source_role"] == "last_screenshot"
+    assert second_crop["crop_reference"]["source_is_crop"] is True
+    assert controller._image_size(second_crop["path"]) == (10, 8)
+    image = controller._read_png_rgba(second_crop["path"])
+    assert image is not None
+    _width, _height, second_pixels = image
+    assert second_pixels[:4] == bytearray([15, 14, 0, 255])
+
+
+def test_browser_computer_nested_crop_aliases_are_applied(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    source = tmp_path / "latest.png"
+    assert controller._write_png_rgba(source, 100, 50, bytearray([255, 255, 255, 255] * 100 * 50))
+    controller._write_computer_state(
+        {
+            "last_screenshot": {
+                "path": str(source),
+                "image_size": {"width": 100, "height": 50},
+                "action_coordinate_system": {"x": 0, "y": 0, "width": 100, "height": 50},
+            }
+        }
+    )
+    monkeypatch.setattr(BrowserComputerController, "_cursor_position", staticmethod(lambda: None))
+
+    path = tmp_path / "nested-crop.png"
+    payload = {
+        "source": "latest",
+        "crop": {
+            "crop_x": 10,
+            "crop_y": 5,
+            "crop_width": 20,
+            "crop_height": 10,
+        },
+    }
+    capture = controller._capture_or_reuse_screenshot(path, payload)
+    crop = controller._apply_screenshot_crop(path, payload, capture)
+
+    assert crop is not None
+    assert controller._image_size(crop["path"]) == (20, 10)
+    assert crop["crop_reference"]["source"] == "latest_screenshot"
+    assert crop["crop_reference"]["box"] == {"x": 10, "y": 5, "width": 20, "height": 10}
 
 
 def test_tool_activity_events_and_logs_redact_secret_values():
@@ -2251,7 +2757,7 @@ def test_browser_screenshots_endpoint_omits_model_preview_duplicates(tmp_path, m
     workspace = store.conversation_workspace_dir(conversation["id"]) / "tools"
     workspace.mkdir(parents=True, exist_ok=True)
     screenshot_path = workspace / "screen.png"
-    model_path = workspace / "screen-model.jpg"
+    model_path = workspace / "screen-model.png"
     screenshot_path.write_bytes(b"image-bytes")
     model_path.write_bytes(b"model-image-bytes")
     assistant = store.add_message(
@@ -2288,7 +2794,7 @@ def test_browser_screenshots_endpoint_omits_model_preview_duplicates(tmp_path, m
     assert result["status"] == "ok"
     assert len(result["data"]["screenshots"]) == 1
     screenshot = result["data"]["screenshots"][0]
-    assert screenshot["data_url"].startswith("data:image/jpeg;base64,")
+    assert screenshot["data_url"].startswith("data:image/png;base64,")
     assert screenshot["image_size"] == {"width": 640, "height": 406}
     assert screenshot["click_marker"]["coordinate_space"] == "model_image"
     assert screenshot["click_marker"]["x"] == 291
@@ -2318,11 +2824,11 @@ def test_computer_use_auto_converts_latest_model_screenshot_coordinates(monkeypa
 
     payload, marker = controller._resolve_action_point({"x": 320, "y": 203}, infer_window=False)
 
-    assert payload["x"] == 740
-    assert payload["y"] == 459
-    assert marker == {"x": 320, "y": 203, "screen_x": 740, "screen_y": 459, "coordinate_space": "model_image"}
-    assert state["ai_cursor"]["x"] == 740
-    assert state["ai_cursor"]["y"] == 459
+    assert payload["x"] == 741
+    assert payload["y"] == 460
+    assert marker == {"x": 320, "y": 203, "screen_x": 741, "screen_y": 460, "coordinate_space": "model_image"}
+    assert state["ai_cursor"]["x"] == 741
+    assert state["ai_cursor"]["y"] == 460
 
 
 def test_computer_use_accepts_browser_tool_test_normalized_point(monkeypatch, tmp_path):
@@ -2346,13 +2852,102 @@ def test_computer_use_accepts_browser_tool_test_normalized_point(monkeypatch, tm
         infer_window=False,
     )
 
-    assert payload["x"] == 735
+    assert payload["x"] == 734
     assert payload["y"] == 756
     assert payload["coordinate_space"] == "screen"
     assert marker["coordinate_space"] == "normalized_1000"
     assert marker["point_order"] == "yx"
-    assert marker["screen_x"] == 735
+    assert marker["screen_x"] == 734
     assert marker["screen_y"] == 756
+
+
+def test_computer_use_normalized_click_uses_composite_chrome_frame(monkeypatch, tmp_path):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    state = {
+        "target_window": {
+            "app": "Google Chrome",
+            "title": "LINE Official Account Manager",
+            "x": 0,
+            "y": 37,
+            "width": 1470,
+            "height": 919,
+            "capture_rect": {"x": 0, "y": 37, "width": 1470, "height": 919},
+            "content_rect": {"x": 0, "y": 158, "width": 1470, "height": 798},
+        },
+        "last_screenshot": {
+            "image_size": {"width": 2940, "height": 1838},
+            "model_image_size": {"width": 640, "height": 400},
+            "action_coordinate_system": {"x": 0, "y": 37, "width": 1470, "height": 919},
+        },
+    }
+
+    monkeypatch.setattr(controller, "_computer_state", lambda: dict(state))
+    monkeypatch.setattr(controller, "_write_computer_state", lambda value: state.update(value))
+
+    payload, marker = controller._resolve_action_point(
+        {"normalized_x": 235, "normalized_y": 20, "coordinate_space": "normalized_1000"},
+        infer_window=False,
+    )
+
+    assert payload["x"] == 345
+    assert payload["y"] == 55
+    assert marker["screen_x"] == 345
+    assert marker["screen_y"] == 55
+
+
+def test_computer_use_normalized_coordinates_clamp_to_last_pixel(monkeypatch, tmp_path):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    state = {
+        "last_screenshot": {
+            "action_coordinate_system": {"x": 20, "y": 40, "width": 101, "height": 51},
+        },
+    }
+
+    monkeypatch.setattr(controller, "_computer_state", lambda: dict(state))
+    monkeypatch.setattr(controller, "_write_computer_state", lambda value: state.update(value))
+
+    payload, marker = controller._resolve_action_point(
+        {"normalized_x": 1500, "normalized_y": -20, "coordinate_space": "normalized_1000"},
+        infer_window=False,
+    )
+
+    assert payload["x"] == 120
+    assert payload["y"] == 40
+    assert marker["normalized_x"] == 1000
+    assert marker["normalized_y"] == 0
+
+
+def test_computer_use_normalized_click_prefers_attached_crop_over_target_window(monkeypatch, tmp_path):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    state = {
+        "target_window": {"app": "Google Chrome", "title": "LINE", "x": 0, "y": 158, "width": 1470, "height": 798},
+        "last_screenshot": {
+            "path": str(tmp_path / "crop.png"),
+            "image_size": {"width": 300, "height": 200},
+            "crop_reference": {"source": "latest_screenshot"},
+            "action_coordinate_system": {"x": 98, "y": 242, "width": 148, "height": 85},
+        },
+    }
+
+    monkeypatch.setattr(controller, "_computer_state", lambda: dict(state))
+    monkeypatch.setattr(controller, "_write_computer_state", lambda value: state.update(value))
+
+    payload, marker = controller._resolve_action_point(
+        {"normalized_x": 1000, "normalized_y": 1000, "coordinate_space": "normalized_1000"},
+        infer_window=False,
+    )
+
+    assert payload["x"] == 245
+    assert payload["y"] == 326
+    assert marker["screen_x"] == 245
+    assert marker["screen_y"] == 326
+    assert marker["reference"] == "last_screenshot"
 
 
 def test_computer_use_drag_uses_virtual_cursor_and_converts_model_coordinates(monkeypatch, tmp_path):
@@ -2378,7 +2973,7 @@ def test_computer_use_drag_uses_virtual_cursor_and_converts_model_coordinates(mo
 
     assert result["executed"] is True
     assert result["virtual_cursor"] is True
-    assert result["target"] == {"from": {"x": 286, "y": 143}, "to": {"x": 740, "y": 459}}
+    assert result["target"] == {"from": {"x": 286, "y": 143}, "to": {"x": 741, "y": 460}}
     assert result["drag_marker"]["from"] == {
         "x": 100,
         "y": 50,
@@ -2389,12 +2984,12 @@ def test_computer_use_drag_uses_virtual_cursor_and_converts_model_coordinates(mo
     assert result["drag_marker"]["to"] == {
         "x": 320,
         "y": 203,
-        "screen_x": 740,
-        "screen_y": 459,
+        "screen_x": 741,
+        "screen_y": 460,
         "coordinate_space": "model_image",
     }
-    assert state["ai_cursor"]["x"] == 740
-    assert state["ai_cursor"]["y"] == 459
+    assert state["ai_cursor"]["x"] == 741
+    assert state["ai_cursor"]["y"] == 460
 
 
 def test_chat_store_splits_loaded_inline_thoughts(tmp_path, monkeypatch):
@@ -2673,6 +3268,33 @@ def test_fallback_operations_company_routes_precede_generic_agent_status():
     }
 
 
+def test_standalone_http_chat_stream_bypasses_function_runtime_and_unwraps_sse(monkeypatch):
+    import ecosystem.defaultspack.transport.http as http_transport
+
+    server = http_transport.DefaultsHttpServer(facade=None)
+    captured = {}
+
+    def fake_invoke_block(module_name, payload, context):
+        captured["module_name"] = module_name
+        captured["payload"] = payload
+        captured["context"] = context
+        return {"status": "ok", "data": {"_sse": True, "events": [{"type": "done"}]}}
+
+    monkeypatch.setattr(http_transport, "invoke_block", fake_invoke_block)
+
+    result = server._invoke_fallback_block(
+        "blocks.chat.stream",
+        {"message": {"role": "user", "content": "hello"}},
+        {"id": "c-http"},
+        {"id": "conversation_id"},
+    )
+
+    assert captured["module_name"] == "blocks.chat.stream"
+    assert captured["payload"]["conversation_id"] == "c-http"
+    assert captured["context"]["owner_pack"] == "defaultspack"
+    assert http_transport._RequestHandler._sse_events_from_result(result) == [{"type": "done"}]
+
+
 def test_ui_clipboard_write_uses_local_clipboard(monkeypatch):
     from blocks.ui import clipboard
 
@@ -2854,6 +3476,54 @@ def test_browser_computer_screenshot_uses_window_id_for_selected_macos_window(tm
     assert result["action"] == "computer.screenshot"
     assert calls[0][:4] == ["screencapture", "-x", "-l", "12345"]
     assert result["target_window"]["window_id"] == 12345
+
+
+def test_browser_computer_screenshot_uses_composite_capture_rect(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    png_header = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR"
+    png_body = png_header + b"\x00\x00\x02\x80\x00\x00\x01\x90"
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if command[0] == "screencapture":
+            Path(command[-1]).write_bytes(png_body)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+    monkeypatch.setattr(BrowserComputerController, "_model_screenshot_copy", lambda self, path: path)
+    monkeypatch.setattr(BrowserComputerController, "_cursor_position", staticmethod(lambda: None))
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    controller._write_computer_state(
+        {
+            "target_window": {
+                "app": "Google Chrome",
+                "title": "LINE Official Account Manager",
+                "x": 0,
+                "y": 37,
+                "width": 1470,
+                "height": 919,
+                "window_id": 2811,
+                "capture_rect": {"x": 0, "y": 37, "width": 1470, "height": 919},
+                "content_rect": {"x": 0, "y": 158, "width": 1470, "height": 798},
+                "capture_method": "rect",
+            }
+        }
+    )
+    controller._active_window = lambda: None
+    controller._chrome_tabs = lambda: []
+
+    result = controller.run("computer.screenshot")
+
+    assert calls[0][:4] == ["screencapture", "-x", "-R", "0,37,1470,919"]
+    assert result["target_window"]["capture_rect"]["y"] == 37
+    assert result["action_coordinate_system"]["y"] == 37
+    assert result["action_coordinate_system"]["height"] == 919
 
 
 def test_browser_computer_screenshot_resolves_app_filter_without_prior_select(tmp_path, monkeypatch):
@@ -3240,6 +3910,103 @@ def test_computer_use_local_action_map_supports_context_and_windows():
     assert _browser_computer_action_payload("browser_use", {"action": "windows"})[0] == "computer.windows"
     assert _browser_computer_action_payload("browser_use", {"action": "select_window"})[0] == "computer.select_window"
     assert _browser_computer_action_payload("browser_use", {"action": "drag"})[0] == "computer.drag"
+
+
+def test_computer_use_payload_preserves_zoom_crop_fields():
+    from domain.tool.executor import _browser_computer_action_payload
+
+    action, payload = _browser_computer_action_payload(
+        "computer_use",
+        {
+            "action": "screenshot",
+            "source": "latest",
+            "zoom": 3,
+            "normalized_x": 420,
+            "normalized_y": 510,
+            "crop_x": 120,
+            "crop_y": 180,
+            "crop_width": 420,
+            "crop_height": 260,
+            "normalized_box": [100, 200, 700, 800],
+            "detail": "high_detail",
+        },
+    )
+
+    assert action == "computer.screenshot"
+    assert payload["source"] == "latest"
+    assert payload["zoom"] == 3
+    assert payload["normalized_x"] == 420
+    assert payload["normalized_y"] == 510
+    assert payload["crop_x"] == 120
+    assert payload["crop_y"] == 180
+    assert payload["crop_width"] == 420
+    assert payload["crop_height"] == 260
+    assert payload["normalized_box"] == [100, 200, 700, 800]
+    assert payload["detail"] == "high_detail"
+
+
+def test_computer_use_function_wrapper_forwards_zoom_crop_fields(monkeypatch):
+    from ecosystem.rumi_default_tools_pack.functions.computer_use import main as computer_use_main
+
+    captured = {}
+
+    def fake_run_browser_computer(context, request):
+        captured["context"] = context
+        captured["request"] = request
+        return {"ok": True}
+
+    monkeypatch.setattr(computer_use_main, "_run_browser_computer", fake_run_browser_computer)
+
+    result = computer_use_main.run(
+        {"conversation_id": "conv-1"},
+        {
+            "action": "screenshot",
+            "source": "latest",
+            "zoom": 2,
+            "normalized_x": 500,
+            "normalized_y": 320,
+            "crop_width": 360,
+            "crop_height": 240,
+        },
+    )
+
+    assert result == {"ok": True}
+    assert captured["request"]["action"] == "computer.screenshot"
+    assert captured["request"]["payload"]["source"] == "latest"
+    assert captured["request"]["payload"]["zoom"] == 2
+    assert captured["request"]["payload"]["normalized_x"] == 500
+    assert captured["request"]["payload"]["normalized_y"] == 320
+    assert captured["request"]["payload"]["crop_width"] == 360
+    assert captured["request"]["payload"]["crop_height"] == 240
+
+
+def test_browser_use_function_wrapper_forwards_zoom_crop_fields(monkeypatch):
+    from ecosystem.rumi_default_tools_pack.functions.browser_use import main as browser_use_main
+
+    captured = {}
+
+    def fake_run_browser_computer(context, request):
+        captured["request"] = request
+        return {"ok": True}
+
+    monkeypatch.setattr(browser_use_main, "_run_browser_computer", fake_run_browser_computer)
+
+    browser_use_main.run(
+        {},
+        {
+            "action": "screenshot",
+            "source": "latest",
+            "zoom": 2,
+            "normalized_box": [200, 250, 800, 850],
+            "detail": "high_detail",
+        },
+    )
+
+    assert captured["request"]["action"] == "computer.screenshot"
+    assert captured["request"]["payload"]["source"] == "latest"
+    assert captured["request"]["payload"]["zoom"] == 2
+    assert captured["request"]["payload"]["normalized_box"] == [200, 250, 800, 850]
+    assert captured["request"]["payload"]["detail"] == "high_detail"
 
 
 def test_computer_use_context_defaults_do_not_enable_background():
@@ -3915,7 +4682,7 @@ def test_computer_click_falls_back_to_swift_on_macos(tmp_path, monkeypatch):
 
     def fake_run(command, **kwargs):
         calls.append((command, kwargs))
-        if command[0] == "python3":
+        if command[0] == sys.executable:
             raise subprocess.CalledProcessError(1, command)
         return subprocess.CompletedProcess(command, 0)
 
@@ -3924,7 +4691,8 @@ def test_computer_click_falls_back_to_swift_on_macos(tmp_path, monkeypatch):
 
     BrowserComputerController(artifact_root=tmp_path)._darwin_click({"x": 120, "y": 240})
 
-    assert calls[0][0][0] == "python3"
+    assert calls[0][0][0] == sys.executable
+    assert calls[0][0][1] == "-c"
     assert calls[1][0][0] == "/usr/bin/swift"
     assert "leftMouseDown" in calls[1][0][2]
     assert "CGPoint(x: 120, y: 240)" in calls[1][0][2]
@@ -3940,6 +4708,56 @@ def test_computer_type_applescript_preserves_non_ascii_text(tmp_path):
 
     assert 'keystroke "こんにちは！"' in script
     assert "\\u3053" not in script
+
+
+def test_computer_type_uses_clipboard_preserving_paste_for_non_ascii_on_macos(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+
+    BrowserComputerController(artifact_root=tmp_path)._darwin_type(
+        {"text": "computer useの修正と検証が完了しました。"}
+    )
+
+    assert len(calls) == 1
+    command = calls[0][0]
+    assert command[:2] == ["osascript", "-e"]
+    assert command[3:] == ["--", "computer useの修正と検証が完了しました。"]
+    script = command[2]
+    assert "set rumiPasteText to item 1 of argv" in script
+    assert "set rumiOriginalClipboard to the clipboard" in script
+    assert "set the clipboard to rumiPasteText" in script
+    assert 'keystroke "v" using {command down}' in script
+    assert "set the clipboard to rumiOriginalClipboard" in script
+    assert 'keystroke "computer useの修正と検証が完了しました。"' not in script
+    assert "\\u306e" not in " ".join(command)
+
+
+def test_computer_type_keeps_ascii_on_direct_keystroke_path_for_macos(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+    import ecosystem.rumi_default_tools_pack.domain.tool.browser_computer as browser_computer
+
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
+
+    BrowserComputerController(artifact_root=tmp_path)._darwin_type({"text": "hello"})
+
+    assert len(calls) == 1
+    script = calls[0][0][2]
+    assert script == 'tell application "System Events" to keystroke "hello"'
+    assert "set the clipboard" not in script
 
 
 def test_browser_computer_manages_persistent_profiles_and_cookie_jars(tmp_path):

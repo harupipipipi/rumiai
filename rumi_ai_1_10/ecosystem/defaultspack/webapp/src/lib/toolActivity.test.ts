@@ -89,6 +89,43 @@ test("updates streamed tool activity when a completion event arrives before the 
   assert.equal(groups[0].items[0].input, "click Notion (120, 340)");
 });
 
+test("uses streamed completion results and artifacts before final logs arrive", () => {
+  const groups = buildToolActivityGroups([], [
+    {
+      type: "tool_call_started",
+      phase: "tool_call_started",
+      tool_call_id: "call_1",
+      tool_name: "browser_computer",
+      arguments: { action: "computer.screenshot" },
+      message: "browser_computer を使用中",
+    },
+    {
+      type: "tool_call_completed",
+      phase: "tool_call_completed",
+      tool_call_id: "call_1",
+      tool_name: "browser_computer",
+      result: {
+        status: "ok",
+        data: {
+          summary: "Captured screen",
+          widget: {
+            data_url: "data:image/png;base64,aW1hZ2U=",
+            screenshot_path: "/tmp/rumi/workspace/tools/browser/screen.png",
+          },
+        },
+      },
+      message: "browser_computer の結果を受け取りました",
+    },
+  ], { conversationId: "conv_1" });
+
+  const item = groups[0].items[0];
+  assert.equal(item.status, "completed");
+  assert.equal(item.input, "computer.screenshot");
+  assert.equal(item.detail, "Captured screen");
+  assert.equal(item.artifacts?.some((artifact) => artifact.url?.startsWith("data:image/png")), true);
+  assert.equal(item.artifacts?.some((artifact) => artifact.path.endsWith("screen.png")), true);
+});
+
 test("dedupes started events when a matching completed log exists", () => {
   const groups = buildToolActivityGroups(
     [

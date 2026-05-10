@@ -236,6 +236,16 @@ function isImagePath(path: string): boolean {
   return /\.(png|jpe?g|gif|webp|svg)$/i.test(path);
 }
 
+function isImageDataUrl(value: string): boolean {
+  return /^data:image\/[a-z0-9.+-]+;base64,/i.test(value);
+}
+
+function dataUrlName(value: string): string {
+  const match = value.match(/^data:image\/([a-z0-9.+-]+);/i);
+  const extension = match?.[1]?.replace("jpeg", "jpg").split("+")[0] || "png";
+  return `screenshot.${extension}`;
+}
+
 function collectArtifactPaths(value: unknown, paths: string[] = [], seen = new Set<string>()): string[] {
   if (Array.isArray(value)) {
     value.forEach((item) => collectArtifactPaths(item, paths, seen));
@@ -255,8 +265,60 @@ function collectArtifactPaths(value: unknown, paths: string[] = [], seen = new S
   return paths;
 }
 
+function collectInlineImageUrls(value: unknown, urls: string[] = [], seen = new Set<string>()): string[] {
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectInlineImageUrls(item, urls, seen));
+    return urls;
+  }
+  if (!isRecord(value)) return urls;
+
+  const dataUrl = stringValue(value.data_url) || stringValue(value.dataUrl);
+  if (dataUrl && isImageDataUrl(dataUrl) && !seen.has(dataUrl)) {
+    seen.add(dataUrl);
+    urls.push(dataUrl);
+  }
+  Object.entries(value).forEach(([key, entry]) => {
+    if (key === "data_url" || key === "dataUrl") return;
+    collectInlineImageUrls(entry, urls, seen);
+  });
+  return urls;
+}
+
+function streamActivityEventKey(event: ChatActivityEvent): string {
+  const callId = typeof event.tool_call_id === "string" ? event.tool_call_id.trim() : "";
+  if (callId) return `call:${callId}`;
+  const toolName = typeof event.tool_name === "string" ? event.tool_name.trim() : "";
+  const args = event.arguments && typeof event.arguments === "object" ? event.arguments : {};
+  if (toolName) return `tool:${toolName}:${JSON.stringify(args)}`;
+  return `event:${event.type}:${event.phase ?? ""}:${event.message ?? ""}`;
+}
+
+function mergeStreamActivityEvent(base: ChatActivityEvent, update: ChatActivityEvent): ChatActivityEvent {
+  const merged: ChatActivityEvent = { ...base, ...update };
+  for (const key of ["arguments", "result", "artifact", "artifacts", "output", "message", "timestamp"]) {
+    if (merged[key] === undefined && base[key] !== undefined) {
+      merged[key] = base[key];
+    }
+  }
+  return merged;
+}
+
+function upsertStreamActivityEvent(events: ChatActivityEvent[], nextEvent: ChatActivityEvent): ChatActivityEvent[] {
+  const key = streamActivityEventKey(nextEvent);
+  const index = events.findIndex((event) => streamActivityEventKey(event) === key);
+  if (index === -1) return [...events, nextEvent];
+  return events.map((event, eventIndex) => (
+    eventIndex === index ? mergeStreamActivityEvent(event, nextEvent) : event
+  ));
+}
+
+function resultValuesForToolEvent(event: ChatActivityEvent): unknown[] {
+  return [event.result, event.artifact, event.artifacts, event.output].filter((value) => value !== undefined);
+}
+
 function toolPreviewsFromMessages(messages: ChatMessage[]): ToolPreviewItem[] {
-  return messages.flatMap((message) => (message.tool_logs ?? []).flatMap((log, index) => {
+  return messages.flatMap((message) => {
+    const logPreviews = (message.tool_logs ?? []).flatMap((log, index) => {
     const toolName = String(log.tool_name ?? "tool");
     const result = log.result as Record<string, unknown> | undefined;
     const status = String(result?.status ?? "completed");
@@ -305,7 +367,87 @@ function toolPreviewsFromMessages(messages: ChatMessage[]): ToolPreviewItem[] {
       };
     });
     return [logPreview, ...artifactPreviews];
-  })).sort((a, b) => b.timestamp - a.timestamp);
+    });
+
+    const logKeys = new Set((message.tool_logs ?? []).map((log) => {
+      const callId = typeof log.tool_call_id === "string" ? log.tool_call_id.trim() : "";
+      if (callId) return `call:${callId}`;
+      return `tool:${log.tool_name ?? "tool"}:${JSON.stringify(log.arguments ?? {})}`;
+    }));
+    const eventMap = new Map<string, ChatActivityEvent>();
+    for (const event of message.events ?? []) {
+      if (typeof event.tool_name !== "string" || !event.tool_name.trim()) continue;
+      const key = streamActivityEventKey(event);
+      if (logKeys.has(key)) continue;
+      const existing = eventMap.get(key);
+      eventMap.set(key, existing ? mergeStreamActivityEvent(existing, event) : event);
+    }
+    const eventPreviews = [...eventMap.values()].flatMap((event, index) => {
+      const values = resultValuesForToolEvent(event);
+      if (values.length === 0) return [];
+      const toolName = String(event.tool_name ?? "tool");
+      const timestamp = typeof event.timestamp === "number" ? event.timestamp : message.created_at + index + 0.01;
+      const status = event.is_error === true ? "failed" : event.type === "tool_call_completed" || event.type === "tool_result" ? "completed" : "running";
+      const args = compactPreviewValue(event.arguments);
+      const output = compactPreviewValue(event.result ?? event.output ?? event.artifact ?? event.artifacts ?? "");
+      const content = [
+        `tool: ${toolName}`,
+        `status: ${status}`,
+        args ? `input:\n${args}` : "",
+        output ? `result:\n${output}` : "",
+      ].filter(Boolean).join("\n\n");
+      const eventPreview: ToolPreviewItem = {
+        id: `message-tool-event-${message.id}-${streamActivityEventKey(event)}`,
+        toolStepId: String(event.tool_call_id ?? toolName),
+        timestamp,
+        data: {
+          type: "file" as const,
+          filename: `${toolName}.tool`,
+          size: status,
+          content,
+        },
+      };
+      const fileArtifacts = values.flatMap((value) => collectArtifactPaths(value));
+      const pathPreviews: ToolPreviewItem[] = fileArtifacts.map((path, artifactIndex) => {
+        const name = basename(path);
+        const url = conversationArtifactFileUrl(message.conversation_id, path);
+        return {
+          id: `message-tool-event-artifact-${message.id}-${streamActivityEventKey(event)}-${artifactIndex}`,
+          toolStepId: String(event.tool_call_id ?? toolName),
+          timestamp: timestamp + artifactIndex + 0.1,
+          data: isImagePath(path)
+            ? {
+                type: "image" as const,
+                url,
+                alt: name,
+                path,
+              }
+            : {
+                type: "file" as const,
+                filename: name,
+                size: "tool artifact",
+                path,
+                url,
+                downloadName: name,
+                content: `artifact: ${path}`,
+              },
+        };
+      });
+      const inlinePreviews: ToolPreviewItem[] = values.flatMap((value) => collectInlineImageUrls(value)).map((url, imageIndex) => ({
+        id: `message-tool-event-inline-${message.id}-${streamActivityEventKey(event)}-${imageIndex}`,
+        toolStepId: String(event.tool_call_id ?? toolName),
+        timestamp: timestamp + fileArtifacts.length + imageIndex + 0.1,
+        data: {
+          type: "image" as const,
+          url,
+          alt: dataUrlName(url),
+        },
+      }));
+      return [eventPreview, ...pathPreviews, ...inlinePreviews];
+    });
+
+    return [...logPreviews, ...eventPreviews];
+  }).sort((a, b) => b.timestamp - a.timestamp);
 }
 
 function CanvasPeek({
@@ -858,6 +1000,7 @@ export default function App() {
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
   const showActivityInMessages = settingsValues.general?.show_activity_in_messages !== false;
   const showRegion = (regionId: string) => !catalog?.shell || hasShellRegion(catalog, regionId);
+  const isActivityPreviewVisible = showRegion("activity_preview") && effectiveShowPreview;
   const operationsProfileAvailable = hasOperationsProfile(catalog);
 
   const updatePendingRequests = (updater: (current: Record<string, PendingChatRequest>) => Record<string, PendingChatRequest>) => {
@@ -1893,7 +2036,7 @@ export default function App() {
           const existing = current.messages.find((message) => message.id === assistantDraft.id);
           const appendEvent = (message: ChatMessage): ChatMessage => ({
             ...message,
-            events: [...(message.events ?? []), activityEvent],
+            events: upsertStreamActivityEvent(message.events ?? [], activityEvent),
           });
           if (!existing) {
             return {
@@ -2108,8 +2251,8 @@ export default function App() {
           </div>
         )}
 
-        <main className="flex-1 flex min-w-0 bg-[#09090b] relative">
-          <div className={cn("flex-1 flex flex-col min-w-0", effectiveShowPreview && "border-r border-zinc-800/40")}>
+        <main className={cn("rumi-workspace-main flex-1 flex min-w-0 bg-[#09090b] relative", isActivityPreviewVisible && "has-activity-preview")}>
+          <div className={cn("rumi-chat-pane flex-1 flex flex-col min-w-0", isActivityPreviewVisible && "border-r border-zinc-800/40")}>
             {showRegion("chat_header") && (
               <Renderers.chatHeader
                 title={activeChatTitle}
@@ -2187,17 +2330,19 @@ export default function App() {
             )}
           </div>
 
-          {showRegion("activity_preview") && effectiveShowPreview && (
-            <Renderers.toolPreviewPanel
-              previews={canvasPreviews}
-              showPreview={effectiveShowPreview}
-              onClose={() => setShowPreview(false)}
-              previewMode={previewMode}
-              onModeChange={setPreviewMode}
-              activePreviewId={activePreviewId}
-              memo={canvasMemo}
-              onMemoChange={setCanvasMemo}
-            />
+          {isActivityPreviewVisible && (
+            <aside className="rumi-activity-preview-pane" aria-label="Activity preview">
+              <Renderers.toolPreviewPanel
+                previews={canvasPreviews}
+                showPreview={effectiveShowPreview}
+                onClose={() => setShowPreview(false)}
+                previewMode={previewMode}
+                onModeChange={setPreviewMode}
+                activePreviewId={activePreviewId}
+                memo={canvasMemo}
+                onMemoChange={setCanvasMemo}
+              />
+            </aside>
           )}
         </main>
 

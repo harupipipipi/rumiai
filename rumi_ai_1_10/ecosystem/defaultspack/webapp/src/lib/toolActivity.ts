@@ -141,12 +141,36 @@ function isImagePath(path: string): boolean {
   return /\.(png|jpe?g|gif|webp|svg)$/i.test(path);
 }
 
+function isImageDataUrl(value: string): boolean {
+  return /^data:image\/[a-z0-9.+-]+;base64,/i.test(value);
+}
+
+function dataUrlName(value: string): string {
+  const match = value.match(/^data:image\/([a-z0-9.+-]+);/i);
+  const extension = match?.[1]?.replace("jpeg", "jpg").split("+")[0] || "png";
+  return `screenshot.${extension}`;
+}
+
 function collectArtifacts(value: unknown, conversationId?: string, artifacts: ToolActivityArtifact[] = [], seen = new Set<string>()): ToolActivityArtifact[] {
   if (!isRecord(value)) {
     if (Array.isArray(value)) {
       for (const item of value) collectArtifacts(item, conversationId, artifacts, seen);
     }
     return artifacts;
+  }
+
+  const inlineUrl = stringValue(value.data_url) || stringValue(value.dataUrl);
+  if (inlineUrl && isImageDataUrl(inlineUrl)) {
+    const key = `inline:${inlineUrl.length}:${inlineUrl.slice(0, 96)}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      artifacts.push({
+        name: pickString(value, ["name", "filename", "title"]) || dataUrlName(inlineUrl),
+        path: key,
+        kind: "image",
+        url: inlineUrl,
+      });
+    }
   }
 
   const preferredPath = stringValue(value.model_image_path) || stringValue(value.screenshot_path) || stringValue(value.path);
@@ -230,9 +254,35 @@ function statusForEvent(event: ChatActivityEvent): ToolActivityStatus {
     event.phase === "tool_call_completed" ||
     event.phase === "tool_result"
   ) {
-    return event.is_error === true ? "failed" : "completed";
+    const result = event.result;
+    if (event.is_error === true || (isRecord(result) && statusForLog({ result }) === "failed")) return "failed";
+    return "completed";
   }
   return "running";
+}
+
+function mergeActivityEvents(base: ChatActivityEvent, update: ChatActivityEvent): ChatActivityEvent {
+  const merged: ChatActivityEvent = { ...base, ...update };
+  for (const key of ["arguments", "result", "artifact", "artifacts", "output", "message", "timestamp"]) {
+    if (merged[key] === undefined && base[key] !== undefined) {
+      merged[key] = base[key];
+    }
+  }
+  return merged;
+}
+
+function resultValueForEvent(event: ChatActivityEvent): unknown {
+  return event.result ?? event.output ?? event.artifact ?? event.artifacts;
+}
+
+function collectEventArtifacts(event: ChatActivityEvent, conversationId?: string): ToolActivityArtifact[] {
+  const artifacts: ToolActivityArtifact[] = [];
+  const seen = new Set<string>();
+  collectArtifacts(event.result, conversationId, artifacts, seen);
+  collectArtifacts(event.artifact, conversationId, artifacts, seen);
+  collectArtifacts(event.artifacts, conversationId, artifacts, seen);
+  collectArtifacts(event.output, conversationId, artifacts, seen);
+  return artifacts;
 }
 
 export function buildToolActivityGroups(
@@ -276,7 +326,9 @@ export function buildToolActivityGroups(
     if (logKeys.has(key)) continue;
     const existing = eventsByKey.get(key);
     if (!existing || eventRank(event) >= eventRank(existing)) {
-      eventsByKey.set(key, event);
+      eventsByKey.set(key, existing ? mergeActivityEvents(existing, event) : event);
+    } else {
+      eventsByKey.set(key, mergeActivityEvents(event, existing));
     }
   }
   const eventItems = [...eventsByKey.values()]
@@ -287,6 +339,7 @@ export function buildToolActivityGroups(
       const argumentSummary = summarizeToolArguments(toolName, args);
       const status = statusForEvent(event);
       const defaultDetail = status === "running" ? "使用中" : status === "failed" ? "失敗" : "完了";
+      const resultSummary = summarizeToolResult(toolName, resultValueForEvent(event));
       return {
         id: `event-${index}-${toolName}`,
         toolName,
@@ -295,9 +348,10 @@ export function buildToolActivityGroups(
         folderLabel: folder.label,
         input: argumentSummary,
         title: argumentSummary ? `${folder.label} / ${toolName}: ${argumentSummary}` : `${folder.label} / ${toolName}`,
-        detail: String(event.message ?? defaultDetail),
+        detail: resultSummary || String(event.message ?? defaultDetail),
         status,
         timestamp: event.timestamp,
+        artifacts: collectEventArtifacts(event, options.conversationId),
       };
     });
 
