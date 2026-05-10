@@ -7,7 +7,11 @@ from typing import Any, Dict
 
 from blocks._common import ok, error
 from blocks.integrations.common import allow_unsigned_webhook_dev, headers_from_request, raw_body_bytes, text_limit
-from domain.integrations.chat_bridge import dispatch_external_message
+from domain.external.adapters.line import LineResponseAdapter
+from domain.external.normalizer import normalize_line_event
+from domain.external.pipeline import dispatch_external_event
+from domain.external.response import RumiResponse
+from domain.external.response_planner import ResponsePlanner
 from domain.integrations.http_client import post_json
 from domain.integrations.secrets import get_integration_secret, load_integration_secrets_into_env
 
@@ -25,7 +29,7 @@ def run(input_data, context):
     for event in events:
         if not isinstance(event, dict):
             continue
-        result = _handle_event(event, context, model=str(input_data.get("model") or "") or None)
+        result = _handle_event(event, context, model=str(input_data.get("model") or "") or None, verified=bool(verification["verified"]))
         results.append(result)
     return ok({"verified": verification["verified"], "events": results})
 
@@ -35,34 +39,21 @@ def _handle_event(
     context,
     *,
     model: str | None = None,
+    verified: bool = False,
 ) -> Dict[str, Any]:
     if event.get("type") != "message":
         return {"ignored": True, "reason": "unsupported LINE event", "event_type": event.get("type")}
-    message = event.get("message") if isinstance(event.get("message"), dict) else {}
-    message_type = message.get("type")
-    if message_type == "text":
-        text = str(message.get("text") or "").strip()
-    else:
-        text = "LINE {} message received. messageId={}".format(message_type or "unknown", message.get("id", ""))
-    source = event.get("source") if isinstance(event.get("source"), dict) else {}
-    source_id = str(source.get("groupId") or source.get("roomId") or source.get("userId") or "unknown-source")
-    external_key = "|".join(["line", str(source.get("type") or "chat"), source_id])
-    result = dispatch_external_message(
-        provider="line",
-        text=text,
-        external_key=external_key,
-        title="LINE " + source_id,
-        event_id=str(event.get("webhookEventId") or message.get("id") or ""),
-        model=model,
-        metadata={
-            "source": source,
-            "reply_token": event.get("replyToken"),
-            "message_id": message.get("id"),
-            "message_type": message_type,
-        },
+    external_event = normalize_line_event(event, verified=verified, destination=str(event.get("destination") or ""))
+    if model:
+        external_event.metadata["model"] = model
+    result = dispatch_external_event(
+        external_event,
+        input_profile_id="line.default",
+        audience_policy={"default": "allow"},
         context=context,
     )
-    reply = _send_line_reply(str(event.get("replyToken") or ""), result.get("assistant_text", ""))
+    plan = ResponsePlanner("line").plan(RumiResponse.from_result(result))
+    reply = LineResponseAdapter().send(plan, event=external_event)
     return {**result, "reply": reply}
 
 
@@ -83,18 +74,4 @@ def _verify_line(headers: Dict[str, str], raw_body: bytes) -> Dict[str, Any]:
 
 
 def _send_line_reply(reply_token: str, text: str) -> Dict[str, Any]:
-    token = get_integration_secret("line", "LINE_CHANNEL_ACCESS_TOKEN")
-    if not token:
-        return {"sent": False, "reason": "LINE_CHANNEL_ACCESS_TOKEN not configured"}
-    if not reply_token or not text:
-        return {"sent": False, "reason": "missing reply token or text"}
-    payload = {
-        "replyToken": reply_token,
-        "messages": [{"type": "text", "text": text_limit(text, 5000)}],
-    }
-    response = post_json(
-        "https://api.line.me/v2/bot/message/reply",
-        {"Authorization": "Bearer " + token},
-        payload,
-    )
-    return {"sent": bool(response.get("ok")), "provider_response": response}
+    return LineResponseAdapter().send_text_reply(reply_token, text_limit(text, 5000))
