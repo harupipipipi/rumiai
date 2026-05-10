@@ -557,7 +557,11 @@ class TestDIVocabRegistry:
 
     def test_vocab_registry_injected(self):
         import pathlib
-        di_src = pathlib.Path("core_runtime/di_container.py").read_text()
+        di_src = (
+            pathlib.Path(__file__).resolve().parent.parent
+            / "core_runtime"
+            / "di_container.py"
+        ).read_text()
         assert 'get_or_none("vocab_registry")' in di_src
         assert "FunctionRegistry(vocab_registry=" in di_src
 

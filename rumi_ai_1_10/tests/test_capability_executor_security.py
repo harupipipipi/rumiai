@@ -176,9 +176,10 @@ class TestCommandFunctionPathTraversal:
 
         func_dir = tmp_path / "func"
         func_dir.mkdir()
+        outside_command = tmp_path / "evil_script"
 
         entry = _MockFunctionEntry(
-            command=["/etc/evil_script"],
+            command=[str(outside_command)],
             function_dir=str(func_dir),
         )
         resp = executor._execute_command_function(
@@ -259,7 +260,7 @@ class TestSecureTmpDir:
         assert Path(result) == expected_tmp
         assert expected_tmp.is_dir()
         # パーミッション確認 (Unix のみ)
-        if hasattr(os, "stat"):
+        if os.name != "nt" and hasattr(os, "stat"):
             mode = oct(os.stat(str(expected_tmp)).st_mode & 0o777)
             assert mode == "0o700"
 

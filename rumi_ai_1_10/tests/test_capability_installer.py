@@ -37,6 +37,18 @@ from core_runtime.capability_installer import (
 )
 
 
+def _skip_if_symlink_unavailable(tmp_path: Path) -> None:
+    target = tmp_path / "_symlink_probe_target"
+    link = tmp_path / "_symlink_probe_link"
+    target.touch()
+    try:
+        link.symlink_to(target)
+    except OSError as exc:
+        pytest.skip(f"symlink creation is unavailable on this platform: {exc}")
+    else:
+        link.unlink()
+
+
 # ======================================================================
 # CandidateInfo
 # ======================================================================
@@ -210,6 +222,7 @@ class TestCapabilityInstallerStatic:
         assert valid is True
 
     def test_check_no_symlinks_detects_symlink(self, tmp_path):
+        _skip_if_symlink_unavailable(tmp_path)
         target = tmp_path / "target.py"
         target.touch()
         link = tmp_path / "link.py"

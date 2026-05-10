@@ -42,6 +42,18 @@ def _patch_helpers(monkeypatch):
     return audit_mock, dir_perm_mock
 
 
+def _skip_if_symlink_unavailable(tmp_path: Path) -> None:
+    target = tmp_path / "_symlink_probe_target"
+    link = tmp_path / "_symlink_probe_link"
+    target.touch()
+    try:
+        os.symlink(str(target), str(link))
+    except OSError as exc:
+        pytest.skip(f"symlink creation is unavailable on this platform: {exc}")
+    else:
+        link.unlink()
+
+
 # ---------------------------------------------------------------------------
 # 1. 通常のソケットパス確保（symlink なし）→ 成功
 # ---------------------------------------------------------------------------
@@ -84,6 +96,7 @@ def test_ensure_socket_existing_file(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_ensure_socket_symlink_detected(tmp_path, monkeypatch):
+    _skip_if_symlink_unavailable(tmp_path)
     mgr = _make_manager(tmp_path)
     audit_mock, _ = _patch_helpers(monkeypatch)
 
@@ -109,6 +122,7 @@ def test_ensure_socket_symlink_detected(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_ensure_socket_symlink_audit_event(tmp_path, monkeypatch):
+    _skip_if_symlink_unavailable(tmp_path)
     mgr = _make_manager(tmp_path)
     audit_mock, _ = _patch_helpers(monkeypatch)
 
@@ -133,13 +147,14 @@ def test_ensure_socket_symlink_audit_event(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_ensure_socket_dangling_symlink(tmp_path, monkeypatch):
+    _skip_if_symlink_unavailable(tmp_path)
     mgr = _make_manager(tmp_path)
     audit_mock, _ = _patch_helpers(monkeypatch)
 
     pack_id = "pack-dangling"
     sock_path = mgr.get_socket_path(pack_id)
     # ターゲットが存在しない symlink
-    os.symlink("/nonexistent/path/target", str(sock_path))
+    os.symlink(str(tmp_path / "nonexistent" / "target"), str(sock_path))
     assert sock_path.is_symlink()
     assert not sock_path.exists()  # dangling
 
@@ -156,12 +171,13 @@ def test_ensure_socket_dangling_symlink(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_ensure_socket_symlink_unlink_failure(tmp_path, monkeypatch):
+    _skip_if_symlink_unavailable(tmp_path)
     mgr = _make_manager(tmp_path)
     audit_mock, _ = _patch_helpers(monkeypatch)
 
     pack_id = "pack-fail"
     sock_path = mgr.get_socket_path(pack_id)
-    os.symlink("/nonexistent/target", str(sock_path))
+    os.symlink(str(tmp_path / "nonexistent" / "target"), str(sock_path))
 
     original_unlink = Path.unlink
 

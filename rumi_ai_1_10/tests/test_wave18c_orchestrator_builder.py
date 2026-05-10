@@ -7,6 +7,7 @@ W18-C: ContainerOrchestrator の DockerRunBuilder 移行テスト（14ケース�
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 from typing import List, Optional, Tuple
 from unittest import mock
@@ -50,6 +51,7 @@ def _capture_docker_run_cmd(
     cap_ok: bool = True,
     egress_raise: bool = False,
     cap_raise: bool = False,
+    platform: Optional[str] = None,
 ) -> List[str]:
     """
     start_container を呼び出し、subprocess.run に渡された docker run コマンドを返す。
@@ -91,6 +93,8 @@ def _capture_docker_run_cmd(
         mock_egress_mgr.ensure_pack_socket.side_effect = RuntimeError("egress down")
     else:
         mock_egress_mgr.ensure_pack_socket.return_value = (egress_ok, "", egress_sock)
+    mock_egress_mgr.get_tcp_port.return_value = 18081
+    mock_egress_mgr.get_auth_token.return_value = "egress-token"
 
     def _fake_get_egress():
         return mock_egress_mgr
@@ -101,11 +105,17 @@ def _capture_docker_run_cmd(
         mock_cap_proxy.ensure_principal_socket.side_effect = RuntimeError("cap down")
     else:
         mock_cap_proxy.ensure_principal_socket.return_value = (cap_ok, None, cap_sock)
+    mock_cap_proxy.get_tcp_port.return_value = 18082
+    mock_cap_proxy.get_auth_token.return_value = "cap-token"
 
     def _fake_get_cap():
         return mock_cap_proxy
 
-    with mock.patch("subprocess.run", side_effect=_fake_run):
+    platform_patch = mock.patch(
+        "core_runtime.container_orchestrator.sys.platform",
+        platform or sys.platform,
+    )
+    with mock.patch("subprocess.run", side_effect=_fake_run), platform_patch:
         with mock.patch(
             "core_runtime.container_orchestrator.get_uds_egress_proxy_manager",
             _fake_get_egress,
@@ -134,6 +144,10 @@ def _capture_docker_run_cmd(
 
     # docker start パスの場合はコマンドリスト全体を返す
     return captured_cmds[-1] if captured_cmds else []
+
+
+def _option_values(cmd: List[str], option: str) -> List[str]:
+    return [cmd[i + 1] for i, c in enumerate(cmd) if c == option and i + 1 < len(cmd)]
 
 
 # ===========================================================================
@@ -171,7 +185,8 @@ class TestOrchestratorUsesDockerRunBuilder:
         """#4: --network=none が含まれる"""
         orch = _make_orchestrator()
         cmd = _capture_docker_run_cmd(orch)
-        assert "--network=none" in cmd
+        expected_network = "--network=bridge" if sys.platform == "win32" else "--network=none"
+        assert expected_network in cmd
 
     def test_05_cap_drop_all(self):
         """#5: --cap-drop=ALL が含まれる"""
@@ -199,7 +214,10 @@ class TestOrchestratorUsesDockerRunBuilder:
         """#8: --dns=127.0.0.1 が含まれる（旧実装では欠落）"""
         orch = _make_orchestrator()
         cmd = _capture_docker_run_cmd(orch)
-        assert "--dns=127.0.0.1" in cmd
+        if sys.platform == "win32":
+            assert "--dns=127.0.0.1" not in cmd
+        else:
+            assert "--dns=127.0.0.1" in cmd
 
     def test_09_label_pack_id(self):
         """#9: --label rumi.pack_id={pack_id} が含まれる"""
@@ -253,23 +271,33 @@ class TestOrchestratorUsesDockerRunBuilder:
             orch,
             egress_sock=egress_path,
             egress_ok=True,
+            platform="linux",
         )
         # -v でソケットがマウントされている
-        volume_args = []
-        for i, c in enumerate(cmd):
-            if c == "-v" and i + 1 < len(cmd):
-                volume_args.append(cmd[i + 1])
+        volume_args = _option_values(cmd, "-v")
         egress_mounts = [v for v in volume_args if "egress.sock" in v]
         assert len(egress_mounts) == 1
         assert egress_mounts[0] == f"{egress_path}:/run/rumi/egress.sock:rw"
 
         # 環境変数も設定されている
-        env_args = []
-        for i, c in enumerate(cmd):
-            if c == "-e" and i + 1 < len(cmd):
-                env_args.append(cmd[i + 1])
+        env_args = _option_values(cmd, "-e")
         egress_env = [e for e in env_args if e.startswith("RUMI_EGRESS_SOCKET=")]
         assert len(egress_env) == 1
+
+    def test_12b_egress_tcp_fallback_on_windows(self):
+        """#12b: Windows uses TCP fallback instead of a UDS mount."""
+        orch = _make_orchestrator()
+        cmd = _capture_docker_run_cmd(
+            orch,
+            egress_sock=Path("C:/run/rumi/egress/packs/abc123.sock"),
+            egress_ok=True,
+            platform="win32",
+        )
+        env_args = _option_values(cmd, "-e")
+        assert "RUMI_EGRESS_HOST=host.docker.internal" in env_args
+        assert "RUMI_EGRESS_PORT=18081" in env_args
+        assert "RUMI_EGRESS_TOKEN=egress-token" in env_args
+        assert not any("egress.sock" in v for v in _option_values(cmd, "-v"))
 
     def test_13_capability_socket_mounted(self):
         """#13: Capability UDS ソケットがマウントされる"""
@@ -279,22 +307,32 @@ class TestOrchestratorUsesDockerRunBuilder:
             orch,
             cap_sock=cap_path,
             cap_ok=True,
+            platform="linux",
         )
-        volume_args = []
-        for i, c in enumerate(cmd):
-            if c == "-v" and i + 1 < len(cmd):
-                volume_args.append(cmd[i + 1])
+        volume_args = _option_values(cmd, "-v")
         cap_mounts = [v for v in volume_args if "capability.sock" in v]
         assert len(cap_mounts) == 1
         assert cap_mounts[0] == f"{cap_path}:/run/rumi/capability.sock:rw"
 
         # 環境変数も設定されている
-        env_args = []
-        for i, c in enumerate(cmd):
-            if c == "-e" and i + 1 < len(cmd):
-                env_args.append(cmd[i + 1])
+        env_args = _option_values(cmd, "-e")
         cap_env = [e for e in env_args if e.startswith("RUMI_CAPABILITY_SOCKET=")]
         assert len(cap_env) == 1
+
+    def test_13b_capability_tcp_fallback_on_windows(self):
+        """#13b: Windows uses TCP fallback instead of a capability UDS mount."""
+        orch = _make_orchestrator()
+        cmd = _capture_docker_run_cmd(
+            orch,
+            cap_sock=Path("C:/run/rumi/capability/principals/def456.sock"),
+            cap_ok=True,
+            platform="win32",
+        )
+        env_args = _option_values(cmd, "-e")
+        assert "RUMI_CAPABILITY_HOST=host.docker.internal" in env_args
+        assert "RUMI_CAPABILITY_PORT=18082" in env_args
+        assert "RUMI_CAPABILITY_TOKEN=cap-token" in env_args
+        assert not any("capability.sock" in v for v in _option_values(cmd, "-v"))
 
     def test_14_egress_proxy_unavailable_skips_mount(self):
         """#14: Egress Proxy 未起動時はソケットマウントがスキップされる"""

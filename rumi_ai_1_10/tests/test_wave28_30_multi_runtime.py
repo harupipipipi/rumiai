@@ -190,14 +190,19 @@ class TestWave28B_RuntimeDispatch:
         func_dir = tmp_path / "binfunc"
         func_dir.mkdir()
         # Python スクリプトをバイナリとして使う
-        bin_file = func_dir / "mybin"
-        bin_file.write_text(
-            f"#!{sys.executable}\n"
+        runner = func_dir / "runner.py"
+        runner.write_text(
             "import sys, json\n"
             "data = json.loads(sys.stdin.read())\n"
             "print(json.dumps({'result': 'ok', 'got_args': data.get('args', {})}))\n"
         )
-        bin_file.chmod(bin_file.stat().st_mode | stat.S_IEXEC)
+        if sys.platform == "win32":
+            bin_file = func_dir / "mybin.cmd"
+            bin_file.write_text(f'@echo off\n"{sys.executable}" "%~dp0runner.py"\n')
+        else:
+            bin_file = func_dir / "mybin"
+            bin_file.write_text(f"#!{sys.executable}\n" + runner.read_text())
+            bin_file.chmod(bin_file.stat().st_mode | stat.S_IEXEC)
 
         entry = _make_entry(
             runtime="binary",

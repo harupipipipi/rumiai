@@ -23,6 +23,12 @@ if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
 
+def _expected_health_disk_path() -> str:
+    if os.name == "nt":
+        return os.environ.get("SystemDrive", "C:") + "\\"
+    return "/"
+
+
 class TestConfigureLoggingCalled(unittest.TestCase):
     """configure_logging() の呼び出し確認テスト。"""
 
@@ -214,7 +220,7 @@ class TestHealthFlag(unittest.TestCase):
         self.assertIn("disk", probe_names)
         disk_probe = next(c[0][1] for c in calls if c[0][0] == "disk")
         disk_probe()
-        mock_pds.assert_called_with("/")
+        mock_pds.assert_called_with(_expected_health_disk_path())
 
     @patch("core_runtime.health.probe_file_writable")
     @patch("core_runtime.health.probe_disk_space")

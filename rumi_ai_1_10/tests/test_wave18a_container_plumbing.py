@@ -243,6 +243,8 @@ class TestSecretInjection:
             os.write(fd, b"secret-value")
             os.close(fd)
             os.chmod(path, 0o600)
+            if os.name == "nt":
+                pytest.skip("POSIX chmod mode bits are not meaningful on Windows")
             mode = stat.S_IMODE(os.stat(path).st_mode)
             assert mode == 0o600
         finally:
