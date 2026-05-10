@@ -1,0 +1,1 @@
+"""Provider response adapters."""
