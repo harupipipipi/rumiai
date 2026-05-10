@@ -2892,30 +2892,31 @@ $items | Select-Object -First $limit | ConvertTo-Json -Compress
     @staticmethod
     def _windows_open_url_foreground(url: str, app_name: str) -> bool:
         normalized = app_name.strip().lower()
-        candidates: list[Path] = []
+        candidates: list[tuple[Path, bool]] = []
         roots = [os.environ.get("LOCALAPPDATA"), os.environ.get("PROGRAMFILES"), os.environ.get("PROGRAMFILES(X86)")]
         for root_value in roots:
             if not root_value:
                 continue
             root = Path(root_value)
             if any(name in normalized for name in ("chrome", "chromium")):
-                candidates.append(root / "Google" / "Chrome" / "Application" / "chrome.exe")
+                candidates.append((root / "Google" / "Chrome" / "Application" / "chrome.exe", False))
             if "edge" in normalized:
-                candidates.append(root / "Microsoft" / "Edge" / "Application" / "msedge.exe")
+                candidates.append((root / "Microsoft" / "Edge" / "Application" / "msedge.exe", False))
             if "firefox" in normalized:
-                candidates.append(root / "Mozilla Firefox" / "firefox.exe")
+                candidates.append((root / "Mozilla Firefox" / "firefox.exe", False))
         for name in (app_name, f"{app_name}.exe"):
             resolved = shutil.which(name)
             if resolved:
-                candidates.insert(0, Path(resolved))
-        executable = next((candidate for candidate in candidates if candidate.exists()), None)
-        if executable is None:
-            return False
-        try:
-            subprocess.Popen([str(executable), url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            return True
-        except Exception:
-            return False
+                candidates.insert(0, (Path(resolved), True))
+        for executable, resolved_from_path in candidates:
+            if not resolved_from_path and not executable.exists():
+                continue
+            try:
+                subprocess.Popen([str(executable), url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return True
+            except Exception:
+                continue
+        return False
 
     @staticmethod
     def _windows_dpi_awareness_script() -> str:
