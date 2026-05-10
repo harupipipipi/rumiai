@@ -348,6 +348,39 @@ routes.json の `/v1/chat/completions` エンドポイントに `response_format
 
 ストリーミング時も OpenAI 互換 SSE 形式に変換する。これにより既存の OpenAI SDK やライブラリがそのまま rumi に接続できる。
 
+### 5.7 External Input Intake
+
+External input routes are provider adapters, not chat runtime contracts. They
+should normalize inbound provider payloads into `ExternalEvent`, evaluate
+`AudiencePolicy`, select an `InputProfile`, call `submit_input`, and return or
+send a response through `ResponsePlanner` plus `ResponseAdapter`.
+
+Current defaultspack HTTP routes include:
+
+| method | path | role |
+|---|---|---|
+| `GET` | `/api/integrations/secrets` | secret status only, no raw values |
+| `POST` | `/api/integrations/secrets` | write-only set or clear for supported provider secrets |
+| `POST` | `/api/integrations/slack/events` | Slack event intake |
+| `POST` | `/api/integrations/line/webhook` | LINE webhook intake |
+| `POST` | `/api/integrations/discord/interactions` | Discord interaction intake |
+| `POST` | `/api/integrations/discord/events` | Discord event intake |
+| `GET` | `/api/external/tokens` | masked external token status |
+| `POST` | `/api/external/tokens` | write-only external token upsert, rename, delete |
+| `POST` | `/api/webhooks/inbound/{webhook_id}` | generic webhook intake |
+| `GET` | `/api/webhooks/endpoints` | list webhook endpoint configs |
+| `POST` | `/api/webhooks/endpoints` | create webhook endpoint config |
+| `PUT` | `/api/webhooks/endpoints/{webhook_id}` | update webhook endpoint config |
+| `DELETE` | `/api/webhooks/endpoints/{webhook_id}` | delete webhook endpoint config |
+| `POST` | `/api/webhooks/endpoints/{webhook_id}/test` | run a webhook test payload |
+| `GET` | `/api/webhooks/public-urls` | list public URL providers |
+| `POST` | `/api/webhooks/public-urls` | create a provider-backed public URL |
+| `DELETE` | `/api/webhooks/public-urls/{url_id}` | close a public URL |
+
+Cloudflare Quick Tunnel may supply a temporary public URL for development, but
+the API contract must not depend on it. Any tunnel or hosted ingress should feed
+the same local routes.
+
 
 ## 6. stdio Transport
 
@@ -729,4 +762,6 @@ defaults が routes.json に登録するデフォルトルート。全て user_d
 | flow.md | エンドポイントは Flow の api トリガーで登録される。FlowEngine がリクエストを処理する |
 | ai_client.md | ストリーミングイベントの type は ai_client.md セクション 11.3 の正規化イベントと同一 |
 | tool.md | ツールの context API（call_handler, emit_event 等）で transport を操作することはない。transport は上位層であり、ツールから直接触らない |
+| external-inputs.md | Defines the provider-neutral intake path: `ExternalEvent`, `AudiencePolicy`, `InputProfile`, `submit_input`, `ResponsePlanner`, and `ResponseAdapter` |
+| webhooks.md | Documents webhook-specific verification and ack behavior before normalized submission |
 ```
