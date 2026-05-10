@@ -1,0 +1,17 @@
+id: discord.default
+provider: discord
+version: 1
+display_name: Discord Default
+match:
+  event_type: message
+input:
+  role: user
+  content: "coalesce($.content, $.data.options.0.value, $.data.name, 'hello')"
+metadata:
+  source:
+    kind: integration
+    provider: discord
+  discord:
+    guild_id: "$.guild_id"
+    channel_id: "$.channel_id"
+    author: "$.author"

@@ -1,0 +1,15 @@
+type: object
+required: [id, provider, version, input]
+properties:
+  id:
+    type: string
+  provider:
+    type: string
+  version:
+    type: integer
+  match:
+    type: object
+  input:
+    type: object
+  metadata:
+    type: object

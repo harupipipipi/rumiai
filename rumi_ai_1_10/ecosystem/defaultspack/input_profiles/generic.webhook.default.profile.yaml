@@ -1,0 +1,15 @@
+id: generic.webhook.default
+provider: generic
+version: 1
+display_name: Generic Webhook Default
+match:
+  event_type: message
+input:
+  role: user
+  content: "coalesce($.text, $.message, $.content, 'Webhook event received')"
+metadata:
+  source:
+    kind: webhook
+    provider: generic
+  webhook:
+    payload: "$"
