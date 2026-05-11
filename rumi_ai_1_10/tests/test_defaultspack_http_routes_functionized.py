@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -131,4 +132,82 @@ def test_fallback_http_permission_denied_does_not_fallback_for_other_permission(
         )
 
     assert result == denied
+    legacy.assert_not_called()
+
+
+def test_fallback_http_dev_auto_approve_retries_pack_not_approved_post(monkeypatch):
+    from transport.http import DefaultsHttpServer
+
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    server._build_context = lambda: {"request_id": "req-1"}
+    monkeypatch.setenv("RUMI_ENVIRONMENT", "development")
+    monkeypatch.setenv("RUMI_AUTO_APPROVE_LOCAL", "true")
+
+    approved = []
+
+    class FakeApprovalManager:
+        def scan_packs(self):
+            return ["defaultspack"]
+
+        def approve(self, pack_id):
+            approved.append(pack_id)
+            return SimpleNamespace(success=True)
+
+    denied = {
+        "status": "error",
+        "error": {
+            "code": "PACK_NOT_APPROVED",
+            "message": "Pack not approved: defaultspack",
+        },
+    }
+    ok = {"status": "ok", "data": {"id": "conversation-1"}}
+    with patch(
+        "domain.function_runtime.bridge.invoke_function",
+        side_effect=[denied, ok],
+    ) as invoke, patch(
+        "core_runtime.approval_manager.get_approval_manager",
+        return_value=FakeApprovalManager(),
+    ), patch(
+        "transport.http.invoke_block",
+        return_value={"status": "ok", "data": {"legacy": True}},
+    ) as legacy:
+        result = server._invoke_fallback_block(
+            "blocks.chat.create_conversation",
+            {"_actual_method": "POST"},
+            {},
+        )
+
+    assert result == ok
+    assert invoke.call_count == 2
+    assert approved == ["defaultspack"]
+    legacy.assert_not_called()
+
+
+def test_fallback_http_pack_not_approved_post_without_dev_auto_approve_does_not_retry(monkeypatch):
+    from transport.http import DefaultsHttpServer
+
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    server._build_context = lambda: {"request_id": "req-1"}
+    monkeypatch.delenv("RUMI_ENVIRONMENT", raising=False)
+    monkeypatch.delenv("RUMI_AUTO_APPROVE_LOCAL", raising=False)
+
+    denied = {
+        "status": "error",
+        "error": {
+            "code": "PACK_NOT_APPROVED",
+            "message": "Pack not approved: defaultspack",
+        },
+    }
+    with patch("domain.function_runtime.bridge.invoke_function", return_value=denied) as invoke, patch(
+        "transport.http.invoke_block",
+        return_value={"status": "ok", "data": {"unsafe": True}},
+    ) as legacy:
+        result = server._invoke_fallback_block(
+            "blocks.chat.create_conversation",
+            {"_actual_method": "POST"},
+            {},
+        )
+
+    assert result == denied
+    invoke.assert_called_once()
     legacy.assert_not_called()

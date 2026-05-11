@@ -171,11 +171,19 @@ class DefaultsHttpServer:
             function_id = function_id_for_block_module(module_name)
             if function_id:
                 context["_defaultspack_http_route_adapter"] = True
+                qualified_name = f"defaultspack:{function_id}"
                 result = invoke_function(
-                    f"defaultspack:{function_id}",
+                    qualified_name,
                     payload,
                     context,
                     principal_id="defaultspack",
+                )
+                result = self._retry_after_dev_auto_approve(
+                    qualified_name,
+                    payload,
+                    context,
+                    result,
+                    invoke_function,
                 )
                 error_info = result.get("error", {}) if isinstance(result, dict) else {}
                 error_code = str(error_info.get("code") or "")
@@ -199,6 +207,35 @@ class DefaultsHttpServer:
         except Exception:
             pass
         return invoke_block(module_name, payload, context)
+
+    def _retry_after_dev_auto_approve(self, qualified_name, payload, context, result, invoke_function):
+        error_info = result.get("error", {}) if isinstance(result, dict) else {}
+        if str(error_info.get("code") or "") != "PACK_NOT_APPROVED":
+            return result
+        pack_id, _, _ = qualified_name.partition(":")
+        if not pack_id or not self._dev_auto_approve_pack(pack_id):
+            return result
+        return invoke_function(
+            qualified_name,
+            payload,
+            context,
+            principal_id=pack_id,
+        )
+
+    def _dev_auto_approve_pack(self, pack_id):
+        rumi_env = os.environ.get("RUMI_ENVIRONMENT", "").lower()
+        auto_approve = os.environ.get("RUMI_AUTO_APPROVE_LOCAL", "").lower()
+        if rumi_env not in {"development", "dev"} or auto_approve != "true":
+            return False
+        try:
+            from core_runtime.approval_manager import get_approval_manager
+
+            manager = get_approval_manager()
+            manager.scan_packs()
+            result = manager.approve(pack_id)
+            return bool(getattr(result, "success", False))
+        except Exception:
+            return False
 
     def _safe_get_fallback_allowed(self, module_name, payload):
         actual_method = str(payload.get("_actual_method") or "").upper()
