@@ -1,0 +1,18 @@
+{
+  "function_id": "computer_semantic_action",
+  "description": "Execute a semantic action on a desktop application via ComputerSeat (e.g. press a button, set a value).",
+  "calling_convention": "subprocess",
+  "host_execution": false,
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "app": {"type": "string", "description": "Application name"},
+      "pid": {"type": "integer", "description": "Process ID"},
+      "window_id": {"type": "integer", "description": "Window ID"},
+      "intent": {"type": "string", "description": "Natural language intent"},
+      "element_id": {"type": "string", "description": "AX element ID to act on"},
+      "point": {"type": "array", "items": {"type": "integer"}, "description": "[x, y] coordinate"}
+    },
+    "required": ["intent"]
+  }
+}

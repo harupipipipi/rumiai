@@ -1,0 +1,21 @@
+{
+  "function_id": "computer_pid_event",
+  "description": "Send input events directly to a PID via CGEventPostToPid (experimental). Requires macOS.",
+  "calling_convention": "subprocess",
+  "host_execution": false,
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "pid": {"type": "integer", "description": "Target process ID (required)"},
+      "action": {"type": "string", "enum": ["click", "type_text", "key", "scroll"], "description": "Action to perform"},
+      "x": {"type": "integer"},
+      "y": {"type": "integer"},
+      "button": {"type": "string", "default": "left"},
+      "text": {"type": "string"},
+      "key_combo": {"type": "string"},
+      "direction": {"type": "string"},
+      "clicks": {"type": "integer", "default": 3}
+    },
+    "required": ["pid", "action"]
+  }
+}
