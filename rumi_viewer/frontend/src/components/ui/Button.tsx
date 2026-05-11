@@ -4,31 +4,41 @@ import { cn } from "@/src/lib/utils"
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link'
   size?: 'default' | 'sm' | 'lg' | 'icon'
+  loading?: boolean
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant = 'default', size = 'default', ...props }, ref) => {
+  ({ className, variant = 'default', size = 'default', loading, disabled, children, ...props }, ref) => {
     return (
       <button
         ref={ref}
+        disabled={disabled || loading}
         className={cn(
-          "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
+          "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-all duration-[var(--transition-fast)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-main)] disabled:pointer-events-none disabled:opacity-50",
           {
-            'bg-accent text-accent-fg hover:opacity-90': variant === 'default',
-            'bg-red-500 text-white hover:bg-red-600': variant === 'destructive',
-            'border border-border bg-bg-main hover:bg-bg-hover': variant === 'outline',
-            'bg-bg-card text-text-main hover:bg-bg-hover': variant === 'secondary',
-            'hover:bg-bg-hover hover:text-text-main': variant === 'ghost',
-            'text-accent underline-offset-4 hover:underline': variant === 'link',
+            'bg-accent text-accent-fg shadow-sm hover:bg-accent/90 active:scale-[0.98]': variant === 'default',
+            'bg-destructive text-destructive-fg shadow-sm hover:bg-destructive/90 active:scale-[0.98]': variant === 'destructive',
+            'border border-border bg-bg-main hover:bg-bg-hover active:bg-bg-hover/80': variant === 'outline',
+            'bg-bg-hover text-text-main hover:bg-bg-hover/80': variant === 'secondary',
+            'hover:bg-bg-hover text-text-muted hover:text-text-main': variant === 'ghost',
+            'text-accent underline-offset-4 hover:underline p-0 h-auto': variant === 'link',
             'h-10 px-4 py-2': size === 'default',
-            'h-9 rounded-md px-3': size === 'sm',
-            'h-11 rounded-md px-8': size === 'lg',
-            'h-10 w-10': size === 'icon',
+            'h-8 rounded-md px-3 text-xs': size === 'sm',
+            'h-11 rounded-lg px-6': size === 'lg',
+            'h-9 w-9 p-0': size === 'icon',
           },
           className
         )}
         {...props}
-      />
+      >
+        {loading && (
+          <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+        )}
+        {children}
+      </button>
     )
   }
 )
