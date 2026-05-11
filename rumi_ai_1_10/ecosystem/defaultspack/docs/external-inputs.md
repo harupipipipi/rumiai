@@ -161,6 +161,29 @@ uses a bot token and `channel_id`, while `Webhook URL` uses the channel webhook
 URL as a masked external token. Slack uses the Events Request URL, Signing
 Secret, Bot Token, and thread-aware `chat.postMessage`.
 
+## Safety Notes
+
+- Webhook endpoint management and public URL creation routes are treated as
+  local-admin sensitive routes and require the local auth guard.
+- External inbound webhook routes remain externally reachable, but each endpoint
+  is expected to enforce provider signatures or shared-secret verification.
+- Newly created generic webhook endpoints default to disabled + shared_secret
+  unless explicitly configured otherwise.
+- Cloudflare Quick Tunnel is only a swappable public URL provider. It is not a
+  security boundary; endpoint security and local-admin route guards remain
+  required.
+
+## Known Limitations
+
+- LINE and Discord adapters in this PR are MVP text-response adapters, not
+  complete production bot implementations.
+- LINE non-text messages are normalized into placeholder text for now.
+- Discord interaction handling is intentionally minimal; full deferred/follow-up
+  interaction behavior should be handled in a follow-up PR.
+- Cloudflare Quick Tunnel is only a swappable public URL provider. It should not
+  be treated as the security boundary; endpoint security and local-admin route
+  guards remain required.
+
 ## Current Defaultspack Routes
 
 Current integration routes are provider-specific adapters that should converge

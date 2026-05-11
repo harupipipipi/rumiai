@@ -211,3 +211,37 @@ def test_fallback_http_pack_not_approved_post_without_dev_auto_approve_does_not_
     assert result == denied
     invoke.assert_called_once()
     legacy.assert_not_called()
+
+
+def test_external_webhook_admin_routes_require_sensitive_http_auth():
+    from transport import http
+
+    assert http._requires_sensitive_http_auth("GET", "/api/external/tokens")
+    assert http._requires_sensitive_http_auth("POST", "/api/external/tokens")
+
+    assert not http._requires_sensitive_http_auth("GET", "/api/external/templates")
+    assert http._requires_sensitive_http_auth("POST", "/api/external/templates")
+
+    assert http._requires_sensitive_http_auth("GET", "/api/webhooks/endpoints")
+    assert http._requires_sensitive_http_auth("POST", "/api/webhooks/endpoints")
+    assert http._requires_sensitive_http_auth("PUT", "/api/webhooks/endpoints/test-webhook")
+    assert http._requires_sensitive_http_auth("DELETE", "/api/webhooks/endpoints/test-webhook")
+    assert http._requires_sensitive_http_auth("POST", "/api/webhooks/endpoints/test-webhook/test")
+
+    assert http._requires_sensitive_http_auth("GET", "/api/webhooks/public-urls")
+    assert http._requires_sensitive_http_auth("POST", "/api/webhooks/public-urls")
+    assert http._requires_sensitive_http_auth("DELETE", "/api/webhooks/public-urls/cfqt_123")
+
+    assert not http._requires_sensitive_http_auth("POST", "/api/webhooks/inbound/test-webhook")
+
+
+def test_external_webhook_admin_routes_are_sensitive_for_cors():
+    from transport import http
+
+    assert http._is_sensitive_http_path("/api/webhooks/endpoints")
+    assert http._is_sensitive_http_path("/api/webhooks/endpoints/test-webhook")
+    assert http._is_sensitive_http_path("/api/webhooks/public-urls")
+    assert http._is_sensitive_http_path("/api/webhooks/public-urls/cfqt_123")
+    assert http._is_sensitive_http_path("/api/external/templates")
+
+    assert not http._is_sensitive_http_path("/api/webhooks/inbound/test-webhook")

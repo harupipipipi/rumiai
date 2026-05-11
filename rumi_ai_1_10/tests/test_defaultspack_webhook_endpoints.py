@@ -41,6 +41,19 @@ def test_endpoint_store_crud_and_shared_secret_verification():
             assert store.delete("test-webhook")["deleted"] is True
 
 
+def test_endpoint_store_new_endpoint_defaults_disabled_and_secured():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        endpoint_path = Path(tmpdir) / "endpoints.json"
+        store = WebhookEndpointStore(endpoint_path)
+
+        result = store.upsert({"id": "unsafe-by-default", "kind": "generic"})
+
+        endpoint = result["endpoint"]
+        assert endpoint["enabled"] is False
+        assert endpoint["security"]["mode"] == "shared_secret"
+        assert endpoint["security"]["header"] == "x-rumi-webhook-token"
+
+
 def test_endpoint_as_dict_redacts_inline_secret():
     endpoint = WebhookEndpoint(
         id="test",

@@ -590,6 +590,13 @@ _SENSITIVE_INTEGRATION_PATHS = {
     "/api/integrations/secrets",
     "/api/external/tokens",
 }
+_SENSITIVE_INTEGRATION_METHOD_PATHS = {
+    "/api/external/templates": {"POST", "PUT", "DELETE"},
+}
+_SENSITIVE_INTEGRATION_PREFIXES = (
+    "/api/webhooks/endpoints",
+    "/api/webhooks/public-urls",
+)
 _SENSITIVE_CHAT_PATH_RE = re.compile(
     r"^/v1/conversations/[^/]+/run-results/[^/]+/browser-screenshots$"
 )
@@ -601,10 +608,29 @@ def _is_sensitive_coding_path(path):
     return _local_is_sensitive_coding_path(path)
 
 
+def _matches_sensitive_prefix(path):
+    return any(path == prefix or path.startswith(prefix + "/") for prefix in _SENSITIVE_INTEGRATION_PREFIXES)
+
+
+def _requires_sensitive_http_auth(method, path):
+    method = str(method or "").upper()
+    if path in _SENSITIVE_INTEGRATION_PATHS:
+        return True
+    if method in _SENSITIVE_INTEGRATION_METHOD_PATHS.get(path, set()):
+        return True
+    if _matches_sensitive_prefix(path):
+        return True
+    if _SENSITIVE_CHAT_PATH_RE.match(path) is not None:
+        return True
+    return False
+
+
 def _is_sensitive_http_path(path):
     return (
         path in _SENSITIVE_CODING_PATHS
         or path in _SENSITIVE_INTEGRATION_PATHS
+        or path in _SENSITIVE_INTEGRATION_METHOD_PATHS
+        or _matches_sensitive_prefix(path)
         or _SENSITIVE_CHAT_PATH_RE.match(path) is not None
     )
 
@@ -803,7 +829,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             return coding_error
         if _is_sensitive_coding_path(path):
             return None
-        if path not in _SENSITIVE_INTEGRATION_PATHS and _SENSITIVE_CHAT_PATH_RE.match(path) is None:
+        if not _requires_sensitive_http_auth(method, path):
             return None
         origin = self.headers.get("Origin", "")
         if not _is_allowed_sensitive_origin(origin):

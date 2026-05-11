@@ -14,6 +14,26 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _safe_endpoint_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    safe = dict(payload)
+    kind = str(safe.get("kind") or "generic").strip() or "generic"
+
+    if "enabled" not in safe:
+        safe["enabled"] = False
+
+    security = safe.get("security")
+    if not isinstance(security, dict) or not security:
+        if kind in {"line", "discord", "slack"}:
+            safe["security"] = {"mode": "provider_signature"}
+        else:
+            safe["security"] = {
+                "mode": "shared_secret",
+                "header": "x-rumi-webhook-token",
+            }
+
+    return safe
+
+
 class WebhookEndpointStore:
     def __init__(self, path: Path | None = None) -> None:
         self.path = path or self._default_path()
@@ -33,6 +53,7 @@ class WebhookEndpointStore:
         return self._endpoints().get(str(endpoint_id or "").strip())
 
     def upsert(self, payload: dict[str, Any]) -> dict[str, Any]:
+        payload = _safe_endpoint_payload(payload)
         endpoint_id = str(payload.get("id") or "").strip() or self._make_id(str(payload.get("kind") or "webhook"))
         endpoint = WebhookEndpoint.from_dict({**payload, "id": endpoint_id})
         endpoints = self._endpoints()
