@@ -292,7 +292,7 @@ class ApprovalManager:
             for file_path in local_dir.glob(pattern):
                 if file_path.is_file():
                     # __pycache__ 等を除外
-                    if any(p in str(file_path) for p in ["__pycache__", ".pyc", ".git"]):
+                    if self._should_skip_hash_file(file_path, local_dir):
                         continue
                     
                     relative_path = str(file_path.relative_to(local_dir))
@@ -901,7 +901,7 @@ class ApprovalManager:
         
         for file_path in pack_dir.rglob("*"):
             if file_path.is_file():
-                if any(p in str(file_path) for p in ["__pycache__", ".pyc", ".git"]):
+                if self._should_skip_hash_file(file_path, pack_dir):
                     continue
                 
                 relative_path = str(file_path.relative_to(pack_dir))
@@ -919,7 +919,7 @@ class ApprovalManager:
 
         for file_path in pack_dir.rglob("*"):
             if file_path.is_file():
-                if any(p in str(file_path) for p in ["__pycache__", ".pyc", ".git"]):
+                if self._should_skip_hash_file(file_path, pack_dir):
                     continue
 
                 relative_path = str(file_path.relative_to(pack_dir))
@@ -927,6 +927,18 @@ class ApprovalManager:
                 hashes[relative_path] = hash_value
 
         return hashes
+
+    @staticmethod
+    def _should_skip_hash_file(file_path: Path, base_dir: Path | None = None) -> bool:
+        try:
+            path_parts = file_path.relative_to(base_dir).parts if base_dir is not None else file_path.parts
+        except ValueError:
+            path_parts = file_path.parts
+        parts = set(path_parts)
+        if parts & {"__pycache__", ".git", "user_data"}:
+            return True
+        name = file_path.name
+        return name.endswith(".pyc") or name == ".DS_Store"
     
     def _compute_file_hash(self, path: Path) -> str:
         """ファイルのSHA-256ハッシュを計算"""

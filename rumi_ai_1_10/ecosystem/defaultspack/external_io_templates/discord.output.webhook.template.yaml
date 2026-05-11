@@ -1,0 +1,30 @@
+id: discord.output.webhook
+direction: output
+provider: discord
+display_name: Discord Output (Webhook URL)
+summary: "Channel webhook mode: paste a Discord channel Webhook URL and send without a bot token."
+setup_steps:
+  - Choose Discord Output (Webhook URL).
+  - "Paste the channel Webhook URL into External Tokens with provider=discord and kind=Webhook URL."
+  - "No Bot Token or local Discord gateway is required for this output mode."
+output_profile_id: discord.webhook
+required_setup:
+  any_of:
+    - fields:
+        - webhook_url
+tokens:
+  - kind: webhook_url
+    label: Webhook URL
+fields:
+  - id: webhook_url
+    label: Webhook URL
+    secret: true
+capabilities_profile: discord
+examples:
+  - id: external_send.discord.webhook
+    label: Tool send
+    tool: external_send
+    args:
+      provider: discord
+      webhook_url: "https://discord.com/api/webhooks/..."
+      text: "送信する本文"

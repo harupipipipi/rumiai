@@ -1,0 +1,12 @@
+id: generic.webhook
+provider: generic
+version: 1
+display_name: Generic Webhook Output
+transport: generic_webhook
+mode: json
+required_fields:
+  - callback_url
+capabilities_profile: generic
+safety:
+  recheck_sensitivity: true
+  recheck_capabilities: true

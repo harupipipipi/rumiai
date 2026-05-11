@@ -1,0 +1,7 @@
+from __future__ import annotations
+
+from .test_defaultspack_input_profiles import test_line_default_profile_maps_text_message_to_user_input
+
+
+def test_line_profile_text_mapping():
+    test_line_default_profile_maps_text_message_to_user_input()

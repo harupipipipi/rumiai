@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from domain.chat.store import ChatStore
-from domain.integrations.store import IntegrationConversationStore
+from domain.input.envelope import RumiInputEnvelope
+from domain.input.submit import submit_input
 
 
 def dispatch_external_message(
@@ -17,73 +17,25 @@ def dispatch_external_message(
     metadata: Dict[str, Any] | None = None,
     context: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
-    cleaned_text = str(text or "").strip()
-    if not cleaned_text:
-        return {
-            "status": "ignored",
-            "reason": "empty message",
-            "assistant_text": "",
-        }
-
-    integration_store = IntegrationConversationStore()
-    if integration_store.is_event_processed(provider, event_id):
-        return {
-            "status": "duplicate",
-            "event_id": event_id,
-            "assistant_text": "",
-        }
-
-    chat_store = ChatStore()
     external_metadata = metadata if isinstance(metadata, dict) else {}
-    conversation = integration_store.get_or_create_conversation(
-        provider=provider,
-        external_key=external_key,
-        title=title,
-        metadata=external_metadata,
-        chat_store=chat_store,
-        model=model,
-    )
-
-    from blocks.chat.send import run as send_run
-
-    request: Dict[str, Any] = {
-        "conversation_id": conversation["id"],
-        "message": {
-            "role": "user",
-            "content": cleaned_text,
-            "metadata": {
-                "source": "external_integration",
-                "external": {
-                    "provider": provider,
-                    "external_key": external_key,
-                    "event_id": event_id,
-                    **external_metadata,
-                },
-            },
+    envelope = RumiInputEnvelope(
+        role="user",
+        input=str(text or ""),
+        chat={
+            "conversation_id": None,
+            "external_key": external_key,
+            "title": title,
+            "model": model,
         },
-        "params": {},
-    }
-
-    result = send_run(request, context or {})
-    if not isinstance(result, dict) or result.get("status") != "ok":
-        return {
-            "status": "error",
-            "conversation_id": conversation["id"],
-            "error": result.get("error") if isinstance(result, dict) else str(result),
-            "assistant_text": "",
-        }
-
-    assistant = result.get("data") if isinstance(result.get("data"), dict) else {}
-    payload = {
-        "status": "ok",
-        "provider": provider,
-        "event_id": event_id,
-        "conversation_id": conversation["id"],
-        "assistant_message_id": assistant.get("id"),
-        "assistant_text": extract_assistant_text(assistant),
-    }
-    integration_store.mark_event_processed(provider, event_id, payload)
-    return payload
+        source={
+            "kind": "integration",
+            "provider": provider,
+            "event_id": event_id,
+            "external_key": external_key,
+        },
+        metadata=external_metadata,
+    )
+    return submit_input(envelope, context or {})
 
 
 def extract_assistant_text(message: Dict[str, Any]) -> str:

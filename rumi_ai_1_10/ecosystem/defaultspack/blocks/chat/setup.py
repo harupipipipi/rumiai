@@ -61,6 +61,19 @@ def run(context):
         ("POST", "/api/integrations/line/webhook", _lazy("blocks.integrations.line"), {}),
         ("POST", "/api/integrations/discord/interactions", _lazy("blocks.integrations.discord"), {}),
         ("POST", "/api/integrations/discord/events", _lazy("blocks.integrations.discord"), {}),
+        ("GET", "/api/external/tokens", _lazy("blocks.external.tokens"), {}),
+        ("POST", "/api/external/tokens", _lazy("blocks.external.tokens"), {}),
+        ("GET", "/api/external/templates", _lazy("blocks.external.templates"), {}),
+        ("POST", "/api/external/templates", _lazy("blocks.external.templates"), {}),
+        ("POST", "/api/webhooks/inbound/{webhook_id}", _lazy("blocks.webhooks.inbound"), {"webhook_id": "webhook_id"}),
+        ("GET", "/api/webhooks/endpoints", _lazy("blocks.webhooks.endpoints"), {}),
+        ("POST", "/api/webhooks/endpoints", _lazy("blocks.webhooks.endpoints"), {}),
+        ("PUT", "/api/webhooks/endpoints/{webhook_id}", _lazy("blocks.webhooks.endpoints"), {"webhook_id": "webhook_id"}),
+        ("DELETE", "/api/webhooks/endpoints/{webhook_id}", _lazy("blocks.webhooks.endpoints"), {"webhook_id": "webhook_id"}),
+        ("POST", "/api/webhooks/endpoints/{webhook_id}/test", _lazy("blocks.webhooks.inbound"), {"webhook_id": "webhook_id"}),
+        ("GET", "/api/webhooks/public-urls", _lazy("blocks.webhooks.public_url"), {}),
+        ("POST", "/api/webhooks/public-urls", _lazy("blocks.webhooks.public_url"), {}),
+        ("DELETE", "/api/webhooks/public-urls/{url_id}", _lazy("blocks.webhooks.public_url"), {"url_id": "url_id"}),
     ]
 
     for method, pattern, handler, path_inject in routes:

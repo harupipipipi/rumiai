@@ -1,15 +1,34 @@
 import { useEffect, useState, type ReactElement } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Check, ChevronDown, MoreVertical, Pencil, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, Copy, Loader2, MoreVertical, Pencil, Trash2, X } from "lucide-react";
 
 import { cn } from "../lib/cn";
+import { api } from "../lib/api";
 import type { SettingsSection } from "../lib/api";
 import type { SettingsModalRendererProps } from "./types";
 
 function formatReadonlyValue(value: unknown, fallback: unknown): string {
   const resolved = value ?? fallback ?? "";
   if (typeof resolved === "boolean") return resolved ? "Saved" : "Not set";
+  if (resolved && typeof resolved === "object") return JSON.stringify(resolved, null, 2);
   return String(resolved);
+}
+
+async function copyTextToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
 }
 
 function apiProviderRows(value: unknown): Array<Record<string, unknown>> {
@@ -35,6 +54,35 @@ function apiRowLabel(api: Record<string, unknown>): string {
   return String(api.label ?? `${api.provider_id}:${api.api_id}:***`);
 }
 
+function externalTokenProviderRows(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object") : [];
+}
+
+function namedTokenRows(provider: Record<string, unknown>): Array<Record<string, unknown>> {
+  const tokens = provider.tokens;
+  return Array.isArray(tokens) ? tokens.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object") : [];
+}
+
+function registeredExternalTokenRows(providers: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  const rows: Array<Record<string, unknown>> = providers.flatMap((provider) => (
+    namedTokenRows(provider).map((token) => ({
+      ...token,
+      provider_id: token.provider_id ?? provider.provider_id,
+    }))
+  ));
+  return rows.filter((token) => Boolean(token.configured));
+}
+
+function requiredExternalTokenRows(providers: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  return providers.flatMap((provider) => {
+    const required = provider.required_tokens;
+    if (!Array.isArray(required)) return [];
+    return required
+      .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+      .map((item) => ({ ...item, provider_id: provider.provider_id }));
+  });
+}
+
 function MaskedApiLabel({ api }: { api: Record<string, unknown> }) {
   const providerId = String(api.provider_id ?? "");
   const apiId = String(api.api_id ?? "");
@@ -51,6 +99,58 @@ function MaskedApiLabel({ api }: { api: Record<string, unknown> }) {
       <span className="tracking-normal text-zinc-500">***</span>
     </span>
   );
+}
+
+function MaskedExternalTokenLabel({ token }: { token: Record<string, unknown> }) {
+  const providerId = String(token.provider_id ?? "");
+  const tokenId = String(token.token_id ?? "");
+  const fallback = String(token.label ?? `${providerId}:${tokenId}:***`);
+  if (!providerId || !tokenId) {
+    return <span className="truncate text-xs text-zinc-300">{fallback}</span>;
+  }
+  return (
+    <span className="inline-flex max-w-full items-center overflow-hidden font-mono text-xs leading-5 text-zinc-500">
+      <span className="truncate">{providerId}</span>
+      <span className="px-0.5 text-zinc-600">:</span>
+      <span className="truncate">{tokenId}</span>
+      <span className="px-0.5 text-zinc-600">:</span>
+      <span className="tracking-normal text-zinc-500">***</span>
+    </span>
+  );
+}
+
+function externalTokenKindOptions(providerId: string): Array<{ value: string; label: string }> {
+  const common: Record<string, Array<{ value: string; label: string }>> = {
+    line: [
+      { value: "channel_secret", label: "Channel Secret" },
+      { value: "channel_access_token", label: "Channel Access Token" },
+      { value: "reply_token", label: "Reply Token" },
+    ],
+    discord: [
+      { value: "bot_token", label: "Bot Token" },
+      { value: "webhook_url", label: "Webhook URL" },
+      { value: "application_id", label: "Application ID" },
+      { value: "public_key", label: "Public Key" },
+    ],
+    slack: [
+      { value: "bot_token", label: "Bot Token" },
+      { value: "signing_secret", label: "Signing Secret" },
+      { value: "app_token", label: "App Token" },
+      { value: "channel_id", label: "Channel ID" },
+    ],
+    generic: [
+      { value: "webhook_shared_secret", label: "Webhook Shared Secret" },
+      { value: "webhook_url", label: "Webhook URL" },
+      { value: "callback_url", label: "Callback URL" },
+    ],
+    web: [
+      { value: "callback_url", label: "Callback URL" },
+    ],
+  };
+  return common[providerId] ?? [
+    { value: "token", label: "Token" },
+    { value: "webhook_url", label: "Webhook URL" },
+  ];
 }
 
 function CustomSelect({
@@ -104,6 +204,168 @@ function CustomSelect({
   );
 }
 
+function publicUrlConfig(value: unknown, fallback: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  if (fallback && typeof fallback === "object" && !Array.isArray(fallback)) return fallback as Record<string, unknown>;
+  return {};
+}
+
+function PublicUrlField({
+  sectionId,
+  field,
+  value,
+  onChange,
+}: {
+  sectionId: string;
+  field: SettingsSection["fields"][number];
+  value: unknown;
+  onChange: (sectionId: string, fieldId: string, value: unknown) => void;
+}) {
+  const config = publicUrlConfig(value, field.default);
+  const [providerId, setProviderId] = useState(String(config.provider_id ?? "cloudflare_quick_tunnel"));
+  const [localUrl, setLocalUrl] = useState(String(config.local_url ?? "http://127.0.0.1:8766"));
+  const [routePath, setRoutePath] = useState(String(config.route_path ?? "/api/integrations/line/webhook"));
+  const [result, setResult] = useState<Record<string, unknown> | null>(
+    config.result && typeof config.result === "object" ? config.result as Record<string, unknown> : null,
+  );
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    const next = publicUrlConfig(value, field.default);
+    setProviderId(String(next.provider_id ?? "cloudflare_quick_tunnel"));
+    setLocalUrl(String(next.local_url ?? "http://127.0.0.1:8766"));
+    setRoutePath(String(next.route_path ?? "/api/integrations/line/webhook"));
+    setResult(next.result && typeof next.result === "object" ? next.result as Record<string, unknown> : null);
+  }, [field.default, value]);
+
+  const routeOptions = [
+    { value: "/api/integrations/line/webhook", label: "LINE webhook" },
+    { value: "/api/integrations/discord/interactions", label: "Discord interactions" },
+    { value: "/api/integrations/discord/events", label: "Discord events" },
+    { value: "/api/integrations/slack/events", label: "Slack events" },
+    { value: "/api/webhooks/inbound/{webhook_id}", label: "Generic webhook" },
+  ];
+  const providerOptions = [
+    { value: "cloudflare_quick_tunnel", label: "Cloudflare Quick Tunnel" },
+    { value: "static", label: "Static URL" },
+  ];
+  const publicUrl = String(result?.public_url ?? "");
+  const error = String(result?.error ?? "");
+
+  const persist = (nextResult: Record<string, unknown> | null) => {
+    onChange(sectionId, field.id, {
+      provider_id: providerId,
+      local_url: localUrl,
+      route_path: routePath,
+      result: nextResult,
+    });
+  };
+
+  const createUrl = async () => {
+    setBusy(true);
+    setCopied(false);
+    try {
+      const next = await api.createPublicUrl({
+        provider_id: providerId,
+        local_url: localUrl,
+        route_path: routePath,
+      });
+      setResult(next);
+      persist(next);
+    } catch (errorValue) {
+      const next = { ok: false, error: errorValue instanceof Error ? errorValue.message : "Failed to create URL" };
+      setResult(next);
+      persist(next);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const closeUrl = async () => {
+    const urlId = String(result?.url_id ?? "");
+    if (urlId && urlId !== "static") {
+      await api.closePublicUrl(urlId).catch(console.error);
+    }
+    setResult(null);
+    persist(null);
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-3 md:grid-cols-[1.1fr_1.1fr_1.2fr]">
+        <label className="space-y-1.5">
+          <span className="text-[11px] font-medium uppercase text-zinc-500">URL provider</span>
+          <CustomSelect value={providerId} onChange={setProviderId} options={providerOptions} />
+        </label>
+        <label className="space-y-1.5">
+          <span className="text-[11px] font-medium uppercase text-zinc-500">Local Rumi URL</span>
+          <input
+            value={localUrl}
+            onChange={(event) => setLocalUrl(event.target.value)}
+            className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-cyan-500"
+            placeholder="http://127.0.0.1:8766"
+          />
+        </label>
+        <label className="space-y-1.5">
+          <span className="text-[11px] font-medium uppercase text-zinc-500">Webhook route</span>
+          <CustomSelect value={routePath} onChange={setRoutePath} options={routeOptions} />
+        </label>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={createUrl}
+          disabled={busy || !localUrl.trim() || !routePath.trim()}
+          className={cn(
+            "inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors",
+            busy || !localUrl.trim() || !routePath.trim()
+              ? "cursor-not-allowed border-zinc-800 bg-zinc-900 text-zinc-600"
+              : "border-cyan-700 bg-cyan-950/35 text-cyan-100 hover:border-cyan-500 hover:bg-cyan-900/35",
+          )}
+        >
+          {busy ? <Loader2 size={15} className="animate-spin" /> : <span className="h-2 w-2 rounded-full bg-cyan-300" />}
+          {providerId === "cloudflare_quick_tunnel" ? "Cloudflare URLを発行" : "Webhook URLを作成"}
+        </button>
+        {publicUrl && (
+          <button
+            type="button"
+            onClick={() => {
+              void copyTextToClipboard(publicUrl).then(() => {
+                setCopied(true);
+                window.setTimeout(() => setCopied(false), 1600);
+              });
+            }}
+            className="inline-flex items-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 hover:border-zinc-500"
+          >
+            <Copy size={14} />
+            {copied ? "コピー済み" : "Webhook URLをコピー"}
+          </button>
+        )}
+        {result && (
+          <button
+            type="button"
+            onClick={() => void closeUrl()}
+            className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-500 hover:text-zinc-200"
+          >
+            Clear / Close
+          </button>
+        )}
+      </div>
+      {publicUrl && (
+        <div className="rounded-lg border border-emerald-800/60 bg-emerald-950/20 px-3 py-2 font-mono text-xs text-emerald-200 break-all">
+          {publicUrl}
+        </div>
+      )}
+      {!publicUrl && error && (
+        <div className="rounded-lg border border-amber-800/60 bg-amber-950/20 px-3 py-2 text-xs text-amber-200">
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SettingsField({
   sectionId,
   field,
@@ -121,10 +383,17 @@ function SettingsField({
   const [apiName, setApiName] = useState("main");
   const [apiSecret, setApiSecret] = useState("");
   const [apiSaveState, setApiSaveState] = useState<"idle" | "saved">("idle");
+  const [tokenProvider, setTokenProvider] = useState("line");
+  const [tokenName, setTokenName] = useState("main");
+  const [tokenKind, setTokenKind] = useState("channel_access_token");
+  const [tokenSecret, setTokenSecret] = useState("");
+  const [tokenSaveState, setTokenSaveState] = useState<"idle" | "saved">("idle");
   const [renamingKey, setRenamingKey] = useState("");
   const [renameDraft, setRenameDraft] = useState("");
   const [selectedApiKey, setSelectedApiKey] = useState("");
   const [openApiMenuKey, setOpenApiMenuKey] = useState("");
+  const [selectedTokenKey, setSelectedTokenKey] = useState("");
+  const [openTokenMenuKey, setOpenTokenMenuKey] = useState("");
   const commonLabel = <span className="text-sm text-zinc-300">{field.label}</span>;
   const isSecretConfigured = Boolean(value);
 
@@ -345,6 +614,282 @@ function SettingsField({
       );
       break;
     }
+    case "external_tokens": {
+      const providers = externalTokenProviderRows(value);
+      const providerOptions = providers.length
+        ? providers.map((provider) => String(provider.provider_id ?? ""))
+        : ["line", "discord", "generic", "slack"];
+      const uniqueProviderOptions = [...new Set(providerOptions.filter(Boolean))];
+      const registeredTokens = registeredExternalTokenRows(providers);
+      const requiredTokens = requiredExternalTokenRows(providers);
+      const tokenHintByProvider: Record<string, string> = {
+        line: "LINE: Channel Secret / Channel Access Tokenを貼ります。返信先IDは外部入力から自動取得、push時だけTarget IDを使います。",
+        discord: "Discord Bot + Channel: Bot Tokenを貼り、Channel IDはTarget / Channel ID欄へ。Webhook mode: Webhook URLを貼ります。",
+        slack: "Slack: Signing Secret / Bot Tokenを貼り、Channel IDやThread TSはTarget欄へ。",
+        generic: "Generic: shared secretやcallback URLを貼ります。",
+      };
+      control = (
+        <div className="space-y-4">
+          <div className="overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950/70">
+            <div className="grid grid-cols-[36px_minmax(220px,1.4fr)_minmax(130px,0.8fr)_minmax(120px,0.8fr)_48px] items-center gap-3 border-b border-zinc-800 bg-zinc-900/70 px-3 py-2 text-[11px] font-medium text-zinc-500">
+              <span className="h-4 w-4 rounded border border-cyan-500/70" />
+              <span>Token</span>
+              <span>Kind</span>
+              <span>Endpoints</span>
+              <span />
+            </div>
+            <div className="divide-y divide-zinc-800/80">
+              {registeredTokens.length > 0 ? registeredTokens.map((token) => {
+                const key = String(token.key ?? `${token.provider_id}:${token.token_id}`);
+                const isRenaming = renamingKey === key;
+                const isMenuOpen = openTokenMenuKey === key;
+                const isSelected = selectedTokenKey === key;
+                const endpointIds = Array.isArray(token.endpoint_ids) ? token.endpoint_ids.map(String).join(", ") : "";
+                return (
+                  <div
+                    key={key}
+                    className={cn(
+                      "grid grid-cols-[36px_minmax(220px,1.4fr)_minmax(130px,0.8fr)_minmax(120px,0.8fr)_48px] items-center gap-3 px-3 py-3 transition-colors",
+                      isSelected ? "bg-zinc-900/85" : "bg-zinc-950/20 hover:bg-zinc-900/45",
+                    )}
+                    onClick={() => setSelectedTokenKey(key)}
+                  >
+                    <span className={cn("h-4 w-4 rounded border", isSelected ? "border-cyan-400 bg-cyan-500/20" : "border-cyan-500/70")} />
+                    <div className="min-w-0">
+                      {isRenaming ? (
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            value={renameDraft}
+                            autoFocus
+                            onChange={(event) => setRenameDraft(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key !== "Enter") return;
+                              event.preventDefault();
+                              if (!renameDraft.trim()) return;
+                              onChange(sectionId, field.id, {
+                                action: "rename",
+                                provider_id: token.provider_id,
+                                token_id: token.token_id,
+                                name: renameDraft.trim(),
+                              });
+                              setRenamingKey("");
+                            }}
+                            className="min-w-0 flex-1 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 outline-none"
+                          />
+                          <button
+                            type="button"
+                            disabled={!renameDraft.trim()}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              if (!renameDraft.trim()) return;
+                              onChange(sectionId, field.id, {
+                                action: "rename",
+                                provider_id: token.provider_id,
+                                token_id: token.token_id,
+                                name: renameDraft.trim(),
+                              });
+                              setRenamingKey("");
+                            }}
+                            className="rounded-md border border-zinc-700 p-1 text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+                            title="Rename"
+                          >
+                            <Check size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setRenamingKey("");
+                            }}
+                            className="rounded-md border border-zinc-800 p-1 text-zinc-500 hover:text-zinc-300"
+                          >
+                            <X size={13} />
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="truncate text-sm font-medium text-zinc-200">{String(token.name ?? token.token_id ?? "")}</div>
+                          <MaskedExternalTokenLabel token={token} />
+                        </>
+                      )}
+                    </div>
+                    <span className="truncate text-sm text-zinc-500">{String(token.kind ?? "token")}</span>
+                    <span className="truncate text-sm text-zinc-500">{endpointIds || "None"}</span>
+                    <div className="relative flex justify-end">
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setOpenTokenMenuKey(isMenuOpen ? "" : key);
+                        }}
+                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-800 text-zinc-500 transition-colors hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-200"
+                        title="Actions"
+                      >
+                        <MoreVertical size={15} />
+                      </button>
+                      {isMenuOpen && (
+                        <>
+                          <button
+                            type="button"
+                            aria-label="close token menu"
+                            className="fixed inset-0 z-10 cursor-default"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setOpenTokenMenuKey("");
+                            }}
+                          />
+                          <div className="absolute right-0 top-[calc(100%+6px)] z-20 w-32 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 py-1 shadow-2xl">
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setRenamingKey(key);
+                                setRenameDraft(String(token.name ?? token.token_id ?? ""));
+                                setOpenTokenMenuKey("");
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
+                            >
+                              <Pencil size={13} />
+                              Rename
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setOpenTokenMenuKey("");
+                                onChange(sectionId, field.id, {
+                                  action: "delete",
+                                  provider_id: token.provider_id,
+                                  token_id: token.token_id,
+                                });
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-rose-300 hover:bg-rose-950/30"
+                            >
+                              <Trash2 size={13} />
+                              Delete
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              }) : (
+                <div className="px-3 py-5 text-xs text-zinc-600">No registered external tokens yet.</div>
+              )}
+            </div>
+          </div>
+          {requiredTokens.length > 0 && (
+            <div className="flex flex-wrap gap-2 text-[11px]">
+              {requiredTokens.map((token) => (
+                <span
+                  key={`${String(token.provider_id)}:${String(token.kind)}`}
+                  className={cn(
+                    "rounded-md border px-2 py-1",
+                    token.configured ? "border-emerald-800 bg-emerald-950/25 text-emerald-300" : "border-zinc-800 bg-zinc-950 text-zinc-500",
+                  )}
+                >
+                  {String(token.provider_id)} / {String(token.kind)}: {token.configured ? "configured" : "missing"}
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
+            <div className="mb-3 text-xs leading-5 text-zinc-400">{tokenHintByProvider[tokenProvider] ?? "値は保存後に再表示しません。"}</div>
+            <div className="grid gap-3 md:grid-cols-[150px_1fr_1fr_1.4fr_auto]">
+              <label className="space-y-1.5">
+                <span className="text-[11px] font-medium uppercase text-zinc-500">Provider</span>
+                <CustomSelect
+                  value={tokenProvider}
+                  onChange={(nextProvider) => {
+                    setTokenProvider(nextProvider);
+                    setTokenKind(externalTokenKindOptions(nextProvider)[0]?.value ?? "token");
+                    setTokenSaveState("idle");
+                  }}
+                  options={uniqueProviderOptions.map((providerId) => ({ value: providerId, label: providerId }))}
+                />
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-[11px] font-medium uppercase text-zinc-500">Token ID</span>
+                <input
+                  value={tokenName}
+                  onChange={(event) => {
+                    setTokenName(event.target.value);
+                    setTokenSaveState("idle");
+                  }}
+                  placeholder="main"
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-cyan-500"
+                />
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-[11px] font-medium uppercase text-zinc-500">Paste Kind</span>
+                <CustomSelect
+                  value={tokenKind}
+                  onChange={(nextKind) => {
+                    setTokenKind(nextKind);
+                    setTokenSaveState("idle");
+                  }}
+                  options={externalTokenKindOptions(tokenProvider)}
+                />
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-[11px] font-medium uppercase text-zinc-500">Secret / URL Value</span>
+                <input
+                  type="password"
+                  autoComplete="off"
+                  value={tokenSecret}
+                  onChange={(event) => {
+                    setTokenSecret(event.target.value);
+                    setTokenSaveState("idle");
+                  }}
+                  placeholder={tokenKind === "webhook_url" ? "https://discord.com/api/webhooks/..." : `${tokenProvider} ${tokenKind}`}
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-cyan-500"
+                />
+              </label>
+              <div className="flex items-end">
+                <button
+                  type="button"
+                  disabled={!tokenProvider.trim() || !tokenName.trim() || !tokenSecret.trim()}
+                  onClick={() => {
+                    if (!tokenProvider.trim() || !tokenName.trim() || !tokenSecret.trim()) return;
+                    onChange(sectionId, field.id, {
+                      action: "upsert",
+                      provider_id: tokenProvider,
+                      token_id: tokenName,
+                      name: tokenName,
+                      kind: tokenKind,
+                      value: tokenSecret,
+                    });
+                    setTokenSecret("");
+                    setTokenSaveState("saved");
+                  }}
+                  className={cn(
+                    "w-full rounded-lg border px-3 py-2 text-sm transition-colors",
+                    tokenProvider.trim() && tokenName.trim() && tokenSecret.trim()
+                      ? "border-zinc-100 bg-zinc-100 text-zinc-950"
+                      : "cursor-not-allowed border-zinc-800 bg-zinc-900 text-zinc-600",
+                  )}
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+          {tokenSaveState === "saved" && <p className="text-[11px] text-emerald-400">Saved</p>}
+        </div>
+      );
+      break;
+    }
+    case "public_url":
+      control = (
+        <PublicUrlField
+          sectionId={sectionId}
+          field={field}
+          value={value}
+          onChange={onChange}
+        />
+      );
+      break;
     case "secret":
       control = (
         <div className="flex flex-wrap items-center gap-2 min-w-0">
@@ -423,7 +968,19 @@ function SettingsField({
       );
       break;
     case "readonly":
-      control = <div className="text-sm text-zinc-300">{formatReadonlyValue(value, field.default)}</div>;
+      control = (
+        <div className="group/readonly flex items-start justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2">
+          <div className="whitespace-pre-wrap text-sm leading-6 text-zinc-300 select-text">{formatReadonlyValue(value, field.default)}</div>
+          <button
+            type="button"
+            onClick={() => void copyTextToClipboard(formatReadonlyValue(value, field.default))}
+            className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-zinc-800 text-zinc-500 opacity-70 transition-colors hover:border-zinc-600 hover:text-zinc-200 group-hover/readonly:opacity-100"
+            title="Copy"
+          >
+            <Copy size={13} />
+          </button>
+        </div>
+      );
       break;
     case "textarea":
       control = (
@@ -483,7 +1040,7 @@ export function SettingsModalRenderer({
       key={`${activeSection?.id}.${field.id}`}
       className={cn(
         "rounded-lg border border-zinc-800 bg-zinc-950/50 p-4",
-        field.type === "textarea" || field.type === "secret" || field.type === "api_keys" ? "lg:col-span-2" : "",
+        field.type === "textarea" || field.type === "secret" || field.type === "api_keys" || field.type === "external_tokens" || field.type === "public_url" || field.id.endsWith("_setup_guide") ? "lg:col-span-2" : "",
       )}
     >
       <SettingsField

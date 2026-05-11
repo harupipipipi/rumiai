@@ -24,10 +24,18 @@ from domain.safety.local_guard import (
 from transport.registry import build_always_available_http_routes, build_fallback_http_routes
 
 
-_PACK_NOT_APPROVED_SAFE_GET_FALLBACK_BLOCKS = {
+_SAFE_GET_FALLBACK_BLOCKS = {
+    "blocks.ai.catalog",
+    "blocks.ai.models",
+    "blocks.ai.profiles",
+    "blocks.ai.providers",
+    "blocks.chat.get_conversation",
+    "blocks.chat.list_conversations",
+    "blocks.external.templates",
+    "blocks.tool.list",
     "blocks.ui.catalog",
-    "blocks.ui.settings",
     "blocks.ui.commands",
+    "blocks.ui.settings",
 }
 
 
@@ -164,16 +172,29 @@ class DefaultsHttpServer:
             function_id = function_id_for_block_module(module_name)
             if function_id:
                 context["_defaultspack_http_route_adapter"] = True
+                qualified_name = f"defaultspack:{function_id}"
                 result = invoke_function(
-                    f"defaultspack:{function_id}",
+                    qualified_name,
                     payload,
                     context,
                     principal_id="defaultspack",
                 )
+                result = self._retry_after_dev_auto_approve(
+                    qualified_name,
+                    payload,
+                    context,
+                    result,
+                    invoke_function,
+                )
                 error_info = result.get("error", {}) if isinstance(result, dict) else {}
                 error_code = str(error_info.get("code") or "")
                 if error_code == "PACK_NOT_APPROVED":
-                    if self._pack_not_approved_fallback_allowed(module_name, payload):
+                    if self._safe_get_fallback_allowed(module_name, payload):
+                        pass
+                    else:
+                        return result
+                elif error_code == "PERMISSION_DENIED":
+                    if self._function_call_permission_fallback_allowed(module_name, payload, error_info):
                         pass
                     else:
                         return result
@@ -188,9 +209,45 @@ class DefaultsHttpServer:
             pass
         return invoke_block(module_name, payload, context)
 
-    def _pack_not_approved_fallback_allowed(self, module_name, payload):
+    def _retry_after_dev_auto_approve(self, qualified_name, payload, context, result, invoke_function):
+        error_info = result.get("error", {}) if isinstance(result, dict) else {}
+        if str(error_info.get("code") or "") != "PACK_NOT_APPROVED":
+            return result
+        pack_id, _, _ = qualified_name.partition(":")
+        if not pack_id or not self._dev_auto_approve_pack(pack_id):
+            return result
+        return invoke_function(
+            qualified_name,
+            payload,
+            context,
+            principal_id=pack_id,
+        )
+
+    def _dev_auto_approve_pack(self, pack_id):
+        rumi_env = os.environ.get("RUMI_ENVIRONMENT", "").lower()
+        auto_approve = os.environ.get("RUMI_AUTO_APPROVE_LOCAL", "").lower()
+        if rumi_env not in {"development", "dev"} or auto_approve != "true":
+            return False
+        try:
+            from core_runtime.approval_manager import get_approval_manager
+
+            manager = get_approval_manager()
+            manager.scan_packs()
+            result = manager.approve(pack_id)
+            return bool(getattr(result, "success", False))
+        except Exception:
+            return False
+
+    def _safe_get_fallback_allowed(self, module_name, payload):
         actual_method = str(payload.get("_actual_method") or "").upper()
-        return actual_method == "GET" and module_name in _PACK_NOT_APPROVED_SAFE_GET_FALLBACK_BLOCKS
+        return actual_method == "GET" and module_name in _SAFE_GET_FALLBACK_BLOCKS
+
+    def _function_call_permission_fallback_allowed(self, module_name, payload, error_info):
+        message = str((error_info or {}).get("message") or "")
+        return (
+            self._safe_get_fallback_allowed(module_name, payload)
+            and "function.call" in message
+        )
 
     # ---- Chat Handlers (fallback) ----
 
@@ -531,7 +588,15 @@ _SENSITIVE_CODING_PATHS = set(SENSITIVE_CODING_PATHS) | set(METHOD_SENSITIVE_COD
 
 _SENSITIVE_INTEGRATION_PATHS = {
     "/api/integrations/secrets",
+    "/api/external/tokens",
 }
+_SENSITIVE_INTEGRATION_METHOD_PATHS = {
+    "/api/external/templates": {"POST", "PUT", "DELETE"},
+}
+_SENSITIVE_INTEGRATION_PREFIXES = (
+    "/api/webhooks/endpoints",
+    "/api/webhooks/public-urls",
+)
 _SENSITIVE_CHAT_PATH_RE = re.compile(
     r"^/v1/conversations/[^/]+/run-results/[^/]+/browser-screenshots$"
 )
@@ -543,10 +608,29 @@ def _is_sensitive_coding_path(path):
     return _local_is_sensitive_coding_path(path)
 
 
+def _matches_sensitive_prefix(path):
+    return any(path == prefix or path.startswith(prefix + "/") for prefix in _SENSITIVE_INTEGRATION_PREFIXES)
+
+
+def _requires_sensitive_http_auth(method, path):
+    method = str(method or "").upper()
+    if path in _SENSITIVE_INTEGRATION_PATHS:
+        return True
+    if method in _SENSITIVE_INTEGRATION_METHOD_PATHS.get(path, set()):
+        return True
+    if _matches_sensitive_prefix(path):
+        return True
+    if _SENSITIVE_CHAT_PATH_RE.match(path) is not None:
+        return True
+    return False
+
+
 def _is_sensitive_http_path(path):
     return (
         path in _SENSITIVE_CODING_PATHS
         or path in _SENSITIVE_INTEGRATION_PATHS
+        or path in _SENSITIVE_INTEGRATION_METHOD_PATHS
+        or _matches_sensitive_prefix(path)
         or _SENSITIVE_CHAT_PATH_RE.match(path) is not None
     )
 
@@ -745,7 +829,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             return coding_error
         if _is_sensitive_coding_path(path):
             return None
-        if path not in _SENSITIVE_INTEGRATION_PATHS and _SENSITIVE_CHAT_PATH_RE.match(path) is None:
+        if not _requires_sensitive_http_auth(method, path):
             return None
         origin = self.headers.get("Origin", "")
         if not _is_allowed_sensitive_origin(origin):

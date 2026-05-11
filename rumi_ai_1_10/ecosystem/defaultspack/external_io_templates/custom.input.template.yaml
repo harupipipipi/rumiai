@@ -1,0 +1,36 @@
+id: custom.input
+direction: input
+provider: custom
+display_name: Custom Input
+summary: Add a custom input provider by registering here or dropping profile/template files into user_data/shared.
+extension_paths:
+  templates: user_data/shared/external_io_templates
+  input_profiles: user_data/shared/input_profiles
+response_prompt:
+  enabled: true
+  mode: plan_only
+  allowed_actions:
+    - reply_text
+    - store_only
+    - summarize_then_reply
+    - run_browser_use
+    - run_computer_use
+    - run_python
+    - run_tool
+  tools:
+    browser_use:
+      enabled: true
+    computer_use:
+      enabled: true
+      requires_approval: true
+    python:
+      enabled: true
+      sandbox: true
+    external_send:
+      enabled: true
+      requires_approval: true
+examples:
+  - id: custom.line.biz.computer_use
+    label: LINE Web via Chrome
+    prompt: |
+      Google Chromeをcomputer_useで操作して起動し、https://chat.line.biz/U938c119aee3803767d500905c221a1f4/chat/C7d9e77e21e38512175c081f235f0aec8 にアクセスして返答して。

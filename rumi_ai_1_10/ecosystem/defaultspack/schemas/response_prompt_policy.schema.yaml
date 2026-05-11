@@ -1,0 +1,104 @@
+type: object
+properties:
+  enabled:
+    type: boolean
+    default: false
+  model:
+    type: string
+    default: inherit
+  mode:
+    enum: [plan_only]
+    default: plan_only
+  system_prompt:
+    type: string
+  user_prompt:
+    type: string
+  allowed_actions:
+    type: array
+    items:
+      enum:
+        - reply_text
+        - store_only
+        - summarize_then_reply
+        - run_browser_use
+        - run_computer_use
+        - run_python
+        - run_tool
+        - send_file_if_allowed
+        - ask_for_approval
+  allowed_outputs:
+    type: array
+    items:
+      type: string
+  output:
+    type: object
+    properties:
+      provider:
+        enum: [line, discord, slack, generic, web, custom]
+      output_profile_id:
+        type: string
+      mode:
+        type: string
+  fallback_action:
+    enum:
+      - reply_text
+      - store_only
+      - summarize_then_reply
+      - ask_for_approval
+    default: reply_text
+  tools:
+    type: object
+    additionalProperties:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          default: false
+        requires_approval:
+          type: boolean
+        sandbox:
+          type: boolean
+        network:
+          enum: [default, disabled, allowed]
+  output_schema:
+    type: object
+    properties:
+      type:
+        enum: [object]
+      required:
+        type: array
+        items:
+          type: string
+      properties:
+        type: object
+      additionalProperties:
+        type: boolean
+  sensitivity:
+    type: object
+    properties:
+      default:
+        enum: [public, private, local_only]
+        default: public
+      recheck_before_external_reply:
+        type: boolean
+        default: true
+  safety:
+    type: object
+    properties:
+      direct_tool_execution:
+        enum: [forbidden]
+      reject_actions_outside_allowed_actions:
+        type: boolean
+        default: true
+      recheck_sensitivity_before_external_reply:
+        type: boolean
+        default: true
+      recheck_capabilities_before_external_reply:
+        type: boolean
+        default: true
+      computer_use_approval_required_default:
+        type: boolean
+        default: true
+required:
+  - enabled
+additionalProperties: true

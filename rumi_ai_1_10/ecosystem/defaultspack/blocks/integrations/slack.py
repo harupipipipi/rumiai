@@ -6,10 +6,14 @@ import time
 from typing import Any, Dict
 
 from blocks._common import ok, error
-from blocks.integrations.common import allow_unsigned_webhook_dev, headers_from_request, raw_body_bytes, text_limit
-from domain.integrations.chat_bridge import dispatch_external_message
-from domain.integrations.http_client import post_json
-from domain.integrations.secrets import get_integration_secret, load_integration_secrets_into_env
+from blocks.integrations.common import allow_unsigned_webhook_dev, headers_from_request, raw_body_bytes
+from domain.external.adapters.slack import SlackResponseAdapter
+from domain.external.normalizer import normalize_slack_event
+from domain.external.pipeline import dispatch_external_event
+from domain.external.response import RumiResponse
+from domain.external.response_planner import ResponsePlanner
+from domain.external.token_store import read_external_token
+from domain.integrations.secrets import load_integration_secrets_into_env
 
 
 def run(input_data, context):
@@ -36,34 +40,24 @@ def run(input_data, context):
     if not text:
         return ok({"ignored": True, "reason": "empty slack message"})
 
-    team_id = str(input_data.get("team_id") or event.get("team") or "unknown-team")
-    channel = str(event.get("channel") or "")
-    user = str(event.get("user") or "")
-    thread_ts = str(event.get("thread_ts") or event.get("ts") or "")
-    external_key = "|".join(["slack", team_id, channel, thread_ts or user or "direct"])
-    result = dispatch_external_message(
-        provider="slack",
-        text=text,
-        external_key=external_key,
-        title="Slack " + (channel or user or "chat"),
-        event_id=str(input_data.get("event_id") or event.get("client_msg_id") or event.get("ts") or ""),
-        model=str(input_data.get("model") or "") or None,
-        metadata={
-            "team_id": team_id,
-            "channel": channel,
-            "user": user,
-            "thread_ts": thread_ts,
-            "event_ts": event.get("event_ts") or event.get("ts"),
-        },
+    external_event = normalize_slack_event(input_data, verified=bool(verification["verified"]))
+    model = str(input_data.get("model") or "").strip()
+    if model:
+        external_event.metadata["model"] = model
+    result = dispatch_external_event(
+        external_event,
+        input_profile_id="slack.default",
+        audience_policy={"default": "allow"},
         context=context,
+        send_response=True,
     )
-    reply = result.get("assistant_text", "")
-    send_result = _send_slack_reply(channel, reply, thread_ts)
+    plan = result.get("response_plan") if isinstance(result.get("response_plan"), dict) else ResponsePlanner("slack").plan(RumiResponse.from_result(result))
+    send_result = _send_response_plan(plan, external_event)
     return ok({**result, "verified": verification["verified"], "reply": send_result})
 
 
 def _verify_slack(headers: Dict[str, str], raw_body: bytes) -> Dict[str, Any]:
-    secret = get_integration_secret("slack", "SLACK_SIGNING_SECRET")
+    secret = read_external_token("slack", kind="signing_secret", legacy_key="SLACK_SIGNING_SECRET")
     if not secret:
         if allow_unsigned_webhook_dev():
             return {"ok": True, "verified": False, "reason": "unsigned dev mode enabled"}
@@ -84,22 +78,8 @@ def _verify_slack(headers: Dict[str, str], raw_body: bytes) -> Dict[str, Any]:
     return {"ok": True, "verified": True, "reason": ""}
 
 
-def _send_slack_reply(channel: str, text: str, thread_ts: str = "") -> Dict[str, Any]:
-    token = get_integration_secret("slack", "SLACK_BOT_TOKEN")
-    if not token:
-        return {"sent": False, "reason": "SLACK_BOT_TOKEN not configured"}
-    if not channel or not text:
-        return {"sent": False, "reason": "missing channel or text"}
-    payload: Dict[str, Any] = {"channel": channel, "text": text_limit(text, 39000)}
-    if thread_ts:
-        payload["thread_ts"] = thread_ts
-    response = post_json(
-        "https://slack.com/api/chat.postMessage",
-        {"Authorization": "Bearer " + token},
-        payload,
-    )
-    body = response.get("body") if isinstance(response, dict) else {}
-    return {
-        "sent": bool(response.get("ok")) and (not isinstance(body, dict) or body.get("ok") is not False),
-        "provider_response": response,
-    }
+def _send_response_plan(plan: dict[str, Any], external_event) -> Dict[str, Any]:
+    action_plan = (plan.get("metadata") or {}).get("response_action_plan") if isinstance(plan.get("metadata"), dict) else {}
+    if isinstance(action_plan, dict) and not action_plan.get("external_reply", True):
+        return {"sent": False, "reason": "external reply suppressed by response prompt policy"}
+    return SlackResponseAdapter().send(plan, event=external_event)

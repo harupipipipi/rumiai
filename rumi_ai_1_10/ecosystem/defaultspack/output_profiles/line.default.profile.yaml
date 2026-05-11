@@ -1,0 +1,17 @@
+id: line.default
+provider: line
+version: 1
+display_name: LINE Default Output
+transport: line_messaging_api
+mode: reply_or_push
+credentials:
+  token_ref:
+    provider_id: line
+    kind: channel_access_token
+targets:
+  reply_token: "$.metadata.reply_token"
+  push_target: "$.payload.source.userId"
+capabilities_profile: line
+safety:
+  recheck_sensitivity: true
+  recheck_capabilities: true

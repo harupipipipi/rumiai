@@ -1,0 +1,30 @@
+id: line.default
+provider: line
+version: 1
+display_name: LINE Default
+match:
+  event_type: message
+input:
+  role: user
+  content:
+    when:
+      - if: "$.message.type == 'text'"
+        value: "$.message.text"
+      - else:
+        value: "LINE ${$.message.type} message received. messageId=${$.message.id}"
+metadata:
+  source:
+    kind: integration
+    provider: line
+  line:
+    reply_token: "$.replyToken"
+    source: "$.source"
+    message: "$.message"
+params:
+  external_input:
+    default_response:
+      mode: same_response
+      include_source_context: true
+      source_context_format: "${provider}から来た入力です。"
+response_prompt:
+  enabled: false

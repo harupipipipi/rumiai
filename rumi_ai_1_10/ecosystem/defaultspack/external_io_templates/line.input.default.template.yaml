@@ -1,0 +1,39 @@
+id: line.input.default
+direction: input
+provider: line
+display_name: LINE Input
+summary: Issue a temporary public URL, paste it into LINE Messaging API Webhook URL, then receive LINE events.
+setup_steps:
+  - Select LINE Input.
+  - Generate a Cloudflare Quick Tunnel URL for /api/integrations/line/webhook.
+  - Paste the generated URL into LINE Messaging API Webhook URL.
+  - Save Channel Secret and Channel Access Token in External Tokens.
+  - Rumi replies with replyToken first, then can push when a target ID is available.
+input_profile_id: line.default
+endpoint:
+  id: line-main
+  kind: line
+  route: /api/integrations/line/webhook
+  security:
+    mode: provider_signature
+tokens:
+  - kind: channel_secret
+    label: Channel Secret
+  - kind: channel_access_token
+    label: Channel Access Token
+default_response:
+  mode: same_response
+  include_source_context: true
+  source_context_format: "${provider}から来た入力です。"
+response_prompt:
+  enabled: false
+examples:
+  - id: line.default.same_response
+    label: Default same response
+    prompt: "同じ会話へ短く返答する。送信元は既定で会話文脈に入れる。"
+  - id: line.to.discord
+    label: LINE to Discord
+    prompt: "LINEから来た内容を要約し、external_send toolでDiscordの指定channel_idへ送ってから、LINEには受付済みと返す。"
+  - id: line.to.web
+    label: LINE to Web
+    prompt: "LINEから来た内容をローカル/Web出力へ保存し、外部返信は必要な場合だけ短く返す。"

@@ -16,3 +16,18 @@ Session keys follow:
 - `agent:{agent_id}:discord:channel:{channel_id}`
 - `cron:{job_id}`
 - `webhook:{webhook_id}`
+
+## External Input Relationship
+
+Gateway is a local intake shell, not the external input framework itself. Public
+or provider-specific events should be normalized into `ExternalEvent`, checked by
+`AudiencePolicy`, mapped through `InputProfile`, and submitted through
+`submit_input`. Gateway messages can be one source of those events.
+
+Response delivery should go through `ResponsePlanner` and `ResponseAdapter` so
+chat and agent code do not learn Slack, Discord, LINE, webhook, or tunnel
+details.
+
+Cloudflare Quick Tunnel, if used, is only a swappable URL provider in front of a
+local endpoint. It must not be treated as the canonical gateway, auth system, or
+external input runtime.

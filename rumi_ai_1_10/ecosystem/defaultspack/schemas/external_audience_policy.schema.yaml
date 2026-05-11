@@ -1,0 +1,12 @@
+type: object
+properties:
+  default:
+    enum: [allow, deny]
+  allow:
+    type: array
+  deny:
+    type: array
+  require:
+    type: object
+  rate_limit:
+    type: object

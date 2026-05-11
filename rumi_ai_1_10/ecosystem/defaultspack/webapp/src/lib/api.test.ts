@@ -229,6 +229,56 @@ test("deleteProviderApiKey serializes delete action", async () => {
   });
 });
 
+test("saveExternalToken serializes named token metadata", async () => {
+  let requestBody: any = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: { provider_id: "line", token_id: "main", configured: true },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.saveExternalToken("line", "secret", { tokenId: "main", name: "Main", kind: "channel_access_token" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(requestBody, {
+    provider_id: "line",
+    token_id: "main",
+    name: "Main",
+    kind: "channel_access_token",
+    value: "secret",
+  });
+});
+
+test("deleteExternalToken serializes delete action", async () => {
+  let requestBody: any = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: { provider_id: "line", token_id: "main", configured: false },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.deleteExternalToken("line", "main");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(requestBody, {
+    action: "delete",
+    provider_id: "line",
+    token_id: "main",
+  });
+});
+
 test("streamMessage parses SSE deltas and final message", async () => {
   const originalFetch = globalThis.fetch;
   const events: string[] = [];

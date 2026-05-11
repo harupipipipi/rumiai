@@ -4,7 +4,11 @@ from typing import Any, Dict
 
 from blocks._common import ok, error
 from blocks.integrations.common import allow_unsigned_webhook_dev, headers_from_request, raw_body_bytes, text_limit
-from domain.integrations.chat_bridge import dispatch_external_message
+from domain.external.adapters.discord import DiscordResponseAdapter
+from domain.external.normalizer import normalize_discord_interaction, normalize_discord_message
+from domain.external.pipeline import dispatch_external_event
+from domain.external.response import RumiResponse
+from domain.external.response_planner import ResponsePlanner
 from domain.integrations.http_client import post_json
 from domain.integrations.secrets import get_integration_secret, load_integration_secrets_into_env
 
@@ -12,6 +16,7 @@ from domain.integrations.secrets import get_integration_secret, load_integration
 DISCORD_PING = 1
 DISCORD_APPLICATION_COMMAND = 2
 DISCORD_MESSAGE_WITH_SOURCE = 4
+DISCORD_DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE = 5
 
 
 def run(input_data, context):
@@ -27,11 +32,17 @@ def run(input_data, context):
         return {"type": DISCORD_PING}
 
     if payload_type == DISCORD_APPLICATION_COMMAND:
-        result = _handle_interaction(input_data, context)
+        result = _handle_interaction(input_data, context, verified=bool(verification["verified"]))
+        if not _interaction_external_reply_enabled(result):
+            return {
+                "type": DISCORD_DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
+                "rumi": {key: value for key, value in result.items() if key != "assistant_text"},
+                "verified": verification["verified"],
+            }
         return {
             "type": DISCORD_MESSAGE_WITH_SOURCE,
             "data": {
-                "content": text_limit(result.get("assistant_text") or "応答を生成できませんでした。", 2000),
+                "content": text_limit(_interaction_response_text(result), 2000),
                 "allowed_mentions": {"parse": []},
             },
             "rumi": {key: value for key, value in result.items() if key != "assistant_text"},
@@ -39,63 +50,65 @@ def run(input_data, context):
         }
 
     if str(input_data.get("t") or "").upper() == "MESSAGE_CREATE" or input_data.get("content"):
-        result = _handle_message_create(input_data, context)
+        result = _handle_message_create(input_data, context, verified=bool(verification["verified"]))
         return ok({**result, "verified": verification["verified"]})
 
     return ok({"ignored": True, "reason": "unsupported discord payload", "verified": verification["verified"]})
 
 
-def _handle_interaction(input_data: Dict[str, Any], context) -> Dict[str, Any]:
-    data = input_data.get("data") if isinstance(input_data.get("data"), dict) else {}
-    text = _interaction_text(data)
-    channel_id = str(input_data.get("channel_id") or "")
-    user_id = _interaction_user_id(input_data)
-    external_key = "|".join(["discord", str(input_data.get("guild_id") or "dm"), channel_id or user_id or "interaction"])
-    return dispatch_external_message(
-        provider="discord",
-        text=text,
-        external_key=external_key,
-        title="Discord " + (channel_id or user_id or "interaction"),
-        event_id=str(input_data.get("id") or ""),
-        model=str(input_data.get("model") or "") or None,
-        metadata={
-            "interaction_id": input_data.get("id"),
-            "application_id": input_data.get("application_id"),
-            "guild_id": input_data.get("guild_id"),
-            "channel_id": channel_id,
-            "user_id": user_id,
-            "interaction_name": data.get("name"),
-        },
+def _handle_interaction(input_data: Dict[str, Any], context, *, verified: bool = False) -> Dict[str, Any]:
+    external_event = normalize_discord_interaction(input_data, verified=verified)
+    return dispatch_external_event(
+        external_event,
+        input_profile_id="discord.default",
+        audience_policy={"default": "allow"},
         context=context,
+        send_response=True,
     )
 
 
-def _handle_message_create(input_data: Dict[str, Any], context) -> Dict[str, Any]:
+def _handle_message_create(input_data: Dict[str, Any], context, *, verified: bool = False) -> Dict[str, Any]:
     data = input_data.get("d") if isinstance(input_data.get("d"), dict) else input_data
     author = data.get("author") if isinstance(data.get("author"), dict) else {}
     if author.get("bot"):
         return {"status": "ignored", "reason": "bot message", "assistant_text": ""}
     channel_id = str(data.get("channel_id") or input_data.get("channel_id") or "")
-    user_id = str(author.get("id") or data.get("user_id") or "")
-    content = str(data.get("content") or input_data.get("content") or "")
-    external_key = "|".join(["discord", str(data.get("guild_id") or "dm"), channel_id or user_id or "message"])
-    result = dispatch_external_message(
-        provider="discord",
-        text=content,
-        external_key=external_key,
-        title="Discord " + (channel_id or user_id or "message"),
-        event_id=str(data.get("id") or input_data.get("id") or ""),
-        model=str(input_data.get("model") or data.get("model") or "") or None,
-        metadata={
-            "guild_id": data.get("guild_id"),
-            "channel_id": channel_id,
-            "user_id": user_id,
-            "message_id": data.get("id"),
-        },
+    external_event = normalize_discord_message(input_data, verified=verified)
+    result = dispatch_external_event(
+        external_event,
+        input_profile_id="discord.default",
+        audience_policy={"default": "allow"},
         context=context,
+        send_response=True,
     )
-    reply = _send_discord_channel_message(channel_id, result.get("assistant_text", ""))
+    plan = result.get("response_plan") if isinstance(result.get("response_plan"), dict) else ResponsePlanner("discord").plan(RumiResponse.from_result(result))
+    reply = _send_response_plan(plan, external_event)
     return {**result, "reply": reply}
+
+
+def _interaction_response_text(result: dict[str, Any]) -> str:
+    plan = result.get("response_plan") if isinstance(result.get("response_plan"), dict) else {}
+    messages = plan.get("messages") if isinstance(plan.get("messages"), list) else []
+    for message in messages:
+        if isinstance(message, dict) and str(message.get("text") or "").strip():
+            return str(message.get("text") or "").strip()
+    action_plan = (plan.get("metadata") or {}).get("response_action_plan") if isinstance(plan.get("metadata"), dict) else {}
+    if isinstance(action_plan, dict) and not action_plan.get("external_reply", True):
+        return "処理を受け付けました。"
+    return str(result.get("assistant_text") or "応答を生成できませんでした。")
+
+
+def _interaction_external_reply_enabled(result: dict[str, Any]) -> bool:
+    plan = result.get("response_plan") if isinstance(result.get("response_plan"), dict) else {}
+    action_plan = (plan.get("metadata") or {}).get("response_action_plan") if isinstance(plan.get("metadata"), dict) else {}
+    return not isinstance(action_plan, dict) or bool(action_plan.get("external_reply", True))
+
+
+def _send_response_plan(plan: dict[str, Any], external_event) -> Dict[str, Any]:
+    action_plan = (plan.get("metadata") or {}).get("response_action_plan") if isinstance(plan.get("metadata"), dict) else {}
+    if isinstance(action_plan, dict) and not action_plan.get("external_reply", True):
+        return {"sent": False, "reason": "external reply suppressed by response prompt policy"}
+    return DiscordResponseAdapter().send(plan, event=external_event)
 
 
 def _interaction_text(data: Dict[str, Any]) -> str:
@@ -139,14 +152,4 @@ def _verify_discord(headers: Dict[str, str], raw_body: bytes) -> Dict[str, Any]:
 
 
 def _send_discord_channel_message(channel_id: str, text: str) -> Dict[str, Any]:
-    token = get_integration_secret("discord", "DISCORD_BOT_TOKEN")
-    if not token:
-        return {"sent": False, "reason": "DISCORD_BOT_TOKEN not configured"}
-    if not channel_id or not text:
-        return {"sent": False, "reason": "missing channel or text"}
-    response = post_json(
-        "https://discord.com/api/v10/channels/{}/messages".format(channel_id),
-        {"Authorization": "Bot " + token},
-        {"content": text_limit(text, 2000), "allowed_mentions": {"parse": []}},
-    )
-    return {"sent": bool(response.get("ok")), "provider_response": response}
+    return DiscordResponseAdapter().send_channel_message(channel_id, text_limit(text, 2000))

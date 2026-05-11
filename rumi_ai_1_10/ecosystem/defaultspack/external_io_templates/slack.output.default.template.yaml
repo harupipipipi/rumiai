@@ -1,0 +1,30 @@
+id: slack.output.default
+direction: output
+provider: slack
+display_name: Slack Output
+summary: Send messages through Slack Web API to a channel_id/thread_ts.
+output_profile_id: slack.default
+required_setup:
+  any_of:
+    - fields:
+        - bot_token
+        - channel_id
+tokens:
+  - kind: bot_token
+    label: Bot Token
+fields:
+  - id: channel_id
+    label: Channel ID
+    secret: false
+  - id: thread_ts
+    label: Thread TS
+    secret: false
+capabilities_profile: slack
+examples:
+  - id: external_send.slack.channel
+    label: Tool send
+    tool: external_send
+    args:
+      provider: slack
+      channel_id: "Cxxxxxxxx"
+      text: "送信する本文"

@@ -67,13 +67,35 @@ def get_integration_secret(provider_id: str, key: str, *, pack_root: Path | None
     env_value = os.environ.get(normalized_key, "").strip()
     if env_value:
         return env_value
-    if not (_secrets_dir(pack_root) / f"{normalized_key}.json").exists():
+    value = ""
+    if (_secrets_dir(pack_root) / f"{normalized_key}.json").exists():
+        value = _get_store(pack_root)._internal_read_value(
+            normalized_key,
+            caller_id=f"defaultspack.integrations:{normalized_provider}",
+        )
+    if value:
+        return str(value or "").strip()
+    try:
+        from domain.external.token_store import read_external_token
+
+        legacy_kind = {
+            "LINE_CHANNEL_SECRET": "channel_secret",
+            "LINE_CHANNEL_ACCESS_TOKEN": "channel_access_token",
+            "DISCORD_BOT_TOKEN": "bot_token",
+            "DISCORD_APPLICATION_ID": "application_id",
+            "DISCORD_PUBLIC_KEY": "public_key",
+            "SLACK_BOT_TOKEN": "bot_token",
+            "SLACK_SIGNING_SECRET": "signing_secret",
+            "SLACK_APP_TOKEN": "app_token",
+        }.get(normalized_key, "")
+        return read_external_token(
+            normalized_provider,
+            kind=legacy_kind,
+            legacy_key=normalized_key,
+            pack_root=pack_root,
+        )
+    except Exception:
         return ""
-    value = _get_store(pack_root)._internal_read_value(
-        normalized_key,
-        caller_id=f"defaultspack.integrations:{normalized_provider}",
-    )
-    return str(value or "").strip()
 
 
 def load_integration_secrets_into_env(*, pack_root: Path | None = None) -> Dict[str, bool]:

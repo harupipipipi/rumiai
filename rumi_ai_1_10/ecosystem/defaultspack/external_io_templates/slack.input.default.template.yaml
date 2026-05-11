@@ -1,0 +1,35 @@
+id: slack.input.default
+direction: input
+provider: slack
+display_name: Slack Input
+summary: Receive Slack Events API callbacks through a public URL and normalize them to Rumi input.
+setup_steps:
+  - Select Slack Input.
+  - Generate a public URL for /api/integrations/slack/events.
+  - Paste it into Slack Events Request URL.
+  - Save Signing Secret and Bot Token in External Tokens.
+  - Rumi replies to channel/thread with thread_ts when available.
+input_profile_id: slack.default
+endpoint:
+  id: slack-main
+  kind: slack
+  route: /api/integrations/slack/events
+  security:
+    mode: provider_signature
+tokens:
+  - kind: signing_secret
+    label: Signing Secret
+  - kind: bot_token
+    label: Bot Token
+  - kind: app_token
+    label: App Token
+default_response:
+  mode: same_response
+  include_source_context: true
+  source_context_format: "${provider}から来た入力です。"
+response_prompt:
+  enabled: false
+examples:
+  - id: slack.default.same_response
+    label: Default same response
+    prompt: "同じSlack channel/threadへ短く返す。"

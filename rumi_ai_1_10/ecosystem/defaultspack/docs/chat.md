@@ -4,6 +4,19 @@ defaults Pack のチャット機能の全 API リファレンスです。handler
 
 ecosystem.json の chat コンポーネントは 18 個の handler を provides しています: `create_conversation`, `get_conversation`, `list_conversations`, `update_conversation`, `delete_conversation`, `export_conversation`, `send`, `stream`, `add_message`, `get_message`, `update_message`, `delete_message`, `branch`, `search`, `stop`, `regenerate`, `summarize_and_trim`, `auto_trim`。
 
+## External input conversations
+
+External providers should not call chat internals with raw provider payloads.
+Webhook and gateway intake should first produce an `ExternalEvent`, pass
+`AudiencePolicy`, select an `InputProfile`, and call `submit_input`. The chat
+layer then receives a normal user message with external metadata attached.
+
+External conversations should use `conversation_kind: "external"` and stable
+session keys such as `slack:{team_id}:{channel_id}:{thread_id}` or
+`line:{source_type}:{source_id}`. Replies should be planned by
+`ResponsePlanner` and delivered by a `ResponseAdapter`; chat handlers should not
+hold raw provider tokens or construct provider API calls directly.
+
 ## 会話の作成
 
 **handler**: `defaults.chat.create_conversation`（`blocks/chat/create_conversation.py`）

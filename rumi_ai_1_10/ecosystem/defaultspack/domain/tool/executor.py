@@ -140,6 +140,11 @@ class ToolExecutor:
                 "is_error": True,
                 "widget": None,
             }
+        pack_id, _, function_id = qualified_name.partition(":")
+        if isinstance(context, dict) and context.get("user_requested_computer_use"):
+            local_tool = self._first_party_local_tool_for_function(pack_id, function_id)
+            if local_tool in {"browser_computer", "browser_use", "computer_use"}:
+                return self._execute_local(local_tool, arguments or {}, context)
         request = {
             "type": "function.call",
             "qualified_name": qualified_name,
@@ -220,10 +225,15 @@ class ToolExecutor:
             return None
         if getattr(response, "error_type", "") not in {
             "pack_not_approved",
+            "permission_denied",
             "function_not_found",
             "function_registry_unavailable",
         }:
             return None
+        if getattr(response, "error_type", "") == "permission_denied":
+            message = str(getattr(response, "error", "") or "")
+            if "function.call" not in message:
+                return None
         qualified_name = str(request.get("qualified_name") or "")
         pack_id, _, function_id = qualified_name.partition(":")
         if pack_id not in {"defaultspack", "rumi_default_tools_pack"} or not function_id:
@@ -392,6 +402,8 @@ class ToolExecutor:
                 "is_error": True,
                 "widget": None,
             }
+        if isinstance(output, dict) and output.get("status") in {"ok", "error"}:
+            return ToolExecutor._tool_response_from_pack_function_output(output)
         if isinstance(output, dict):
             if "result" in output or "is_error" in output or "widget" in output:
                 return {
@@ -548,6 +560,13 @@ class ToolExecutor:
 
         if not isinstance(result, dict):
             return {"result": str(result), "is_error": False, "widget": None}
+
+        if "result" in result or "is_error" in result or "widget" in result:
+            return {
+                "result": result.get("result", ""),
+                "is_error": bool(result.get("is_error", False)),
+                "widget": result.get("widget"),
+            }
 
         if result.get("status") == "error":
             error_info = result.get("error", {})
