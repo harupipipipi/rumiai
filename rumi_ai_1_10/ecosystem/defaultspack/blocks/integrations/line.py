@@ -51,10 +51,18 @@ def _handle_event(
         input_profile_id="line.default",
         audience_policy={"default": "allow"},
         context=context,
+        send_response=True,
     )
-    plan = ResponsePlanner("line").plan(RumiResponse.from_result(result))
-    reply = LineResponseAdapter().send(plan, event=external_event)
+    plan = result.get("response_plan") if isinstance(result.get("response_plan"), dict) else ResponsePlanner("line").plan(RumiResponse.from_result(result))
+    reply = _send_response_plan(plan, external_event)
     return {**result, "reply": reply}
+
+
+def _send_response_plan(plan: dict[str, Any], external_event) -> Dict[str, Any]:
+    action_plan = (plan.get("metadata") or {}).get("response_action_plan") if isinstance(plan.get("metadata"), dict) else {}
+    if isinstance(action_plan, dict) and not action_plan.get("external_reply", True):
+        return {"sent": False, "reason": "external reply suppressed by response prompt policy"}
+    return LineResponseAdapter().send(plan, event=external_event)
 
 
 def _verify_line(headers: Dict[str, str], raw_body: bytes) -> Dict[str, Any]:

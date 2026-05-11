@@ -16,6 +16,7 @@ from domain.integrations.secrets import get_integration_secret, load_integration
 DISCORD_PING = 1
 DISCORD_APPLICATION_COMMAND = 2
 DISCORD_MESSAGE_WITH_SOURCE = 4
+DISCORD_DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE = 5
 
 
 def run(input_data, context):
@@ -32,10 +33,16 @@ def run(input_data, context):
 
     if payload_type == DISCORD_APPLICATION_COMMAND:
         result = _handle_interaction(input_data, context, verified=bool(verification["verified"]))
+        if not _interaction_external_reply_enabled(result):
+            return {
+                "type": DISCORD_DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
+                "rumi": {key: value for key, value in result.items() if key != "assistant_text"},
+                "verified": verification["verified"],
+            }
         return {
             "type": DISCORD_MESSAGE_WITH_SOURCE,
             "data": {
-                "content": text_limit(result.get("assistant_text") or "応答を生成できませんでした。", 2000),
+                "content": text_limit(_interaction_response_text(result), 2000),
                 "allowed_mentions": {"parse": []},
             },
             "rumi": {key: value for key, value in result.items() if key != "assistant_text"},
@@ -56,6 +63,7 @@ def _handle_interaction(input_data: Dict[str, Any], context, *, verified: bool =
         input_profile_id="discord.default",
         audience_policy={"default": "allow"},
         context=context,
+        send_response=True,
     )
 
 
@@ -71,10 +79,36 @@ def _handle_message_create(input_data: Dict[str, Any], context, *, verified: boo
         input_profile_id="discord.default",
         audience_policy={"default": "allow"},
         context=context,
+        send_response=True,
     )
-    plan = ResponsePlanner("discord").plan(RumiResponse.from_result(result))
-    reply = DiscordResponseAdapter().send(plan, event=external_event)
+    plan = result.get("response_plan") if isinstance(result.get("response_plan"), dict) else ResponsePlanner("discord").plan(RumiResponse.from_result(result))
+    reply = _send_response_plan(plan, external_event)
     return {**result, "reply": reply}
+
+
+def _interaction_response_text(result: dict[str, Any]) -> str:
+    plan = result.get("response_plan") if isinstance(result.get("response_plan"), dict) else {}
+    messages = plan.get("messages") if isinstance(plan.get("messages"), list) else []
+    for message in messages:
+        if isinstance(message, dict) and str(message.get("text") or "").strip():
+            return str(message.get("text") or "").strip()
+    action_plan = (plan.get("metadata") or {}).get("response_action_plan") if isinstance(plan.get("metadata"), dict) else {}
+    if isinstance(action_plan, dict) and not action_plan.get("external_reply", True):
+        return "処理を受け付けました。"
+    return str(result.get("assistant_text") or "応答を生成できませんでした。")
+
+
+def _interaction_external_reply_enabled(result: dict[str, Any]) -> bool:
+    plan = result.get("response_plan") if isinstance(result.get("response_plan"), dict) else {}
+    action_plan = (plan.get("metadata") or {}).get("response_action_plan") if isinstance(plan.get("metadata"), dict) else {}
+    return not isinstance(action_plan, dict) or bool(action_plan.get("external_reply", True))
+
+
+def _send_response_plan(plan: dict[str, Any], external_event) -> Dict[str, Any]:
+    action_plan = (plan.get("metadata") or {}).get("response_action_plan") if isinstance(plan.get("metadata"), dict) else {}
+    if isinstance(action_plan, dict) and not action_plan.get("external_reply", True):
+        return {"sent": False, "reason": "external reply suppressed by response prompt policy"}
+    return DiscordResponseAdapter().send(plan, event=external_event)
 
 
 def _interaction_text(data: Dict[str, Any]) -> str:

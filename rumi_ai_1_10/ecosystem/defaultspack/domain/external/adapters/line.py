@@ -12,6 +12,8 @@ class LineResponseAdapter(ResponseAdapter):
 
     def send(self, plan: dict[str, Any], *, event=None, context: dict[str, Any] | None = None) -> dict[str, Any]:
         del context
+        if not _external_reply_allowed(plan):
+            return {"sent": False, "reason": "external reply suppressed by response prompt policy"}
         reply_token = ""
         source = {}
         if event is not None:
@@ -54,3 +56,14 @@ class LineResponseAdapter(ResponseAdapter):
             {"to": user_id, "messages": [{"type": "text", "text": text[:5000]}]},
         )
         return {"sent": bool(response.get("ok")), "provider_response": response}
+
+
+def _external_reply_allowed(plan: dict[str, Any]) -> bool:
+    metadata = plan.get("metadata") if isinstance(plan.get("metadata"), dict) else {}
+    action_plan = metadata.get("response_action_plan") if isinstance(metadata.get("response_action_plan"), dict) else {}
+    if action_plan and not action_plan.get("external_reply", True):
+        return False
+    decision = metadata.get("response_prompt_decision") if isinstance(metadata.get("response_prompt_decision"), dict) else {}
+    if str(decision.get("sensitivity") or "").lower() == "local_only":
+        return False
+    return True
