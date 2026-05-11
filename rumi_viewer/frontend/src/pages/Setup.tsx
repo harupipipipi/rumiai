@@ -44,28 +44,6 @@ export function Setup() {
     };
   }, [loadProfile]);
 
-  useEffect(() => {
-    void loadProfile();
-  }, [loadProfile]);
-
-  useEffect(() => {
-    const refreshProfile = () => {
-      void loadProfile();
-    };
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === 'visible') {
-        refreshProfile();
-      }
-    };
-
-    window.addEventListener('focus', refreshProfile);
-    document.addEventListener('visibilitychange', refreshWhenVisible);
-    return () => {
-      window.removeEventListener('focus', refreshProfile);
-      document.removeEventListener('visibilitychange', refreshWhenVisible);
-    };
-  }, [loadProfile]);
-
   // Handle OAuth callback redirect params
   useEffect(() => {
     const isLinked = searchParams.get('linked');
@@ -91,28 +69,12 @@ export function Setup() {
       return;
     }
 
-    setLinked(true);
-    setSetupDone(true);
-    addToast(t('setup.link_success') || 'Account linked successfully!', 'success');
-    const timer = setTimeout(() => {
-      navigate(panelRoutes.home);
-    }, 1500);
-    return () => clearTimeout(timer);
-  }, [profile.connected, linked, setSetupDone, addToast, navigate, t]);
-
-  useEffect(() => {
-    if (!profile.connected || linked) {
-      return;
-    }
-
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
     setLoading(true);
     void finalizeSetup()
       .then(() => {
-        if (!alive) {
-          return;
-        }
+        if (!alive) return;
         setLinked(true);
         addToast(t('setup.link_success') || 'Account linked successfully!', 'success');
         timer = setTimeout(() => {
@@ -120,18 +82,14 @@ export function Setup() {
         }, 1500);
       })
       .catch(() => {
-        if (!alive) {
-          return;
-        }
+        if (!alive) return;
         addToast(t('setup.connect_failed') || 'Failed to connect', 'error');
         setLoading(false);
       });
 
     return () => {
       alive = false;
-      if (timer) {
-        clearTimeout(timer);
-      }
+      if (timer) clearTimeout(timer);
     };
   }, [profile.connected, linked, addToast, navigate, t]);
 
@@ -157,11 +115,15 @@ export function Setup() {
 
   if (linked) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-bg-main p-4 transition-colors duration-200">
-        <div className="flex w-full max-w-md flex-col items-center justify-center gap-6 text-center animate-in fade-in zoom-in-95">
-          <CheckCircle2 className="h-16 w-16 text-green-500" />
-          <h1 className="text-2xl font-bold text-text-main">{t('setup.linked_title') || 'Account Linked!'}</h1>
-          <p className="text-text-muted">{t('setup.redirecting') || 'Redirecting to dashboard...'}</p>
+      <div className="flex min-h-screen items-center justify-center bg-bg-main p-6">
+        <div className="flex w-full max-w-sm flex-col items-center gap-6 text-center page-enter">
+          <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-50 dark:bg-emerald-950/30">
+            <CheckCircle2 className="h-7 w-7 text-emerald-500" />
+          </div>
+          <div>
+            <h1 className="text-xl font-semibold text-text-main">{t('setup.linked_title') || 'Account Linked!'}</h1>
+            <p className="mt-2 text-sm text-text-muted">{t('setup.redirecting') || 'Redirecting to dashboard...'}</p>
+          </div>
           <Loader2 className="h-5 w-5 animate-spin text-accent" />
         </div>
       </div>
@@ -169,24 +131,35 @@ export function Setup() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-bg-main p-4 transition-colors duration-200">
-      <div className="flex w-full max-w-md flex-col items-center justify-center gap-8 text-center animate-in fade-in zoom-in-95">
+    <div className="flex min-h-screen items-center justify-center bg-bg-main p-6">
+      <div className="flex w-full max-w-md flex-col items-center gap-10 text-center page-enter">
+        {/* Logo + Title */}
         <div className="flex flex-col items-center gap-4">
-          <div className="flex h-24 w-24 items-center justify-center rounded-[var(--radius)] bg-bg-hover shadow-xl overflow-hidden">
-            <img src="https://picsum.photos/seed/rumi/200/200" alt="Rumi Logo" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-accent/10">
+            <span className="text-2xl font-bold text-accent">R</span>
           </div>
-          <h1 className="text-4xl font-bold tracking-tight text-text-main">Rumi AI</h1>
-          <p className="text-text-muted">{t('setup.subtitle')}</p>
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight text-text-main">Welcome to Rumi AI</h1>
+            <p className="mt-2 text-sm text-text-muted">{t('setup.subtitle')}</p>
+          </div>
         </div>
 
-        <div className="flex w-full flex-col gap-4">
-          <Button size="lg" className="w-full text-base" onClick={handleConnect} disabled={loading}>
-            {loading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : null}
+        {/* Step indicator */}
+        <div className="flex items-center gap-2">
+          <div className="h-1.5 w-8 rounded-full bg-accent" />
+          <div className="h-1.5 w-8 rounded-full bg-border" />
+        </div>
+
+        {/* Actions: primary right, secondary left */}
+        <div className="flex w-full flex-col gap-3">
+          <Button size="lg" className="w-full" onClick={handleConnect} disabled={loading} loading={loading}>
             {t('setup.connect_rumi')}
           </Button>
-          <Button variant="ghost" className="w-full" onClick={handleSkip} disabled={loading}>
-            {t('setup.skip')}
-          </Button>
+          <div className="flex justify-start">
+            <Button variant="ghost" onClick={handleSkip} disabled={loading}>
+              {t('setup.skip')}
+            </Button>
+          </div>
         </div>
       </div>
     </div>
