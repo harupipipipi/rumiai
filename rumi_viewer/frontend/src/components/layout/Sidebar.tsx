@@ -3,116 +3,102 @@ import { useAppStore } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
 import { cn } from '@/src/lib/utils';
 import { panelRoutes } from '@/src/lib/routes';
-import { Folder, GitBranch, LayoutGrid, Network, Settings, PanelLeft, Home } from 'lucide-react';
+import { Folder, LayoutGrid, Network, Settings, PanelLeft, Home, GitBranch } from 'lucide-react';
 
 export function Sidebar() {
   const t = useT();
   const location = useLocation();
   const profile = useAppStore(state => state.profile);
-  const theme = useAppStore(state => state.theme);
   const isSidebarOpen = useAppStore(state => state.isSidebarOpen);
   const setSidebarOpen = useAppStore(state => state.setSidebarOpen);
 
+  // Ordered: general user first → advanced/developer last
   const links = [
     { to: panelRoutes.home, icon: Home, label: t('nav.home') },
     { to: panelRoutes.packs, icon: Folder, label: t('nav.packs') },
+    { to: panelRoutes.flows, icon: LayoutGrid, label: t('nav.flows') },
     { to: panelRoutes.nodes, icon: Network, label: t('nav.nodes') },
     { to: panelRoutes.graphEditor, icon: GitBranch, label: 'Graphs' },
-    { to: panelRoutes.flows, icon: LayoutGrid, label: t('nav.flows') },
     { to: panelRoutes.settings, icon: Settings, label: t('nav.settings') },
   ];
-
 
   return (
     <aside
       className={cn(
-        "flex-shrink-0 flex flex-col bg-bg-sidebar border-r border-border transition-all duration-300 overflow-hidden",
-        isSidebarOpen ? "w-[260px]" : "w-14"
+        "flex-shrink-0 flex flex-col bg-bg-sidebar border-r border-border transition-[width] duration-[var(--transition-slow)] overflow-hidden",
+        isSidebarOpen ? "w-[240px]" : "w-[56px]"
       )}
     >
-      {/* Logo Area */}
-      <div className={cn("p-3 flex items-center", isSidebarOpen ? "justify-between" : "justify-center")}>
-        {isSidebarOpen ? (
-          <div className="flex items-center gap-2 px-2">
-            {theme === 'Rumi' && <span className="font-bold text-lg tracking-wide text-text-main">Rumi AI</span>}
-            {theme === 'Minimal' && <span className="font-serif text-lg font-medium tracking-wide text-text-main">Rumi</span>}
-            {theme === 'Standard' && <span className="font-medium text-lg text-text-main">Rumi</span>}
-            {theme === 'Rounded' && <span className="text-xl font-medium text-text-main">Rumi</span>}
-          </div>
-        ) : null}
+      {/* Brand + Toggle */}
+      <div className={cn("flex items-center h-14 border-b border-border", isSidebarOpen ? "px-4 justify-between" : "justify-center")}>
+        {isSidebarOpen && (
+          <span className="text-base font-semibold tracking-tight text-text-main">Rumi AI</span>
+        )}
         <button
           onClick={() => setSidebarOpen(!isSidebarOpen)}
-          className="p-1.5 hover:bg-bg-hover rounded-md text-text-muted transition-colors"
-          title={isSidebarOpen ? "Close sidebar" : "Expand sidebar"}
+          className="p-1.5 rounded-md text-text-muted hover:bg-bg-hover hover:text-text-main transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring-color)]"
+          aria-label={isSidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
         >
-          <PanelLeft className={cn("w-5 h-5 transition-transform duration-300", !isSidebarOpen && "rotate-180")} />
+          <PanelLeft className={cn("w-4 h-4 transition-transform duration-[var(--transition-slow)]", !isSidebarOpen && "rotate-180")} />
         </button>
       </div>
 
-      {/* Navigation Links */}
-      <div className={cn(
-        "py-2 space-y-1 flex-1 overflow-y-auto",
-        isSidebarOpen ? "px-3" : "px-1.5"
-      )}>
-        {links.map((link: any) => {
-          const isActive =
-            location.pathname === link.to ||
-            (link.to !== panelRoutes.home && location.pathname.startsWith(link.to));
-          return (
-            <Link
-              key={link.to}
-              to={link.to}
-              title={!isSidebarOpen ? link.label : undefined}
-              className={cn(
-                "group relative flex items-center rounded-xl transition-all duration-200 font-medium text-sm",
-                isSidebarOpen ? "w-full gap-3 px-3 py-2.5" : "justify-center p-3 mt-1",
-                isActive 
-                  ? "bg-accent/10 text-accent" 
-                  : "text-text-muted hover:bg-bg-hover/80 hover:text-text-main"
-              )}
-            >
-              {isActive && isSidebarOpen && (
-                <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-5 bg-accent rounded-r-full" />
-              )}
-              <div className={cn(
-                "p-1 rounded-md transition-colors",
-                isActive && !isSidebarOpen ? "bg-accent/10" : ""
-              )}>
-                <link.icon className={cn("w-5 h-5", isActive ? "text-accent" : "group-hover:text-text-main")} />
-              </div>
-              {isSidebarOpen && <span>{link.label}</span>}
-            </Link>
-          );
-        })}
-      </div>
+      {/* Navigation */}
+      <nav className={cn("flex-1 overflow-y-auto py-3", isSidebarOpen ? "px-3" : "px-1.5")} aria-label="Main navigation">
+        <ul className="space-y-1">
+          {links.map((link) => {
+            const isActive =
+              location.pathname === link.to ||
+              (link.to !== panelRoutes.home && location.pathname.startsWith(link.to));
+            return (
+              <li key={link.to}>
+                <Link
+                  to={link.to}
+                  title={!isSidebarOpen ? link.label : undefined}
+                  aria-current={isActive ? 'page' : undefined}
+                  className={cn(
+                    "group relative flex items-center rounded-lg transition-colors duration-[var(--transition-fast)] text-sm font-medium",
+                    isSidebarOpen ? "gap-3 px-3 py-2" : "justify-center p-2.5",
+                    isActive
+                      ? "bg-accent/8 text-accent"
+                      : "text-text-muted hover:bg-bg-hover hover:text-text-main"
+                  )}
+                >
+                  {isActive && isSidebarOpen && (
+                    <div className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 bg-accent rounded-r-full" />
+                  )}
+                  <link.icon className={cn("w-[18px] h-[18px] shrink-0", isActive ? "text-accent" : "text-text-muted group-hover:text-text-main")} />
+                  {isSidebarOpen && <span>{link.label}</span>}
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      </nav>
 
-      {/* Bottom section: toggle + profile */}
-      <div className="mt-auto border-t border-border">
+      {/* User section */}
+      <div className="border-t border-border">
         <div className={cn(isSidebarOpen ? "p-3" : "p-1.5 flex justify-center")}>
           <Link
             to={panelRoutes.settings}
-            title={!isSidebarOpen ? t('nav.settings') : undefined}
+            title={!isSidebarOpen ? profile.username : undefined}
             className={cn(
-              "hover:bg-bg-hover rounded-lg transition-colors",
-              isSidebarOpen ? "w-full flex items-center justify-between p-2" : "flex justify-center p-1.5"
+              "flex items-center rounded-lg transition-colors hover:bg-bg-hover",
+              isSidebarOpen ? "gap-3 p-2 w-full" : "p-2 justify-center"
             )}
           >
-            <div className={cn("flex items-center", isSidebarOpen && "gap-3")}>
-              {profile.avatar ? (
-                <img src={profile.avatar} alt="User" className="w-8 h-8 rounded-full object-cover border border-border" referrerPolicy="no-referrer" />
-              ) : (
-                <div className="w-8 h-8 rounded-full bg-gradient-to-r from-green-400 to-blue-500 flex items-center justify-center text-white font-bold text-sm">
-                  {profile.username.charAt(0).toUpperCase()}
-                </div>
-              )}
-              {isSidebarOpen && (
-                <div className="text-left leading-tight">
-                  <div className="text-[13px] font-medium text-text-main">{profile.username}</div>
-                  <div className="text-[11px] text-text-muted">{t('nav.admin')}</div>
-                </div>
-              )}
-            </div>
-            {isSidebarOpen && <Settings className="w-4 h-4 text-text-muted" />}
+            {profile.avatar ? (
+              <img src={profile.avatar} alt="" className="w-7 h-7 rounded-full object-cover border border-border" referrerPolicy="no-referrer" />
+            ) : (
+              <div className="w-7 h-7 rounded-full bg-accent/20 flex items-center justify-center text-accent text-xs font-semibold">
+                {profile.username.charAt(0).toUpperCase()}
+              </div>
+            )}
+            {isSidebarOpen && (
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-medium text-text-main truncate">{profile.username}</div>
+              </div>
+            )}
           </Link>
         </div>
       </div>
