@@ -1,0 +1,33 @@
+id: line.output.default
+direction: output
+provider: line
+display_name: LINE Output
+summary: Reply or push through LINE Messaging API.
+output_profile_id: line.default
+required_setup:
+  any_of:
+    - fields:
+        - channel_access_token
+        - reply_token
+    - fields:
+        - channel_access_token
+        - user_id
+tokens:
+  - kind: channel_access_token
+    label: Channel Access Token
+fields:
+  - id: reply_token
+    label: Reply Token
+    secret: false
+  - id: user_id
+    label: User/Group/Room ID
+    secret: false
+capabilities_profile: line
+examples:
+  - id: external_send.line.push
+    label: Tool send
+    tool: external_send
+    args:
+      provider: line
+      target_id: "Uxxxxxxxx"
+      text: "送信する本文"

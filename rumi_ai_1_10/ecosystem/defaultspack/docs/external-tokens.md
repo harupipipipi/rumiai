@@ -13,6 +13,7 @@ debug dumps, generated docs, or delivery status.
 | Signing secret | Slack signing secret, LINE channel secret | Verify inbound webhooks |
 | Public verification key | Discord public key | Verify inbound interactions |
 | Outbound bot token | Slack bot token, Discord bot token, LINE channel access token | Send replies |
+| Webhook URL | Discord webhook URL or generic callback secret | Send provider-specific webhook messages |
 | Local intake token | Gateway bearer token or webhook shared token | Protect local intake |
 | Reply handle | LINE reply token, Discord interaction id/token | Send short-lived response |
 

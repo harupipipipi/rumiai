@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 from domain.external.event import ExternalEvent
 from domain.external.input_profile import InputProfile
+from domain.external.redaction import redact_sensitive
 from domain.external.response import RumiResponse
 from domain.input.envelope import RumiInputEnvelope
 
@@ -44,6 +45,7 @@ class ResponsePromptDecision:
     approved_for_execution: bool = False
     fallback: bool = False
     error: str = ""
+    output: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -74,6 +76,7 @@ class ResponsePromptDecision:
             "allows_external_reply": self.allows_external_reply,
             "executable": self.executable,
             "fallback": self.fallback,
+            "output": redact_sensitive(dict(self.output)),
             "metadata": dict(self.metadata),
         }
         if self.error:
@@ -104,6 +107,7 @@ class ResponsePromptPolicy:
             )
         )
         self.allowed_actions = self._parse_allowed_actions(self.config.get("allowed_actions"))
+        self.allowed_outputs = self._parse_allowed_outputs(self.config.get("allowed_outputs"))
         fallback_action = str(self.config.get("fallback_action") or "reply_text").strip()
         self.fallback_action = fallback_action if fallback_action in self.allowed_actions else sorted(self.allowed_actions)[0]
         self.tools = self.config.get("tools") if isinstance(self.config.get("tools"), dict) else {}
@@ -224,6 +228,11 @@ class ResponsePromptPolicy:
             decision_metadata.update(data["metadata"])
         if tool_name:
             decision_metadata["tool"] = tool_name
+        output = self._parse_output(data)
+        if output and not self._output_allowed(output):
+            rejected_metadata = dict(metadata)
+            rejected_metadata["rejected_output"] = redact_sensitive(output)
+            return self._fallback_decision("output target not allowed", rejected_metadata)
 
         requires_approval = bool(data.get("requires_approval")) or self._requires_approval(action, tool_name)
         return ResponsePromptDecision(
@@ -234,6 +243,7 @@ class ResponsePromptPolicy:
             sensitivity=sensitivity,
             requires_approval=requires_approval,
             approved_for_execution=bool(approved_for_execution or data.get("approved_for_execution")),
+            output=output,
             metadata=decision_metadata,
         )
 
@@ -252,6 +262,7 @@ class ResponsePromptPolicy:
             sensitivity="public",
             fallback=True,
             error=error,
+            output={},
             metadata=fallback_metadata,
         )
 
@@ -264,6 +275,31 @@ class ResponsePromptPolicy:
             actions = {"reply_text"}
         actions = {item for item in actions if item in KNOWN_ACTIONS}
         return actions or {"reply_text"}
+
+    @staticmethod
+    def _parse_allowed_outputs(value: Any) -> set[str]:
+        if not isinstance(value, list):
+            return set()
+        return {str(item).strip() for item in value if str(item).strip()}
+
+    @staticmethod
+    def _parse_output(data: dict[str, Any]) -> dict[str, Any]:
+        raw = data.get("output") if isinstance(data.get("output"), dict) else data.get("target")
+        output = dict(raw) if isinstance(raw, dict) else {}
+        output_profile_id = str(data.get("output_profile_id") or output.get("output_profile_id") or "").strip()
+        if output_profile_id:
+            output["output_profile_id"] = output_profile_id
+        provider = str(data.get("output_provider") or output.get("provider") or "").strip()
+        if provider:
+            output["provider"] = provider
+        return output
+
+    def _output_allowed(self, output: dict[str, Any]) -> bool:
+        if not self.allowed_outputs:
+            return True
+        output_id = str(output.get("output_profile_id") or output.get("id") or "").strip()
+        provider = str(output.get("provider") or "").strip()
+        return bool((output_id and output_id in self.allowed_outputs) or (provider and provider in self.allowed_outputs))
 
     def _tool_name_for_decision(self, data: dict[str, Any], action: str) -> str:
         tool = data.get("tool") or data.get("tool_name")

@@ -1,0 +1,37 @@
+id: line.input.default
+direction: input
+provider: line
+display_name: LINE Input
+summary: Receive LINE Messaging API events and normalize them to Rumi input.
+input_profile_id: line.default
+endpoint:
+  id: line-main
+  kind: line
+  route: /api/integrations/line/webhook
+  security:
+    mode: provider_signature
+tokens:
+  - kind: channel_secret
+    label: Channel Secret
+  - kind: channel_access_token
+    label: Channel Access Token
+default_response:
+  mode: same_response
+  include_source_context: true
+  source_context_format: "${provider}から来た入力です。"
+response_prompt:
+  enabled: false
+examples:
+  - id: line.default.same_response
+    label: Default same response
+    prompt: "同じ会話へ短く返答する。送信元は既定で会話文脈に入れる。"
+  - id: line.to.discord
+    label: LINE to Discord
+    prompt: "LINEから来た内容を要約し、external_send toolでDiscordの指定channel_idへ送ってから、LINEには受付済みと返す。"
+  - id: line.to.web
+    label: LINE to Web
+    prompt: "LINEから来た内容をローカル/Web出力へ保存し、外部返信は必要な場合だけ短く返す。"
+  - id: line.biz.computer_use
+    label: LINE Official Account Manager via computer_use
+    prompt: |
+      Google Chromeをcomputer_useで操作して起動し、https://chat.line.biz/U938c119aee3803767d500905c221a1f4/chat/C7d9e77e21e38512175c081f235f0aec8 にアクセスして返答して。

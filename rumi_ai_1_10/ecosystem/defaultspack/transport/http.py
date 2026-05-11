@@ -31,6 +31,7 @@ _SAFE_GET_FALLBACK_BLOCKS = {
     "blocks.ai.providers",
     "blocks.chat.get_conversation",
     "blocks.chat.list_conversations",
+    "blocks.external.templates",
     "blocks.tool.list",
     "blocks.ui.catalog",
     "blocks.ui.commands",

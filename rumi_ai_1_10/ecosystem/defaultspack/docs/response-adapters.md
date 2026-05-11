@@ -32,6 +32,11 @@ The planner reads the prompt decision, provider limits, event audience, and
 runtime output metadata. Provider length limits, file limits, and sensitivity
 checks still happen after the prompt decision.
 
+Output profiles are the outbound counterpart to input profiles. Built-in
+profiles cover LINE reply/push, Discord bot channel messages, Discord webhook
+URLs, Slack channel/thread messages, generic webhook callbacks, and local web
+output. Custom profiles can be placed in `user_data/shared/output_profiles`.
+
 ## Response Prompt Policy
 
 `response_prompt` is a prompt-routed planning policy. It may inspect the event,
@@ -46,6 +51,8 @@ Policy fields are defined in `schemas/response_prompt_policy.schema.yaml`:
   return;
 - `tools`: tool visibility and approval requirements for planning context;
 - `output_schema`: the expected structured shape of the prompt decision;
+- `allowed_outputs`: optional output profile ids or providers the prompt may
+  target;
 - `fallback`: the safe action to use when the prompt output is invalid or
   denied;
 - `sensitivity`: visibility defaults and external delivery constraints.
@@ -73,6 +80,9 @@ response_prompt:
       enabled: true
       requires_approval: false
       sandbox: true
+    external_send:
+      enabled: true
+      requires_approval: true
   system_prompt: |
     Decide how Rumi should respond. Use browser_use only when current
     external information is needed. Return strict JSON.
@@ -83,6 +93,11 @@ response_prompt:
     User input: ${input.text}
     Assistant result: ${response.text}
 ```
+
+For cross-provider actions, the prompt should return a plan such as
+`run_tool` with `tool: external_send`. That tool is approval-gated and uses the
+same LINE, Discord, Slack, and generic webhook adapters as normal response
+delivery. The prompt never receives raw bot tokens or webhook secrets.
 
 ## ResponsePlan
 
@@ -139,7 +154,9 @@ the webhook handler can return an ack while the adapter sends later.
 | `line-reply` | LINE reply API using a short-lived reply token reference |
 | `discord-interaction` | Discord interaction response body |
 | `discord-channel` | Discord channel message API |
+| `discord-webhook` | Discord webhook URL |
 | `webhook-json` | Generic JSON response or callback URL |
+| `external_send` | Tool-backed LINE/Discord/Slack/generic send after approval |
 
 The adapter id is selected by `InputProfile`, not by the chat handler.
 

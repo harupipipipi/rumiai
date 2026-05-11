@@ -15,6 +15,8 @@ from domain.chat.store import ChatStore
 from domain.dev.inspector import Inspector
 from domain.extensions.runtime import get_extension_registry
 from domain.external.input_profile_registry import InputProfileRegistry
+from domain.external.io_templates import external_io_template_catalog
+from domain.external.output_profile_registry import OutputProfileRegistry
 from domain.external.token_store import external_token_status, set_external_token
 from domain.tool.registry import ToolRegistry
 from domain.webhook.endpoint_store import WebhookEndpointStore
@@ -596,9 +598,59 @@ class FrontendRegistry:
                 ],
             },
             {
-                "id": "external_inputs",
-                "label": "External Inputs",
-                "description": "Webhook endpoints, profiles, policies, response planning, and provider tokens.",
+                "id": "external_input",
+                "label": "External Input",
+                "description": "Inbound routes, input profiles, audience policy, and default response behavior.",
+                "fields": [
+                    {
+                        "id": "endpoint_summary",
+                        "label": "Input Endpoints",
+                        "type": "readonly",
+                        "default": "No endpoints",
+                    },
+                    {
+                        "id": "input_template_summary",
+                        "label": "Input Templates",
+                        "type": "readonly",
+                        "default": "LINE / Discord / Slack / Generic / Custom",
+                    },
+                    {
+                        "id": "input_profile_summary",
+                        "label": "Input Profiles",
+                        "type": "readonly",
+                        "default": "No profiles",
+                    },
+                    {
+                        "id": "include_source_context",
+                        "label": "Tell Source By Default",
+                        "type": "toggle",
+                        "default": True,
+                        "help": "外部入力をchatへ渡す時に、LINE/Discord/Slackなど送信元を既定で伝えます。",
+                    },
+                    {
+                        "id": "default_response_mode",
+                        "label": "Default Response",
+                        "type": "select",
+                        "default": "same_response",
+                        "options": [
+                            {"value": "same_response", "label": "Same response"},
+                            {"value": "custom_prompt", "label": "Custom prompt"},
+                            {"value": "store_only", "label": "Store only"},
+                        ],
+                        "help": "default は同じ応答。それ以外は response_prompt でカスタム指示できます。",
+                    },
+                    {
+                        "id": "policy_summary",
+                        "label": "Audience Policies",
+                        "type": "readonly",
+                        "default": "Default allow/deny policies are evaluated server-side.",
+                    },
+                ],
+            },
+            {
+                "id": "external_output",
+                "label": "External Output",
+                "description": "Provider-neutral response profiles, output templates, and token management.",
                 "fields": [
                     {
                         "id": "external_tokens",
@@ -608,34 +660,54 @@ class FrontendRegistry:
                         "help": "Named external tokens are masked and use the same secret-store pattern as API keys.",
                     },
                     {
-                        "id": "endpoint_summary",
-                        "label": "Webhook Endpoints",
+                        "id": "output_template_summary",
+                        "label": "Output Templates",
                         "type": "readonly",
-                        "default": "No endpoints",
+                        "default": "Discord bot/channel or webhook URL, LINE reply/push, Slack channel, Generic webhook, Web/local.",
                     },
                     {
-                        "id": "input_profile_summary",
-                        "label": "Input Profiles",
+                        "id": "output_profile_summary",
+                        "label": "Output Profiles",
                         "type": "readonly",
-                        "default": "No profiles",
-                    },
-                    {
-                        "id": "policy_summary",
-                        "label": "Audience Policies",
-                        "type": "readonly",
-                        "default": "Default allow/deny policies are evaluated server-side.",
+                        "default": "Provider capabilities drive response planning.",
                     },
                     {
                         "id": "response_summary",
-                        "label": "Response Profiles",
+                        "label": "Response Prompt Policy",
                         "type": "readonly",
-                        "default": "Provider capabilities drive response planning.",
+                        "default": "Prompt decisions create action plans; tools/adapters execute after policy checks.",
                     },
                     {
                         "id": "public_url_summary",
                         "label": "Temporary Public URLs",
                         "type": "readonly",
                         "default": "Providers: static, cloudflare_quick_tunnel",
+                    },
+                ],
+            },
+            {
+                "id": "external_custom",
+                "label": "External Custom",
+                "description": "Custom input/output templates loaded from registration API or extension files.",
+                "fields": [
+                    {
+                        "id": "custom_template_path",
+                        "label": "Template Extension Path",
+                        "type": "readonly",
+                        "default": "user_data/shared/external_io_templates",
+                    },
+                    {
+                        "id": "custom_profile_paths",
+                        "label": "Profile Extension Paths",
+                        "type": "readonly",
+                        "default": "user_data/shared/input_profiles, user_data/shared/output_profiles",
+                    },
+                    {
+                        "id": "custom_prompt_examples",
+                        "label": "Custom Prompt Examples",
+                        "type": "textarea",
+                        "default": "",
+                        "help": "例: Google Chromeをcomputer_useで操作して起動し、指定のLINE Official Account Manager URLにアクセスして返答する。",
                     },
                 ],
             },
@@ -1208,13 +1280,29 @@ class FrontendRegistry:
                 "api_keys": [],
                 "model_api_routes": "",
             },
-            "external_inputs": {
-                "external_tokens": [],
+            "external_input": {
                 "endpoint_summary": "",
+                "input_template_summary": "LINE / Discord / Slack / Generic / Custom",
                 "input_profile_summary": "",
+                "include_source_context": True,
+                "default_response_mode": "same_response",
                 "policy_summary": "Default allow/deny policies are evaluated server-side.",
-                "response_summary": "Provider capabilities drive response planning.",
+            },
+            "external_output": {
+                "external_tokens": [],
+                "output_template_summary": "Discord bot/channel or webhook URL, LINE reply/push, Slack channel, Generic webhook, Web/local.",
+                "output_profile_summary": "",
+                "response_summary": "Prompt decisions create action plans; tools/adapters execute after policy checks.",
                 "public_url_summary": "Providers: static, cloudflare_quick_tunnel",
+            },
+            "external_custom": {
+                "custom_template_path": "user_data/shared/external_io_templates",
+                "custom_profile_paths": "user_data/shared/input_profiles, user_data/shared/output_profiles",
+                "custom_prompt_examples": (
+                    "Google Chromeをcomputer_useで操作して起動し、"
+                    "https://chat.line.biz/U938c119aee3803767d500905c221a1f4/chat/C7d9e77e21e38512175c081f235f0aec8 "
+                    "にアクセスして返答して。"
+                ),
             },
         }
 
@@ -1382,9 +1470,11 @@ class FrontendRegistry:
                         name=name,
                     )
             apis["api_keys"] = []
-        external_inputs = sanitized.get("external_inputs")
-        if isinstance(external_inputs, dict):
-            token_patch = external_inputs.pop("external_tokens", None)
+        external_output = sanitized.get("external_output")
+        legacy_external_inputs = sanitized.get("external_inputs")
+        token_container = external_output if isinstance(external_output, dict) else legacy_external_inputs
+        if isinstance(token_container, dict):
+            token_patch = token_container.pop("external_tokens", None)
             if isinstance(token_patch, dict) and token_patch.get("action") == "upsert":
                 provider_id = str(token_patch.get("provider_id") or "").strip()
                 token_id = str(token_patch.get("token_id") or token_patch.get("name") or "").strip()
@@ -1398,7 +1488,9 @@ class FrontendRegistry:
                         name=str(token_patch.get("name") or token_id),
                         kind=str(token_patch.get("kind") or "token"),
                     )
-            external_inputs["external_tokens"] = []
+            token_container["external_tokens"] = []
+        if isinstance(legacy_external_inputs, dict) and "external_inputs" in sanitized:
+            sanitized.pop("external_inputs", None)
         models = sanitized.get("models")
         if isinstance(models, dict):
             sanitized["models"] = ModelRuntimeSettingsService(
@@ -1430,23 +1522,72 @@ class FrontendRegistry:
             if isinstance(routes, list):
                 routes = "\n".join(str(item).strip() for item in routes if str(item).strip())
             apis["model_api_routes"] = str(routes or "").strip() + ("\n" if str(routes or "").strip() else "")
-        external_inputs = refreshed.setdefault("external_inputs", {})
-        if isinstance(external_inputs, dict):
-            external_inputs["external_tokens"] = external_token_status(pack_root=self._pack_root)
-            endpoints = WebhookEndpointStore().list_endpoints()
-            profiles = InputProfileRegistry(self._pack_root).list_profiles()
-            enabled_count = sum(1 for endpoint in endpoints if endpoint.get("enabled"))
-            external_inputs["endpoint_summary"] = f"{len(endpoints)} endpoints ({enabled_count} enabled)"
-            external_inputs["input_profile_summary"] = ", ".join(profile.id for profile in profiles) or "No profiles"
-            external_inputs.setdefault("policy_summary", "Default allow/deny policies are evaluated server-side.")
-            external_inputs.setdefault("response_summary", "Provider capabilities drive response planning.")
-            external_inputs.setdefault("public_url_summary", "Providers: static, cloudflare_quick_tunnel")
+        external_input = refreshed.setdefault("external_input", {})
+        if not isinstance(external_input, dict):
+            external_input = {}
+            refreshed["external_input"] = external_input
+        external_output = refreshed.setdefault("external_output", {})
+        if not isinstance(external_output, dict):
+            external_output = {}
+            refreshed["external_output"] = external_output
+        external_custom = refreshed.setdefault("external_custom", {})
+        if not isinstance(external_custom, dict):
+            external_custom = {}
+            refreshed["external_custom"] = external_custom
+        endpoints = WebhookEndpointStore().list_endpoints()
+        input_profiles = InputProfileRegistry(self._pack_root).list_profiles()
+        output_profiles = OutputProfileRegistry(self._pack_root).list_profiles()
+        template_catalog = external_io_template_catalog(self._pack_root)
+        input_templates = template_catalog.get("input") if isinstance(template_catalog.get("input"), list) else []
+        output_templates = template_catalog.get("output") if isinstance(template_catalog.get("output"), list) else []
+        enabled_count = sum(1 for endpoint in endpoints if endpoint.get("enabled"))
+        external_input["endpoint_summary"] = f"{len(endpoints)} endpoints ({enabled_count} enabled)"
+        external_input["input_template_summary"] = self._template_summary(input_templates)
+        external_input["input_profile_summary"] = ", ".join(profile.id for profile in input_profiles) or "No profiles"
+        external_input.setdefault("include_source_context", True)
+        external_input.setdefault("default_response_mode", "same_response")
+        external_input.setdefault("policy_summary", "Default allow/deny policies are evaluated server-side.")
+        external_output["external_tokens"] = external_token_status(pack_root=self._pack_root)
+        external_output["output_template_summary"] = self._template_summary(output_templates)
+        external_output["output_profile_summary"] = ", ".join(profile.id for profile in output_profiles) or "No output profiles"
+        external_output.setdefault("response_summary", "Prompt decisions create action plans; tools/adapters execute after policy checks.")
+        external_output.setdefault("public_url_summary", "Providers: static, cloudflare_quick_tunnel")
+        extension_paths = template_catalog.get("extension_paths") if isinstance(template_catalog.get("extension_paths"), dict) else {}
+        external_custom["custom_template_path"] = str(extension_paths.get("templates") or external_custom.get("custom_template_path") or "")
+        external_custom["custom_profile_paths"] = ", ".join(
+            item
+            for item in [
+                str(extension_paths.get("input_profiles") or ""),
+                str(extension_paths.get("output_profiles") or ""),
+            ]
+            if item
+        )
+        external_custom.setdefault(
+            "custom_prompt_examples",
+            (
+                "Google Chromeをcomputer_useで操作して起動し、"
+                "https://chat.line.biz/U938c119aee3803767d500905c221a1f4/chat/C7d9e77e21e38512175c081f235f0aec8 "
+                "にアクセスして返答して。"
+            ),
+        )
+        refreshed.pop("external_inputs", None)
         models = refreshed.setdefault("models", {})
         if isinstance(models, dict):
             refreshed["models"] = ModelRuntimeSettingsService(
                 self._pack_root
             ).refresh_models_settings(models)
         return refreshed
+
+    @staticmethod
+    def _template_summary(templates: list[Any]) -> str:
+        providers: list[str] = []
+        for item in templates:
+            if not isinstance(item, dict):
+                continue
+            provider = str(item.get("provider") or "").strip()
+            if provider and provider not in providers:
+                providers.append(provider)
+        return ", ".join(providers) if providers else "No templates"
 
     @staticmethod
     def _legacy_default_target(values: dict[str, Any]) -> str:

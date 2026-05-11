@@ -1,0 +1,18 @@
+id: discord.webhook
+provider: discord
+version: 1
+display_name: Discord Webhook Output
+transport: discord_webhook
+mode: webhook_message
+credentials:
+  token_ref:
+    provider_id: discord
+    kind: webhook_url
+required_fields:
+  - webhook_url
+capabilities_profile: discord
+safety:
+  allowed_mentions:
+    parse: []
+  recheck_sensitivity: true
+  recheck_capabilities: true

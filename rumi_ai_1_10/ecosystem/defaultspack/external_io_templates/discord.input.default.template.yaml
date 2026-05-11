@@ -1,0 +1,34 @@
+id: discord.input.default
+direction: input
+provider: discord
+display_name: Discord Input
+summary: Receive Discord interactions or events and normalize them to Rumi input.
+input_profile_id: discord.default
+endpoint:
+  id: discord-main
+  kind: discord
+  routes:
+    - /api/integrations/discord/interactions
+    - /api/integrations/discord/events
+  security:
+    mode: provider_signature
+tokens:
+  - kind: public_key
+    label: Public Key
+  - kind: application_id
+    label: Application ID
+  - kind: bot_token
+    label: Bot Token
+default_response:
+  mode: same_response
+  include_source_context: true
+  source_context_format: "${provider}から来た入力です。"
+response_prompt:
+  enabled: false
+examples:
+  - id: discord.default.same_response
+    label: Default same response
+    prompt: "同じDiscord channelへ短く返す。"
+  - id: discord.current_info
+    label: Browser follow-up
+    prompt: "最新情報が必要なときだけbrowser_useで調べ、Discordには短文、chat historyには詳細を残す。"

@@ -1,0 +1,16 @@
+id: slack.default
+provider: slack
+version: 1
+display_name: Slack Default Output
+transport: slack_web_api
+mode: channel_message
+credentials:
+  token_ref:
+    provider_id: slack
+    kind: bot_token
+required_fields:
+  - channel_id
+capabilities_profile: slack
+safety:
+  recheck_sensitivity: true
+  recheck_capabilities: true

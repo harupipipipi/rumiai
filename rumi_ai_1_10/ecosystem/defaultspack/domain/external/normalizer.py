@@ -100,6 +100,39 @@ def normalize_discord_message(payload: dict[str, Any], *, verified: bool) -> Ext
     )
 
 
+def normalize_slack_event(payload: dict[str, Any], *, verified: bool) -> ExternalEvent:
+    event = payload.get("event") if isinstance(payload.get("event"), dict) else payload
+    team_id = _clean(payload.get("team_id") or event.get("team"), "unknown-team")
+    channel_id = _clean(event.get("channel") or payload.get("channel"), "unknown-channel")
+    thread_ts = _clean(event.get("thread_ts") or event.get("ts"), "")
+    actor_id = _clean(event.get("user") or event.get("bot_id"), "unknown")
+    event_id = _clean(payload.get("event_id") or event.get("client_msg_id") or event.get("event_ts") or event.get("ts"))
+    scope_id = channel_id
+    conversation_suffix = thread_ts or actor_id or channel_id
+    return ExternalEvent(
+        provider="slack",
+        workspace=ExternalPrincipal("team", team_id),
+        scope=ExternalPrincipal("channel", scope_id),
+        actor=ExternalPrincipal("bot" if event.get("bot_id") else "user", actor_id),
+        conversation=ExternalPrincipal("external", _conversation_id("slack", "channel", conversation_suffix)),
+        event={
+            "id": event_id,
+            "message_id": _clean(event.get("client_msg_id") or event.get("ts") or event_id),
+            "type": "message",
+            "message_type": _clean(event.get("type"), "message"),
+        },
+        payload=payload,
+        verified=verified,
+        metadata={
+            "team_id": team_id,
+            "channel": channel_id,
+            "user": actor_id,
+            "thread_ts": thread_ts,
+            "event_ts": event.get("event_ts") or event.get("ts"),
+        },
+    )
+
+
 def normalize_generic_webhook(payload: dict[str, Any], *, webhook_id: str, verified: bool) -> ExternalEvent:
     scope_id = _clean(payload.get("scope_id") or payload.get("channel_id") or webhook_id, webhook_id)
     actor_id = _clean(payload.get("actor_id") or payload.get("user_id"), "unknown")

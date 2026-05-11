@@ -148,6 +148,45 @@ def test_run_browser_use_enabled_becomes_tool_followup():
     assert plan["messages"] == []
 
 
+def test_run_tool_can_plan_external_send_without_executing_it():
+    decision = _decision(
+        {
+            "action": "run_tool",
+            "tool": "external_send",
+            "instruction": "Send the short result to Discord.",
+            "output": {"provider": "discord", "output_profile_id": "discord.bot_channel"},
+        },
+        config=_config(tools={"external_send": {"enabled": True, "requires_approval": True}}),
+    )
+    plan = _plan(decision)
+    action_plan = plan["metadata"]["response_action_plan"]
+
+    assert decision.action == "run_tool"
+    assert decision.tool_name == "external_send"
+    assert decision.requires_approval is True
+    assert action_plan["type"] == "tool_followup"
+    assert action_plan["tool"] == "external_send"
+    assert action_plan["external_reply"] is False
+    assert action_plan["output"]["output_profile_id"] == "discord.bot_channel"
+    assert plan["messages"] == []
+
+
+def test_output_target_not_in_allowed_outputs_falls_back():
+    decision = _decision(
+        {
+            "action": "reply_text",
+            "output": {"provider": "discord", "output_profile_id": "discord.bot_channel"},
+        },
+        config=_config(allowed_outputs=["line.default"]),
+        response=RumiResponse(text="fallback text"),
+    )
+
+    assert decision.action == "reply_text"
+    assert decision.fallback is True
+    assert decision.reason == "output target not allowed"
+    assert decision.metadata["rejected_output"]["provider"] == "discord"
+
+
 def test_run_computer_use_enabled_defaults_to_approval_gated_plan():
     decision = _decision(
         {"action": "run_computer_use", "instruction": "click the button"},

@@ -1,0 +1,26 @@
+type: object
+required: [id, provider, version, transport]
+properties:
+  id:
+    type: string
+  provider:
+    enum: [line, discord, slack, generic, web, custom]
+  version:
+    type: integer
+  display_name:
+    type: string
+  transport:
+    type: string
+  mode:
+    type: string
+  credentials:
+    type: object
+  required_fields:
+    type: array
+    items:
+      type: string
+  capabilities_profile:
+    type: string
+  safety:
+    type: object
+additionalProperties: true

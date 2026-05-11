@@ -19,11 +19,15 @@ def handle_inbound_webhook(webhook_id: str, input_data: dict[str, Any], context:
     if not verification["ok"]:
         return {"status": "error", "error": verification["reason"], "code": "WEBHOOK_UNAUTHORIZED", "_http_status": 401}
     event = normalize_generic_webhook(input_data, webhook_id=endpoint.id, verified=verification["verified"])
+    runtime_context = dict(context or {})
+    runtime_context.setdefault("webhook_endpoint", endpoint.as_dict())
+    if endpoint.response_profile_id:
+        runtime_context.setdefault("output_profile_id", endpoint.response_profile_id)
     result = dispatch_external_event(
         event,
         input_profile_id=endpoint.input_profile_id,
         audience_policy={"default": "allow", "require": {"verified": endpoint.security.get("mode") != "none"}},
-        context=context or {},
+        context=runtime_context,
         send_response=True,
     )
     return {"status": "ok", "endpoint": endpoint.as_dict(), "result": result}

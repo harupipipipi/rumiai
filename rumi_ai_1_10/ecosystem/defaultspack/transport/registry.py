@@ -48,6 +48,8 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("POST", "/api/integrations/discord/events", block_module="blocks.integrations.discord"),
     HttpRouteSpec("GET", "/api/external/tokens", block_module="blocks.external.tokens"),
     HttpRouteSpec("POST", "/api/external/tokens", block_module="blocks.external.tokens"),
+    HttpRouteSpec("GET", "/api/external/templates", block_module="blocks.external.templates"),
+    HttpRouteSpec("POST", "/api/external/templates", block_module="blocks.external.templates"),
     HttpRouteSpec("POST", "/api/webhooks/inbound/{webhook_id}", block_module="blocks.webhooks.inbound", path_inject={"webhook_id": "webhook_id"}),
     HttpRouteSpec("GET", "/api/webhooks/endpoints", block_module="blocks.webhooks.endpoints"),
     HttpRouteSpec("POST", "/api/webhooks/endpoints", block_module="blocks.webhooks.endpoints"),

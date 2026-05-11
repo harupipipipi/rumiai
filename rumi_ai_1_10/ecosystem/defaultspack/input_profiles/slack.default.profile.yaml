@@ -1,20 +1,21 @@
-id: discord.default
-provider: discord
+id: slack.default
+provider: slack
 version: 1
-display_name: Discord Default
+display_name: Slack Default
 match:
   event_type: message
 input:
   role: user
-  content: "coalesce($.content, $.data.options.0.value, $.data.name, 'hello')"
+  content: "coalesce($.event.text, $.text, $.message, 'Slack event received')"
 metadata:
   source:
     kind: integration
-    provider: discord
-  discord:
-    guild_id: "$.guild_id"
-    channel_id: "$.channel_id"
-    author: "$.author"
+    provider: slack
+  slack:
+    team_id: "$.team_id"
+    channel_id: "$.event.channel"
+    user_id: "$.event.user"
+    thread_ts: "coalesce($.event.thread_ts, $.event.ts)"
 params:
   external_input:
     default_response:

@@ -1,0 +1,27 @@
+id: discord.output.bot_channel
+direction: output
+provider: discord
+display_name: Discord Output (Bot + Channel)
+summary: Send messages through a Discord bot token to a channel_id.
+output_profile_id: discord.bot_channel
+required_setup:
+  any_of:
+    - fields:
+        - bot_token
+        - channel_id
+tokens:
+  - kind: bot_token
+    label: Bot Token
+fields:
+  - id: channel_id
+    label: Channel ID
+    secret: false
+capabilities_profile: discord
+examples:
+  - id: external_send.discord.channel
+    label: Tool send
+    tool: external_send
+    args:
+      provider: discord
+      channel_id: "1234567890"
+      text: "送信する本文"

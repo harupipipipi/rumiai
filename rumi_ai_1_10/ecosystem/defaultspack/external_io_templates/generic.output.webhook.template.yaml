@@ -1,0 +1,19 @@
+id: generic.output.webhook
+direction: output
+provider: generic
+display_name: Generic Webhook Output
+summary: Send a provider-neutral JSON response to a callback URL.
+output_profile_id: generic.webhook
+fields:
+  - id: callback_url
+    label: Callback URL
+    secret: true
+capabilities_profile: generic
+examples:
+  - id: external_send.generic.callback
+    label: Tool send
+    tool: external_send
+    args:
+      provider: generic
+      callback_url: "https://example.com/callback"
+      text: "送信する本文"

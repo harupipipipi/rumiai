@@ -63,6 +63,8 @@ def run(context):
         ("POST", "/api/integrations/discord/events", _lazy("blocks.integrations.discord"), {}),
         ("GET", "/api/external/tokens", _lazy("blocks.external.tokens"), {}),
         ("POST", "/api/external/tokens", _lazy("blocks.external.tokens"), {}),
+        ("GET", "/api/external/templates", _lazy("blocks.external.templates"), {}),
+        ("POST", "/api/external/templates", _lazy("blocks.external.templates"), {}),
         ("POST", "/api/webhooks/inbound/{webhook_id}", _lazy("blocks.webhooks.inbound"), {"webhook_id": "webhook_id"}),
         ("GET", "/api/webhooks/endpoints", _lazy("blocks.webhooks.endpoints"), {}),
         ("POST", "/api/webhooks/endpoints", _lazy("blocks.webhooks.endpoints"), {}),

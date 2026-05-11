@@ -559,6 +559,13 @@ class ToolExecutor:
         if not isinstance(result, dict):
             return {"result": str(result), "is_error": False, "widget": None}
 
+        if "result" in result or "is_error" in result or "widget" in result:
+            return {
+                "result": result.get("result", ""),
+                "is_error": bool(result.get("is_error", False)),
+                "widget": result.get("widget"),
+            }
+
         if result.get("status") == "error":
             error_info = result.get("error", {})
             return {

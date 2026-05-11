@@ -6,6 +6,7 @@ from domain.external.audience_policy import AudiencePolicy
 from domain.external.event import ExternalEvent
 from domain.external.input_profile_engine import InputProfileEngine
 from domain.external.input_profile_registry import InputProfileRegistry
+from domain.external.output_profile_registry import OutputProfileRegistry
 from domain.external.response import RumiResponse
 from domain.external.response_planner import ResponsePlanner
 from domain.external.response_prompt_policy import ResponsePromptDecision, ResponsePromptPolicy
@@ -47,6 +48,10 @@ def dispatch_external_event(
     response = RumiResponse.from_result(result)
     prompt_decision = None
     if send_response:
+        output_profile = _resolve_output_profile(event.provider, runtime_context)
+        output_provider = output_profile.provider if output_profile is not None else event.provider
+        if output_profile is not None:
+            result["output_profile_id"] = output_profile.id
         prompt_decision = decide_response_prompt_policy(
             event=event,
             envelope=envelope,
@@ -58,8 +63,21 @@ def dispatch_external_event(
             result["response_prompt_decision"] = prompt_decision.as_dict()
             result.setdefault("metadata", {})["response_prompt_decision"] = prompt_decision.as_dict()
             response.metadata["response_prompt_decision"] = prompt_decision.as_dict()
-        result["response_plan"] = ResponsePlanner(event.provider).plan(response, prompt_decision=prompt_decision)
+        result["response_plan"] = ResponsePlanner(output_provider).plan(response, prompt_decision=prompt_decision)
     return result
+
+
+def _resolve_output_profile(provider: str, context: dict[str, Any]) -> Any:
+    profile_id = str(context.get("output_profile_id") or context.get("response_profile_id") or "").strip()
+    endpoint = context.get("webhook_endpoint") if isinstance(context.get("webhook_endpoint"), dict) else {}
+    if not profile_id:
+        profile_id = str(endpoint.get("response_profile_id") or "").strip()
+    registry = OutputProfileRegistry()
+    if profile_id:
+        profile = registry.get(profile_id)
+        if profile is not None:
+            return profile
+    return registry.default_for_provider(provider)
 
 
 def decide_response_prompt_policy(

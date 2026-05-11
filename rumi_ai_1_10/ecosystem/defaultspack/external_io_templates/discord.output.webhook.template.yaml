@@ -1,0 +1,26 @@
+id: discord.output.webhook
+direction: output
+provider: discord
+display_name: Discord Output (Webhook URL)
+summary: Send messages to a Discord webhook URL without a bot token.
+output_profile_id: discord.webhook
+required_setup:
+  any_of:
+    - fields:
+        - webhook_url
+tokens:
+  - kind: webhook_url
+    label: Webhook URL
+fields:
+  - id: webhook_url
+    label: Webhook URL
+    secret: true
+capabilities_profile: discord
+examples:
+  - id: external_send.discord.webhook
+    label: Tool send
+    tool: external_send
+    args:
+      provider: discord
+      webhook_url: "https://discord.com/api/webhooks/..."
+      text: "送信する本文"

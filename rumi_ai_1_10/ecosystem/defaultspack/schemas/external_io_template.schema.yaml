@@ -1,0 +1,36 @@
+type: object
+required: [id, direction, provider, display_name]
+properties:
+  id:
+    type: string
+  direction:
+    enum: [input, output]
+  provider:
+    enum: [line, discord, slack, generic, web, custom]
+  display_name:
+    type: string
+  input_profile_id:
+    type: string
+  output_profile_id:
+    type: string
+  endpoint:
+    type: object
+  tokens:
+    type: array
+    items:
+      type: object
+  fields:
+    type: array
+    items:
+      type: object
+  default_response:
+    type: object
+  response_prompt:
+    type: object
+  examples:
+    type: array
+    items:
+      type: object
+  extension_paths:
+    type: object
+additionalProperties: true

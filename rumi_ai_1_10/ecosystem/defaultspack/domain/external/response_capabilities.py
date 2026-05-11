@@ -28,6 +28,27 @@ DEFAULT_RESPONSE_CAPABILITIES: dict[str, dict[str, Any]] = {
             "reply": {"supports_reply_token": True, "supports_push": True},
         },
     },
+    "slack": {
+        "provider": "slack",
+        "capabilities": {
+            "text": {"enabled": True, "max_chars": 39000, "supports_markdown": True},
+            "files": {
+                "enabled": True,
+                "max_files_per_message": 10,
+                "max_bytes_per_file": 10485760,
+                "allowed_mime": ["image/png", "image/jpeg", "image/webp", "text/plain", "application/pdf"],
+            },
+            "transforms": {"text_chunking": True, "file_to_link_fallback": True},
+        },
+    },
+    "web": {
+        "provider": "web",
+        "capabilities": {
+            "text": {"enabled": True, "max_chars": 8000, "supports_markdown": True},
+            "files": {"enabled": False},
+            "transforms": {"text_chunking": True, "file_to_link_fallback": True},
+        },
+    },
     "generic": {
         "provider": "generic",
         "capabilities": {

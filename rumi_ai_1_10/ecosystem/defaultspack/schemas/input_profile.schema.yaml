@@ -13,3 +13,11 @@ properties:
     type: object
   metadata:
     type: object
+  params:
+    type: object
+  tools:
+    type: array
+  response_prompt:
+    type: object
+  default_response:
+    type: object

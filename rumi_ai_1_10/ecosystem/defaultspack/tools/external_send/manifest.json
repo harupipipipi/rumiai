@@ -1,0 +1,77 @@
+{
+  "id": "external_send",
+  "description": "Send a planned response to LINE, Discord, Slack, or a generic webhook output target.",
+  "config": {
+    "tool_id": "external_send",
+    "name": "External Send",
+    "summary": "Tool-backed external output sender for prompt-routed response actions.",
+    "tool_category": "integration",
+    "action_type": "write",
+    "write_action": true,
+    "requires_approval": true,
+    "risk": "medium",
+    "tags": ["external", "integration", "output", "response"],
+    "ui": {
+      "group_id": "integrations",
+      "group_label": "Integrations",
+      "group_icon": "send",
+      "item_icon": "send",
+      "composer_label": "External Send",
+      "composer_description": "Send via LINE, Discord, Slack, or webhook after approval.",
+      "composer_icon": "send"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "required": ["provider", "text"],
+        "properties": {
+          "provider": {
+            "type": "string",
+            "enum": ["line", "discord", "slack", "generic", "web"]
+          },
+          "text": {
+            "type": "string"
+          },
+          "channel_id": {
+            "type": "string"
+          },
+          "webhook_url": {
+            "type": "string"
+          },
+          "callback_url": {
+            "type": "string"
+          },
+          "reply_token": {
+            "type": "string"
+          },
+          "target_id": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          },
+          "group_id": {
+            "type": "string"
+          },
+          "room_id": {
+            "type": "string"
+          },
+          "thread_ts": {
+            "type": "string"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "default": false
+          },
+          "metadata": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.external.send_tool:external_send_tool"
+    }
+  }
+}

@@ -26,6 +26,19 @@ properties:
         - run_tool
         - send_file_if_allowed
         - ask_for_approval
+  allowed_outputs:
+    type: array
+    items:
+      type: string
+  output:
+    type: object
+    properties:
+      provider:
+        enum: [line, discord, slack, generic, web, custom]
+      output_profile_id:
+        type: string
+      mode:
+        type: string
   fallback_action:
     enum:
       - reply_text

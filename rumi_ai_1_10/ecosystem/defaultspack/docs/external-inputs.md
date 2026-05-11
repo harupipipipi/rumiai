@@ -37,6 +37,12 @@ rate limit, or required verification. Policy output is explicit: `allow`,
 chat external key/title/model, source metadata, params, and tools. It performs
 transformation only; it does not decide whether an event is allowed.
 
+Input and output configuration are separate. Input profiles answer "what came
+in and how should it enter chat?". Output profiles answer "where can a response
+go and through which transport?". Built-in input templates exist for LINE,
+Discord, Slack, and generic webhooks; custom templates can be registered through
+`/api/external/templates` or placed in `user_data/shared/external_io_templates`.
+
 `submit_input` is the framework entrypoint after profile transformation. It
 accepts a `RumiInputEnvelope`, persists the user message, and invokes the
 chat-compatible turn runner.
@@ -54,6 +60,10 @@ runner paths.
 `ResponseAdapter` renders and delivers that plan through a provider-specific
 surface such as a Slack thread, LINE reply token, Discord interaction response,
 or generic webhook response.
+
+Default input templates set `include_source_context: true`. Rumi tells the turn
+runner that an input came from LINE, Discord, Slack, or another provider before
+the user's text, while keeping raw tokens and request secrets out of the prompt.
 
 ## Event Contract
 
@@ -141,5 +151,7 @@ on the framework boundary above:
 | `POST /api/integrations/secrets` | Set or clear write-only secrets |
 | `GET /api/external/tokens` | API-key-like external token status |
 | `POST /api/external/tokens` | Upsert, rename, or delete named external tokens |
+| `GET /api/external/templates` | List built-in and custom input/output templates |
+| `POST /api/external/templates` | Register a custom input or output template |
 | `POST /api/webhooks/inbound/{webhook_id}` | Generic webhook intake |
 | `GET /api/webhooks/endpoints` | List webhook endpoint configs |

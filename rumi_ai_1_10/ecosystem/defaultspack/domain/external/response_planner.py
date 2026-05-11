@@ -62,6 +62,7 @@ class ResponsePlanner:
             approved_for_execution=bool(decision.get("approved_for_execution")),
             fallback=bool(decision.get("fallback")),
             error=str(decision.get("error") or ""),
+            output=dict(decision.get("output") if isinstance(decision.get("output"), dict) else {}),
             metadata=dict(metadata),
         )
 
@@ -93,10 +94,11 @@ class ResponsePlanner:
 
     @staticmethod
     def _action_plan(decision: ResponsePromptDecision) -> dict[str, Any]:
+        output = dict(decision.output)
         if decision.sensitivity == "local_only" or decision.action == "store_only":
-            return {"type": "store_only", "external_reply": False}
+            return {"type": "store_only", "external_reply": False, "output": output}
         if decision.action == "ask_for_approval":
-            return {"type": "approval_required", "external_reply": False, "instruction": decision.instruction}
+            return {"type": "approval_required", "external_reply": False, "instruction": decision.instruction, "output": output}
         if decision.action.startswith("run_"):
             return {
                 "type": "tool_followup",
@@ -104,8 +106,9 @@ class ResponsePlanner:
                 "instruction": decision.instruction,
                 "requires_approval": decision.requires_approval,
                 "external_reply": False,
+                "output": output,
             }
-        return {"type": "reply", "external_reply": decision.sends_external_reply}
+        return {"type": "reply", "external_reply": decision.sends_external_reply, "output": output}
 
     @staticmethod
     def _chunk_text(text: str, max_chars: int) -> list[str]:

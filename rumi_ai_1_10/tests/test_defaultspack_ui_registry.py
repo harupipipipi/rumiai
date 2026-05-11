@@ -347,6 +347,27 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertTrue(reloaded["preview"]["auto_open"])
         self.assertEqual(reloaded["preview"]["max_items"], 5)
 
+    def test_external_settings_are_split_into_input_output_and_custom_sections(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with patch("domain.frontend.registry.AIClient") as mock_client:
+            mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+            settings = FrontendRegistry(pack_root=DEFAULTSPACK_ROOT).get_settings()
+
+        sections = {section["id"]: section for section in settings["sections"]}
+        values = settings["values"]
+
+        self.assertIn("external_input", sections)
+        self.assertIn("external_output", sections)
+        self.assertIn("external_custom", sections)
+        self.assertNotIn("external_inputs", sections)
+        self.assertTrue(values["external_input"]["include_source_context"])
+        self.assertEqual(values["external_input"]["default_response_mode"], "same_response")
+        self.assertIn("line", values["external_input"]["input_template_summary"])
+        self.assertIn("discord", values["external_output"]["output_template_summary"])
+        self.assertIn("slack", values["external_output"]["output_template_summary"])
+        self.assertIn("external_io_templates", values["external_custom"]["custom_template_path"])
+
     def test_update_settings_persists_sidebar_user_data(self):
         from domain.frontend.registry import FrontendRegistry
 

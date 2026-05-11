@@ -1,0 +1,14 @@
+id: custom.output
+direction: output
+provider: custom
+display_name: Custom Output
+summary: Add custom output by registering a template, an output profile, or a tool-backed sender.
+extension_paths:
+  templates: user_data/shared/external_io_templates
+  output_profiles: user_data/shared/output_profiles
+tools:
+  - external_send
+examples:
+  - id: custom.tool.output
+    label: Output through tool
+    prompt: "outputがwebでも、必要ならexternal_send toolでLINE/Discord/Slackへ送る。"

@@ -13,5 +13,11 @@ metadata:
     provider: generic
   webhook:
     payload: "$"
+params:
+  external_input:
+    default_response:
+      mode: same_response
+      include_source_context: true
+      source_context_format: "${provider}から来た入力です。"
 response_prompt:
   enabled: false

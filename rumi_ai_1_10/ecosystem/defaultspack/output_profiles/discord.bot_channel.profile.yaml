@@ -1,0 +1,18 @@
+id: discord.bot_channel
+provider: discord
+version: 1
+display_name: Discord Bot Channel Output
+transport: discord_bot
+mode: channel_message
+credentials:
+  token_ref:
+    provider_id: discord
+    kind: bot_token
+required_fields:
+  - channel_id
+capabilities_profile: discord
+safety:
+  allowed_mentions:
+    parse: []
+  recheck_sensitivity: true
+  recheck_capabilities: true
